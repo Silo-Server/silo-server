@@ -343,8 +343,10 @@ func (h *ProfileHandler) profileAvatarSourceSHA256(ctx context.Context, store us
 	if recorded {
 		return sum, nil
 	}
-	// The picture changed or another request recorded a hash first: answer
-	// with what the profile holds now.
+	// Nothing was written: the picture changed, another request recorded a
+	// hash first, or the store behind a decorator keeps no hashes. Answer
+	// with what the profile holds now, and with the computed hash when it
+	// still shows this picture with none recorded.
 	current, err := store.GetProfile(ctx, profile.ID)
 	if err != nil {
 		return "", err
@@ -352,8 +354,8 @@ func (h *ProfileHandler) profileAvatarSourceSHA256(ctx context.Context, store us
 	if current == nil {
 		return "", fmt.Errorf("profile %s not found", profile.ID)
 	}
-	if current.AvatarSourceSHA256 == "" && isUploadedAvatarRef(current.Avatar) {
-		return "", fmt.Errorf("avatar hash of profile %s was not recorded", profile.ID)
+	if current.AvatarSourceSHA256 == "" && current.Avatar == profile.Avatar {
+		return sum, nil
 	}
 	return current.AvatarSourceSHA256, nil
 }
