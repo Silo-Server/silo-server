@@ -77,6 +77,16 @@ func TestKeyOperationsRecheckActingProfileDB(t *testing.T) {
 	refused(t, "checked against the PIN before it changed", checked)
 	refused(t, "as a profile that is gone", ActingProfile{ID: uuid.NewString()})
 
+	setPrimary := func(primary bool) {
+		t.Helper()
+		if _, err := env.pool.Exec(ctx, `UPDATE user_profiles SET is_primary = $3 WHERE user_id = $1 AND id = $2`, admin.ID, checked.ID, primary); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setPrimary(false)
+	refused(t, "as a profile that is no longer the main one", current)
+	setPrimary(true)
+
 	// A profile write in progress: the operation doesn't wait for it.
 	writer, err := env.pool.Begin(ctx)
 	if err != nil {
