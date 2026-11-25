@@ -437,8 +437,11 @@ func (f *Fetcher) fetchOne(ctx context.Context, resolved ResolvedSection, librar
 		}
 	}
 	if shared {
+		// A shared entry is built without the viewer, so nothing read from
+		// one profile's state (a collection that turned hide_watched on after
+		// the key was read) can reach another profile through the cache.
 		items, total, err = getOrRefresh(ctx, key, f.now(), func(loadCtx context.Context) ([]*models.MediaItem, int, error) {
-			return f.fetchSection(loadCtx, resolved, libraryID, libraryIDs, userID, profileID, filter)
+			return f.fetchSection(loadCtx, resolved, libraryID, libraryIDs, 0, "", filter)
 		})
 	} else {
 		items, total, err = f.fetchSection(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
