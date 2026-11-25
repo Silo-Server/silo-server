@@ -44,6 +44,7 @@ func TestExtractChapterFrameRetriesAtTheChapterStart(t *testing.T) {
 		{name: "start before the last packet", chapter: models.MediaChapter{StartSeconds: 9.5, EndSeconds: 15}, failure: errNoPackets, wantSeeks: []float64{10.875, 9.5}, wantFrame: "frame@9.500"},
 		{name: "start after the video", chapter: models.MediaChapter{StartSeconds: 15, EndSeconds: 20}, failure: errNoPackets, wantSeeks: []float64{16.25, 15}, wantErr: true},
 		{name: "empty output", chapter: models.MediaChapter{StartSeconds: 9.5, EndSeconds: 15}, failure: &mediasample.Error{Reason: mediasample.ReasonEmpty}, wantSeeks: []float64{10.875, 9.5}, wantFrame: "frame@9.500"},
+		{name: "node's empty output", chapter: models.MediaChapter{StartSeconds: 9.5, EndSeconds: 15}, failure: errors.New("chapter thumbnail remote extract: chapter_extract_failed: ffmpeg sampling failed (empty)"), wantSeeks: []float64{10.875, 9.5}, wantFrame: "frame@9.500"},
 		{name: "other failure", chapter: models.MediaChapter{StartSeconds: 9.5, EndSeconds: 15}, failure: errors.New("chapter_extract_failed: exit status 1: Invalid data found when processing input"), wantSeeks: []float64{10.875}, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

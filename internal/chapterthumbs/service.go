@@ -1605,8 +1605,8 @@ func (s *Service) extractChapterFrame(ctx context.Context, file *models.MediaFil
 // noFrameAtSeek reports an extraction that found no video frame at or after
 // its seek time: ffmpeg exits with "received no packets" when the seek lands
 // after the last video packet, and mediasample reports ReasonEmpty when ffmpeg
-// succeeds without writing the image. A remote extraction's error arrives as
-// text, so the text is checked too.
+// succeeds without writing the image. A transcode node's error arrives as
+// text, so the text of both is checked too.
 func noFrameAtSeek(err error) bool {
 	if err == nil {
 		return false
@@ -1615,8 +1615,12 @@ func noFrameAtSeek(err error) bool {
 	if errors.As(err, &runErr) && runErr.Reason == mediasample.ReasonEmpty {
 		return true
 	}
-	return strings.Contains(err.Error(), "received no packets")
+	message := err.Error()
+	return strings.Contains(message, "received no packets") || strings.Contains(message, emptySamplingFailure)
 }
+
+// emptySamplingFailure is how a mediasample.Error with ReasonEmpty starts.
+var emptySamplingFailure = (&mediasample.Error{Reason: mediasample.ReasonEmpty}).Error()
 
 func chapterCaptureTime(chapter models.MediaChapter) float64 {
 	duration := chapter.EndSeconds - chapter.StartSeconds
