@@ -13990,7 +13990,7 @@
     {
       "name": "poll_device_login_preapproval_rate_limited",
       "operation_id": "pollDeviceLogin",
-      "scenario": "A sign-in approved in advance whose device code has had too many wrong secrets waits out the lock, the right secret included.",
+      "scenario": "A wrong secret for a sign-in approved in advance, after too many wrong secrets for its device code, waits out the lock. The right secret is never refused by it.",
       "request": {
         "method": "POST",
         "path": "/api/v2/auth/device/poll",

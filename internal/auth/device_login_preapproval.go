@@ -354,8 +354,10 @@ func lockPreapprovalIdentity(ctx context.Context, tx pgx.Tx, preview *deviceLogi
 }
 
 // preapprovedSession adjusts the session collecting a pre-approved request:
-// it records the polling device's address and has its provider time stamped
-// now rather than 30 days ago. It reports denied, after withdrawing the
+// it records the polling device's address. The session keeps the approving
+// session's provider time, as every device sign-in does: redeeming is not a
+// provider sign-in, so it must not restart the limit that ends a chain the
+// provider can no longer vouch for. It reports denied, after withdrawing the
 // request in tx, when the request was approved through a provider identity
 // that is gone or refused since; identityErr is lockPreapprovalIdentity's
 // answer. It answers that denial once the withdrawal is committed, any other
@@ -377,6 +379,5 @@ func preapprovedSession(ctx context.Context, tx pgx.Tx, record *deviceLoginRecor
 		return nil, identityErr
 	}
 	session.IPAddress = clientip.FromContext(ctx)
-	session.ProviderSince = nil
 	return nil, nil
 }

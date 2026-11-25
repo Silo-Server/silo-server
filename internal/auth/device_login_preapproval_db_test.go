@@ -270,7 +270,6 @@ func TestDevicePreapprovalProviderIdentityDB(t *testing.T) {
 	}
 
 	_, code, secret := preapprove("tv")
-	before := time.Now().Add(-time.Minute)
 	poll, err := svc.Poll(t.Context(), code, secret)
 	if err != nil || poll.TokenPair == nil {
 		t.Fatalf("redeem = %+v, %v", poll, err)
@@ -279,8 +278,11 @@ func TestDevicePreapprovalProviderIdentityDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.IdentityID == nil || *session.IdentityID != identityID || session.ProviderSince == nil || session.ProviderSince.Before(before) {
-		t.Fatalf("device session identity %v since %v, want identity %d since redemption", session.IdentityID, session.ProviderSince, identityID)
+	// The provider vouched when the approving session signed in, not when
+	// the device redeemed: a later time would extend the chain's limit.
+	if session.IdentityID == nil || *session.IdentityID != identityID || session.ProviderSince == nil ||
+		session.ProviderSince.Sub(since).Abs() > time.Millisecond {
+		t.Fatalf("device session identity %v since %v, want identity %d since %v", session.IdentityID, session.ProviderSince, identityID, since)
 	}
 
 	refusedID, refusedCode, refusedSecret := preapprove("refused")

@@ -215,10 +215,14 @@ the fingerprint. Nothing on the poll changes for the TV.
   an identity whose installation is gone refuses the poll as `denied` and
   withdraws the row; a disabled installation answers 503
   `provider_unavailable` and leaves the row for a later poll. The device's
-  session carries the identity with its provider time stamped at redemption,
-  not 30 days earlier, so its first refresh re-checks the provider on the usual
-  schedule instead of ending at once. A session whose identity was already gone
-  cannot pre-approve (403 `not_permitted`).
+  session carries the identity and the approving session's `provider_since`,
+  as every device sign-in does. Redeeming is not a provider sign-in, so it
+  never restarts the limit that ends a chain the provider can no longer vouch
+  for ([external-sign-in.md](external-sign-in.md#provider-re-check)): where
+  the provider cannot re-check, a sign-in redeemed late yields a session
+  that ends `auth.refresh_token_expiry` after the phone's provider sign-in,
+  which can be soon. A session whose identity was already gone cannot
+  pre-approve (403 `not_permitted`).
 - **Address.** The device's session records the address of the polling
   device, not the phone's.
 - **List and revoke.** `GET /api/v2/auth/device/preapprovals` and
