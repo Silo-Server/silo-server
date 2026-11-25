@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -29,8 +31,10 @@ type ProfileSetAuthority struct {
 // its kid names and spends its challenge. The payload has no origin, so no
 // origin rule applies. A payload addressed to another account is refused as
 // a bad signature, like one for another server; so is an unknown or revoked
-// key. A disabled account and an administrator's account are refused once
-// the signature verifies. No session opens: the caller applies the set.
+// key. Once the signature verifies, the key must still pass the rules a key
+// sign-in runs (its provider identity, local passwords), and a disabled
+// account and an administrator's account are refused. No session opens: the
+// caller applies the set, and checks the account again under its own lock.
 func (a *AppKeySignIn) VerifyProfileSet(ctx context.Context, req KeyRequest) (*ProfileSetAuthority, error) {
 	if err := req.Envelope.CheckShape(appkeys.PurposeProfileSet); err != nil {
 		return nil, err
@@ -54,16 +58,45 @@ func (a *AppKeySignIn) VerifyProfileSet(ctx context.Context, req KeyRequest) (*P
 	if payload.AccountID != strconv.Itoa(person.UserID) {
 		return nil, ErrKeySignatureInvalid
 	}
-	var role string
-	var enabled bool
-	if err := a.pool.QueryRow(ctx, `SELECT role, enabled FROM users WHERE id = $1`, person.UserID).Scan(&role, &enabled); err != nil {
+	// The key must still be good for signing in: the same provider and
+	// local password rules a key sign-in runs, under the same locks. A
+	// provider-bound key whose identity is gone is revoked here, as there.
+	binding := KeyBinding{IdentityID: person.IdentityID, ProviderBound: person.ProviderBound}
+	if _, err := a.service.keyProviderExpiry(ctx, person.UserID, binding); err != nil && !errors.Is(err, errKeyIdentityGone) {
 		return nil, err
 	}
-	if !enabled {
-		return nil, ErrUserDisabled
+	gone := false
+	err = a.inTx(ctx, func(tx pgx.Tx) error {
+		user, err := lockEnabledUser(ctx, tx, person.UserID)
+		if err != nil {
+			return err
+		}
+		if _, err := lockChain(ctx, tx, user, binding); errors.Is(err, errKeyIdentityGone) {
+			gone = true
+			return revokePersonKeyTx(ctx, tx, user.ID, person.ID)
+		} else if err != nil {
+			return err
+		}
+		locked, err := lockPersonKey(ctx, tx, user.ID, person.ID)
+		if errors.Is(err, ErrAppKeyNotFound) || (err == nil && locked.RevokedAt != nil) {
+			return ErrKeySignatureInvalid
+		}
+		if err != nil {
+			return err
+		}
+		if !(KeyBinding{IdentityID: locked.IdentityID, ProviderBound: locked.ProviderBound}).same(binding) {
+			return errKeyBindingChanged
+		}
+		if user.Role == models.RoleAdmin {
+			return ErrProfileSetAdminAccount
+		}
+		return nil
+	})
+	if gone {
+		return nil, ErrKeySignatureInvalid
 	}
-	if role == models.RoleAdmin {
-		return nil, ErrProfileSetAdminAccount
+	if err != nil {
+		return nil, err
 	}
 	return &ProfileSetAuthority{
 		UserID: person.UserID, PersonKeyID: req.Envelope.KeyID,
