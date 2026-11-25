@@ -325,6 +325,10 @@ const (
 	// local password; turning it off requires at least one of them. The
 	// "silo auth local-login enable" command turns it back on.
 	AuthLocalPasswordLoginSettingKey = "auth.local_password_login"
+	// AuthAppKeySignInSettingKey turns app key sign-in on or off server-wide
+	// (docs/architecture/app-keys.md). On by default. Off, the app key
+	// capability reports disabled.
+	AuthAppKeySignInSettingKey = "auth.app_key_sign_in"
 	// AuthEmailAutoMatchSettingKey links a first external sign-in to the
 	// unlinked account holding the same email, but only when the provider
 	// says the email is verified. Off by default: an email match lets whoever
@@ -426,6 +430,7 @@ var adminSettingDefaults = map[string]string{
 	ServerLocalURLSettingKey:                  "",
 	WebMediaURLSettingKey:                     "",
 	AuthLocalPasswordLoginSettingKey:          "true",
+	AuthAppKeySignInSettingKey:                "true",
 	AuthEmailAutoMatchSettingKey:              "false",
 	AuthUserAPIKeysSettingKey:                 "false",
 	AuthProviderRecheckIntervalSettingKey:     "12h",
@@ -785,7 +790,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"notifications.apple_push_delivery_enabled", "notifications.android_push_delivery_enabled",
 		"catalog.search.meilisearch.semantic_enabled", "catalog.search.meilisearch.binary_quantized",
 		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style",
-		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, AuthUserAPIKeysSettingKey, ServerLANDiscoverySettingKey,
+		AuthLocalPasswordLoginSettingKey, AuthAppKeySignInSettingKey, AuthEmailAutoMatchSettingKey, AuthUserAPIKeysSettingKey, ServerLANDiscoverySettingKey,
 		BackupEnabledSettingKey, BackupIncludeIntroFingerprintsSettingKey, BackupIncludeSubtitlesSettingKey,
 		BackupS3PathStyleSettingKey:
 		return normalizeAdminBool(key, value)

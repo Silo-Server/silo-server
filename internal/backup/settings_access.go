@@ -32,6 +32,7 @@ var accessSettings = func() map[string]widerFunc {
 		settingLocalPasswordLogin:             on,
 		"auth.email_auto_match":               on,
 		config.AuthUserAPIKeysSettingKey:      on,
+		config.AuthAppKeySignInSettingKey:     on,
 		"signup.enabled":                      on,
 		"password_reset.self_service_enabled": on,
 		"jellyfin_compat.enabled":             on,
