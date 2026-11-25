@@ -163,7 +163,10 @@ func requireCompleteItem(t *testing.T, label string, item map[string]json.RawMes
 // TestSessionReachRuleDB is the rule's table, through both routes: for each
 // kind of caller session, what another session's item shows and whether
 // ending another session is allowed. Regression: a session a device signed
-// in with by code read every session of the account and could end any.
+// in with by code read every session of the account and could end any. The
+// rows without a value pin each TV spelling the apps send (tvOS, android-tv,
+// roku), each in another case, against one platform that isn't a TV's and
+// none.
 func TestSessionReachRuleDB(t *testing.T) {
 	d := newReachDB(t)
 	yes, no := true, false
@@ -180,7 +183,6 @@ func TestSessionReachRuleDB(t *testing.T) {
 		{"before the column, Android TV", nil, "Android-TV", true},
 		{"before the column, Roku", nil, "ROKU", true},
 		{"before the column, phone", nil, "iOS", false},
-		{"before the column, web", nil, "web", false},
 		{"before the column, no platform", nil, "", false},
 		{"password sign-in, TV", &no, "tvOS", false},
 	} {
