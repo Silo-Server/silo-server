@@ -71,7 +71,8 @@ tests:
         severity: warning
       exp_annotations:
         summary: Silo has old queued work
-        description: Includes delayed retries except for queues that report due work only (such as images). Inspect queue retry
+        description: Includes delayed retries, except for images, which reports only due work; there a job deferred again and
+          again (a full artwork store or a missing local mount) shows as growing queued depth, not age. Inspect queue retry
           gates, worker attempts and admin job progress before treating this as a stall.
 - name: memory pressure and cgroup OOM
   interval: 1m
@@ -285,5 +286,6 @@ tests:
         severity: warning
       exp_annotations:
         summary: Silo has old queued work
-        description: Includes delayed retries except for queues that report due work only (such as images). Inspect queue retry
+        description: Includes delayed retries, except for images, which reports only due work; there a job deferred again and
+          again (a full artwork store or a missing local mount) shows as growing queued depth, not age. Inspect queue retry
           gates, worker attempts and admin job progress before treating this as a stall.
