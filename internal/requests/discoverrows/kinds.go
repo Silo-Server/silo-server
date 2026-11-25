@@ -264,10 +264,16 @@ func (tmdbListKind) SourceKey(row Row) string {
 type mdbListKind struct{}
 
 func (mdbListKind) Normalize(row *Row) FieldErrors {
-	// The stored URL is the list page, without the /json suffix its feed adds.
+	// The stored URL is the list page, without the /json suffix its feed adds
+	// to the path; a query stays after it.
 	errs := normalizeList(row, func(raw string) (string, error) {
 		feed, err := collectionutil.CanonicalMDBListURL(raw)
-		return strings.TrimSuffix(feed, "/json"), err
+		path, query, hasQuery := strings.Cut(feed, "?")
+		page := strings.TrimSuffix(path, "/json")
+		if hasQuery {
+			page += "?" + query
+		}
+		return page, err
 	})
 	if row.List == nil {
 		return errs

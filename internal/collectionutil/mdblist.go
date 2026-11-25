@@ -51,8 +51,12 @@ func NormalizeMDBListURL(raw string) string {
 		return ""
 	}
 	// Earlier builds appended /json to the end of the query; drop it so a URL
-	// they stored recovers on its next sync.
-	if query = strings.TrimSuffix(query, "/json"); query != "" {
+	// they stored recovers on its next sync. No feed parameter value ends in
+	// /json, and trimming every one keeps a second pass from changing the URL.
+	for strings.HasSuffix(query, "/json") {
+		query = strings.TrimSuffix(query, "/json")
+	}
+	if query != "" {
 		return path + "/json?" + query
 	}
 	return path + "/json"
