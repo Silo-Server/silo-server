@@ -22,8 +22,9 @@ const DemoSignInRefreshInterval = 30 * time.Second
 // failed password sign-ins (SignInAttemptLimiter's name lane), which every
 // visitor of a public demo shares. The exemption applies while demo mode is
 // on (demomode.SettingKey) and demomode.AccountSettingKey names an existing,
-// enabled account that is not an administrator, and covers that account's
-// own sign-in names only (ownSignInKeys). Anything else, including a setting
+// enabled account that is not an administrator and signs in with its local
+// password (DemoAccountUsable), and covers that account's own sign-in names
+// only (ownSignInKeys), checked by the local provider. Anything else, including a setting
 // this process has never read, leaves the ordinary per-name limit in place.
 // Limits on the client address are not this type's and still apply.
 //
@@ -84,11 +85,17 @@ func (d *DemoSignIn) Refresh(ctx context.Context) {
 	}
 }
 
-// exempts reports whether spend's name skips the per-name budget. A key the
-// database did not fold must not decide whose budget a name is
-// (signInNameKeys), so it never does.
-func (d *DemoSignIn) exempts(ctx context.Context, spend *signInSpend) bool {
-	if d == nil || !spend.folded {
+// exempts reports whether spend's name skips the per-name budget, for a
+// sign-in through providerID ("" lets the name pick it). Only a password
+// the local provider checks against the demo account itself is exempt: a
+// named provider other than the local one, or a budget name derived from
+// what was typed (which can sign in to another account), keeps the budget.
+// The account's own names find it, and an account with local password
+// sign-in routes them locally (passwordRoute). A key the database did not
+// fold must not decide whose budget a name is (signInNameKeys), so it never
+// does.
+func (d *DemoSignIn) exempts(ctx context.Context, spend *signInSpend, providerID string) bool {
+	if d == nil || !spend.folded || spend.derived || (providerID != "" && providerID != LocalProviderID) {
 		return false
 	}
 	if known := d.keys.Load(); known == nil || !slices.Contains(*known, spend.key) {
@@ -142,9 +149,10 @@ func (d *DemoSignIn) accountKeys(ctx context.Context) ([]string, bool) {
 }
 
 // DemoAccountUsable reports whether user may be the demo account the
-// per-name sign-in limit skips: enabled, and not an administrator.
+// per-name sign-in limit skips: enabled, not an administrator, and signing
+// in with its local password, the one a demo shares with its visitors.
 func DemoAccountUsable(user *models.User) bool {
-	return user != nil && user.Enabled && user.Role != models.RoleAdmin
+	return user != nil && user.Enabled && user.Role != models.RoleAdmin && user.LocalPasswordLoginEnabled
 }
 
 // Refusals of a demomode.AccountSettingKey value.
@@ -156,7 +164,8 @@ var (
 // CheckDemoAccountSetting refuses a demomode.AccountSettingKey value that
 // names no account (ErrDemoAccountNotFound) or an administrator's
 // (ErrDemoAccountAdmin). Empty names none and is accepted. A disabled
-// account is accepted: it is exempted from nothing until it is enabled.
+// account, or one without local password sign-in, is accepted: it is
+// exempted from nothing until DemoAccountUsable holds.
 func CheckDemoAccountSetting(ctx context.Context, db rowQuerier, value string) error {
 	value = strings.TrimSpace(value)
 	if value == "" {

@@ -78,7 +78,11 @@ func (s *Setting) enabled(ctx context.Context, value string, err error) (string,
 		}
 		return value, nil
 	}
-	logFailure(ctx, "reading the demo mode setting failed", err)
+	// A request its client abandoned cancels the read; that is not a failing
+	// store, so it is not logged as one.
+	if ctx.Err() == nil {
+		slog.WarnContext(ctx, "reading the demo mode setting failed", "component", "demomode", "error", err)
+	}
 	switch s.last.Load() {
 	case on:
 		return OnValue, nil
@@ -93,17 +97,11 @@ func (s *Setting) accountID(ctx context.Context, value string, err error) (strin
 		s.account.Store(&value)
 		return value, nil
 	}
-	logFailure(ctx, "reading the demo account setting failed", err)
+	if ctx.Err() == nil {
+		slog.WarnContext(ctx, "reading the demo account setting failed", "component", "demomode", "error", err)
+	}
 	if last := s.account.Load(); last != nil {
 		return *last, nil
 	}
 	return "", err
-}
-
-// logFailure logs a failed read. A request its client abandoned cancels the
-// read; that is not a failing store, so it is not logged as one.
-func logFailure(ctx context.Context, msg string, err error) {
-	if ctx.Err() == nil {
-		slog.WarnContext(ctx, msg, "component", "demomode", "error", err)
-	}
 }

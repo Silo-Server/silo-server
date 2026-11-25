@@ -324,6 +324,9 @@
 ./internal/auth TestAPIKeyCreationRefusesRevokedCredentialDB
 ./internal/auth TestPasswordSignInForRoutesDB
 ./internal/auth TestExternalSignInDemoModeDB
+./internal/auth TestDemoSignInNameBudgetDB
+./internal/auth TestDemoSignInFailsClosedDB
+./internal/auth TestCheckDemoAccountSettingDB
 ./internal/auth TestExternalAccountCannotPreemptInitialSetupDB
 ./internal/auth TestPluginAuthBindingCallbackModeDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
