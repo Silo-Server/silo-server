@@ -141,8 +141,8 @@ func (h *CollectionHandler) PersonalCollectionItemsPage(ctx context.Context, use
 
 // maxHiddenMemberBatches bounds the stored-member pages one page of a
 // collection that hides watched titles reads, and hiddenMemberBatchSize is the
-// fewest members each of those reads, so a small page (a three-title peek)
-// still reads on past a run of watched members.
+// fewest members each read after the first takes, so a small page (a
+// three-title peek) still reads on past a run of watched members.
 const (
 	maxHiddenMemberBatches = 10
 	hiddenMemberBatchSize  = 100
@@ -207,7 +207,6 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 	batches, read := 1, opts
 	if display != "" {
 		batches = maxHiddenMemberBatches
-		read.Limit = max(opts.Limit, hiddenMemberBatchSize)
 	}
 	var listed []*models.MediaItem
 	var revision int64
@@ -251,7 +250,9 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 		if !page.HasMore || len(out.Items) == opts.Limit {
 			break
 		}
-		read.After = out.Last
+		// The first read is the page's own size; later ones widen, so a run
+		// of watched members costs a few reads rather than ten small ones.
+		read.After, read.Limit = out.Last, max(opts.Limit, hiddenMemberBatchSize)
 	}
 	h.setListingLogos(ctx, out.Items, listed, access)
 	if _, err = h.repo.ListItemsPage(ctx, id, userstore.CollectionItemsPageOptions{Limit: 1, Revision: revision}); err != nil {

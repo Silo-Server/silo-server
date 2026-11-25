@@ -266,3 +266,27 @@ func TestEpisodeLibraryCollectionHidesWatchedEpisodesDB(t *testing.T) {
 		t.Errorf("play and shuffle read %d episodes, want %d", len(items), unwatched)
 	}
 }
+
+// A viewer whose access narrows nothing could always see every server
+// collection's card. When a collection that hides watched titles can't be
+// counted for that viewer (here its stored rules no longer validate), it keeps
+// its stored count instead of dropping out of the list.
+func TestHideWatchedCollectionKeepsItsCardWhenItsCountFailsDB(t *testing.T) {
+	f := newHideWatchedFixture(t)
+	ctx := t.Context()
+	c := f.collections(t, true)[1]
+	batchEquivExec(t, f.pool, `UPDATE library_collections SET query_definition = '{"groups":[{"match":"all","rules":[{"field":"no_such_field","op":"is","value":true}]}]}' WHERE id = $1`, c.ID)
+	read, err := f.repo.GetByID(ctx, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := []*models.LibraryCollection{read}
+	counts, err := f.repo.ViewerCollectionCounts(ctx, listed, f.watcher)
+	if err == nil {
+		t.Fatal("counting a collection whose rules don't validate succeeded; the test needs a failing count")
+	}
+	shown := CollectionsShownToViewer(listed, counts)
+	if len(shown) != 1 || shown[0].ItemCount != read.ItemCount {
+		t.Fatalf("shown = %+v, want the collection with its stored count %d", shown, read.ItemCount)
+	}
+}

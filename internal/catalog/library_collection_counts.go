@@ -41,17 +41,18 @@ type ViewerCollectionCount struct {
 // described by access, keyed by collection ID, counted the way the
 // collection's catalog page counts its members. It returns nil when access
 // narrows nothing and no collection hides watched titles from the viewer,
-// since the stored counts are then the viewer's, and otherwise a non-nil map. Stored members are counted in one statement; smart
-// collections run their count queries in concurrent batches, and those the
-// viewer can open nothing in are counted again without the viewer's access,
-// because their cached count may predate their current members. A collection
-// whose count could not be read is absent from the result, and the error says
-// why.
+// since the stored counts are then the viewer's, and otherwise a non-nil map.
+// Stored members are counted in one statement; smart collections run their
+// count queries in concurrent batches, and those the viewer can open nothing
+// in are counted again without the viewer's access, because their cached
+// count may predate their current members. A collection whose count could not
+// be read is absent from the result, and the error says why.
 //
 // A collection that hides watched titles counts, for a viewer with a profile,
 // only the members that profile has not watched, so its card matches its
 // page; the other collections then keep their stored counts when access
-// narrows nothing.
+// narrows nothing. For such a viewer, a hiding collection whose unwatched
+// count fails keeps its stored count rather than dropping out of the list.
 func (r *LibraryCollectionRepository) ViewerCollectionCounts(ctx context.Context, collections []*models.LibraryCollection, access AccessFilter) (map[string]ViewerCollectionCount, error) {
 	narrows := access.NarrowsCatalog()
 	var hiding, rest []*models.LibraryCollection
@@ -84,6 +85,11 @@ func (r *LibraryCollectionRepository) ViewerCollectionCounts(ctx context.Context
 	for _, c := range hiding {
 		n, ok := unwatched[c.ID]
 		if !ok {
+			if !narrows {
+				// The viewer could open every member before; a failed
+				// count must not hide the card from them.
+				counts[c.ID] = ViewerCollectionCount{Count: c.ItemCount}
+			}
 			continue
 		}
 		counts[c.ID] = ViewerCollectionCount{Count: n}

@@ -14,6 +14,7 @@
 ./internal/catalog TestLibraryCollectionCountsHideViewersWatchedTitlesDB
 ./internal/catalog TestCappedLibraryCollectionHidesAfterPickingMembersDB
 ./internal/catalog TestEpisodeLibraryCollectionHidesWatchedEpisodesDB
+./internal/catalog TestHideWatchedCollectionKeepsItsCardWhenItsCountFailsDB
 ./internal/catalog TestLibraryCollectionReplaceItemsWritesOnlyTheDifferenceDB
 ./internal/catalog TestLibraryCollectionReplaceItemsRacesMemberDeleteDB
 ./internal/catalog TestLibraryCollectionNamesDB
