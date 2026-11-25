@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/profileedits"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -49,6 +50,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	if deps.ActivityLogWriter != nil {
 		r.Use(activitylog.NewFilteredMiddleware(deps.ActivityLogWriter, deps.NodeID, skipCompatActivityLog))
 	}
+	r.Use(profileedits.Middleware(deps.ProfileEditsWaker))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"},

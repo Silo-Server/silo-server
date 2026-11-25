@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/backup/userdata"
+	"github.com/Silo-Server/silo-server/internal/profileedits"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
@@ -121,6 +122,8 @@ func lockPlanned(ctx context.Context, tx pgx.Tx, plan accountPlan) (bool, error)
 // changed (password, role, permissions, group, login and owner flags, PIN,
 // and access stay); only missing profiles are added and chosen data merged.
 func (a *applier) applyAccount(ctx context.Context, tx pgx.Tx, sel UserSelection) (applied, error) {
+	// A restore is not an edit made on this server.
+	ctx = profileedits.WithoutRecording(ctx)
 	item := ReportItem{Kind: KindAccount, Label: sel.Account}
 	ref, ok := a.rs.user(sel.Account)
 	if !ok {

@@ -69,7 +69,7 @@ var restoredDataTables = strings.Fields(`
 	media_root_overrides movie_availability notification_preferences observed_media_locations
 	overlay_images page_sections people plugin_archives plugin_capabilities plugin_installations 
 	 plugin_task_bindings podcast_feeds 
-	 profile_series_interest profile_series_notification_mutes request_group_limits
+	 profile_series_interest profile_series_notification_mutes profile_set_edits request_group_limits
 	request_routes request_routing request_settings request_user_limits scanned_media_groups
 	scanned_media_roots season_localizations seasons server_settings skipped_media_roots
 	stale_media_ids task_schedules task_triggers tmdb_movie_collections user_audio_preferences

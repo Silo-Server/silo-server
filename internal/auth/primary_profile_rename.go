@@ -36,6 +36,8 @@ func updatePreviousUsername(ctx context.Context, db interface {
 // the profile API would refuse. Profiles kept in the SQLite user store are not
 // in user_profiles, so they keep their names.
 //
+// A primary profile from a profile set keeps its name: the set names it.
+//
 // The account row is already locked, and a profile save locks the profile row
 // before it touches the account row, so waiting here for a profile a save
 // holds could deadlock. A primary profile being saved at that moment is
@@ -51,7 +53,7 @@ func renamePrimaryProfileWithAccount(ctx context.Context, db interface {
 			SELECT o.name FROM user_profiles o WHERE o.user_id = p.user_id AND o.id <> p.id
 		)
 		FROM user_profiles p
-		WHERE p.user_id = $1 AND p.is_primary
+		WHERE p.user_id = $1 AND p.is_primary AND p.sync_id IS NULL
 		FOR NO KEY UPDATE OF p SKIP LOCKED`, id).Scan(&profileID, &name, &others)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil

@@ -77,6 +77,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback/planstore"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/policy"
+	"github.com/Silo-Server/silo-server/internal/profileedits"
 	"github.com/Silo-Server/silo-server/internal/progresssync"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
@@ -246,23 +247,26 @@ type Dependencies struct {
 	// for network access provider plugins on this host. The token middleware
 	// runs on every native request and connected overlay origins are accepted
 	// by WebSocket handshakes. Nil disables both (tests, worker modes).
-	NetworkAccess             *netaccess.Broker
-	NodeID                    string
-	LogStreamHub              *logstream.Hub
-	RealtimeHub               *notifications.Hub
-	Notifications             *notifications.System // user-facing release notifications (may be nil)
-	PolicySystem              *policy.System        // policy engine lifecycle (may be nil)
-	EventsHub                 *evt.Hub
-	ScanRegistry              *evt.ScanRegistry
-	LibraryScanQueue          *scanqueue.Service
-	LibraryMonitor            interface{ Poke() }            // real-time library monitor, reconciled after library mutations (nil when this node runs none)
-	Trickplay                 interface{ ReconcileSoon() }   // seek preview service, reconciled after a library's trickplay setting changes (nil when not configured)
-	TrickplayReader           *trickplay.Reader              // published seek previews for players (nil when not configured)
-	TrickplayAdmin            *trickplay.Admin               // seek preview status and regeneration for administrators (nil when not configured)
-	KeptSubtitles             *keptsub.Store                 // embedded subtitle tracks kept in the assets store, read before demuxing a source (nil without a database or blob storage)
-	SubtitlePrefetch          *keptsub.Prefetcher            // reads the subtitle tracks a playback will likely want, at playback start (nil without KeptSubtitles)
-	LibraryMonitoring         apiv2.LibraryMonitoringService // real-time monitoring status for the v2 admin read (may be nil)
-	ActivityLogWriter         activitylog.Writer
+	NetworkAccess     *netaccess.Broker
+	NodeID            string
+	LogStreamHub      *logstream.Hub
+	RealtimeHub       *notifications.Hub
+	Notifications     *notifications.System // user-facing release notifications (may be nil)
+	PolicySystem      *policy.System        // policy engine lifecycle (may be nil)
+	EventsHub         *evt.Hub
+	ScanRegistry      *evt.ScanRegistry
+	LibraryScanQueue  *scanqueue.Service
+	LibraryMonitor    interface{ Poke() }            // real-time library monitor, reconciled after library mutations (nil when this node runs none)
+	Trickplay         interface{ ReconcileSoon() }   // seek preview service, reconciled after a library's trickplay setting changes (nil when not configured)
+	TrickplayReader   *trickplay.Reader              // published seek previews for players (nil when not configured)
+	TrickplayAdmin    *trickplay.Admin               // seek preview status and regeneration for administrators (nil when not configured)
+	KeptSubtitles     *keptsub.Store                 // embedded subtitle tracks kept in the assets store, read before demuxing a source (nil without a database or blob storage)
+	SubtitlePrefetch  *keptsub.Prefetcher            // reads the subtitle tracks a playback will likely want, at playback start (nil without KeptSubtitles)
+	LibraryMonitoring apiv2.LibraryMonitoringService // real-time monitoring status for the v2 admin read (may be nil)
+	ActivityLogWriter activitylog.Writer
+	// ProfileEditsWaker tells an account's apps that a profile from its
+	// profile set changed on this server. Nil wakes nothing.
+	ProfileEditsWaker         profileedits.Waker
 	ActivityLogRepo           *activitylog.Repo
 	APIUsage                  *apiusage.Store // per-session API request summaries (nil without a database)
 	OpsLogRepo                *opslog.Repo
@@ -3654,6 +3658,8 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	if deps.ActivityLogWriter != nil {
 		r.Use(activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub))
 	}
+	// Before auth, which names the account whose edits the request records.
+	r.Use(profileedits.Middleware(deps.ProfileEditsWaker))
 
 	// A handler's panic becomes its 500 here, inside the request metrics and
 	// the activity log, so both record it like any other server error

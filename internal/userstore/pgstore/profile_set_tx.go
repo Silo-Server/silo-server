@@ -240,7 +240,8 @@ func (w *profileSetTx) DeleteProfile(ctx context.Context, profileID string) ([]s
 	if !slices.Contains(w.removable, profileID) {
 		return nil, fmt.Errorf("profile %s was not locked for removal", profileID)
 	}
-	return deleteProfileRowsTx(ctx, w.tx, w.userID, profileID)
+	collections, _, err := deleteProfileRowsTx(ctx, w.tx, w.userID, profileID)
+	return collections, err
 }
 
 func (w *profileSetTx) Accept(ctx context.Context, version int64, sha256 []byte) error {

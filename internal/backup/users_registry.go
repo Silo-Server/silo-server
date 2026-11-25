@@ -140,6 +140,7 @@ var excludedUserTables = map[string]string{
 	"user_taste_clusters":                      excludedRecommendation,
 	"user_taste_profiles":                      excludedRecommendation,
 	"profile_series_interest":                  "derived from watch progress and history",
+	"profile_set_edits":                        "edits to profiles from a profile set; a full restore carries them, and a restore set carries no sync IDs",
 	"user_personal_collection_poster_variants": excludedCollage,
 	"user_personal_collection_smart_collages":  excludedCollage,
 	"user_collection_revisions":                excludedRevision,

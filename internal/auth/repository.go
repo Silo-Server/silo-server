@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/profileedits"
 )
 
 // Sentinel errors for repository operations.
@@ -746,16 +747,17 @@ func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, exp
 
 // Delete removes a user by their ID.
 func (r *UserRepository) Delete(ctx context.Context, id int) error {
-	tag, err := r.pool.Exec(ctx, "DELETE FROM users WHERE id = $1", id)
-	if err != nil {
-		return fmt.Errorf("deleting user: %w", err)
-	}
-
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-
-	return nil
+	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, "DELETE FROM users WHERE id = $1", id)
+		if err != nil {
+			return fmt.Errorf("deleting user: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		// After the account, as MutateAdminAccount does.
+		return profileedits.DeleteAccount(ctx, tx, id)
+	})
 }
 
 // List returns all users ordered by ID ascending.

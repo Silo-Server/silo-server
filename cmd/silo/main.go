@@ -4282,6 +4282,7 @@ func main() {
 			ClientIPResolver:     ipResolver,
 			IngressTokens:        networkAccess.Registry,
 			ActivityLogWriter:    deps.ActivityLogWriter,
+			ProfileEditsWaker:    deps.ProfileEditsWaker,
 			NodeID:               deps.NodeID,
 			StreamTelemetry:      streamTelemetryRegistry,
 			NodePlanner:          deps.NodePlanner,

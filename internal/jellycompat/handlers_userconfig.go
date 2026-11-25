@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -270,7 +271,18 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 	encoded, _ := json.Marshal(dto.Configuration)
 	err = tx.WithPreferenceSettingsTransaction(r.Context(), func(writer userstore.PreferenceSettingsWriter) error {
 		for key, value := range values {
-			if _, err := writer.UpsertSettingValue(r.Context(), userstore.SettingIdentity{Key: key, Scope: settingscontract.ScopeProfile, ProfileID: session.ProfileID}, value); err != nil {
+			id := userstore.SettingIdentity{Key: key, Scope: settingscontract.ScopeProfile, ProfileID: session.ProfileID}
+			// Jellyfin Web saves the whole configuration from every page; a
+			// value equal to the stored one is not written, so it is not an
+			// edit of that setting.
+			stored, err := writer.GetSettingValue(r.Context(), id)
+			if err != nil {
+				return err
+			}
+			if stored != nil && sameJSON(stored.Value, value) {
+				continue
+			}
+			if _, err := writer.UpsertSettingValue(r.Context(), id, value); err != nil {
 				return err
 			}
 		}
@@ -302,4 +314,13 @@ func (h *AuthHandler) HandleCultures(w http.ResponseWriter, r *http.Request) {
 		cultures = append(cultures, culture{Name: code, DisplayName: display.English.Languages().Name(base), TwoLetterISOLanguageName: code, ThreeLetterISOLanguageName: iso3, ThreeLetterISOLanguageNames: []string{iso3}})
 	}
 	writeJSON(w, http.StatusOK, cultures)
+}
+
+// sameJSON reports whether a and b are the same JSON value.
+func sameJSON(a, b json.RawMessage) bool {
+	var x, y any
+	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
+		return false
+	}
+	return reflect.DeepEqual(x, y)
 }

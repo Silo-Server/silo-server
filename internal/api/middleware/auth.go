@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/profileedits"
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -209,6 +210,10 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			am.sessionLastSeen.Touch(claims.SessionID)
 		}
 
+		// Edits this request makes to profiles from a profile set are
+		// recorded as this account's, or the administrator's acting as it.
+		profileedits.FromContext(r.Context()).SetActor(claims.UserID, claims.ImpersonatorUserID)
+
 		// Populate activity log context if present (set by activitylog middleware upstream)
 		if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 			uid := claims.UserID
@@ -239,6 +244,7 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 func (am *AuthMiddleware) AttachSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if claims := am.sessionClaims(r); claims != nil {
+			profileedits.FromContext(r.Context()).SetActor(claims.UserID, claims.ImpersonatorUserID)
 			if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 				uid := claims.UserID
 				lc.UserID = &uid
