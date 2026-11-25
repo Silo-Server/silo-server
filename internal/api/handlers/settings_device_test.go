@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -106,5 +107,39 @@ func TestEffectiveSubtitleAppearanceReadsTheCanonicalSetting(t *testing.T) {
 				t.Error("a device override carries no updated_at")
 			}
 		})
+	}
+}
+
+// TestSubtitleAppearanceDeviceOverrideStoresWhatTheRouteReads: the companion
+// PUT writes the override the effective route then serves, and refuses a value
+// the canonical schema cannot hold rather than accepting a write no reader sees.
+func TestSubtitleAppearanceDeviceOverrideStoresWhatTheRouteReads(t *testing.T) {
+	_, store := newValuesTestHandler(t)
+	ctx := seamCtx(t, "profile-1")
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+	cmd := DeviceSettingCommand{
+		UserID: seamUserID, ProfileID: "profile-1",
+		Device: NewDeviceMetadata("device-1", "Living room", "iOS"), Key: SubtitleAppearanceSettingKey,
+	}
+
+	if err := handler.SetDeviceSetting(ctx, cmd, `{"fontSize":"small"}`); err != nil {
+		t.Fatalf("SetDeviceSetting: %v", err)
+	}
+	for _, refused := range []string{`{}`, `{"fontSize":"huge"}`} {
+		err := handler.SetDeviceSetting(ctx, cmd, refused)
+		if apiErr := requireSettingStatus(t, err, http.StatusBadRequest, refused); apiErr.Field != "value" {
+			t.Errorf("%s refused at %q, want value", refused, apiErr.Field)
+		}
+	}
+
+	got, err := handler.EffectiveSubtitleAppearance(ctx, seamUserID, "profile-1", NewDeviceMetadata("device-1", "", ""))
+	if err != nil {
+		t.Fatalf("EffectiveSubtitleAppearance: %v", err)
+	}
+	if !got.HasDeviceOverride || got.EffectiveValue != `{"fontSize":"small"}` {
+		t.Errorf("effective = %q (override %v), want the stored override", got.EffectiveValue, got.HasDeviceOverride)
+	}
+	if got.DeviceName != "Living room" || got.DevicePlatform != "iOS" {
+		t.Errorf("device = %q/%q, want the name and platform the override was saved with", got.DeviceName, got.DevicePlatform)
 	}
 }

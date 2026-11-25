@@ -296,14 +296,20 @@ func headerText(value string) string {
 }
 
 // SetDeviceSetting validates and stores a device-scoped setting for the
-// acting profile, keeping the canonical runtime settings in sync. v1 PUT
-// /settings/device/{key} and v2 updateSubtitleAppearanceDeviceOverride both
-// go through it; a *APIError is a decision the caller renders.
+// acting profile, keeping the canonical runtime settings in sync. v2
+// updateSubtitleAppearanceDeviceOverride goes through it; a *APIError is a
+// decision the caller renders. A value the canonical schema cannot hold is
+// refused: readers resolve the canonical rows, so storing it in the legacy row
+// alone would accept a write no reader ever serves.
 func (h *SettingsHandler) SetDeviceSetting(ctx context.Context, cmd DeviceSettingCommand, value string) error {
 	if err := validateDeviceSettingTarget(&cmd); err != nil {
 		return err
 	}
 	if err := validateRegisteredSetting(cmd.Key, value, scopeDevice); err != nil {
+		return fieldError("value", err.Error())
+	}
+	writes, err := planLegacyRuntimeSettings(cmd.Key, &value)
+	if err != nil {
 		return fieldError("value", err.Error())
 	}
 	store, err := h.storeProvider.ForUser(ctx, cmd.UserID)
@@ -318,7 +324,7 @@ func (h *SettingsHandler) SetDeviceSetting(ctx context.Context, cmd DeviceSettin
 		Key:            cmd.Key,
 		Value:          value,
 	}
-	if err := h.syncLegacyDeviceSetting(ctx, store, cmd.UserID, entry, &value); err != nil {
+	if err := h.syncLegacyDeviceSetting(ctx, store, cmd.UserID, entry, &value, writes); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to set device setting")
 	}
 	return nil
@@ -339,7 +345,14 @@ func (h *SettingsHandler) DeleteDeviceSetting(ctx context.Context, cmd DeviceSet
 	h.registerRequestDevice(ctx, store, cmd.ProfileID, cmd.Device)
 
 	entry := userstore.DeviceSettingEntry{ProfileID: cmd.ProfileID, DeviceID: cmd.Device.DeviceID, Key: cmd.Key}
-	if err := h.syncLegacyDeviceSetting(ctx, store, cmd.UserID, entry, nil); err != nil {
+	writes, err := planLegacyRuntimeSettings(cmd.Key, nil)
+	if err != nil {
+		// A key with no canonical target still clears its legacy row.
+		slog.WarnContext(ctx, "legacy device setting has no canonical representation; clearing legacy row only",
+			"component", "api", "key", cmd.Key, "error", err)
+		writes = nil
+	}
+	if err := h.syncLegacyDeviceSetting(ctx, store, cmd.UserID, entry, nil, writes); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete device setting")
 	}
 	return nil
@@ -373,24 +386,17 @@ func planLegacyRuntimeSettings(key string, value *string) ([]profileSettingSync,
 	return out, nil
 }
 
-// syncLegacyDeviceSetting mirrors a shipped device-setting mutation to its
-// profile_device canonical rows. Alias cleanup participates in the same
-// transaction, so a failure cannot leave the two spellings disagreeing.
+// syncLegacyDeviceSetting applies a shipped device-setting mutation and its
+// planned profile_device canonical writes. Alias cleanup participates in the
+// same transaction, so a failure cannot leave the two spellings disagreeing.
 func (h *SettingsHandler) syncLegacyDeviceSetting(
 	ctx context.Context,
 	store userstore.UserStore,
 	userID int,
 	entry userstore.DeviceSettingEntry,
 	value *string,
+	writes []profileSettingSync,
 ) error {
-	writes, err := planLegacyRuntimeSettings(entry.Key, value)
-	if err != nil {
-		// Keep the established loose JSON endpoint compatible when a syntactically
-		// valid legacy document cannot satisfy the stricter canonical schema.
-		slog.WarnContext(ctx, "legacy device setting has no canonical representation; preserving legacy write",
-			"component", "api", "key", entry.Key, "error", err)
-		writes = nil
-	}
 	base := userstore.SettingIdentity{
 		Scope:     settingscontract.ScopeProfileDevice,
 		ProfileID: entry.ProfileID, DeviceID: entry.DeviceID,
@@ -493,6 +499,16 @@ func (h *SettingsHandler) EffectiveSubtitleAppearance(ctx context.Context, userI
 		view.EffectiveValue = view.DeviceValue
 		view.HasDeviceOverride = true
 		view.UpdatedAt = deviceRow.UpdatedAt
+		// The device name and platform live on the row the companion PUT
+		// wrote, so a GET that declares only the device id still reports them.
+		registered, err := store.GetDeviceSetting(ctx, profileID, device.DeviceID, SubtitleAppearanceSettingKey)
+		if err != nil {
+			return EffectiveSubtitleAppearanceView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to get setting")
+		}
+		if registered != nil {
+			view.DeviceName = registered.DeviceName
+			view.DevicePlatform = registered.DevicePlatform
+		}
 	}
 	return view, nil
 }

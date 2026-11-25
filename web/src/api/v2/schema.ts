@@ -37089,7 +37089,7 @@ export interface components {
     };
     SubtitleAppearanceDeviceOverride: {
       /**
-       * @description The subtitle appearance as a JSON document; the server validates only that it is JSON
+       * @description The subtitle appearance as a JSON document; it must satisfy the settings contract's subtitle-appearance schema
        * @example {"fontSize":"xxlarge"}
        */
       value: string;

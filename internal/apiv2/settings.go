@@ -137,7 +137,7 @@ type EffectiveSubtitleAppearanceInput struct {
 
 // SubtitleAppearanceDeviceOverride is the value a device stores.
 type SubtitleAppearanceDeviceOverride struct {
-	Value string `json:"value" required:"true" doc:"The subtitle appearance as a JSON document; the server validates only that it is JSON" example:"{\"fontSize\":\"xxlarge\"}"`
+	Value string `json:"value" required:"true" doc:"The subtitle appearance as a JSON document; it must satisfy the settings contract's subtitle-appearance schema" example:"{\"fontSize\":\"xxlarge\"}"`
 }
 
 // SubtitleAppearanceDeviceOverrideInput is the
