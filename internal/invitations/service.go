@@ -7,6 +7,8 @@ import (
 	netmail "net/mail"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -523,17 +525,20 @@ func (s *Service) serverName(ctx context.Context) string {
 }
 
 // profileNameFromEmail derives the default profile name from the address's
-// local part ("marco@example.com" → "Marco").
+// local part ("marco@example.com" → "Marco"), or from a username given
+// without one. The first letter is capitalized as a whole character, so a
+// name that starts outside ASCII stays valid text.
 func profileNameFromEmail(email string) string {
 	local := email
 	if at := strings.IndexByte(email, '@'); at > 0 {
 		local = email[:at]
 	}
 	local = strings.TrimSpace(local)
-	if local == "" {
-		return ""
+	first, size := utf8.DecodeRuneInString(local)
+	if size == 0 || first == utf8.RuneError {
+		return local
 	}
-	return strings.ToUpper(local[:1]) + local[1:]
+	return string(unicode.ToUpper(first)) + local[size:]
 }
 
 // SupportsDefaultProfile reports capability, not transient storage health.
