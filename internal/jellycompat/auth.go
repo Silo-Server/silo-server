@@ -139,9 +139,11 @@ func (a *Authenticator) RequireSession(next http.Handler) http.Handler {
 		// Refresh underlying Silo tokens if they're about to expire.
 		// Use a detached context so a client aborting the request mid-refresh
 		// (common on flaky mobile networks) doesn't revoke the compat session.
+		// It keeps the request's values, so the refresh records the client's
+		// address as one the account signs in from.
 		if a.refresher != nil && !session.StreamAppTokenExpiry.IsZero() &&
 			session.StreamAppTokenExpiry.Before(a.now().Add(tokenRefreshBuffer)) {
-			refreshCtx, cancel := context.WithTimeout(context.Background(), tokenRefreshTimeout)
+			refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), tokenRefreshTimeout)
 			newPair, err := a.refresher.Refresh(refreshCtx, session.StreamAppRefreshToken)
 			cancel()
 			if errors.Is(err, auth.ErrSessionCheckUnavailable) || errors.Is(err, auth.ErrProviderUnavailable) {

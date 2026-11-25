@@ -582,7 +582,7 @@ describe("RealtimeEventsProvider", () => {
   it("patches preparation progress in place and re-reads the list on other changes", async () => {
     setProfileId("primary");
     mockState.profile = { id: "primary", has_pin: false };
-    mockState.pathname = "/admin/activity";
+    mockState.pathname = "/admin/downloads";
     const queryClient = new QueryClient();
     const key = adminDownloadPreparationsKey(captureProfileRequestContext());
     const initial = makePreparationList([makePreparation()]);

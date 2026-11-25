@@ -108,6 +108,11 @@ func DefaultConfig() Config {
 			"device_start":    {RequestsPerMinute: 20, Burst: 10},
 			"device_lookup":   {RequestsPerMinute: 60, Burst: 20},
 			"device_poll":     {RequestsPerMinute: 120, Burst: 30},
+			// The three OAuth sign-in starts. Each costs a plugin call and a
+			// stored flow, and one sign-in can spend two: a form post bounces
+			// to the GET start, and a native start off the public origin
+			// resumes there. Hence twice device_start.
+			"oauth_start": {RequestsPerMinute: 40, Burst: 20},
 			// A dashboard can request several hundred posters when it opens.
 			ItemPosterBucket: {RequestsPerMinute: 600, Burst: 400},
 			// Invitation claim lookups and accepts: single-use tokens with

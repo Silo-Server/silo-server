@@ -1629,7 +1629,7 @@ func ladderRungForLabelV3(label string) (ladderRungV3, bool) {
 
 // sourceLadderHeightV3 classifies a source by the smallest class whose bounds
 // contain both dimensions, the scanner's buckets for a file's resolution label
-// (scanner.mapResolution). Cropped and cinema-aspect encodes therefore land in
+// (scanner.ResolutionLabel). Cropped and cinema-aspect encodes therefore land in
 // the class the catalog shows: 1918x872 is 1080p and 3840x1540 is 2160p. An 8K
 // source is 4320p, above every rung, so its 4K rungs scale down to 2160 lines.
 func sourceLadderHeightV3(source SourceDescriptorV3) int {

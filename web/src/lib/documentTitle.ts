@@ -82,7 +82,6 @@ const ADMIN_ROOT: AdminTitle = {
 
 const ADMIN_TITLES: Record<string, AdminTitle> = {
   "access-groups": adminPage("accessGroups"),
-  activity: adminPage("activity"),
   "api-keys": adminPage("apiKeys"),
   autoscan: adminPage("autoscan"),
   backups: adminPage("backups"),
@@ -92,6 +91,7 @@ const ADMIN_TITLES: Record<string, AdminTitle> = {
   downloads: adminPage("downloads"),
   history: adminPage("history"),
   "history-import": adminPage("historyImport"),
+  insights: adminPage("insights"),
   "marker-history": adminPage("markerHistory"),
   libraries: adminPage("libraries"),
   logs: adminPage("logs"),

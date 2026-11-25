@@ -14,7 +14,7 @@ import (
 	"golang.org/x/mod/module"
 )
 
-const shunpikePath = "github.com/Silo-Server/shunpike"
+const shunpikePath = "github.com/darthShadow/shunpike"
 
 var forkPaths = [...]string{"github.com/quic-go/quic-go", "tailscale.com"}
 

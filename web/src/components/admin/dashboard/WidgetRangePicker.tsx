@@ -11,13 +11,16 @@ const SHOW_RANGE_LABELS: Record<WidgetRange, MessageKey> = {
   day: "web.admin.dashboard.rangePicker.show.day",
   week: "web.admin.dashboard.rangePicker.show.week",
   month: "web.admin.dashboard.rangePicker.show.month",
+  quarter: "web.admin.dashboard.rangePicker.show.quarter",
+  year: "web.admin.dashboard.rangePicker.show.year",
+  all: "web.admin.dashboard.rangePicker.show.all",
 };
 
 /**
  * A compact segmented control for a widget's window.
  *
- * Toggle buttons rather than a listbox: there are at most four options, they
- * are two characters wide, and one tap has to change the chart — a dropdown
+ * Toggle buttons rather than a listbox: there are at most five options, they
+ * are a few characters wide, and one tap has to change the chart — a dropdown
  * would cost an extra interaction for the same choice. Each button reports its
  * own pressed state, so a screen reader hears which window is showing without
  * having to open anything.

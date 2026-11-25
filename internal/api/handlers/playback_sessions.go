@@ -479,14 +479,16 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 
 // posterURL applies the admin poster rule. A loader built without the rule
 // (one a handler makes for itself, with no signing secret) still names cached
-// art by its stored URL, and names nothing for art that is not cached: it
-// never hands out a provider's URL.
+// art when its stored URL stays on this server, and names nothing otherwise: it
+// never hands out a provider's or off-server object store's URL.
 func (l *PlaybackSessionsLoader) posterURL(ctx context.Context, ownerID, path string) string {
 	if l.Posters != nil {
 		return l.Posters.URL(ctx, ownerID, path)
 	}
 	if l.DetailSvc != nil && artworkurl.IsStoredArtworkPath(path) {
-		return l.DetailSvc.PresignURL(ctx, artworkurl.StoredPosterVariant(path), "card")
+		if url := l.DetailSvc.PresignURL(ctx, artworkurl.StoredPosterVariant(path), "card"); artworkurl.IsSameServerPath(url) {
+			return url
+		}
 	}
 	return ""
 }

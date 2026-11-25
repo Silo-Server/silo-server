@@ -21,7 +21,7 @@ export function RecentActivityWidget() {
           {t("web.admin.dashboard.widgets.recentActivity.title")}
         </CardTitle>
         <Link
-          to="/admin/activity"
+          to="/admin/insights"
           className="text-muted-foreground hover:text-primary text-[0.6875rem] transition-colors"
         >
           {t("web.admin.dashboard.widgets.recentActivity.viewAll")}

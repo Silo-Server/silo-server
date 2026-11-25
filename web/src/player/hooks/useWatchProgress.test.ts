@@ -81,3 +81,20 @@ it("ends the session when a pause report learns it stayed paused too long", asyn
   });
   expect(onSessionEnded).toHaveBeenCalledExactlyOnceWith("paused_timeout");
 });
+
+// Leaving flushes progress first; a flush the server refuses because it
+// already ended the session must say so, or a minimized player keeps it.
+it("ends the session when the leave's flush learns an administrator ended it", async () => {
+  const { video } = loadedVideo();
+  mocks.send.mockRejectedValue(new PlayerFetchError(410, "Gone", "playback_session_ended"));
+  const onSessionEnded = vi.fn();
+  const { result } = renderHook(
+    () => useWatchProgress("session", { current: video }, undefined, onSessionEnded),
+    { wrapper },
+  );
+
+  await act(async () => {
+    await result.current().catch(() => {});
+  });
+  expect(onSessionEnded).toHaveBeenCalledExactlyOnceWith("ended");
+});
