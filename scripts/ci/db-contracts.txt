@@ -325,6 +325,9 @@
 ./internal/auth TestPasswordSignInForRoutesDB
 ./internal/auth TestExternalAccountCannotPreemptInitialSetupDB
 ./internal/auth TestPluginAuthBindingCallbackModeDB
+./internal/auth TestLocalPasswordOffAccountsDB
+./internal/auth TestLocalPasswordOffKeepsOpenSessionsDB
+./internal/api/handlers TestLocalLoginSettingRequiresBreakGlassDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
 ./internal/auth TestSignupPolicySerializationDB
