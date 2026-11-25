@@ -51,6 +51,8 @@ shared short URL: each server's link is its own.
 - A pending poll answer carries the request's current `expires_at`. The
   device moves its local deadline to that value, so a TV following the start
   answer's `expires_in` doesn't give up on a code someone is approving.
+- A request [approved in advance](#approval-in-advance) lives 30 days and is
+  never extended.
 - Requests more than a day past their expiry are deleted by the
   `cleanup_device_logins` step of the `database_maintenance` task
   (`DeviceLoginRetention`).
@@ -154,6 +156,104 @@ secret. An older node's collection of a bound request fails as a server error
 and rolls back the session it inserted, so the request stays approved for the
 TV to collect through an updated node. Rolling the migration back refuses
 every live bound request before it drops the columns.
+
+## Approval in advance
+
+A phone that joins a new server can get a TV into it while the TV is off. The
+phone asks the server for a sign-in that is already approved, tied to one of
+the TV's [session binding](#session-binding) fingerprints, and passes the
+device code to the TV through its own channel. The TV redeems it later with
+the ordinary `pollDeviceLogin`, sending the device code and the secret behind
+the fingerprint. Nothing on the poll changes for the TV.
+
+- **Creating it.** `POST /api/v2/auth/device/preapprove` takes `device_name`,
+  `device_platform` and `binding`, and answers 201 with `id`, `device_code` and
+  `expires_at`. Only the account's own login session may call it: an API key,
+  a session an administrator opened as the account, or a remote-playback
+  handoff is 403 `permission_denied`, and a temporary-password session is
+  stopped by the middleware as for every other route. The account and the
+  approving session are locked and checked as for an ordinary approval, and the
+  row is inserted `approved`, with `preapproved_at` set, `ip_address` NULL and
+  the session's provider chain. The row keeps `client_purpose = 'device_login'`,
+  so the poll path and older nodes treat it as any approved bound request.
+- **Reachable only by its device code.** The device code is 32 random bytes
+  (256 bits). The browser and user codes stored beside it are random 32-byte
+  values that are never returned, and `getDeviceLogin`, approve and deny refuse
+  a pre-approved row even when one of those codes matches, so no eight-digit
+  or six-digit code finds it. `cancelDeviceLogin` takes no secret, so it leaves
+  a pre-approved row as it is and answers 404. Only `pollDeviceLogin` with the
+  device code reaches it, and only with the secret does it give tokens.
+- **Lifetime.** 30 days from approval, single use. The poll that collects it
+  moves it to `consumed` in the same transaction that opens the session, as for
+  any request. Lookups never extend it (the opened hold applies only to pending
+  requests), and retention deletes it a day after it expires, as any request.
+- **Cap.** An account holds at most 20 waiting (approved, unexpired,
+  uncollected) pre-approved sign-ins. Another is 409 `conflict`. The count runs
+  under the account lock, so concurrent calls cannot overrun it.
+- **What ends it.** Revoking it from the list (below) moves it to `denied`.
+  The account-wide events that withdraw an ordinary uncollected approval
+  withdraw it too: signing out everywhere, an administrator disabling the
+  account or setting its password, a password reset, a password change that
+  signs out other sessions, a sign-in provider refusing the identity, and the
+  sign-in policy changes that revoke sign-ins. A poll for an account disabled
+  or deleted since answers `denied`; this holds for every device sign-in, not
+  only pre-approved ones, since over 30 days it is a normal case.
+- **The approving session.** The row records the login session that approved
+  it (`preapproved_session_id`). Revoking that one session withdraws the
+  sign-ins it approved in advance and that no device has redeemed, in the
+  same statement. A database trigger on `auth_sessions` does it, not
+  application code, so it holds for every write that revokes a login
+  session: the session list, an administrator, logout, a revoked app key that
+  opened it, the account-wide revocations, and a node from an older release.
+  A session someone else was using therefore cannot leave a sign-in behind
+  for later, and cannot hide one by logging itself out. Sign-ins the account
+  approved from its other sessions stay, and so does a device that already
+  redeemed: its session is its own and is ended from the session list. A
+  session that only reaches its expiry is not revoked and leaves its sign-ins
+  in place; they expire within the same 30 days.
+- **Provider identity at redemption.** When the approving session came from a
+  provider identity, the poll locks and checks that identity as a provider
+  sign-in does, before the device row: a refused identity, an unlinked one, or
+  an identity whose installation is gone refuses the poll as `denied` and
+  withdraws the row; a disabled installation answers 503
+  `provider_unavailable` and leaves the row for a later poll. The device's
+  session carries the identity and the approving session's `provider_since`,
+  as every device sign-in does. Redeeming is not a provider sign-in, so it
+  never restarts the limit that ends a chain the provider can no longer vouch
+  for ([external-sign-in.md](external-sign-in.md#provider-re-check)): where
+  the provider cannot re-check, a sign-in redeemed late yields a session
+  that ends `auth.refresh_token_expiry` after the phone's provider sign-in,
+  which can be soon. A session whose identity was already gone cannot
+  pre-approve (403 `not_permitted`).
+- **Address.** The device's session records the address of the polling
+  device, not the phone's.
+- **List and revoke.** `GET /api/v2/auth/device/preapprovals` and
+  `DELETE /api/v2/auth/device/preapprovals/{id}` serve the account's own login
+  session; `GET /api/v2/admin/users/{user_id}/device-preapprovals` and
+  `DELETE .../{id}` serve administrators, under the owner protection that
+  revoking login sessions has. Items carry `id`, `device_name`,
+  `device_platform`, `created_at` and `expires_at`, never the device code or
+  the fingerprint. The list is bounded by the cap and not paged. Revoking a
+  row already withdrawn succeeds; any other id is 404.
+- **Wrong secrets.** Besides the per-address `device_poll` budget, each
+  pre-approved request has its own budget of wrong binding secrets, keyed by
+  its device code hash: 10 attempts, then 15 minutes locked
+  (`ratelimit.DevicePreapprovalPolicy`), counted in Redis when the deployment
+  has it. Only a wrong secret spends an attempt. While locked, a wrong secret
+  is 429 `rate_limited` with `Retry-After`. The right secret is never
+  refused by the budget and clears the count, and wrong secrets never change
+  the row, so someone who learns a device code can neither keep the TV out
+  nor destroy its sign-in.
+- **Rolling deploys and rollback.** A node from the release before this one
+  does not know the marker: it would let a bare device code cancel a
+  pre-approved request and would collect one without the provider check
+  above. Ending the approving session still withdraws its sign-ins there,
+  because the database does that. Clients create pre-approved sign-ins only after
+  `GET /api/v2/auth/device/capability` reports `preapprove`, which an older
+  node never does, and an upgrade should finish before the feature is relied
+  on. Rolling the migration back deletes the waiting pre-approved requests.
+
+`GET /api/v2/auth/device/capability` reports `preapprove: true`.
 
 ## Remote-playback handoff
 

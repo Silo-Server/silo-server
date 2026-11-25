@@ -43,6 +43,16 @@ func ProfilePINKey(userID int, profileID string) string {
 // account (auth.DeviceLoginService).
 var QuickConnectCodePolicy = AttemptPolicy{MaxAttempts: 20, Window: 15 * time.Minute}
 
+// DevicePreapprovalPolicy bounds wrong binding secrets sent with one
+// pre-approved device sign-in's device code: ten, then fifteen minutes
+// locked. The secret is 32 random bytes, so the budget is not what keeps it
+// from being guessed; it stops someone who learned a device code from
+// polling it without end. The device sign-in service keys it per request
+// and never spends or consults it for the correct secret, which clears the
+// count, so the lock cannot be used to keep the device itself out
+// (auth.DeviceLoginService).
+var DevicePreapprovalPolicy = AttemptPolicy{MaxAttempts: 10, Window: 15 * time.Minute}
+
 // SignInNamePolicy bounds password sign-ins per sign-in name: ten attempts,
 // then fifteen minutes locked. The client address budgets cannot bound
 // guessing at one name from many addresses; this holds it near a thousand
@@ -94,6 +104,13 @@ func NewProfilePINAttemptLimiter(client *redis.Client) *AttemptLimiter {
 // limiter.
 func NewQuickConnectCodeAttemptLimiter(client *redis.Client) *AttemptLimiter {
 	return newSharedAttemptLimiter(client, QuickConnectCodePolicy)
+}
+
+// NewDevicePreapprovalAttemptLimiter returns the per-request limiter on
+// wrong binding secrets for pre-approved device sign-ins, shared through
+// Redis on the same terms as the profile PIN limiter.
+func NewDevicePreapprovalAttemptLimiter(client *redis.Client) *AttemptLimiter {
+	return newSharedAttemptLimiter(client, DevicePreapprovalPolicy)
 }
 
 func newSharedAttemptLimiter(client *redis.Client, p AttemptPolicy) *AttemptLimiter {

@@ -9935,6 +9935,26 @@
       "body_file": "list_admin_trickplay_libraries_ok.json"
     },
     {
+      "name": "list_admin_user_device_preapprovals_ok",
+      "operation_id": "listAdminUserDevicePreapprovals",
+      "scenario": "An administrator lists an account's waiting sign-ins approved in advance.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/1/device-preapprovals",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CollectionDevicePreapproval",
+      "body_file": "list_admin_user_device_preapprovals_ok.json"
+    },
+    {
       "name": "list_admin_user_identities_ok",
       "operation_id": "listAdminUserIdentities",
       "scenario": "An administrator reads an account's linked identities, with the provider subject.",
@@ -10539,6 +10559,26 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/PersonalCollectionCollection",
       "body_file": "list_collections_ok.json"
+    },
+    {
+      "name": "list_device_preapprovals_ok",
+      "operation_id": "listDevicePreapprovals",
+      "scenario": "The account's waiting sign-ins approved in advance, without device codes or fingerprints.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/device/preapprovals",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CollectionDevicePreapproval",
+      "body_file": "list_device_preapprovals_ok.json"
     },
     {
       "name": "list_devices_ok",
@@ -13948,6 +13988,89 @@
       "body_file": "poll_device_login_opened.json"
     },
     {
+      "name": "poll_device_login_preapproval_rate_limited",
+      "operation_id": "pollDeviceLogin",
+      "scenario": "A wrong secret for a sign-in approved in advance, after too many wrong secrets for its device code, waits out the lock. The right secret is never refused by it.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/poll",
+        "body": "{\"device_code\":\"dev-locked\",\"binding_secret\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\"}"
+      },
+      "expected_status": 429,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json",
+        "Retry-After": "900"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "poll_device_login_preapproval_rate_limited.json"
+    },
+    {
+      "name": "preapprove_device_login_api_key_forbidden",
+      "operation_id": "preapproveDeviceLogin",
+      "scenario": "An API key cannot approve a device in advance: only the account's own signed-in session can.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/preapprove",
+        "headers": {
+          "Authorization": "Bearer sa_member",
+          "X-Profile-Id": "p-primary"
+        },
+        "body": "{\"device_name\":\"Living room TV\",\"binding\":\"Zmh6rfhivXdsj8GLjp-OIAiXFIVu4jOzkCpZHQ1fKSU\"}"
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "preapprove_device_login_api_key_forbidden.json"
+    },
+    {
+      "name": "preapprove_device_login_limit",
+      "operation_id": "preapproveDeviceLogin",
+      "scenario": "An account already holding 20 waiting sign-ins approved in advance is refused another as a conflict.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/preapprove",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"device_name\":\"Twenty-first TV\",\"binding\":\"Zmh6rfhivXdsj8GLjp-OIAiXFIVu4jOzkCpZHQ1fKSU\"}"
+      },
+      "expected_status": 409,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "preapprove_device_login_limit.json"
+    },
+    {
+      "name": "preapprove_device_login_ok",
+      "operation_id": "preapproveDeviceLogin",
+      "scenario": "A signed-in phone approves a sign-in in advance for a TV's fingerprint and gets the device code to hand the TV.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/preapprove",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"device_name\":\"Living room TV\",\"device_platform\":\"tvos\",\"binding\":\"Zmh6rfhivXdsj8GLjp-OIAiXFIVu4jOzkCpZHQ1fKSU\"}"
+      },
+      "expected_status": 201,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DevicePreapprovalCreated",
+      "body_file": "preapprove_device_login_ok.json"
+    },
+    {
       "name": "precondition_failed",
       "operation_id": null,
       "scenario": "A guarded mutation whose If-Match names a stale version: nothing changes and ETag carries the current validator to retry with.",
@@ -14820,6 +14943,43 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/MetadataMatchQueueAction",
       "body_file": "retry_metadata_match_queue_ok.json"
+    },
+    {
+      "name": "revoke_device_preapproval_not_found",
+      "operation_id": "revokeDevicePreapproval",
+      "scenario": "Revoking a sign-in that is not waiting (redeemed, expired, or another account's) is not found.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/auth/device/preapprovals/00000000-0000-4000-8000-000000000000",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "revoke_device_preapproval_not_found.json"
+    },
+    {
+      "name": "revoke_device_preapproval_ok",
+      "operation_id": "revokeDevicePreapproval",
+      "scenario": "The account revokes a waiting sign-in approved in advance; the device's next poll answers denied.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/auth/device/preapprovals/6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {},
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
     },
     {
       "name": "search_catalog_facet_authentication_required",
