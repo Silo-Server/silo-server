@@ -40,9 +40,15 @@ type fakeSessions struct{ roles map[string]string }
 
 const storeDownSession = "s-store-down"
 
+// remotePlaybackSession is a remote-playback handoff session bound to p-owner.
+const remotePlaybackSession = "s-remote-playback"
+
 func (f fakeSessions) ActiveSession(_ context.Context, id string, _ int) (auth.SessionAuthority, bool, error) {
 	if id == storeDownSession {
 		return auth.SessionAuthority{}, false, errors.New("checking session validity: dial tcp: connection refused")
+	}
+	if id == remotePlaybackSession {
+		return auth.SessionAuthority{Role: "user", Purpose: models.SessionPurposeRemotePlayback, BoundProfileID: "p-owner"}, true, nil
 	}
 	role, ok := f.roles[id]
 	return auth.SessionAuthority{Role: role, Purpose: models.SessionPurposeAccount}, ok, nil
@@ -124,6 +130,8 @@ const (
 	householdToken = "tok-household"
 	// householdAPIKeyToken is an API key owned by account 4.
 	householdAPIKeyToken = "sa_household"
+	// remotePlaybackToken is member 1's remote-playback handoff session.
+	remotePlaybackToken = "tok-remote-playback"
 	// storeDownToken is member 1's token for a session the store cannot
 	// look up (the database is unreachable).
 	storeDownToken = "tok-store-down"
@@ -182,6 +190,7 @@ func fakeAuth(users map[int]*models.User) *apimw.AuthMiddleware {
 		demotedToken:           {UserID: 1, Role: "admin", SessionID: "s1", TokenType: auth.TokenTypeAccess},
 		householdToken:         {UserID: householdUserID, Role: "user", SessionID: "s5", TokenType: auth.TokenTypeAccess},
 		storeDownToken:         {UserID: 1, Role: "user", SessionID: storeDownSession, TokenType: auth.TokenTypeAccess},
+		remotePlaybackToken:    {UserID: 1, Role: "user", SessionID: remotePlaybackSession, TokenType: auth.TokenTypeAccess, SessionPurpose: models.SessionPurposeRemotePlayback, ProfileID: "p-owner"},
 	}
 	keys := fakeAPIKeys{map[string]*models.APIKey{apiKeyToken: {ID: 7, UserID: 1}, householdAPIKeyToken: {ID: 11, UserID: householdUserID}}}
 	return apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]string{"s1": "user", "s2": "admin", "s3": "admin", "s4": "user", "s5": "user"}}, keys, fakeUsers{users})

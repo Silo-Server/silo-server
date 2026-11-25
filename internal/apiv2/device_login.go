@@ -78,6 +78,7 @@ type DeviceLoginCapability struct {
 	Cancel                bool  `json:"cancel" doc:"Whether a device can withdraw its own request with cancelDeviceLogin" example:"true"`
 	OpenedSignal          bool  `json:"opened_signal" doc:"Whether pollDeviceLogin reports opened once an approver has looked the request up, and lookups hold the code while it is being approved" example:"true"`
 	SessionBinding        bool  `json:"session_binding" doc:"Whether startDeviceLogin accepts binding, getDeviceLogin reports it, and pollDeviceLogin requires the matching binding_secret for a bound request" example:"true"`
+	Preapprove            bool  `json:"preapprove" doc:"Whether a signed-in session can approve a device sign-in in advance with preapproveDeviceLogin, list and revoke those approvals, and the device can redeem one with pollDeviceLogin" example:"true"`
 }
 
 // DeviceLoginCapabilityOutput is the getDeviceLoginCapability response.
@@ -284,7 +285,8 @@ func registerDeviceLogin(reg *Registry) {
 	poll := humaOp(http.MethodPost, Prefix+"/auth/device/poll", "pollDeviceLogin", "device-login",
 		"Poll a pairing request from the device and collect its tokens once approved.")
 	poll.Description = "A request started with binding is polled only with its binding_secret: a poll without it, or with another secret, is 403 device_binding_mismatch and leaves the request unchanged."
-	poll.Errors = []int{http.StatusForbidden, http.StatusNotFound}
+	poll.Description += " A request approved in advance answers 429 rate_limited after too many wrong secrets for its device code, and 503 provider_unavailable while the sign-in provider it was approved through is disabled. A request whose approving account was disabled or deleted answers status denied."
+	poll.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusTooManyRequests, http.StatusServiceUnavailable}
 	Register(reg, Operation{
 		Operation: poll, RetrySafety: RetrySafetyNonRetryable,
 		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketDevicePoll,
@@ -320,6 +322,7 @@ func (reg *Registry) getDeviceLoginCapability(_ context.Context, _ *CapabilityIn
 			Cancel:                true,
 			OpenedSignal:          true,
 			SessionBinding:        true,
+			Preapprove:            true,
 		},
 	}, nil
 }

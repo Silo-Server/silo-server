@@ -796,6 +796,7 @@ func (s *DeviceLoginService) Cancel(ctx context.Context, deviceCode string) (str
 		WHERE device_code_hash = $1
 			AND status IN ($3, $4)
 			AND expires_at > NOW()
+			AND preapproved_at IS NULL
 		RETURNING status
 	`,
 		hash,
@@ -815,6 +816,11 @@ func (s *DeviceLoginService) Cancel(ctx context.Context, deviceCode string) (str
 	record, err := scanDeviceLogin(row)
 	if err != nil {
 		return "", err
+	}
+	if record.PreapprovedAt != nil {
+		// Cancel takes no binding secret, so a device code alone must not
+		// end a sign-in approved in advance; its account revokes it.
+		return "", ErrDeviceLoginNotFound
 	}
 	if isDeviceLoginExpired(record) {
 		return DeviceLoginStatusExpired, nil

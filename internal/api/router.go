@@ -234,6 +234,9 @@ type Dependencies struct {
 	// codes each account tries, shared with the Jellyfin-compatible API's
 	// Authorize route. Nil gets a process-local limiter.
 	QuickConnectCodeAttempts *ratelimit.AttemptLimiter
+	// DevicePreapprovalAttempts bounds wrong binding secrets per
+	// pre-approved device sign-in. Nil gets a process-local limiter.
+	DevicePreapprovalAttempts *ratelimit.AttemptLimiter
 	// SignInAttempts bounds password sign-ins per sign-in name, shared with
 	// the Jellyfin and Audiobookshelf sign-ins so every surface counts against
 	// one budget. Nil gets a process-local limiter.
@@ -761,6 +764,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 				quickConnectAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.QuickConnectCodePolicy)
 			}
 			deviceLoginService.WithQuickConnectAttempts(quickConnectAttempts)
+			preapprovalAttempts := deps.DevicePreapprovalAttempts
+			if preapprovalAttempts == nil {
+				preapprovalAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.DevicePreapprovalPolicy)
+			}
+			deviceLoginService.WithPreapprovalAttempts(preapprovalAttempts)
 		}
 		authHandler = handlers.NewAuthHandler(authService, jwtService, deviceLoginService)
 		authHandler.SetPrimaryProfileChecker(checkPrimaryProfile)
