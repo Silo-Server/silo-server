@@ -595,44 +595,41 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
       deviceId: string;
       keys: readonly string[];
     }) => {
-      const reset: string[] = [];
-      try {
-        for (const key of keys) {
-          try {
-            await deleteAdminSettingValue(
-              userId,
-              key,
-              { scope: "profile_device", profileId, deviceId },
-              authority,
-            );
-            reset.push(key);
-          } catch (err) {
-            if (err instanceof V2ProblemError && err.status === 404) {
-              reset.push(key);
-              continue;
-            }
+      let completed = 0;
+      for (const key of keys) {
+        try {
+          await deleteAdminSettingValue(
+            userId,
+            key,
+            { scope: "profile_device", profileId, deviceId },
+            authority,
+          );
+        } catch (err) {
+          if (!(err instanceof V2ProblemError && err.status === 404)) {
             // A failure without a readable reason (no connection) gets none: the
             // count already says how far the reset got.
             throw new Error(
               t("web.admin.common.users.resetAllStopped", {
                 count: keys.length,
                 count_text: keys.length,
-                completed: reset.length,
+                completed: completed,
                 reason: readableErrorText(err, ""),
               }).trimEnd(),
             );
           }
         }
-      } finally {
-        // Keys reset before a failure are gone too.
+        completed++;
+        // Drop each row as its delete lands, not when the loop ends: a key
+        // reset before a later failure is gone too, and a save made while the
+        // rest of the loop runs must not be dropped with it.
         await dropAdminDeviceOverrideRows(queryClient, authority, {
           userId,
           profileId,
           deviceId,
-          keys: reset,
+          keys: [key],
         });
       }
-      return { completed: reset.length };
+      return { completed };
     },
     onSuccess: (_data, variables) => {
       toast.success(t("web.admin.common.users.resetAllDone"));

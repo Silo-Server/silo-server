@@ -163,3 +163,56 @@ it.each([
     ]),
   );
 });
+
+it("drops the overrides a reset-all removed before a later delete failed", async () => {
+  const subtitles = row("medium", 2, "2026-11-23T00:00:00Z");
+  const speed = { ...row("medium", 1, "2026-11-23T00:00:00Z"), key: "player.playback_speed" };
+  let gets = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+      if (method === "DELETE") {
+        return url.includes("player.playback_speed")
+          ? new Response(JSON.stringify({ status: 500, title: "Internal" }), {
+              status: 500,
+              headers: { "Content-Type": "application/problem+json" },
+            })
+          : new Response(null, { status: 204 });
+      }
+      if (url.includes("/settings/values")) {
+        gets += 1;
+        return gets === 1 ? valuesPage([subtitles, speed]) : new Promise<Response>(() => undefined);
+      }
+      return json({ items: [], page: { has_more: false } });
+    }),
+  );
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client }, children);
+  const { result } = renderHook(
+    () => ({
+      stored: useAdminUserSettings(1),
+      reset: useDeleteAllAdminUserDeviceSettingsForDevice(),
+    }),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.stored.data).toHaveLength(2));
+
+  await act(async () => {
+    await result.current.reset
+      .mutateAsync({
+        userId: 1,
+        profileId: "profile-a",
+        deviceId: "device-a",
+        keys: ["playback.subtitle_appearance", "player.playback_speed"],
+      })
+      .catch(() => undefined);
+  });
+
+  await waitFor(() =>
+    expect(result.current.stored.data).toMatchObject([{ key: "player.playback_speed" }]),
+  );
+  expect(result.current.stored.data).toHaveLength(1);
+});
