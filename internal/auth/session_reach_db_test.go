@@ -141,13 +141,29 @@ func reachScratchSchema(t *testing.T, tables ...string) *pgxpool.Pool {
 	return pool
 }
 
-// TestDeviceSignInMigrationMarksKeptRequestsDB applies the migration's Up to
-// sessions stored before it: a session a kept device sign-in request points
-// at is marked, every other keeps no value, and Down drops the column.
+// deviceSignInMigration returns a migration's Up and Down SQL, unqualified
+// so they apply to the test schema.
+func deviceSignInMigration(t *testing.T, name string) (string, string) {
+	t.Helper()
+	data, err := os.ReadFile("../../migrations/sql/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, down, ok := strings.Cut(strings.ReplaceAll(string(data), "public.", ""), "-- +goose Down")
+	if !ok {
+		t.Fatalf("%s has no Down section", name)
+	}
+	return up, down
+}
+
+// TestDeviceSignInMigrationMarksKeptRequestsDB applies the two migrations'
+// Up, in order, to sessions stored before them: a session a kept device
+// sign-in request points at is marked, every other keeps no value, and the
+// Downs, in reverse order, drop the column.
 func TestDeviceSignInMigrationMarksKeptRequestsDB(t *testing.T) {
 	pool := reachScratchSchema(t, "auth_sessions")
 	ctx := t.Context()
-	// The step reads only the request's session link.
+	// The marking step reads only the request's session link.
 	if _, err := pool.Exec(ctx, `ALTER TABLE auth_sessions DROP COLUMN via_device_sign_in;
 		CREATE TABLE device_login_requests AS SELECT auth_session_id FROM public.device_login_requests WITH NO DATA`); err != nil {
 		t.Fatal(err)
@@ -161,23 +177,21 @@ func TestDeviceSignInMigrationMarksKeptRequestsDB(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO device_login_requests (auth_session_id) VALUES ($1)`, device); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile("../../migrations/sql/20261125210607_record_device_sign_in_sessions.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	up, down, ok := strings.Cut(strings.ReplaceAll(string(data), "public.", ""), "-- +goose Down")
-	if !ok {
-		t.Fatal("missing Down section")
-	}
-	if _, err := pool.Exec(ctx, up); err != nil {
-		t.Fatal(err)
+	addUp, addDown := deviceSignInMigration(t, "20261125210607_record_device_sign_in_sessions.sql")
+	markUp, markDown := deviceSignInMigration(t, "20261125224536_mark_device_sign_in_sessions.sql")
+	for _, step := range []string{addUp, markUp} {
+		if _, err := pool.Exec(ctx, step); err != nil {
+			t.Fatal(err)
+		}
 	}
 	requireVia(t, "kept request's", viaDeviceSignIn(t, pool, device), true)
 	if via := viaDeviceSignIn(t, pool, other); via != nil {
 		t.Fatalf("unmarked session via_device_sign_in = %v, want no value", *via)
 	}
-	if _, err := pool.Exec(ctx, down); err != nil {
-		t.Fatal(err)
+	for _, step := range []string{markDown, addDown} {
+		if _, err := pool.Exec(ctx, step); err != nil {
+			t.Fatal(err)
+		}
 	}
 	var columns int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns
