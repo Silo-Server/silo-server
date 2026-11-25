@@ -82,3 +82,14 @@ func (h *AuthHandler) appKeyAnswer(ctx context.Context, result *auth.KeySignInRe
 	}
 	return answer, nil
 }
+
+// VerifyProfileSet verifies a signed profile set; see auth.AppKeySignIn.
+func (h *AuthHandler) VerifyProfileSet(ctx context.Context, req auth.KeyRequest) (*auth.ProfileSetAuthority, error) {
+	return h.appKeys.VerifyProfileSet(ctx, req)
+}
+
+// ProfileSetSessionAllowed refuses a login session that may not read or
+// send the account's profile set.
+func (h *AuthHandler) ProfileSetSessionAllowed(ctx context.Context, claims *auth.Claims) error {
+	return h.appKeys.ProfileSetSessionAllowed(ctx, claims)
+}

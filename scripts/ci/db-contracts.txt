@@ -329,6 +329,7 @@
 ./internal/auth TestDeviceKeyRevocationEndsItsSessionsDB
 ./internal/auth TestAccountKeyRulesDB
 ./internal/auth TestKeyChallengeRulesDB
+./internal/auth TestVerifyProfileSetDB
 ./internal/auth TestKeySignInRefusalsDB
 ./internal/auth TestKeySignInAdminWaitsForApprovalDB
 ./internal/auth TestSessionAllowsDB
