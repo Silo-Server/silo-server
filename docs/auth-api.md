@@ -664,7 +664,11 @@ at most 64 characters; absent means `""`.
 A malformed member is 422 `validation_failed` at the member
 (`body.set.items[2].name`, `body.pairs[0].local_id`), or at `body.payload` in
 the signed form. A new item named like a profile outside the set is 422 at its
-name with code `name_conflict`.
+name with code `name_conflict`, and so is an item whose name the owner already
+gave another of the set's profiles on this server (a profile keeps a name the
+owner set, whatever its item says); the later item of the two is named. An
+item 0 whose `sync_id` the owner removed on this server (see
+`hidden_by_owner`) is 422 at `body.set.items[0].sync_id`.
 
 **Answer.**
 
@@ -792,7 +796,9 @@ and when:
   or a deletion.
 - `by: "owner"` (an override): an administrator on an admin route, or an
   administrator signed in as the account. A set leaves the field as it is and
-  reports it in `overrides`.
+  reports it in `overrides`. An override belongs to the profile, not to its
+  `sync_id`: when a set gives the main profile a new `sync_id`, its overrides
+  and marks move with it.
 
 The later edit of a field wins, whoever makes it: an administrator's edit of a
 field the person changed makes it an override, and the person's edit of an
@@ -807,11 +813,13 @@ What counts as an edit:
   that changed. `picture` changes with a new upload even when the avatar
   reference stays the same; `pin` changes whenever a PIN is set, the same
   digits included.
-- A setting, `settings.<key>`, on every write or reset of the profile's own
-  value, even with the same value. `server_local` keys and settings stored per
-  device, library or series are not in the set and are never recorded. A
-  Jellyfin-compatible app's configuration save writes, and so records, only
-  the values that differ from the stored ones.
+- A setting, `settings.<key>`, when a write or reset changes the profile's
+  own value. Writing the value already stored, or the default when nothing is
+  stored, and resetting a value that isn't there, are not edits.
+  `server_local` keys and settings stored per device, library or series are
+  not in the set and are never recorded. A Jellyfin-compatible app's
+  configuration save writes only the values that differ from the ones it
+  shows the app, so echoing a page back records nothing.
 - A profile's deletion, in `deleted_here`. An owner's deletion also hides the
   profile: a set does not create or pair it again on this server, and reports
   it in `hidden_by_owner`.
@@ -825,6 +833,9 @@ In `GET /profiles/set`:
 - `items[].changed_here`: the profile's recorded fields, `{ field, at, by }`,
   by field. Marks are listed until a set settles them, overrides until the
   person edits the field here.
+- `field`, here and in `overrides`, is an open string: an item field name or
+  `settings.<key>`. New item fields and new settings keys will appear; an app
+  ignores, or carries through unchanged, a `field` it doesn't know.
 - `deleted_here`: profiles of the set deleted here, `{ sync_id, at, by }`.
 - `overrides`: `{ sync_id, field, value }` for each owner's field. `value` is
   what the profile holds now, encoded as a set item encodes it: `pin` is
@@ -832,6 +843,10 @@ In `GET /profiles/set`:
   `null`; a setting the owner reset has no `value` member, because the
   profile has no value of its own (`null` is a value).
 - `hidden_by_owner`: the `sync_id`s the owner deleted here.
+- `deleted_here` and `hidden_by_owner` list every removal on record, including
+  `sync_id`s the set has since dropped. The `PUT` answer's `hidden_by_owner`
+  lists only that set's items. An app that doesn't find one of these
+  `sync_id`s in its own set ignores it; the server is not out of step.
 - `edits_token`: names the marks (`by: "account"` entries of `changed_here`
   and `deleted_here`); `""` when there are none. It changes with every
   recorded edit, including one that puts a field back as it was.
@@ -841,9 +856,9 @@ or it is `profile_set_stale` with nothing written: read the set, merge the
 marks, and send again. An accepted newer set settles exactly the marks its
 `edits_seen` named and they leave `changed_here` and `deleted_here`; a mark
 recorded after the read stays. A repeat of the held version settles nothing.
-Overrides and hidden profiles stay until the owner clears them or the person
-edits the field here; deleting the profile on this server also ends its
-overrides.
+An override stays until the person edits that field on this server, or the
+profile is deleted here. A profile an administrator deleted stays hidden on
+this server: no operation clears that yet.
 
 ## Profile PINs
 

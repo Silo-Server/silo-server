@@ -653,7 +653,16 @@ by a set built elsewhere.
   field replaces the row, whoever makes it, so an override is not a lock: the
   person's edit of an overridden field on this server makes it a mark, with
   `replaced_owner` set. Until an owner can clear an override directly, a
-  profile delete clears its overrides.
+  profile delete clears its overrides, and a profile an administrator deleted
+  stays hidden.
+- *Edits follow the profile.* An item that lands on an existing profile reads
+  the edits recorded under that profile's `sync_id`, not the one the item
+  names. Item 0 always lands on the main profile, so a set can give the main
+  profile a new `sync_id`; its rows then move to the new ID in the set's
+  transaction. Otherwise a new ID would shed the owner's overrides. The main
+  profile can't take a `sync_id` the owner removed, which would end the
+  hiding. Names are checked as the profiles will end up, a name the owner set
+  included.
 - *What an accepted set clears.* It deletes exactly the marks its token was
   computed from, matched by revision, so a mark written after that read is
   kept. A mark with `replaced_owner` is kept instead, stamped `settled_at`, as
@@ -674,14 +683,19 @@ by a set built elsewhere.
 transaction: `updateProfile` for the set's item fields, compared before and
 after under the row lock (a web save sends every field, so presence would
 mark them all); the setting upsert, compare-and-set and delete helpers for a
-profile-scope key a set carries, on every write or reset, unchanged value or
-not; the profile delete for the removal. The preference columns are recorded
+profile-scope key a set carries, when the profile's value changes (the stored
+value, or the contract default when nothing is stored, is read under the
+row's lock first; a reset that removes nothing changes nothing); the profile
+delete for the removal. The preference columns are recorded
 through their settings keys only. The pool-level profile update runs in a
 transaction of its own so the avatar writes and their record commit together.
 Who acted comes from a holder the request gets before auth
 (`profileedits.Middleware`), filled in by the native and Jellyfin-compatible
-auth: the account itself, another account (an admin route), or an
-administrator signed in as the account. A write with no holder or no account
+auth: the account itself, an administrator acting on another account (an
+admin route; the role the admin gate checks), or an administrator signed in
+as the account. Another account that is not an administrator records
+nothing: no route lets one write another account's profiles, and either
+label would be wrong. A write with no holder or no account
 named (background work), and a context marked `WithoutRecording` (the set's
 own apply, a restore set, a profile import), records nothing; restore and
 import also write through raw SQL the recorder never sees. The username
@@ -691,17 +705,20 @@ store records nothing; it does not take sets either.
 
 The edit rows are the last rows any transaction locks: after the account
 locks, profile rows and the account row in the set, and after the profile row
-in a profile save, avatar write or delete. Writers serialize with the set on
-the account's preference-settings lock, or, for the avatar write, which does
-not take it, on the profile row the set locks before any edit row. The table
-has no foreign keys: one to `users` would take a key-share lock on the account
-row on every edit, which an account deletion holding that row while it
-cascades into the profiles could deadlock against. Deleting an account deletes
-its rows after the account, in the same transaction, at both deletion sites.
+in a profile save, avatar write or delete. Every writer that can record an
+edit takes the account's preference-settings lock first, the pool-level
+profile and setting writes included, and so does an account deletion, before
+it locks the account row. So a deletion runs wholly before or after a
+recorded edit, never between the write and its record. The recording
+statement also key-share locks the profile row it reads, so a delete of that
+profile that took no such lock either waits for it or leaves it no profile.
+The table has no foreign keys: one to `users` would take a key-share lock on
+the account row on every edit. Deleting an account deletes its rows after the
+account, in the same transaction, at both deletion sites.
 
 After a request that recorded an edit, the middleware calls the server's
-waker for each account that got one, to tell the person's apps. No waker is
-wired yet, so nothing is sent.
+waker for each account that got one, to tell the person's apps; it calls it
+for a write that rolled back too. No waker is wired yet, so nothing is sent.
 
 **Mapping.** The first item is always the main profile, which the set never
 creates, deletes or swaps; a set naming the main profile's `sync_id` anywhere

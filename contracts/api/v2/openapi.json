@@ -52263,6 +52263,7 @@
             "type": "string"
           },
           "field": {
+            "description": "An item field name, or settings.\u003ckey\u003e. An open string: new item fields and settings keys will appear, and an app ignores or carries through one it doesn't know",
             "examples": [
               "name"
             ],
@@ -52280,7 +52281,7 @@
         "additionalProperties": false,
         "properties": {
           "deleted_here": {
-            "description": "Profiles of the set deleted on this server outside a set",
+            "description": "Profiles of the set deleted on this server outside a set. Every removal on record, including sync_ids the set no longer carries",
             "items": {
               "$ref": "#/components/schemas/ProfileSetDeletion"
             },
@@ -52294,7 +52295,7 @@
             "type": "string"
           },
           "hidden_by_owner": {
-            "description": "Profiles the owner removed on this server; a set does not bring them back",
+            "description": "Profiles the owner removed on this server; a set does not bring them back. Every removal on record, including sync_ids the set no longer carries",
             "items": {
               "type": "string"
             },
@@ -52517,7 +52518,7 @@
         "additionalProperties": false,
         "properties": {
           "field": {
-            "description": "An item field name, or settings.\u003ckey\u003e",
+            "description": "An item field name, or settings.\u003ckey\u003e. An open string: new item fields and settings keys will appear, and an app ignores or carries through one it doesn't know",
             "examples": [
               "max_content_rating"
             ],

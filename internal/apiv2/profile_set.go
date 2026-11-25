@@ -164,7 +164,7 @@ type ProfileSetMember struct {
 // does not overwrite.
 type ProfileSetOverride struct {
 	SyncID string          `json:"sync_id" format:"uuid" example:"0f8fad5b-d9cb-469f-a165-70867728950e"`
-	Field  string          `json:"field" doc:"An item field name, or settings.<key>" example:"max_content_rating"`
+	Field  string          `json:"field" doc:"An item field name, or settings.<key>. An open string: new item fields and settings keys will appear, and an app ignores or carries through one it doesn't know" example:"max_content_rating"`
 	Value  ProfileSetValue `json:"value,omitempty" doc:"The value this server holds, as a set item encodes it. pin is \"set\" or \"clear\", never a PIN. Absent for a setting the owner reset, which has no profile value here"`
 }
 
@@ -196,7 +196,7 @@ type ProfileSetPutOutput struct {
 
 // ProfileSetFieldChange is a field edited on this server outside a set.
 type ProfileSetFieldChange struct {
-	Field string  `json:"field" example:"name"`
+	Field string  `json:"field" doc:"An item field name, or settings.<key>. An open string: new item fields and settings keys will appear, and an app ignores or carries through one it doesn't know" example:"name"`
 	At    Instant `json:"at" example:"2026-11-25T03:50:00.000Z"`
 	By    string  `json:"by" enum:"account,owner" example:"account"`
 }
@@ -237,9 +237,9 @@ type ProfileSetLocal struct {
 type ProfileSetHeld struct {
 	Version                int64                `json:"version" doc:"The version of the last set this server accepted; 0 when it never took one" example:"7"`
 	Items                  []ProfileSetHeldItem `json:"items"`
-	DeletedHere            []ProfileSetDeletion `json:"deleted_here" doc:"Profiles of the set deleted on this server outside a set"`
+	DeletedHere            []ProfileSetDeletion `json:"deleted_here" doc:"Profiles of the set deleted on this server outside a set. Every removal on record, including sync_ids the set no longer carries"`
 	Overrides              []ProfileSetOverride `json:"overrides" doc:"Values the owner set on this server; a set leaves them as they are"`
-	HiddenByOwner          []string             `json:"hidden_by_owner" doc:"Profiles the owner removed on this server; a set does not bring them back"`
+	HiddenByOwner          []string             `json:"hidden_by_owner" doc:"Profiles the owner removed on this server; a set does not bring them back. Every removal on record, including sync_ids the set no longer carries"`
 	LocalOnly              []ProfileSetLocal    `json:"local_only" doc:"Profiles on this account that are not part of the set"`
 	JellyfinBareNameSignIn *bool                `json:"jellyfin_bare_name_sign_in,omitempty" doc:"Whether signing in on the Jellyfin-compatible surface with the bare account name (no #profile) picks a profile as the account's profiles now stand: true when exactly one profile is named like the account, or else exactly one profile has no PIN. Absent while that surface is off" example:"true"`
 	EditsToken             string               `json:"edits_token" doc:"Names the person's own edits on this server that no set has settled (the by account entries of changed_here and deleted_here); empty when there are none. A newer set must send it back as edits_seen while it is not empty" example:"e1.mFzDq0dX7eTsc3m6SfN0Lw1o2s0kHqgV"`

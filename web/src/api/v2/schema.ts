@@ -35289,18 +35289,21 @@ export interface components {
        * @enum {string}
        */
       by: "account" | "owner";
-      /** @example name */
+      /**
+       * @description An item field name, or settings.<key>. An open string: new item fields and settings keys will appear, and an app ignores or carries through one it doesn't know
+       * @example name
+       */
       field: string;
     };
     ProfileSetHeld: {
-      /** @description Profiles of the set deleted on this server outside a set */
+      /** @description Profiles of the set deleted on this server outside a set. Every removal on record, including sync_ids the set no longer carries */
       deleted_here: components["schemas"]["ProfileSetDeletion"][];
       /**
        * @description Names the person's own edits on this server that no set has settled (the by account entries of changed_here and deleted_here); empty when there are none. A newer set must send it back as edits_seen while it is not empty
        * @example e1.mFzDq0dX7eTsc3m6SfN0Lw1o2s0kHqgV
        */
       edits_token: string;
-      /** @description Profiles the owner removed on this server; a set does not bring them back */
+      /** @description Profiles the owner removed on this server; a set does not bring them back. Every removal on record, including sync_ids the set no longer carries */
       hidden_by_owner: string[];
       items: components["schemas"]["ProfileSetHeldItem"][];
       /**
@@ -35390,7 +35393,7 @@ export interface components {
     };
     ProfileSetOverride: {
       /**
-       * @description An item field name, or settings.<key>
+       * @description An item field name, or settings.<key>. An open string: new item fields and settings keys will appear, and an app ignores or carries through one it doesn't know
        * @example max_content_rating
        */
       field: string;
