@@ -43,9 +43,9 @@ const (
 	CodeOriginNotGranted Code = "origin_not_granted"
 	// CodeGrantInvalid: the grant inside a grant-redeem does not verify, or
 	// names another server or app key.
-	CodeGrantInvalid Code = "grant_invalid"
+	CodeGrantInvalid Code = "app_grant_invalid"
 	// CodeGrantExpired: the grant's own exp has passed.
-	CodeGrantExpired Code = "grant_expired"
+	CodeGrantExpired Code = "app_grant_expired"
 	// CodeOpenFailed: a sealed reply that does not open.
 	CodeOpenFailed Code = "open_failed"
 	// CodeNotAPoint: a public key that is not the uncompressed form of a
