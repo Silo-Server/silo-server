@@ -97,6 +97,13 @@ type ProfileHandler struct {
 	// RecWorker is told when an update changes a profile's access scope, so
 	// its recommendations are rebuilt under the new one. Optional.
 	RecWorker SignalsChangedNotifier
+	// ProfileSetAvailable turns the profile set on: the stores keep accounts
+	// in PostgreSQL, where a set applies in one transaction.
+	ProfileSetAvailable bool
+	// JellyfinCompatEnabled reports that the Jellyfin-compatible listener
+	// runs, so the profile set can say how its sign-in by bare account name
+	// will behave.
+	JellyfinCompatEnabled bool
 }
 
 // NewProfileHandler creates a new ProfileHandler.
@@ -826,20 +833,7 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 		return apiError(http.StatusConflict, "primary_profile_protected", "The primary profile cannot be deleted. Delete the user account instead.")
 	}
 
-	// The profile's devices, read before the delete takes their registrations.
-	registry, _ := store.(userstore.DeviceRegistry)
-	var devices []string
-	if registry != nil && h.Connections != nil {
-		entries, err := registry.ListDevices(ctx)
-		if err != nil {
-			slog.WarnContext(ctx, "listing profile devices before delete failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
-		}
-		for _, entry := range entries {
-			if entry.ProfileID == profileID {
-				devices = append(devices, entry.DeviceID)
-			}
-		}
-	}
+	registry, devices := h.profileDevices(ctx, store, userID, profileID)
 	var audit *auditmutation.Entry
 	var auditErr error
 	var deleteErr error
@@ -859,62 +853,7 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 		return apiError(http.StatusNotFound, "not_found", "Profile not found")
 	}
 	auditmutation.CommitMutation(ctx, audit)
-	if h.JellyfinSessionPurger != nil {
-		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-		if purgeErr := h.JellyfinSessionPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
-			slog.WarnContext(ctx, "profile Jellyfin session purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
-		}
-	}
-	if h.WatchlistRequestWithdrawer != nil {
-		withdrawCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-		if withdrawErr := h.WatchlistRequestWithdrawer.WithdrawProfileWatchlistRequests(withdrawCtx, userID, profileID); withdrawErr != nil {
-			slog.WarnContext(ctx, "profile watchlist request withdrawal failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", withdrawErr)
-		}
-	}
-	if isUploadedAvatarRef(profile.Avatar) {
-		if cleanupErr := deleteUploadedAvatarObjects(ctx, h.AvatarStore, userID, profileID); cleanupErr != nil {
-			slog.WarnContext(ctx, "profile avatar cleanup failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
-		}
-	}
-	removeDeletedCollectionArtwork(ctx, h.ArtworkStore, userCollectionImagePrefix, deletedCollections...)
-	if h.DeviceLibraryPurger != nil {
-		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-		if purgeErr := h.DeviceLibraryPurger.PurgeProfileDevices(purgeCtx, userID, profileID); purgeErr != nil {
-			slog.WarnContext(ctx, "profile device-library purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
-		}
-	}
-	forgetPlaybackConnections(ctx, h.Connections, registry, userID, devices)
-	if h.DroppedSeriesPurger != nil {
-		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-		if purgeErr := h.DroppedSeriesPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
-			slog.WarnContext(ctx, "profile dropped-series purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
-		}
-	}
-	if h.WatchlistTitlesPurger != nil {
-		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-		if purgeErr := h.WatchlistTitlesPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
-			slog.WarnContext(ctx, "profile watchlist-title purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
-		}
-	}
-	if h.EbookReaderPurger != nil {
-		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-		if purgeErr := h.EbookReaderPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
-			slog.WarnContext(ctx, "profile ebook reader purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
-		}
-	}
-	if h.RecommendationsPurger != nil {
-		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-		if purgeErr := h.RecommendationsPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
-			slog.WarnContext(ctx, "profile recommendation purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
-		}
-	}
+	h.afterProfileDeleted(ctx, userID, *profile, devices, deletedCollections, registry)
 	return nil
 }
 

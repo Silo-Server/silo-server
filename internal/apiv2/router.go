@@ -464,7 +464,10 @@ type Dependencies struct {
 	// AdminAppKeys lists and revokes another account's app keys; nil leaves
 	// those operations not configured and the account capability app_keys
 	// false.
-	AdminAppKeys     AdminAppKeyService
+	AdminAppKeys AdminAppKeyService
+	// ProfileSet applies and reads profile sets; nil reports the capability
+	// not_configured.
+	ProfileSet       ProfileSetService
 	PolicyCapability PolicyCapabilityService
 	Branding         BrandingService
 	OverlayImages    OverlayImageService

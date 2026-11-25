@@ -6940,7 +6940,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"de4aa9b672f28af1bc0935ff6d212d14ad189b2a535672d15a73219f1339028c\""
+        "ETag": "\"121f63457137cd6a176835232f8cba5f8dd428a3ecba8e977b58356d08ebadc1\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AppKeyCapability",
@@ -8723,6 +8723,48 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/ProfileSectionSettingCollection",
       "body_file": "get_profile_section_settings_ok.json"
+    },
+    {
+      "name": "get_profile_set_never_taken",
+      "operation_id": "getProfileSet",
+      "scenario": "An account that never took a set: version 0, no items, and every profile in local_only, which is how an app tells a server to bring profiles from.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/profiles/set",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json",
+        "ETag": "\"ps1-Sz1OkZdBBGkMEU6lCU8jYH\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/ProfileSetHeld",
+      "body_file": "get_profile_set_never_taken.json"
+    },
+    {
+      "name": "get_profile_set_ok",
+      "operation_id": "getProfileSet",
+      "scenario": "The set as this server holds it, with a profile outside the set.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/profiles/set",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json",
+        "ETag": "\"ps1-iDy1i3qRXnuRUt3bUNRAzZ\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/ProfileSetHeld",
+      "body_file": "get_profile_set_ok.json"
     },
     {
       "name": "get_progress_capabilities_ok",
@@ -14417,6 +14459,50 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "progress_bootstrap_invalid_cursor.json"
+    },
+    {
+      "name": "put_profile_set_ok",
+      "operation_id": "putProfileSet",
+      "scenario": "The main profile sends the household's set over its login session; the server answers each profile's ID here and what still waits for the person.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/profiles/set",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"set\":{\"version\":1,\"items\":[{\"sync_id\":\"0f8fad5b-d9cb-469f-a165-70867728950e\",\"name\":\"Sam\",\"picture\":\"\",\"pin\":{\"keep\":true},\"is_child\":false,\"max_content_rating\":\"\",\"max_advisory_age\":null,\"require_advisory_age\":false,\"requests_blocked\":false,\"a_newer_member\":1}]}}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/ProfileSetApplied",
+      "body_file": "put_profile_set_ok.json"
+    },
+    {
+      "name": "put_profile_set_stale",
+      "operation_id": "putProfileSet",
+      "scenario": "A set older than the one the server holds is refused; the app reads the held set and sends a newer one.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/profiles/set",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"set\":{\"version\":0,\"items\":[{\"sync_id\":\"0f8fad5b-d9cb-469f-a165-70867728950e\",\"name\":\"Sam\",\"picture\":\"\",\"pin\":{\"keep\":true},\"is_child\":false,\"max_content_rating\":\"\",\"max_advisory_age\":null,\"require_advisory_age\":false,\"requests_blocked\":false,\"a_newer_member\":1}]}}"
+      },
+      "expected_status": 409,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "put_profile_set_stale.json"
     },
     {
       "name": "query_catalog_items_limit_out_of_range",

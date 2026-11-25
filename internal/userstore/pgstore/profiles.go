@@ -528,21 +528,43 @@ func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string,
 		}
 	}
 
+	collectionIDs, err := deleteProfileRowsTx(ctx, tx, s.userID, id)
+	if err != nil {
+		return nil, err
+	}
+	if audit != nil {
+		if err := audit(tx, deleted); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return collectionIDs, nil
+}
+
+// deleteProfileRowsTx deletes one profile and every row keyed by it in tx,
+// and returns the IDs of the personal collections it deleted. It takes no
+// locks: the caller already holds what DeleteProfileAudited takes, in its
+// order (the account locks, the actors, the collections, the profile row).
+// A profile that does not exist is an error.
+func deleteProfileRowsTx(ctx context.Context, tx pgx.Tx, userID int, id string) ([]string, error) {
 	// Preferences belong to viewers, not creators, so remove every override
 	// for collections owned by the profile before those collections disappear.
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM user_collection_sort_preferences
 		WHERE user_id = $1 AND collection_kind = 'user' AND collection_id IN (
 			SELECT id FROM user_personal_collections WHERE user_id = $1 AND profile_id = $2
-		)`, s.userID, id); err != nil {
+		)`, userID, id); err != nil {
 		return nil, fmt.Errorf("deleting collection sort preferences for profile %s: %w", id, err)
 	}
 
-	_, err = tx.Exec(ctx, `
+	_, err := tx.Exec(ctx, `
 		DELETE FROM user_personal_collection_items
 		WHERE user_id = $1 AND collection_id IN (
 			SELECT id FROM user_personal_collections WHERE user_id = $1 AND profile_id = $2
-		)`, s.userID, id)
+		)`, userID, id)
 	if err != nil {
 		return nil, fmt.Errorf("deleting collection items for profile %s: %w", id, err)
 	}
@@ -553,30 +575,30 @@ func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string,
 		DELETE FROM user_personal_collection_profiles
 		WHERE user_id = $1 AND collection_id IN (
 			SELECT id FROM user_personal_collections WHERE user_id = $1 AND profile_id = $2
-		)`, s.userID, id); err != nil {
+		)`, userID, id); err != nil {
 		return nil, fmt.Errorf("deleting collection visibility for profile %s: %w", id, err)
 	}
 
 	// Jellyfin display preferences carry the profile in their key.
 	if _, err := tx.Exec(ctx,
 		`DELETE FROM jellycompat_displayprefs WHERE user_id = $1 AND left(prefs_id, length($2)) = $2`,
-		s.userID, userstore.ProfileDisplayPrefsPrefix(id)); err != nil {
+		userID, userstore.ProfileDisplayPrefsPrefix(id)); err != nil {
 		return nil, fmt.Errorf("deleting display preferences for profile %s: %w", id, err)
 	}
 	// Jellyfin-compatible sessions signed in as the profile end with it. Every
 	// lookup reads the stored row, so deleting it ends them on all replicas.
 	if _, err := tx.Exec(ctx,
 		`DELETE FROM jellycompat_sessions WHERE streamapp_user_id = $1 AND profile_id = $2`,
-		s.userID, id); err != nil {
+		userID, id); err != nil {
 		return nil, fmt.Errorf("deleting Jellyfin sessions for profile %s: %w", id, err)
 	}
-	if err := deleteProfileSectionOverrides(ctx, tx, s.userID, id); err != nil {
+	if err := deleteProfileSectionOverrides(ctx, tx, userID, id); err != nil {
 		return nil, err
 	}
 
 	// The profile's own collections, returned so the caller can remove their
 	// artwork once this commits.
-	rows, err := tx.Query(ctx, "DELETE FROM user_personal_collections WHERE user_id = $1 AND profile_id = $2 RETURNING id", s.userID, id)
+	rows, err := tx.Query(ctx, "DELETE FROM user_personal_collections WHERE user_id = $1 AND profile_id = $2 RETURNING id", userID, id)
 	if err != nil {
 		return nil, fmt.Errorf("deleting collections for profile %s: %w", id, err)
 	}
@@ -586,26 +608,17 @@ func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string,
 	}
 
 	for _, table := range profileCascadeTables {
-		if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE user_id = $1 AND profile_id = $2", table), s.userID, id); err != nil {
+		if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE user_id = $1 AND profile_id = $2", table), userID, id); err != nil {
 			return nil, fmt.Errorf("deleting from %s for profile %s: %w", table, id, err)
 		}
 	}
 
-	result, err := tx.Exec(ctx, "DELETE FROM user_profiles WHERE user_id = $1 AND id = $2", s.userID, id)
+	result, err := tx.Exec(ctx, "DELETE FROM user_profiles WHERE user_id = $1 AND id = $2", userID, id)
 	if err != nil {
 		return nil, fmt.Errorf("deleting profile %s: %w", id, err)
 	}
 	if result.RowsAffected() == 0 {
 		return nil, fmt.Errorf("profile %s not found", id)
-	}
-	if audit != nil {
-		if err := audit(tx, deleted); err != nil {
-			return nil, err
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
 	}
 	return collectionIDs, nil
 }

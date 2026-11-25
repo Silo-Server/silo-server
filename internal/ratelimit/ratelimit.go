@@ -119,6 +119,7 @@ func DefaultConfig() Config {
 			// behind one address.
 			"key_challenge": {RequestsPerMinute: 60, Burst: 20},
 			"key_sign_in":   {RequestsPerMinute: 60, Burst: 20},
+			"profile_set":   {RequestsPerMinute: 20, Burst: 10},
 			// A dashboard can request several hundred posters when it opens.
 			ItemPosterBucket: {RequestsPerMinute: 600, Burst: 400},
 			// Invitation claim lookups and accepts: single-use tokens with

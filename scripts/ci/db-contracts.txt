@@ -329,6 +329,7 @@
 ./internal/auth TestDeviceKeyRevocationEndsItsSessionsDB
 ./internal/auth TestAccountKeyRulesDB
 ./internal/auth TestKeyChallengeRulesDB
+./internal/auth TestVerifyProfileSetDB
 ./internal/auth TestKeySignInRefusalsDB
 ./internal/auth TestKeySignInAdminWaitsForApprovalDB
 ./internal/auth TestSessionAllowsDB
@@ -743,6 +744,7 @@
 ./internal/userstore/pgstore TestPostgresConcurrentProfileDeletesWithCrossVisibility
 ./internal/userstore/pgstore TestPostgresConcurrentProfileAndCollectionDeletes
 ./internal/userstore/pgstore TestPostgresConcurrentProfileDeleteAndCollectionReorder
+./internal/userstore/pgstore TestPostgresProfileSetConcurrentWithDeleteAndReorderDB
 ./internal/userstore/pgstore TestUpdateProfileRequestsBlockedBumpsAccessPolicyRevision
 ./internal/api/handlers TestEbookReaderPurgeProfileDB
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
@@ -1248,6 +1250,17 @@
 # The household profile limit holds under concurrent creates (issue #2423).
 ./internal/api/handlers TestCreateProfileLimitConcurrentDB
 ./internal/api/handlers TestProfileAvatarSourceHashDB
+./internal/api/handlers TestProfileSetIdenticalApplyWritesNothingDB
+./internal/api/handlers TestProfileSetVersionRuleDB
+./internal/api/handlers TestProfileSetLimitInSetOrderDB
+./internal/api/handlers TestProfileSetChildCreatedWithNoLibrariesDB
+./internal/api/handlers TestProfileSetNamesDB
+./internal/api/handlers TestProfileSetPairsKeepHistoryDB
+./internal/api/handlers TestProfileSetPINsDB
+./internal/api/handlers TestProfileSetRemovalDeletesLikeProfileDeleteDB
+./internal/api/handlers TestProfileSetSessionPINProofDB
+./internal/api/handlers TestProfileSetSettingsDB
+./internal/api/handlers TestProfileSetRepeatCountsPINGuessesDB
 
 # A scan request for a scope with an active run joins that run without a
 # duplicate-key ERROR, and queues a new run if that one finished meanwhile

@@ -11927,6 +11927,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/profiles/set": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read the account's profile set as this server holds it.
+     * @description The same sessions as putProfileSet's session form may read it, without the main profile's PIN. An account that never took a set answers version 0, no items, and every profile in local_only. changed_here, deleted_here and overrides are always empty today. Strong ETag; If-None-Match answers 304. 501 capability_unsupported where profiles are not kept in PostgreSQL.
+     */
+    get: operations["getProfileSet"];
+    /**
+     * Make the account's household profiles match a versioned profile set.
+     * @description Makes the account's household profiles match a versioned set, in one transaction. The body is either a signed profile-set envelope ({kid, payload, sig}, signed by the account's person key on a challenge from createAppKeyChallenge; with or without a login session), or {set, pairs?, edits_seen?} over the account's own login session acting as its main profile (X-Profile-Id), with X-Profile-Token when that profile has a PIN. The signed form is refused for an administrator's account (403 permission_denied) and while auth.app_key_sign_in is off (409 capability_disabled); the session form takes neither rule. Sessions opened by device sign-in, by another app's key, or by an administrator acting as the account, remote-playback handoffs, and sessions older than the record of how sessions open are 403 permission_denied; an API key carries no login session and is 401 authentication_required. In demo mode a non-administrator is 403 permission_denied in both forms. The first item is the main profile; items match profiles by sync_id, then by pairs, and are otherwise created in set order up to the household's profile limit (the rest are left_off; nothing is deleted to fit). A profile holding a sync_id the set no longer has is deleted with everything that belongs to it; a profile with no sync_id that pairs does not name is left alone. Only a newer version changes anything: an older version, the same version with other content, the same version whose PINs differ from the stored ones, and a set without the person's latest edits (edits_seen) are 409 profile_set_stale; the same version and content again answers 200 and writes nothing. A set that changes the main profile's PIN ends every X-Profile-Token minted for its old PIN, the caller's included. A malformed member is 422 validation_failed at its member (at body.payload in the signed form); a new item named like a profile outside the set is 422 with code name_conflict. Spends the per-address profile_set rate-limit budget; the signed form also spends its challenge. A body over 256 KiB is 413 payload_too_large. 501 capability_unsupported where profiles are not kept in PostgreSQL.
+     */
+    put: operations["putProfileSet"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/progress": {
     parameters: {
       query?: never;
@@ -35394,6 +35418,301 @@ export interface components {
       items: components["schemas"]["ProfileSectionSetting"][];
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
+    };
+    ProfileSetApplied: {
+      /** @description Child profiles with library limits and no libraries yet, waiting for the person to pick them */
+      awaiting_libraries: string[];
+      /** @description Items whose picture this server doesn't have: a sha256 picture not uploaded here, or a preset it doesn't know. The profile keeps its old picture */
+      awaiting_pictures: string[];
+      /** @description Profiles created from keep that still have no PIN */
+      awaiting_pins: string[];
+      /** @description Profiles the owner removed on this server; always empty today */
+      hidden_by_owner: string[];
+      /**
+       * @description Whether signing in on the Jellyfin-compatible surface with the bare account name (no #profile) picks a profile, as the account's profiles stand after the set: true when exactly one profile is named like the account, or else exactly one profile has no PIN. Absent while that surface is off
+       * @example true
+       */
+      jellyfin_bare_name_sign_in?: boolean;
+      /** @description Items not applied because of the household's profile limit, in set order */
+      left_off: string[];
+      /** @description Values the owner set on this server; always empty today */
+      overrides: components["schemas"]["ProfileSetOverride"][];
+      /** @description This server's ID for each profile it holds from the set, in set order */
+      profiles: components["schemas"]["ProfileSetMember"][];
+      /** @description Known settings whose value this server refused; it kept its own value */
+      skipped_settings: components["schemas"]["ProfileSetSkippedSetting"][];
+      /**
+       * Format: int64
+       * @example 7
+       */
+      version: number;
+    };
+    ProfileSetDeletion: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       * @example 2026-11-25T03:50:00.000Z
+       */
+      at: string;
+      /**
+       * @example account
+       * @enum {string}
+       */
+      by: "account" | "owner";
+      /**
+       * Format: uuid
+       * @example 0f8fad5b-d9cb-469f-a165-70867728950e
+       */
+      sync_id: string;
+    };
+    ProfileSetFieldChange: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       * @example 2026-11-25T03:50:00.000Z
+       */
+      at: string;
+      /**
+       * @example account
+       * @enum {string}
+       */
+      by: "account" | "owner";
+      /** @example name */
+      field: string;
+    };
+    ProfileSetHeld: {
+      /** @description Profiles of the set deleted on this server outside a set; always empty today */
+      deleted_here: components["schemas"]["ProfileSetDeletion"][];
+      /**
+       * @description Names the person's own edits on this server that no set has settled; empty when there are none. A set sends it back as edits_seen
+       * @example
+       */
+      edits_token: string;
+      items: components["schemas"]["ProfileSetHeldItem"][];
+      /**
+       * @description Whether signing in on the Jellyfin-compatible surface with the bare account name (no #profile) picks a profile as the account's profiles now stand: true when exactly one profile is named like the account, or else exactly one profile has no PIN. Absent while that surface is off
+       * @example true
+       */
+      jellyfin_bare_name_sign_in?: boolean;
+      /** @description Profiles on this account that are not part of the set */
+      local_only: components["schemas"]["ProfileSetLocal"][];
+      /** @description Values the owner set on this server; always empty today */
+      overrides: components["schemas"]["ProfileSetOverride"][];
+      /**
+       * Format: int64
+       * @description The version of the last set this server accepted; 0 when it never took one
+       * @example 7
+       */
+      version: number;
+    };
+    ProfileSetHeldItem: {
+      /** @description Fields edited on this server outside a set since the last set it accepted; always empty today */
+      changed_here: components["schemas"]["ProfileSetFieldChange"][];
+      /** @example true */
+      has_pin: boolean;
+      /**
+       * @description Opaque identifier
+       * @example 12
+       */
+      id: string;
+      /** @example false */
+      is_child: boolean;
+      /**
+       * Format: int64
+       * @example 12
+       */
+      max_advisory_age: number | null;
+      /** @example  */
+      max_content_rating: string;
+      /** @example Sam */
+      name: string;
+      /**
+       * @description preset:<id>, sha256:<hex> naming an upload, or empty
+       * @example preset:avatar-3
+       */
+      picture: string;
+      /**
+       * Format: int64
+       * @description The profile's place in the set, from 0
+       * @example 0
+       */
+      position: number;
+      /** @example false */
+      requests_blocked: boolean;
+      /** @example false */
+      require_advisory_age: boolean;
+      /** @description Settings-contract keys stored per profile, each to its value (getSettingsManifest). Keys the server does not know, and keys marked server_local, are ignored. */
+      settings: {
+        [key: string]: unknown;
+      };
+      /**
+       * Format: uuid
+       * @example 0f8fad5b-d9cb-469f-a165-70867728950e
+       */
+      sync_id: string;
+    };
+    ProfileSetLocal: {
+      /** @example false */
+      has_pin: boolean;
+      /**
+       * @description Opaque identifier
+       * @example 15
+       */
+      id: string;
+      /** @example Guest */
+      name: string;
+    };
+    ProfileSetMember: {
+      /**
+       * @description This server's ID for the profile
+       * @example 12
+       */
+      id: string;
+      /**
+       * Format: uuid
+       * @example 0f8fad5b-d9cb-469f-a165-70867728950e
+       */
+      sync_id: string;
+    };
+    ProfileSetOverride: {
+      /**
+       * @description An item field name, or settings.<key>
+       * @example max_content_rating
+       */
+      field: string;
+      /**
+       * Format: uuid
+       * @example 0f8fad5b-d9cb-469f-a165-70867728950e
+       */
+      sync_id: string;
+      /** @description Any JSON value. */
+      value: unknown;
+    };
+    ProfileSetPair: {
+      /**
+       * @description The profile on this server it becomes
+       * @example 15
+       */
+      local_id: string;
+      /**
+       * Format: uuid
+       * @description An item's sync_id
+       * @example 0f8fad5b-d9cb-469f-a165-70867728950e
+       */
+      sync_id: string;
+    };
+    ProfileSetPutBody: {
+      /**
+       * @description Session form: the edits_token getProfileSet answered when the set was built; absent is the empty string
+       * @example
+       */
+      edits_seen?: string;
+      /**
+       * @description Signed form: the person key's key ID
+       * @example PgujdSfBbNNyXngLWCsOgw
+       */
+      kid?: string;
+      /** @description Session form: which existing profile each item becomes, for the first use */
+      pairs?: components["schemas"]["ProfileSetPair"][];
+      /**
+       * @description Signed form: base64url of the profile-set payload {purpose, server_id, iat, exp, challenge, account_id, set, pairs?, edits_seen?}
+       * @example eyJwdXJwb3NlIjoicHJvZmlsZS1zZXQifQ
+       */
+      payload?: string;
+      /** @description Session form: the set */
+      set?: {
+        /** @description The main profile first, then the rest in the order the person chose */
+        items: ({
+          /** @example false */
+          is_child: boolean;
+          /**
+           * Format: int64
+           * @description Advisory-age limit; null for none
+           * @example 12
+           */
+          max_advisory_age: number | null;
+          /**
+           * @description Content-rating ceiling; empty for none
+           * @example
+           */
+          max_content_rating: string;
+          /**
+           * @description 1 to 64 characters once trimmed; unique in the set, compared trimmed and without case
+           * @example Sam
+           */
+          name: string;
+          /**
+           * @description preset:<id> for a built-in picture (avatar-1 to avatar-8, or dicebear:<style>:<seed>), sha256:<64 lower-case hex> of an uploaded picture as it was first uploaded, or empty for none
+           * @example preset:avatar-3
+           */
+          picture: string;
+          /** @description Exactly one of set, keep and clear. Members this server does not know are ignored. */
+          pin: {
+            /**
+             * @description Remove the PIN
+             * @enum {boolean}
+             */
+            clear?: true;
+            /**
+             * @description Leave the PIN this server holds alone. A profile created from keep has no PIN and is reported in awaiting_pins until it gets one
+             * @enum {boolean}
+             */
+            keep?: true;
+            /**
+             * @description Set this PIN, exactly four digits. Compared with the stored PIN first; written only when it differs
+             * @example 1234
+             */
+            set?: string;
+          } & {
+            [key: string]: unknown;
+          };
+          /** @example false */
+          requests_blocked: boolean;
+          /** @example false */
+          require_advisory_age: boolean;
+          /** @description Settings-contract keys stored per profile, each to its value (getSettingsManifest). Keys the server does not know, and keys marked server_local, are ignored. */
+          settings?: {
+            [key: string]: unknown;
+          };
+          /**
+           * @description Keys whose profile value this server removes, so the profile inherits again. A key in both settings and settings_reset is 422
+           * @example [
+           *       "playback.audio_language"
+           *     ]
+           */
+          settings_reset?: string[];
+          /**
+           * Format: uuid
+           * @description The profile's ID on every server, a lower-case UUID. Unique in the set
+           * @example 0f8fad5b-d9cb-469f-a165-70867728950e
+           */
+          sync_id: string;
+        } & {
+          [key: string]: unknown;
+        })[];
+        /**
+         * Format: int64
+         * @description Goes up with every change. A whole number; 7.0 is 7
+         * @example 7
+         */
+        version: number;
+      } & {
+        [key: string]: unknown;
+      };
+      /**
+       * @description Signed form: the person key's signature
+       * @example nnyAt7pV-XsUSmpX0IAk1d0QmUrO4z9CZ5Oeoy9QlVSyCq2EED4Ns_Aakhd5DgOmSqWWrT5xs8an1Ye0a4smgg
+       */
+      sig?: string;
+    };
+    ProfileSetSkippedSetting: {
+      /** @example playback.subtitle_mode */
+      key: string;
+      /**
+       * Format: uuid
+       * @example 0f8fad5b-d9cb-469f-a165-70867728950e
+       */
+      sync_id: string;
     };
     ProfileUpdate: {
       /**
@@ -144086,6 +144405,292 @@ export interface operations {
       /** @description Service Unavailable */
       503: {
         headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getProfileSet: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        /** @description An ETag from an earlier answer; 304 when the set is unchanged */
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProfileSetHeld"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  putProfileSet: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ProfileSetPutBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProfileSetApplied"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          /** @description Seconds to wait before sending the set again. */
+          "Retry-After"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          /** @description Seconds to wait before sending the set again. */
+          "Retry-After"?: string;
           [name: string]: unknown;
         };
         content: {
