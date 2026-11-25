@@ -135,11 +135,8 @@ func IssueJoinAppCodeTx(ctx context.Context, tx pgx.Tx, in JoinAppCode) (IssuedA
 	if _, err := tx.Exec(ctx, `DELETE FROM auth_app_codes WHERE invitation_id = $1 AND redeemed_at IS NULL`, in.InvitationID); err != nil {
 		return IssuedAppCode{}, fmt.Errorf("replacing the invitation's app code: %w", err)
 	}
-	// An expired code keeps its reservation until the retention step runs;
-	// it can't be redeemed, so it gives the name up now.
-	if _, err := tx.Exec(ctx, `DELETE FROM auth_app_codes WHERE reserved_username = $1 AND redeemed_at IS NULL
-		AND expires_at <= clock_timestamp()`, username); err != nil {
-		return IssuedAppCode{}, fmt.Errorf("clearing expired reservations: %w", err)
+	if err := clearDeadReservationsTx(ctx, tx, username, email); err != nil {
+		return IssuedAppCode{}, err
 	}
 	for _, check := range []struct{ field, name string }{{NameFieldUsername, username}, {NameFieldEmail, email}} {
 		if check.name == "" {
@@ -177,6 +174,29 @@ func IssueJoinAppCodeTx(ctx context.Context, tx pgx.Tx, in JoinAppCode) (IssuedA
 	}
 	out.Code = code
 	return out, nil
+}
+
+// clearDeadReservationsTx deletes the unspent join codes that reserve name
+// or email (as either) but can never be redeemed: expired, or for an
+// invitation that can no longer be claimed (accepted, revoked, replaced by a
+// resend or superseded, or expired; a deleted invitation's codes are gone
+// with it). A dead code reserves nothing, so it is removed before the
+// reservation check and the insert, which keeps one rule for both: the
+// unique index on reserved_username then holds only live codes. Retention
+// would delete an expired code later anyway; one whose invitation was
+// revoked would otherwise block the name for up to its ten minutes. The
+// caller holds the settings lock, which every issue and claim takes first.
+func clearDeadReservationsTx(ctx context.Context, tx pgx.Tx, username, email string) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM auth_app_codes c
+		WHERE c.kind = $3 AND c.redeemed_at IS NULL
+			AND (c.reserved_username IN ($1::citext, NULLIF($2, '')::citext) OR c.reserved_email IN ($1::citext, NULLIF($2, '')::citext))
+			AND (c.expires_at <= clock_timestamp() OR NOT EXISTS (
+				SELECT 1 FROM invitations i WHERE i.id = c.invitation_id
+					AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > clock_timestamp()))`,
+		username, email, appCodeKindJoin); err != nil {
+		return fmt.Errorf("clearing dead reservations: %w", err)
+	}
+	return nil
 }
 
 // reservedByAnotherCode reports whether another unspent, unexpired join code

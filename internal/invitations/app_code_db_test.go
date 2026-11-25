@@ -418,6 +418,45 @@ func appCodeHashForTest(code string) ([]byte, bool) {
 func TestJoinAppCodeReservationsDB(t *testing.T) {
 	env := newJoinEnv(t)
 	ctx := t.Context()
+	// A code whose invitation can no longer be claimed reserves nothing: the
+	// replacement invitation takes the same name and email, and the old code
+	// no longer works.
+	for _, tc := range []struct {
+		name, label string
+		replace     func(t *testing.T, inv *models.Invitation) string
+	}{
+		{name: "resent", label: "resent", replace: func(t *testing.T, inv *models.Invitation) string {
+			sent, err := env.svc.Resend(ctx, inv.ID, int64(env.inviter), DeliveryLink)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return sent.ClaimURL[strings.LastIndex(sent.ClaimURL, "#")+1:]
+		}},
+		{name: "revoked, then invited again", label: "revoked", replace: func(t *testing.T, inv *models.Invitation) string {
+			if err := env.svc.Revoke(ctx, inv.ID); err != nil {
+				t.Fatal(err)
+			}
+			token, _ := env.invite(t, models.RoleUser)
+			return token
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := AppCodeRequest{Username: env.name("again-" + tc.label), Email: env.name("again-"+tc.label) + "@example.test"}
+			var inv *models.Invitation
+			request.Token, inv = env.invite(t, models.RoleUser)
+			old, err := env.svc.IssueAppCode(ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Token = tc.replace(t, inv)
+			if _, err := env.svc.IssueAppCode(ctx, request); err != nil {
+				t.Fatalf("the same name and email on the replacement invitation: %v", err)
+			}
+			if _, err := env.redeem(t, old.Code); !errors.Is(err, auth.ErrAppCodeInvalid) {
+				t.Fatalf("the old code: %v", err)
+			}
+		})
+	}
 	t.Run("an address another code reserves", func(t *testing.T) {
 		// One code's email is another's address-as-username, and the other
 		// way round: two unspent codes never claim one address.
