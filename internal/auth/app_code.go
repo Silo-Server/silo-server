@@ -46,6 +46,15 @@ var (
 	ErrJoinNotAvailable = errors.New("this server adds accounts through its sign-in provider")
 )
 
+// The fields and keys a refused app code names (NameTakenError.Field,
+// KeyEnrolledError.Member): the request members that carry them.
+const (
+	NameFieldUsername = "username"
+	NameFieldEmail    = "email"
+	KeyMemberPerson   = "person_key"
+	KeyMemberDevice   = "device_key"
+)
+
 // NameTakenError is ErrAppCodeNameTaken with what clashed: Field is
 // "username" or "email" when the issue could tell, "" at redeem, where the
 // account insert refuses without saying which.
@@ -132,7 +141,7 @@ func IssueJoinAppCodeTx(ctx context.Context, tx pgx.Tx, in JoinAppCode) (IssuedA
 		AND expires_at <= clock_timestamp()`, username); err != nil {
 		return IssuedAppCode{}, fmt.Errorf("clearing expired reservations: %w", err)
 	}
-	for _, check := range []struct{ field, name string }{{"username", username}, {"email", email}} {
+	for _, check := range []struct{ field, name string }{{NameFieldUsername, username}, {NameFieldEmail, email}} {
 		if check.name == "" {
 			continue
 		}
@@ -155,7 +164,7 @@ func IssueJoinAppCodeTx(ctx context.Context, tx pgx.Tx, in JoinAppCode) (IssuedA
 		AppCodeLifetime.Seconds(), in.InvitationExpiresAt).Scan(&out.ExpiresAt)
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "23505" {
 		// Only the reserved name is unique among unspent codes.
-		return IssuedAppCode{}, &NameTakenError{Field: "username"}
+		return IssuedAppCode{}, &NameTakenError{Field: NameFieldUsername}
 	}
 	if err != nil {
 		return IssuedAppCode{}, fmt.Errorf("storing app code: %w", err)
@@ -372,7 +381,7 @@ func (a *AppKeySignIn) redeemJoin(ctx context.Context, req KeyRedeemRequest, pay
 			UserID: user.ID, PublicKey: req.PersonKey, EnrolledVia: models.AppKeyEnrolledAppCode,
 		})
 		if err != nil {
-			return keyEnrolledAs("person_key", err)
+			return keyEnrolledAs(KeyMemberPerson, err)
 		}
 		return a.enrollRedeemedDevice(ctx, tx, user, person, KeyBinding{}, payload, chain.session(req.IP, expiry), PersonKeyEnrolled, out)
 	})
@@ -401,7 +410,7 @@ func (a *AppKeySignIn) redeemSession(ctx context.Context, req KeyRedeemRequest, 
 		}
 		person, status, err := redeemPersonKeyTx(ctx, tx, user.ID, req.PersonKey, binding)
 		if err != nil {
-			return keyEnrolledAs("person_key", err)
+			return keyEnrolledAs(KeyMemberPerson, err)
 		}
 		if err := a.enrollRedeemedDevice(ctx, tx, user, person, binding, payload, chain.session(req.IP, expiry), status, out); err != nil {
 			return err
@@ -458,7 +467,7 @@ func (a *AppKeySignIn) enrollRedeemedDevice(ctx context.Context, tx pgx.Tx, user
 		IdentityID: binding.IdentityID, ProviderBound: binding.ProviderBound,
 	})
 	if err != nil {
-		return keyEnrolledAs("device_key", err)
+		return keyEnrolledAs(KeyMemberDevice, err)
 	}
 	out.User, out.DeviceID, out.Status, out.PersonKeyStatus = user, key.ID, appkeys.ReplySignedIn, personStatus
 	out.Pair, err = a.service.openKeySessionTx(ctx, tx, user, key, session)

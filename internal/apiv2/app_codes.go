@@ -269,7 +269,7 @@ func appCodeConflict(err error) *Problem {
 	}
 	if enrolled, ok := errors.AsType[*auth.KeyEnrolledError](err); ok {
 		location := redeemPayloadLocation
-		if enrolled.Member == "person_key" {
+		if enrolled.Member == auth.KeyMemberPerson {
 			location = locationBody + ".person_key"
 		}
 		return NewProblem(TypeConflict, "That public key is already enrolled on this server.").

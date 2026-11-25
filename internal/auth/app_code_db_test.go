@@ -128,22 +128,6 @@ func TestRedeemSessionAppCodeDB(t *testing.T) {
 		}
 	})
 
-	t.Run("a device key this server holds already", func(t *testing.T) {
-		other := env.localAccount(t, "appcode-otherdevice", models.RoleUser)
-		_, taken, _ := env.enroll(t, other)
-		user := env.localAccount(t, "appcode-keytaken", models.RoleUser)
-		code := issue(t, env.loginSession(t, user, models.SessionOpenedPassword, nil))
-		person := newTestKey(t)
-		_, err := env.signIn.RedeemAppCode(ctx, KeyRedeemRequest{
-			KeyRequest: env.request(t, message{purpose: appkeys.PurposeRedeem, signer: person, device: &taken, fields: map[string]any{"code": code}}),
-			PersonKey:  person.pub,
-		})
-		var enrolled *KeyEnrolledError
-		if !errors.As(err, &enrolled) || enrolled.Member != "device_key" {
-			t.Fatalf("redeem = %v, want the device key named as enrolled", err)
-		}
-	})
-
 	t.Run("expired", func(t *testing.T) {
 		user := env.localAccount(t, "appcode-expired", models.RoleUser)
 		code := issue(t, env.loginSession(t, user, models.SessionOpenedPassword, nil))
@@ -256,4 +240,32 @@ func TestSessionKeyAccessDB(t *testing.T) {
 			t.Fatalf("access = %+v, %v", got, err)
 		}
 	})
+}
+
+// A redeem whose device key this server holds already names that key, so the
+// app knows to make a new one rather than send the person back to the page.
+func TestRedeemAppCodeKeyEnrolledDB(t *testing.T) {
+	env := newKeyEnv(t, "appcodekey")
+	ctx := t.Context()
+	issue := func(t *testing.T, claims *Claims) string {
+		t.Helper()
+		issued, err := env.signIn.IssueSessionAppCode(ctx, claims, ActingProfile{})
+		if err != nil {
+			t.Fatalf("issue: %v", err)
+		}
+		return issued.Code
+	}
+	other := env.localAccount(t, "appcode-otherdevice", models.RoleUser)
+	_, taken, _ := env.enroll(t, other)
+	user := env.localAccount(t, "appcode-keytaken", models.RoleUser)
+	code := issue(t, env.loginSession(t, user, models.SessionOpenedPassword, nil))
+	person := newTestKey(t)
+	_, err := env.signIn.RedeemAppCode(ctx, KeyRedeemRequest{
+		KeyRequest: env.request(t, message{purpose: appkeys.PurposeRedeem, signer: person, device: &taken, fields: map[string]any{"code": code}}),
+		PersonKey:  person.pub,
+	})
+	var enrolled *KeyEnrolledError
+	if !errors.As(err, &enrolled) || enrolled.Member != KeyMemberDevice {
+		t.Fatalf("redeem = %v, want the device key named as enrolled", err)
+	}
 }
