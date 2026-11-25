@@ -166,11 +166,13 @@ func queryInsightsLibraryTitlePlays(ctx context.Context, tx pgx.Tx, win resolved
 }
 
 // addInsightsLibraryLaterFirstPlays finds, for a window that ended before
-// now, the first play after the window of each title it added that had no
-// play in it, and adds those titles to titles with no window plays. Only
-// those titles' sessions are grouped, so a narrow window long ago does not
-// regroup all the history since; the window's own counts stay as the
-// bounded pass read them.
+// now, the first play up to now of each title it added that had no play in
+// it, and adds those titles to titles with no window plays. Only those
+// titles' sessions are grouped, so a narrow window long ago does not regroup
+// all the history since; the window's own counts stay as the bounded pass
+// read them. The grouping starts at the window's start, not its end, so a
+// viewing that began in the window and qualified only once resumed after it
+// still counts, from when it began.
 func addInsightsLibraryLaterFirstPlays(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, now time.Time, q AdminInsightsWindowQuery, titles map[string]insightsTitlePlays) error {
 	played := make([]string, 0, len(titles))
 	for id := range titles {
@@ -203,11 +205,11 @@ func addInsightsLibraryLaterFirstPlays(ctx context.Context, tx pgx.Tx, win resol
 	if len(items) == 0 {
 		return nil
 	}
-	later := win
-	later.From, later.To, later.AllTime = win.To, now, false
+	toNow := win
+	toNow.To = now
 	scopeQuery := q
 	scopeQuery.LibraryID = 0
-	scope := newInsightsPlaysScope(later, scopeQuery)
+	scope := newInsightsPlaysScope(toNow, scopeQuery)
 	scope.itemIDs = items
 	var args []any
 	with, counted := scope.viewingRowsSQL(&args)

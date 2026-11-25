@@ -91,35 +91,42 @@ func TestAdminInsightsBreakdownsDB(t *testing.T) {
 
 // A window that ended before M2's first play: M2 is not played in it, but it
 // is not "not played yet" or "never started" either, since both are about now.
-// M1 gets a 10-second false start just before the window ends, resumed for an
-// hour just after: inside the window that is no play, as every Insights read
-// counts it.
+// M4, also added in the window, gets a 10-second false start just before the
+// window ends, resumed for an hour just after: inside the window that is no
+// play, as every Insights read counts it, but as of now it is M4's first play.
 func assertBreakdownsLibraryPastWindowDB(t *testing.T, h *AdminHandler, pool *pgxpool.Pool, s breakdownsSeed) {
 	day := func(n int) string { return s.now.AddDate(0, 0, -n).Format("2006-01-02") }
 	past := AdminInsightsWindowQuery{Range: InsightsRangeCustom, FromDate: day(12), ToDate: day(10), TZ: "UTC"}
 	end := s.now.AddDate(0, 0, -9).Truncate(24 * time.Hour)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(t.Context(), sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO media_items (content_id, type, title, year, genres, content_rating) VALUES ('M4', 'movie', 'Northbound', 2021, '{Drama}', 'PG')`)
+	exec(`INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at) VALUES ('M4', $1, $2)`, s.movies, end.Add(-72*time.Hour))
+	exec(`INSERT INTO media_files (media_folder_id, file_path, content_id) VALUES ($1, '/m/northbound.mkv', 'M4')`, s.movies)
 	for _, sitting := range []struct {
 		start   time.Time
 		seconds int
 	}{{end.Add(-time.Hour), 10}, {end.Add(time.Hour), 3600}} {
-		if _, err := pool.Exec(t.Context(), `INSERT INTO admin_playback_history
+		exec(`INSERT INTO admin_playback_history
 			(session_id, user_id, profile_id, media_item_id, media_file_id, play_method, started_at, ended_at,
 			 watched_seconds, played_seconds, measured, completed, client_name)
-			VALUES ($1, $2, 'p', 'M1', (SELECT id FROM media_files WHERE content_id = 'M1'), 'direct',
+			VALUES ($1, $2, 'p', 'M4', (SELECT id FROM media_files WHERE content_id = 'M4'), 'direct',
 			 $3, $3::timestamptz + make_interval(secs => $4), $4, $4, TRUE, FALSE, 'Silo Web')`,
-			"breakdowns-"+uuid.NewString(), s.user, sitting.start, sitting.seconds); err != nil {
-			t.Fatal(err)
-		}
+			"breakdowns-"+uuid.NewString(), s.user, sitting.start, sitting.seconds)
 	}
 	lib, err := h.ReadAdminInsightsLibrary(t.Context(), past, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sum := lib.Summary
-	if sum.Titles != 3 || sum.PlayedTitles != 0 || sum.NeverStarted != 0 || sum.AddedTitles != 1 || sum.AddedPlayed != 1 {
+	if sum.Titles != 4 || sum.PlayedTitles != 0 || sum.NeverStarted != 0 || sum.AddedTitles != 2 || sum.AddedPlayed != 2 {
 		t.Errorf("summary = %+v", sum)
 	}
-	if !labeledCountsEqual(lib.TimeToFirstPlay, map[string]int64{"day": 0, "week": 1, "month": 0, "later": 0, "not_yet": 0}) {
+	if !labeledCountsEqual(lib.TimeToFirstPlay, map[string]int64{"day": 0, "week": 2, "month": 0, "later": 0, "not_yet": 0}) {
 		t.Errorf("time to first play = %+v", lib.TimeToFirstPlay)
 	}
 	if len(lib.RecentlyAddedUnplayed) != 0 || len(lib.Genres) != 0 {
