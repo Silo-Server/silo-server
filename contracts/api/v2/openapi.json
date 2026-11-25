@@ -42913,7 +42913,7 @@
         "additionalProperties": false,
         "properties": {
           "created_at": {
-            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "description": "When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at",
             "examples": [
               "2026-01-02T03:04:05.678Z"
             ],
@@ -42927,28 +42927,28 @@
             "type": "boolean"
           },
           "device_id": {
-            "description": "Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing",
+            "description": "Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in",
             "examples": [
               "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
             ],
             "type": "string"
           },
           "device_name": {
-            "description": "Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device",
+            "description": "Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in",
             "examples": [
               "Living Room Apple TV"
             ],
             "type": "string"
           },
           "device_platform": {
-            "description": "Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none",
+            "description": "Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in",
             "examples": [
               "tvOS"
             ],
             "type": "string"
           },
           "expires_at": {
-            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "description": "When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at",
             "examples": [
               "2026-02-01T03:04:05.678Z"
             ],
@@ -42958,7 +42958,7 @@
             "type": "string"
           },
           "id": {
-            "description": "Session identifier; the value deleteSession takes",
+            "description": "Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current",
             "examples": [
               "6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"
             ],
@@ -42966,14 +42966,14 @@
             "type": "string"
           },
           "ip_address": {
-            "description": "Client address recorded at login; empty when unknown",
+            "description": "Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in",
             "examples": [
               "203.0.113.7"
             ],
             "type": "string"
           },
           "last_seen_at": {
-            "description": "Most recent authenticated request, coalesced to at most one update per minute; null until recorded",
+            "description": "Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in",
             "examples": [
               "2026-01-02T03:04:05.678Z"
             ],
@@ -43048,7 +43048,7 @@
             "description": "The caller's live session, even when it falls outside this page; null for API-key callers or another account's admin listing",
             "properties": {
               "created_at": {
-                "description": "RFC 3339 instant in UTC with millisecond precision",
+                "description": "When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at",
                 "examples": [
                   "2026-01-02T03:04:05.678Z"
                 ],
@@ -43062,28 +43062,28 @@
                 "type": "boolean"
               },
               "device_id": {
-                "description": "Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing",
+                "description": "Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in",
                 "examples": [
                   "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
                 ],
                 "type": "string"
               },
               "device_name": {
-                "description": "Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device",
+                "description": "Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in",
                 "examples": [
                   "Living Room Apple TV"
                 ],
                 "type": "string"
               },
               "device_platform": {
-                "description": "Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none",
+                "description": "Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in",
                 "examples": [
                   "tvOS"
                 ],
                 "type": "string"
               },
               "expires_at": {
-                "description": "RFC 3339 instant in UTC with millisecond precision",
+                "description": "When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at",
                 "examples": [
                   "2026-02-01T03:04:05.678Z"
                 ],
@@ -43093,7 +43093,7 @@
                 "type": "string"
               },
               "id": {
-                "description": "Session identifier; the value deleteSession takes",
+                "description": "Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current",
                 "examples": [
                   "6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"
                 ],
@@ -43101,14 +43101,14 @@
                 "type": "string"
               },
               "ip_address": {
-                "description": "Client address recorded at login; empty when unknown",
+                "description": "Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in",
                 "examples": [
                   "203.0.113.7"
                 ],
                 "type": "string"
               },
               "last_seen_at": {
-                "description": "Most recent authenticated request, coalesced to at most one update per minute; null until recorded",
+                "description": "Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in",
                 "examples": [
                   "2026-01-02T03:04:05.678Z"
                 ],
@@ -155072,6 +155072,7 @@
     },
     "/api/v2/auth/sessions": {
       "get": {
+        "description": "A session opened by device sign-in (a code a signed-in person approved, Jellyfin Quick Connect, or a remote-playback handoff), and a session from before this rule was recorded whose X-Silo-Device-Platform was tvOS, android-tv or roku, sees only itself in full. It still gets every live session of the account, but another session's item carries only its id and current: device_name and ip_address are empty, device_id and device_platform are absent, last_seen_at is null, and created_at and expires_at repeat the caller's own. For such a caller the page is ordered by id, not newest first, and a cursor from the other kind of caller is invalid_cursor.",
         "operationId": "listSessions",
         "parameters": [
           {
@@ -155360,6 +155361,7 @@
     },
     "/api/v2/auth/sessions/{id}": {
       "delete": {
+        "description": "A session opened by device sign-in (see listSessions) may revoke only itself: another session of the account is 403 permission_denied, and a session of another account or an unknown id is 404 as for every caller.",
         "operationId": "deleteSession",
         "parameters": [
           {
@@ -155400,6 +155402,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {

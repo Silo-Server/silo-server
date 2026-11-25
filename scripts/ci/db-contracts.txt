@@ -1614,3 +1614,9 @@
 # Image cache queue metrics count future-deferred retries in queued depth while
 # reporting oldest queued age only for due rows (next_attempt_at <= NOW()).
 ./internal/workmetrics TestQueueSamplerImagesReportsDueQueuedAgeDB
+./internal/auth TestSessionsRecordDeviceSignInDB
+./internal/auth TestFirstRunSessionRecordsNoDeviceSignInDB
+./internal/auth TestDeviceSignInMigrationMarksKeptRequestsDB
+./internal/apiv2 TestSessionReachRuleDB
+./internal/apiv2 TestLimitedSessionDeleteDB
+./internal/apiv2 TestLimitedSessionPagesByIDDB

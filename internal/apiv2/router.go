@@ -1324,6 +1324,10 @@ type SessionService interface {
 	// CurrentLoginSession returns nil, not an error, when the session is no
 	// longer live.
 	CurrentLoginSession(ctx context.Context, userID int, sessionID string) (*models.AuthSession, error)
+	// ListSessionsPageByID and SessionLimitedToItself serve a session that
+	// may see and end only itself (auth.LimitedToItself).
+	ListSessionsPageByID(ctx context.Context, userID int, afterID string, limit int) ([]*models.AuthSession, bool, error)
+	SessionLimitedToItself(ctx context.Context, sessionID string) (bool, error)
 	RevokeSession(ctx context.Context, sessionID string, userID int) error
 	SetupInitialUser(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
 	SignupEnabled(ctx context.Context) (bool, error)

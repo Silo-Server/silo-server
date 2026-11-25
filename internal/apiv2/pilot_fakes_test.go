@@ -1390,6 +1390,16 @@ func (f *fakeSessionService) ListSessionsPage(_ context.Context, userID int, aft
 	return page, false, nil
 }
 
+// ListSessionsPageByID and SessionLimitedToItself: the fake's caller is never
+// limited to itself; the Postgres tests cover that listing.
+func (f *fakeSessionService) ListSessionsPageByID(context.Context, int, string, int) ([]*models.AuthSession, bool, error) {
+	return nil, false, f.err
+}
+
+func (f *fakeSessionService) SessionLimitedToItself(context.Context, string) (bool, error) {
+	return false, f.err
+}
+
 func (f *fakeSessionService) RevokeSession(_ context.Context, sessionID string, _ int) error {
 	if f.err != nil {
 		return f.err
