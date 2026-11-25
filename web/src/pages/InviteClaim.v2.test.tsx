@@ -432,3 +432,44 @@ it("says an emailed invitation's address is taken when its code is refused", asy
     "An account already uses this email address.",
   );
 });
+
+// Focus moves once, when an answer comes back, never while the person types:
+// a taken email, then a refusal with no field, then typing in the email field
+// keeps focus there.
+it("keeps focus where the person types after a later refusal", async () => {
+  lookup = async () => json({ ...linkInvitation, app_join: true });
+  let issued = 0;
+  appCode = async () =>
+    ++issued === 1
+      ? problemResponse(409, "conflict", {
+          errors: [{ location: "body.email", code: "duplicate", detail: "taken" }],
+        })
+      : problemResponse(429, "rate_limited");
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.change(screen.getByLabelText("Username"), { target: { value: "sam" } });
+  const email = screen.getByLabelText("Email (optional)");
+  fireEvent.change(email, { target: { value: "sam@example.test" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  await waitFor(() => expect(document.activeElement).toBe(email));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Too many requests");
+  // The submit cleared the email's error; the refusal sent focus to the form.
+  expect(email).not.toHaveAccessibleDescription(/already uses/);
+  email.focus();
+  fireEvent.change(email, { target: { value: "sam2@example.test" } });
+  expect(document.activeElement).toBe(email);
+});
+
+// An error on the field that already has focus can't be read by moving
+// focus there, so the status region says it.
+it("announces an error on the field that has focus", async () => {
+  lookup = async () => json({ ...linkInvitation, app_join: true });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  const username = screen.getByLabelText("Username");
+  expect(document.activeElement).toBe(username);
+  fireEvent.submit(username.closest("form")!);
+  expect(await screen.findByRole("status")).toHaveTextContent("Choose a username.");
+  expect(username).toHaveAccessibleDescription("Choose a username.");
+});

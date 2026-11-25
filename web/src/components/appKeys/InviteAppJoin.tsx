@@ -40,6 +40,13 @@ export function InviteAppJoin({
   const usernameInput = useRef<HTMLInputElement>(null);
   const emailInput = useRef<HTMLInputElement>(null);
   const continueButton = useRef<HTMLButtonElement>(null);
+  // Counts the answers that came back (or the checks this page made), so
+  // focus moves once per answer, never while the person types.
+  const [settled, setSettled] = useState(0);
+  const handled = useRef(0);
+  // Read by a polite status region when the field with the error already has
+  // focus: moving focus there again would not read its description.
+  const [announcement, setAnnouncement] = useState("");
   useEffect(() => {
     const controller = new AbortController();
     lifetime.current = controller;
@@ -51,10 +58,20 @@ export function InviteAppJoin({
   // isn't also an alert; a refusal that belongs to no field is the alert, and
   // focus goes back to the form's first control without reading it twice.
   useEffect(() => {
-    if (pending || appCode) return;
-    if (fieldError?.field === "email") emailInput.current?.focus();
-    else if (fieldError || refusal) (usernameInput.current ?? continueButton.current)?.focus();
-  }, [fieldError, refusal, pending, appCode]);
+    if (settled === handled.current) return;
+    handled.current = settled;
+    if (appCode || (!fieldError && !refusal)) return;
+    const target =
+      fieldError?.field === "email"
+        ? emailInput.current
+        : (usernameInput.current ?? continueButton.current);
+    if (fieldError && target === document.activeElement) {
+      setAnnouncement(fieldError.message);
+      return;
+    }
+    setAnnouncement("");
+    target?.focus();
+  }, [settled, fieldError, refusal, appCode]);
 
   // A refusal that belongs to a field sends the person back to the form.
   // The server names the field: a taken name is `duplicate` at body.username
@@ -118,7 +135,10 @@ export function InviteAppJoin({
         setRefusal(refusalMessage(error));
       }
     } finally {
-      if (!controller.signal.aborted) setPending(false);
+      if (!controller.signal.aborted) {
+        setPending(false);
+        setSettled((n) => n + 1);
+      }
     }
   }
 
@@ -127,12 +147,16 @@ export function InviteAppJoin({
     if (pending) return;
     const name = username.trim();
     const address = email.trim();
+    setFieldError(undefined);
+    setAnnouncement("");
     if (!name) {
       setFieldError({ field: "username", message: t("web.auth.invite.usernameRequired") });
+      setSettled((n) => n + 1);
       return;
     }
     if (address && !isValidEmail(address)) {
       setFieldError({ field: "email", message: invalidEmailMessage() });
+      setSettled((n) => n + 1);
       return;
     }
     chosen.current = { username: name, email: address };
@@ -181,6 +205,9 @@ export function InviteAppJoin({
   return (
     <form onSubmit={handleSubmit} className="space-y-4" noValidate>
       {refusalAlert}
+      <p role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
       <div className="space-y-2">
         <Label htmlFor="invite-app-username">{t("web.auth.username")}</Label>
         <Input
