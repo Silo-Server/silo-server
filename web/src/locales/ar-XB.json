@@ -127613,6 +127613,16 @@
       "value": "\u200F\u202ELast Air Date\u202C"
     }
   ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELock \u202C"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    }
+  ],
   "web.item.editMetadata.locked": [
     {
       "type": 0,
