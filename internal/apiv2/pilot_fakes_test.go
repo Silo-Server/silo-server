@@ -1114,10 +1114,12 @@ func (f fakeDevices) PollDeviceLogin(_ context.Context, deviceCode, bindingSecre
 	if r == nil {
 		return nil, &handlers.APIError{Status: 404, Code: "not_found", Message: "Device login request not found"}
 	}
-	if r.locked {
-		return nil, &handlers.APIError{Status: 429, Code: "rate_limited", Message: "Too many wrong binding secrets for this sign-in. Try again later.", RetryAfter: 900}
-	}
 	if r.binding != "" && bindingSecret != fakeBindingSecret {
+		// As the service does: the budget answers a wrong secret only, and
+		// never refuses the right one.
+		if r.locked {
+			return nil, &handlers.APIError{Status: 429, Code: "rate_limited", Message: "Too many wrong binding secrets for this sign-in. Try again later.", RetryAfter: 900}
+		}
 		return nil, &handlers.APIError{Status: 403, Code: handlers.DeviceBindingMismatchCode, Message: "The binding secret does not match the binding this request was started with"}
 	}
 	view := &handlers.DeviceLoginPollView{Status: r.Status, PollAfter: 5, Opened: r.opened && r.Status == auth.DeviceLoginStatusPending}

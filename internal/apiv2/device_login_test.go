@@ -423,7 +423,7 @@ func TestDevicePreapprovalOperations(t *testing.T) {
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.binding" {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
-	rec = do(t, h, http.MethodPost, "/api/v2/auth/device/poll", `{"device_code":"dev-locked","binding_secret":"`+fakeBindingSecret+`"}`, nil)
+	rec = do(t, h, http.MethodPost, "/api/v2/auth/device/poll", `{"device_code":"dev-locked","binding_secret":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}`, nil)
 	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
 		t.Fatalf("%d %v %s", rec.Code, rec.Header(), rec.Body.String())
 	}
