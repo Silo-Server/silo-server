@@ -6579,7 +6579,7 @@ export interface paths {
     post?: never;
     /**
      * Revoke an account's person key.
-     * @description No new device can be introduced with it, and the devices it introduced that are still waiting for approval are denied. Devices already enrolled keep their keys and sessions. The person sets up a new person key from a signed-in device (replacePersonKey). An account with no person key, as after a first call, changes nothing and records nothing (204); an unknown account is 404 not_found. Audited as user.person_key_revoked. Any administrator may act on an ordinary account and on their own; only the server Owner may act on another administrator or on the Owner (403 permission_denied). Answers while auth.app_key_sign_in is off.
+     * @description No new device can be introduced with it, and the devices it introduced that are still waiting for approval are denied. Devices already enrolled keep their keys and sessions. The person sets up a new person key from a signed-in device (replacePersonKey). An account with no person key, as straight after a first call, changes nothing and records nothing (204); an unknown account is 404 not_found. The request names no key, so it acts on the person key the account holds when it arrives: read listAdminUserAppKeys before repeating it, since a repeat after the person has set up a new key revokes that one. Audited as user.person_key_revoked. Any administrator may act on an ordinary account and on their own; only the server Owner may act on another administrator or on the Owner (403 permission_denied). Answers while auth.app_key_sign_in is off.
      */
     delete: operations["revokeAdminUserPersonKey"];
     options?: never;
@@ -15186,7 +15186,7 @@ export interface components {
       /** @description Provider-bound and its provider account is no longer linked to the account: it can't sign in again and is revoked at its next try. The person's own list leaves such a key out */
       identity_gone: boolean;
       /**
-       * @description The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't bound to a linked provider account. Unlinking that provider account revokes the key
+       * @description The provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key is bound to none. Unlinking that provider account revokes the key. With identity_gone true the ID is historical: that provider account is no longer linked and the identities list does not have it
        * @example 4
        */
       identity_id: string | null;
@@ -15203,7 +15203,7 @@ export interface components {
       kind: "device" | "app";
       /**
        * Format: date-time
-       * @description When the key last opened a login session. enroll and an introduce that signs in open one, so a key not used since shows enrolled_at; null for a key waiting for approval, which has never opened one
+       * @description When the key last opened a login session. enroll and an introduce that signs in open one, so a key not used since shows enrolled_at; null for a key that has never opened one: a key waiting for approval, and a key approved since that has not signed in yet. status, not this member, says whether a key is waiting
        */
       last_used_at: string | null;
       /**
@@ -15216,7 +15216,7 @@ export interface components {
        * @example ios
        */
       platform: string;
-      /** @description Enrolled from a sign-in provider session, or introduced by a person key that was: the provider checks the person again at each sign-in */
+      /** @description Bound to a sign-in provider account of this account, from enrollment, from the person key that introduced it, or since that account was linked. The server checks that the account is still linked at each sign-in and asks the provider again when its recheck is due, not every time */
       provider_bound: boolean;
       /**
        * @description active, or pending while an administrator's device waits for approval. A waiting key older than 24 hours is left out of the list without anyone denying or revoking it
@@ -15251,7 +15251,7 @@ export interface components {
       /** @description Provider-bound and its provider account is no longer linked to the account: it can't introduce a device again */
       identity_gone: boolean;
       /**
-       * @description The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't bound to a linked provider account. Unlinking that provider account revokes the key
+       * @description The provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key is bound to none. Unlinking that provider account revokes the key. With identity_gone true the ID is historical: that provider account is no longer linked and the identities list does not have it
        * @example 4
        */
       identity_id: string | null;
@@ -15260,7 +15260,7 @@ export interface components {
        * @example PgujdSfBbNNyXngLWCsOgw
        */
       kid: string;
-      /** @description Enrolled from a sign-in provider session: it vouches for a device only while that provider account is linked */
+      /** @description Bound to a sign-in provider account of this account, from enrollment or since that account was linked: it vouches for a device only while that provider account is linked. It says what the key is tied to, not that the provider was asked just now */
       provider_bound: boolean;
     };
     AdminArtworkStorageStatus: {
@@ -25329,7 +25329,7 @@ export interface components {
       kind: "device" | "app";
       /**
        * Format: date-time
-       * @description When the key last opened a login session. enroll and an introduce that signs in open one, so a key not used since shows enrolled_at; null for a key waiting for approval, which has never opened one
+       * @description When the key last opened a login session. enroll and an introduce that signs in open one, so a key not used since shows enrolled_at; null for a key that has never opened one: a key waiting for approval, and a key approved since that has not signed in yet. status, not this member, says whether a key is waiting
        */
       last_used_at: string | null;
       /**

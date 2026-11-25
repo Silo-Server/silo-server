@@ -24,18 +24,18 @@ type AdminAppKeyService interface {
 type AdminAppPersonKey struct {
 	AppPersonKey
 	EnrolledBy    string `json:"enrolled_by" enum:"session,app-code" doc:"How the key was enrolled: from a signed-in session or with an app code" example:"session"`
-	ProviderBound bool   `json:"provider_bound" doc:"Enrolled from a sign-in provider session: it vouches for a device only while that provider account is linked"`
+	ProviderBound bool   `json:"provider_bound" doc:"Bound to a sign-in provider account of this account, from enrollment or since that account was linked: it vouches for a device only while that provider account is linked. It says what the key is tied to, not that the provider was asked just now"`
 	IdentityGone  bool   `json:"identity_gone" doc:"Provider-bound and its provider account is no longer linked to the account: it can't introduce a device again"`
-	IdentityID    *ID    `json:"identity_id" nullable:"true" doc:"The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't bound to a linked provider account. Unlinking that provider account revokes the key" example:"4"`
+	IdentityID    *ID    `json:"identity_id" nullable:"true" doc:"The provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key is bound to none. Unlinking that provider account revokes the key. With identity_gone true the ID is historical: that provider account is no longer linked and the identities list does not have it" example:"4"`
 }
 
 // AdminAppDeviceKey is one of an account's device keys as an administrator
 // sees it: the person's own list object plus how it signs in.
 type AdminAppDeviceKey struct {
 	AppDeviceKey
-	ProviderBound bool     `json:"provider_bound" doc:"Enrolled from a sign-in provider session, or introduced by a person key that was: the provider checks the person again at each sign-in"`
+	ProviderBound bool     `json:"provider_bound" doc:"Bound to a sign-in provider account of this account, from enrollment, from the person key that introduced it, or since that account was linked. The server checks that the account is still linked at each sign-in and asks the provider again when its recheck is due, not every time"`
 	IdentityGone  bool     `json:"identity_gone" doc:"Provider-bound and its provider account is no longer linked to the account: it can't sign in again and is revoked at its next try. The person's own list leaves such a key out"`
-	IdentityID    *ID      `json:"identity_id" nullable:"true" doc:"The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't bound to a linked provider account. Unlinking that provider account revokes the key" example:"4"`
+	IdentityID    *ID      `json:"identity_id" nullable:"true" doc:"The provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key is bound to none. Unlinking that provider account revokes the key. With identity_gone true the ID is historical: that provider account is no longer linked and the identities list does not have it" example:"4"`
 	WaitingUntil  *Instant `json:"waiting_until" nullable:"true" doc:"For a key with status pending, when it stops waiting for approval (24 hours after it asked); null otherwise"`
 }
 
@@ -94,10 +94,14 @@ func registerAdminAppKeys(reg *Registry) {
 		"Revoke one of an account's device keys and end the sessions it opened.",
 		"The device is signed out and its key can't sign in again. Revoking a revoked key changes nothing; a key of another account is 404 not_found. Audited as user.device_key_revoked."+adminKeyRule),
 		reg.revokeAdminUserDeviceKey)
-	Register(reg, adminAppKeyOperation(http.MethodDelete, "/person", "revokeAdminUserPersonKey",
+	// The request names no key: it revokes whichever person key the account
+	// holds when it arrives. A blind repeat after the person has set up a new
+	// one would revoke that, so it is not declared safe to replay.
+	revokePerson := adminAppKeyOperation(http.MethodDelete, "/person", "revokeAdminUserPersonKey",
 		"Revoke an account's person key.",
-		"No new device can be introduced with it, and the devices it introduced that are still waiting for approval are denied. Devices already enrolled keep their keys and sessions. The person sets up a new person key from a signed-in device (replacePersonKey). An account with no person key, as after a first call, changes nothing and records nothing (204); an unknown account is 404 not_found. Audited as user.person_key_revoked."+adminKeyRule),
-		reg.revokeAdminUserPersonKey)
+		"No new device can be introduced with it, and the devices it introduced that are still waiting for approval are denied. Devices already enrolled keep their keys and sessions. The person sets up a new person key from a signed-in device (replacePersonKey). An account with no person key, as straight after a first call, changes nothing and records nothing (204); an unknown account is 404 not_found. The request names no key, so it acts on the person key the account holds when it arrives: read listAdminUserAppKeys before repeating it, since a repeat after the person has set up a new key revokes that one. Audited as user.person_key_revoked."+adminKeyRule)
+	revokePerson.RetrySafety = RetrySafetyNonRetryable
+	Register(reg, revokePerson, reg.revokeAdminUserPersonKey)
 	Register(reg, adminAppKeyOperation(http.MethodPost, "/pending/{id}/deny", "denyAdminUserPendingKey",
 		"Deny one of an account's device keys waiting for approval.",
 		"The key's next sign-in answers 403 key_denied and neither list shows it. Denying a denied key changes nothing; an active, revoked or unknown key is 404 not_found. No administrator operation approves a waiting key: only the person does, from one of their own sessions (approvePendingAppKey). Audited as user.device_key_denied."+adminKeyRule),
