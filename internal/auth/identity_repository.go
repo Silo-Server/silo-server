@@ -113,10 +113,11 @@ func listIdentitiesForUser(ctx context.Context, db dbQuerier, userID int) ([]Lin
 // deletes the identities first, so it waits here, or this waits for it,
 // instead of the two deadlocking on requests and sessions. forDelete takes
 // the lock that deleting them needs. Otherwise the lock only stops an
-// uninstall or unlink from deleting them meanwhile. Unlinking an identity and
-// the provider re-check lock the identity FOR UPDATE and so wait for it, as
-// they already wait on the account row; a provider sign-in's non-key update
-// of the identity does not.
+// uninstall or unlink from deleting them meanwhile. Unlinking an identity,
+// the provider re-check and opening a provider sign-in's session
+// (lockOAuthIdentity) lock the identity FOR UPDATE and so wait for it, as
+// they already wait on the account row; account resolution's non-key update
+// of the identity after a sign-in does not.
 func lockIdentitiesBeforeSessions(ctx context.Context, db dbQuerier, userID int, forDelete bool) error {
 	lock := "FOR KEY SHARE"
 	if forDelete {
