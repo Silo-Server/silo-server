@@ -296,9 +296,11 @@ function ClaimForm({ token }: { token: string }) {
             {t("web.auth.invite.title", { server: invitation.server_name })}
           </CardTitle>
           <CardDescription className="mt-2 text-sm leading-6">
-            {invitation.email_required
-              ? t("web.auth.invite.descriptionEmailRequired")
-              : t("web.auth.invite.description")}
+            {invitation.app_join && path !== "password"
+              ? t("web.auth.invite.descriptionWithApp")
+              : invitation.email_required
+                ? t("web.auth.invite.descriptionEmailRequired")
+                : t("web.auth.invite.description")}
           </CardDescription>
           {invitation.note && (
             <blockquote className="border-border mt-4 border-s-2 py-1 ps-3 text-sm leading-relaxed">

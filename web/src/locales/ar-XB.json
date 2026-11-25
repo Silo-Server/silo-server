@@ -98275,6 +98275,12 @@
       "value": "\u200F\u202EEnter your email address and choose a password. You'll sign in with your email address.\u202C"
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EJoin with the Silo app on your phone or tablet, or choose a password to sign in.\u202C"
+    }
+  ],
   "web.auth.invite.emailOptional": [
     {
       "type": 0,
