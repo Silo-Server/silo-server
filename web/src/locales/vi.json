@@ -64610,7 +64610,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Kiểm tra xem bộ định tuyến có hỗ trợ UPnP, NAT-PMP hoặc PCP không."
+      "value": "Yêu cầu bộ định tuyến ánh xạ cổng qua UPnP, NAT-PMP hoặc PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -64619,16 +64619,40 @@
       "value": "Ánh xạ cổng"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Phạm vi: từ "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " đến "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Lượt kiểm tra mức độ sẵn sàng không bắt đầu phát trực tiếp."
+      "value": "Bật tùy chọn này sẽ khởi động bộ máy kết nối trực tiếp. Bộ máy sẽ mở một cổng UDP và, khi Ánh xạ cổng đang bật, yêu cầu bộ định tuyến ánh xạ cổng. Chạy kiểm tra chỉ đọc trạng thái của máy chủ."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Quản trị viên đã tắt"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Đã giới hạn trong phạm vi cho phép"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -64640,7 +64664,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Không thể khởi động bộ máy kết nối trực tiếp"
+      "value": "Bộ máy kết nối trực tiếp đã dừng hoặc không thể khởi động"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -64671,6 +64695,12 @@
     {
       "type": 0,
       "value": "Giá trị không hợp lệ; đang dùng Tắt"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Giá trị không hợp lệ; đang dùng giá trị mặc định"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

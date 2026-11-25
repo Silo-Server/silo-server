@@ -78965,7 +78965,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Tikrinti, ar maršruto parinktuvas palaiko UPnP, NAT-PMP arba PCP."
+      "value": "Paprašyti maršruto parinktuvo UPnP, NAT-PMP arba PCP prievado susiejimo."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -78974,16 +78974,40 @@
       "value": "Prievadų susiejimas"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Intervalas: nuo "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " iki "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Parengties patikros nepradeda tiesioginio atkūrimo."
+      "value": "Įjungus šią parinktį, paleidžiamas tiesioginių jungčių variklis. Jis atidaro UDP prievadą ir, kai įjungta parinktis „Prievadų susiejimas“, paprašo maršruto parinktuvo prievado susiejimo. Mygtukas „Paleisti patikrą“ tik nuskaito pagrindinio kompiuterio būseną."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Išjungė administratorius"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Apribota iki leistino intervalo"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -78995,7 +79019,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Nepavyko paleisti tiesioginių jungčių variklio"
+      "value": "Tiesioginių jungčių variklis sustojo arba nepavyko jo paleisti"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -79026,6 +79050,12 @@
     {
       "type": 0,
       "value": "Netinkama reikšmė; naudojama „Išjungta“"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Netinkama reikšmė; naudojama numatytoji"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

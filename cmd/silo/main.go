@@ -3260,6 +3260,9 @@ func main() {
 			SecretKey: bc.SecretKey, Settings: settingsRepo, Logger: slog.Default(), Tuning: tuningCfg,
 			Adjustments: adjustments, HeldAtStart: netadmin.Current().HeldAtStart, ReplicaPresence: apiReplicaPresence, RedisClient: directRedis,
 			RedisUnavailable: directRedisUnavailable,
+			// Separate API processes share the engine lease only through Redis; a
+			// single integrated process has no one to share it with.
+			RequireRedis: mode == "api",
 			// The router depends on directConn: no engine starts before
 			// HandlerReady, after rootHandler exists.
 			AwaitHandler: true,

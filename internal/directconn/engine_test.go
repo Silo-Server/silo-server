@@ -106,6 +106,13 @@ type lifecycleFixture struct {
 	blocked     chan struct{}
 	published   chan struct{}
 	deadline    <-chan time.Time
+	// leased is set when the fixture installs a Redis lease; its first grant
+	// waits engineLeaseTTL before an engine starts. From failFrom after start,
+	// renewals fail or block as the name says. leaseLost makes the key belong to
+	// another process.
+	leased    bool
+	failFrom  time.Duration
+	leaseLost atomic.Bool
 }
 
 type lifecycleLogWriter struct {
@@ -149,6 +156,7 @@ func newLifecycleFixture(t *testing.T, name string) *lifecycleFixture {
 	// instant as a renewal or an assertion would race it.
 	f.cfg.recheckInterval = -1
 	if strings.HasPrefix(name, "renewal") || name == "lease loss" || name == "blocked close" {
+		f.failFrom = engineLeaseTTL + censusInterval
 		f.installLease()
 	}
 	f.svc = New(ctx, f.cfg)
@@ -191,34 +199,47 @@ func (f *lifecycleFixture) installLease() {
 	client.AddHook(leaseCommandHook{process: f.leaseCommand})
 	f.cfg.RedisClient = client
 	f.cfg.ReplicaPresence = cache.NewAPIReplicaPresence(client, "api")
+	f.leased = true
 }
 
 func (f *lifecycleFixture) leaseCommand(cmd redis.Cmder) error {
-	switch cmd := cmd.(type) {
-	case *redis.ScanCmd:
-		cmd.SetVal([]string{"api"}, 0)
-	case *redis.BoolCmd:
-		cmd.SetVal(f.name != "lease loss" || f.renewals == 0)
-	case *redis.Cmd:
-		script := fmt.Sprint(cmd.Args()[1])
-		// Script.Run uses EVALSHA first; release never matches the renewal hash.
-		if strings.Contains(script, "PEXPIRE") || script == renewEngineLease.Hash() {
-			f.renewals++
-			if f.name == "lease loss" {
-				cmd.SetVal(int64(0))
-				return nil
-			}
+	c, ok := cmd.(*redis.Cmd)
+	if !ok {
+		return nil
+	}
+	switch classifyLease(c) {
+	case leaseAcquire:
+		if f.leaseLost.Load() {
+			c.SetVal(int64(0))
+			return nil
+		}
+	case leaseRenew:
+		f.renewals++
+		if f.leaseLost.Load() {
+			c.SetVal(int64(0))
+			return nil
+		}
+		if time.Since(f.start) >= f.failFrom {
 			if f.name == "renewal blocked past deadline" {
 				<-f.blocked
 				return errors.New("renewal blocked")
 			}
-			if f.name != "renewal recovers at sixty" || time.Since(f.start) != 60*time.Second {
+			// "renewal recovers at sixty" answers one renewal, exactly sixty seconds
+			// after the last renewal that worked, which is the self-stop instant.
+			if f.name != "renewal recovers at sixty" || time.Since(f.start) != f.failFrom+30*time.Second {
 				return errors.New("renewal unavailable")
 			}
 		}
-		cmd.SetVal(int64(1))
 	}
+	c.SetVal(int64(1))
 	return nil
+}
+
+// advance moves the fake clock forward and waits for the service to settle.
+func (f *lifecycleFixture) advance(d time.Duration) {
+	f.t.Helper()
+	time.Sleep(d) //nolint:forbidigo // Fake clock inside the synctest bubble: it crosses a lease boundary, no wall time passes.
+	synctest.Wait()
 }
 
 func (f *lifecycleFixture) cleanup() {
@@ -268,6 +289,10 @@ func (f *lifecycleFixture) initial() bool {
 func (f *lifecycleFixture) exercise() {
 	f.t.Helper()
 	f.apply()
+	if f.leased {
+		// A fresh grant keeps the engine off until its hold ends.
+		f.advance(engineLeaseTTL)
+	}
 	if !f.initial() {
 		return
 	}
@@ -283,8 +308,8 @@ func (f *lifecycleFixture) exercise() {
 	case "blocked close":
 		f.checkBlockedClose()
 	case "lease loss":
-		time.Sleep(31 * time.Second) //nolint:forbidigo // Advance synctest time across the scripted lease-loss census.
-		synctest.Wait()
+		f.leaseLost.Store(true)
+		f.advance(31 * time.Second)
 		f.assertCloses(1)
 	case "coalesced settings":
 		f.apply()
@@ -338,13 +363,24 @@ func (f *lifecycleFixture) checkBlockedClose() {
 		statusDone <- err
 	}()
 	published := make(chan string, 1)
+	// The observer ends with the check, also when the publication never comes.
+	observerDone := make(chan struct{})
+	defer close(observerDone)
 	go func() {
 		m := f.svc.replica
 		m.mu.Lock()
 		m.count = 2
 		m.mu.Unlock()
-		m.changed <- struct{}{}
-		<-f.published
+		select {
+		case m.changed <- struct{}{}:
+		case <-observerDone:
+			return
+		}
+		select {
+		case <-f.published:
+		case <-observerDone:
+			return
+		}
 		f.svc.mu.Lock()
 		reason := f.svc.logged[featureDirect].reason
 		f.svc.mu.Unlock()
@@ -405,8 +441,11 @@ func (f *lifecycleFixture) checkDrift() {
 	f.engines[0].port++
 	f.engines[0].changed <- struct{}{}
 	synctest.Wait()
-	if f.name == "drift restart" && (strings.Count(f.logs.String(), "feature=engine kind=local state=on") < 2 || !strings.Contains(f.logs.String(), "feature=engine kind=local state=off")) {
-		f.t.Fatalf("restart transitions missing from logs: %s", &f.logs)
+	// A restart is not a stop: the engine row goes from on straight to on, with no
+	// off row with an empty reason in between. The off row with reason disabled
+	// before the first start is not part of the restart.
+	if f.name == "drift restart" && (strings.Count(f.logs.String(), "feature=engine kind=local state=on") != 1 || strings.Contains(f.logs.String(), `feature=engine kind=local state=off reason=""`)) {
+		f.t.Fatalf("a restart must publish no off row for the engine: %s", &f.logs)
 	}
 	if f.calls != 2 || f.engines[0].closes.Load() != 1 {
 		f.t.Fatalf("after drift calls=%d closes=%d, want 2/1", f.calls, f.engines[0].closes.Load())
@@ -451,9 +490,11 @@ func (f *lifecycleFixture) checkBindRetry() {
 
 func (f *lifecycleFixture) checkRenewal() {
 	f.t.Helper()
-	deadline := 60 * time.Second
+	// The last renewal that worked is at failFrom-30s, so the engine stops 60
+	// seconds after it, or 60 seconds after the one renewal that recovers.
+	deadline := f.failFrom + 30*time.Second
 	if f.name == "renewal recovers at sixty" {
-		deadline = 120 * time.Second
+		deadline += 60 * time.Second
 	}
 	for time.Since(f.start) < deadline-time.Second {
 		step := min(10*time.Second, deadline-time.Second-time.Since(f.start))
@@ -633,6 +674,7 @@ type serveExitFixture struct {
 	mu        sync.Mutex
 	servers   []*exitServer
 	renewFail atomic.Bool
+	leased    bool
 }
 
 type serveExitOptions struct {
@@ -682,6 +724,7 @@ func newServeExitFixture(t *testing.T, opts serveExitOptions) *serveExitFixture 
 		return srv
 	}
 	if opts.lease {
+		f.leased = true
 		client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:6379"})
 		t.Cleanup(func() { _ = client.Close() })
 		client.AddHook(leaseCommandHook{process: f.leaseCommand})
@@ -693,19 +736,26 @@ func newServeExitFixture(t *testing.T, opts serveExitOptions) *serveExitFixture 
 }
 
 func (f *serveExitFixture) leaseCommand(cmd redis.Cmder) error {
-	switch cmd := cmd.(type) {
-	case *redis.ScanCmd:
-		cmd.SetVal([]string{"api"}, 0)
-	case *redis.BoolCmd:
-		cmd.SetVal(true)
-	case *redis.Cmd:
-		script := fmt.Sprint(cmd.Args()[1])
-		if (strings.Contains(script, "PEXPIRE") || script == renewEngineLease.Hash()) && f.renewFail.Load() {
-			return errors.New("renewal unavailable")
-		}
-		cmd.SetVal(int64(1))
+	c, ok := cmd.(*redis.Cmd)
+	if !ok {
+		return nil
 	}
+	if classifyLease(c) == leaseRenew && f.renewFail.Load() {
+		return errors.New("renewal unavailable")
+	}
+	c.SetVal(int64(1))
 	return nil
+}
+
+// begin applies the settings and, with a lease, waits out the fresh grant's
+// hold, so the first engine is running when it returns.
+func (f *serveExitFixture) begin() {
+	f.t.Helper()
+	f.settingsChanged()
+	if f.leased {
+		f.want("during the hold", 0, stateOff, "replica_lease_pending")
+		f.sleep(engineLeaseTTL)
+	}
 }
 
 func (f *serveExitFixture) starts() int {
@@ -772,7 +822,7 @@ func TestServeExitRestartsAfterReadAndRenewal(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			f := newServeExitFixture(t, serveExitOptions{lease: true})
 			defer f.shutdown()
-			f.settingsChanged()
+			f.begin()
 			f.want("started", 1, stateOn, "")
 			// The exit triggers a background settings read, which succeeds.
 			f.exitServe(1)
@@ -785,7 +835,7 @@ func TestServeExitRestartsAfterReadAndRenewal(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			f := newServeExitFixture(t, serveExitOptions{lease: true})
 			defer f.shutdown()
-			f.settingsChanged()
+			f.begin()
 			// The exit's background read fails, so the renewal completes first.
 			f.store.failReads.Store(1)
 			f.exitServe(1)
@@ -820,7 +870,7 @@ func TestServeExitIgnoresFailedRenewal(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newServeExitFixture(t, serveExitOptions{lease: true})
 		defer f.shutdown()
-		f.settingsChanged()
+		f.begin()
 		f.exitServe(1)
 		f.renewFail.Store(true)
 		f.sleep(censusInterval)
@@ -840,7 +890,7 @@ func TestServeExitWithoutSnapshotWakesOnRenewal(t *testing.T) {
 		defer f.shutdown()
 		// Shutdown joins the blocked check, so release it first.
 		defer close(release)
-		f.settingsChanged()
+		f.begin()
 		f.want("started", 1, stateOn, "")
 		f.exitServe(1)
 		f.wantWithdrawn("after the exit", 1)
@@ -854,7 +904,7 @@ func TestServeExitThenDisabledStaysOff(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newServeExitFixture(t, serveExitOptions{lease: true})
 		defer f.shutdown()
-		f.settingsChanged()
+		f.begin()
 		f.store.set("direct_connections.enabled", "false")
 		f.exitServe(1)
 		f.want("after the exit's read", 1, stateOff, reasonDisabled)
@@ -869,7 +919,7 @@ func TestServeExitSecondExitWaitsForSettingsChange(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newServeExitFixture(t, serveExitOptions{lease: true, recheck: true})
 		defer f.shutdown()
-		f.settingsChanged()
+		f.begin()
 		f.exitServe(1)
 		f.sleep(censusInterval)
 		f.want("restarted", 2, stateOn, "")
@@ -908,7 +958,12 @@ func TestServeExitDetachesBeforePublishAndCountsRenewalDuringPublish(t *testing.
 		gate := &gatedLog{writing: make(chan struct{}), release: make(chan struct{})}
 		f := newServeExitFixture(t, serveExitOptions{lease: true, logs: gate})
 		defer f.shutdown()
-		f.settingsChanged()
+		// Registered after the shutdown above, so it runs first: a failed check
+		// must free the gated log write before Shutdown waits for it.
+		var releaseOnce sync.Once
+		releaseGate := func() { releaseOnce.Do(func() { close(gate.release) }) }
+		defer releaseGate()
+		f.begin()
 		f.want("started", 1, stateOn, "")
 		f.mu.Lock()
 		close(f.servers[0].exit)
@@ -928,7 +983,7 @@ func TestServeExitDetachesBeforePublishAndCountsRenewalDuringPublish(t *testing.
 			t.Fatalf("lease successes during the publication: %d -> %d, want one more", before, after)
 		}
 
-		close(gate.release)
+		releaseGate()
 		synctest.Wait()
 		if n := f.starts(); n != 2 {
 			t.Errorf("a settings read and a lease renewal both completed after the exit: %d starts, want 2", n)
@@ -1125,7 +1180,7 @@ func (recordingLeaseRelease) ProcessPipelineHook(next redis.ProcessPipelineHook)
 // acquires the lease never overlaps an engine of the same identity.
 func TestShutdownClosesEngineBeforeReleasingLease(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		f := &lifecycleFixture{t: t, name: "renewal recovers at sixty", start: time.Now()}
+		f := &lifecycleFixture{t: t, name: "renewal recovers at sixty", start: time.Now(), failFrom: engineLeaseTTL + censusInterval, leased: true}
 		f.store = &memorySettings{values: map[string]string{"direct_connections.enabled": "true"}}
 		f.cfg = testConfig(f.store)
 		f.cfg.SecretKey = bytes.Repeat([]byte{0x41}, 32)
@@ -1142,6 +1197,7 @@ func TestShutdownClosesEngineBeforeReleasingLease(t *testing.T) {
 		f.cfg.ReplicaPresence = cache.NewAPIReplicaPresence(client, "api")
 		f.svc = New(t.Context(), f.cfg)
 		f.apply()
+		f.advance(engineLeaseTTL)
 		if f.calls != 1 {
 			t.Fatalf("starts=%d, want 1", f.calls)
 		}

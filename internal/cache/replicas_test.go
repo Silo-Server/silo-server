@@ -30,7 +30,7 @@ func TestAPIReplicaPresenceSeparatesIdenticalNodeNames(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 	first := NewAPIReplicaPresence(client, "shared-api-name")
 	second := NewAPIReplicaPresence(client, "shared-api-name")
-	if first.key() == second.key() {
+	if first.ID() == second.ID() {
 		t.Fatal("replicas with the same node name share a presence marker")
 	}
 }
@@ -43,13 +43,14 @@ func TestAPIReplicaPresenceRegisterRenewsAfterFailedFirstWrite(t *testing.T) {
 		down.Store(true)
 		var writes atomic.Int32
 		client.AddHook(commandHook{process: func(cmd redis.Cmder) error {
-			if cmd.Name() != "set" {
+			if cmd.Name() != "evalsha" {
 				return nil
 			}
 			if down.Load() {
 				return errors.New("redis down")
 			}
 			writes.Add(1)
+			cmd.(*redis.Cmd).SetVal(int64(1))
 			return nil
 		}})
 		ctx, cancel := context.WithCancel(t.Context())
@@ -89,7 +90,7 @@ func TestAPIReplicaPresenceRegisterBoundsStalledWrite(t *testing.T) {
 		client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:6379"})
 		t.Cleanup(func() { _ = client.Close() })
 		client.AddHook(contextHook{process: func(ctx context.Context, cmd redis.Cmder) error {
-			if cmd.Name() != "set" {
+			if cmd.Name() != "evalsha" {
 				return nil
 			}
 			<-ctx.Done()
@@ -131,6 +132,9 @@ func TestAPIReplicaPresenceDoesNotRewriteMarkerAfterWithdrawal(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 			ops = append(ops, cmd.Name())
+			if c, ok := cmd.(*redis.Cmd); ok {
+				c.SetVal(int64(1))
+			}
 			return nil
 		}})
 		ctx, cancel := context.WithCancel(t.Context())
@@ -147,7 +151,7 @@ func TestAPIReplicaPresenceDoesNotRewriteMarkerAfterWithdrawal(t *testing.T) {
 		synctest.Wait()
 		mu.Lock()
 		defer mu.Unlock()
-		if want := []string{"set", "del"}; !slices.Equal(ops, want) {
+		if want := []string{"evalsha", "zrem"}; !slices.Equal(ops, want) {
 			t.Fatalf("Redis commands = %v, want %v: no write after the withdrawal delete", ops, want)
 		}
 	})

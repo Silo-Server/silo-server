@@ -49,32 +49,74 @@ schedules a follow-up check when the values differ from the running check's.
 
 ## Replica Census and Lease
 
-One process presence marker (`cache.APIReplicaPresence`) is shared with network
-access providers. Redis markers expire after 90 seconds and refresh every
-30 seconds. The direct service counts them every 30 seconds. A count of zero
-refreshes this process's marker and evaluates as one replica; a failed refresh
-counts as a census error.
+The census and the lease run only while direct connections are on. The lifecycle
+starts them when settings enable the feature, before the HTTP handler exists, and
+stops them when settings disable it: it closes the engine first, then releases the
+lease. A disabled feature runs neither; the presence member that network access
+shares still refreshes.
+
+Each API process keeps one member in the Redis sorted set `silo:api-replicas`
+(`cache.APIReplicaPresence`, shared with network access providers). The member is
+the process's presence ID, scored with its expiry in Redis milliseconds. Members
+expire after 90 seconds and refresh every 30 seconds. One script call prunes expired
+members, writes this process's member if it is missing, and returns the count. The
+count therefore includes this process, a lone member of another process is never
+read as this one's, and the cost does not grow with the keyspace. Expiry compares
+scores with Redis `TIME`, so no host clock enters. A failed call is a census error.
+A process that predates the set writes no member and is not counted; it runs no engine.
 
 The engine lease uses `silo:direct:engine-lease`, with this process's presence ID
-as its value. Acquisition uses `SET ... NX PX 90000`. Renewal every 30 seconds
-compares the holder ID before `PEXPIRE`; release compares it before `DEL`.
-The census and the lease operation of one update each have their own 2-second
-bound, so a slow census cannot expire the renewal. The presence writes and the
-lease use a Redis client whose sockets honor context deadlines, so a Redis that
-stops answering ends each call at its bound. The lifecycle stops the engine once
-the last successful renewal is older than 60 seconds, independently of an
-in-flight census or renewal. Without Redis, there is no census or lease and the
-gate permits the engine. Redis that is configured but unusable, because its client
-failed to build or this process has no presence identity, is not a deployment
-without Redis: the gate stays closed with `replica_census_unavailable`.
+as its value. The acquisition script writes the value with `PX 90000` when the key
+is free and refreshes the TTL when the key already holds this process's value, so
+a retry after a lost reply to an applied write succeeds. Renewal every 30 seconds
+compares the holder ID before `PEXPIRE`; release compares it before `DEL`. A failed
+lease operation is retried after 5 seconds, so one failed renewal leaves the next
+attempt well inside the 60-second self-stop. The release has its own 2-second bound
+and runs even when the shutdown context has already ended. The census and the lease
+operation of one update each have their own 2-second bound, so a slow census cannot
+expire the renewal. The presence writes and the lease use a Redis client whose
+sockets honor context deadlines, so a Redis that stops answering ends each call at
+its bound. The lifecycle stops the engine once the last successful renewal is older
+than 60 seconds, independently of an in-flight census or renewal.
+
+A grant is one stretch of ownership of the key. Redis's confirmation of an
+acquisition opens it; an attempt that fails, even one whose write applied, opens
+nothing, and the retry is idempotent. A renewal answered `0`, a release, or a
+renewal that completes after the grant's own 60-second deadline ends it, so
+the next success is a new grant, also for the same process. A fresh grant permits
+the engine only after 90 seconds, the lease TTL, counted from the send time of the
+acquisition or renewal that opened it. The process that held the key before it can
+have lost the key at any point up to that send, so it stops permitting traffic
+within 60 seconds of its last renewal and has the remaining 30 seconds to tear down.
+The hold is the same margin a crash takeover has. Every enable waits the hold: the census and lease start when the
+feature is turned on, and the engine starts when the hold ends. A grant lost to
+another process makes the engine stop with `replica_lease_held` or
+`replica_lease_pending`, and the same process's next grant waits again.
+
+A running engine's packet connection is fenced by its grant. Once the grant ends
+or its local deadline (last renewal plus 60 seconds) passes, the connection handed
+to HTTP/3 drops every packet in both directions, including segmented writes, before
+the engine is drained. The drain of a stop the lease forces closes connections at
+once, with no grace period. No local check closes the gap of a process paused
+between a check and a send, or of two writable Redis authorities; the 30 seconds
+between the 60-second self-stop and the 90-second TTL bound the first case. The
+fence covers the HTTP/3 path Silo owns. The engine's own discovery and transport
+paths in shunpike are outside it.
+
+Redis is required for the engine in `server.mode = api`: separate API processes
+share the lease only through Redis. A single integrated process without Redis runs
+the engine with no census and no lease. Two integrated processes without Redis can
+overlap during a rolling restart; that case is left open.
 
 `internal/directconn/replica.go` separates permission to keep the engine running
 from availability for new direct connections:
 
 | Redis | Census | Lease | Engine May Run | Available | Reason |
 |---|---|---|---|---|---|
-| Absent | -- | -- | Yes | Yes | None |
-| Present | One replica | Held | Yes | Yes | None |
+| Absent, `server.mode` not `api` | -- | -- | Yes | Yes | None |
+| Absent, `server.mode = api` | -- | -- | No | No | `replica_census_unavailable` |
+| Present | One replica | Held, hold over | Yes | Yes | None |
+| Present | One replica | Held, fresh grant inside its hold | No | No | `replica_lease_pending` |
 | Present | One replica | Free or acquiring | No | No | `replica_lease_pending` |
 | Present | One replica | Held by another process | No | No | `replica_lease_held` |
 | Present | More than one replica | Held | Yes | No | `multiple_api_replicas` |
@@ -96,7 +138,10 @@ HKDF-SHA256 from `SECRET_KEY`, a nil salt, and the label
 `engine.NodePrivateFromBytes`, which clamps them.
 
 The UDP port defaults to 8094. An invalid port leaves the engine off with
-`udp_port_invalid`; a failed start reports `udp_port_bind_failed`.
+`udp_port_invalid`; a start that fails because the port is taken reports
+`udp_port_bind_failed`, and any other start failure reports `engine_start_failed`.
+A candidate engine built while its permission lapsed, because the lease or the
+settings changed during construction, is closed unpublished and is no failure.
 `internal/directconn/engine.go` uses one start function and one stop function.
 No engine starts before the HTTP handler it serves exists: the API host calls
 `HandlerReady` once the router is built. Until then a settings read records its
@@ -104,6 +149,7 @@ values and starts nothing, and `HandlerReady` runs the start only if settings an
 the gate still allow it. This keeps the lease deadline in force during a slow
 startup, because the lifecycle never waits for the handler.
 Each start replays the stored peer set before constructing a fresh HTTP/3 server.
+A peer list the running engine rejects is not stored, so a restart never replays it.
 Each stop shuts down that server before calling `Engine.Close` without a timeout
 wrapper. One goroutine reads `Engine.Changed` and ends before that engine closes.
 If the engine reports a different local port after a rebind, Silo stops it and

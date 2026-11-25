@@ -15,7 +15,10 @@ import (
 	"github.com/darthShadow/shunpike/engine/n4"
 )
 
-const reasonEngineStartFailed = "engine_start_failed"
+const (
+	reasonEngineStartFailed = "engine_start_failed"
+	reasonPortBindFailed    = "udp_port_bind_failed"
+)
 
 type engineHandle interface {
 	LocalPort() uint16
@@ -70,7 +73,16 @@ type engineState struct {
 	// handlerReady is set by HandlerReady; with Config.AwaitHandler no engine
 	// starts before it. mu protects it.
 	handlerReady bool
+
+	// graceless makes drainServer close every connection at once instead of
+	// waiting out the grace period; the lifecycle sets it for a stop caused by
+	// the lease and clears it after.
+	graceless bool
 }
+
+// errStaleStart marks a candidate engine closed unpublished because the
+// settings or the replica gate changed while it was built.
+var errStaleStart = errors.New("direct engine start is stale")
 
 func buildEngineConfig(cfg Config, values settings) (engine.Config, n4.Policy, bool, error) {
 	policy := n4.DefaultServerPolicy()
@@ -110,10 +122,11 @@ func (s *Service) initEngine() {
 	go s.engineControl()
 }
 
-// Shutdown drains HTTP/3 under ctx, stops and joins the lease monitor, and
-// closes the engine synchronously. It waits for all lifecycle goroutines even
-// after ctx expires; engine close has no timeout wrapper. Repeated calls return
-// the same shutdown error.
+// Shutdown drains HTTP/3 under ctx, closes the engine synchronously, then stops
+// and joins the lease monitor, which releases the lease under its own bound
+// even when ctx has expired. It waits for all lifecycle goroutines even after
+// ctx expires; engine close has no timeout wrapper. Repeated calls return the
+// same shutdown error.
 func (s *Service) Shutdown(ctx context.Context) error {
 	l := s.lifecycle
 	select {
@@ -174,25 +187,31 @@ func (s *Service) engineFeature() Feature {
 }
 
 // SetPeers replaces leased peers, copying the input, and replays them before
-// constructing the next HTTP/3 server. It returns any live engine update error.
+// constructing the next HTTP/3 server. A live engine validates the list first;
+// a list it rejects is returned as an error and is not kept, so a restart never
+// replays it. With no live engine the list is staged unvalidated for the next
+// start.
 func (s *Service) SetPeers(peers []engine.Peer) error {
 	l := s.lifecycle
 	l.peersMu.Lock()
 	defer l.peersMu.Unlock()
-	l.peers = slices.Clone(peers)
-	for i := range l.peers {
-		l.peers[i].Endpoints = slices.Clone(l.peers[i].Endpoints)
-		if c := l.peers[i].Confirmation; c != nil {
+	staged := slices.Clone(peers)
+	for i := range staged {
+		staged[i].Endpoints = slices.Clone(staged[i].Endpoints)
+		if c := staged[i].Confirmation; c != nil {
 			copyOf := *c
-			l.peers[i].Confirmation = &copyOf
+			staged[i].Confirmation = &copyOf
 		}
 	}
 	l.mu.Lock()
 	e := l.current
 	l.mu.Unlock()
 	if e != nil {
-		return e.SetPeers(l.peers)
+		if err := e.SetPeers(staged); err != nil {
+			return err
+		}
 	}
+	l.peers = staged
 	return nil
 }
 
@@ -256,15 +275,29 @@ func (s *Service) engineControl() {
 func (s *Service) reconcileEngine(drift engineHandle) {
 	l := s.lifecycle
 	l.mu.Lock()
-	if s.cfg.AwaitHandler && !l.handlerReady {
-		// Keep the retry flag: HandlerReady runs the start it holds.
-		l.mu.Unlock()
-		return
+	values, ready := l.values, l.ready
+	// Keep the retry flag while a start is held: HandlerReady runs the start.
+	held := s.cfg.AwaitHandler && !l.handlerReady
+	var retry bool
+	if !held {
+		retry = l.retry
+		l.retry = false
 	}
-	values, ready, retry := l.values, l.ready, l.retry
-	l.retry = false
 	l.mu.Unlock()
 	if !ready {
+		return
+	}
+	// The census and lease run only while direct connections are on. Starting
+	// them before the handler exists lets a fresh grant's hold overlap startup.
+	if s.replica != nil && values.enabled {
+		s.replica.start(context.WithoutCancel(s.ctx))
+	}
+	if held {
+		// No engine runs before its handler is ready, so a disable in that window
+		// has nothing to close before it stops the monitor and releases the lease.
+		if s.replica != nil && !values.enabled {
+			s.haltReplica()
+		}
 		return
 	}
 	gate := s.ReplicaGate()
@@ -274,7 +307,15 @@ func (s *Service) reconcileEngine(drift engineHandle) {
 		l.gate = gate
 	}
 	if reason := s.engineStopReason(values, gate); reason != "" {
+		// A stop the lease forces closes connections at once: the lease no longer
+		// covers them.
+		l.graceless = values.enabled && reason == gate.Reason
 		s.stopEngine(reason, nil)
+		l.graceless = false
+		if s.replica != nil && !values.enabled {
+			// The engine is closed first, so the lease outlives it.
+			s.haltReplica()
+		}
 		l.restartPending = false
 		l.mu.Lock()
 		l.feature.State, l.feature.Reason = stateOff, reason
@@ -302,9 +343,18 @@ func (s *Service) reconcileEngine(drift engineHandle) {
 		return
 	}
 	if err := s.startEngine(values); err != nil {
+		if errors.Is(err, errStaleStart) {
+			// Not a failure: the newer input is already waiting.
+			s.wakeEngine()
+			return
+		}
 		l.failed = true
+		reason := reasonEngineStartFailed
+		if errors.Is(err, engine.ErrPortUnavailable) {
+			reason = reasonPortBindFailed
+		}
 		l.mu.Lock()
-		l.feature.State, l.feature.Reason = stateOff, "udp_port_bind_failed"
+		l.feature.State, l.feature.Reason = stateOff, reason
 		l.pending = append(l.pending, l.feature)
 		l.mu.Unlock()
 		s.cfg.Logger.WarnContext(s.ctx, "direct connections: engine start failed", "component", "directconn", "error", err)
@@ -350,11 +400,17 @@ func (s *Service) serveExited() {
 		l.failed = true
 	} else {
 		l.restartPending = true
-		if s.claimReread() {
-			go s.rereadSettings()
-		}
+		s.startAsyncReread()
 	}
 	s.teardownEngine(e, reasonEngineStartFailed, nil)
+}
+
+// haltReplica stops the census and lease and releases the lease. A release
+// failure is logged: the lease expires on its own.
+func (s *Service) haltReplica() {
+	if err := s.replica.halt(context.Background()); err != nil {
+		s.cfg.Logger.WarnContext(s.ctx, "direct connections: engine lease release failed", "component", "directconn", "error", err)
+	}
 }
 
 func (s *Service) engineStopReason(values settings, gate ReplicaGate) string {
@@ -370,6 +426,10 @@ func (s *Service) engineStopReason(values settings, gate ReplicaGate) string {
 	}
 }
 
+// startEngine builds an engine for values and publishes it. It rechecks the
+// settings and the replica gate after construction, which can outlast the
+// lease: a candidate that no longer has permission is closed unpublished and
+// errStaleStart is returned.
 func (s *Service) startEngine(values settings) error {
 	l := s.lifecycle
 	c, policy, _, err := buildEngineConfig(s.cfg, values)
@@ -386,11 +446,27 @@ func (s *Service) startEngine(values settings) error {
 	l.peersMu.Lock()
 	err = e.SetPeers(l.peers)
 	l.mu.Lock()
-	l.current = e
+	var grant uint64
+	stale := false
+	if err == nil {
+		if s.replica != nil {
+			grant, _ = s.replica.window()
+		}
+		stale = l.values != values || s.engineStopReason(l.values, s.ReplicaGate()) != ""
+	}
+	if !stale {
+		l.current = e
+	}
 	l.mu.Unlock()
 	l.peersMu.Unlock()
+	if stale {
+		if cerr := e.Close(); cerr != nil {
+			s.cfg.Logger.WarnContext(s.ctx, "direct connections: engine close failed", "component", "directconn", "error", cerr)
+		}
+		return errStaleStart
+	}
 	if err != nil {
-		s.stopEngine("udp_port_bind_failed", nil)
+		s.stopEngine(reasonEngineStartFailed, nil)
 		return fmt.Errorf("apply direct engine peers: %w", err)
 	}
 	if s.cfg.newServer != nil {
@@ -399,9 +475,10 @@ func (s *Service) startEngine(values settings) error {
 			srv := l.server
 			done := make(chan struct{})
 			l.serveDone = done
+			conn := fenceFor(e.PacketConn(), s.replica, grant)
 			go func() {
 				defer close(done)
-				if err := srv.Serve(e.PacketConn()); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
+				if err := srv.Serve(conn); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
 					s.cfg.Logger.WarnContext(s.ctx, "direct connections: HTTP/3 serve stopped", "component", "directconn", "error", err)
 				}
 			}()
@@ -438,7 +515,9 @@ func (s *Service) engineEvents(ctx context.Context, e engineHandle, done chan st
 	}
 }
 
-// stopEngine detaches the current engine and tears it down.
+// stopEngine detaches the current engine and tears it down. A non-empty reason
+// publishes the engine row off with that reason; an empty reason is a restart
+// and leaves the row as it is until the next start or stop sets it.
 func (s *Service) stopEngine(reason string, shutdownCtx context.Context) {
 	l := s.lifecycle
 	l.peersMu.Lock()
@@ -453,9 +532,12 @@ func (s *Service) stopEngine(reason string, shutdownCtx context.Context) {
 
 // teardownEngine ends a detached engine: it joins the event worker, drains
 // HTTP/3, closes the engine, and on shutdown then stops the replica monitor,
-// which releases the lease, and joins the check workers. The engine closes
-// before the lease is released, so no successor holds the lease while this
-// engine is open. A nil engine with no shutdown context has nothing to end.
+// which releases the lease, and joins the check workers. On shutdown the engine
+// closes before the lease is released, so no successor takes the lease while
+// this engine is open. On a stop the lease forces, the lease may already have
+// passed to another process: the packet fence has cut the engine off by then,
+// and the drain closes connections at once. A nil engine with no shutdown
+// context has nothing to end.
 func (s *Service) teardownEngine(e engineHandle, reason string, shutdownCtx context.Context) {
 	l := s.lifecycle
 	if e == nil && shutdownCtx == nil {
@@ -479,20 +561,19 @@ func (s *Service) teardownEngine(e engineHandle, reason string, shutdownCtx cont
 	}
 	if shutdownCtx != nil {
 		if s.replica != nil {
-			// End a census or renewal in flight, so the stop does not wait for it.
-			s.replica.interrupt()
-			select {
-			case s.replica.stop <- shutdownCtx:
-			case <-s.replica.done:
-			}
-			<-s.replica.done
-			l.shutdownErr = errors.Join(l.shutdownErr, s.replica.stopErr)
+			// halt ends a census or renewal in flight, so the stop does not wait for it.
+			l.shutdownErr = errors.Join(l.shutdownErr, s.replica.halt(shutdownCtx))
 		}
 		s.cancelService()
 		s.checkWorkers.Wait()
 		if s.replicaEventsDone != nil {
 			<-s.replicaEventsDone
 		}
+	}
+	if reason == "" {
+		// A restart: the engine row goes from its old state to the new one, with
+		// no off row in between.
+		return
 	}
 	l.mu.Lock()
 	l.feature.State, l.feature.Reason = stateOff, reason
@@ -506,7 +587,13 @@ func (s *Service) drainServer(shutdownCtx context.Context) {
 	l := s.lifecycle
 	ctx := shutdownCtx
 	cancel := func() {}
-	if ctx == nil {
+	switch {
+	case ctx != nil:
+	case l.graceless:
+		// An ended context makes the server close every connection now.
+		ctx, cancel = context.WithCancel(context.Background())
+		cancel()
+	default:
 		ctx, cancel = context.WithTimeout(context.Background(), checkTimeout)
 	}
 	if err := l.server.Shutdown(ctx); err != nil {
@@ -530,6 +617,24 @@ func (s *Service) cancelService() {
 	s.cancel()
 }
 
+// startAsyncReread starts a background settings reread that Shutdown joins:
+// the slot is claimed under the lock cancelService takes, so no reread starts
+// once shutdown has begun. It starts nothing while a reread runs.
+func (s *Service) startAsyncReread() {
+	s.mu.Lock()
+	if s.rereading || s.ctx.Err() != nil {
+		s.mu.Unlock()
+		return
+	}
+	s.rereading = true
+	s.checkWorkers.Add(1)
+	s.mu.Unlock()
+	go func() {
+		defer s.checkWorkers.Done()
+		s.rereadSettings()
+	}()
+}
+
 // Publish outside the lifecycle lock, matching Status's service-to-lifecycle
 // lock order. Keep transitions until the first probe snapshot exists.
 func (s *Service) publishEngineFeatures() {
@@ -543,5 +648,13 @@ func (s *Service) publishEngineFeatures() {
 	features := append(l.pending, l.feature)
 	l.pending = nil
 	l.mu.Unlock()
-	s.logFeatures(s.ctx, s.last.status.Enabled, features)
+	// The direct row follows the engine row, so it is republished with it.
+	for _, f := range s.last.status.Features {
+		if f.Feature == featureDirect {
+			direct := []Feature{f}
+			s.projectDirect(direct, s.last.status.Enabled)
+			features = append(features, direct[0])
+		}
+	}
+	s.logFeatureStates(s.ctx, s.last.status.Enabled, features, false)
 }

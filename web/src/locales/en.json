@@ -64418,7 +64418,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Check the router for UPnP, NAT-PMP, or PCP support."
+      "value": "Ask the router for a UPnP, NAT-PMP, or PCP port mapping."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -64427,10 +64427,28 @@
       "value": "Port mapping"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Range: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " to "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Readiness checks do not start direct playback."
+      "value": "Turning this on starts the direct connection engine. It opens a UDP port and, when Port mapping is on, asks the router for a port mapping. Run check only reads the host's state."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
@@ -64485,6 +64503,12 @@
     {
       "type": 0,
       "value": "Invalid value; using off"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Invalid value; using the default"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

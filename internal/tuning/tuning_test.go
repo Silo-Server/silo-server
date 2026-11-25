@@ -108,7 +108,7 @@ var tuningParseTests = []struct {
 			DirectReceiveWindowMiB: 128,
 			DirectACKDecimation:    true,
 		},
-		adjustments: []Adjustment{{Env: "SILO_NET_DIRECT_RECEIVE_WINDOW", Requested: "x", Effective: "128", Reason: "invalid"}},
+		adjustments: []Adjustment{{Env: "SILO_NET_DIRECT_RECEIVE_WINDOW", Requested: "x", Effective: "128", Reason: "invalid_default"}},
 	},
 	{
 		name:       "direct GSO invalid",
@@ -117,12 +117,12 @@ var tuningParseTests = []struct {
 		sendBuffer: 33554432,
 		direct: &Config{
 			DirectUDPPort:          8094,
-			DirectGSO:              true,
+			DirectGSO:              false,
 			DirectBBRLoss:          "both",
 			DirectReceiveWindowMiB: 128,
 			DirectACKDecimation:    true,
 		},
-		adjustments: []Adjustment{{Env: "SILO_NET_DIRECT_GSO", Requested: "maybe", Effective: "on", Reason: "invalid"}},
+		adjustments: []Adjustment{{Env: "SILO_NET_DIRECT_GSO", Requested: "maybe", Effective: "off", Reason: "invalid"}},
 	},
 	{
 		name:       "direct ACK decimation invalid",
@@ -134,9 +134,9 @@ var tuningParseTests = []struct {
 			DirectGSO:              true,
 			DirectBBRLoss:          "both",
 			DirectReceiveWindowMiB: 128,
-			DirectACKDecimation:    true,
+			DirectACKDecimation:    false,
 		},
-		adjustments: []Adjustment{{Env: "SILO_NET_DIRECT_ACK_DECIMATION", Requested: "maybe", Effective: "on", Reason: "invalid"}},
+		adjustments: []Adjustment{{Env: "SILO_NET_DIRECT_ACK_DECIMATION", Requested: "maybe", Effective: "off", Reason: "invalid"}},
 	},
 	{
 		name:       "direct BBR loss invalid",
@@ -146,11 +146,11 @@ var tuningParseTests = []struct {
 		direct: &Config{
 			DirectUDPPort:          8094,
 			DirectGSO:              true,
-			DirectBBRLoss:          "both",
+			DirectBBRLoss:          "off",
 			DirectReceiveWindowMiB: 128,
 			DirectACKDecimation:    true,
 		},
-		adjustments: []Adjustment{{Env: "SILO_NET_DIRECT_BBR_LOSS", Requested: "none", Effective: "both", Reason: "invalid"}},
+		adjustments: []Adjustment{{Env: "SILO_NET_DIRECT_BBR_LOSS", Requested: "none", Effective: "off", Reason: "invalid"}},
 	},
 	{
 		name:       "direct GSO off",

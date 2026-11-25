@@ -24,27 +24,36 @@ func TestReplicaServiceGate(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		client := redis.NewClient(&redis.Options{})
+		client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:6379"})
 		t.Cleanup(func() { _ = client.Close() })
 		var count atomic.Int32
 		count.Store(2)
 		client.AddHook(leaseCommandHook{process: func(cmd redis.Cmder) error {
-			switch cmd := cmd.(type) {
-			case *redis.ScanCmd:
-				cmd.SetVal(make([]string, int(count.Load())), 0)
-			case *redis.BoolCmd:
-				cmd.SetVal(true)
-			case *redis.Cmd:
-				cmd.SetVal(int64(1))
+			if cmd, ok := cmd.(*redis.Cmd); ok {
+				if op := classifyLease(cmd); op == leaseCensusCount || op == leaseCensusTouch {
+					cmd.SetVal(int64(count.Load()))
+				} else {
+					cmd.SetVal(int64(1))
+				}
 			}
 			return nil
 		}})
 		var logs bytes.Buffer
 		cfg := testConfig(&memorySettings{values: map[string]string{"direct_connections.enabled": "true"}})
+		cfg.Tuning, _ = tuning.Parse(func(string) string { return "" })
+		cfg.SecretKey = bytes.Repeat([]byte{0x41}, 32)
+		cfg.newEngine = func(_ context.Context, c engine.Config) (engineHandle, error) {
+			return &lifecycleEngine{port: c.Port, changed: make(chan struct{}, 1), events: new([]string), eventsMu: new(sync.Mutex)}, nil
+		}
 		cfg.Logger = slog.New(slog.NewTextHandler(&logs, nil))
 		cfg.ReplicaPresence = cache.NewAPIReplicaPresence(client, "api")
 		cfg.RedisClient = client
 		svc := New(ctx, cfg)
+		synctest.Wait()
+		// The first status read starts the census, which runs only while the feature is on.
+		if _, err := svc.Status(t.Context(), false); err != nil {
+			t.Fatal(err)
+		}
 		synctest.Wait()
 		status, err := svc.Status(t.Context(), false)
 		if err != nil {
@@ -58,7 +67,9 @@ func TestReplicaServiceGate(t *testing.T) {
 			t.Fatalf("missing gate reason in feature log: %s", logs.String())
 		}
 		count.Store(1)
-		time.Sleep(30 * time.Second) //nolint:forbidigo // Advance synctest virtual time to the next census, then wait for publication.
+		// The next census sees one replica and acquires; the fresh grant's hold ends
+		// 90 seconds after that.
+		time.Sleep(censusInterval + engineLeaseTTL) //nolint:forbidigo // Advance synctest virtual time past the grant's hold, then wait for publication.
 		synctest.Wait()
 		status, err = svc.Status(t.Context(), false)
 		if err != nil {
@@ -128,17 +139,14 @@ func TestReplicaCensusRefreshAndSelfStop(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		client := redis.NewClient(&redis.Options{})
+		client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:6379"})
 		t.Cleanup(func() { _ = client.Close() })
 		var unavailable atomic.Bool
 		client.AddHook(leaseCommandHook{process: func(cmd redis.Cmder) error {
 			if unavailable.Load() {
 				return errors.New("redis down")
 			}
-			switch cmd := cmd.(type) {
-			case *redis.BoolCmd:
-				cmd.SetVal(true)
-			case *redis.Cmd:
+			if cmd, ok := cmd.(*redis.Cmd); ok {
 				cmd.SetVal(int64(1))
 			}
 			return nil
@@ -147,6 +155,11 @@ func TestReplicaCensusRefreshAndSelfStop(t *testing.T) {
 		monitor := newReplicaMonitor(presence, &redisEngineLease{client: client, id: "process"}, slog.New(slog.DiscardHandler))
 		done := make(chan struct{})
 		go func() { defer close(done); monitor.run(ctx) }()
+		synctest.Wait()
+		if got := monitor.snapshot(); got.EngineMayRun || got.Reason != "replica_lease_pending" {
+			t.Fatalf("gate during a fresh grant's hold = %+v, want a pending lease", got)
+		}
+		time.Sleep(engineLeaseTTL) //nolint:forbidigo // Advance synctest virtual time past the fresh grant's hold.
 		synctest.Wait()
 		if got := monitor.snapshot(); !got.EngineMayRun || !got.Available {
 			t.Fatalf("initial gate = %+v", got)
@@ -175,12 +188,13 @@ func TestReplicaCensusRefreshAndSelfStop(t *testing.T) {
 
 func TestAPIReplicaRefreshWritesOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		client := redis.NewClient(&redis.Options{})
+		client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:6379"})
 		t.Cleanup(func() { _ = client.Close() })
 		var writes atomic.Int32
 		client.AddHook(leaseCommandHook{process: func(cmd redis.Cmder) error {
-			if cmd.Name() == "set" {
+			if cmd.Name() == "evalsha" {
 				writes.Add(1)
+				cmd.(*redis.Cmd).SetVal(int64(1))
 			}
 			return nil
 		}})
@@ -229,10 +243,7 @@ func (h contextLeaseHook) ProcessHook(redis.ProcessHook) redis.ProcessHook {
 			cmd.SetErr(err)
 			return err
 		}
-		switch cmd := cmd.(type) {
-		case *redis.BoolCmd:
-			cmd.SetVal(true)
-		case *redis.Cmd:
+		if cmd, ok := cmd.(*redis.Cmd); ok {
 			cmd.SetVal(int64(1))
 		}
 		return nil
@@ -298,22 +309,18 @@ func TestShutdownInterruptsInFlightReplicaUpdate(t *testing.T) {
 		client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:6379"})
 		t.Cleanup(func() { _ = client.Close() })
 		client.AddHook(ctxCommandHook{process: func(ctx context.Context, cmd redis.Cmder) error {
-			switch cmd := cmd.(type) {
-			case *redis.ScanCmd:
-				if stall.Load() {
+			if cmd, ok := cmd.(*redis.Cmd); ok {
+				if op := classifyLease(cmd); stall.Load() && (op == leaseCensusCount || op == leaseCensusTouch) {
 					<-ctx.Done()
 					cmd.SetErr(ctx.Err())
 					return ctx.Err()
 				}
-				cmd.SetVal([]string{"api"}, 0)
-			case *redis.BoolCmd:
-				cmd.SetVal(true)
-			case *redis.Cmd:
 				cmd.SetVal(int64(1))
 			}
 			return nil
 		}})
-		cfg := testConfig(&memorySettings{values: map[string]string{"direct_connections.enabled": "false"}})
+		// The census and lease run only while direct connections are on.
+		cfg := testConfig(&memorySettings{values: map[string]string{"direct_connections.enabled": "true"}})
 		cfg.RedisClient = client
 		cfg.ReplicaPresence = cache.NewAPIReplicaPresence(client, "api")
 		svc := New(t.Context(), cfg)

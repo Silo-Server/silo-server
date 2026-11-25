@@ -70250,7 +70250,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "⟦Çĥéçķ ţĥé ŕöûţéŕ ƒöŕ ÛÞñÞ, ÑÅŢ-ÞṀÞ, öŕ ÞÇÞ šûþþöŕţ.~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Åšķ ţĥé ŕöûţéŕ ƒöŕ å ÛÞñÞ, ÑÅŢ-ÞṀÞ, öŕ ÞÇÞ þöŕţ ɱåþþîñĝ.~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -70259,10 +70259,32 @@
       "value": "⟦Þöŕţ ɱåþþîñĝ~~~~~⟧"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "⟦Ŕåñĝé: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " ţö "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "⟦Ŕéåđîñéšš çĥéçķš đö ñöţ šţåŕţ đîŕéçţ þļåýƀåçķ.~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ţûŕñîñĝ ţĥîš öñ šţåŕţš ţĥé đîŕéçţ çöññéçţîöñ éñĝîñé. Îţ öþéñš å ÛĐÞ þöŕţ åñđ, ŵĥéñ Þöŕţ ɱåþþîñĝ îš öñ, åšķš ţĥé ŕöûţéŕ ƒöŕ å þöŕţ ɱåþþîñĝ. Ŕûñ çĥéçķ öñļý ŕéåđš ţĥé ĥöšţ'š šţåţé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
@@ -70317,6 +70339,12 @@
     {
       "type": 0,
       "value": "⟦Îñṽåļîđ ṽåļûé; ûšîñĝ öƒƒ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ ṽåļûé; ûšîñĝ ţĥé đéƒåûļţ~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

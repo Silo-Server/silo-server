@@ -58119,7 +58119,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "라우터에서 UPnP, NAT-PMP 또는 PCP를 지원하는지 확인해요."
+      "value": "라우터에 UPnP, NAT-PMP 또는 PCP 포트 매핑을 요청해요."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -58128,16 +58128,40 @@
       "value": "포트 매핑"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "범위: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": "~"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "준비 상태를 확인해도 직접 재생은 시작되지 않아요."
+      "value": "이 설정을 켜면 직접 연결 엔진이 시작돼요. 엔진은 UDP 포트를 열고, 포트 매핑이 켜져 있으면 라우터에 포트 매핑을 요청해요. 확인 실행은 호스트 상태를 읽기만 해요."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "관리자가 사용 중지함"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "허용 범위에 맞게 조정됨"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -58149,7 +58173,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "직접 연결 엔진을 시작할 수 없음"
+      "value": "직접 연결 엔진이 중지됐거나 시작할 수 없음"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -58180,6 +58204,12 @@
     {
       "type": 0,
       "value": "유효하지 않은 값이어서 끔으로 적용됨"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "잘못된 값, 기본값 사용"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

@@ -11,8 +11,15 @@ type logKey struct {
 }
 
 func (s *Service) logFeatures(ctx context.Context, enabled bool, features []Feature) {
+	s.logFeatureStates(ctx, enabled, features, true)
+}
+
+// logFeatureStates logs the feature states that changed. With wake, a direct row
+// wakes the engine lifecycle; the lifecycle's own publication passes false,
+// since it would otherwise wake itself.
+func (s *Service) logFeatureStates(ctx context.Context, enabled bool, features []Feature, wake bool) {
 	for _, f := range features {
-		if f.Feature == featureDirect {
+		if wake && f.Feature == featureDirect {
 			s.wakeEngine()
 		}
 		if !enabled && f.Feature == featureDirect {

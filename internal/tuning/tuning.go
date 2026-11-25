@@ -85,12 +85,16 @@ type Adjustment struct {
 
 const (
 	reasonInvalid = "invalid"
-	reasonClamped = "clamped"
+	// reasonInvalidDefault marks a malformed request that keeps the knob's default
+	// instead of turning the knob off.
+	reasonInvalidDefault = "invalid_default"
+	reasonClamped        = "clamped"
 )
 
 // Parse reads startup knobs through getenv. Empty values use the defaults.
-// Invalid TCP knobs turn off; invalid direct enums and malformed receive windows
-// use their defaults. Invalid ports become zero. Numeric receive windows clamp
+// An unrecognized TCP or direct on/off knob turns that knob off, as
+// internal/envutil does; a malformed receive window keeps its default. Invalid
+// ports become zero. Numeric receive windows clamp
 // to their bounds. Adjustments report each changed request in parse order;
 // no adjustments means a nil slice. No value prevents process startup.
 func Parse(getenv func(string) string) (Config, []Adjustment) {
@@ -140,7 +144,8 @@ func Parse(getenv func(string) string) (Config, []Adjustment) {
 			cfg.DirectUDPPort = port
 		}
 	}
-	// Each enum's first choice is its default.
+	// Each enum's first choice is its default; an unrecognized value means off.
+	// off is an allowed choice of every enum.
 	enum := func(env string, allowed ...string) string {
 		value := getenv(env)
 		normalized := strings.ToLower(strings.TrimSpace(value))
@@ -150,8 +155,8 @@ func Parse(getenv func(string) string) (Config, []Adjustment) {
 		if slices.Contains(allowed, normalized) {
 			return normalized
 		}
-		adjust(env, value, allowed[0], reasonInvalid)
-		return allowed[0]
+		adjust(env, value, knobOff, reasonInvalid)
+		return knobOff
 	}
 	cfg.DirectGSO = enum(EnvDirectGSO, knobOn, knobOff) == knobOn
 	cfg.DirectBBRLoss = enum(EnvDirectBBRLoss, directBBRLossBoth, directBBRLossNoLower, directBBRLossThreshold, knobOff)
@@ -161,7 +166,7 @@ func Parse(getenv func(string) string) (Config, []Adjustment) {
 	default:
 		window, err := strconv.Atoi(normalized)
 		if err != nil {
-			adjust(EnvDirectReceiveWindow, requested, strconv.Itoa(cfg.DirectReceiveWindowMiB), reasonInvalid)
+			adjust(EnvDirectReceiveWindow, requested, strconv.Itoa(cfg.DirectReceiveWindowMiB), reasonInvalidDefault)
 			break
 		}
 		cfg.DirectReceiveWindowMiB = min(max(window, minDirectReceiveWindowMiB), maxDirectReceiveWindowMiB)

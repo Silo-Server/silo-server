@@ -10,8 +10,9 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// apiReplicaKeyPrefix keys one live API replica's presence marker.
-const apiReplicaKeyPrefix = "silo:api-replica:"
+// apiReplicaKey is the sorted set of live API replicas. Each member is one
+// process's presence identity, scored with its expiry in Redis milliseconds.
+const apiReplicaKey = "silo:api-replicas"
 
 // APIReplicaTTL is how long a presence marker outlives its last refresh. It is
 // three refresh intervals so one missed refresh does not drop a live replica.
@@ -24,6 +25,23 @@ const apiReplicaRefreshInterval = 30 * time.Second
 // context deadlines, such as NewDeadlineRedisClientForRole's, ends a stalled
 // write at this bound.
 const apiReplicaWriteTimeout = 2 * time.Second
+
+// presenceScript maintains the replica set in one round trip. Expiry compares
+// scores with Redis TIME, so no replica's clock enters the census. It first drops
+// expired members. "touch" then writes the caller's member; "count" writes it
+// only if it is missing, so the count always includes the caller; "read" writes
+// nothing. It returns the number of live members.
+var presenceScript = redis.NewScript(`
+local t = redis.call('TIME')
+local now = t[1] * 1000 + math.floor(t[2] / 1000)
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now)
+local op = ARGV[3]
+if op == 'touch' or (op == 'count' and redis.call('ZSCORE', KEYS[1], ARGV[1]) == false) then
+  redis.call('ZADD', KEYS[1], now + ARGV[2], ARGV[1])
+  redis.call('PEXPIRE', KEYS[1], ARGV[2])
+end
+return redis.call('ZCARD', KEYS[1])
+`)
 
 // APIReplicaPresence is a census of live API processes shared by network access
 // providers and the direct engine gate. Count reports Redis failures to callers.
@@ -80,10 +98,8 @@ func (p *APIReplicaPresence) withdraw() {
 	p.withdrawn = true
 	cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_ = p.client.Del(cleanup, p.key()).Err()
+	_ = p.client.ZRem(cleanup, apiReplicaKey, p.id).Err()
 }
-
-func (p *APIReplicaPresence) key() string { return apiReplicaKeyPrefix + p.id }
 
 // ID returns this process's unique presence identity, or empty for nil presence.
 // Engine leases use the same identity as the process's presence marker.
@@ -112,31 +128,33 @@ func (p *APIReplicaPresence) touch(ctx context.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, apiReplicaWriteTimeout)
 	defer cancel()
-	if err := p.client.Set(ctx, p.key(), time.Now().UTC().Format(time.RFC3339), p.ttl).Err(); err != nil {
+	if _, err := p.run(ctx, "touch"); err != nil {
 		return fmt.Errorf("register api replica presence: %w", err)
 	}
 	return nil
 }
 
+func (p *APIReplicaPresence) run(ctx context.Context, op string) (int, error) {
+	return presenceScript.Run(ctx, p.client, []string{apiReplicaKey}, p.id, p.ttl.Milliseconds(), op).Int()
+}
+
 // Count returns how many API replicas currently hold a marker, including this
-// one. A nil presence reports one.
+// one: a missing marker of this process is written first, in the same call, so
+// a lone marker of another process is never read as this one. A withdrawn
+// presence writes nothing. A nil presence reports one.
 func (p *APIReplicaPresence) Count(ctx context.Context) (int, error) {
 	if p == nil {
 		return 1, nil
 	}
-	var (
-		cursor uint64
-		count  int
-	)
-	for {
-		keys, next, err := p.client.Scan(ctx, cursor, apiReplicaKeyPrefix+"*", 100).Result()
-		if err != nil {
-			return 0, fmt.Errorf("count api replicas: %w", err)
-		}
-		count += len(keys)
-		if next == 0 {
-			return count, nil
-		}
-		cursor = next
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	op := "count"
+	if p.withdrawn {
+		op = "read"
 	}
+	count, err := p.run(ctx, op)
+	if err != nil {
+		return 0, fmt.Errorf("count api replicas: %w", err)
+	}
+	return count, nil
 }

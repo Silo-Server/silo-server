@@ -52,6 +52,10 @@ type Config struct {
 	// be built. The gate then fails closed with replica_census_unavailable
 	// instead of reading a missing client as a deployment without Redis.
 	RedisUnavailable bool
+	// RequireRedis makes a missing RedisClient fail closed the same way: with
+	// several API processes and no shared lease the engine could run twice. Main
+	// sets it for server.mode api; a single integrated process runs without Redis.
+	RequireRedis bool
 	// AwaitHandler holds every engine start until HandlerReady is called, so the
 	// engine binds its UDP port only once the HTTP handler it serves exists.
 	AwaitHandler bool
@@ -96,10 +100,11 @@ type Service struct {
 	beforeFailureRecorded func()
 }
 
-// New starts the replica census when Redis is configured and the minute
-// settings recheck, without running probes. The caller starts the first check
-// through SettingsChanged; canceling ctx starts ordered shutdown. Call Shutdown
-// to drain with a caller's deadline and wait for the service to finish.
+// New starts the minute settings recheck, without running probes. With Redis it
+// prepares the replica census and lease, which run only while direct connections
+// are on. The caller starts the first check through SettingsChanged; canceling
+// ctx starts ordered shutdown. Call Shutdown to drain with a caller's deadline
+// and wait for the service to finish.
 func New(ctx context.Context, cfg Config) *Service {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -123,6 +128,9 @@ func New(ctx context.Context, cfg Config) *Service {
 		// shared lease value would let one replica release another's lease.
 		s.redisUnavailable = true
 		cfg.Logger.WarnContext(ctx, "direct connections: Redis is configured but unusable for the replica census; the engine stays off", "component", "directconn")
+	case cfg.RedisClient == nil && cfg.RequireRedis:
+		s.redisUnavailable = true
+		cfg.Logger.WarnContext(ctx, "direct connections: this server mode needs Redis for the engine lease; the engine stays off", "component", "directconn")
 	case cfg.RedisClient != nil:
 		s.replica = newReplicaMonitor(cfg.ReplicaPresence, &redisEngineLease{client: cfg.RedisClient, id: cfg.ReplicaPresence.ID()}, cfg.Logger)
 		s.replicaEventsDone = make(chan struct{})
@@ -130,8 +138,8 @@ func New(ctx context.Context, cfg Config) *Service {
 	// The lifecycle exists before any goroutine that wakes it starts.
 	s.initEngine()
 	if s.replica != nil {
-		// Only the lifecycle stops the monitor, after draining HTTP/3.
-		go s.replica.run(context.WithoutCancel(ctx)) //nolint:gosec // The monitor must outlive ctx cancellation; stopEngine stops and joins it.
+		// Only the lifecycle starts and stops the monitor; it stops it after
+		// draining HTTP/3.
 		go s.replicaEvents()
 	}
 	interval := cfg.recheckInterval
@@ -299,13 +307,19 @@ func (s *Service) Status(ctx context.Context, refresh bool) (Status, error) {
 	}
 	pending := s.readPending
 	aged := time.Since(s.readAt) >= settingsRecheck
-	reread := snapshot && (pending || aged) && !s.rereading
+	// The reread holds a check-worker slot, claimed before shutdown cancels the
+	// service, so Shutdown joins it.
+	reread := snapshot && (pending || aged) && !s.rereading && s.ctx.Err() == nil
 	if reread {
 		s.rereading = true
+		s.checkWorkers.Add(1)
 	}
 	s.mu.Unlock()
 	if reread {
-		go s.rereadSettings()
+		go func() {
+			defer s.checkWorkers.Done()
+			s.rereadSettings()
+		}()
 	}
 	if run == nil || (pending && !snapshot) {
 		fresh, err := s.reconcile(ctx, refresh, false)
@@ -331,7 +345,7 @@ func (s *Service) Status(ctx context.Context, refresh bool) (Status, error) {
 	defer s.mu.Unlock()
 	out := run.status
 	out.Features = append([]Feature(nil), out.Features...)
-	s.projectReplicaGate(out.Features, out.Enabled)
+	s.projectDirect(out.Features, out.Enabled)
 	out.Features = append(out.Features, s.engineFeature())
 	out.Listeners = append([]Listener(nil), s.listeners...)
 	out.Knobs = statusKnobs(s.cfg.Tuning, s.cfg.Adjustments)
@@ -381,7 +395,7 @@ func (s *Service) run(run *checkRun) {
 	status := Status{Enabled: run.values.enabled, CheckedAt: time.Now(), Features: featureStates(run.values, s.cfg.HeldAtStart, caps, capErr, nat, natErr, mapping, mappingErr)}
 	s.mu.Lock()
 	features := append([]Feature(nil), status.Features...)
-	s.projectReplicaGate(features, status.Enabled)
+	s.projectDirect(features, status.Enabled)
 	features = append(features, s.engineFeature())
 	s.logFeatures(s.ctx, run.values.enabled, features)
 	run.status = status
