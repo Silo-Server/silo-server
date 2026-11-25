@@ -1797,6 +1797,7 @@ func fixtureCases() []fixtureCase {
 		status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/AppKeyCapability"})
 	cases = append(cases, devicePreapprovalFixtureCases()...)
 	cases = append(cases, appKeyFixtureCases()...)
+	cases = append(cases, adminAppKeyFixtureCases()...)
 	return cases
 }
 
@@ -2194,6 +2195,7 @@ func fixtureDeps() Dependencies {
 	deps.DirectConnections = fakeDirectConnections{}
 	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
 	deps.AppKeys = fixtureAppKeys()
+	deps.AdminAppKeys = fixtureAdminAppKeys()
 	deps.AdminPluginProvisionStatus = func(context.Context) ([]plugins.ProvisionStatus, error) {
 		return []plugins.ProvisionStatus{{PluginID: "silo.auth.oidc", Version: "0.1.2", State: "pending"}}, nil
 	}
