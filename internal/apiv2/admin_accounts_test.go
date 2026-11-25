@@ -199,7 +199,7 @@ func TestAdminAccountCreateAndErrors(t *testing.T) {
 	// every other path that sets a password.
 	f.err = auth.PasswordPolicy{RequireUppercase: true}.Check("new-password")
 	refused := requireProblem(t, do(t, h, http.MethodPost, path, body, actingRequestAdmin), TypeValidationFailed)
-	if len(refused.Errors) != 1 || refused.Errors[0].Location != "body.password" || refused.Errors[0].Detail != "Include at least one capital letter." {
+	if len(refused.Errors) != 1 || refused.Errors[0].Location != "body.password" || refused.Errors[0].Code != codePasswordNeedsUppercase || refused.Errors[0].Detail != "Include at least one capital letter." {
 		t.Fatalf("policy errors = %+v", refused.Errors)
 	}
 	f.err = errors.New("storage down")

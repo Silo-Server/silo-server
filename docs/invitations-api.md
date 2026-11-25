@@ -59,7 +59,8 @@ Acceptance takes `{password}`, plus `email` when the lookup reported
 `email_required`, and returns **201** after the account and invitation commit.
 Passwords follow the server's password policy (`getPasswordPolicy`; by default at
 least eight characters and at most 72 UTF-8 bytes), and a refused one returns
-`422 validation_failed` at `body.password` without consuming the invitation. `email`
+`422 validation_failed` at `body.password`, with a
+[code that names the rule](auth-api.md#account-passwords), without consuming the invitation. `email`
 is ignored for an emailed invitation. For a link invitation, a missing or invalid
 address returns `422 validation_failed` at `body.email`, and an address that
 already has an account returns `409 conflict`. Neither consumes the invitation;
