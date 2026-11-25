@@ -53,8 +53,12 @@ func preapprovalSecret(t *testing.T) (secret, binding string) {
 // claims, as the request middleware would.
 func preapprovalApprover(t *testing.T, svc *DeviceLoginService, userID int, identityID *int64, providerSince *time.Time) context.Context {
 	t.Helper()
+	openedVia := models.SessionOpenedPassword
+	if identityID != nil || providerSince != nil {
+		openedVia = models.SessionOpenedProvider
+	}
 	session := models.AuthSession{ID: uuid.New().String(), UserID: userID, DeviceName: "approving phone",
-		ExpiresAt: time.Now().Add(24 * time.Hour), IdentityID: identityID, ProviderSince: providerSince}
+		ExpiresAt: time.Now().Add(24 * time.Hour), IdentityID: identityID, ProviderSince: providerSince, OpenedVia: openedVia}
 	if err := svc.sessions.Create(t.Context(), session); err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +227,7 @@ func TestDevicePreapprovalWithdrawnWithSessionDB(t *testing.T) {
 	approve := func(label string, deviceKeyID *string) (session, id, code, secret string) {
 		t.Helper()
 		row := models.AuthSession{ID: uuid.New().String(), UserID: userID, DeviceName: "approving phone",
-			ExpiresAt: time.Now().Add(24 * time.Hour), DeviceKeyID: deviceKeyID}
+			ExpiresAt: time.Now().Add(24 * time.Hour), DeviceKeyID: deviceKeyID, OpenedVia: models.SessionOpenedPassword}
 		if err := svc.sessions.Create(t.Context(), row); err != nil {
 			t.Fatal(err)
 		}
@@ -414,5 +418,40 @@ func TestDevicePreapprovalWrongSecretBudgetDB(t *testing.T) {
 	result, err := svc.Poll(t.Context(), created.DeviceCode, secret)
 	if err != nil || result.TokenPair == nil {
 		t.Fatalf("right secret past the budget: %+v, %v", result, err)
+	}
+}
+
+// TestDevicePreapprovalSessionRuleDB: a sign-in approved in advance outlives
+// the session that made it, so a session opened by device sign-in (a TV) or by
+// another app's key can't make one; the person's own password session can.
+func TestDevicePreapprovalSessionRuleDB(t *testing.T) {
+	svc, pool, userID, name := deviceLoginTestService(t)
+	grant, err := NewAppKeyRepository(pool).InsertDeviceKey(t.Context(), NewDeviceKey{UserID: userID, PublicKey: newAppPublicKey(t),
+		Kind: models.DeviceKeyKindApp, Name: "Other app", EnrolledVia: models.AppKeyEnrolledGrant})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, via string
+		deviceKey *string
+		allowed   bool
+	}{
+		{name: "password", via: models.SessionOpenedPassword, allowed: true},
+		{name: "device sign-in", via: models.SessionOpenedDeviceLogin},
+		{name: "another app's key", via: models.SessionOpenedAppKey, deviceKey: &grant.ID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session := models.AuthSession{ID: uuid.New().String(), UserID: userID, DeviceName: "caller",
+				ExpiresAt: time.Now().Add(time.Hour), OpenedVia: tc.via, DeviceKeyID: tc.deviceKey}
+			if err := svc.sessions.Create(t.Context(), session); err != nil {
+				t.Fatal(err)
+			}
+			ctx := WithClaims(t.Context(), &Claims{UserID: userID, SessionID: session.ID, TokenType: TokenTypeAccess})
+			_, binding := preapprovalSecret(t)
+			_, err := svc.Preapprove(ctx, DevicePreapprovalInput{DeviceName: name(tc.name), Binding: binding}, userID)
+			if tc.allowed != (err == nil) || (!tc.allowed && !errors.Is(err, ErrSessionNotAllowed)) {
+				t.Fatalf("preapprove from a %s session = %v", tc.name, err)
+			}
+		})
 	}
 }

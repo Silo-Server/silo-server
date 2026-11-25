@@ -174,6 +174,9 @@ is one function, `auth.SessionAllows`:
 - A session opened by a key enrolled through a grant (another app) is refused
   every such change, and also approving a device sign-in: the app's access ends
   when its key is revoked, so it must not mint access that outlives that.
+- `POST /auth/device/preapprove` (a device sign-in approved in advance, see
+  [device-login.md](device-login.md#approval-in-advance)) follows the same rule
+  as `enroll`: a sign-in approved in advance outlives the session that made it.
 - `DELETE /auth/keys/devices/{id}` follows the same rule, except that a
   grant-enrolled app may revoke its own key. A device may revoke its own key,
   which ends the session asking.

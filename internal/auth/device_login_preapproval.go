@@ -131,6 +131,12 @@ func (s *DeviceLoginService) Preapprove(ctx context.Context, input DevicePreappr
 		if err != nil {
 			return err
 		}
+		// A sign-in approved in advance outlives the session that made it,
+		// so it needs a session that may hand out lasting access: not one a
+		// device sign-in or another app's key opened.
+		if err := SessionAllows(ctx, tx, claims, ActionManageKeys); err != nil {
+			return err
+		}
 		if chain.identityID == nil && chain.providerSince != nil {
 			// The session's provider identity is gone, so redemption would
 			// refuse this request.
