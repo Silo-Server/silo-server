@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -27,7 +26,7 @@ type AdminAppPersonKey struct {
 	EnrolledBy    string `json:"enrolled_by" enum:"session,app-code" doc:"How the key was enrolled: from a signed-in session or with an app code" example:"session"`
 	ProviderBound bool   `json:"provider_bound" doc:"Enrolled from a sign-in provider session: it vouches for a device only while that provider account is linked"`
 	IdentityGone  bool   `json:"identity_gone" doc:"Provider-bound and its provider account is no longer linked to the account: it can't introduce a device again"`
-	IdentityID    *ID    `json:"identity_id" nullable:"true" doc:"The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't provider-bound. Unlinking that provider account revokes the key" example:"4"`
+	IdentityID    *ID    `json:"identity_id" nullable:"true" doc:"The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't bound to a linked provider account. Unlinking that provider account revokes the key" example:"4"`
 }
 
 // AdminAppDeviceKey is one of an account's device keys as an administrator
@@ -36,7 +35,7 @@ type AdminAppDeviceKey struct {
 	AppDeviceKey
 	ProviderBound bool     `json:"provider_bound" doc:"Enrolled from a sign-in provider session, or introduced by a person key that was: the provider checks the person again at each sign-in"`
 	IdentityGone  bool     `json:"identity_gone" doc:"Provider-bound and its provider account is no longer linked to the account: it can't sign in again and is revoked at its next try. The person's own list leaves such a key out"`
-	IdentityID    *ID      `json:"identity_id" nullable:"true" doc:"The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't provider-bound. Unlinking that provider account revokes the key" example:"4"`
+	IdentityID    *ID      `json:"identity_id" nullable:"true" doc:"The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't bound to a linked provider account. Unlinking that provider account revokes the key" example:"4"`
 	WaitingUntil  *Instant `json:"waiting_until" nullable:"true" doc:"For a key with status pending, when it stops waiting for approval (24 hours after it asked); null otherwise"`
 }
 
@@ -215,6 +214,6 @@ func keyIdentityID(providerBound bool, identityID *int64) *ID {
 	if !providerBound || identityID == nil {
 		return nil
 	}
-	id := ID(strconv.FormatInt(*identityID, 10))
+	id := IDFromInt(*identityID)
 	return &id
 }

@@ -15186,7 +15186,7 @@ export interface components {
       /** @description Provider-bound and its provider account is no longer linked to the account: it can't sign in again and is revoked at its next try. The person's own list leaves such a key out */
       identity_gone: boolean;
       /**
-       * @description The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't provider-bound. Unlinking that provider account revokes the key
+       * @description The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't bound to a linked provider account. Unlinking that provider account revokes the key
        * @example 4
        */
       identity_id: string | null;
@@ -15251,7 +15251,7 @@ export interface components {
       /** @description Provider-bound and its provider account is no longer linked to the account: it can't introduce a device again */
       identity_gone: boolean;
       /**
-       * @description The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't provider-bound. Unlinking that provider account revokes the key
+       * @description The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't bound to a linked provider account. Unlinking that provider account revokes the key
        * @example 4
        */
       identity_id: string | null;

@@ -2247,7 +2247,7 @@
             "type": "boolean"
           },
           "identity_id": {
-            "description": "The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't provider-bound. Unlinking that provider account revokes the key",
+            "description": "The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't bound to a linked provider account. Unlinking that provider account revokes the key",
             "examples": [
               "4"
             ],
@@ -2389,7 +2389,7 @@
             "type": "boolean"
           },
           "identity_id": {
-            "description": "The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't provider-bound. Unlinking that provider account revokes the key",
+            "description": "The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't bound to a linked provider account. Unlinking that provider account revokes the key",
             "examples": [
               "4"
             ],
