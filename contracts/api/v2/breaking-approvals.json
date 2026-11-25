@@ -1,11 +1,3 @@
 {
-  "approvals": [
-    {
-      "operation_id": "putProfileSet",
-      "change_id": "request-property-became-required",
-      "fingerprint": "71ee0ae52cfbe597c34c3d7d8568fb13c2defdb0c0014cad28ad566971a7c8a7",
-      "reason": "settings becomes required in every profile set item, with {} for none, so an app that forgot the member can't pass for one that chose to send nothing. The operation is new on this integration branch and no released client sends a profile set; the one client in development is changed with it.",
-      "approved_in": "#5323"
-    }
-  ]
+  "approvals": []
 }
