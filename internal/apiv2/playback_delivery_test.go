@@ -62,16 +62,42 @@ func TestPlaybackDeliveryV2BytesErrorsAndAuthorization(t *testing.T) {
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, path, "", viewerHeaders()), TypeDependencyUnavailable)
 }
 
-// A relay answers 502 when its transcode node is unreachable, keyless, or
-// refused the relay's signature: the node is unavailable, which v2 reports as
-// a retryable dependency failure rather than an internal error.
-func TestPlaybackDeliveryNodeUnavailableIsDependencyUnavailable(t *testing.T) {
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, Prefix+"/stream/"+deliveryTestSession, nil)
-	writer := &playbackDeliveryWriter{ResponseWriter: w, request: r}
-	http.Error(writer, "transcode node unavailable", http.StatusBadGateway)
-	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), TypeDependencyUnavailable.ID) {
-		t.Fatalf("node unavailable = %d %s, want 503 %s", w.Code, w.Body.String(), TypeDependencyUnavailable.ID)
+// A pre-body failure maps onto the catalog by status, except where the v1
+// handler names a media error the status alone does not distinguish.
+func TestPlaybackDeliveryProblemTypes(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		status     int
+		code       string
+		wantStatus int
+		want       ProblemType
+	}{
+		// A relay answers 502 when its transcode node is unreachable, keyless,
+		// or refused the relay's signature: the node is unavailable, which v2
+		// reports as a retryable dependency failure rather than an internal error.
+		{name: "node unavailable", status: http.StatusBadGateway, wantStatus: http.StatusServiceUnavailable, want: TypeDependencyUnavailable},
+		// A request from a replaced plan's playlist is refused for good, but is
+		// not the end of the session the way playback_session_ended is.
+		{name: "superseded transport", status: http.StatusNotFound, code: playback.TransportSupersededCode, wantStatus: http.StatusNotFound, want: TypePlaybackTransportSuperseded},
+		{name: "missing segment", status: http.StatusNotFound, wantStatus: http.StatusNotFound, want: TypeNotFound},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, Prefix+"/stream/"+deliveryTestSession, nil)
+			writer := &playbackDeliveryWriter{ResponseWriter: w, request: r}
+			if test.code != "" {
+				writer.Header().Set(playback.ErrorHeader, test.code)
+			}
+			http.Error(writer, "legacy body", test.status)
+			if w.Code != test.wantStatus || !strings.Contains(w.Body.String(), `"`+test.want.URI()+`"`) {
+				t.Fatalf("status %d = %d %s, want %d %s", test.status, w.Code, w.Body.String(), test.wantStatus, test.want.ID)
+			}
+			// The problem type carries the code on v2; the v1 side channel
+			// is not part of the v2 contract.
+			if got := w.Header().Get(playback.ErrorHeader); got != "" {
+				t.Fatalf("%s = %q on a v2 problem", playback.ErrorHeader, got)
+			}
+		})
 	}
 }
 

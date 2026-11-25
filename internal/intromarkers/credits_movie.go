@@ -143,6 +143,9 @@ func (e *ChromaprintExtractor) SampleMovieTail(ctx context.Context, candidate Ca
 		return creditsTail{}, fmt.Errorf("sampling the movie tail of file %d: %w", candidate.FileID, err)
 	}
 	e.logTailDecoder(ctx, candidate, req, result)
+	if err := checkTailFrames(result); err != nil {
+		return creditsTail{}, err
+	}
 	return creditsTail{Frames: result.Frames}, nil
 }
 

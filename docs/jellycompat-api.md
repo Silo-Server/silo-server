@@ -254,7 +254,11 @@ keep their season as `ParentId`. As in Jellyfin, a type filter at the user root
 and an `IncludeItemTypes` that names `Episode` under a library `ParentId` search
 recursively even without `Recursive`. A non-recursive library browse whose
 `Episode` comes only from `ExcludeItemTypes` returns the library's direct
-children, which are never episodes.
+children, which are never episodes. `IsFavorite=true` and an `Ids` list
+narrow both parts the same way, so `Ids` with a type filter that names
+`Episode` returns the named episodes. On such a lookup a series or season
+`ParentId` keeps only its own episodes, and a collection `ParentId` lists
+none of the named episodes.
 
 `/Shows/{id}/Episodes` accepts numeric `Season`, `SeasonId`, `StartItemId`,
 `StartIndex`, and `Limit`. As in Jellyfin 12.1, an explicit `SeasonId` selects

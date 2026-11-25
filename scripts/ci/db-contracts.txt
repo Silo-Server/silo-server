@@ -408,6 +408,10 @@
 # Persisted failure text stays valid UTF-8 and bounded.
 ./internal/trickplay TestFinishAcceptsTruncatedUTF8ErrorDB
 
+# A seek-preview failure that blames the file's data backs off; only repeated
+# ones in a row make the file unusable.
+./internal/trickplay TestFinishMakesRepeatedDamageUnusableDB
+
 # Metadata fallback excludes providers that do not support the item kind.
 ./internal/metadata TestChainlessFallback_SkipsDefaultDisabledCapability
 
@@ -763,6 +767,7 @@
 ./internal/api/handlers TestPlaybackLifecycleTransitionsDB
 ./internal/api/handlers TestNativeSessionsListLifecycleDB
 ./internal/api/handlers TestPlaybackLifecycleOrderAndStartStateDB
+./internal/api/handlers TestConfirmedPauseLifecycleDB
 ./internal/api/handlers TestLifecycleSweepSelectsWhatItCanEndDB
 ./internal/api/handlers TestLifecycleSweepPassesLiveJellyfinPlaysDB
 ./internal/api/handlers TestLifecycleSweepBacksOffFailedEndsDB

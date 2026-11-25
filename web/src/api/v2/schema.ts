@@ -23905,6 +23905,9 @@ export interface components {
       /** Format: uri-reference */
       public_url?: string;
       refresh_result?: components["schemas"]["LibraryRefreshJobResult"];
+      /** @description The export job a catalog_import job reads from, when it was queued with export_job_id. Clients format their own label from it. */
+      source_export_job_id?: string;
+      /** @description An import's source as English text: the remote URL, the file name, or "Export job <id>". Prefer source_export_job_id when present. */
       source_label?: string;
       /**
        * Format: date-time
@@ -25833,6 +25836,11 @@ export interface components {
        */
       advisory_source?: "commonsense" | "mdblist";
       /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date
+       */
+      air_date?: string;
+      /**
        * @description On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author
        * @example [
        *       "Frank Herbert"
@@ -25863,6 +25871,12 @@ export interface components {
        * @description The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair
        */
       duration_seconds?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       /** @description Empty, never null */
@@ -26128,6 +26142,12 @@ export interface components {
       effective_version_resolution?: string;
       /** Format: int64 */
       episode_count?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       extras?: components["schemas"]["ItemExtraInfo"][];
@@ -29474,6 +29494,11 @@ export interface components {
        */
       advisory_source?: "commonsense" | "mdblist";
       /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date
+       */
+      air_date?: string;
+      /**
        * @description On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author
        * @example [
        *       "Frank Herbert"
@@ -29504,6 +29529,12 @@ export interface components {
        * @description The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair
        */
       duration_seconds?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       /** @description Empty, never null */
@@ -37167,7 +37198,7 @@ export interface components {
     };
     SubtitleAppearanceDeviceOverride: {
       /**
-       * @description The subtitle appearance as a JSON document; the server validates only that it is JSON
+       * @description The subtitle appearance as a JSON document; it must satisfy the settings contract's subtitle-appearance schema
        * @example {"fontSize":"xxlarge"}
        */
       value: string;
@@ -38267,6 +38298,11 @@ export interface components {
       title: string;
     };
     WatchDetail: {
+      /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD; sent when episode_labels is air_date
+       */
+      air_date?: string;
       backdrop_thumbhash?: string;
       /**
        * Format: uri-reference
@@ -38287,6 +38323,12 @@ export interface components {
       effective_version_hdr?: boolean;
       /** @description The version resolution the profile last played */
       effective_version_resolution?: string;
+      /**
+       * @description The series' episode labels, as on CatalogItem: air_date means show air_date where the season and episode numbers would go; absent or unknown means show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       intro?: components["schemas"]["WatchMarker"];
@@ -39192,6 +39234,11 @@ export interface components {
        */
       advisory_source?: "commonsense" | "mdblist";
       /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date
+       */
+      air_date?: string;
+      /**
        * @description On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author
        * @example [
        *       "Frank Herbert"
@@ -39224,6 +39271,12 @@ export interface components {
        * @description The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair
        */
       duration_seconds?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       /** @description Empty, never null */
@@ -39432,6 +39485,11 @@ export interface components {
        */
       advisory_source?: "commonsense" | "mdblist";
       /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date
+       */
+      air_date?: string;
+      /**
        * @description On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author
        * @example [
        *       "Frank Herbert"
@@ -39462,6 +39520,12 @@ export interface components {
        * @description The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair
        */
       duration_seconds?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       /** @description Empty, never null */
@@ -137844,6 +137908,8 @@ export interface operations {
         silo_rendition?: "video" | "subtitles";
         /** @description Set with silo_rendition=subtitles by the multivariant playlist of a plan with on-demand renditions (hls_subtitle_renditions_all_v1): the container track number whose WebVTT playlist to answer. */
         silo_track?: string;
+        /** @description Opaque transport generation the plan's HLS URL carries, when the attempt listed hls_transport_marker_v1 in deliveries.hls.features, and the playlist echoes into its URIs; clients must not compose, strip or move it. When the session has a recorded current transport, a request naming a transport a replan replaced answers 404 playback_transport_superseded. A session rebuilt from its recipe (after a server restart, or on a server that did not hold it) has none until its next replan and serves the request as if the marker were absent. Absent, the request is served by the session's current transport. */
+        silo_transport?: string;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
@@ -137972,6 +138038,8 @@ export interface operations {
         silo_rendition?: "video" | "subtitles";
         /** @description Set with silo_rendition=subtitles by the multivariant playlist of a plan with on-demand renditions (hls_subtitle_renditions_all_v1): the container track number whose WebVTT playlist to answer. */
         silo_track?: string;
+        /** @description Opaque transport generation the plan's HLS URL carries, when the attempt listed hls_transport_marker_v1 in deliveries.hls.features, and the playlist echoes into its URIs; clients must not compose, strip or move it. When the session has a recorded current transport, a request naming a transport a replan replaced answers 404 playback_transport_superseded. A session rebuilt from its recipe (after a server restart, or on a server that did not hold it) has none until its next replan and serves the request as if the marker were absent. Absent, the request is served by the session's current transport. */
+        silo_transport?: string;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
@@ -138094,6 +138162,8 @@ export interface operations {
   getPlaybackSegment: {
     parameters: {
       query?: {
+        /** @description Opaque transport generation the plan's HLS URL carries, when the attempt listed hls_transport_marker_v1 in deliveries.hls.features, and the playlist echoes into its URIs; clients must not compose, strip or move it. When the session has a recorded current transport, a request naming a transport a replan replaced answers 404 playback_transport_superseded. A session rebuilt from its recipe (after a server restart, or on a server that did not hold it) has none until its next replan and serves the request as if the marker were absent. Absent, the request is served by the session's current transport. */
+        silo_transport?: string;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */

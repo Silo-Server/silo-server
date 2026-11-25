@@ -1,21 +1,38 @@
 import type { EpisodeListItem } from "@/api/types";
-import { formatEpisodeCode } from "@/lib/episodeCardLabels";
+import {
+  formatEpisodeCode,
+  formatEpisodeLabel,
+  labelsEpisodesByAirDate,
+} from "@/lib/episodeCardLabels";
 import { formatDate } from "@/lib/datetime";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { t } from "@/i18n";
 
-type EpisodeIdentity = Pick<EpisodeListItem, "season_number" | "episode_number" | "title">;
+type EpisodeIdentity = Pick<
+  EpisodeListItem,
+  "season_number" | "episode_number" | "title" | "air_date"
+>;
 
 /**
  * First caption line, "S01E02 · Pilot", in two parts: the code with its
  * separator, and the title. The code alone when the episode has no title.
  */
-export function episodeCardTitleParts(episode: EpisodeIdentity): {
+export function episodeCardTitleParts(
+  episode: EpisodeIdentity,
+  episodeLabels?: string,
+): {
   prefix: string;
   title?: string;
 } {
-  const code = formatEpisodeCode(episode.season_number, episode.episode_number);
   const title = episode.title?.trim();
+  if (labelsEpisodesByAirDate(episodeLabels)) {
+    // The air date is on the line below, so the title leads on its own; an
+    // untitled episode shows the date (or its code when undated).
+    return title
+      ? { prefix: "", title }
+      : { prefix: formatEpisodeLabel({ ...episode, episode_labels: episodeLabels }) };
+  }
+  const code = formatEpisodeCode(episode.season_number, episode.episode_number);
   return title ? { prefix: `${code} · `, title } : { prefix: code };
 }
 
@@ -24,9 +41,12 @@ export function episodeCardTitleParts(episode: EpisodeIdentity): {
  * "Season 1, Episode 2, Pilot" (or "Specials, Episode 2, …") rather than the
  * letters of "S01E02".
  */
-export function episodeCardSpokenTitle(episode: EpisodeIdentity): string {
+export function episodeCardSpokenTitle(episode: EpisodeIdentity, episodeLabels?: string): string {
   const episodeNumber = episode.episode_number;
   const title = episode.title?.trim();
+  if (labelsEpisodesByAirDate(episodeLabels)) {
+    return title || formatEpisodeLabel({ ...episode, episode_labels: episodeLabels });
+  }
   if (episode.season_number === 0) {
     return title
       ? t("web.detail.episodes.spokenSpecialTitled", { episode: episodeNumber, title })

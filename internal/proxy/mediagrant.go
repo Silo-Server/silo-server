@@ -199,6 +199,9 @@ func (s *Server) handleGrantTranscodeManifest(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
+	if refuseSupersededGrantTransport(w, r, card) {
+		return
+	}
 	claims := card.ToClaims()
 	if !requireGrantPlaybackEndpointV3(w, &claims, proxyPlaybackEndpointTranscodeV3) {
 		return
@@ -212,12 +215,32 @@ func (s *Server) handleGrantTranscodeSegment(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
+	if refuseSupersededGrantTransport(w, r, card) {
+		return
+	}
 	claims := card.ToClaims()
 	if !requireGrantPlaybackEndpointV3(w, &claims, proxyPlaybackEndpointTranscodeV3) {
 		return
 	}
 	s.touchTranscodeSession(r, &claims)
 	s.relayGrantToTranscodeNode(w, r, &claims, "/transcode/"+transcodeTransportIDFromClaims(&claims)+"/segment/"+chi.URLParam(r, "name"))
+}
+
+// refuseSupersededGrantTransport answers a request from a playlist whose
+// transport a replan has replaced. The grant names the current transport; the
+// request must not be relayed to it, where an old segment number would
+// seek-restart the stream the client is switching to. A grant that names no
+// transport (a replan away from HLS) supersedes every marked HLS URL.
+func refuseSupersededGrantTransport(w http.ResponseWriter, r *http.Request, card *playback.RecipeCard) bool {
+	query := r.URL.Query()
+	superseded := playback.TransportSuperseded(card.SessionID, card.TranscodeTransportID, query) ||
+		(card.TranscodeTransportID == "" && query.Get(playback.TransportQueryParam) != "")
+	if !superseded {
+		return false
+	}
+	w.Header().Set(playback.ErrorHeader, playback.TransportSupersededCode)
+	writeGrantError(w, http.StatusNotFound, playback.TransportSupersededCode, playback.TransportSupersededMessage)
+	return true
 }
 
 func requireGrantPlaybackEndpointV3(w http.ResponseWriter, claims *streamtoken.Claims, endpoint proxyPlaybackEndpointV3) bool {

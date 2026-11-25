@@ -53,7 +53,7 @@ import {
 import { jobCancelledError, jobFailedError } from "@/lib/adminJobErrors";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { createRealtimeQueryRefreshScheduler } from "@/components/realtimeQueryRefresh";
-import { adminSessionsKey } from "@/api/v2/adminSessionsCache";
+import { adminSessionsKey, applyAdminSessionPauseEvent } from "@/api/v2/adminSessionsCache";
 import {
   adminDownloadPreparationsKey,
   applyDownloadPreparationProgress,
@@ -858,6 +858,8 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       case "sessions":
         if (message.event === "sessions.replaced") {
           refreshSessions();
+        } else if (message.event === "session.paused" || message.event === "session.resumed") {
+          applyAdminSessionPauseEvent(queryClient, realtimeAuthority, message.data);
         }
         break;
       case "tasks":

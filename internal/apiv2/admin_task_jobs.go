@@ -74,7 +74,8 @@ type AdminTaskJob struct {
 	LibraryResult *AdminTaskJobLibraryResult `json:"library_result,omitempty"`
 	AdminJob
 	LibraryIDs              []ID                                 `json:"library_ids"`
-	SourceLabel             string                               `json:"source_label,omitempty"`
+	SourceLabel             string                               `json:"source_label,omitempty" doc:"An import's source as English text: the remote URL, the file name, or \"Export job <id>\". Prefer source_export_job_id when present."`
+	SourceExportJobID       string                               `json:"source_export_job_id,omitempty" doc:"The export job a catalog_import job reads from, when it was queued with export_job_id. Clients format their own label from it."`
 	CatalogResult           *AdminTaskJobCatalogResult           `json:"catalog_result,omitempty"`
 	ItemResult              *AdminTaskJobItemResult              `json:"item_result,omitempty"`
 	StorageTransitionResult *AdminTaskJobStorageTransitionResult `json:"storage_transition_result,omitempty"`
@@ -214,14 +215,16 @@ func (reg *Registry) adminTaskJobOf(ctx context.Context, job *models.AdminJob, a
 	}
 	if job.JobType == adminjob.JobTypeCatalogExport || job.JobType == adminjob.JobTypeCatalogImport {
 		var request struct {
-			LibraryIDs  []int64 `json:"library_ids"`
-			SourceLabel string  `json:"source_label"`
+			LibraryIDs        []int64 `json:"library_ids"`
+			SourceLabel       string  `json:"source_label"`
+			SourceExportJobID string  `json:"source_export_job_id"`
 		}
 		if json.Unmarshal(job.RequestPayload, &request) == nil {
 			for _, id := range request.LibraryIDs {
 				out.LibraryIDs = append(out.LibraryIDs, IDFromInt(id))
 			}
 			out.SourceLabel = request.SourceLabel
+			out.SourceExportJobID = request.SourceExportJobID
 		}
 		if job.Status == adminjob.StatusCompleted {
 			var result AdminTaskJobCatalogResult
