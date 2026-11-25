@@ -74,6 +74,17 @@ func EnsureLocalPasswordLoginAllowedInTransaction(ctx context.Context, tx pgx.Tx
 	return nil
 }
 
+// demoModeSettingKey is the server setting that runs the server as a public
+// demo, whose visitors share one account that is not an administrator.
+const demoModeSettingKey = "demo.enabled"
+
+// demoModeOn reads demoModeSettingKey; only "true" turns it on, as on the
+// native API.
+func demoModeOn(ctx context.Context, db rowQuerier) (bool, error) {
+	value, err := readServerSetting(ctx, db, demoModeSettingKey)
+	return value == "true", err
+}
+
 func emailAutoMatchEnabled(ctx context.Context, db rowQuerier) (bool, error) {
 	return readBoolSetting(ctx, db, config.AuthEmailAutoMatchSettingKey, false)
 }

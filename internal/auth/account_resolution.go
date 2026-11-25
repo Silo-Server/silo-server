@@ -201,6 +201,19 @@ func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInpu
 		if !user.Enabled {
 			return ErrUserDisabled
 		}
+		// Demo visitors share one account that is not an administrator, so
+		// none may change how it signs in, even through a flow started
+		// before demo mode was turned on. A setting that can't be read
+		// fails the link.
+		if user.Role != models.RoleAdmin {
+			demo, err := demoModeOn(ctx, tx)
+			if err != nil {
+				return err
+			}
+			if demo {
+				return ErrDemoRestricted
+			}
+		}
 		linked, err := linkIdentityTx(ctx, tx, user, in.InstallationID, identity, true, true)
 		if err != nil {
 			return err
@@ -226,6 +239,17 @@ func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInpu
 		autoMatch, err := emailAutoMatchEnabled(ctx, tx)
 		if err != nil {
 			return err
+		}
+		// Every account matching could reach is not an administrator, and
+		// on a demo server that is the account every visitor shares: there
+		// matching does not apply, as when it is off. A setting that can't
+		// be read matches nothing.
+		if autoMatch {
+			demo, err := demoModeOn(ctx, tx)
+			if err != nil {
+				slog.WarnContext(ctx, "email auto-match skipped: reading demo mode failed", "component", "auth", "error", err)
+			}
+			autoMatch = err == nil && !demo
 		}
 		if autoMatch {
 			user, err := scanUser(tx.QueryRow(ctx, `SELECT `+allColumns+` FROM users
