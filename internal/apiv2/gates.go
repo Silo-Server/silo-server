@@ -28,6 +28,12 @@ import (
 // the claims of a valid login session (AttachSession) and never refuses.
 const metaAttachSession = "silo.attach_session"
 
+// metaOptionalViewerScope marks a public operation that also attaches the
+// session and then resolves its viewer scope when it can
+// (ViewerAccessMiddleware.ResolveIfPresent): a session's profile proof is
+// read, and a missing or unproven one never refuses the request.
+const metaOptionalViewerScope = "silo.optional_viewer_scope"
+
 // Legacy v1 error codes the gates translate that have no v2 problem type of
 // their own (the others reuse the matching ProblemType's ID).
 const (
@@ -61,6 +67,13 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 		}
 		if attach, _ := op.Metadata[metaAttachSession].(bool); attach && class == ClassPublic && deps.Auth != nil {
 			chain = append(chain, deps.Auth.AttachSession)
+			if scoped, _ := op.Metadata[metaOptionalViewerScope].(bool); scoped {
+				if deps.ViewerAccess == nil {
+					missing = "viewer access"
+				} else {
+					chain = append(chain, deps.ViewerAccess.ResolveIfPresent)
+				}
+			}
 		}
 		r, w := humachi.Unwrap(ctx)
 		if missing != "" {
