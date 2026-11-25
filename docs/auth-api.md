@@ -53,7 +53,7 @@ also reads its stored row, so a missed eviction event cannot authorize a deleted
 Extending a session or storing its refreshed tokens only updates an existing row and
 ends the session when the row is gone. The response counts revoked
 live login sessions, not withdrawn approvals or
-compatibility sessions. Single-session revocation leaves other sessions and device approvals unchanged, except that it withdraws the device sign-ins that session [approved in advance](architecture/device-login.md#approval-in-advance) and no device has redeemed.
+compatibility sessions. Single-session revocation leaves other sessions and device approvals unchanged, except that it withdraws the device sign-ins that session [approved in advance](architecture/device-login.md#approval-in-advance) and no device has redeemed. Logging a session out withdraws them too.
 Other accounts' own sessions remain usable. API keys are not login sessions and are not
 revoked here.
 Creating a "View as user" session locks the originating and viewed accounts in the

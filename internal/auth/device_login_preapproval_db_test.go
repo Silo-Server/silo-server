@@ -196,15 +196,27 @@ func TestDevicePreapprovalRefusedDB(t *testing.T) {
 		func(pgx.Tx, *models.AuthSession) (*auditmutation.Entry, error) { return nil, nil }); err != nil {
 		t.Fatal(err)
 	}
+	// So does that session logging itself out, or a caller holding someone
+	// else's session could approve a sign-in and leave no session to end.
+	loggedOutPhone := preapprovalApprover(t, svc, userID, nil, nil)
+	loggedOutSecret, loggedOutBinding := preapprovalSecret(t)
+	loggedOut, err := svc.Preapprove(loggedOutPhone, DevicePreapprovalInput{DeviceName: name("logged out"), Binding: loggedOutBinding}, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.sessions.Revoke(t.Context(), ClaimsFromContext(loggedOutPhone).SessionID); err != nil {
+		t.Fatal(err)
+	}
 	if got := preapprovalStatus(t, pool, keptID); got != DeviceLoginStatusApproved {
 		t.Fatalf("ending another session left the kept pre-approval %s", got)
 	}
 
 	_, oldCode, oldSecret := preapprove("old", -(DevicePreapprovalTTL + time.Hour))
 	for label, tc := range map[string]struct{ code, secret, want string }{
-		"revoked":       {revokedCode, revokedSecret, DeviceLoginStatusDenied},
-		"session ended": {ended.DeviceCode, endedSecret, DeviceLoginStatusDenied},
-		"expired":       {oldCode, oldSecret, DeviceLoginStatusExpired},
+		"revoked":            {revokedCode, revokedSecret, DeviceLoginStatusDenied},
+		"session ended":      {ended.DeviceCode, endedSecret, DeviceLoginStatusDenied},
+		"session logged out": {loggedOut.DeviceCode, loggedOutSecret, DeviceLoginStatusDenied},
+		"expired":            {oldCode, oldSecret, DeviceLoginStatusExpired},
 	} {
 		poll, err := svc.Poll(t.Context(), tc.code, tc.secret)
 		if err != nil || poll.TokenPair != nil || poll.Status != tc.want {

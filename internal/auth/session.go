@@ -215,17 +215,26 @@ func (r *SessionRepository) ListByUserPage(ctx context.Context, userID int, afte
 	return scanSessions(rows)
 }
 
-// Revoke sets revoked_at to NOW() for the given session.
+// Revoke ends the given session, as a logout does, and withdraws the device
+// sign-ins it approved in advance that no device has redeemed. Without that
+// a caller holding someone else's session could approve a sign-in and log
+// the session out, leaving the sign-in behind with no session to end. The
+// session row is locked first, the order Preapprove and revokeChecked take.
 func (r *SessionRepository) Revoke(ctx context.Context, id string) error {
-	query := `UPDATE auth_sessions SET revoked_at = NOW() WHERE id = $1`
-	tag, err := r.pool.Exec(ctx, query, id)
-	if err != nil {
-		return fmt.Errorf("revoking session: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrSessionNotFound
-	}
-	return nil
+	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		var locked string
+		err := tx.QueryRow(ctx, `SELECT id FROM auth_sessions WHERE id = $1 FOR UPDATE`, id).Scan(&locked)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrSessionNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("locking session: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at = NOW() WHERE id = $1`, id); err != nil {
+			return fmt.Errorf("revoking session: %w", err)
+		}
+		return withdrawSessionPreapprovalsInTransaction(ctx, tx, []string{id})
+	})
 }
 
 // revokeChecked revokes one session in a transaction holding its row lock.

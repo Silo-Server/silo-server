@@ -199,16 +199,16 @@ the fingerprint. Nothing on the poll changes for the TV.
   or deleted since answers `denied`; this holds for every device sign-in, not
   only pre-approved ones, since over 30 days it is a normal case.
 - **The approving session.** The row records the login session that approved
-  it (`preapproved_session_id`). Ending that one session from the session
-  list, by the account or by an administrator, withdraws the sign-ins it
-  approved in advance and that no device has redeemed, in the same
-  transaction; so does revoking an app key that opened it. A session someone
-  else was using therefore cannot leave a sign-in behind for later. Sign-ins
-  the account approved from its other sessions stay, and so does a device
-  that already redeemed: its session is its own and is ended from the session
-  list. Logging out and a session reaching its expiry leave the sign-ins the
-  session approved in place, since the person ending their own session is
-  not saying it was misused.
+  it (`preapproved_session_id`). Ending that one session withdraws the
+  sign-ins it approved in advance and that no device has redeemed, in the
+  same transaction: from the session list, by the account or by an
+  administrator; by logging the session out; and by revoking an app key that
+  opened it. A session someone else was using therefore cannot leave a
+  sign-in behind for later, and cannot hide one by logging itself out.
+  Sign-ins the account approved from its other sessions stay, and so does a
+  device that already redeemed: its session is its own and is ended from the
+  session list. A session that reaches its expiry leaves its sign-ins in
+  place; they expire within the same 30 days.
 - **Provider identity at redemption.** When the approving session came from a
   provider identity, the poll locks and checks that identity as a provider
   sign-in does, before the device row: a refused identity, an unlinked one, or
