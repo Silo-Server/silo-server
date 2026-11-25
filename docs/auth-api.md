@@ -37,7 +37,9 @@ devices and playback sessions. All paths below use `/api/v2`.
 | `DELETE /admin/users/{user_id}/login-sessions` (`deleteAdminUserLoginSessions`) | Acting admin. Revokes all live sessions of the selected account and returns `{ "revoked": N }`. Repeating an account-wide request returns zero when no live sessions remain. |
 
 Session rows expose `id`, `device_name` (the client-reported identifier or User-Agent),
-`ip_address` at sign-in, `created_at`, `expires_at`, `last_seen_at`, and `current`.
+`ip_address` at sign-in, `created_at`, `expires_at`, `last_seen_at`, `current`, and
+`device_key_id` (the app device key that opened the session, `null` for any other
+sign-in).
 `last_seen_at` is an actual authenticated native API request timestamp, recorded at
 most once a minute per session across API nodes. It is null until activity has been
 recorded, including for sessions created before the migration. Creation and expiry
@@ -919,6 +921,23 @@ operation contract.
 | `GET /auth/keys/pending` (`listPendingAppKeys`) | as `GET /auth/keys` | `{ "items": [ ... ] }`, each a device object as in `GET /auth/keys` with `status` `pending`: the account's waiting keys inside their 24 hours, oldest first. |
 | `POST /auth/keys/pending/{id}/approve` (`approvePendingAppKey`) | the account's own login session acting as the household's main profile | Body `{}`, 204. The key becomes active and the device's next `sign-in` opens a session. The account must still be an enabled administrator (403 `permission_denied`). Approving an active key changes nothing, except that the session that key itself opened is refused (403 `permission_denied`); an unknown, denied, revoked or expired key is 404 `not_found`. A session opened by one of the administrator's own device keys may approve. Audited as `user.device_key_approved`. |
 | `POST /auth/keys/pending/{id}/deny` (`denyPendingAppKey`) | as `GET /auth/keys` | Body `{}`, 204. The key's next `sign-in` answers 403 `key_denied`, and neither list shows it. Denying a denied key changes nothing; an active, revoked or unknown key is 404 `not_found`. Audited as `user.device_key_denied`. |
+| `GET /admin/users/{user_id}/keys` (`listAdminUserAppKeys`) | acting admin | What `GET /auth/keys` shows for that account, each object with `provider_bound`, `identity_gone` and `identity_id` (the provider account the key is bound to, as `listAdminUserIdentities` identifies it; `null` when the key is bound to none; historical when `identity_gone` is `true`, since that provider account is no longer linked or listed) added, and `waiting_until` (when a `pending` key stops waiting; `null` otherwise) on each device. `person_key` also carries `enrolled_by` (`session`\|`app-code`). A key whose provider account is no longer linked is listed with `identity_gone` `true`: it can't sign in again, and the person's own list leaves it out. Revoked and denied keys, and waiting keys past their 24 hours, are left out. An unknown account is 404. The account's device sign-ins approved in advance are `listAdminUserDevicePreapprovals`. |
+| `DELETE /admin/users/{user_id}/keys/devices/{id}` (`revokeAdminUserDeviceKey`) | acting admin, under the Owner rules (below) | 204. Revokes the key and ends every session it opened. Revoking a revoked key changes nothing; a key of another account is 404. Audited as `user.device_key_revoked`. |
+| `DELETE /admin/users/{user_id}/keys/person` (`revokeAdminUserPersonKey`) | acting admin, under the Owner rules | 204. Revokes the person key: no device can be introduced with it, and devices it introduced that are still waiting are denied. Devices already enrolled keep their keys and sessions; the person sets up a new person key from a signed-in device. An account with no person key, as straight after a first call, answers 204 and records nothing; an unknown account is 404. The request names no key and acts on the person key the account holds when it arrives, so it is not safe to replay blindly: a repeat after the person has set up a new key revokes that one. Read the list first. Audited as `user.person_key_revoked`, with the count of waiting devices it denied. |
+| `POST /admin/users/{user_id}/keys/pending/{id}/deny` (`denyAdminUserPendingKey`) | acting admin, under the Owner rules | Body `{}`, 204. As `denyPendingAppKey`. No administrator operation approves a waiting key. Audited as `user.device_key_denied`. |
+
+**Administrators.** The four `/admin/users/{user_id}/keys` operations answer
+while `auth.app_key_sign_in` is off, so keys can be reviewed and removed then.
+Any acting administrator lists any account. A change follows the Owner rules of
+revoking login sessions: an administrator acts on an ordinary account and on
+their own, only the Owner acts on another administrator or on the Owner (403
+`permission_denied` otherwise). A scoped API key and an administrator acting as
+an account are treated as those operations treat them: the account the
+credential belongs to is the actor. The account capability
+(`getAdminAccountCapabilities`) reports `app_keys` when these operations are
+served. A login session opened by a device key carries that key's `id` as
+`device_key_id` in `GET /auth/sessions` and the administrator's session list;
+signing such a session out leaves the key, so the device signs in again.
 
 **Signed messages.** An envelope is exactly `{ "kid", "payload", "sig" }`, plus
 `device_sig` on `introduce` and `enroll`. `payload` is base64url (no padding) of

@@ -83,6 +83,8 @@ const LDAP = {
 
 let capabilities: Record<string, unknown>;
 let identities: Array<typeof IDENTITY>;
+let appKeys: Record<string, unknown> | null = null;
+let hanging: Set<string>;
 let failures: Record<string, unknown>;
 let serverPasswordLogin: string;
 const calls: Array<{ op: string; options?: { body?: unknown; path?: unknown } }> = [];
@@ -126,12 +128,15 @@ beforeEach(() => {
     state: "available",
   };
   identities = [IDENTITY];
+  appKeys = null;
+  hanging = new Set();
   failures = {};
   serverPasswordLogin = "true";
   calls.length = 0;
   vi.mocked(v2).mockImplementation(((op: string, options?: { body?: unknown }) => {
     calls.push({ op, options });
     if (failures[op]) return Promise.reject(failures[op]);
+    if (hanging.has(op)) return new Promise(() => {});
     switch (op) {
       case "GET /api/v2/auth/external-sign-in/capabilities":
         return Promise.resolve(capabilities);
@@ -139,6 +144,12 @@ beforeEach(() => {
         return Promise.resolve({ key: "auth.local_password_login", value: serverPasswordLogin });
       case "GET /api/v2/admin/users/{id}/identities":
         return Promise.resolve({ items: identities });
+      case "GET /api/v2/admin/users/capabilities":
+        return Promise.resolve({ state: "available", app_keys: appKeys !== null });
+      case "GET /api/v2/admin/users/{user_id}/keys":
+        return Promise.resolve(appKeys);
+      case "GET /api/v2/admin/users/{user_id}/device-preapprovals":
+        return Promise.resolve({ items: [] });
       case "POST /api/v2/admin/users/{id}/identities":
         identities = [{ ...IDENTITY, id: "9" }];
         return Promise.resolve(identities[0]);
@@ -182,7 +193,7 @@ describe("AdminUserSignIn identities", () => {
     await user.click(await screen.findByRole("button", { name: "Unlink Company SSO (alice)" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog).toHaveTextContent(
-      "alice won't be able to sign in until you set a password or connect a provider again.",
+      "alice won’t be able to sign in until you set a password or connect a provider again.",
     );
     await user.click(within(dialog).getByRole("button", { name: "Unlink" }));
     await waitFor(() =>
@@ -198,6 +209,81 @@ describe("AdminUserSignIn identities", () => {
       ),
     );
   });
+
+  // Unlinking revokes only the keys bound to that provider account, so the
+  // dialog says so only when such a key exists.
+  it.each([
+    ["4", true],
+    ["9", false],
+  ])("mentions app keys only when one is bound to it (identity %s)", async (bound, warns) => {
+    appKeys = {
+      devices: [
+        {
+          id: "k1",
+          kid: "k1",
+          kind: "device",
+          name: "Phone",
+          platform: "ios",
+          status: "active",
+          enrolled_by: "session",
+          allowed_by: null,
+          enrolled_at: "2026-10-01T00:00:00Z",
+          last_used_at: null,
+          provider_bound: true,
+          identity_gone: false,
+          identity_id: bound,
+          waiting_until: null,
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    mount();
+    await user.click(await screen.findByRole("button", { name: "Unlink Company SSO (alice)" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await waitFor(() =>
+      expect(within(dialog).getByRole("button", { name: "Unlink" })).toBeEnabled(),
+    );
+    const sentence = "Silo app keys tied to this provider account are removed";
+    if (warns) expect(dialog).toHaveTextContent(sentence);
+    else expect(dialog).not.toHaveTextContent(sentence);
+  });
+
+  // A key list that couldn't be read can't say whether keys go with the
+  // provider account, so the dialog says what holds either way.
+  it("hedges about app keys when the key list failed, and lets the unlink go ahead", async () => {
+    appKeys = { devices: [] };
+    failures["GET /api/v2/admin/users/{user_id}/keys"] = new Error("unavailable");
+    const user = userEvent.setup();
+    mount();
+    await user.click(await screen.findByRole("button", { name: "Unlink Company SSO (alice)" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await waitFor(() =>
+      expect(within(dialog).getByRole("button", { name: "Unlink" })).toBeEnabled(),
+    );
+    expect(dialog).toHaveTextContent(
+      "Any of alice’s Silo app keys tied to this provider account are removed",
+    );
+  });
+
+  // Until both the account capability and the key list answer, the dialog
+  // can't know what unlinking removes.
+  it.each([["GET /api/v2/admin/users/capabilities"], ["GET /api/v2/admin/users/{user_id}/keys"]])(
+    "keeps Unlink off while %s hasn't answered",
+    async (op) => {
+      appKeys = { devices: [] };
+      hanging.add(op);
+      const user = userEvent.setup();
+      mount();
+      await user.click(await screen.findByRole("button", { name: "Unlink Company SSO (alice)" }));
+      const dialog = await screen.findByRole("alertdialog");
+      // The key list is asked for only once the capability says it is served.
+      if (op.endsWith("/keys"))
+        await waitFor(() =>
+          expect(opCalls("GET /api/v2/admin/users/{user_id}/keys")).toHaveLength(1),
+        );
+      expect(within(dialog).getByRole("button", { name: "Unlink" })).toBeDisabled();
+    },
+  );
 
   it("hides changes from an admin who may not manage the account", async () => {
     mount({ ...USER, role: "admin" }, { manageable: false, viewerIsOwner: false });

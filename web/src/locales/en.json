@@ -215,6 +215,12 @@
       "value": "That’s already linked to this account."
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "This code is unknown, used or expired. Get a new one from the server’s page."
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -23593,6 +23599,87 @@
               "value": " can no longer sign in with this provider account."
             }
           ]
+        }
+      }
+    }
+  ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " can no longer sign in with this provider account. "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " won’t be able to sign in until you set a password or connect a provider again."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " can no longer sign in with this provider account."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "’s Silo app keys tied to this provider account are removed, and those devices are signed out."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Any of "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "’s Silo app keys tied to this provider account are removed, and those devices are signed out."
+            }
+          ]
+        },
+        "other": {
+          "value": []
         }
       }
     }
@@ -85993,6 +86080,374 @@
       "value": "count"
     }
   ],
+  "web.admin.users.detail.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t make that change. Try again."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "Deny device"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " can’t sign in to "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’s account. If it was theirs, they add it again in the Silo app."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "Deny "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "Remove key"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "Devices already signed in keep working until you remove them. No new device can be added with this key, and devices it added that are still waiting are denied. "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’s Silo app sets up a new key the next time they add a device while signed in."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "Remove "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’s account key?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "Remove device"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " is signed out of "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’s account now and can’t sign in with its key again. To use it again, "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " adds it again in the Silo app."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "Remove "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "Withdraw approval"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " can’t use this approval to sign in to "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’s account."
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "Withdraw the approval for "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "Saving…"
+    }
+  ],
+  "web.admin.users.detail.appKeys.denied": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " denied"
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "Devices and apps that sign in to "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’s account with the Silo app, without a password."
+    }
+  ],
+  "web.admin.users.detail.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "Devices"
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "No devices use the Silo app on this account."
+    }
+  ],
+  "web.admin.users.detail.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "Removing a device signs it out and stops its key working. Signing out a session doesn’t remove the device: it signs back in with its key."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t load devices."
+    }
+  ],
+  "web.admin.users.detail.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "Loading devices…"
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "Silo app sign-in is off on this server, so these devices can’t sign in. You can still remove them."
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Only the server owner can change another admin’s or the owner’s devices."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "The Silo app uses this key to add "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’s new devices. Set up "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "No account key. "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’s Silo app sets one up the next time they add a device while signed in."
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "Remove account key"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "Account key"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "Account key removed"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "Sign-ins "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " approved for a device that hasn’t connected yet."
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t load the sign-ins approved in advance."
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "Approved in advance"
+    }
+  ],
+  "web.admin.users.detail.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "Refresh Silo app devices"
+    }
+  ],
+  "web.admin.users.detail.appKeys.removed": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " removed"
+    }
+  ],
+  "web.admin.users.detail.appKeys.title": [
+    {
+      "type": 0,
+      "value": "Silo app devices"
+    }
+  ],
+  "web.admin.users.detail.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "Silo app sign-in isn’t available on this server, so these devices can’t sign in. You can still remove them."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "A new device on an admin account waits until "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " approves it from a device they’re signed in on. You can deny it here."
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "Waiting for approval"
+    }
+  ],
+  "web.admin.users.detail.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "Approval withdrawn"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -92761,6 +93216,54 @@
       "value": "Approve sign-in"
     }
   ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "This code has expired."
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "Silo couldn’t make a code. Try again."
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "Press Open Silo to continue in the Silo app on this device. If the app isn’t installed, install it, come back to this tab and press Open Silo again."
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "Open Silo"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "Get a new code"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "This code works once and expires after a few minutes."
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "Open Silo"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "Open with the siloserver.org link instead"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -92963,10 +93466,46 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "Your account will use "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "Continue"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "With an email address, this server can send you a sign-in link if you lose your devices."
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "Nothing happens? The app isn't installed — just continue below."
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " adds people through its sign-in provider. Sign in with it on this site, then open Silo from your account settings."
     }
   ],
   "web.auth.invite.created": [
@@ -92995,6 +93534,18 @@
       "value": "Enter your email address and choose a password. You'll sign in with your email address."
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "Join with the Silo app on your phone or tablet, or choose a password to sign in."
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "Email (optional)"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -93015,6 +93566,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "Join with the Silo app"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "Join with the Silo app instead"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -93115,6 +93678,24 @@
     {
       "type": 0,
       "value": "Invitation unavailable"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "Use a password instead"
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "Choose a username."
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "That username or email address is already in use. Choose another."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -134179,6 +134760,142 @@
       "value": "How to use this key"
     }
   ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "Allowed by "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "Deny"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "Deny "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "Can’t sign in: its sign-in provider account is no longer linked"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "Other app"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "Silo app"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "Last signed in "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "Not signed in with its key yet"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "Approved in advance · expires "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "Checked with the sign-in provider"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "Remove"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "Remove "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "Added with a one-time code from the server’s web page"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "Added by the Silo app on another device"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "Added while signed in"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "Waiting for approval until "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "Withdraw"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "Withdraw the approval for "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
@@ -139205,6 +139922,30 @@
       "value": "You're offline, so this change wasn't saved"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "Open in Silo"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "Sign the Silo app on your phone or tablet in to this account, without a password."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "Only the household’s main profile can open Silo for this account. Switch to it and try again."
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "Silo app"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -142235,6 +142976,24 @@
     {
       "type": 0,
       "value": "Settings"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "Sign in again"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "Sign in again to manage your devices"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "Manage your devices in the Silo app."
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

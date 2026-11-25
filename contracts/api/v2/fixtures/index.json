@@ -5747,6 +5747,24 @@
       "body_file": "delete_watchlist_entry_locked_profile.json"
     },
     {
+      "name": "deny_admin_user_pending_key_ok",
+      "operation_id": "denyAdminUserPendingKey",
+      "scenario": "An administrator denies a device waiting for approval on an account.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/users/2/keys/pending/5b1d7f0e-6a57-4d0c-8a59-0f3f3a0f4a10/deny",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{}"
+      },
+      "expected_status": 204,
+      "response_headers": {},
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
       "name": "deny_device_login_code_required",
       "operation_id": "denyDeviceLogin",
       "scenario": "A decision naming neither code is a validation failure.",
@@ -10034,6 +10052,25 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminTrickplayLibraries",
       "body_file": "list_admin_trickplay_libraries_ok.json"
+    },
+    {
+      "name": "list_admin_user_app_keys_ok",
+      "operation_id": "listAdminUserAppKeys",
+      "scenario": "An administrator lists an account's keys: a person key from a provider session, a device waiting for approval, an active device, and a device whose provider account is gone.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/2/keys",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminAppKeyList",
+      "body_file": "list_admin_user_app_keys_ok.json"
     },
     {
       "name": "list_admin_user_device_preapprovals_ok",
@@ -15145,6 +15182,40 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/MetadataMatchQueueAction",
       "body_file": "retry_metadata_match_queue_ok.json"
+    },
+    {
+      "name": "revoke_admin_user_device_key_ok",
+      "operation_id": "revokeAdminUserDeviceKey",
+      "scenario": "An administrator removes one of an account's devices; its sessions end.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/admin/users/2/keys/devices/0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {},
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
+      "name": "revoke_admin_user_person_key_ok",
+      "operation_id": "revokeAdminUserPersonKey",
+      "scenario": "An administrator revokes an account's person key; enrolled devices keep working.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/admin/users/2/keys/person",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {},
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
     },
     {
       "name": "revoke_device_preapproval_not_found",

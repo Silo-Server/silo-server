@@ -14,6 +14,7 @@ import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonatio
 import { AdminUserPasswordResetDialog } from "@/components/AdminUserPasswordResetDialog";
 import { AdminUserSignIn } from "@/components/admin/AdminUserSignIn";
 import { LoginSessionsPanel } from "@/components/sessions/LoginSessionsPanel";
+import { AdminAppKeysPanel } from "@/components/admin/AdminAppKeysPanel";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
@@ -260,6 +261,9 @@ function AdminUserDetailPage() {
             />
             {capabilities.data?.login_sessions && (
               <LoginSessionsPanel adminUser={account} manageable={manageable} />
+            )}
+            {capabilities.data?.app_keys && (
+              <AdminAppKeysPanel user={account} manageable={manageable} />
             )}
           </TabsContent>
           <TabsContent value="activity" className="min-w-0">

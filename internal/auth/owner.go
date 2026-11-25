@@ -78,6 +78,44 @@ func CheckOwnerTarget(actor OwnerActor, target *models.User) error {
 	return nil
 }
 
+// lockAdminActorAndTarget locks the acting administrator, the target account
+// and the request's audit actors (auditmutation.ActorIDs) in id order, the
+// order ownership transfers take, so a transfer cannot race the check. It
+// refuses an actor that is not an enabled admin (ErrAdminProtected) and
+// applies CheckOwnerTarget. ErrNotFound when the target does not exist.
+func lockAdminActorAndTarget(ctx context.Context, tx pgx.Tx, actorID, userID int) error {
+	rows, err := tx.Query(ctx, `SELECT id, role, enabled, is_owner FROM users
+		WHERE id = ANY($1) ORDER BY id FOR UPDATE`, append([]int{actorID, userID}, auditmutation.ActorIDs(ctx)...))
+	if err != nil {
+		return err
+	}
+	var actor, target *models.User
+	for rows.Next() {
+		var user models.User
+		if err := rows.Scan(&user.ID, &user.Role, &user.Enabled, &user.IsOwner); err != nil {
+			rows.Close()
+			return err
+		}
+		if user.ID == actorID {
+			actor = &user
+		}
+		if user.ID == userID {
+			target = &user
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if target == nil {
+		return ErrNotFound
+	}
+	if actor == nil || actor.Role != models.RoleAdmin || !actor.Enabled {
+		return ErrAdminProtected
+	}
+	return CheckOwnerTarget(OwnerActor{ID: actor.ID, IsOwner: actor.IsOwner}, target)
+}
+
 // CheckGrantAdmin refuses a caller other than the Owner creating or inviting
 // an account with role.
 func CheckGrantAdmin(actor OwnerActor, role string) error {

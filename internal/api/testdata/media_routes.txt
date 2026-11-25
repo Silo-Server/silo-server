@@ -543,6 +543,10 @@ POST /api/v2/admin/users/{id}/transfer-ownership	non-media
 GET /api/v2/admin/users/{id}/watch-summary	non-media
 GET /api/v2/admin/users/{user_id}/device-preapprovals	non-media
 DELETE /api/v2/admin/users/{user_id}/device-preapprovals/{id}	non-media
+GET /api/v2/admin/users/{user_id}/keys	non-media
+DELETE /api/v2/admin/users/{user_id}/keys/devices/{id}	non-media
+POST /api/v2/admin/users/{user_id}/keys/pending/{id}/deny	non-media
+DELETE /api/v2/admin/users/{user_id}/keys/person	non-media
 DELETE /api/v2/admin/users/{user_id}/login-sessions	non-media
 GET /api/v2/admin/users/{user_id}/login-sessions	non-media
 DELETE /api/v2/admin/users/{user_id}/login-sessions/{session_id}	non-media
@@ -1647,6 +1651,10 @@ POST /api/v2/admin/users/{id}/transfer-ownership	non-media
 GET /api/v2/admin/users/{id}/watch-summary	non-media
 GET /api/v2/admin/users/{user_id}/device-preapprovals	non-media
 DELETE /api/v2/admin/users/{user_id}/device-preapprovals/{id}	non-media
+GET /api/v2/admin/users/{user_id}/keys	non-media
+DELETE /api/v2/admin/users/{user_id}/keys/devices/{id}	non-media
+POST /api/v2/admin/users/{user_id}/keys/pending/{id}/deny	non-media
+DELETE /api/v2/admin/users/{user_id}/keys/person	non-media
 DELETE /api/v2/admin/users/{user_id}/login-sessions	non-media
 GET /api/v2/admin/users/{user_id}/login-sessions	non-media
 DELETE /api/v2/admin/users/{user_id}/login-sessions/{session_id}	non-media

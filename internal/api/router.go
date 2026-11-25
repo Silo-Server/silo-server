@@ -2870,6 +2870,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		authHandler.SetAppKeySignIn(auth.NewAppKeySignIn(deps.DB, authService))
 		authHandler.SetHouseholdStores(deps.UserStoreProvider, profilesOutsidePostgres(deps.Config))
 		v2deps.AppKeys = authHandler
+		v2deps.AdminAppKeys = authHandler
 	}
 	if markersHandler != nil {
 		v2deps.Markers = markersHandler
