@@ -14,7 +14,7 @@ type AdminInsightsLibrarySummary struct {
 	Titles                int64    `json:"titles" doc:"Distinct movies and series in scope; a title in two libraries counts once"`
 	PlayedTitles          int64    `json:"played_titles" doc:"Titles with a play in the window; a series counts when any episode has one"`
 	PlayedShare           float64  `json:"played_share"`
-	NeverStarted          int64    `json:"never_started" doc:"Titles with no playback session at all since history began"`
+	NeverStarted          int64    `json:"never_started" doc:"Titles with no playback session from the start of history to the window's end"`
 	AddedTitles           int64    `json:"added_titles" doc:"Titles first seen in the window"`
 	AddedPlayed           int64    `json:"added_played" doc:"Titles added in the window that have a play since"`
 	MedianDaysToFirstPlay *float64 `json:"median_days_to_first_play" nullable:"true" doc:"Median days from being added to the first play, over titles added in the window that have one"`

@@ -2396,7 +2396,8 @@ window. The implementation and its edge cases are documented in
   Titles are movies and series; a series is played when any of its episodes has a play.
   Coverage is per title: `libraries` (libraries with movies or series, most titles first) and
   `summary` count titles, titles played in the window, titles never started (no playback
-  session at all since history began, so a false start counts as started), and titles added in
+  session from the start of history to the window's end, so a false start counts as started),
+  and titles added in
   the window (`media_item_libraries.first_seen_at`; across libraries the earliest). A title in
   two libraries counts once in `summary` and is played in both when either file played; the
   account and profile filters narrow "played" and "started" to that person. `genres` (up to

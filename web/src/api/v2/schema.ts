@@ -19238,7 +19238,7 @@ export interface components {
       median_days_to_first_play: number | null;
       /**
        * Format: int64
-       * @description Titles with no playback session at all since history began
+       * @description Titles with no playback session from the start of history to the window's end
        */
       never_started: number;
       /** Format: double */

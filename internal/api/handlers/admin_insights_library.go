@@ -341,7 +341,9 @@ func queryInsightsLibraryUnplayed(ctx context.Context, tx pgx.Tx, a insightsLibr
 
 // queryInsightsLibraryBreakdowns sums the window's plays by the played
 // titles' genres, decades and content ratings. A title with three genres
-// counts in each, so genre shares do not add up to the total.
+// counts in each, so genre shares do not add up to the total. Only movies
+// and series count, like coverage: history also holds plays of other item
+// types, which the Library tab does not report on.
 func queryInsightsLibraryBreakdowns(ctx context.Context, tx pgx.Tx, libraryPlays map[string]int64, out *AdminInsightsLibrary) error {
 	if len(libraryPlays) == 0 {
 		return nil
@@ -352,7 +354,7 @@ func queryInsightsLibraryBreakdowns(ctx context.Context, tx pgx.Tx, libraryPlays
 	}
 	rows, err := tx.Query(ctx, `
 		SELECT content_id, COALESCE(genres, '{}'), year, COALESCE(BTRIM(content_rating), '')
-		FROM media_items WHERE content_id = ANY($1::text[])
+		FROM media_items WHERE content_id = ANY($1::text[]) AND type IN ('movie', 'series')
 	`, ids)
 	if err != nil {
 		return fmt.Errorf("querying insights library breakdowns: %w", err)

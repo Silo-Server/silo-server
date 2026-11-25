@@ -13475,7 +13475,7 @@
             ]
           },
           "never_started": {
-            "description": "Titles with no playback session at all since history began",
+            "description": "Titles with no playback session from the start of history to the window's end",
             "format": "int64",
             "type": "integer"
           },
