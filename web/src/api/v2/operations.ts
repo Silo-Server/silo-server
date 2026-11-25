@@ -809,6 +809,7 @@ export const v2Operations = {
   "POST /api/v2/auth/device/poll": "pollDeviceLogin",
   "POST /api/v2/auth/device/preapprove": "preapproveDeviceLogin",
   "POST /api/v2/auth/device/start": "startDeviceLogin",
+  "POST /api/v2/auth/grants/redeem": "redeemAppKeyGrant",
   "POST /api/v2/auth/impersonation/end": "endImpersonation",
   "POST /api/v2/auth/keys/challenge": "createAppKeyChallenge",
   "POST /api/v2/auth/keys/enroll": "enrollAppKeys",

@@ -2141,6 +2141,8 @@ that holds a bearer secret or a public capability, each one way:
     approval again.
   - Sign-in challenges: a sign-in in progress fails once and the app asks
     for a new challenge.
+  - Used grant IDs (`auth_grant_uses`): a grant lives five minutes, so a
+    restore never revives one that was used.
   - Device sign-ins, including ones approved in advance: a TV waiting to be
     signed in shows a new code, approved again.
 - Restored with live credentials (`secretScrubbed`): connections to outside

@@ -23,6 +23,12 @@ type OwnAppKeys struct {
 	AllowedBy string
 }
 
+// SessionMayIssueCredential reports whether the claims' session may be
+// handed a personal API key or a linked sign-in (SessionMayIssueCredential).
+func (a *AppKeySignIn) SessionMayIssueCredential(ctx context.Context, claims *Claims) error {
+	return SessionMayIssueCredential(ctx, a.pool, claims)
+}
+
 // ListOwnKeys lists the keys of the claims' account, for the account's own
 // login session.
 func (a *AppKeySignIn) ListOwnKeys(ctx context.Context, claims *Claims) (OwnAppKeys, error) {
