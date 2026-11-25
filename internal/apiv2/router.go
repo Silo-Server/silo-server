@@ -31,6 +31,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/plugins"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
@@ -267,9 +268,14 @@ type Dependencies struct {
 	Devices                       DeviceLoginService
 	Sessions                      SessionService
 	// PluginLaunch mints the plugin access cookie token (*handlers.AuthHandler).
-	PluginLaunch          PluginLaunchService
-	OAuth                 OAuthService
-	BucketRateLimit       func(string) func(http.Handler) http.Handler
+	PluginLaunch    PluginLaunchService
+	OAuth           OAuthService
+	BucketRateLimit func(string) func(http.Handler) http.Handler
+	// AccountRateLimit spends an account's share of a rate-limit budget
+	// that is keyed by account (ratelimit.Middleware.AllowEndpointAccount):
+	// the handler calls it once it knows whose request it is. Nil leaves
+	// such an operation limited by address only.
+	AccountRateLimit      func(ctx context.Context, bucket string, accountID int) ratelimit.AllowResult
 	Markers               MarkerService
 	AdminSections         AdminSectionService
 	AdminPolicy           AdminPolicyService
@@ -461,6 +467,10 @@ type Dependencies struct {
 	PersonalAPIKeys         PersonalAPIKeyService
 	// AppKeys stores app keys; nil reports the capability not_configured.
 	AppKeys AppKeyService
+	// AdminAppKeys lists and revokes another account's app keys; nil leaves
+	// those operations not configured and the account capability app_keys
+	// false.
+	AdminAppKeys AdminAppKeyService
 	// ProfileSet applies and reads profile sets; nil reports the capability
 	// not_configured.
 	ProfileSet       ProfileSetService

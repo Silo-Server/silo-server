@@ -2874,6 +2874,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		authHandler.SetAppKeySignIn(auth.NewAppKeySignIn(deps.DB, authService))
 		authHandler.SetHouseholdStores(deps.UserStoreProvider, profilesOutsidePostgres(deps.Config))
 		v2deps.AppKeys = authHandler
+		v2deps.AdminAppKeys = authHandler
 	}
 	if markersHandler != nil {
 		v2deps.Markers = markersHandler
@@ -4096,6 +4097,10 @@ func v2Dependencies(
 	if deps.RateLimitMW != nil {
 		out.RateLimit = deps.RateLimitMW.Handler
 		out.BucketRateLimit = deps.RateLimitMW.AuthEndpointHandler
+		// A profile set is limited by account: the address a household or
+		// a reverse proxy shares only gets the looser budget.
+		deps.RateLimitMW.KeyEndpointByAccount("profile_set")
+		out.AccountRateLimit = deps.RateLimitMW.AllowEndpointAccount
 	}
 	if deps.Config != nil {
 		out.CursorSecret = []byte(deps.Config.Auth.JWTSecret)

@@ -453,6 +453,29 @@ The profile set and personal API keys are not offered on that store at all.
 The key list, its deletes, the pending list and deny keep no profile rule:
 any profile of the account may review and remove devices.
 
+**Administrators.** An administrator reviews and removes another account's
+keys on the Users page through `/admin/users/{user_id}/keys`: list, revoke a
+device key, revoke the person key, deny a waiting key. These routes don't read
+`opened_via` or the acting profile, and answer while the switch is off. Any
+acting administrator lists any account. A change locks the acting
+administrator, the target account and the request's audit actors in id order
+(`lockAdminActorAndTarget`, shared with revoking login sessions and device
+sign-ins approved in advance) and applies `CheckOwnerTarget`: an administrator
+acts on an ordinary account and on their own, only the Owner on another
+administrator or on the Owner. Then the key rows, then the sessions, the order
+every key path takes, with one more account row in front; no key path locks two
+accounts, so there is no cycle. No administrator route approves a waiting key:
+approval is the person's, from one of their own sessions. The Owner may deny
+another administrator's waiting key.
+
+The administrator's list shows what the person's list hides: a provider-bound
+key whose identity is gone from the account, marked `identity_gone`. It is
+dead (revoked at its next use) but still occupies the person's device, so the
+administrator sees why it no longer signs in. It shows how each key was
+enrolled and, for a key a grant enrolled, the account whose person key allowed
+it; nothing records which session or administrator vouched for a key beyond
+that.
+
 ## The origin rule and the sealed reply
 
 The payload names the address the device is talking to. The server refuses it
@@ -527,8 +550,12 @@ TLS connection covers all of it.
 
 ## What revokes keys
 
-- **Revoking a device key** (the person's devices list) ends its sessions at
-  once, as above.
+- **Revoking a device key** (the person's devices list, or an administrator on
+  the Users page) ends its sessions at once, as above.
+- **Revoking the person key** (an administrator on the Users page) stops it
+  introducing devices and denies the devices it introduced that are still
+  waiting, as replacing it does. Devices already enrolled keep their keys and
+  sessions. The person sets up a new person key from a signed-in device.
 - **Replacing the person key** revokes the old one: new devices need the new
   key, devices already enrolled keep theirs. A device the old key introduced
   that is still waiting for approval is refused with it (`denied`): replacing
@@ -796,11 +823,42 @@ answer `capability_unsupported`.
 `createAppKeyChallenge` spends the per-address `key_challenge` budget;
 `introduce`, `sign-in`, `enroll` and grant redemption spend `key_sign_in`. Both default to 60 a
 minute with a burst of 20, enough for a few waiting devices behind one address
-(each asks every five seconds). `PUT /profiles/set` spends its own
-`profile_set` budget, 20 a minute with a burst of 10; its signed form also
-spends a challenge. Neither budget can be spent per key before the
-signature verifies; the challenge is what makes each signed request single
+(each asks every five seconds). Neither budget can be spent per key before
+the signature verifies; the challenge is what makes each signed request single
 use.
+
+Both of those are counted per client address, and stay so: a sign-in is
+untrusted until its signature verifies, so there is no account to count it
+against. What that means in practice:
+
+- A device signs in with its key when its refresh token has run out, not on
+  every start. One sign-in costs one challenge and one signed request.
+- From one address, 20 devices can sign in at once and then one a second.
+  A device over the budget gets 429 with `Retry-After` and tries again.
+- The signed routes share one budget: an `introduce`, a `sign-in`, an
+  `enroll` and a grant redemption from one address all draw on the same 60 a
+  minute.
+- Behind a reverse proxy that passes the client address on, each client has
+  its own budget, and the proxy's own address has one ten times as large that
+  all of them share. Behind a proxy that doesn't pass it on, every person's
+  devices count as one client and share one 60 a minute, as they already do
+  for password sign-in.
+- An owner whose household or proxy needs more raises
+  `ratelimit.auth.key_challenge.*` and `ratelimit.auth.key_sign_in.*`
+  (requests per minute and burst).
+
+`PUT /profiles/set` is limited per account, not per address: `profile_set`,
+20 a minute with a burst of 10, is spent by the session's account, or by the
+account a signed set names once its signature has verified
+(`ratelimit.Middleware.AllowEndpointAccount`, called from the handler). A
+household's devices share one address, and so does every account behind a
+reverse proxy that doesn't pass the client address on; counting the address
+would give all of them one person's allowance. The address still has a budget,
+ten times the account's, spent in the gate before anything about the request
+is trusted (`KeyEndpointByAccount`). An unverified signed request can only
+count there. A forwarding proxy's own address gets that same tenfold budget,
+not ten times it again. The signed form also spends a challenge, and has
+spent it by the time the account's limit refuses the set.
 
 ## Multi-node rules
 

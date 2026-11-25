@@ -279,6 +279,8 @@ const (
 	ActionLoginSessionsRevoked     = "user.login_sessions_revoked"
 	ActionDeviceKeyApproved        = "user.device_key_approved"
 	ActionDeviceKeyDenied          = "user.device_key_denied"
+	ActionDeviceKeyRevoked         = "user.device_key_revoked"
+	ActionPersonKeyRevoked         = "user.person_key_revoked"
 	ActionAPIKeyCreated            = "api_key.created"
 	ActionAPIKeyUpdated            = "api_key.updated"
 	ActionAPIKeyDeleted            = "api_key.deleted"
@@ -319,6 +321,7 @@ func Actions() []string {
 		ActionImpersonationStarted, ActionImpersonationEnded, ActionOwnershipTransferred,
 		ActionPasswordResetLinkCreated, ActionPasswordResetCompleted, ActionPasswordChanged,
 		ActionLoginSessionRevoked, ActionLoginSessionsRevoked, ActionDeviceKeyApproved, ActionDeviceKeyDenied,
+		ActionDeviceKeyRevoked, ActionPersonKeyRevoked,
 		ActionAPIKeyCreated, ActionAPIKeyUpdated, ActionAPIKeyDeleted,
 		ActionProfileCreated, ActionProfileUpdated, ActionProfileDeleted}
 }

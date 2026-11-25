@@ -247,36 +247,7 @@ func (s *DeviceLoginService) AdminListPreapprovals(ctx context.Context, userID i
 // revoking the account's login sessions has (CheckOwnerTarget).
 func (s *DeviceLoginService) AdminRevokePreapproval(ctx context.Context, actorID, userID int, id string) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT id, role, enabled, is_owner FROM users
-			WHERE id = ANY($1) ORDER BY id FOR UPDATE`, []int{actorID, userID})
-		if err != nil {
-			return err
-		}
-		var actor, target *models.User
-		for rows.Next() {
-			var u models.User
-			if err := rows.Scan(&u.ID, &u.Role, &u.Enabled, &u.IsOwner); err != nil {
-				rows.Close()
-				return err
-			}
-			if u.ID == actorID {
-				actor = &u
-			}
-			if u.ID == userID {
-				target = &u
-			}
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		if target == nil {
-			return ErrNotFound
-		}
-		if actor == nil || actor.Role != models.RoleAdmin || !actor.Enabled {
-			return ErrAdminProtected
-		}
-		if err := CheckOwnerTarget(OwnerActor{ID: actor.ID, IsOwner: actor.IsOwner}, target); err != nil {
+		if err := lockAdminActorAndTarget(ctx, tx, actorID, userID); err != nil {
 			return err
 		}
 		return s.revokePreapprovalTx(ctx, tx, userID, id)

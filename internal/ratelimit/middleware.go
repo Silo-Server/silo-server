@@ -38,6 +38,9 @@ type Middleware struct {
 	// overBudget holds, per endpoint budget, the check that admits a request
 	// the budget would refuse. See AdmitOverEndpointBudget.
 	overBudget map[string]func(*http.Request) bool
+	// byAccount holds the endpoint budgets a caller's account spends. See
+	// KeyEndpointByAccount.
+	byAccount map[string]bool
 }
 
 // NewMiddleware creates the rate limit middleware. Session quotas share the
@@ -249,6 +252,51 @@ func (mw *Middleware) AdmitOverEndpointBudget(endpoint string, admit func(*http.
 	mw.overBudget[endpoint] = admit
 }
 
+// KeyEndpointByAccount makes endpoint's configured budget the one each
+// account spends (AllowEndpointAccount), not the one each address spends.
+// It is for an operation that learns whose request it is only in its
+// handler, such as one that accepts a signed body: every device of a
+// household behind one address, and every account behind a reverse proxy
+// that doesn't pass the client address on, would otherwise share one
+// person's allowance.
+//
+// The address still has a budget, spent before anything about the request is
+// trusted: the forwarding peer's size, authPeerBudgetMultiplier times the
+// endpoint's, so only abuse reaches it. Call it while building the router,
+// before serving requests.
+func (mw *Middleware) KeyEndpointByAccount(endpoint string) {
+	mw.mu.Lock()
+	defer mw.mu.Unlock()
+	if mw.byAccount == nil {
+		mw.byAccount = map[string]bool{}
+	}
+	mw.byAccount[endpoint] = true
+}
+
+// AllowEndpointAccount spends accountID's share of an endpoint keyed by
+// account. The handler calls it once it knows the account for certain: the
+// session's, or the one a verified signature names. An endpoint with no
+// configured budget, and a limiter that is switched off, allow everything.
+func (mw *Middleware) AllowEndpointAccount(ctx context.Context, endpoint string, accountID int) AllowResult {
+	mw.mu.RLock()
+	cfg := mw.cfg
+	mw.mu.RUnlock()
+	epCfg, ok := cfg.AuthEndpoints[endpoint]
+	if !cfg.Enabled || !ok {
+		return AllowResult{Allowed: true}
+	}
+	return mw.perKey.Allow(ctx, fmt.Sprintf("authaccount:%d:%s", accountID, endpoint), endpointRate(epCfg))
+}
+
+// endpointRate is a named endpoint's configured budget as a Rate.
+func endpointRate(epCfg AuthEndpointConfig) Rate {
+	return Rate{
+		RequestsPerSecond: epCfg.RequestsPerMinute / 60,
+		RequestsPerMinute: epCfg.RequestsPerMinute,
+		Burst:             epCfg.Burst,
+	}
+}
+
 // admitOverBudget runs the endpoint's admission check for a request its
 // endpoint budget refused. Each check costs the caller a lookup, so checks
 // spend budgets of their own before it runs. The client's budget is ten times
@@ -294,6 +342,7 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 			mw.mu.RLock()
 			cfg := mw.cfg
 			admit := mw.overBudget[endpoint]
+			byAccount := mw.byAccount[endpoint]
 			mw.mu.RUnlock()
 
 			if !cfg.Enabled {
@@ -313,10 +362,15 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 				// Check per-endpoint limit
 				epCfg, ok := cfg.AuthEndpoints[endpoint]
 				if ok {
-					epRate := Rate{
-						RequestsPerSecond: epCfg.RequestsPerMinute / 60,
-						RequestsPerMinute: epCfg.RequestsPerMinute,
-						Burst:             epCfg.Burst,
+					epRate := endpointRate(epCfg)
+					// What every client behind one forwarding peer shares.
+					peerRate := authPeerRate(epRate)
+					if byAccount {
+						// The account spends the endpoint's budget in the
+						// handler; the address gets the looser shared one,
+						// which is as much as its forwarding peer gets: the
+						// two are not multiplied.
+						epRate = peerRate
 					}
 					epKey := fmt.Sprintf("authip:%s:%s", source, endpoint)
 					epResult := mw.perKey.Allow(r.Context(), epKey, epRate)
@@ -330,7 +384,7 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 					if epResult.Allowed {
 						if peer := clientip.PeerIP(r.Context()); peer != "" && peer != clientIP && netaccess.PathFromContext(r.Context()).IsDefault() {
 							peerKey := fmt.Sprintf("authpeer:%s:%s", SourceKey(peer), endpoint)
-							epResult = mw.perKey.Allow(r.Context(), peerKey, authPeerRate(epRate))
+							epResult = mw.perKey.Allow(r.Context(), peerKey, peerRate)
 						}
 					}
 					if !epResult.Allowed && !mw.admitOverBudget(r, admit, clientIP, endpoint, epRate) {
