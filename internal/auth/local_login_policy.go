@@ -78,11 +78,14 @@ func EnsureLocalPasswordLoginAllowedInTransaction(ctx context.Context, tx pgx.Tx
 // demo, whose visitors share one account that is not an administrator.
 const demoModeSettingKey = "demo.enabled"
 
-// demoModeOn reads demoModeSettingKey; only "true" turns it on, as on the
-// native API.
+// demoModeOnValue is the only demoModeSettingKey value that turns demo mode
+// on, as on the native API.
+const demoModeOnValue = "true"
+
+// demoModeOn reads demoModeSettingKey.
 func demoModeOn(ctx context.Context, db rowQuerier) (bool, error) {
 	value, err := readServerSetting(ctx, db, demoModeSettingKey)
-	return value == "true", err
+	return value == demoModeOnValue, err
 }
 
 func emailAutoMatchEnabled(ctx context.Context, db rowQuerier) (bool, error) {

@@ -234,7 +234,7 @@ func demoMode(ctx context.Context, settings apimw.DemoSettingsReader) (bool, err
 	if err != nil {
 		return false, err
 	}
-	return enabled == "true", nil //nolint:goconst // settings literal, not a shared constant
+	return enabled == "true", nil
 }
 
 // demoRestricted reports whether demo mode restricts the caller: demo mode
