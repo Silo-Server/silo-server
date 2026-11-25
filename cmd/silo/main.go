@@ -3636,6 +3636,7 @@ func main() {
 			// or unconfigured autoscan still age out.
 			tasks.NewAutoscanEventCleanupTask(autoscan.NewRepository(deps.DB, deps.SecretCipher), settingsRepo),
 			tasks.NewDeviceLoginCleanupTask(auth.NewDeviceLoginRetention(deps.DB)),
+			tasks.NewAppKeyChallengeCleanupTask(auth.NewKeyChallenges(deps.DB)),
 			tasks.NewOAuthFlowCleanupTask(auth.NewPGOAuthStore(deps.DB)),
 		)
 		var diagnosticsStore diagnostics.ObjectStore
