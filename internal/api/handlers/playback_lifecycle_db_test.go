@@ -273,8 +273,8 @@ func TestPlaybackLifecycleOrderAndStartStateDB(t *testing.T) {
 // its control socket: it moves the lifecycle row at once, so the admin list
 // shows it before the next progress report, but never over progress the
 // attempt accepted after the confirmation was received, even progress that
-// commits while the confirmation waits on the attempt row, and never on a
-// stopped session.
+// commits while the confirmation waits on the attempt row, and never on an
+// expired attempt or a stopped session.
 func TestConfirmedPauseLifecycleDB(t *testing.T) {
 	ctx, pool, account := lifecycleTestDB(t)
 	store := NewPGPlaybackAdminStore(pool, nil)
@@ -359,6 +359,7 @@ func TestConfirmedPauseLifecycleDB(t *testing.T) {
 	if _, ok, err := store.ConfirmLifecyclePause(ctx, native, true, 2); err != nil || !ok || state() != LifecyclePaused {
 		t.Fatalf("confirmation at the latest sequence: ok=%v err=%v state=%s", ok, err, state())
 	}
+	requireExpiredAttemptIgnoresConfirmation(t, ctx, pool, store, native, state)
 	if _, _, err := store.RecordEnd(ctx, AdminPlaybackHistoryEntry{
 		SessionID: native, UserID: account, ProfileID: "p-1", MediaFileID: file, PlayMethod: "direct_play",
 		StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(time.Minute).Format(time.RFC3339Nano), EndReason: PlaybackEndStopped,
@@ -367,6 +368,20 @@ func TestConfirmedPauseLifecycleDB(t *testing.T) {
 	}
 	if _, ok, _ := store.ConfirmLifecyclePause(ctx, native, false, 2); ok || state() != LifecycleStopped {
 		t.Fatalf("a stopped session resumed: ok=%v state=%s", ok, state())
+	}
+}
+
+// requireExpiredAttemptIgnoresConfirmation expires the paused session's
+// attempt and checks a resume confirmation leaves the row paused: an attempt
+// past its lease accepts no progress, and no confirmation either, since the
+// sweep is about to end it.
+func requireExpiredAttemptIgnoresConfirmation(t *testing.T, ctx context.Context, pool *pgxpool.Pool, store *PGPlaybackAdminStore, sessionID string, state func() string) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `UPDATE playback_v3_attempts SET expires_at = NOW() - interval '1 second' WHERE session_id = $1::uuid`, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.ConfirmLifecyclePause(ctx, sessionID, false, 2); err != nil || ok || state() != LifecyclePaused {
+		t.Fatalf("an expired attempt resumed: ok=%v err=%v state=%s", ok, err, state())
 	}
 }
 

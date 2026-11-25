@@ -178,7 +178,7 @@ func (s *PGPlaybackAdminStore) ConfirmLifecyclePause(ctx context.Context, sessio
 	err := s.pool.QueryRow(ctx, `
 		WITH attempt AS (
 			SELECT 1 FROM playback_v3_attempts
-			WHERE session_id = $1::uuid AND stopped_at IS NULL AND last_sequence <= $3
+			WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL AND last_sequence <= $3
 			FOR SHARE
 		)
 		UPDATE playback_session_lifecycle
