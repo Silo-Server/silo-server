@@ -688,6 +688,20 @@ has the full rules; what a client sees:
   `permission_denied`.
 - It cannot approve or deny a device request, Quick Connect included.
 
+## App key sign-in
+
+App keys let an app sign in to an account with a key it holds instead of a
+password. Storage, revocation and the server switch are described in
+[app-keys.md](architecture/app-keys.md). This server serves the capability
+only; each feature field turns `true` when its operation is served.
+
+| Operation | Credential | Notes |
+| --- | --- | --- |
+| `GET /auth/keys/capability` (`getAppKeyCapability`) | none | `state` is `available` while `auth.app_key_sign_in` is on, `disabled` while it is off, and `not_configured` on a server started without a database for app keys. `introduce`, `sign_in`, `enroll`, `app_codes`, `grants`, `sign_in_links` and `profile_set` each report one operation and are all `false` on this server. `signature_suites` is `["ES256"]` and `sealed_reply_suites` is `["P256-HKDF-SHA256-AES256GCM"]`. Conditional like every capability document (`ETag`, `If-None-Match`). |
+
+Server setting: `auth.app_key_sign_in` (default `true`). It is read on each
+request, so a change applies on every node at once.
+
 ## External sign-in
 
 OIDC and LDAP sign-in come from `auth_provider.v1` plugins. Account
@@ -873,10 +887,11 @@ are refused with 403 `local_login_disabled` and `getSignupStatus` reports
 signup off), `auth.email_auto_match` (default `false`; matches ordinary
 accounts only, never an admin, the Owner or a break-glass account),
 `auth.provider_recheck_interval` (default `12h`, 5m to 30d: how old the
-provider's last answer about an identity may be before a refresh asks again)
-and `auth.provider_recheck_outage_policy` (`fail_open`, the default, keeps a
+provider's last answer about an identity may be before a refresh asks again),
+`auth.provider_recheck_outage_policy` (`fail_open`, the default, keeps a
 session whose provider cannot be reached; `fail_closed` refuses its refresh
-until the provider answers).
+until the provider answers) and `auth.app_key_sign_in` (default `true`; see
+[App key sign-in](#app-key-sign-in)).
 
 Provider re-check: a login session opened through the provider (an OAuth or
 LDAP sign-in, a device sign-in approved from such a session, or a session of

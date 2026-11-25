@@ -30,7 +30,7 @@ func IsSessionNotFound(err error) bool {
 }
 
 // sessionColumns is the list of columns returned by all session SELECT queries.
-const sessionColumns = `id, user_id, device_name, COALESCE(device_id, '') AS device_id, COALESCE(device_platform, '') AS device_platform, COALESCE(host(ip_address), '') AS ip_address, created_at, expires_at, revoked_at, impersonator_user_id, impersonation_started_at, identity_id, provider_since, last_seen_at, purpose, COALESCE(bound_profile_id, '') AS bound_profile_id, absolute_expires_at`
+const sessionColumns = `id, user_id, device_name, COALESCE(device_id, '') AS device_id, COALESCE(device_platform, '') AS device_platform, COALESCE(host(ip_address), '') AS ip_address, created_at, expires_at, revoked_at, impersonator_user_id, impersonation_started_at, identity_id, provider_since, last_seen_at, purpose, COALESCE(bound_profile_id, '') AS bound_profile_id, absolute_expires_at, device_key_id::text AS device_key_id`
 
 // SessionRepository provides CRUD operations for the auth_sessions table.
 type SessionRepository struct {
@@ -63,6 +63,7 @@ func scanSession(row pgx.Row) (*models.AuthSession, error) {
 		&s.Purpose,
 		&s.BoundProfileID,
 		&s.AbsoluteExpiresAt,
+		&s.DeviceKeyID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -96,6 +97,7 @@ func scanSessions(rows pgx.Rows) ([]*models.AuthSession, error) {
 			&s.Purpose,
 			&s.BoundProfileID,
 			&s.AbsoluteExpiresAt,
+			&s.DeviceKeyID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning session row: %w", err)
@@ -117,6 +119,9 @@ func (r *SessionRepository) Create(ctx context.Context, session models.AuthSessi
 
 // createWithQuerier inserts a new auth session using the provided exec-capable
 // database handle so callers can participate in an existing transaction.
+// A session opened by an app device key carries DeviceKeyID; the caller
+// holds the account and key row locks (lockDeviceKey) in the same
+// transaction, so a concurrent revocation of the key also ends this session.
 func (r *SessionRepository) createWithQuerier(
 	ctx context.Context,
 	db sessionExecQuerier,
@@ -139,8 +144,8 @@ func (r *SessionRepository) createWithQuerier(
 	}
 
 	query := `INSERT INTO auth_sessions
-		(id, user_id, device_name, ip_address, expires_at, impersonator_user_id, impersonation_started_at, identity_id, provider_since, device_id, device_platform, purpose, bound_profile_id, absolute_expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, ''), $14)`
+		(id, user_id, device_name, ip_address, expires_at, impersonator_user_id, impersonation_started_at, identity_id, provider_since, device_id, device_platform, purpose, bound_profile_id, absolute_expires_at, device_key_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, ''), $14, $15::uuid)`
 
 	// ip_address is a Postgres inet column; an empty string fails the
 	// inet input parser (SQLSTATE 22P02). Pass NULL when the caller
@@ -166,6 +171,7 @@ func (r *SessionRepository) createWithQuerier(
 		session.Purpose,
 		session.BoundProfileID,
 		session.AbsoluteExpiresAt,
+		session.DeviceKeyID,
 	)
 	if err != nil {
 		return fmt.Errorf("creating session: %w", err)

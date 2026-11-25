@@ -6852,6 +6852,24 @@
       "body_file": "get_admin_section_ok.json"
     },
     {
+      "name": "get_app_key_capability_ok",
+      "operation_id": "getAppKeyCapability",
+      "scenario": "App key sign-in support before login, with the server setting on.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/keys/capability"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"73534696ae8b82a5859ea222533a0e8be69be28a958358d6397b22c1d3cb884a\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AppKeyCapability",
+      "body_file": "get_app_key_capability_ok.json"
+    },
+    {
       "name": "get_audio_preference_not_found",
       "operation_id": "getAudioPreference",
       "scenario": "A series the acting profile has no remembered audio track for.",

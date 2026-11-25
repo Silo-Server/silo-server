@@ -1,0 +1,17 @@
+{
+  "revision": "1661dc67ba5dc29209028d67a431b85a224d1bc0dd3dd24c86bfba3bab39fe69",
+  "state": "available",
+  "introduce": false,
+  "sign_in": false,
+  "enroll": false,
+  "app_codes": false,
+  "grants": false,
+  "sign_in_links": false,
+  "profile_set": false,
+  "signature_suites": [
+    "ES256"
+  ],
+  "sealed_reply_suites": [
+    "P256-HKDF-SHA256-AES256GCM"
+  ]
+}

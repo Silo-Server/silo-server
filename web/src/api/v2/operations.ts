@@ -340,6 +340,7 @@ export const v2Operations = {
   "GET /api/v2/auth/device/capability": "getDeviceLoginCapability",
   "GET /api/v2/auth/device/preapprovals": "listDevicePreapprovals",
   "GET /api/v2/auth/external-sign-in/capabilities": "getExternalSignInCapabilities",
+  "GET /api/v2/auth/keys/capability": "getAppKeyCapability",
   "GET /api/v2/auth/oauth/callback": "finishStableOAuthCallback",
   "GET /api/v2/auth/oauth/capabilities": "getOAuthHandshakeCapabilities",
   "GET /api/v2/auth/oauth/{install_id}/callback": "finishOAuthCallback",

@@ -192,6 +192,8 @@ const (
 var secretTables = []secretTable{
 	{name: "auth_sessions", handling: secretLeftOut, why: "web and native sign-ins and their refresh tokens"},
 	{name: "device_login_requests", handling: secretLeftOut, why: "device-code sign-ins, which name auth_sessions"},
+	{name: "auth_person_keys", handling: secretLeftOut, why: "app person keys, which vouch for new device keys; a restored server asks devices to enroll again"},
+	{name: "auth_device_keys", handling: secretLeftOut, why: "app device keys, which open login sessions; a restored server asks devices to enroll again"},
 	{name: "jellycompat_sessions", handling: secretLeftOut, why: "Jellyfin-protocol access tokens"},
 	{name: "jellycompat_device_profiles", handling: secretLeftOut, why: "keyed by Jellyfin-protocol access tokens"},
 	{name: "jellycompat_playback_sessions", handling: secretLeftOut, why: "Jellyfin-protocol playback sessions"},

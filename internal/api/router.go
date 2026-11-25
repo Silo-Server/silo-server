@@ -2861,6 +2861,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminAPIKeys = adminAPIKeys
 		v2deps.PersonalAPIKeys = newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, deps.Config)
 	}
+	if deps.DB != nil {
+		v2deps.AppKeys = auth.NewAppKeyRepository(deps.DB)
+	}
 	if markersHandler != nil {
 		v2deps.Markers = markersHandler
 		v2deps.AdminMarkerHistory = markersHandler

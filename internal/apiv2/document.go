@@ -576,6 +576,7 @@ func registerAll(reg *Registry) {
 	registerAuthSessions(reg)
 	registerDeviceLogin(reg)
 	registerDevicePreapprovals(reg)
+	registerAppKeys(reg)
 	registerAdminUsers(reg)
 	registerAdminPlaybackHistory(reg)
 	registerAdminAccounts(reg)
