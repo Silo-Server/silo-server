@@ -693,7 +693,7 @@ only; each feature field turns `true` when its operation is served.
 
 | Operation | Credential | Notes |
 | --- | --- | --- |
-| `GET /auth/keys/capability` (`getAppKeyCapability`) | none | `state` is `available` while `auth.app_key_sign_in` is on and `disabled` while it is off. `introduce`, `sign_in`, `enroll`, `app_codes`, `grants`, `sign_in_links` and `profile_set` each report one operation and are all `false` on this server. `signature_suites` is `["ES256"]` and `sealed_reply_suites` is `["P256-HKDF-SHA256-AES256GCM"]`. Conditional like every capability document (`ETag`, `If-None-Match`). |
+| `GET /auth/keys/capability` (`getAppKeyCapability`) | none | `state` is `available` while `auth.app_key_sign_in` is on, `disabled` while it is off, and `not_configured` on a server started without a database for app keys. `introduce`, `sign_in`, `enroll`, `app_codes`, `grants`, `sign_in_links` and `profile_set` each report one operation and are all `false` on this server. `signature_suites` is `["ES256"]` and `sealed_reply_suites` is `["P256-HKDF-SHA256-AES256GCM"]`. Conditional like every capability document (`ETag`, `If-None-Match`). |
 
 Server setting: `auth.app_key_sign_in` (default `true`). It is read on each
 request, so a change applies on every node at once.
