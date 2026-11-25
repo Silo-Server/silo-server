@@ -143,6 +143,12 @@ export function SubtitleUploadForm({
         return;
       }
       if (!isAcceptedSubtitleFile(file)) {
+        // Drop the earlier choice so Upload cannot send a file other than the
+        // one the error names, and ignore its pending language detection.
+        detectRequestRef.current++;
+        setDetectingLanguage(false);
+        setSelectedFile(null);
+        setDetectionSource(null);
         reportError(t("web.subtitles.upload.unsupportedType"));
         return;
       }
