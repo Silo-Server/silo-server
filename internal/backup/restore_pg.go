@@ -417,11 +417,18 @@ func (c *PGControl) NameOf(ctx context.Context, oid uint32) (string, bool, error
 // name, without waiting for them to go: every other client is counted the
 // moment it is seen. Background workers, such as autovacuum on the database,
 // are not clients and are left out too.
+//
+// A session this role may not inspect counts as a client. A role without
+// pg_read_all_stats sees another role's session with its backend type and
+// application name NULL, and a restore may run as such a role
+// (CheckPrivileges asks only for CREATEDB and ownership), so NULL in either
+// column must never read as "not a client" or "one of ours".
 func (c *PGControl) OtherConnections(ctx context.Context, name string) (int, error) {
 	var n int
 	err := c.Conn.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
-		WHERE datname = $1 AND pid <> pg_backend_pid() AND backend_type = 'client backend'
-			AND ($2 = '' OR application_name <> $2)`, name, c.own).Scan(&n)
+		WHERE datname = $1 AND pid <> pg_backend_pid()
+			AND coalesce(backend_type, 'client backend') = 'client backend'
+			AND ($2 = '' OR application_name IS DISTINCT FROM $2)`, name, c.own).Scan(&n)
 	return n, err
 }
 
