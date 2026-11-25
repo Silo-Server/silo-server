@@ -89,6 +89,31 @@ func TestAdminInsightsBreakdownsDB(t *testing.T) {
 	t.Run("library past window", func(t *testing.T) { assertBreakdownsLibraryPastWindowDB(t, h, pool, s) })
 }
 
+// Titles added at the same moment list in content_id's "C" order whatever the
+// database's default collation: "M-b" before "m-a" (byte order) where en_US
+// would put "m-a" first.
+func TestInsightsLibraryUnplayedTieOrderDB(t *testing.T) {
+	pool := insightsTestPool(t)
+	ctx := t.Context()
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title) VALUES ('m-a', 'movie', 'A'), ('M-b', 'movie', 'B')`); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	out := &AdminInsightsLibrary{}
+	added := []insightsAddedTitle{{contentID: "m-a", addedAt: at}, {contentID: "M-b", addedAt: at}}
+	if err := queryInsightsLibraryUnplayed(ctx, tx, added, nil, out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.RecentlyAddedUnplayed) != 2 || out.RecentlyAddedUnplayed[0].ContentID != "M-b" {
+		t.Errorf("unplayed = %+v, want M-b first", out.RecentlyAddedUnplayed)
+	}
+}
+
 // A window that ended before M2's first play: M2 is not played in it, but it
 // is not "not played yet" or "never started" either, since both are about now.
 // M4, also added in the window, gets a 10-second false start just before the

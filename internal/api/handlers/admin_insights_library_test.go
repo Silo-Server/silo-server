@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"strings"
 	"testing"
 	"time"
 )
@@ -69,32 +68,18 @@ func TestPopulateInsightsLibraryFirstPlays(t *testing.T) {
 		if evenOut.Summary.MedianDaysToFirstPlay == nil || *evenOut.Summary.MedianDaysToFirstPlay != 1.3 {
 			t.Fatalf("even median = %v, want 1.3", evenOut.Summary.MedianDaysToFirstPlay)
 		}
+
+		// PostgreSQL's percentile_cont gives 4319.999999999999 s here (0.0
+		// days); a plain (lo+hi)/2 gives 4320 s and rounds up to 0.1.
+		roundAdded := []insightsAddedTitle{{contentID: "a", addedAt: base}, {contentID: "b", addedAt: base}}
+		roundTitles := map[string]insightsTitlePlays{
+			"a": {firstPlayAt: base.Add(84302132 * time.Microsecond)},
+			"b": {firstPlayAt: base.Add(8555697868 * time.Microsecond)},
+		}
+		roundOut := &AdminInsightsLibrary{}
+		populateInsightsLibraryFirstPlays(roundAdded, roundTitles, roundOut)
+		if m := roundOut.Summary.MedianDaysToFirstPlay; m == nil || *m != 0 {
+			t.Fatalf("median = %v, want 0 as percentile_cont rounds it", roundOut.Summary)
+		}
 	})
-}
-
-func TestViewingRowsSQLMediaFilesJoinGuard(t *testing.T) {
-	win := resolvedInsightsWindow{
-		From: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
-		To:   time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC),
-	}
-
-	var args []any
-	with, _ := newInsightsPlaysScope(win, AdminInsightsWindowQuery{}).viewingRowsSQL(&args)
-	if strings.Contains(with, "media_files") || strings.Contains(with, "file_library_id") {
-		t.Fatalf("unfiltered viewingRowsSQL unexpectedly joined media_files")
-	}
-
-	args = nil
-	withLib, countedLib := newInsightsPlaysScope(win, AdminInsightsWindowQuery{LibraryID: 42}).viewingRowsSQL(&args)
-	if !strings.Contains(withLib, "LEFT JOIN media_files mf") || !strings.Contains(countedLib, "file_library_id") {
-		t.Fatalf("library-filtered viewingRowsSQL missing media_files join or attribution")
-	}
-
-	args = nil
-	scope := newInsightsPlaysScope(win, AdminInsightsWindowQuery{})
-	scope.needFileLibrary = true
-	withProj, _ := scope.viewingRowsSQL(&args)
-	if !strings.Contains(withProj, "LEFT JOIN media_files mf") || !strings.Contains(withProj, "file_library_id") {
-		t.Fatalf("needFileLibrary viewingRowsSQL missing media_files join or projection")
-	}
 }

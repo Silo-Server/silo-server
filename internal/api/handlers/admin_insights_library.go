@@ -128,9 +128,13 @@ func queryInsightsLibraryTitlePlays(ctx context.Context, tx pgx.Tx, win resolved
 	scope.needFileLibrary = q.LibraryID > 0
 	var args []any
 	with, counted := scope.viewingRowsSQL(&args)
-	var query string
+	// Without a library filter every play counts, so skip attributing rows
+	// to a library (and the media_files join it needs).
+	libraryExpr := "0::int"
 	if q.LibraryID > 0 {
-		query = with + fmt.Sprintf(`,
+		libraryExpr = insightsLibraryOfRowSQL("vr")
+	}
+	query := with + fmt.Sprintf(`,
 		counted AS (
 			SELECT vr.started_at, %[1]s AS is_play,
 				COALESCE(vr.series_id, vr.media_item_id) AS title_id, %[2]s AS library_id
@@ -140,20 +144,7 @@ func queryInsightsLibraryTitlePlays(ctx context.Context, tx pgx.Tx, win resolved
 		FROM counted
 		WHERE is_play AND title_id <> ''
 		GROUP BY title_id, library_id
-	`, insightsIsPlaySQL("vr"), insightsLibraryOfRowSQL("vr"), counted)
-	} else {
-		query = with + fmt.Sprintf(`,
-		counted AS (
-			SELECT vr.started_at, %[1]s AS is_play,
-				COALESCE(vr.series_id, vr.media_item_id) AS title_id
-			FROM vr WHERE %[2]s
-		)
-		SELECT title_id, 0::int, COUNT(*)::bigint, MIN(started_at)
-		FROM counted
-		WHERE is_play AND title_id <> ''
-		GROUP BY title_id
-	`, insightsIsPlaySQL("vr"), counted)
-	}
+	`, insightsIsPlaySQL("vr"), libraryExpr, counted)
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("querying insights library plays: %w", err)
@@ -475,15 +466,17 @@ func insightsWaitSeconds(addedAt, firstPlayAt time.Time) float64 {
 	return float64(firstPlayAt.Unix()-addedAt.Unix()) + float64(firstPlayAt.Nanosecond()-addedAt.Nanosecond())/1e9
 }
 
-// insightsPercentileCont50 matches PostgreSQL's percentile_cont(0.5) linear
-// interpolation over a non-empty sorted slice.
+// insightsPercentileCont50 matches PostgreSQL's percentile_cont(0.5) over a
+// non-empty sorted slice, including its lo + (hi-lo)*0.5 rounding: (lo+hi)/2
+// can differ in the last bit and tip the displayed median across a 0.1 day.
 func insightsPercentileCont50(sorted []float64) float64 {
 	n := len(sorted)
 	mid := n / 2
 	if n%2 == 1 {
 		return sorted[mid]
 	}
-	return (sorted[mid-1] + sorted[mid]) / 2
+	lo, hi := sorted[mid-1], sorted[mid]
+	return lo + (hi-lo)*0.5
 }
 
 // queryInsightsLibraryUnplayed lists the newest titles added in the window
@@ -498,19 +491,15 @@ func queryInsightsLibraryUnplayed(ctx context.Context, tx pgx.Tx, added []insigh
 	if len(unplayed) == 0 {
 		return nil
 	}
+	// Go compares strings byte by byte, the same order as content_id's
+	// COLLATE "C", so the cut here and the ORDER BY below agree.
 	slices.SortFunc(unplayed, func(x, y insightsAddedTitle) int {
 		if c := y.addedAt.Compare(x.addedAt); c != 0 {
 			return c
 		}
 		return cmp.Compare(x.contentID, y.contentID)
 	})
-	// Include any ties at the cutoff timestamp so Postgres breaks content_id
-	// ties using the database collation.
-	end := min(len(unplayed), insightsLibraryUnplayedLimit)
-	for end < len(unplayed) && unplayed[end].addedAt.Equal(unplayed[end-1].addedAt) {
-		end++
-	}
-	top := unplayed[:end]
+	top := unplayed[:min(len(unplayed), insightsLibraryUnplayedLimit)]
 	ids := make([]string, len(top))
 	addedAts := make([]time.Time, len(top))
 	libIDs := make([]int, len(top))
@@ -524,8 +513,7 @@ func queryInsightsLibraryUnplayed(ctx context.Context, tx pgx.Tx, added []insigh
 		FROM unnest($1::text[], $2::timestamptz[], $3::int[]) AS u(content_id, added_at, library_id)
 		JOIN media_items mi ON mi.content_id = u.content_id
 		LEFT JOIN media_folders lib ON lib.id = u.library_id
-		ORDER BY u.added_at DESC, u.content_id
-		LIMIT `+strconv.Itoa(insightsLibraryUnplayedLimit), ids, addedAts, libIDs)
+		ORDER BY u.added_at DESC, u.content_id COLLATE "C"`, ids, addedAts, libIDs)
 	if err != nil {
 		return fmt.Errorf("querying insights library unplayed titles: %w", err)
 	}
