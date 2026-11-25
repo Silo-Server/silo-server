@@ -549,7 +549,7 @@ func (s *RuntimeConfigStore) UpsertAuthBinding(ctx context.Context, binding Auth
 		if binding.Enabled {
 			return validateInstallationAuthBindings(ctx, tx, binding.InstallationID)
 		}
-		return nil
+		return checkSignInProvider(ctx, tx, 0)
 
 	})
 }

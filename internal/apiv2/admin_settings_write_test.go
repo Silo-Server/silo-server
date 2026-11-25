@@ -2,11 +2,15 @@ package apiv2
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"maps"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/config"
 )
 
@@ -160,5 +164,15 @@ func TestLocalLoginRefusalProblemTypes(t *testing.T) {
 			requireProblem(t, do(t, h, "PUT", Prefix+"/admin/settings", `{"values":{"auth.local_password_login":"false"}}`, headers), tc.want)
 			requireProblem(t, do(t, h, "PUT", Prefix+"/admin/settings/auth.local_password_login", `{"value":"false"}`, headers), tc.want)
 		})
+	}
+}
+
+// Taking away the last sign-in provider while password sign-in is off is
+// refused with the same problem type the settings write uses, so the web's
+// plugin and sign-in pages can explain it.
+func TestPluginWriteSignInProviderRefusal(t *testing.T) {
+	p, ok := errors.AsType[*Problem](adminPluginMutationProblem(fmt.Errorf("disabling: %w", auth.ErrSignInProviderRequired)))
+	if !ok || p.Type != TypeSignInProviderRequired.URI() || p.Status != http.StatusConflict {
+		t.Fatalf("problem = %+v", p)
 	}
 }

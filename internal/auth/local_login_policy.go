@@ -24,10 +24,11 @@ var (
 	// local password sign-in off and no enabled break-glass admin that can
 	// still use its password.
 	ErrBreakGlassRequired = errors.New("at least one enabled break-glass admin with password sign-in is required while local password sign-in is off")
-	// ErrSignInProviderRequired refuses turning local password sign-in off
-	// while no OIDC or LDAP sign-in provider is on: nobody but the
-	// break-glass admins could sign in.
-	ErrSignInProviderRequired = errors.New("an enabled sign-in provider is required to turn local password sign-in off")
+	// ErrSignInProviderRequired refuses a change that would leave local
+	// password sign-in off with no OIDC or LDAP provider people can use:
+	// turning the switch off without one, or taking the last one away while
+	// it is off. Nobody but the break-glass admins could sign in.
+	ErrSignInProviderRequired = errors.New("a sign-in provider people can use is required while local password sign-in is off")
 )
 
 // rowQuerier is what the policy reads need: a pool or a transaction.
@@ -171,27 +172,45 @@ func usableBreakGlassCount(ctx context.Context, db rowQuerier, excludeID int) (i
 	return count, nil
 }
 
-// CheckLocalLoginSettingChange refuses turning local password sign-in off
-// while no break-glass admin could still sign in (ErrBreakGlassRequired), or
-// while no sign-in provider can sign everyone else in
-// (ErrSignInProviderRequired). The caller runs it inside the settings
-// mutation, which already holds the settings lock; before and after are the
-// effective values, and publicURL is the server.public_url the same save
-// leaves in effect.
-func CheckLocalLoginSettingChange(ctx context.Context, db dbQuerier, before, after, publicURL string) error {
-	wasOn := settingBool(before, true)
-	isOn := settingBool(after, true)
-	if !wasOn || isOn {
+// LocalLoginSettings are the settings a local password sign-in check reads,
+// as effective values: auth.local_password_login and server.public_url.
+type LocalLoginSettings struct {
+	LocalPasswordLogin string
+	PublicURL          string
+}
+
+// CheckLocalLoginSettingChange refuses a settings save that would leave
+// local password sign-in off with no break-glass admin who could still sign
+// in (ErrBreakGlassRequired, checked when the switch goes off), or with no
+// sign-in provider that can sign everyone else in
+// (ErrSignInProviderRequired, checked when the switch goes off and when the
+// public URL changes while it is off: an OpenID Connect provider needs one).
+// The caller runs it inside the settings mutation, which already holds the
+// settings lock.
+func CheckLocalLoginSettingChange(ctx context.Context, db dbQuerier, before, after LocalLoginSettings) error {
+	if settingBool(after.LocalPasswordLogin, true) {
 		return nil
 	}
-	count, err := usableBreakGlassCount(ctx, db, 0)
-	if err != nil {
-		return err
+	turningOff := settingBool(before.LocalPasswordLogin, true)
+	if !turningOff && before.PublicURL == after.PublicURL {
+		return nil
 	}
-	if count == 0 {
-		return ErrBreakGlassRequired
+	if turningOff {
+		count, err := usableBreakGlassCount(ctx, db, 0)
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			return ErrBreakGlassRequired
+		}
 	}
-	enabled, err := signInProviderEnabled(ctx, db, publicURL)
+	return requireSignInProvider(ctx, db, after.PublicURL, 0)
+}
+
+// requireSignInProvider answers ErrSignInProviderRequired unless a provider
+// other than installation removing can sign people in.
+func requireSignInProvider(ctx context.Context, db dbQuerier, publicURL string, removing int) error {
+	enabled, err := signInProviderEnabled(ctx, db, publicURL, removing)
 	if err != nil {
 		return err
 	}
@@ -201,19 +220,45 @@ func CheckLocalLoginSettingChange(ctx context.Context, db dbQuerier, before, aft
 	return nil
 }
 
+func init() {
+	plugins.RegisterSignInProviderGuard(ensureSignInProviderWhileLocalLoginOff)
+}
+
+// ensureSignInProviderWhileLocalLoginOff is the plugins write guard: while
+// local password sign-in is off, a binding or installation write may not
+// leave the server without a provider that can sign people in. It takes the
+// settings lock, which the settings save holds while it checks the other
+// direction, so a save turning passwords off and a write disabling the last
+// provider cannot both pass.
+func ensureSignInProviderWhileLocalLoginOff(ctx context.Context, tx pgx.Tx, removing int) error {
+	if err := lockServerSettings(ctx, tx); err != nil {
+		return err
+	}
+	allowed, err := localPasswordLoginAllowed(ctx, tx)
+	if err != nil || allowed {
+		return err
+	}
+	publicURL, err := readServerSetting(ctx, tx, config.ServerPublicURLSettingKey)
+	if err != nil {
+		return err
+	}
+	return requireSignInProvider(ctx, tx, publicURL, removing)
+}
+
 // signInProviderEnabled reports whether an OIDC or LDAP sign-in provider can
 // sign people in: an enabled installation with an enabled sign-in binding
 // that is not a network identity binding, whose mode is served. A network
 // provider signs in only people on its network, and an OAuth provider signs
 // nobody in without a public URL (OAuthSignInServed), so neither counts. A
-// credentials (directory) provider needs no public URL.
-func signInProviderEnabled(ctx context.Context, db dbQuerier, publicURL string) (bool, error) {
+// credentials (directory) provider needs no public URL. Installation
+// removing (0 for none) is treated as gone.
+func signInProviderEnabled(ctx context.Context, db dbQuerier, publicURL string, removing int) (bool, error) {
 	rows, err := db.Query(ctx, `SELECT COALESCE((SELECT c.metadata->'auth_modes' FROM plugin_capabilities c
 			WHERE c.plugin_installation_id = b.plugin_installation_id AND c.capability_type = 'auth_provider.v1'
 				AND c.capability_id = b.capability_id), '[]'::jsonb)
 		FROM plugin_installations p
 		JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND `+primarySignInBindingSQL("b")+`
-		WHERE p.enabled`)
+		WHERE p.enabled AND p.id <> $1`, removing)
 	if err != nil {
 		return false, fmt.Errorf("checking for an enabled sign-in provider: %w", err)
 	}

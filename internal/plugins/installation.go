@@ -501,6 +501,11 @@ func (s *InstallationStore) update(ctx context.Context, id int, input UpdateInst
 			return err
 		}
 	}
+	if touchesBindings && !provisioning {
+		if err := checkSignInProvider(ctx, tx, 0); err != nil {
+			return err
+		}
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit update installation transaction: %w", err)
@@ -770,7 +775,7 @@ func (s *InstallationStore) Delete(ctx context.Context, id int) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, id); err != nil {
 			return fmt.Errorf("deleting plugin installation: %w", err)
 		}
-		return nil
+		return checkSignInProvider(ctx, tx, 0)
 	})
 	if err != nil {
 		return err

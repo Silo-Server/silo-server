@@ -327,6 +327,8 @@
 ./internal/auth TestPluginAuthBindingCallbackModeDB
 ./internal/auth TestLocalPasswordOffAccountsDB
 ./internal/auth TestLocalPasswordOffKeepsOpenSessionsDB
+./internal/auth TestSignInProviderGuardDB
+./internal/auth TestSignInProviderGuardSerializesWithSettingsSaveDB
 ./internal/api/handlers TestLocalLoginSettingRequiresBreakGlassDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB

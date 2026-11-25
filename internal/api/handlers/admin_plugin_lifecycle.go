@@ -107,12 +107,24 @@ func (h *PluginHandler) UpdateAdminPluginInstallation(ctx context.Context, id in
 		}
 	}
 
+	stopped := false
 	if in.Enabled != nil && !*in.Enabled && current.Enabled {
+		// Refused before the plugin stops: the last sign-in provider while
+		// password sign-in is off stays on.
+		if err := h.installations.CheckSignInProviderRemoval(ctx, id); err != nil {
+			return PluginInstallationView{}, err
+		}
 		if err := h.service.Stop(id); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
 			return PluginInstallationView{}, err
 		}
+		stopped = true
 	}
 	if err := h.installations.Update(ctx, id, plugins.UpdateInstallationInput{Enabled: in.Enabled, UpdatePolicy: in.UpdatePolicy}); err != nil {
+		if stopped {
+			if _, restartErr := h.service.Start(ctx, id); restartErr != nil {
+				slog.ErrorContext(ctx, "restarting plugin after failed disable", "component", "api", "installation_id", id, "error", restartErr)
+			}
+		}
 		if errors.Is(err, plugins.ErrBuiltinInstallationImmutable) {
 			return PluginInstallationView{}, ErrPluginBuiltinInstallation
 		}
@@ -219,6 +231,11 @@ func (h *PluginHandler) DeleteAdminPluginInstallation(ctx context.Context, id in
 	}
 	if ownership.Managed {
 		return &plugins.ManagedByEnvironmentError{Field: "installation"}
+	}
+	// Refused before the plugin stops: the last sign-in provider while
+	// password sign-in is off stays installed. Delete checks again.
+	if err := h.installations.CheckSignInProviderRemoval(ctx, id); err != nil {
+		return err
 	}
 
 	stopped := false

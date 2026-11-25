@@ -425,7 +425,7 @@ func TestLocalPasswordPolicyDB(t *testing.T) {
 	// settings path and the CLI path alike. Other tests' break-glass rows
 	// would satisfy it, so count first.
 	if env.usableBreakGlass(t) == 0 {
-		if err := CheckLocalLoginSettingChange(ctx, env.pool, "true", "false", ""); !errors.Is(err, ErrBreakGlassRequired) {
+		if err := CheckLocalLoginSettingChange(ctx, env.pool, LocalLoginSettings{LocalPasswordLogin: "true"}, LocalLoginSettings{LocalPasswordLogin: "false"}); !errors.Is(err, ErrBreakGlassRequired) {
 			t.Fatalf("settings check = %v, want ErrBreakGlassRequired", err)
 		}
 	}
@@ -437,7 +437,7 @@ func TestLocalPasswordPolicyDB(t *testing.T) {
 	if _, err := env.pool.Exec(ctx, `UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, env.installationID); err != nil {
 		t.Fatal(err)
 	}
-	if err := CheckLocalLoginSettingChange(ctx, env.pool, "true", "false", ""); err != nil {
+	if err := CheckLocalLoginSettingChange(ctx, env.pool, LocalLoginSettings{LocalPasswordLogin: "true"}, LocalLoginSettings{LocalPasswordLogin: "false"}); err != nil {
 		t.Fatalf("settings check with break-glass and a provider = %v", err)
 	}
 	env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "false")

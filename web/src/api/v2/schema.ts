@@ -4104,10 +4104,10 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Assign enabled and/or update_policy on one installation. Disabling stops the running plugin first. Repeating the same assignment converges on one stored row. */
+    /** Assign enabled and/or update_policy on one installation. Disabling stops the running plugin first. Disabling the installation of the last OIDC or LDAP provider people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required, refused before the plugin stops. Repeating the same assignment converges on one stored row. */
     put: operations["updateAdminPluginInstallation"];
     post?: never;
-    /** Stop the plugin, delete the installation row (configuration, bindings and archives cascade) and remove its files. Row delete and file removal are not one transaction and a repeat finds no row: a later 404 is not this caller's receipt; never automatically retry. */
+    /** Stop the plugin, delete the installation row (configuration, bindings and archives cascade) and remove its files. Row delete and file removal are not one transaction and a repeat finds no row: a later 404 is not this caller's receipt; never automatically retry. Uninstalling the last OIDC or LDAP provider people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required, refused before the plugin stops. */
     delete: operations["deleteAdminPluginInstallation"];
     options?: never;
     head?: never;
@@ -4122,7 +4122,7 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Replace the auth provider binding for one capability. Sign-in providers rebuild on every node without a restart. Enabling a binding while another one is enabled is 409 provider_already_enabled. The whole row is assigned, so repeating the request converges on one stored binding. */
+    /** Replace the auth provider binding for one capability. Sign-in providers rebuild on every node without a restart. Enabling a binding while another one is enabled is 409 provider_already_enabled. Turning off the last OIDC or LDAP binding people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required. The whole row is assigned, so repeating the request converges on one stored binding. */
     put: operations["updateAdminPluginAuthBinding"];
     post?: never;
     delete?: never;
@@ -5483,7 +5483,7 @@ export interface paths {
     get: operations["getAdminStoredSettings"];
     /**
      * Validate and merge captured settings under the existing transaction guard; prerequisite probes and runtime notifications are not replayable receipts.
-     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP sign-in provider is on it is 409 sign_in_provider_required. Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in.
+     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP provider people can sign in with is on it is 409 sign_in_provider_required (an OpenID Connect provider counts only with server.public_url set, so clearing server.public_url while auth.local_password_login is off and it is the only provider is refused the same way). Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in.
      */
     put: operations["updateAdminSettings"];
     post?: never;
@@ -5504,7 +5504,7 @@ export interface paths {
     get: operations["getAdminSetting"];
     /**
      * Validate and replace one setting with the established single-key validation rules and transaction guard.
-     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP sign-in provider is on it is 409 sign_in_provider_required. Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in.
+     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP provider people can sign in with is on it is 409 sign_in_provider_required (an OpenID Connect provider counts only with server.public_url set, so clearing server.public_url while auth.local_password_login is off and it is the only provider is refused the same way). Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in.
      */
     put: operations["updateAdminSetting"];
     post?: never;
