@@ -67520,7 +67520,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Az útválasztó UPnP-, NAT-PMP- vagy PCP-támogatásának ellenőrzése."
+      "value": "Porttovábbítást kér az útválasztótól UPnP, NAT-PMP vagy PCP protokollal."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67529,16 +67529,44 @@
       "value": "Portleképezés"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Tartomány: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " és "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " között"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "A készenléti ellenőrzések nem indítanak közvetlen lejátszást."
+      "value": "A bekapcsolás elindítja a közvetlen kapcsolati motort. Ez megnyit egy UDP-portot, és ha a Porttovábbítás be van kapcsolva, porttovábbítást kér az útválasztótól. Az Ellenőrzés futtatása csak a gazdagép állapotát olvassa ki."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Rendszergazda által letiltva"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Az engedélyezett tartományra korlátozva"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67550,7 +67578,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Nem sikerült elindítani a közvetlen kapcsolati motort"
+      "value": "A közvetlen kapcsolati motor leállt, vagy nem sikerült elindítani"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67581,6 +67609,12 @@
     {
       "type": 0,
       "value": "Érvénytelen érték; a beállítás ki van kapcsolva"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Érvénytelen érték; az alapértelmezett érték van használatban"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

@@ -60815,7 +60815,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "ルーターがUPnP、NAT-PMP、PCPに対応しているか確認します。"
+      "value": "ルーターにUPnP、NAT-PMP、またはPCPのポートマッピングをリクエストします。"
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -60824,16 +60824,40 @@
       "value": "ポートマッピング"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "範囲："
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": "〜"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "準備状況の確認ではダイレクト再生は開始されません。"
+      "value": "オンにすると、ダイレクト接続エンジンが起動します。エンジンはUDPポートを開き、「ポートマッピング」がオンの場合はルーターにポートマッピングをリクエストします。「チェックを実行」はホストの状態を読み取るだけです。"
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "管理者により無効化"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "許容範囲内に調整済み"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -60845,7 +60869,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "ダイレクト接続エンジンを開始できませんでした"
+      "value": "ダイレクト接続エンジンが停止したか、起動できませんでした"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -60876,6 +60900,12 @@
     {
       "type": 0,
       "value": "無効な値のためオフを使用"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "無効な値のため、デフォルトを使用"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

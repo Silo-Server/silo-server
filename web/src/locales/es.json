@@ -74880,7 +74880,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Comprueba si el router admite UPnP, NAT-PMP o PCP."
+      "value": "Solicita al router una asignación de puertos UPnP, NAT-PMP o PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -74889,16 +74889,40 @@
       "value": "Asignación de puertos"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Rango: de "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " a "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Las comprobaciones de preparación no inician la reproducción directa."
+      "value": "Al activar esta opción se inicia el motor de conexión directa. Abre un puerto UDP y, si Asignación de puertos está activada, solicita al router una asignación de puertos. Ejecutar comprobación solo lee el estado del host."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Desactivado por el administrador"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Ajustado al rango permitido"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -74910,7 +74934,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "No se pudo iniciar el motor de conexión directa"
+      "value": "El motor de conexión directa se detuvo o no se pudo iniciar"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -74941,6 +74965,12 @@
     {
       "type": 0,
       "value": "Valor no válido; se usa desactivado"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Valor no válido; se usa el predeterminado"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

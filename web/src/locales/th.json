@@ -61723,7 +61723,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "ตรวจสอบการรองรับ UPnP NAT-PMP หรือ PCP ของเราเตอร์"
+      "value": "ขอการแมปพอร์ต UPnP NAT-PMP หรือ PCP จากเราเตอร์"
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -61732,16 +61732,40 @@
       "value": "การแมปพอร์ต"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "ช่วง: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " ถึง "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "การตรวจสอบความพร้อมจะไม่เริ่มการเล่นโดยตรง"
+      "value": "การเปิดตัวเลือกนี้จะเริ่มเอนจินการเชื่อมต่อโดยตรง ซึ่งจะเปิดพอร์ต UDP และขอการแมปพอร์ตจากเราเตอร์เมื่อเปิด “การแมปพอร์ต” อยู่ ส่วน “เรียกใช้การตรวจสอบ” จะอ่านสถานะของโฮสต์เท่านั้น"
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "ผู้ดูแลระบบปิดใช้งานแล้ว"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "ปรับให้อยู่ในช่วงที่อนุญาตแล้ว"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -61753,7 +61777,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "เริ่มเอนจินการเชื่อมต่อโดยตรงไม่ได้"
+      "value": "เอนจินการเชื่อมต่อโดยตรงหยุดทำงานหรือเริ่มไม่ได้"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -61784,6 +61808,12 @@
     {
       "type": 0,
       "value": "ค่าไม่ถูกต้อง จึงใช้ “ปิด”"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "ค่าไม่ถูกต้อง ใช้ค่าเริ่มต้นแทน"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

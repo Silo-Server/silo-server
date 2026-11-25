@@ -11,10 +11,29 @@ type logKey struct {
 }
 
 func (s *Service) logFeatures(ctx context.Context, enabled bool, features []Feature) {
+	s.logFeatureStates(ctx, enabled, features, true)
+}
+
+// logFeatureStates logs the feature states that changed. With wake, a direct row
+// wakes the engine lifecycle; the lifecycle's own publication passes false,
+// since it would otherwise wake itself.
+func (s *Service) logFeatureStates(ctx context.Context, enabled bool, features []Feature, wake bool) {
 	for _, f := range features {
+		if wake && f.Feature == featureDirect {
+			s.wakeEngine()
+		}
 		if !enabled && f.Feature == featureDirect {
 			f.State = stateOff
 			f.Reason = reasonDisabled
+		}
+
+		if f.State == "capped" {
+			switch f.Feature {
+			case "socket_receive_buffer":
+				f.Detail = "plain UDP buffer; kernel limit net.core.rmem_max"
+			case "socket_send_buffer":
+				f.Detail = "plain UDP buffer; kernel limit net.core.wmem_max"
+			}
 		}
 		key := logKey{enabled, f.Feature, f.State, f.Reason, f.Granted}
 		if s.logged[f.Feature] == key {

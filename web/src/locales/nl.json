@@ -67432,7 +67432,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Controleer of de router UPnP, NAT-PMP of PCP ondersteunt."
+      "value": "Vraag de router om een UPnP-, NAT-PMP- of PCP-poorttoewijzing."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67441,16 +67441,40 @@
       "value": "Poorttoewijzing"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Bereik: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " tot "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Gereedheidscontroles starten geen direct afspelen."
+      "value": "Als je dit aanzet, start de engine voor directe verbindingen. Die opent een UDP-poort en vraagt de router om een poorttoewijzing als Poorttoewijzing aan staat. Controle uitvoeren leest alleen de status van de host."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Uitgeschakeld door beheerder"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Begrensd tot het toegestane bereik"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67462,7 +67486,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "De engine voor directe verbindingen kan niet starten"
+      "value": "De engine voor directe verbindingen is gestopt of kan niet starten"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67493,6 +67517,12 @@
     {
       "type": 0,
       "value": "Ongeldige waarde; staat uit"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Ongeldige waarde; de standaardwaarde wordt gebruikt"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

@@ -82079,7 +82079,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Preveri, ali usmerjevalnik podpira UPnP, NAT-PMP ali PCP."
+      "value": "Pri usmerjevalniku zahteva preslikavo vrat UPnP, NAT-PMP ali PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -82088,16 +82088,40 @@
       "value": "Preslikava vrat"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Obseg: od "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " do "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Preverjanja pripravljenosti ne začnejo neposrednega predvajanja."
+      "value": "Ko to vklopite, se zažene mehanizem neposrednih povezav. Odpre vrata UDP in, ko je vklopljena Preslikava vrat, pri usmerjevalniku zahteva preslikavo vrat. Zaženi preverjanje samo prebere stanje gostitelja."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Onemogočil skrbnik"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Omejeno na dovoljeni obseg"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -82109,7 +82133,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Mehanizma neposrednih povezav ni bilo mogoče zagnati"
+      "value": "Mehanizem neposrednih povezav se je ustavil ali ga ni bilo mogoče zagnati"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -82140,6 +82164,12 @@
     {
       "type": 0,
       "value": "Neveljavna vrednost; nastavitev je izklopljena"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Neveljavna vrednost; uporabljena je privzeta"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

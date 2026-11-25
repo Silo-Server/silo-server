@@ -74984,7 +74984,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Provjerava podržava li usmjerivač UPnP, NAT-PMP ili PCP."
+      "value": "Traži od usmjerivača mapiranje priključka putem protokola UPnP, NAT-PMP ili PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -74993,16 +74993,40 @@
       "value": "Mapiranje portova"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Raspon: od "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " do "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Provjere spremnosti ne pokreću izravnu reprodukciju."
+      "value": "Uključivanjem ove postavke pokreće se mehanizam izravnih veza. On otvara UDP priključak i, kada je „Mapiranje priključaka“ uključeno, traži od usmjerivača mapiranje priključka. „Pokreni provjeru“ samo čita stanje hosta."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Onemogućio administrator"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Ograničeno na dopušteni raspon"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -75014,7 +75038,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Mehanizam izravnih veza nije se mogao pokrenuti"
+      "value": "Mehanizam izravnih veza zaustavio se ili se nije mogao pokrenuti"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -75045,6 +75069,12 @@
     {
       "type": 0,
       "value": "Nevaljana vrijednost; postavka je isključena"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Nevažeća vrijednost; koristi se zadana"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

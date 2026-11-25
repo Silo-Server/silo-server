@@ -67532,7 +67532,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Prüfe, ob der Router UPnP, NAT-PMP oder PCP unterstützt."
+      "value": "Fordert beim Router eine Portweiterleitung per UPnP, NAT-PMP oder PCP an."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67541,16 +67541,40 @@
       "value": "Port-Mapping"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Bereich: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " bis "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Bereitschaftsprüfungen starten keine direkte Wiedergabe."
+      "value": "Wenn du diese Option aktivierst, startet die Engine für direkte Verbindungen. Sie öffnet einen UDP-Port und fordert beim Router eine Portweiterleitung an, wenn „Portweiterleitung“ aktiviert ist. „Prüfung ausführen“ liest nur den Zustand des Hosts aus."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Von einem Admin deaktiviert"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Auf den zulässigen Bereich begrenzt"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67562,7 +67586,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Die Engine für direkte Verbindungen konnte nicht gestartet werden"
+      "value": "Die Engine für direkte Verbindungen wurde beendet oder konnte nicht gestartet werden"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67593,6 +67617,12 @@
     {
       "type": 0,
       "value": "Ungültiger Wert; Aus wird verwendet"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Ungültiger Wert; Standardwert wird verwendet"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

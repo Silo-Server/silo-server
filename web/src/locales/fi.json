@@ -67744,7 +67744,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Tarkista reitittimen UPnP-, NAT-PMP- tai PCP-tuki."
+      "value": "Pyydä reitittimeltä UPnP-, NAT-PMP- tai PCP-porttiohjaus."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67753,16 +67753,40 @@
       "value": "Porttikartoitus"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Alue: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": "–"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Valmiustarkistukset eivät käynnistä suoraa toistoa."
+      "value": "Tämän ottaminen käyttöön käynnistää suorien yhteyksien moottorin. Se avaa UDP-portin ja pyytää reitittimeltä porttiohjausta, kun Porttiohjaus on päällä. Suorita tarkistus -painike vain lukee isännän tilan."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Ylläpitäjä poisti käytöstä"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Rajattu sallitulle alueelle"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67774,7 +67798,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Suorien yhteyksien moottorin käynnistys epäonnistui"
+      "value": "Suorien yhteyksien moottori pysähtyi, tai sen käynnistys epäonnistui"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67805,6 +67829,12 @@
     {
       "type": 0,
       "value": "Virheellinen arvo; käytetään asetusta Pois"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Virheellinen arvo; käytetään oletusta"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

@@ -82083,7 +82083,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Перевіряти, чи підтримує маршрутизатор UPnP, NAT-PMP або PCP."
+      "value": "Запитувати в маршрутизатора переадресацію порту через UPnP, NAT-PMP або PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -82092,16 +82092,40 @@
       "value": "Переадресація портів"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Діапазон: від "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " до "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Перевірки готовності не запускають пряме відтворення."
+      "value": "Якщо ввімкнути цей параметр, запуститься рушій прямих з’єднань. Він відкриває UDP-порт і, коли ввімкнено «Переадресація портів», запитує в маршрутизатора переадресацію порту. «Виконати перевірку» лише зчитує стан хоста."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Вимкнено адміністратором"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Обмежено дозволеним діапазоном"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -82113,7 +82137,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Не вдалося запустити рушій прямих з’єднань"
+      "value": "Рушій прямих з’єднань зупинився або не зміг запуститися"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -82144,6 +82168,12 @@
     {
       "type": 0,
       "value": "Недійсне значення; використовується «Вимк.»"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Неприпустиме значення; використовується типове"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

@@ -82380,7 +82380,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Skontroluje, či smerovač podporuje UPnP, NAT-PMP alebo PCP."
+      "value": "Požiada smerovač o mapovanie portu cez UPnP, NAT-PMP alebo PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -82389,16 +82389,40 @@
       "value": "Mapovanie portov"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Rozsah: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " až "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Kontroly pripravenosti nespúšťajú priame prehrávanie."
+      "value": "Zapnutím tejto možnosti sa spustí modul priamych pripojení. Ten otvorí port UDP a ak je zapnuté Mapovanie portov, požiada smerovač o mapovanie portu. Spustiť kontrolu iba číta stav hostiteľa."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Vypnuté správcom"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Obmedzené na povolený rozsah"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -82410,7 +82434,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Modul priamych pripojení sa nepodarilo spustiť"
+      "value": "Modul priamych pripojení sa zastavil alebo sa ho nepodarilo spustiť"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -82441,6 +82465,12 @@
     {
       "type": 0,
       "value": "Neplatná hodnota; nastavené na Vypnuté"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Neplatná hodnota; používa sa predvolená"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

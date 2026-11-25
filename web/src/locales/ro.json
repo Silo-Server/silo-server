@@ -74972,7 +74972,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Verificați dacă routerul acceptă UPnP, NAT-PMP sau PCP."
+      "value": "Solicitați routerului o mapare de port prin UPnP, NAT-PMP sau PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -74981,16 +74981,40 @@
       "value": "Maparea porturilor"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Interval: de la "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " la "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Verificările de pregătire nu pornesc redarea directă."
+      "value": "Activarea acestei opțiuni pornește motorul conexiunilor directe. Acesta deschide un port UDP și, când opțiunea „Mapare porturi” este activată, solicită routerului o mapare de port. „Rulați verificarea” doar citește starea gazdei."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Dezactivat de administrator"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Valoarea a fost limitată la intervalul permis"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -75002,7 +75026,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Motorul conexiunilor directe nu a putut porni"
+      "value": "Motorul conexiunilor directe s-a oprit sau nu a putut porni"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -75033,6 +75057,12 @@
     {
       "type": 0,
       "value": "Valoare nevalidă; setarea este dezactivată"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Valoare nevalidă; se folosește valoarea implicită"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

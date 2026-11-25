@@ -94664,7 +94664,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "تحقق من دعم الموجّه لـ UPnP أو NAT-PMP أو PCP."
+      "value": "اطلب من الموجّه تعيين منفذ عبر UPnP أو NAT-PMP أو PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -94673,16 +94673,40 @@
       "value": "تعيين المنافذ"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "النطاق: من "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " إلى "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "لا تبدأ فحوص الجاهزية التشغيل المباشر."
+      "value": "يؤدي تفعيل هذا الخيار إلى بدء محرك الاتصال المباشر. فهو يفتح منفذ UDP، ويطلب من الموجّه تعيين منفذ عندما يكون «تعيين المنافذ» مفعّلًا. أما «إجراء الفحص» فيقرأ حالة المضيف فقط."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "عطّله المسؤول"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "ضُبط ضمن النطاق المسموح به"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -94694,7 +94718,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "تعذّر بدء محرك الاتصال المباشر"
+      "value": "توقف محرك الاتصال المباشر أو تعذّر بدؤه"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -94725,6 +94749,12 @@
     {
       "type": 0,
       "value": "قيمة غير صالحة؛ يُستخدم «معطّل»"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "قيمة غير صالحة؛ تُستخدم القيمة الافتراضية"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

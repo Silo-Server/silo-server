@@ -67688,7 +67688,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Tjek routeren for understøttelse af UPnP, NAT-PMP eller PCP."
+      "value": "Bed routeren om en UPnP-, NAT-PMP- eller PCP-porttilknytning."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67697,16 +67697,40 @@
       "value": "Portmapping"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Interval: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " til "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Parathedstjek starter ikke direkte afspilning."
+      "value": "Når du slår dette til, starter motoren til direkte forbindelser. Den åbner en UDP-port og beder routeren om en porttilknytning, når Porttilknytning er slået til. Kør tjek læser kun værtens tilstand."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Deaktiveret af administrator"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Begrænset til det tilladte interval"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67718,7 +67742,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Motoren til direkte forbindelser kunne ikke starte"
+      "value": "Motoren til direkte forbindelser stoppede eller kunne ikke starte"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67749,6 +67773,12 @@
     {
       "type": 0,
       "value": "Ugyldig værdi; slået fra"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Ugyldig værdi; bruger standardværdien"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

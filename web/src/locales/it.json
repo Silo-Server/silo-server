@@ -74744,7 +74744,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Verifica se il router supporta UPnP, NAT-PMP o PCP."
+      "value": "Chiede al router una mappatura delle porte UPnP, NAT-PMP o PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -74753,16 +74753,40 @@
       "value": "Mappatura delle porte"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Intervallo: da "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " a "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Le verifiche di disponibilità non avviano la riproduzione diretta."
+      "value": "Se attivi questa opzione, si avvia il motore delle connessioni dirette. Il motore apre una porta UDP e, quando Mappatura delle porte è attivo, chiede al router una mappatura delle porte. Esegui verifica legge solo lo stato dell’host."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Disattivato dall’amministratore"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Limitato all’intervallo consentito"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -74774,7 +74798,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Impossibile avviare il motore delle connessioni dirette"
+      "value": "Il motore delle connessioni dirette si è arrestato o non è riuscito ad avviarsi"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -74805,6 +74829,12 @@
     {
       "type": 0,
       "value": "Valore non valido; impostazione disattivata"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Valore non valido; viene usato il valore predefinito"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

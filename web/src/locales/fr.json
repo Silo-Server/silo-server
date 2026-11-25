@@ -74636,7 +74636,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Vérifier si le routeur prend en charge UPnP, NAT-PMP ou PCP."
+      "value": "Demander au routeur une redirection de port UPnP, NAT-PMP ou PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -74645,16 +74645,40 @@
       "value": "Redirection de ports"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Plage : de "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " à "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Les vérifications de préparation ne lancent pas la lecture directe."
+      "value": "L’activation de cette option démarre le moteur de connexion directe. Il ouvre un port UDP et, quand Redirection de port est activé, demande au routeur une redirection de port. Le bouton Lancer la vérification lit seulement l’état de l’hôte."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Désactivé par l’administrateur"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Valeur ramenée dans la plage autorisée"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -74666,7 +74690,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Impossible de démarrer le moteur de connexion directe"
+      "value": "Le moteur de connexion directe s’est arrêté ou n’a pas pu démarrer"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -74697,6 +74721,12 @@
     {
       "type": 0,
       "value": "Valeur non valide ; option désactivée"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Valeur non valide ; valeur par défaut utilisée"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

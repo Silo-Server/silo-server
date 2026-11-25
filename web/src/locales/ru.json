@@ -83189,7 +83189,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Проверять поддержку UPnP, NAT-PMP или PCP на роутере."
+      "value": "Запрашивать у роутера проброс порта по UPnP, NAT-PMP или PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -83198,16 +83198,40 @@
       "value": "Проброс портов"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Диапазон: от "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " до "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Проверка готовности не запускает прямое воспроизведение."
+      "value": "Включение запускает движок прямых подключений. Он открывает UDP-порт и, если включён параметр «Проброс портов», запрашивает у роутера проброс порта. Кнопка «Запустить проверку» только считывает состояние хоста."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Отключено администратором"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Приведено к допустимому диапазону"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -83219,7 +83243,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Не удалось запустить движок прямых подключений"
+      "value": "Движок прямых подключений остановился или не смог запуститься"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -83250,6 +83274,12 @@
     {
       "type": 0,
       "value": "Недопустимое значение; параметр выключен"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Недопустимое значение; используется значение по умолчанию"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

@@ -60667,7 +60667,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Periksa dukungan UPnP, NAT-PMP, atau PCP di router."
+      "value": "Minta pemetaan port UPnP, NAT-PMP, atau PCP dari router."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -60676,16 +60676,40 @@
       "value": "Pemetaan port"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Rentang: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " hingga "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Pemeriksaan kesiapan tidak memulai pemutaran langsung."
+      "value": "Mengaktifkan opsi ini akan memulai mesin koneksi langsung. Mesin ini membuka port UDP dan, saat Pemetaan port aktif, meminta pemetaan port dari router. Tombol Jalankan pemeriksaan hanya membaca status host."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Dinonaktifkan oleh administrator"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Dibatasi ke rentang yang diizinkan"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -60697,7 +60721,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Mesin koneksi langsung tidak dapat dimulai"
+      "value": "Mesin koneksi langsung berhenti atau tidak dapat dimulai"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -60728,6 +60752,12 @@
     {
       "type": 0,
       "value": "Nilai tidak valid; dinonaktifkan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Nilai tidak valid; menggunakan default"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

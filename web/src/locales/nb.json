@@ -67740,7 +67740,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Kontroller om ruteren støtter UPnP, NAT-PMP eller PCP."
+      "value": "Be ruteren om portkartlegging via UPnP, NAT-PMP eller PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67749,16 +67749,40 @@
       "value": "Porttilordning"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Område: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " til "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Klarhetskontroller starter ikke direkte avspilling."
+      "value": "Når du slår på dette, starter motoren for direkte tilkoblinger. Den åpner en UDP-port og ber ruteren om portkartlegging når Portkartlegging er slått på. Kjør kontroll leser bare vertens tilstand."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Deaktivert av administrator"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Justert til det tillatte området"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67770,7 +67794,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Motoren for direkte tilkoblinger kunne ikke starte"
+      "value": "Motoren for direkte tilkoblinger stoppet eller kunne ikke starte"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67801,6 +67825,12 @@
     {
       "type": 0,
       "value": "Ugyldig verdi; bruker av"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Ugyldig verdi; bruker standardverdien"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

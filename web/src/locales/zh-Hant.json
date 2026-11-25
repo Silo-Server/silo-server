@@ -61349,7 +61349,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "檢查路由器是否支援 UPnP、NAT-PMP 或 PCP。"
+      "value": "向路由器請求 UPnP、NAT-PMP 或 PCP 連接埠對應。"
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -61358,16 +61358,40 @@
       "value": "連接埠對應"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "範圍："
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " 到 "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "就緒檢查不會開始直接播放。"
+      "value": "開啟此功能會啟動直接連線引擎。引擎會開啟一個 UDP 連接埠，並在「連接埠對應」開啟時向路由器請求連接埠對應。「執行檢查」只會讀取主機的狀態。"
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "已由管理員停用"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "已限制在允許的範圍內"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -61379,7 +61403,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "無法啟動直接連線引擎"
+      "value": "直接連線引擎已停止或無法啟動"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -61410,6 +61434,12 @@
     {
       "type": 0,
       "value": "值無效；改為關閉"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "值無效，改用預設值"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

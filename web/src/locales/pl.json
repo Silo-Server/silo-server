@@ -82950,7 +82950,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Sprawdzaj, czy router obsługuje UPnP, NAT-PMP lub PCP."
+      "value": "Poproś router o mapowanie portu przez UPnP, NAT-PMP lub PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -82959,16 +82959,40 @@
       "value": "Mapowanie portów"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Zakres: od "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " do "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Sprawdzanie gotowości nie uruchamia odtwarzania bezpośredniego."
+      "value": "Włączenie tej opcji uruchamia mechanizm połączeń bezpośrednich. Otwiera on port UDP, a gdy włączone jest mapowanie portów, prosi router o mapowanie portu. Sprawdzanie tylko odczytuje stan hosta."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Wyłączone przez administratora"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Ograniczono do dozwolonego zakresu"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -82980,7 +83004,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Nie udało się uruchomić mechanizmu połączeń bezpośrednich"
+      "value": "Mechanizm połączeń bezpośrednich przestał działać lub nie udało się go uruchomić"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -83011,6 +83035,12 @@
     {
       "type": 0,
       "value": "Nieprawidłowa wartość; ustawiono Wył."
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Nieprawidłowa wartość; używana jest wartość domyślna"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

@@ -71536,7 +71536,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "\u200F\u202ECheck the router for UPnP, NAT-PMP, or PCP support.\u202C"
+      "value": "\u200F\u202EAsk the router for a UPnP, NAT-PMP, or PCP port mapping.\u202C"
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -71545,16 +71545,40 @@
       "value": "\u200F\u202EPort mapping\u202C"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERange: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": "\u202E to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "\u200F\u202EReadiness checks do not start direct playback.\u202C"
+      "value": "\u200F\u202ETurning this on starts the direct connection engine. It opens a UDP port and, when Port mapping is on, asks the router for a port mapping. Run check only reads the host's state.\u202C"
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "\u200F\u202EDisabled by administrator\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClamped to the allowed range\u202C"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -71566,7 +71590,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "\u200F\u202EThe direct connection engine could not start\u202C"
+      "value": "\u200F\u202EThe direct connection engine stopped or could not start\u202C"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -71597,6 +71621,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EInvalid value; using off\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInvalid value; using the default\u202C"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

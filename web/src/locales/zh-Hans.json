@@ -61211,7 +61211,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "检查路由器是否支持UPnP、NAT-PMP或PCP。"
+      "value": "向路由器请求UPnP、NAT-PMP或PCP端口映射。"
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -61220,16 +61220,40 @@
       "value": "端口映射"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "范围："
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": "到"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "就绪检查不会启动直连播放。"
+      "value": "开启此项会启动直连引擎。它会打开一个UDP端口，并在“端口映射”开启时向路由器请求端口映射。“运行检查”只会读取主机的状态。"
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "已被管理员停用"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "已调整到允许范围内"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -61241,7 +61265,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "直连引擎无法启动"
+      "value": "直连引擎已停止或无法启动"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -61272,6 +61296,12 @@
     {
       "type": 0,
       "value": "值无效；按关闭处理"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "值无效，正在使用默认值"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

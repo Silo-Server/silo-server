@@ -39,6 +39,7 @@ function labelText(t: Translate, label: Label) {
 
 const FEATURE_LABELS: Record<Feature["feature"], Label> = {
   direct: "web.admin.settings.network.direct.title",
+  engine: "web.admin.settings.network.direct.feature.engine",
   nat_mapping: "web.admin.settings.network.direct.feature.nat_mapping",
   nat_hairpin: "web.admin.settings.network.direct.feature.nat_hairpin",
   ipv4: { name: "IPv4" },
@@ -88,6 +89,15 @@ const REASON_LABELS = {
   granted_below_request: "web.admin.settings.network.direct.reason.granted_below_request",
   not_needed: "web.admin.settings.network.direct.reason.not_needed",
   invalid: "web.admin.settings.network.direct.reason.invalid",
+  invalid_default: "web.admin.settings.network.direct.reason.invalid_default",
+  clamped: "web.admin.settings.network.direct.reason.clamped",
+  multiple_api_replicas: "web.admin.settings.network.direct.reason.multiple_api_replicas",
+  replica_census_unavailable: "web.admin.settings.network.direct.reason.replica_census_unavailable",
+  replica_lease_pending: "web.admin.settings.network.direct.reason.replica_lease_pending",
+  replica_lease_held: "web.admin.settings.network.direct.reason.replica_lease_held",
+  udp_port_invalid: "web.admin.settings.network.direct.reason.udp_port_invalid",
+  udp_port_bind_failed: "web.admin.settings.network.direct.reason.udp_port_bind_failed",
+  engine_start_failed: "web.admin.settings.network.direct.reason.engine_start_failed",
 } satisfies Record<NonNullable<Feature["reason"]>, MessageKey> & Record<string, MessageKey>;
 
 const PORT_MAPPING_LABELS: Record<string, string> = {
@@ -117,16 +127,33 @@ function congestionLabel(t: Translate, value: string) {
 
 const ENV_TCP_CONGESTION = "SILO_NET_TCP_CONGESTION";
 const ENV_TCP_SEND_BUFFER = "SILO_NET_TCP_SEND_BUFFER";
+const ENV_DIRECT_UDP_PORT = "SILO_NET_DIRECT_UDP_PORT";
+const ENV_DIRECT_GSO = "SILO_NET_DIRECT_GSO";
+const ENV_DIRECT_BBR_LOSS = "SILO_NET_DIRECT_BBR_LOSS";
+const ENV_DIRECT_RECEIVE_WINDOW = "SILO_NET_DIRECT_RECEIVE_WINDOW";
+const ENV_DIRECT_ACK_DECIMATION = "SILO_NET_DIRECT_ACK_DECIMATION";
 
 /** The plain name of a host tuning variable; a variable with no entry shows by its name alone. */
 const KNOB_LABELS: Partial<Record<string, MessageKey>> = {
   [ENV_TCP_CONGESTION]: "web.admin.settings.network.direct.knob.tcpCongestion",
   [ENV_TCP_SEND_BUFFER]: "web.admin.settings.network.direct.knob.tcpSendBuffer",
+  [ENV_DIRECT_UDP_PORT]: "web.admin.settings.network.direct.knob.directUdpPort",
+  [ENV_DIRECT_GSO]: "web.admin.settings.network.direct.knob.directGso",
+  [ENV_DIRECT_BBR_LOSS]: "web.admin.settings.network.direct.knob.directBbrLoss",
+  [ENV_DIRECT_RECEIVE_WINDOW]: "web.admin.settings.network.direct.knob.directReceiveWindow",
+  [ENV_DIRECT_ACK_DECIMATION]: "web.admin.settings.network.direct.knob.directAckDecimation",
 };
+
+/** The state a knob's on or off value reads as; any other value shows as sent. */
+function onOffLabel(t: Translate, value: string) {
+  if (value === "on") return t("web.admin.settings.network.direct.state.on");
+  if (value === "off") return t("web.admin.settings.network.direct.state.off");
+  return value;
+}
 
 /**
  * A host tuning value as people read it: an algorithm name in capitals, a byte size with its
- * unit, and off as the Off state. A value the server sent that is none of these (a rejected
+ * unit, on and off as states, and the receive window, which the server sends in MiB, as a size. A value the server sent that is none of these (a rejected
  * request, a variable this build does not know) shows as sent.
  */
 function knobValue(t: Translate, knob: DirectConnectionsKnob, value: string) {
@@ -136,6 +163,17 @@ function knobValue(t: Translate, knob: DirectConnectionsKnob, value: string) {
   if (knob.env === ENV_TCP_SEND_BUFFER) {
     if (value === "off") return t("web.admin.settings.network.direct.state.off");
     return /^\d+$/.test(value) ? formatFileSize(Number(value), { fallback: value }) : value;
+  }
+  if (knob.env === ENV_DIRECT_GSO || knob.env === ENV_DIRECT_ACK_DECIMATION) {
+    return onOffLabel(t, value);
+  }
+  if (knob.env === ENV_DIRECT_BBR_LOSS) {
+    return value === "off" ? t("web.admin.settings.network.direct.state.off") : value;
+  }
+  if (knob.env === ENV_DIRECT_RECEIVE_WINDOW) {
+    return /^\d+$/.test(value)
+      ? formatFileSize(Number(value) * 1024 ** 2, { fallback: value })
+      : value;
   }
   return value;
 }
@@ -388,6 +426,14 @@ function HostRow({ host }: { host: DirectConnectionsHostStatus }) {
                     <p className="text-muted-foreground text-xs">
                       {t("web.admin.settings.network.direct.allowed", {
                         values: joinList(knob.allowed.map((value) => knobValue(t, knob, value))),
+                      })}
+                    </p>
+                  ) : null}
+                  {knob.min !== undefined && knob.max !== undefined ? (
+                    <p className="text-muted-foreground text-xs">
+                      {t("web.admin.settings.network.direct.range", {
+                        min: knobValue(t, knob, knob.min),
+                        max: knobValue(t, knob, knob.max),
                       })}
                     </p>
                   ) : null}

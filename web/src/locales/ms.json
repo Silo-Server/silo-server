@@ -60655,7 +60655,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Semak sokongan UPnP, NAT-PMP atau PCP pada penghala."
+      "value": "Minta pemetaan port UPnP, NAT-PMP atau PCP daripada penghala."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -60664,16 +60664,40 @@
       "value": "Pemetaan port"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Julat: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " hingga "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Semakan kesediaan tidak memulakan main terus."
+      "value": "Menghidupkan tetapan ini akan memulakan enjin sambungan terus. Enjin ini membuka port UDP dan, apabila Pemetaan port dihidupkan, meminta pemetaan port daripada penghala. Jalankan semakan hanya membaca keadaan hos."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Dilumpuhkan oleh pentadbir"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Dihadkan kepada julat yang dibenarkan"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -60685,7 +60709,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Enjin sambungan terus tidak dapat dimulakan"
+      "value": "Enjin sambungan terus berhenti atau tidak dapat dimulakan"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -60716,6 +60740,12 @@
     {
       "type": 0,
       "value": "Nilai tidak sah; menggunakan mati"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Nilai tidak sah; menggunakan nilai lalai"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

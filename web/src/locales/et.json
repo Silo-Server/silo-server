@@ -68320,7 +68320,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Kontrollib, kas ruuter toetab UPnP-d, NAT-PMP-d või PCP-d."
+      "value": "Küsib ruuterilt pordisuunamist protokolli UPnP, NAT-PMP või PCP kaudu."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -68329,16 +68329,40 @@
       "value": "Pordivastendus"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Vahemik: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " kuni "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Valmisoleku kontrollid ei käivita otseesitust."
+      "value": "Selle sisselülitamine käivitab otseühenduste mootori. See avab UDP-pordi ja küsib ruuterilt pordisuunamist, kui valik „Pordisuunamine“ on sees. Nupp „Käivita kontroll“ loeb ainult hosti olekut."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Administraator on keelanud"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Viidud lubatud vahemikku"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -68350,7 +68374,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Otseühenduste mootori käivitamine ebaõnnestus"
+      "value": "Otseühenduste mootor seiskus või ei käivitunud"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -68381,6 +68405,12 @@
     {
       "type": 0,
       "value": "Sobimatu väärtus; lülitati välja"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Sobimatu väärtus; kasutatakse vaikeväärtust"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

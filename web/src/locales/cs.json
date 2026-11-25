@@ -82312,7 +82312,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Zkontrolovat, zda router podporuje UPnP, NAT-PMP nebo PCP."
+      "value": "Požádat router o mapování portu přes UPnP, NAT-PMP nebo PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -82321,16 +82321,40 @@
       "value": "Mapování portů"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Rozsah: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " až "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Kontroly připravenosti nespouštějí přímé přehrávání."
+      "value": "Zapnutím této možnosti se spustí modul přímého připojení. Ten otevře port UDP, a pokud je zapnuta možnost Mapování portů, požádá router o mapování portu. Tlačítko Spustit kontrolu pouze zjišťuje stav hostitele."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Vypnuto správcem"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Omezeno na povolený rozsah"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -82342,7 +82366,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Modul přímého připojení se nepodařilo spustit"
+      "value": "Modul přímého připojení se zastavil nebo ho nebylo možné spustit"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -82373,6 +82397,12 @@
     {
       "type": 0,
       "value": "Neplatná hodnota; použito vypnuto"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Neplatná hodnota; používá se výchozí"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

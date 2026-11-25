@@ -74960,7 +74960,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Verificar se o roteador oferece suporte a UPnP, NAT-PMP ou PCP."
+      "value": "Solicitar ao roteador um mapeamento de porta UPnP, NAT-PMP ou PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -74969,16 +74969,40 @@
       "value": "Mapeamento de portas"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Intervalo: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " a "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "As verificações de prontidão não iniciam a reprodução direta."
+      "value": "Ativar esta opção inicia o mecanismo de conexão direta. Ele abre uma porta UDP e, quando Mapeamento de portas está ativado, solicita ao roteador um mapeamento de porta. Executar verificação apenas lê o estado do host."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Desativado pelo administrador"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Limitado ao intervalo permitido"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -74990,7 +75014,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Não foi possível iniciar o mecanismo de conexão direta"
+      "value": "O mecanismo de conexão direta parou ou não pôde ser iniciado"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -75021,6 +75045,12 @@
     {
       "type": 0,
       "value": "Valor inválido; usando desativado"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Valor inválido; usando o padrão"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

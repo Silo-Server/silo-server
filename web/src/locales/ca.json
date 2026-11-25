@@ -74984,7 +74984,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Comprova si l’encaminador admet UPnP, NAT-PMP o PCP."
+      "value": "Demana a l’encaminador una assignació de ports UPnP, NAT-PMP o PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -74993,16 +74993,40 @@
       "value": "Assignació de ports"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Interval: entre "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " i "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Les comprovacions de preparació no inicien la reproducció directa."
+      "value": "En activar aquesta opció, s’inicia el motor de connexió directa: s’obre un port UDP i, si Assignació de ports està activat, es demana a l’encaminador una assignació de ports. Executa la comprovació només llegeix l’estat de l’equip."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Desactivat per l’administrador"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "S’ha ajustat a l’interval permès"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -75014,7 +75038,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "No s’ha pogut iniciar el motor de connexió directa"
+      "value": "El motor de connexió directa s’ha aturat o no s’ha pogut iniciar"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -75045,6 +75069,12 @@
     {
       "type": 0,
       "value": "Valor no vàlid; s’ha desactivat"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Valor no vàlid; s’utilitza el valor per defecte"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

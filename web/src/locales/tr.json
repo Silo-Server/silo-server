@@ -67164,7 +67164,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Yönlendiricinin UPnP, NAT-PMP veya PCP desteğini kontrol eder."
+      "value": "Yönlendiriciden UPnP, NAT-PMP veya PCP ile bağlantı noktası eşlemesi ister."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67173,16 +67173,44 @@
       "value": "Bağlantı noktası eşleme"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Aralık: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " ile "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " arası"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Hazırlık kontrolleri doğrudan oynatmayı başlatmaz."
+      "value": "Bu ayarı açmak doğrudan bağlantı motorunu başlatır. Motor bir UDP bağlantı noktası açar ve “Bağlantı noktası eşleme” açıksa yönlendiriciden bağlantı noktası eşlemesi ister. “Kontrolü çalıştır” yalnızca ana makinenin durumunu okur."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Yönetici tarafından devre dışı bırakıldı"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "İzin verilen aralıkla sınırlandırıldı"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67194,7 +67222,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Doğrudan bağlantı motoru başlatılamadı"
+      "value": "Doğrudan bağlantı motoru durdu veya başlatılamadı"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67225,6 +67253,12 @@
     {
       "type": 0,
       "value": "Geçersiz değer; kapalı olarak uygulanıyor"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Geçersiz değer; varsayılan kullanılıyor"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

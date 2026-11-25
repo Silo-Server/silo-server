@@ -67988,7 +67988,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Ελέγχει τον δρομολογητή για υποστήριξη UPnP, NAT-PMP ή PCP."
+      "value": "Ζητά από τον δρομολογητή αντιστοίχιση θύρας UPnP, NAT-PMP ή PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67997,16 +67997,40 @@
       "value": "Αντιστοίχιση θυρών"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Εύρος: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " έως "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Οι έλεγχοι ετοιμότητας δεν ξεκινούν απευθείας αναπαραγωγή."
+      "value": "Η ενεργοποίηση αυτής της ρύθμισης εκκινεί τη μηχανή απευθείας συνδέσεων. Η μηχανή ανοίγει μια θύρα UDP και, όταν η επιλογή «Αντιστοίχιση θύρας» είναι ενεργή, ζητά από τον δρομολογητή αντιστοίχιση θύρας. Η «Εκτέλεση ελέγχου» μόνο διαβάζει την κατάσταση του κεντρικού υπολογιστή."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Απενεργοποιήθηκε από διαχειριστή"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Περιορίστηκε στο επιτρεπόμενο εύρος"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -68018,7 +68042,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Δεν ήταν δυνατή η εκκίνηση της μηχανής απευθείας συνδέσεων"
+      "value": "Η μηχανή απευθείας συνδέσεων σταμάτησε ή δεν ήταν δυνατή η εκκίνησή της"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -68049,6 +68073,12 @@
     {
       "type": 0,
       "value": "Μη έγκυρη τιμή – χρησιμοποιείται «Ανενεργό»"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Μη έγκυρη τιμή, χρησιμοποιείται η προεπιλογή"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

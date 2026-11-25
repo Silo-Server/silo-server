@@ -200,7 +200,7 @@ func (p *proxyPluginHost) hooks() standaloneServerHooks {
 	}
 }
 
-// warnOnMultipleAPIReplicas registers this API replica's presence and logs
+// warnOnMultipleAPIReplicas reads the registered process presence and logs
 // the single-API constraint when another live replica is seen: network
 // access providers keep their overlay node key under one shared "api" state
 // scope, so two replicas would present one overlay identity from two
@@ -208,10 +208,6 @@ func (p *proxyPluginHost) hooks() standaloneServerHooks {
 // a second replica reading the same state.
 func warnOnMultipleAPIReplicas(ctx context.Context, presence *cache.APIReplicaPresence, service *plugins.Service) {
 	if presence == nil || service == nil {
-		return
-	}
-	if err := presence.Register(ctx); err != nil {
-		slog.DebugContext(ctx, "api replica presence unavailable", "component", "plugins", "error", err)
 		return
 	}
 	providers, err := service.ListNetworkAccessProviders(ctx)

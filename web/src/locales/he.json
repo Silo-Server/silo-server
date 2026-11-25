@@ -74219,7 +74219,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "בדיקה אם הנתב תומך ב-UPnP, ב-NAT-PMP או ב-PCP."
+      "value": "בקשת מיפוי פורטים מהנתב באמצעות UPnP, \u200FNAT-PMP או PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -74228,16 +74228,40 @@
       "value": "מיפוי יציאות"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "טווח: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " עד "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "בדיקות מוכנות לא מתחילות הפעלה ישירה."
+      "value": "הפעלת האפשרות הזו מפעילה את מנוע החיבורים הישירים. המנוע פותח פורט UDP, וכשהאפשרות ”מיפוי פורטים” מופעלת, הוא גם מבקש מהנתב מיפוי פורטים. הלחצן ”הרצת בדיקה” רק קורא את מצב המארח."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "הושבת על ידי מנהל"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "הערך הותאם לטווח המותר"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -74249,7 +74273,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "לא ניתן היה להפעיל את מנוע החיבורים הישירים"
+      "value": "מנוע החיבורים הישירים הפסיק לפעול או שלא ניתן היה להפעיל אותו"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -74280,6 +74304,12 @@
     {
       "type": 0,
       "value": "ערך לא תקין; ההגדרה כבויה"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "ערך לא חוקי; נעשה שימוש בברירת המחדל"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

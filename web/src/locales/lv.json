@@ -76047,7 +76047,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Pārbauda, vai maršrutētājs atbalsta UPnP, NAT-PMP vai PCP."
+      "value": "Pieprasīt no maršrutētāja UPnP, NAT-PMP vai PCP portu kartēšanu."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -76056,16 +76056,40 @@
       "value": "Portu kartēšana"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Diapazons: no "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " līdz "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Gatavības pārbaudes nesāk tiešo atskaņošanu."
+      "value": "Ieslēdzot šo iestatījumu, tiek palaists tiešo savienojumu dzinējs. Tas atver UDP portu un, ja ir ieslēgts iestatījums „Portu kartēšana”, pieprasa no maršrutētāja portu kartēšanu. Poga „Palaist pārbaudi” tikai nolasa resursdatora stāvokli."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Atspējojis administrators"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Vērtība ierobežota līdz atļautajam diapazonam"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -76077,7 +76101,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Neizdevās palaist tiešo savienojumu dzinēju"
+      "value": "Tiešo savienojumu dzinējs apstājās, vai to neizdevās palaist"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -76108,6 +76132,12 @@
     {
       "type": 0,
       "value": "Nederīga vērtība; iestatījums izslēgts"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Nederīga vērtība; tiek izmantota noklusējuma vērtība"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

@@ -67408,7 +67408,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "राउटर में UPnP, NAT-PMP या PCP का समर्थन जाँचें।"
+      "value": "राउटर से UPnP, NAT-PMP या PCP पोर्ट मैपिंग का अनुरोध करें।"
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67417,16 +67417,44 @@
       "value": "पोर्ट मैपिंग"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "सीमा: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " से "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " तक"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "तैयारी की जाँच से डायरेक्ट प्लेबैक शुरू नहीं होता।"
+      "value": "इसे चालू करने पर डायरेक्ट कनेक्शन इंजन शुरू हो जाता है। यह एक UDP पोर्ट खोलता है और “पोर्ट मैपिंग” चालू होने पर राउटर से पोर्ट मैपिंग का अनुरोध करता है। “जाँच चलाएँ” से सिर्फ़ होस्ट की स्थिति पढ़ी जाती है।"
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "एडमिनिस्ट्रेटर द्वारा बंद किया गया"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "अनुमत सीमा के अंदर सीमित किया गया"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67438,7 +67466,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "डायरेक्ट कनेक्शन इंजन शुरू नहीं हो सका"
+      "value": "डायरेक्ट कनेक्शन इंजन रुक गया या शुरू नहीं हो सका"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67469,6 +67497,12 @@
     {
       "type": 0,
       "value": "अमान्य वैल्यू; बंद किया गया"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "अमान्य मान; डिफ़ॉल्ट इस्तेमाल हो रहा है"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

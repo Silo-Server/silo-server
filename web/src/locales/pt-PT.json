@@ -75172,7 +75172,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Verificar se o router suporta UPnP, NAT-PMP ou PCP."
+      "value": "Pedir ao router um mapeamento de portas UPnP, NAT-PMP ou PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -75181,16 +75181,40 @@
       "value": "Mapeamento de portas"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Intervalo: de "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " a "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "As verificações de preparação não iniciam a reprodução direta."
+      "value": "Ativar esta opção inicia o motor de ligações diretas. Este abre uma porta UDP e, com a opção Mapeamento de portas ativada, pede ao router um mapeamento de portas. O botão Executar verificação apenas lê o estado do host."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Desativado pelo administrador"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Ajustado ao intervalo permitido"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -75202,7 +75226,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Não foi possível iniciar o motor de ligações diretas"
+      "value": "O motor de ligações diretas parou ou não foi possível iniciá-lo"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -75233,6 +75257,12 @@
     {
       "type": 0,
       "value": "Valor inválido; definição desativada"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Valor inválido; a usar a predefinição"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

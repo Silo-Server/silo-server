@@ -67932,7 +67932,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Проверява рутера за поддръжка на UPnP, NAT-PMP или PCP."
+      "value": "Изисква от рутера пренасочване на порт чрез UPnP, NAT-PMP или PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67941,16 +67941,40 @@
       "value": "Пренасочване на портове"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Диапазон: от "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " до "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Проверките за готовност не стартират директно възпроизвеждане."
+      "value": "Включването на тази опция стартира механизма за директни връзки. Той отваря UDP порт и, когато опцията „Пренасочване на портове“ е включена, изисква от рутера пренасочване на порт. Бутонът „Изпълнение на проверка“ само чете състоянието на хоста."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Изключено от администратор"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Ограничено до разрешения диапазон"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67962,7 +67986,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Механизмът за директни връзки не можа да стартира"
+      "value": "Механизмът за директни връзки спря или не можа да стартира"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67993,6 +68017,12 @@
     {
       "type": 0,
       "value": "Невалидна стойност; използва се „Изключено“"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Невалидна стойност; използва се стойността по подразбиране"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [

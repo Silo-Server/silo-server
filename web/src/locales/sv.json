@@ -67628,7 +67628,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Kontrollera om routern har stöd för UPnP, NAT-PMP eller PCP."
+      "value": "Be routern om en portmappning via UPnP, NAT-PMP eller PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67637,16 +67637,40 @@
       "value": "Portmappning"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Intervall: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " till "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Beredskapskontroller startar inte direktuppspelning."
+      "value": "När du aktiverar detta startas motorn för direktanslutningar. Den öppnar en UDP-port och ber routern om en portmappning när Portmappning är på. Kör kontroll läser bara värdens tillstånd."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Inaktiverad av administratör"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Begränsat till det tillåtna intervallet"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67658,7 +67682,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Motorn för direktanslutningar kunde inte starta"
+      "value": "Motorn för direktanslutningar stoppades eller kunde inte starta"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67689,6 +67713,12 @@
     {
       "type": 0,
       "value": "Ogiltigt värde; använder av"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Ogiltigt värde; standardvärdet används"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
