@@ -143,7 +143,7 @@ type SetupServerInput struct {
 	Body    struct {
 		Username             string `json:"username" minLength:"1" maxLength:"254" doc:"Login name of the administrator" example:"admin"`
 		Email                string `json:"email" minLength:"1" maxLength:"254" doc:"Contact email of the administrator" example:"admin@example.test"`
-		Password             string `json:"password" minLength:"8" maxLength:"72" doc:"Account password; at least 8 characters and at most 72 UTF-8 bytes" example:"correct horse battery staple"`
+		Password             string `json:"password" minLength:"8" maxLength:"72" doc:"Account password; at least 8 characters and at most 72 UTF-8 bytes. The server's password policy can require more; getPasswordPolicy describes it" example:"correct horse battery staple"`
 		CreateDefaultProfile bool   `json:"create_default_profile,omitempty" doc:"Also create the household's first profile" example:"true"`
 		DefaultProfileName   string `json:"default_profile_name,omitempty" maxLength:"128" doc:"Name of that profile; the username when empty" example:"Alice"`
 	}
@@ -152,6 +152,21 @@ type SetupServerInput struct {
 // SignupStatus reports whether public invited signup is on.
 type SignupStatus struct {
 	Enabled bool `json:"enabled" doc:"True when signup accepts invite codes" example:"false"`
+}
+
+// PasswordPolicy is the rule set a new local password must meet. It applies
+// to setupServer, signup, changePassword, a password reset and an
+// administrator setting a password; passwords already stored keep working.
+type PasswordPolicy struct {
+	MinimumLength    int  `json:"minimum_length" doc:"Fewest characters a new password may have; never fewer than 8" example:"8"`
+	MaximumBytes     int  `json:"maximum_bytes" doc:"Most UTF-8 bytes a new password may have" example:"72"`
+	RequireUppercase bool `json:"require_uppercase" doc:"Whether a new password needs a capital letter (Unicode category Lu)" example:"false"`
+	RequireSpecial   bool `json:"require_special" doc:"Whether a new password needs a punctuation mark or symbol (Unicode categories P and S); letters, digits and spaces do not count" example:"false"`
+}
+
+// PasswordPolicyOutput is the getPasswordPolicy response.
+type PasswordPolicyOutput struct {
+	Body PasswordPolicy
 }
 
 // SignupStatusOutput is the getSignupStatus response.
@@ -166,7 +181,7 @@ type SignupInput struct {
 	Body    struct {
 		Username             string `json:"username" minLength:"1" maxLength:"254" doc:"Login name" example:"alice"`
 		Email                string `json:"email" minLength:"1" maxLength:"254" doc:"Contact email" example:"alice@example.test"`
-		Password             string `json:"password" minLength:"8" maxLength:"72" doc:"Account password; at least 8 characters and at most 72 UTF-8 bytes" example:"correct horse battery staple"`
+		Password             string `json:"password" minLength:"8" maxLength:"72" doc:"Account password; at least 8 characters and at most 72 UTF-8 bytes. The server's password policy can require more; getPasswordPolicy describes it" example:"correct horse battery staple"`
 		InviteCode           string `json:"invite_code" minLength:"1" maxLength:"128" doc:"An active invite code" example:"WELCOME-2026"`
 		CreateDefaultProfile bool   `json:"create_default_profile,omitempty" doc:"Also create the household's first profile" example:"true"`
 		DefaultProfileName   string `json:"default_profile_name,omitempty" maxLength:"128" doc:"Name of that profile; the username when empty" example:"Alice"`
@@ -226,6 +241,11 @@ func registerAuthSessions(reg *Registry) {
 			"Report whether public invited signup is enabled."),
 		Class: ClassPublic, ServiceBacked: true,
 	}, reg.getSignupStatus)
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodGet, Prefix+"/auth/password-policy", "getPasswordPolicy", "auth",
+			"Describe the rules a new password must meet."),
+		Class: ClassPublic, ServiceBacked: true,
+	}, reg.getPasswordPolicy)
 	signup := humaOp(http.MethodPost, Prefix+"/auth/signup", opSignup, "auth",
 		"Create an account from an invite code and open its session.")
 	signup.DefaultStatus = http.StatusCreated
@@ -433,6 +453,22 @@ func (reg *Registry) getSignupStatus(ctx context.Context, _ *struct{}) (*SignupS
 	return &SignupStatusOutput{Body: SignupStatus{Enabled: enabled}}, nil
 }
 
+func (reg *Registry) getPasswordPolicy(ctx context.Context, _ *struct{}) (*PasswordPolicyOutput, error) {
+	if reg.deps.Sessions == nil {
+		return nil, unavailable("account")
+	}
+	policy, err := reg.deps.Sessions.PasswordPolicy(ctx)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	return &PasswordPolicyOutput{Body: PasswordPolicy{
+		MinimumLength:    policy.MinimumLength,
+		MaximumBytes:     auth.MaximumPasswordBytes,
+		RequireUppercase: policy.RequireUppercase,
+		RequireSpecial:   policy.RequireSpecial,
+	}}, nil
+}
+
 func (reg *Registry) signup(ctx context.Context, in *SignupInput) (*TokenPairOutput, error) {
 	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
 		return nil, p
@@ -470,6 +506,10 @@ func invalidEmailProblem(email string) *Problem {
 // (an invite code the store refused) is a validation problem at that member;
 // everything else follows the v1 status.
 func registrationProblem(err error) *Problem {
+	// A password the policy refused reads as on every other password path.
+	if message, ok := auth.PasswordRuleMessage(err); ok {
+		return passwordMemberProblem(message)
+	}
 	var apiErr *handlers.APIError
 	if errors.As(err, &apiErr) && apiErr.Field != "" {
 		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").

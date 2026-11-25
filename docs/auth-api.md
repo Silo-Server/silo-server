@@ -90,9 +90,24 @@ active primary profile. An admin account may also change its password before sel
 but selecting a secondary profile removes that authority. API keys and impersonation sessions can
 never change an account password.
 
-Local passwords are bcrypt hashes. Setup, invited signup, and password changes share the same
-password policy. New passwords must contain at least 8 Unicode characters and be
-no more than 72 UTF-8 bytes, the bcrypt input limit. The caller must prove knowledge of the current
+Local passwords are bcrypt hashes. Setup, invited signup, password changes, password resets and
+passwords an administrator sets share one password policy, which an administrator sets under
+Settings → Sign-in:
+
+| Setting | Default | Rule |
+| --- | --- | --- |
+| `auth.password_min_length` | `8` | Fewest Unicode characters, from 8 to 72. |
+| `auth.password_require_uppercase` | `false` | At least one capital letter (Unicode category `Lu`). |
+| `auth.password_require_special` | `false` | At least one punctuation mark or symbol (Unicode categories `P` and `S`); letters, digits and spaces do not count. |
+
+Every new password is also at most 72 UTF-8 bytes, the bcrypt input limit. The policy is read on
+every check, so a change applies at once on every node. It applies only when a password is chosen;
+passwords already stored keep working. The recovery command
+`silo auth local-login enable -user <name> -temporary-password` sets a temporary password without
+it, and the account then chooses a new one under the policy. A backup
+restore never weakens the live policy.
+
+To change a password, the caller must prove knowledge of the current
 password. By default, changing the password does not revoke existing login sessions; users can
 review and revoke those separately through the account sessions API. The change can also
 sign the account out everywhere else in the same step; see
@@ -101,6 +116,20 @@ sign the account out everywhere else in the same step; see
 Accounts whose local password login is disabled keep their credential at the external provider and
 cannot use this flow. An administrator can also make a password temporary or issue a reset link;
 see [temporary passwords](#temporary-passwords) and [password reset links](#password-reset-links).
+
+### `GET /auth/password-policy` (`getPasswordPolicy`)
+
+Public, so the setup, signup and password-reset forms can check a password before sending it. The
+server checks it again on every write.
+
+```json
+{
+  "minimum_length": 8,
+  "maximum_bytes": 72,
+  "require_uppercase": false,
+  "require_special": false
+}
+```
 
 ### `GET /account/password/capability` (`getAccountPasswordCapability`)
 
@@ -166,7 +195,7 @@ holding a session but not the password cannot brute-force it.
 | `401` | `authentication_required` | No valid login session. |
 | `403` | `permission_denied` | The active profile is not the primary profile, an administrator selected a secondary profile, or the caller is an API key or "View as user" session. |
 | `409` | `conflict` | The account does not use local password login. |
-| `422` | `validation_failed` | A member is missing, empty, `null` or unknown; the current password did not match (`body.current_password`); or the new password is shorter than 8 characters, longer than 72 UTF-8 bytes, or the same as a temporary password (`body.new_password`). |
+| `422` | `validation_failed` | A member is missing, empty, `null` or unknown; the current password did not match (`body.current_password`); or the new password breaks the [password policy](#account-passwords) or is the same as a temporary password (`body.new_password`). |
 | `429` | `rate_limited` | The `password_change` budget is spent; `Retry-After` says when to try again. |
 | `503` | `dependency_unavailable` | The server has no password service, or password hashing is saturated; `Retry-After` says when to try again. |
 

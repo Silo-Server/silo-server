@@ -1329,6 +1329,8 @@ type SessionService interface {
 	SetupInitialUser(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
 	SignupEnabled(ctx context.Context) (bool, error)
 	Signup(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
+	// PasswordPolicy is the rule set a new password must meet.
+	PasswordPolicy(ctx context.Context) (auth.PasswordPolicy, error)
 	// NetworkSignIn signs in the overlay peer of the request through a
 	// network identity provider.
 	NetworkSignIn(ctx context.Context, in handlers.NetworkSignInInput) (handlers.TokenPairView, error)

@@ -7053,6 +7053,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/auth/password-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Describe the rules a new password must meet. */
+    get: operations["getPasswordPolicy"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/auth/plugin-launch": {
     parameters: {
       query?: never;
@@ -14168,7 +14185,7 @@ export interface components {
       maximum_password_bytes: number;
       /**
        * Format: int64
-       * @description Fewest characters a new password may have
+       * @description Fewest characters a new password may have. getPasswordPolicy describes the rest of the password policy
        * @example 8
        */
       minimum_password_length: number;
@@ -26719,7 +26736,7 @@ export interface components {
        */
       current_password: string;
       /**
-       * @description The replacement; the capability document names the length limits
+       * @description The replacement; getPasswordPolicy describes the rules it must meet
        * @example margin fossil quench hollow
        */
       new_password: string;
@@ -32837,6 +32854,30 @@ export interface components {
       /** Format: int64 */
       telemetry_only_truncated: number;
     };
+    PasswordPolicy: {
+      /**
+       * Format: int64
+       * @description Most UTF-8 bytes a new password may have
+       * @example 72
+       */
+      maximum_bytes: number;
+      /**
+       * Format: int64
+       * @description Fewest characters a new password may have; never fewer than 8
+       * @example 8
+       */
+      minimum_length: number;
+      /**
+       * @description Whether a new password needs a punctuation mark or symbol (Unicode categories P and S); letters, digits and spaces do not count
+       * @example false
+       */
+      require_special: boolean;
+      /**
+       * @description Whether a new password needs a capital letter (Unicode category Lu)
+       * @example false
+       */
+      require_uppercase: boolean;
+    };
     PasswordResetCapability: {
       /** @description Whether the current principal may use the capability */
       allowed?: boolean;
@@ -36808,7 +36849,7 @@ export interface components {
        */
       email: string;
       /**
-       * @description Account password; at least 8 characters and at most 72 UTF-8 bytes
+       * @description Account password; at least 8 characters and at most 72 UTF-8 bytes. The server's password policy can require more; getPasswordPolicy describes it
        * @example correct horse battery staple
        */
       password: string;
@@ -36915,7 +36956,7 @@ export interface components {
        */
       invite_code: string;
       /**
-       * @description Account password; at least 8 characters and at most 72 UTF-8 bytes
+       * @description Account password; at least 8 characters and at most 72 UTF-8 bytes. The server's password policy can require more; getPasswordPolicy describes it
        * @example correct horse battery staple
        */
       password: string;
@@ -101808,6 +101849,71 @@ export interface operations {
       };
       /** @description Unsupported Media Type */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getPasswordPolicy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PasswordPolicy"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
         headers: {
           [name: string]: unknown;
         };

@@ -1,12 +1,12 @@
 import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Navigate, useSearchParams } from "react-router";
-import { useChangeAccountPassword } from "@/hooks/queries/account";
+import { useChangeAccountPassword, usePasswordPolicy } from "@/hooks/queries/account";
 import { useAuth } from "@/hooks/useAuth";
 import { usePostSignInNavigation } from "@/hooks/usePostSignInNavigation";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
-import { newPasswordProblem, passwordErrorMessage } from "@/lib/newPassword";
+import { newPasswordProblem, passwordErrorMessage, newPasswordHint } from "@/lib/newPassword";
 import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/PasswordInput";
 import { Label } from "@/components/ui/label";
@@ -36,6 +36,7 @@ export default function ChoosePassword() {
   const [settleFailed, setSettleFailed] = useState(false);
   const busy = useRef(false);
   const t = useT();
+  const passwordPolicy = usePasswordPolicy();
   useDocumentTitle(t("web.auth.choosePassword.documentTitle"));
 
   if (loading) {
@@ -67,7 +68,7 @@ export default function ChoosePassword() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (busy.current) return;
-    const problem = newPasswordProblem(password, confirmation);
+    const problem = newPasswordProblem(password, confirmation, passwordPolicy);
     if (problem) {
       setError(problem);
       return;
@@ -148,9 +149,7 @@ export default function ChoosePassword() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="new-password">{t("web.auth.passwordRules.newPassword")}</Label>
-              <p className="text-muted-foreground text-xs">
-                {t("web.auth.passwordRules.minLength")}
-              </p>
+              <p className="text-muted-foreground text-xs">{newPasswordHint(passwordPolicy)}</p>
               <PasswordInput
                 id="new-password"
                 value={password}

@@ -41,11 +41,15 @@ func (h *AuthHandler) AccountPasswordCapability(ctx context.Context, claims *aut
 	} else {
 		allowed = false
 	}
+	policy, err := h.PasswordPolicy(ctx)
+	if err != nil {
+		return AccountPasswordCapabilityView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load the password policy")
+	}
 	return AccountPasswordCapabilityView{
 		Configured:              h.passwords != nil,
 		ChangePassword:          allowed,
 		RequiresCurrentPassword: true,
-		MinimumPasswordLength:   auth.MinimumPasswordLength,
+		MinimumPasswordLength:   policy.MinimumLength,
 		MaximumPasswordBytes:    auth.MaximumPasswordBytes,
 		SignOutOtherSessions:    h.passwords != nil,
 	}, nil
@@ -79,15 +83,14 @@ func (h *AuthHandler) ChangePassword(ctx context.Context, claims *auth.Claims, c
 		return apiError(http.StatusBadRequest, "bad_request", "Current password and new password are required")
 	}
 	err := h.passwords.ChangePassword(ctx, claims.UserID, claims.SessionID, currentPassword, newPassword, signOutOtherSessions)
+	if apiErr := passwordPolicyError(err, "new_password"); apiErr != nil {
+		return apiErr
+	}
 	switch {
 	case err == nil:
 		return nil
 	case errors.Is(err, auth.ErrCurrentPasswordInvalid):
 		return &APIError{Status: http.StatusBadRequest, Code: "invalid_current_password", Message: "Current password is incorrect", Field: "current_password"}
-	case errors.Is(err, auth.ErrPasswordTooShort):
-		return &APIError{Status: http.StatusBadRequest, Code: codeWeakPassword, Message: "Password must be at least 8 characters", Field: "new_password"}
-	case errors.Is(err, auth.ErrPasswordTooLong):
-		return &APIError{Status: http.StatusBadRequest, Code: codePasswordTooLong, Message: "Password must be at most 72 bytes", Field: "new_password"}
 	case errors.Is(err, auth.ErrPasswordUnchanged):
 		return &APIError{Status: http.StatusBadRequest, Code: codeWeakPassword, Message: "Choose a password different from the temporary one", Field: "new_password"}
 	case errors.Is(err, auth.ErrPasswordLoginDisabled):

@@ -575,6 +575,7 @@ GET /api/v2/auth/oauth/{install_id}/callback	non-media
 POST /api/v2/auth/oauth/{install_id}/init	non-media
 GET /api/v2/auth/oauth/{install_id}/native/start	non-media
 GET /api/v2/auth/oauth/{install_id}/start	non-media
+GET /api/v2/auth/password-policy	non-media
 POST /api/v2/auth/plugin-launch	non-media
 GET /api/v2/auth/provider-logout	non-media
 GET /api/v2/auth/providers	non-media
@@ -1662,6 +1663,7 @@ GET /api/v2/auth/oauth/{install_id}/callback	non-media
 POST /api/v2/auth/oauth/{install_id}/init	non-media
 GET /api/v2/auth/oauth/{install_id}/native/start	non-media
 GET /api/v2/auth/oauth/{install_id}/start	non-media
+GET /api/v2/auth/password-policy	non-media
 POST /api/v2/auth/plugin-launch	non-media
 GET /api/v2/auth/provider-logout	non-media
 GET /api/v2/auth/providers	non-media

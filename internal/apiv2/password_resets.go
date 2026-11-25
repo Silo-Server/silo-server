@@ -147,6 +147,9 @@ type PasswordResetCompleteOutput struct {
 }
 
 func passwordResetProblem(err error) *Problem {
+	if message, ok := auth.PasswordRuleMessage(err); ok {
+		return passwordMemberProblem(message)
+	}
 	var apiErr *handlers.APIError
 	switch {
 	case errors.As(err, &apiErr):
@@ -167,10 +170,6 @@ func passwordResetProblem(err error) *Problem {
 		return NewProblem(TypeCapabilityNotConfigured, "Email is not configured; share a reset link instead.")
 	case errors.Is(err, passwordreset.ErrNoLinkBase):
 		return NewProblem(TypeCapabilityNotConfigured, "Reset links need the server's public URL; set it in the server settings.")
-	case errors.Is(err, auth.ErrPasswordTooShort):
-		return passwordMemberProblem("Use at least 8 characters.")
-	case errors.Is(err, auth.ErrPasswordTooLong):
-		return passwordMemberProblem("Use at most 72 bytes.")
 	case errors.Is(err, passwordhash.ErrBusy):
 		return passwordHashBusyProblem()
 	}

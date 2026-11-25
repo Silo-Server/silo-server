@@ -5,6 +5,7 @@ import { XIcon } from "lucide-react";
 
 import type { CreateUserRequest } from "@/api/types";
 import { captureAdminUserAuthority } from "@/api/v2/adminUsers";
+import { V2ProblemError } from "@/api/v2/request";
 import {
   PolicyAccessFields,
   PolicyLimitFields,
@@ -37,6 +38,8 @@ import {
   useViewerIsOwner,
 } from "@/hooks/queries/admin/users";
 import { useAuth } from "@/hooks/useAuth";
+import { usePasswordPolicy } from "@/hooks/queries/account";
+import { newPasswordHint, newPasswordPolicyProblem, passwordErrorMessage } from "@/lib/newPassword";
 import { useT } from "@/i18n";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import {
@@ -116,6 +119,7 @@ function CreateUserForm({
   onBusy: (busy: boolean) => void;
 }) {
   const t = useT();
+  const passwordPolicy = usePasswordPolicy();
   const [authority] = useState(captureAdminUserAuthority);
   const busy = useRef(false);
   const [error, setError] = useState("");
@@ -132,6 +136,12 @@ function CreateUserForm({
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // A password the policy refuses, shown at the field rather than in the alert.
+  const [passwordError, setPasswordError] = useState("");
+  const passwordRef = useRef<HTMLInputElement>(null);
+  // The password as last typed. A save that settles after the admin left the
+  // Account tab can't read it from the unmounted input.
+  const latestPassword = useRef("");
   const [requirePasswordChange, setRequirePasswordChange] = useState(false);
   const [role, setRole] = useState("user");
   const [permissions, setPermissions] = useState<string[]>([PERMISSION_MARKER_EDIT]);
@@ -154,6 +164,8 @@ function CreateUserForm({
   const usernameId = useId();
   const emailId = useId();
   const passwordId = useId();
+  const passwordErrorId = useId();
+  const passwordHintId = useId();
   const requireChangeId = useId();
   const roleId = useId();
   const markerEditId = useId();
@@ -193,6 +205,16 @@ function CreateUserForm({
     accessGroupsLoaded &&
     !accessGroups.some((group) => group.id === selectedGroupID);
 
+  // Saved from another tab, the field is not rendered: show it first.
+  function showPasswordError(message: string) {
+    setError("");
+    flushSync(() => {
+      setDialogTab("account");
+      setPasswordError(message);
+    });
+    passwordRef.current?.focus();
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (
@@ -203,6 +225,11 @@ function CreateUserForm({
       return;
     if (!isValidEmail(email)) {
       setError(invalidEmailMessage());
+      return;
+    }
+    const passwordProblem = newPasswordPolicyProblem(password, passwordPolicy);
+    if (passwordProblem) {
+      showPasswordError(passwordProblem);
       return;
     }
     // A cleared or half-typed limit is not in the policy state, which still
@@ -217,23 +244,33 @@ function CreateUserForm({
     busy.current = true;
     onBusy(true);
     setError("");
+    setPasswordError("");
+    const body: CreateUserRequest = {
+      username,
+      email,
+      password,
+      ...(requirePasswordChange ? { require_password_change: true } : {}),
+      role,
+      permissions,
+      create_default_profile: createDefaultProfile,
+      ...policyCreateFields(policy),
+      ...(typeof groupToSend === "number" ? { access_group_id: groupToSend } : {}),
+    };
     try {
-      const body: CreateUserRequest = {
-        username,
-        email,
-        password,
-        ...(requirePasswordChange ? { require_password_change: true } : {}),
-        role,
-        permissions,
-        create_default_profile: createDefaultProfile,
-        ...policyCreateFields(policy),
-        ...(typeof groupToSend === "number" ? { access_group_id: groupToSend } : {}),
-      };
       await createMutation.mutateAsync({ body, profileContext: authority });
       createMutation.reset();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("web.admin.users.list.create.saveFailed"));
+      // A policy that changed since the form loaded: the server's rule goes
+      // at the field like the form's own check, unless the admin has already
+      // changed the password it refused.
+      if (err instanceof V2ProblemError && err.problem.errors?.[0]?.location === "body.password") {
+        if (latestPassword.current === body.password) {
+          showPasswordError(passwordErrorMessage(err, ""));
+        }
+      } else {
+        setError(passwordErrorMessage(err, t("web.admin.users.list.create.saveFailed")));
+      }
     } finally {
       busy.current = false;
       onBusy(false);
@@ -310,13 +347,31 @@ function CreateUserForm({
               <div className="space-y-2">
                 <Label htmlFor={passwordId}>{t("web.admin.users.list.create.password")}</Label>
                 <Input
+                  ref={passwordRef}
                   id={passwordId}
                   type="password"
                   autoComplete="new-password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    latestPassword.current = e.target.value;
+                    setPasswordError("");
+                  }}
+                  aria-invalid={passwordError ? true : undefined}
+                  aria-errormessage={passwordError ? passwordErrorId : undefined}
+                  aria-describedby={
+                    passwordError ? `${passwordHintId} ${passwordErrorId}` : passwordHintId
+                  }
                   required
                 />
+                <p id={passwordHintId} className="text-muted-foreground text-xs">
+                  {newPasswordHint(passwordPolicy)}
+                </p>
+                {passwordError ? (
+                  <p id={passwordErrorId} className="text-destructive text-xs">
+                    {passwordError}
+                  </p>
+                ) : null}
                 <div className="flex items-center gap-2">
                   <Switch
                     id={requireChangeId}

@@ -29,9 +29,13 @@ import (
 var accessSettings = func() map[string]widerFunc {
 	m := map[string]widerFunc{
 		// Who may sign in, and how.
-		settingLocalPasswordLogin:             on,
-		"auth.email_auto_match":               on,
-		config.AuthUserAPIKeysSettingKey:      on,
+		settingLocalPasswordLogin:        on,
+		"auth.email_auto_match":          on,
+		config.AuthUserAPIKeysSettingKey: on,
+		// What a new password must contain: a weaker policy grants more.
+		config.AuthPasswordMinLengthSettingKey:        shorterPasswordMinimum,
+		config.AuthPasswordRequireUppercaseSettingKey: off,
+		config.AuthPasswordRequireSpecialSettingKey:   off,
 		"signup.enabled":                      on,
 		"password_reset.self_service_enabled": on,
 		"jellyfin_compat.enabled":             on,
@@ -135,6 +139,33 @@ func on(restored, live string) bool {
 	r, rerr := strconv.ParseBool(restored)
 	l, lerr := strconv.ParseBool(live)
 	return rerr != nil || lerr != nil || r && !l
+}
+
+// off: a requirement that grants more when false.
+func off(restored, live string) bool { return on(live, restored) }
+
+// shorterPasswordMinimum: a password minimum that grants more when shorter,
+// compared as the server applies it. A value outside the setting's range
+// applies as the built-in floor (auth.LoadPasswordPolicy), so a stored "99"
+// is weaker than a live "12".
+func shorterPasswordMinimum(restored, live string) bool {
+	// A restored value the setting refuses is never written over the live one.
+	if _, err := config.NormalizeAdminSetting(config.AuthPasswordMinLengthSettingKey, restored); err != nil {
+		return true
+	}
+	return appliedPasswordMinimum(restored) < appliedPasswordMinimum(live)
+}
+
+func appliedPasswordMinimum(value string) int {
+	normalized, err := config.NormalizeAdminSetting(config.AuthPasswordMinLengthSettingKey, value)
+	if err != nil {
+		return config.PasswordMinLengthFloor
+	}
+	minimum, err := strconv.Atoi(normalized)
+	if err != nil {
+		return config.PasswordMinLengthFloor
+	}
+	return minimum
 }
 
 // longer: a duration that grants more when longer.
