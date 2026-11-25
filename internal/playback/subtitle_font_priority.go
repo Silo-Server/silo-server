@@ -57,16 +57,23 @@ func subtitleScriptFonts(ctx context.Context, inputPath string, ordinal int, cac
 	return assScriptFontNames(texts...)
 }
 
+// maxScriptFontNames bounds the families read from a script, so a crafted
+// track that names a new font in every event cannot keep bundle selection
+// busy. A bundle holds 32 fonts, and real scripts name a few dozen families.
+const maxScriptFontNames = 256
+
 // assScriptFontNames returns the font families ASS script text names, each
 // once, lowercased as libass compares them, in the order first named: the
 // Fontname of every style in [V4+ Styles] or [V4 Styles], then the \fn
-// override tags of the events. A leading @ (vertical text) is not part of
-// the family.
+// override tags of the events, up to maxScriptFontNames. A leading @
+// (vertical text) is not part of the family.
 func assScriptFontNames(texts ...[]byte) []string {
 	var names []string
+	seen := make(map[string]bool)
 	add := func(name string) {
 		name = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(name), "@")))
-		if name != "" && !slices.Contains(names, name) {
+		if name != "" && len(names) < maxScriptFontNames && !seen[name] {
+			seen[name] = true
 			names = append(names, name)
 		}
 	}
@@ -153,10 +160,14 @@ func scriptFontStreamsFirst(ctx context.Context, inputPath, ffmpegPath string, s
 	if len(candidates) > maxStagedSubtitleFonts || total > maxStagedSubtitleFontBytes {
 		return nil, 0, errStagedSubtitleFontsTooLarge
 	}
+	named := make(map[string]bool, len(families))
+	for _, family := range families {
+		named[strings.ToLower(family)] = true
+	}
 	wanted := map[int]bool{}
 	err := readFontAttachments(ctx, inputPath, ffmpegPath, candidates, videoStream, func(stream attachmentProbeStream, data []byte) {
 		wanted[stream.Index] = slices.ContainsFunc(fontNames(data), func(name string) bool {
-			return slices.ContainsFunc(families, func(family string) bool { return strings.EqualFold(family, name) })
+			return named[strings.ToLower(name)]
 		})
 	})
 	if err != nil {

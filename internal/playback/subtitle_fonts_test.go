@@ -297,3 +297,59 @@ func TestFontNamesBoundsCraftedCollection(t *testing.T) {
 		t.Fatalf("fontNames kept %d names, want the one repeated name", len(names))
 	}
 }
+
+// A crafted track can name a new font in every event. The families read from
+// it must stay bounded: a bundle holds 32 fonts, so a few hundred families is
+// ample, and comparing each attachment's names against every family of an
+// unbounded list would keep the request busy long past its deadline.
+//
+//nolint:misspell // ASS uses the literal Dialogue record type.
+func TestASSScriptFontNamesBoundsDistinctNames(t *testing.T) {
+	var script strings.Builder
+	script.WriteString("[Events]\n")
+	for i := range 20000 {
+		fmt.Fprintf(&script, "Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\\fnF%d}x\n", i)
+	}
+	names := assScriptFontNames([]byte(script.String()))
+	if len(names) == 0 || names[0] != "f0" || len(names) > 256 {
+		t.Fatalf("assScriptFontNames kept %d families, want the first few hundred", len(names))
+	}
+}
+
+// Reading every attachment's names can outlast the request on slow storage.
+// The bundle must then still serve the fonts that fit, in container order, as
+// it did before it read names, rather than fail.
+func TestExtractSubtitleFontBundleKeepsContainerOrderWhenNamesAreSlow(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helper is unix-only")
+	}
+	dir := t.TempDir()
+	total := maxSubtitleFontAttachments + 8
+	streams := make([]string, 0, total)
+	for i := range total {
+		streams = append(streams, fmt.Sprintf(`{"index":%d,"extradata_size":1,"codec_name":"ttf","codec_type":"attachment","tags":{"filename":"f%02d.ttf"}}`, i+2, i))
+	}
+	writeExecutable(t, filepath.Join(dir, "ffprobe"), "#!/bin/sh\nprintf '%s' '{\"streams\":["+strings.Join(streams, ",")+"]}'\n")
+	ffmpeg := filepath.Join(dir, "ffmpeg")
+	// Reading names dumps every attachment and stalls; the bundle's own dump
+	// of the fonts that fit answers at once.
+	writeExecutable(t, ffmpeg, fmt.Sprintf(`#!/bin/sh
+n=0
+for arg do
+ case "$arg" in -dump_attachment:*) n=$((n+1)) ;; esac
+done
+if [ "$n" -gt %d ]; then exec sleep 60; fi
+for arg do
+ case "$arg" in -dump_attachment:*) printf f ;; esac
+done
+`, maxSubtitleFontAttachments))
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	fonts, err := extractSubtitleFontBundle(ctx, "input.mkv", ffmpeg, func(context.Context) []string { return []string{"go mono"} })
+	if err != nil {
+		t.Fatalf("extractSubtitleFontBundle returned error: %v", err)
+	}
+	if len(fonts) != maxSubtitleFontAttachments || fonts[0].Name != "f00.ttf" || fonts[len(fonts)-1].Name != "f31.ttf" {
+		t.Fatalf("bundle holds %d fonts, want the first %d in container order", len(fonts), maxSubtitleFontAttachments)
+	}
+}

@@ -164,7 +164,15 @@ func chooseBundleFonts(ctx context.Context, inputPath, ffmpegPath string, stream
 	}
 	var wanted, wantedKept int
 	if families := scriptFonts(ctx); len(families) > 0 {
-		ordered, n, err := scriptFontStreamsFirst(ctx, inputPath, ffmpegPath, streams, videoStream, families)
+		// Reading the attachments' names gets half of what is left of the
+		// deadline, so storage too slow for it still leaves time to serve the
+		// bundle in container order.
+		namesCtx, cancel := ctx, context.CancelFunc(func() {})
+		if deadline, ok := ctx.Deadline(); ok {
+			namesCtx, cancel = context.WithDeadline(ctx, time.Now().Add(time.Until(deadline)/2))
+		}
+		ordered, n, err := scriptFontStreamsFirst(namesCtx, inputPath, ffmpegPath, streams, videoStream, families)
+		cancel()
 		switch {
 		case ctx.Err() != nil:
 			return nil, ctx.Err()
