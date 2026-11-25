@@ -19,6 +19,8 @@ import {
 import type { CollectionDraft } from "@/lib/collections/scope";
 import { useT } from "@/i18n";
 
+import { ToggleRow } from "../fields/ToggleRow";
+
 function ShowOnlyField({
   value,
   onChange,
@@ -75,11 +77,15 @@ function ShowOnlyField({
   );
 }
 
-/** Name and description; and Show only on a personal Manual collection or Synced list. */
+/**
+ * Name and description; Show only on a personal Manual collection or Synced
+ * list; and Hide watched titles on a server collection.
+ */
 export function DetailsPanel({
   draft,
   onChange,
   showOnly,
+  hideWatched = false,
   nameNote,
   nameError,
 }: {
@@ -87,6 +93,8 @@ export function DetailsPanel({
   onChange: (update: (draft: CollectionDraft) => CollectionDraft) => void;
   /** Personal Manual collections and Synced lists filter what they show while browsing. */
   showOnly: boolean;
+  /** Server collections can hide, from each profile, the titles it has watched. */
+  hideWatched?: boolean;
   /** A line under Name, as in "Kept your name". */
   nameNote?: string;
   /** Why the last save refused this name, as in "Another collection in Movies already has this name". */
@@ -154,6 +162,20 @@ export function DetailsPanel({
         <ShowOnlyField
           value={draft.showOnly}
           onChange={(next) => onChange((current) => ({ ...current, showOnly: next }))}
+        />
+      ) : null}
+      {hideWatched && draft.server ? (
+        <ToggleRow
+          label={t("web.collections.details.hideWatched")}
+          help={t("web.collections.details.hideWatchedHelp")}
+          checked={draft.server.hideWatched ?? false}
+          onCheckedChange={(on) =>
+            onChange((current) =>
+              current.server
+                ? { ...current, server: { ...current.server, hideWatched: on } }
+                : current,
+            )
+          }
         />
       ) : null}
     </section>

@@ -63,6 +63,17 @@ func (r *LibraryCollectionRepository) ListItemsPage(ctx context.Context, collect
 	return page, nil
 }
 
+// CollectionRowState is what a Home row needs before it reads a collection:
+// the revision that keys its shared cache entry, and whether the collection
+// hides watched titles, which makes the row per profile instead of shared.
+func (r *LibraryCollectionRepository) CollectionRowState(ctx context.Context, collectionID string) (revision int64, hideWatched bool, err error) {
+	err = r.pool.QueryRow(ctx, `SELECT v.revision, p.hide_watched FROM library_collections p JOIN library_collection_revisions v ON v.collection_id = p.id WHERE p.id = $1`, collectionID).Scan(&revision, &hideWatched)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, ErrLibraryCollectionNotFound
+	}
+	return revision, hideWatched, err
+}
+
 // CollectionRevision is a durable fence for access and definition reads made
 // outside the membership transaction (including cross-store viewer checks).
 func (r *LibraryCollectionRepository) CollectionRevision(ctx context.Context, collectionID string) (int64, error) {

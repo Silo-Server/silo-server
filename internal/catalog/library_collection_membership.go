@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -96,16 +97,26 @@ func ResolveLibraryCollectionMembership(c *models.LibraryCollection, access Acce
 // the way the collection's browse page does: a sort other than the query's own
 // reorders the members without choosing different ones, so a capped query
 // keeps the titles its own sort ranks first. The members never depend on the
-// viewer's profile, because library collections are shared.
-func PreviewLiveLibraryCollection(ctx context.Context, pool *pgxpool.Pool, m LibraryCollectionMembership, access AccessFilter, limit int) ([]*models.MediaItem, int, error) {
-	return previewLiveLibraryCollection(ctx, pool, m, access, limit, true)
+// viewer's profile, because library collections are shared; display
+// (LibraryCollectionDisplayFor) then hides some of them from the viewer in
+// access.
+func PreviewLiveLibraryCollection(ctx context.Context, pool *pgxpool.Pool, m LibraryCollectionMembership, access AccessFilter, display string, limit int) ([]*models.MediaItem, int, error) {
+	return previewLiveLibraryCollection(ctx, pool, m, access, display, limit, true)
 }
 
 // previewLiveLibraryCollection is PreviewLiveLibraryCollection, counting the
 // members only when includeTotal is set.
-func previewLiveLibraryCollection(ctx context.Context, pool *pgxpool.Pool, m LibraryCollectionMembership, access AccessFilter, limit int, includeTotal bool) ([]*models.MediaItem, int, error) {
+func previewLiveLibraryCollection(ctx context.Context, pool *pgxpool.Pool, m LibraryCollectionMembership, access AccessFilter, display string, limit int, includeTotal bool) ([]*models.MediaItem, int, error) {
 	if !m.Live || m.OutOfScope {
 		return []*models.MediaItem{}, 0, nil
+	}
+	if display != "" {
+		executor, outer, err := displayedMembersExecutor(QueryExecutor{Pool: pool}, m.Query, display, m.Sort, stripCatalogUserScope(access))
+		if err != nil {
+			return nil, 0, err
+		}
+		items, total, _, err := executor.PreviewPage(ctx, outer, access, limit, 0, includeTotal)
+		return items, total, err
 	}
 	access = stripCatalogUserScope(access)
 	executor := &QueryExecutor{Pool: pool, Scope: m.Query.MediaScope}
@@ -120,4 +131,59 @@ func previewLiveLibraryCollection(ctx context.Context, pool *pgxpool.Pool, m Lib
 	}
 	items, total, _, err := executor.PreviewPage(ctx, def, access, limit, 0, includeTotal)
 	return items, total, err
+}
+
+// PreviewLibraryCollectionCursorPage pages a smart server collection's
+// members, def, for the viewer in access, less those display
+// (LibraryCollectionDisplayFor) hides from that viewer.
+func PreviewLibraryCollectionCursorPage(ctx context.Context, executor *QueryExecutor, def QueryDefinition, display string, access AccessFilter, limit int, after *QueryCursor) (QueryCursorPage, error) {
+	if display == "" {
+		return executor.PreviewCursorPage(ctx, def, access, limit, after, false)
+	}
+	scoped, outer, err := displayedMembersExecutor(*executor, def, display, def.Sort, stripCatalogUserScope(access))
+	if err != nil {
+		return QueryCursorPage{}, err
+	}
+	return scoped.PreviewCursorPage(ctx, outer, access, limit, after, false)
+}
+
+// displayedMembersExecutor reads def's members as base's source, with the
+// viewer's user scope stripped since members are shared, and returns the
+// display filter as the query to run over them in sort order with the
+// viewer's access. Its ORDER/LIMIT stay inside the source, so a capped
+// collection picks its members before the filter hides any.
+//
+// memberAccess reads the members: a server collection's are shared, so its
+// callers strip the viewer's user scope from it.
+func displayedMembersExecutor(base QueryExecutor, def QueryDefinition, display string, sort QuerySort, memberAccess AccessFilter) (*QueryExecutor, QueryDefinition, error) {
+	outer, err := displayFilterDefinition(display)
+	if err != nil {
+		return nil, outer, err
+	}
+	base.Scope = def.MediaScope
+	if base.BaseRelationSQL != "" {
+		base.BaseRelationSQL = catalogBaseRelationForScope(def.MediaScope)
+	}
+	predicate, args, err := collectionDefinitionPredicate(&base, def, memberAccess)
+	if err != nil {
+		return nil, outer, err
+	}
+	base.SourceWhere, base.SourceArgs = predicate, args
+	outer.MediaScope = def.MediaScope
+	if sort != (QuerySort{}) {
+		outer.Sort = sort
+	}
+	return &base, outer, nil
+}
+
+// displayFilterDefinition parses a display filter into the query that runs
+// over a collection's members; an empty filter admits them all.
+func displayFilterDefinition(display string) (QueryDefinition, error) {
+	outer := QueryDefinition{}.Normalize()
+	canonical, err := NormalizeDisplayQueryFragment([]byte(display))
+	if err != nil || canonical == "" {
+		return outer, err
+	}
+	err = json.Unmarshal([]byte(canonical), &outer)
+	return outer, err
 }

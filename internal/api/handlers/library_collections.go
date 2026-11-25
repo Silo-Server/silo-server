@@ -204,17 +204,19 @@ func (h *LibraryCollectionHandler) collageComposer() collectionCollageComposer {
 }
 
 type libraryCollectionResponse struct {
-	ID                string          `json:"id"`
-	LibraryID         int             `json:"library_id"`
-	LibraryIDs        []int           `json:"library_ids"`
-	Slug              string          `json:"slug"`
-	Title             string          `json:"title"`
-	Description       string          `json:"description"`
-	CollectionType    string          `json:"collection_type"`
-	Visibility        string          `json:"visibility"`
-	SortOrder         int             `json:"sort_order"`
-	GroupID           *string         `json:"group_id"`
-	Featured          bool            `json:"featured"`
+	ID             string  `json:"id"`
+	LibraryID      int     `json:"library_id"`
+	LibraryIDs     []int   `json:"library_ids"`
+	Slug           string  `json:"slug"`
+	Title          string  `json:"title"`
+	Description    string  `json:"description"`
+	CollectionType string  `json:"collection_type"`
+	Visibility     string  `json:"visibility"`
+	SortOrder      int     `json:"sort_order"`
+	GroupID        *string `json:"group_id"`
+	Featured       bool    `json:"featured"`
+	// HideWatched is answered through /api/v2 only.
+	HideWatched       bool            `json:"-"`
 	PosterURL         string          `json:"poster_url"`
 	BackdropURL       string          `json:"backdrop_url"`
 	PosterThumbhash   string          `json:"poster_thumbhash,omitempty"`
@@ -300,6 +302,9 @@ type createLibraryCollectionRequest struct {
 	ManagementSource  string          `json:"management_source"`
 	ManagementKey     string          `json:"management_key"`
 	SyncSchedule      string          `json:"sync_schedule"`
+	// HideWatched is set through /api/v2 only; the frozen v1 body never
+	// carries it.
+	HideWatched bool `json:"-"`
 }
 
 type updateLibraryCollectionRequest struct {
@@ -324,6 +329,9 @@ type updateLibraryCollectionRequest struct {
 	ManagementSource  *string                `json:"management_source"`
 	ManagementKey     *string                `json:"management_key"`
 	SyncSchedule      *string                `json:"sync_schedule"`
+	// HideWatched is set through /api/v2 only; the frozen v1 body never
+	// carries it.
+	HideWatched *bool `json:"-"`
 }
 
 type importMDBListRequest struct {
@@ -2301,6 +2309,7 @@ func (h *LibraryCollectionHandler) libraryCollectionResponseOf(ctx context.Conte
 		SortOrder:         collection.SortOrder,
 		GroupID:           collection.GroupID,
 		Featured:          collection.Featured,
+		HideWatched:       collection.HideWatched,
 		PosterURL:         h.presignGPURLCtx(ctx, collection.PosterURL),
 		BackdropURL:       h.presignBackdropURLCtx(ctx, collection.BackdropURL),
 		PosterThumbhash:   collection.PosterThumbhash,

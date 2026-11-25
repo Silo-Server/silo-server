@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -137,6 +138,11 @@ func (h *CollectionHandler) PersonalCollectionItemsPage(ctx context.Context, use
 	}
 	return out, nil
 }
+
+// maxHiddenMemberBatches bounds the stored-member pages one page of a
+// collection that hides watched titles reads.
+const maxHiddenMemberBatches = 10
+
 func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Context, libraryID int, id string, access catalog.AccessFilter, opts userstore.CollectionItemsPageOptions, afterQuery *catalog.QueryCursor) (LibraryCollectionPageView, error) {
 	out := LibraryCollectionPageView{Items: []CollectionItemView{}}
 	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
@@ -150,6 +156,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 	if err != nil || !collectionSpansLibrary(c, libraryID) || c.Visibility != catalog.LibraryCollectionVisibilityVisible {
 		return out, apiError(http.StatusNotFound, "not_found", "Collection not found")
 	}
+	display := catalog.LibraryCollectionDisplayFor(c, access)
 	if catalog.IsLiveQueryType(c.CollectionType) {
 		if opts.Revision != 0 && opts.Revision != witness {
 			return out, collectionPageError(userstore.ErrCollectionChanged)
@@ -165,7 +172,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 		if h.Executor == nil {
 			return out, apiError(503, "unavailable", "Catalog queries are unavailable")
 		}
-		page, err := h.Executor.PreviewCursorPage(ctx, def, access, opts.Limit, afterQuery, false)
+		page, err := catalog.PreviewLibraryCollectionCursorPage(ctx, h.Executor, def, display, access, opts.Limit, afterQuery)
 		if err != nil {
 			return out, collectionPageError(err)
 		}
@@ -189,36 +196,61 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 		return out, collectionPageError(userstore.ErrCollectionChanged)
 	}
 	opts.Revision = witness
-	page, err := h.repo.ListItemsPage(ctx, id, opts)
-	if err != nil {
-		return out, collectionPageError(err)
+	// A collection that hides watched titles reads on past members the viewer
+	// has watched, a bounded number of pages, so a page is not left empty
+	// while unwatched members follow; the continuation is the last member read.
+	batches := 1
+	if display != "" {
+		batches = maxHiddenMemberBatches
 	}
-	ids := make([]string, 0, len(page.Items))
-	for _, i := range page.Items {
-		ids = append(ids, i.MediaItemID)
-	}
-	items, err := h.itemRepo.GetListedByIDsWithAccess(ctx, ids, access)
-	if err != nil {
-		return out, collectionPageError(err)
-	}
-	byID := make(map[string]CollectionItemView, len(items))
-	for _, i := range items {
-		byID[i.ContentID] = h.itemListResponseOf(ctx, i)
-	}
-	for _, id := range ids {
-		if v, ok := byID[id]; ok {
-			out.Items = append(out.Items, v)
+	var listed []*models.MediaItem
+	var revision int64
+	for batch := 0; batch < batches; batch++ {
+		page, err := h.repo.ListItemsPage(ctx, id, opts)
+		if err != nil {
+			return out, collectionPageError(err)
 		}
+		revision = page.Revision
+		ids := make([]string, 0, len(page.Items))
+		for _, i := range page.Items {
+			ids = append(ids, i.MediaItemID)
+		}
+		items, err := h.itemRepo.GetListedByIDsWithAccess(ctx, ids, access)
+		if err != nil {
+			return out, collectionPageError(err)
+		}
+		if display != "" && h.Executor != nil {
+			items, err = catalog.FilterCollectionItemsByDisplayQuery(ctx, h.Executor.Pool, items, display, access)
+			if err != nil {
+				return out, collectionPageError(err)
+			}
+		}
+		byID := make(map[string]*models.MediaItem, len(items))
+		for _, i := range items {
+			byID[i.ContentID] = i
+		}
+		full := false
+		for _, member := range page.Items {
+			if len(out.Items) == opts.Limit {
+				full = true
+				break
+			}
+			out.Last = &userstore.CollectionItemPosition{Position: member.Position, MediaItemID: member.MediaItemID}
+			if item, ok := byID[member.MediaItemID]; ok {
+				out.Items = append(out.Items, h.itemListResponseOf(ctx, item))
+				listed = append(listed, item)
+			}
+		}
+		out.HasMore = full || page.HasMore
+		if full || !page.HasMore || len(out.Items) == opts.Limit {
+			break
+		}
+		opts.After = out.Last
 	}
-	h.setListingLogos(ctx, out.Items, items, access)
-	if _, err = h.repo.ListItemsPage(ctx, id, userstore.CollectionItemsPageOptions{Limit: 1, Revision: page.Revision}); err != nil {
+	h.setListingLogos(ctx, out.Items, listed, access)
+	if _, err = h.repo.ListItemsPage(ctx, id, userstore.CollectionItemsPageOptions{Limit: 1, Revision: revision}); err != nil {
 		return out, collectionPageError(err)
 	}
-	out.Revision = page.Revision
-	out.HasMore = page.HasMore
-	if len(page.Items) > 0 {
-		last := page.Items[len(page.Items)-1]
-		out.Last = &userstore.CollectionItemPosition{Position: last.Position, MediaItemID: last.MediaItemID}
-	}
+	out.Revision = revision
 	return out, nil
 }

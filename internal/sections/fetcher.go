@@ -422,6 +422,8 @@ func (f *Fetcher) fetchOne(ctx context.Context, resolved ResolvedSection, librar
 
 	var items []*models.MediaItem
 	var total int
+	var key string
+	shared := false
 	if f.isCacheableSectionType(resolved) {
 		// User-agnostic rows share one process-global entry per access scope.
 		// getOrRefresh returns a defensive slice copy, so reordering or
@@ -429,11 +431,12 @@ func (f *Fetcher) fetchOne(ctx context.Context, resolved ResolvedSection, librar
 		// cached entry; the pointed-to *MediaItem must not be mutated in place
 		// (see cloneMediaItems). The per-user overlay still runs fresh in
 		// buildSectionsResponse.
-		var key string
-		key, err = f.resolvedListKey(ctx, resolved, libraryID, libraryIDs, filter)
+		key, shared, err = f.resolvedListKey(ctx, resolved, libraryID, libraryIDs, filter)
 		if err != nil {
 			return SectionWithItems{}, err
 		}
+	}
+	if shared {
 		items, total, err = getOrRefresh(ctx, key, f.now(), func(loadCtx context.Context) ([]*models.MediaItem, int, error) {
 			return f.fetchSection(loadCtx, resolved, libraryID, libraryIDs, userID, profileID, filter)
 		})
@@ -1443,8 +1446,13 @@ func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, librar
 			"collection_id", collection.ID, "error", err)
 		return []*models.MediaItem{}, 0, nil
 	}
+	// A collection that hides watched titles reads the viewer's watch state,
+	// so resolvedListKey keeps its row out of the shared cache.
+	viewerAccess := queryAccess
+	viewerAccess.UserID, viewerAccess.ProfileID = userID, profileID
+	display := catalog.LibraryCollectionDisplayFor(collection, viewerAccess)
 	if membership.Live {
-		return catalog.PreviewLiveLibraryCollection(ctx, f.pool, membership, queryAccess, s.ItemLimit)
+		return catalog.PreviewLiveLibraryCollection(ctx, f.pool, membership, viewerAccess, display, s.ItemLimit)
 	}
 
 	collectionItems, err := f.CollectionRepo.ListItems(ctx, cfg.LibraryCollectionID)
@@ -1460,7 +1468,11 @@ func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, librar
 		contentIDs = append(contentIDs, item.MediaItemID)
 	}
 	if membership.Sort.Field != "" {
-		items, total, err := catalog.QueryCollectionItemsBySort(ctx, f.pool, contentIDs, membership.Sort, queryAccess, s.ItemLimit, "")
+		sortAccess := queryAccess
+		if display != "" {
+			sortAccess = viewerAccess
+		}
+		items, total, err := catalog.QueryCollectionItemsBySort(ctx, f.pool, contentIDs, membership.Sort, sortAccess, s.ItemLimit, display)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -1470,6 +1482,13 @@ func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, librar
 	// Filter before limiting, as the sorted and live branches do: limiting
 	// first let the access filter empty the row when the first members sit
 	// in libraries the viewer can't open.
+	if display != "" {
+		// Only the members the viewer has not watched are read in full.
+		contentIDs, err = unwatchedContentIDs(ctx, f.pool, contentIDs, display, viewerAccess)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
 	items, err := f.fetchItemsInListOrder(ctx, contentIDs, s.ItemLimit, libraryID, libraryIDs, filter)
 	if err != nil {
 		return nil, 0, err
@@ -1477,6 +1496,24 @@ func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, librar
 	// The total of an unsorted rail is the number of cards it shows, not the
 	// collection's membership.
 	return items, len(items), nil
+}
+
+// unwatchedContentIDs keeps, in order, the content IDs display admits for the
+// viewer in access.
+func unwatchedContentIDs(ctx context.Context, pool *pgxpool.Pool, contentIDs []string, display string, access catalog.AccessFilter) ([]string, error) {
+	members := make([]*models.MediaItem, len(contentIDs))
+	for i, id := range contentIDs {
+		members[i] = &models.MediaItem{ContentID: id}
+	}
+	kept, err := catalog.FilterCollectionItemsByDisplayQuery(ctx, pool, members, display, access)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(kept))
+	for i, item := range kept {
+		ids[i] = item.ContentID
+	}
+	return ids, nil
 }
 
 // fetchUserCollection resolves a personal (profile-scoped) user collection.

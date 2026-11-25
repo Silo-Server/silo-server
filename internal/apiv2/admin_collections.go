@@ -133,6 +133,7 @@ type AdminCollectionCapabilityOutputBody struct {
 	MDBListSearch     bool                       `json:"mdblist_search" doc:"searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key" example:"true"`
 	ScheduleTimeZone  CollectionScheduleTimeZone `json:"schedule_time_zone"`
 	SectionReferences bool                       `json:"section_references" doc:"listAdminCollectionSections lists the rows that show a collection, and listAdminCollections items carry home_row_count and row_count" example:"true"`
+	HideWatched       bool                       `json:"hide_watched" doc:"Collections take hide_watched on create and update, and answer it" example:"true"`
 }
 
 func adminCollectionOperation(method, path, id, summary string, guarded bool) Operation {
@@ -188,6 +189,7 @@ func registerAdminCollections(reg *Registry) {
 		out.Body.Artwork = v.Artwork
 		out.Body.ItemReorder = v.ItemReorder
 		out.Body.TemplateSummaries = true
+		out.Body.HideWatched = true
 		return out, nil
 	})
 	registerAdminCollectionGroups(reg)

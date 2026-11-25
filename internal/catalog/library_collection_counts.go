@@ -47,11 +47,104 @@ type ViewerCollectionCount struct {
 // because their cached count may predate their current members. A collection
 // whose count could not be read is absent from the result, and the error says
 // why.
+//
+// A collection that hides watched titles counts, for a viewer with a profile,
+// only the members that profile has not watched, so its card matches its
+// page; the other collections then keep their stored counts when access
+// narrows nothing.
 func (r *LibraryCollectionRepository) ViewerCollectionCounts(ctx context.Context, collections []*models.LibraryCollection, access AccessFilter) (map[string]ViewerCollectionCount, error) {
-	if !access.NarrowsCatalog() || len(collections) == 0 {
+	narrows := access.NarrowsCatalog()
+	var hiding, rest []*models.LibraryCollection
+	for _, c := range collections {
+		switch {
+		case c == nil:
+		case LibraryCollectionDisplayFor(c, access) != "":
+			hiding = append(hiding, c)
+		default:
+			rest = append(rest, c)
+		}
+	}
+	if !narrows && len(hiding) == 0 {
 		return nil, nil
 	}
-	access = stripCatalogUserScope(access)
+	shared := stripCatalogUserScope(access)
+	counts := make(map[string]ViewerCollectionCount, len(collections))
+	var restErr, emptyErr error
+	if narrows {
+		counts, restErr = r.accessCollectionCounts(ctx, rest, shared)
+	} else {
+		for _, c := range rest {
+			counts[c.ID] = ViewerCollectionCount{Count: c.ItemCount}
+		}
+	}
+	unwatched, unwatchedErr := r.countUnwatchedMembers(ctx, hiding, access)
+	// One that shows the viewer nothing is told apart, as any collection is,
+	// from one whose members the viewer's access hides.
+	var empty []*models.LibraryCollection
+	for _, c := range hiding {
+		n, ok := unwatched[c.ID]
+		if !ok {
+			continue
+		}
+		counts[c.ID] = ViewerCollectionCount{Count: n}
+		if n == 0 && narrows {
+			empty = append(empty, c)
+		}
+	}
+	if len(empty) > 0 {
+		var visible map[string]ViewerCollectionCount
+		visible, emptyErr = r.accessCollectionCounts(ctx, empty, shared)
+		for _, c := range empty {
+			if v, ok := visible[c.ID]; ok {
+				counts[c.ID] = ViewerCollectionCount{HidesMembers: v.HidesMembers}
+			} else {
+				delete(counts, c.ID)
+			}
+		}
+	}
+	return counts, errors.Join(restErr, unwatchedErr, emptyErr)
+}
+
+// countUnwatchedMembers counts, for each collection, the members the viewer
+// in access opens and has not watched, as the collection's page lists them.
+// One whose count could not be read is absent from the result.
+func (r *LibraryCollectionRepository) countUnwatchedMembers(ctx context.Context, collections []*models.LibraryCollection, access AccessFilter) (map[string]int, error) {
+	counts := make(map[string]int, len(collections))
+	var queries []collectionCountStatement
+	var failures []error
+	shared := stripCatalogUserScope(access)
+	for _, c := range collections {
+		display := LibraryCollectionDisplayFor(c, access)
+		var sql string
+		var args []any
+		var err error
+		if collectionUsesLiveQuery(c) {
+			var membership LibraryCollectionMembership
+			membership, err = ResolveLibraryCollectionMembership(c, shared)
+			if err == nil && membership.OutOfScope {
+				counts[c.ID] = 0
+				continue
+			}
+			if err == nil {
+				sql, args, err = displayedMemberCountQuery("", nil, &membership.Query, display, shared, access)
+			}
+		} else {
+			sql, args, err = displayedMemberCountQuery(libraryMembershipSourceWhere, []any{c.ID}, nil, display, shared, access)
+		}
+		if err != nil {
+			failures = append(failures, fmt.Errorf("collection %s: %w", c.ID, err))
+			continue
+		}
+		queries = append(queries, collectionCountStatement{id: c.ID, sql: sql, args: args})
+	}
+	batchCounts, batchFailures := runCollectionCountStatements(ctx, r.pool, queries)
+	maps.Copy(counts, batchCounts)
+	return counts, errors.Join(append(failures, batchFailures...)...)
+}
+
+// accessCollectionCounts is ViewerCollectionCounts for a viewer whose access
+// narrows the catalog, before any collection hides watched titles.
+func (r *LibraryCollectionRepository) accessCollectionCounts(ctx context.Context, collections []*models.LibraryCollection, access AccessFilter) (map[string]ViewerCollectionCount, error) {
 	counts := make(map[string]ViewerCollectionCount, len(collections))
 	var stored []*models.LibraryCollection
 	var smart []*models.LibraryCollection

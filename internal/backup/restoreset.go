@@ -435,6 +435,9 @@ type CollectionEntry struct {
 	SortConfig          json.RawMessage `json:"sort_config"`
 	SourceConfig        json.RawMessage `json:"source_config"`
 	SyncSchedule        *string         `json:"sync_schedule"`
+	// HideWatched is absent from backups made before the setting existed,
+	// which restores it off, as those collections were.
+	HideWatched bool `json:"hide_watched,omitempty"`
 	// Items are content ids in collection order.
 	Items []string `json:"items"`
 }

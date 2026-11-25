@@ -20,6 +20,7 @@ export function storedAdminCollection(
     sort_order: 0,
     group_id: null,
     featured: false,
+    hide_watched: false,
     poster_url: "",
     poster_is_collage: false,
     backdrop_url: "",

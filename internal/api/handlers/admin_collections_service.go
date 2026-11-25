@@ -149,6 +149,7 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 		ManagementSource: req.ManagementSource,
 		ManagementKey:    req.ManagementKey,
 		SyncSchedule:     syncSchedule,
+		HideWatched:      req.HideWatched,
 		UniqueTitle:      true,
 	}
 	if err := normalizeAdminCollectionInput(&input); err != nil {
@@ -276,6 +277,7 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		ManagementSource: req.ManagementSource,
 		ManagementKey:    req.ManagementKey,
 		SyncSchedule:     req.SyncSchedule,
+		HideWatched:      req.HideWatched,
 		UniqueTitle:      true,
 	}); err != nil {
 		if fieldErr := collectionNameError(err); fieldErr != nil {

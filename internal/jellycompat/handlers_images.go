@@ -638,7 +638,7 @@ func (h *ImagesHandler) collectionVisibleToSession(ctx context.Context, session 
 		access = h.accessFilter(ctx, session.StreamAppUserID, session.ProfileID)
 	}
 	collections := []*models.LibraryCollection{collection}
-	counts, err := h.collections.ViewerCollectionCounts(ctx, collections, withCompatAccessExclusions(access))
+	counts, err := h.collections.ViewerCollectionCounts(ctx, collections, compatCollectionCountAccess(withCompatAccessExclusions(access)))
 	if err != nil {
 		slog.WarnContext(ctx, "counting compat collection for the viewer failed", "component", "jellycompat", "error", err)
 	}

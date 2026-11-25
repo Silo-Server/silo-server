@@ -309,7 +309,7 @@ func (s *LibraryCollectionService) smartCollection(c *models.LibraryCollection, 
 			if err != nil {
 				return nil, err
 			}
-			items, _, err := previewLiveLibraryCollection(ctx, s.collections.pool, m, access, smartCollageScanLimit, false)
+			items, _, err := previewLiveLibraryCollection(ctx, s.collections.pool, m, access, "", smartCollageScanLimit, false)
 			if err != nil {
 				return nil, fmt.Errorf("reading smart collection matches: %w", err)
 			}

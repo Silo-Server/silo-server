@@ -47,6 +47,8 @@ type CreateLibraryCollectionInput struct {
 	ManagementSource    string
 	ManagementKey       string
 	SyncSchedule        *string
+	// HideWatched hides from each viewer the members its profile has watched.
+	HideWatched bool
 	// UniqueTitle refuses, with *LibraryCollectionTitleTakenError, a title
 	// another collection already has in one of this one's libraries. The
 	// admin editor sets it; imports, templates and restores do not.
@@ -65,6 +67,7 @@ type UpdateLibraryCollectionInput struct {
 	SortOrder           *int
 	SetGroupID          **string
 	Featured            *bool
+	HideWatched         *bool
 	PosterURL           *string
 	BackdropURL         *string
 	PosterThumbhash     *string
@@ -130,7 +133,7 @@ const libraryCollectionColumns = `lc.id, lc.library_id, lc.slug, lc.title, lc.de
 	CASE WHEN lc.collection_type = 'smart' THEN lc.item_count_cached
 	     ELSE COALESCE(COUNT(DISTINCT lci.media_item_id) FILTER (WHERE EXISTS (
 	         SELECT 1 FROM media_item_libraries in_library WHERE in_library.content_id = lci.media_item_id)), 0) END,
-	lc.created_at, lc.updated_at,
+	lc.created_at, lc.updated_at, lc.hide_watched,
 	COALESCE(ARRAY_AGG(DISTINCT lcl.library_id) FILTER (WHERE lcl.library_id IS NOT NULL), ARRAY[]::integer[])`
 
 const libraryCollectionScopeFallbackJoin = `LEFT JOIN LATERAL (
@@ -176,6 +179,7 @@ func scanLibraryCollection(row pgx.Row) (*models.LibraryCollection, error) {
 		&collection.ItemCount,
 		&collection.CreatedAt,
 		&collection.UpdatedAt,
+		&collection.HideWatched,
 		&libraryIDs,
 	)
 	if err != nil {
@@ -255,14 +259,14 @@ func CreateLibraryCollectionInTx(ctx context.Context, tx pgx.Tx, input CreateLib
 			poster_thumbhash, backdrop_thumbhash, poster_auto_generated, poster_from_template,
 			source_url, query_definition, sort_config, source_config,
 			management_mode, management_source, management_key,
-			sync_schedule, next_sync_at
+			sync_schedule, next_sync_at, hide_watched
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
 			$8, '', $9, $10, $11,
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22,
-			$23, $24
+			$23, $24, $25
 		)`
 
 	id := input.ID
@@ -401,6 +405,7 @@ func insertLibraryCollectionRow(ctx context.Context, tx pgx.Tx, query, id string
 		input.ManagementKey,
 		input.SyncSchedule,
 		computeNextSyncAt(input.SyncSchedule),
+		input.HideWatched,
 	); err != nil {
 		return err
 	}
@@ -627,6 +632,11 @@ func libraryCollectionColumnSets(input UpdateLibraryCollectionInput) (sets []str
 	if input.Featured != nil {
 		sets = append(sets, fmt.Sprintf("featured = $%d", argIdx))
 		args = append(args, *input.Featured)
+		argIdx++
+	}
+	if input.HideWatched != nil {
+		sets = append(sets, fmt.Sprintf("hide_watched = $%d", argIdx))
+		args = append(args, *input.HideWatched)
 		argIdx++
 	}
 	if input.PosterURL != nil {

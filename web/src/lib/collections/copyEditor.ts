@@ -185,6 +185,7 @@ const DRAFT_FIELD_LABEL: Readonly<Record<DraftField, MessageKey>> = {
   rawSortConfig: "web.collections.copy.fieldOrder",
   showOnly: "web.collections.copy.fieldShowOnly",
   visibility: "web.collections.copy.showOnTabLabel",
+  hideWatched: "web.collections.details.hideWatched",
   shared: "web.collections.copy.showToOtherProfilesLabel",
   inLibraryTabs: "web.collections.copy.showOnTabLabel",
   list: "web.collections.copy.fieldList",

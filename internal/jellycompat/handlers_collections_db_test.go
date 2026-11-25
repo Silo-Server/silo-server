@@ -11,6 +11,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // visibleLibrariesContent is the direct content service with a fixed library
@@ -156,5 +157,62 @@ func TestBoxSetChildrenPageVisibleMembersDB(t *testing.T) {
 	h.content.(*visibleLibrariesContent).accessFilter = nil
 	if names, total := page("&StartIndex=0&Limit=10"); len(names) != 7 || total != 7 || slices.Contains(names, "Title A") {
 		t.Errorf("unrestricted viewer: got %v (total %d), want the 7 members in a library", names, total)
+	}
+}
+
+// TestBoxSetCountIgnoresHideWatchedDB: a server collection that hides watched
+// titles from its native readers still counts, as a BoxSet, every member its
+// children list, whichever profile reads it.
+func TestBoxSetCountIgnoresHideWatchedDB(t *testing.T) {
+	pool, suffix := jellyfin12CompatPool(t)
+	ctx := context.Background()
+	prefix := fmt.Sprintf("jf-boxset-hide-watched-%d", suffix)
+	var library, userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, TRUE) RETURNING id`, prefix).Scan(&library); err != nil {
+		t.Fatalf("seed folder: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, prefix).Scan(&userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanup := context.Background()
+		_, _ = pool.Exec(cleanup, `DELETE FROM library_collections WHERE slug = $1`, prefix)
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id LIKE $1`, prefix+"%")
+		_, _ = pool.Exec(cleanup, `DELETE FROM users WHERE id = $1`, userID)
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = $1`, library)
+	})
+	profile := prefix + "-profile"
+	jellyfin12Exec(t, pool, `INSERT INTO user_profiles (id, user_id, name) VALUES ($1, $2, 'viewer')`, profile, userID)
+	collections := catalog.NewLibraryCollectionRepository(pool)
+	created, err := collections.Create(ctx, catalog.CreateLibraryCollectionInput{
+		LibraryID: library, Slug: prefix, Title: prefix, CollectionType: "manual", Visibility: "visible", HideWatched: true,
+	})
+	if err != nil {
+		t.Fatalf("create collection: %v", err)
+	}
+	for i := range 2 {
+		id := fmt.Sprintf("%s-%d", prefix, i)
+		jellyfin12Exec(t, pool, `INSERT INTO media_items (content_id, type, title) VALUES ($1, 'movie', $1)`, id)
+		jellyfin12Exec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, id, library)
+		if err := collections.AddItem(ctx, created.ID, id, i); err != nil {
+			t.Fatalf("add member: %v", err)
+		}
+	}
+	jellyfin12Exec(t, pool, `INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at) VALUES ($1, $2, $3, 5400, 5400, TRUE, NOW())`,
+		userID, profile, prefix+"-0")
+	collection, err := collections.GetByID(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := &ItemsHandler{
+		collections: collections,
+		accessFilter: func(_ context.Context, userID int, profileID string) catalog.AccessFilter {
+			return catalog.AccessFilter{UserID: userID, ProfileID: profileID, AllowedLibraryIDs: []int{library}}
+		},
+	}
+	shown := h.collectionsForViewer(ctx, &Session{StreamAppUserID: userID, ProfileID: profile}, []*models.LibraryCollection{collection})
+	if len(shown) != 1 || shown[0].ItemCount != 2 {
+		t.Fatalf("shown = %+v, want the collection counting both members", shown)
 	}
 }

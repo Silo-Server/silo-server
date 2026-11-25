@@ -19,6 +19,7 @@ export type DraftField =
   | "rawSortConfig"
   | "showOnly"
   | "visibility"
+  | "hideWatched"
   | "shared"
   | "inLibraryTabs"
   | "list"
@@ -76,6 +77,10 @@ const FIELDS: Record<DraftField, FieldAccess> = {
     get: (d) => d.server?.visibility,
     set: (d, v) =>
       d.server ? { ...d, server: { ...d.server, visibility: v as "visible" | "hidden" } } : d,
+  },
+  hideWatched: {
+    get: (d) => d.server?.hideWatched ?? false,
+    set: (d, v) => (d.server ? { ...d, server: { ...d.server, hideWatched: v as boolean } } : d),
   },
   shared: {
     get: (d) => d.personal?.shared,

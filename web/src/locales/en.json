@@ -101316,6 +101316,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Hide watched titles"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Each profile sees this collection without the titles it has watched, on its page, in its rows and in its count. Nothing is removed. A smart collection with a title limit picks its titles first, so it can show fewer."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,

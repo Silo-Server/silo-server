@@ -814,6 +814,13 @@ func (r *CatalogResolver) resolveLibraryCollectionItems(
 	if err != nil {
 		return nil, err
 	}
+	if r.libraryCollectionDisplay(ctx, collection, access) != "" {
+		items, err := r.libraryCollectionViewerItems(ctx, req, access, collection, membership, collectionRepo)
+		if err != nil {
+			return nil, err
+		}
+		return r.resolveExactOrderedMediaItems(ctx, items, req, access)
+	}
 	if membership.Live {
 		return r.resolveLiveLibraryCollectionSource(ctx, req, access, membership)
 	}
@@ -827,6 +834,35 @@ func (r *CatalogResolver) resolveLibraryCollectionItems(
 		contentIDs = append(contentIDs, item.MediaItemID)
 	}
 	return r.resolveExactOrderedItems(ctx, contentIDs, req, access)
+}
+
+// libraryCollectionViewerItems lists every member of a server collection the
+// viewer in access opens, less those its display filter hides from that
+// viewer, in the collection's own order.
+func (r *CatalogResolver) libraryCollectionViewerItems(ctx context.Context, req CatalogRequest, access AccessFilter, collection *models.LibraryCollection, membership LibraryCollectionMembership, collectionRepo *LibraryCollectionRepository) ([]*models.MediaItem, error) {
+	if membership.OutOfScope {
+		return []*models.MediaItem{}, nil
+	}
+	var items []*models.MediaItem
+	var err error
+	if membership.Live {
+		items, err = r.resolveCollectionQueryBaseItems(ctx, membership.Query, stripCatalogUserScope(access))
+	} else {
+		var collectionItems []*models.LibraryCollectionItem
+		collectionItems, err = collectionRepo.ListItems(ctx, collection.ID)
+		if err != nil {
+			return nil, err
+		}
+		contentIDs := make([]string, 0, len(collectionItems))
+		for _, item := range collectionItems {
+			contentIDs = append(contentIDs, item.MediaItemID)
+		}
+		items, err = r.fetchAccessibleItemsByID(ctx, contentIDs, catalogBaseCollectionRequest(req), access)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return FilterCollectionItemsByDisplayQuery(ctx, r.itemRepo.pool, items, r.libraryCollectionDisplay(ctx, collection, access), access)
 }
 
 func (r *CatalogResolver) resolveLiveLibraryCollectionSource(ctx context.Context, req CatalogRequest, access AccessFilter, membership LibraryCollectionMembership) (*CatalogResult, error) {
@@ -2377,24 +2413,11 @@ func (r *CatalogResolver) loadCollectionSource(ctx context.Context, req CatalogR
 		if err != nil {
 			return "", nil, err
 		}
-		if membership.OutOfScope {
-			return collection.Title, []*models.MediaItem{}, nil
-		}
-		if membership.Live {
-			items, err := r.resolveCollectionQueryBaseItems(ctx, membership.Query, stripCatalogUserScope(access))
-			return collection.Title, items, err
-		}
-
-		collectionItems, err := collectionRepo.ListItems(ctx, collection.ID)
+		items, err := r.libraryCollectionViewerItems(ctx, req, access, collection, membership, collectionRepo)
 		if err != nil {
 			return "", nil, err
 		}
-		contentIDs := make([]string, 0, len(collectionItems))
-		for _, item := range collectionItems {
-			contentIDs = append(contentIDs, item.MediaItemID)
-		}
-		items, err := r.fetchAccessibleItemsByID(ctx, contentIDs, catalogBaseCollectionRequest(req), access)
-		return collection.Title, items, err
+		return collection.Title, items, nil
 	case CatalogSourceUserCollection:
 		store, err := r.catalogStoreForAccess(ctx, access)
 		if err != nil {

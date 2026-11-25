@@ -42,8 +42,11 @@ type LibraryCollection struct {
 	SyncSchedule       *string
 	NextSyncAt         *time.Time
 	ItemCount          int
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	// HideWatched hides from each viewer the members its profile has
+	// watched. Membership stays shared; the filter applies per viewer.
+	HideWatched bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type LibraryCollectionGroupKind string

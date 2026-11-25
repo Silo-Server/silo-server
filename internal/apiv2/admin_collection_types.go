@@ -28,6 +28,7 @@ type AdminCollection struct {
 	SortOrder         int             `json:"sort_order"`
 	GroupID           *ID             `json:"group_id" nullable:"true"`
 	Featured          bool            `json:"featured"`
+	HideWatched       bool            `json:"hide_watched" doc:"Each viewer sees the collection without the titles its profile has watched: on the collection's page, in its Home and library rows, and in its counts. Members and posters stay the same for everyone; a capped smart collection picks its members first, so it can show fewer titles than its limit. A series counts as watched once every episode is. Jellyfin clients see every member." example:"false"`
 	PosterURL         string          `json:"poster_url" format:"uri-reference"`
 	BackdropURL       string          `json:"backdrop_url" format:"uri-reference"`
 	PosterThumbhash   string          `json:"poster_thumbhash,omitempty"`
@@ -63,6 +64,7 @@ type AdminCollectionCreate struct {
 	SortOrder        int             `json:"sort_order,omitempty"`
 	GroupID          *ID             `json:"group_id,omitempty" nullable:"true"`
 	Featured         bool            `json:"featured,omitempty"`
+	HideWatched      bool            `json:"hide_watched,omitempty" doc:"Hide from each viewer the titles its profile has watched; see AdminCollection.hide_watched"`
 	PosterURL        string          `json:"poster_url,omitempty" format:"uri-reference"`
 	BackdropURL      string          `json:"backdrop_url,omitempty" format:"uri-reference"`
 	SourceURL        string          `json:"source_url,omitempty" format:"uri-reference"`
@@ -85,6 +87,7 @@ type AdminCollectionUpdate struct {
 	SortOrder        *int            `json:"sort_order,omitempty" nullable:"false"`
 	GroupID          *ID             `json:"group_id,omitempty" nullable:"true"`
 	Featured         *bool           `json:"featured,omitempty" nullable:"false"`
+	HideWatched      *bool           `json:"hide_watched,omitempty" nullable:"false" doc:"Hide from each viewer the titles its profile has watched; see AdminCollection.hide_watched"`
 	PosterURL        *string         `json:"poster_url,omitempty" format:"uri-reference" nullable:"false"`
 	BackdropURL      *string         `json:"backdrop_url,omitempty" format:"uri-reference" nullable:"false"`
 	SourceURL        *string         `json:"source_url,omitempty" format:"uri-reference" nullable:"false"`
@@ -248,6 +251,7 @@ func (v AdminCollectionCreate) command() (handlers.AdminCollectionCreate, *Probl
 	c.LibraryIDs, c.Slug, c.Title, c.Description = ids, v.Slug, v.Title, v.Description
 	c.CollectionType, c.Visibility, c.SortOrder = v.CollectionType, v.Visibility, v.SortOrder
 	c.Featured, c.PosterURL, c.BackdropURL, c.SourceURL = v.Featured, v.PosterURL, v.BackdropURL, v.SourceURL
+	c.HideWatched = v.HideWatched
 	c.QueryDefinition, c.SortConfig, c.SourceConfig = v.QueryDefinition, v.SortConfig, v.SourceConfig
 	c.ManagementMode, c.ManagementSource, c.ManagementKey, c.SyncSchedule = v.ManagementMode, v.ManagementSource, v.ManagementKey, v.SyncSchedule
 	if v.GroupID != nil {
@@ -269,7 +273,7 @@ func (v AdminCollectionUpdate) command(raw []byte) (handlers.AdminCollectionUpda
 		c.LibraryIDs = &ids
 	}
 	c.Slug, c.Title, c.Description, c.CollectionType = v.Slug, v.Title, v.Description, v.CollectionType
-	c.Visibility, c.SortOrder, c.Featured = v.Visibility, v.SortOrder, v.Featured
+	c.Visibility, c.SortOrder, c.Featured, c.HideWatched = v.Visibility, v.SortOrder, v.Featured, v.HideWatched
 	c.PosterURL, c.BackdropURL, c.SourceURL = v.PosterURL, v.BackdropURL, v.SourceURL
 	c.QueryDefinition, c.SortConfig, c.SourceConfig = v.QueryDefinition, v.SortConfig, v.SourceConfig
 	c.ManagementMode, c.ManagementSource, c.ManagementKey, c.SyncSchedule = v.ManagementMode, v.ManagementSource, v.ManagementKey, v.SyncSchedule
@@ -445,6 +449,7 @@ func adminCollectionOf(v handlers.AdminCollection) AdminCollection {
 		Visibility:        v.Visibility,
 		SortOrder:         v.SortOrder,
 		Featured:          v.Featured,
+		HideWatched:       v.HideWatched,
 		PosterURL:         v.PosterURL,
 		BackdropURL:       v.BackdropURL,
 		PosterThumbhash:   v.PosterThumbhash,
