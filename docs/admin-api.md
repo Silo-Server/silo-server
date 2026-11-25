@@ -2397,7 +2397,9 @@ window. The implementation and its edge cases are documented in
   Coverage is per title: `libraries` (libraries with movies or series, most titles first) and
   `summary` count titles, titles played in the window, titles never started (no playback
   session at all, up to now, so a false start counts as started), and titles added in the
-  window (`media_item_libraries.first_seen_at`; across libraries the earliest). A title in
+  window (`media_item_libraries.first_seen_at`; across libraries the earliest, so `summary`
+  counts titles new to the server, while a library's own row counts titles first seen in that
+  library, including one that reached it from another library during the window). A title in
   two libraries counts once in `summary` and is played in both when either file played; the
   account and profile filters narrow "played" and "started" to that person. `genres` (up to
   20; a title counts in each of its genres), `decades` (key is the decade's first year,

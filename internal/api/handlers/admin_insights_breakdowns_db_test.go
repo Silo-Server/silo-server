@@ -86,14 +86,31 @@ func TestAdminInsightsBreakdownsDB(t *testing.T) {
 	t.Run("devices usage", func(t *testing.T) { assertBreakdownsDevicesDB(t, h, month) })
 	t.Run("library coverage", func(t *testing.T) { assertBreakdownsLibraryCoverageDB(t, h, s, month) })
 	t.Run("library breakdowns", func(t *testing.T) { assertBreakdownsLibraryPlaysDB(t, h, s, month) })
-	t.Run("library past window", func(t *testing.T) { assertBreakdownsLibraryPastWindowDB(t, h, s) })
+	t.Run("library past window", func(t *testing.T) { assertBreakdownsLibraryPastWindowDB(t, h, pool, s) })
 }
 
 // A window that ended before M2's first play: M2 is not played in it, but it
 // is not "not played yet" or "never started" either, since both are about now.
-func assertBreakdownsLibraryPastWindowDB(t *testing.T, h *AdminHandler, s breakdownsSeed) {
+// M1 gets a 10-second false start just before the window ends, resumed for an
+// hour just after: inside the window that is no play, as every Insights read
+// counts it.
+func assertBreakdownsLibraryPastWindowDB(t *testing.T, h *AdminHandler, pool *pgxpool.Pool, s breakdownsSeed) {
 	day := func(n int) string { return s.now.AddDate(0, 0, -n).Format("2006-01-02") }
 	past := AdminInsightsWindowQuery{Range: InsightsRangeCustom, FromDate: day(12), ToDate: day(10), TZ: "UTC"}
+	end := s.now.AddDate(0, 0, -9).Truncate(24 * time.Hour)
+	for _, sitting := range []struct {
+		start   time.Time
+		seconds int
+	}{{end.Add(-time.Hour), 10}, {end.Add(time.Hour), 3600}} {
+		if _, err := pool.Exec(t.Context(), `INSERT INTO admin_playback_history
+			(session_id, user_id, profile_id, media_item_id, media_file_id, play_method, started_at, ended_at,
+			 watched_seconds, played_seconds, measured, completed, client_name)
+			VALUES ($1, $2, 'p', 'M1', (SELECT id FROM media_files WHERE content_id = 'M1'), 'direct',
+			 $3, $3::timestamptz + make_interval(secs => $4), $4, $4, TRUE, FALSE, 'Silo Web')`,
+			"breakdowns-"+uuid.NewString(), s.user, sitting.start, sitting.seconds); err != nil {
+			t.Fatal(err)
+		}
+	}
 	lib, err := h.ReadAdminInsightsLibrary(t.Context(), past, false)
 	if err != nil {
 		t.Fatal(err)

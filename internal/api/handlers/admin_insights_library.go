@@ -80,16 +80,17 @@ func queryAdminInsightsLibrary(ctx context.Context, pool *pgxpool.Pool, q AdminI
 		TimeToFirstPlay: make([]AdminInsightsLabeledCount, 0), RecentlyAddedUnplayed: make([]AdminInsightsUnplayedTitle, 0),
 	}
 
-	// "Played" counts plays inside the window, but "not played yet" and
-	// "never started" are about today: a window that ended in the past looks
-	// up its titles' first plays to now.
-	playsWin := win
-	if dbNow.After(playsWin.To) {
-		playsWin.To = dbNow
-	}
-	titles, libraryPlays, err := queryInsightsLibraryTitlePlays(ctx, tx, playsWin, win.To, q)
+	titles, libraryPlays, err := queryInsightsLibraryTitlePlays(ctx, tx, win, q)
 	if err != nil {
 		return nil, err
+	}
+	// "Played" counts plays inside the window, but "not played yet" is about
+	// today: a window that ended in the past looks up, to now, the first play
+	// of the titles it added that had none in it.
+	if dbNow.After(win.To) {
+		if err := addInsightsLibraryLaterFirstPlays(ctx, tx, win, dbNow, q, titles); err != nil {
+			return nil, err
+		}
 	}
 	ids := make([]string, 0, len(titles))
 	plays := make([]int64, 0, len(titles))
@@ -118,29 +119,25 @@ func queryAdminInsightsLibrary(ctx context.Context, pool *pgxpool.Pool, q AdminI
 	return out, nil
 }
 
-// queryInsightsLibraryTitlePlays groups plays by title over win, which can
-// run past the window's end (windowEnd) to now. plays counts only plays
-// before windowEnd; firstPlayAt is the earliest in all of win, so a title
-// first played after the window has a first play but no plays. It returns
-// every title (any library) and, separately, the window plays the library
-// filter keeps.
-func queryInsightsLibraryTitlePlays(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, windowEnd time.Time, q AdminInsightsWindowQuery) (map[string]insightsTitlePlays, map[string]int64, error) {
+// queryInsightsLibraryTitlePlays groups the window's plays by title. It
+// returns every played title (any library) and, separately, the plays the
+// library filter keeps.
+func queryInsightsLibraryTitlePlays(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, q AdminInsightsWindowQuery) (map[string]insightsTitlePlays, map[string]int64, error) {
 	scopeQuery := q
 	scopeQuery.LibraryID = 0
 	var args []any
 	with, counted := newInsightsPlaysScope(win, scopeQuery).viewingRowsSQL(&args)
-	args = append(args, windowEnd)
 	rows, err := tx.Query(ctx, with+fmt.Sprintf(`,
 		counted AS (
 			SELECT vr.started_at, %[1]s AS is_play,
 				COALESCE(vr.series_id, vr.media_item_id) AS title_id, %[2]s AS library_id
 			FROM vr WHERE %[3]s
 		)
-		SELECT title_id, COALESCE(library_id, 0), COUNT(*) FILTER (WHERE started_at < $%[4]d)::bigint, MIN(started_at)
+		SELECT title_id, COALESCE(library_id, 0), COUNT(*)::bigint, MIN(started_at)
 		FROM counted
 		WHERE is_play AND title_id <> ''
 		GROUP BY title_id, library_id
-	`, insightsIsPlaySQL("vr"), insightsLibraryOfRowSQL("vr"), counted, len(args)), args...)
+	`, insightsIsPlaySQL("vr"), insightsLibraryOfRowSQL("vr"), counted), args...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("querying insights library plays: %w", err)
 	}
@@ -161,17 +158,83 @@ func queryInsightsLibraryTitlePlays(ctx context.Context, tx pgx.Tx, win resolved
 			tp.firstPlayAt = first
 		}
 		titles[id] = tp
-		if plays > 0 && (q.LibraryID <= 0 || libraryID == q.LibraryID) {
+		if q.LibraryID <= 0 || libraryID == q.LibraryID {
 			libraryPlays[id] += plays
 		}
 	}
 	return titles, libraryPlays, rows.Err()
 }
 
-// insightsLibraryCatalogArgs carries the titles played since the window began
-// into the catalog statements as parallel arrays ($1 ids, $2 plays in the
-// window, $3 first play up to now), with the window ($4 from, $5 to) and
-// scope ($6 library, $7 account, $8 profile).
+// addInsightsLibraryLaterFirstPlays finds, for a window that ended before
+// now, the first play after the window of each title it added that had no
+// play in it, and adds those titles to titles with no window plays. Only
+// those titles' sessions are grouped, so a narrow window long ago does not
+// regroup all the history since; the window's own counts stay as the
+// bounded pass read them.
+func addInsightsLibraryLaterFirstPlays(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, now time.Time, q AdminInsightsWindowQuery, titles map[string]insightsTitlePlays) error {
+	played := make([]string, 0, len(titles))
+	for id := range titles {
+		played = append(played, id)
+	}
+	// The added titles (same rule as insightsLibraryAddedCTE) still waiting
+	// at the window's end, and the items whose sessions play them: a movie
+	// itself, a series' episodes.
+	rows, err := tx.Query(ctx, `
+		WITH added AS (
+			SELECT mil.content_id
+			FROM media_item_libraries mil
+			JOIN media_items mi ON mi.content_id = mil.content_id
+			WHERE mi.type IN ('movie', 'series') AND ($3::int = 0 OR mil.media_folder_id = $3::int)
+			GROUP BY mil.content_id
+			HAVING MIN(mil.first_seen_at) >= $1 AND MIN(mil.first_seen_at) < $2
+		),
+		waiting AS (SELECT content_id FROM added WHERE content_id <> ALL($4::text[]))
+		SELECT content_id FROM waiting
+		UNION ALL
+		SELECT ep.content_id FROM episodes ep JOIN waiting w ON w.content_id = ep.series_id
+	`, win.From, win.To, max(q.LibraryID, 0), played)
+	if err != nil {
+		return fmt.Errorf("querying insights library titles still waiting: %w", err)
+	}
+	items, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("scanning insights library titles still waiting: %w", err)
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	later := win
+	later.From, later.To, later.AllTime = win.To, now, false
+	scopeQuery := q
+	scopeQuery.LibraryID = 0
+	scope := newInsightsPlaysScope(later, scopeQuery)
+	scope.itemIDs = items
+	var args []any
+	with, counted := scope.viewingRowsSQL(&args)
+	firstRows, err := tx.Query(ctx, with+fmt.Sprintf(`
+		SELECT COALESCE(vr.series_id, vr.media_item_id), MIN(vr.started_at)
+		FROM vr WHERE %[1]s AND %[2]s
+		GROUP BY 1
+	`, counted, insightsIsPlaySQL("vr")), args...)
+	if err != nil {
+		return fmt.Errorf("querying insights library later first plays: %w", err)
+	}
+	defer firstRows.Close()
+	for firstRows.Next() {
+		var id string
+		var first time.Time
+		if err := firstRows.Scan(&id, &first); err != nil {
+			return fmt.Errorf("scanning insights library later first play: %w", err)
+		}
+		titles[id] = insightsTitlePlays{firstPlayAt: first}
+	}
+	return firstRows.Err()
+}
+
+// insightsLibraryCatalogArgs carries the played titles into the catalog
+// statements as parallel arrays ($1 ids, $2 plays in the window, $3 first
+// play, which for a title added in a past window may come after it), with the
+// window ($4 from, $5 to) and scope ($6 library, $7 account, $8 profile).
 type insightsLibraryCatalogArgs struct {
 	ids        []string
 	plays      []int64
