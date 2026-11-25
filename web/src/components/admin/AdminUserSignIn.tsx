@@ -35,6 +35,8 @@ import {
   type AdminUserIdentity,
 } from "@/hooks/queries/admin/externalSignIn";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
+import { useAdminAppKeys } from "@/hooks/queries/appKeys";
+import { useAdminUserCapabilities } from "@/hooks/queries/admin/users";
 import { useAdminSettingValue } from "@/hooks/queries/admin/settings";
 import { formatDateTime } from "@/lib/datetime";
 import {
@@ -437,6 +439,12 @@ export function AdminUserSignIn({
   const identitiesServed = caps?.admin_identities === true;
   const identities = useAdminUserIdentities(user.id, identitiesServed);
   const unlink = useUnlinkAdminUserIdentity();
+  // Unlinking a provider account revokes the app keys added through it.
+  const appKeysServed = useAdminUserCapabilities().data?.app_keys === true;
+  const appKeys = useAdminAppKeys(user.id, appKeysServed && identitiesServed).keys.data;
+  const providerKeys =
+    (appKeys?.person_key?.provider_bound === true && !appKeys.person_key.identity_gone) ||
+    (appKeys?.devices ?? []).some((key) => key.provider_bound && !key.identity_gone);
   const updateSignIn = useUpdateAdminUserSignIn();
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [linkOpen, setLinkOpen] = useState(false);
@@ -673,10 +681,19 @@ export function AdminUserSignIn({
               })
             : t("web.admin.common.adminUserSignIn.unlinkConfirm.titleUnknownProvider")
         }
-        description={t("web.admin.common.adminUserSignIn.unlinkConfirm.description", {
-          username: user.username,
-          last_way: lastWay ? "yes" : "no",
-        })}
+        description={[
+          t("web.admin.common.adminUserSignIn.unlinkConfirm.description", {
+            username: user.username,
+            last_way: lastWay ? "yes" : "no",
+          }),
+          providerKeys
+            ? t("web.admin.common.adminUserSignIn.unlinkConfirm.keysRevoked", {
+                username: user.username,
+              })
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
         confirmLabel={t("web.admin.common.adminUserSignIn.unlink")}
         className={TOUCH_TARGETS}
         variant="destructive"
