@@ -17,7 +17,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
-// fakeAppKeys answers every app key call: err when set, otherwise answer.
+// fakeAppKeys answers the app key calls: the signed ones, the revocation and
+// the replacement with err when set, otherwise answer.
 type fakeAppKeys struct {
 	enabled bool
 	err     error
@@ -30,7 +31,7 @@ func (f *fakeAppKeys) AppKeySignInEnabled(context.Context) (bool, error) { retur
 
 func (f *fakeAppKeys) IssueKeyChallenge(context.Context) (string, int64, error) {
 	f.calls++
-	return "8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA", 1795578600, f.err
+	return "8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA", 1795578600, nil
 }
 
 func (f *fakeAppKeys) signed() (*handlers.AppKeyAnswer, error) {
@@ -55,7 +56,7 @@ func (f *fakeAppKeys) EnrollAppKeys(context.Context, auth.KeyEnrollRequest) (*ha
 
 func (f *fakeAppKeys) ListOwnAppKeys(context.Context, *auth.Claims) (auth.OwnAppKeys, error) {
 	f.calls++
-	return f.keys, f.err
+	return f.keys, nil
 }
 
 func (f *fakeAppKeys) RevokeOwnDeviceKey(context.Context, *auth.Claims, string) error {

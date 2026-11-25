@@ -343,7 +343,7 @@ func (a *AppKeySignIn) Enroll(ctx context.Context, req KeyEnrollRequest) (*KeySi
 		if err != nil {
 			return err
 		}
-		if chain.binding() != enrolling.binding() {
+		if !chain.binding().same(enrolling.binding()) {
 			// The session moved under another identity since the check.
 			return ErrSessionRevoked
 		}
@@ -376,6 +376,14 @@ func (a *AppKeySignIn) Enroll(ctx context.Context, req KeyEnrollRequest) (*KeySi
 // identity row is gone keeps provider_since).
 func (c sessionProviderChain) binding() KeyBinding {
 	return KeyBinding{IdentityID: c.identityID, ProviderBound: c.identityID != nil || c.providerSince != nil}
+}
+
+// same reports whether two bindings name the same identity.
+func (b KeyBinding) same(other KeyBinding) bool {
+	if b.ProviderBound != other.ProviderBound || (b.IdentityID == nil) != (other.IdentityID == nil) {
+		return false
+	}
+	return b.IdentityID == nil || *b.IdentityID == *other.IdentityID
 }
 
 // livePersonKeyTx locks the account's live person key, or answers nil. tx

@@ -328,6 +328,14 @@
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestDeviceKeyRevocationEndsItsSessionsDB
 ./internal/auth TestAccountKeyRulesDB
+./internal/auth TestKeySignInRefusalsDB
+./internal/auth TestKeySignInAdminWaitsForApprovalDB
+./internal/auth TestSessionAllowsDB
+./internal/auth TestKeyEnrollRulesDB
+./internal/auth TestRevokeOwnDeviceKeyRulesDB
+./internal/auth TestKeySignInLocalPasswordsOffDB
+./internal/auth TestKeySessionContinuesProviderChainDB
+./internal/auth TestPromotionRevokesAppKeysDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
 ./internal/auth TestSignupPolicySerializationDB
 ./internal/apiv2 TestSignupCommitPolicyErrorsDB

@@ -1,0 +1,7 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/signature_invalid",
+  "title": "Signature invalid",
+  "status": 401,
+  "detail": "The signed message did not verify.",
+  "instance": "urn:silo:request:000000000000000000000341"
+}

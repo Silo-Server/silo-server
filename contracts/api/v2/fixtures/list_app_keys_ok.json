@@ -1,0 +1,32 @@
+{
+  "person_key": {
+    "kid": "PgujdSfBbNNyXngLWCsOgw",
+    "enrolled_at": "2026-01-02T03:04:05.678Z"
+  },
+  "devices": [
+    {
+      "id": "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11",
+      "kid": "zT321tSgcB7emUH9k0B0oA",
+      "kind": "device",
+      "name": "Sam's iPhone",
+      "platform": "ios",
+      "status": "active",
+      "enrolled_by": "introduce",
+      "allowed_by": null,
+      "enrolled_at": "2026-01-02T03:04:05.678Z",
+      "last_used_at": "2026-01-02T04:04:05.678Z"
+    },
+    {
+      "id": "5b1d7f0e-6a57-4d0c-8a59-0f3f3a0f4a10",
+      "kid": "iX--ofJySUkUOsEpPo17PQ",
+      "kind": "device",
+      "name": "Sam's iPad",
+      "platform": "ipados",
+      "status": "pending",
+      "enrolled_by": "app-code",
+      "allowed_by": null,
+      "enrolled_at": "2026-01-02T03:04:05.678Z",
+      "last_used_at": null
+    }
+  ]
+}

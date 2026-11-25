@@ -6825,6 +6825,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/auth/keys": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the signed-in account's app keys.
+     * @description Only the account's own login session: an API key and an administrator acting as the account are 403 permission_denied. Answers while auth.app_key_sign_in is off, so keys can still be reviewed and revoked.
+     */
+    get: operations["listAppKeys"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/auth/keys/capability": {
     parameters: {
       query?: never;
@@ -6839,6 +6859,126 @@ export interface paths {
     get: operations["getAppKeyCapability"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/keys/challenge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Issue a challenge for one signed app key request.
+     * @description Send an empty JSON object. The challenge is good for two minutes and one signed request, on any API process. Spends the per-address key_challenge rate-limit budget. 409 capability_disabled while auth.app_key_sign_in is off.
+     */
+    post: operations["createAppKeyChallenge"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/keys/devices/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Revoke one of the signed-in account's device keys and end the sessions it opened.
+     * @description Only the account's own login session: an API key and an administrator acting as the account are 403 permission_denied. A device may revoke its own key, which ends the session making the request. A session opened by another app's key may revoke only that key, and one opened by device sign-in none (403 permission_denied). Revoking a revoked key changes nothing. Answers while auth.app_key_sign_in is off.
+     */
+    delete: operations["revokeAppDeviceKey"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/keys/enroll": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Enroll a person key and a device key on the signed-in account and open a session bound to the device key.
+     * @description Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. The person key is registered when the account has none; a different one already on the account is 409 conflict, and so is a public key already enrolled on this server. Both keys take the provider identity of the session that enrolls them. The sealed plaintext adds person_key_id; the client drops the session it called with. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens}, where tokens is the login token pair; for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited.
+     */
+    post: operations["enrollAppKeys"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/keys/introduce": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Enroll this device's key with the account's person key and open a login session.
+     * @description The body is an introduce envelope signed with the account's person key, with device_sig from the device key in the payload. The device key is enrolled and opens the session. For an administrator's account it is stored waiting for approval, and the device repeats signInWithAppKey until it is approved. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens}, where tokens is the login token pair; for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited.
+     */
+    post: operations["introduceAppKey"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/keys/person": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Replace the signed-in account's person key.
+     * @description Only the account's own login session: an API key and an administrator acting as the account are 403 permission_denied. A session opened by device sign-in or by another app's key is refused too. The old person key is revoked: new devices need the new one, and devices already enrolled keep their own keys. Sending the current key again changes nothing; a public key enrolled anywhere else on this server is 409 conflict. 409 capability_disabled while auth.app_key_sign_in is off.
+     */
+    put: operations["replacePersonKey"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/keys/sign-in": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Open a login session with an enrolled device key.
+     * @description The body is a sign-in envelope signed with the device key, with no device_sig. A key waiting for an administrator's approval answers approval_required, sealed, at most once every five seconds (sooner is 429 rate_limited with Retry-After) and for 24 hours; after that, or once denied, it is 403 key_denied. Spends the per-address key_sign_in rate-limit budget. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens}, where tokens is the login token pair; for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited.
+     */
+    post: operations["signInWithAppKey"];
     delete?: never;
     options?: never;
     head?: never;
@@ -24764,6 +24904,62 @@ export interface components {
       description: string;
       name: string;
     };
+    AppDeviceKey: {
+      /**
+       * @description For a key a grant enrolled, the name of the account whose person key signed the grant; null otherwise
+       * @example sam
+       */
+      allowed_by: string | null;
+      /**
+       * Format: date-time
+       * @description When the key was enrolled
+       */
+      enrolled_at: string;
+      /**
+       * @description How the key was enrolled: introduced by the person key, from a signed-in session, with an app code, or through a grant
+       * @example introduce
+       * @enum {string}
+       */
+      enrolled_by: "introduce" | "session" | "app-code" | "grant";
+      /**
+       * Format: uuid
+       * @description The server's ID for the device key
+       * @example 0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11
+       */
+      id: string;
+      /**
+       * @description The device key's ID
+       * @example zT321tSgcB7emUH9k0B0oA
+       */
+      kid: string;
+      /**
+       * @description device: an install of the person's own app; app: another app the person allowed
+       * @example device
+       * @enum {string}
+       */
+      kind: "device" | "app";
+      /**
+       * Format: date-time
+       * @description When the key last signed in, or last asked while waiting for approval; null before that
+       */
+      last_used_at: string | null;
+      /**
+       * @description The name the device gave itself
+       * @example Sam's iPhone
+       */
+      name: string;
+      /**
+       * @description The platform the device named; empty when it named none
+       * @example ios
+       */
+      platform: string;
+      /**
+       * @description active, or pending while an administrator's device waits for approval
+       * @example active
+       * @enum {string}
+       */
+      status: "active" | "pending";
+    };
     AppKeyCapability: {
       /** @description Whether the current principal may use the capability */
       allowed?: boolean;
@@ -24774,7 +24970,7 @@ export interface components {
       app_codes: boolean;
       /**
        * @description Whether a signed-in account can enroll a person key and a device key
-       * @example false
+       * @example true
        */
       enroll: boolean;
       /**
@@ -24784,7 +24980,7 @@ export interface components {
       grants: boolean;
       /**
        * @description Whether a person key can introduce a new device key and open its first session
-       * @example false
+       * @example true
        */
       introduce: boolean;
       /**
@@ -24792,6 +24988,12 @@ export interface components {
        * @example false
        */
       profile_set: boolean;
+      /**
+       * @description The app key protocol this server speaks
+       * @example silo-sync-v1
+       * @enum {string}
+       */
+      protocol: "silo-sync-v1";
       /** @description Opaque revision of this document */
       revision: string;
       /**
@@ -24802,8 +25004,13 @@ export interface components {
        */
       sealed_reply_suites: string[];
       /**
+       * @description This server's identity, which every signed payload names (getServerIdentity)
+       * @example 3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35
+       */
+      server_id: string;
+      /**
        * @description Whether an enrolled device key can open a login session
-       * @example false
+       * @example true
        */
       sign_in: boolean;
       /**
@@ -24823,6 +25030,59 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
+    AppKeyChallenge: {
+      /**
+       * @description base64url of 32 random bytes. Good for one signed request within expires_in seconds
+       * @example 8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA
+       */
+      challenge: string;
+      /**
+       * Format: int64
+       * @description Seconds the challenge stays good
+       * @example 120
+       */
+      expires_in: number;
+      /**
+       * @description This server's identity, which the signed payload names
+       * @example 3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35
+       */
+      server_id: string;
+      /**
+       * Format: int64
+       * @description The server's clock in seconds since the Unix epoch. A device stamps the payload's iat and exp from it
+       * @example 1795578600
+       */
+      server_time: number;
+    };
+    AppKeyChallengeInputBody: Record<string, never>;
+    AppKeyEnvelope: {
+      /**
+       * @description The device key's own signature over the same bytes. Required on introduce and enroll, refused on sign-in
+       * @example fMNUAuxbYE4rOU1dn5PqgBmxSoSu8GmnvtS_M3syK8N-uOt2jcfwhFX5z3BbCfmGy8V3ToHIzxZ8ySiNfdXqOw
+       */
+      device_sig?: string;
+      /**
+       * @description Key ID of the key that made sig: base64url of the first 16 bytes of SHA-256 over its 65-byte public key
+       * @example PgujdSfBbNNyXngLWCsOgw
+       */
+      kid: string;
+      /**
+       * @description base64url (no padding) of the UTF-8 JSON payload; the signatures cover silo-sync-v1.<purpose>.<payload> exactly as sent
+       * @example eyJwdXJwb3NlIjoic2lnbi1pbiJ9
+       */
+      payload: string;
+      /**
+       * @description base64url of the 64-byte r || s ECDSA P-256 signature over SHA-256 of the signing input
+       * @example nnyAt7pV-XsUSmpX0IAk1d0QmUrO4z9CZ5Oeoy9QlVSyCq2EED4Ns_Aakhd5DgOmSqWWrT5xs8an1Ye0a4smgg
+       */
+      sig: string;
+    };
+    AppKeyList: {
+      /** @description Device and app keys, newest first; revoked and denied keys are left out */
+      devices: components["schemas"]["AppDeviceKey"][];
+      /** @description The account's person key; absent when it has none */
+      person_key?: components["schemas"]["AppPersonKey"];
     };
     ApplePushRegistrationBody: {
       /** @enum {string} */
@@ -24902,6 +25162,18 @@ export interface components {
       id: string;
       reason?: string;
       registry_revision: string;
+    };
+    AppPersonKey: {
+      /**
+       * Format: date-time
+       * @description When the key was enrolled
+       */
+      enrolled_at: string;
+      /**
+       * @description The person key's ID
+       * @example PgujdSfBbNNyXngLWCsOgw
+       */
+      kid: string;
     };
     AudiobookDetailExtension: {
       authors: components["schemas"]["AudiobookPerson"][];
@@ -28868,6 +29140,15 @@ export interface components {
       message: string;
       /** @example ok */
       status: string;
+    };
+    EnrollAppKeysInputBody: {
+      /** @description An enroll envelope signed with the private half of person_key */
+      message: components["schemas"]["AppKeyEnvelope"];
+      /**
+       * @description The person key being enrolled: base64url of its 65-byte uncompressed P-256 point
+       * @example BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q
+       */
+      person_key: string;
     };
     Episode: {
       /**
@@ -32990,6 +33271,13 @@ export interface components {
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
     };
+    PersonKeyReplaced: {
+      /**
+       * @description The new person key's ID (kid)
+       * @example PgujdSfBbNNyXngLWCsOgw
+       */
+      person_key_id: string;
+    };
     PersonRefresh: {
       /**
        * @description Opaque identifier
@@ -35266,6 +35554,13 @@ export interface components {
       path: string;
       pci_address?: string;
     };
+    ReplacePersonKeyInputBody: {
+      /**
+       * @description The new person key: base64url of its 65-byte uncompressed P-256 point
+       * @example BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q
+       */
+      person_key: string;
+    };
     RequestCancelInputBody: {
       reason?: string;
     };
@@ -35742,6 +36037,23 @@ export interface components {
       mode: "library" | "subtree" | "file";
       /** @enum {string} */
       status: "accepted";
+    };
+    SealedReply: {
+      /**
+       * @description base64url of the sealed answer with its 16-byte tag appended
+       * @example HmXEoRjnf6js2Ld9mI4A7szSS2-nsCuQzNNZO1CwSospE23QUKm4
+       */
+      ciphertext: string;
+      /**
+       * @description The server's one-time P-256 public key, base64url of the 65-byte point
+       * @example BFAoQ6TpfXoAHwrvxBK7VXdPfM6Gwt7mqjIgxbn3PwlULI5vaNn1PcXf-cAKZEbeofM3XQ-a3E2RHfUs7rR74Kk
+       */
+      epk: string;
+      /**
+       * @description base64url of the 12-byte AES-256-GCM nonce
+       * @example uTfZ9MxcZfYkDOcc
+       */
+      nonce: string;
     };
     Season: {
       /**
@@ -100393,6 +100705,98 @@ export interface operations {
       };
     };
   };
+  listAppKeys: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AppKeyList"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getAppKeyCapability: {
     parameters: {
       query?: never;
@@ -100458,6 +100862,771 @@ export interface operations {
       };
       /** @description Unprocessable Entity */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  createAppKeyChallenge: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AppKeyChallengeInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AppKeyChallenge"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  revokeAppDeviceKey: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The device key's id from listAppKeys */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  enrollAppKeys: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["EnrollAppKeysInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SealedReply"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  introduceAppKey: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AppKeyEnvelope"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SealedReply"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  replacePersonKey: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReplacePersonKeyInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PersonKeyReplaced"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  signInWithAppKey: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AppKeyEnvelope"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SealedReply"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
         headers: {
           [name: string]: unknown;
         };

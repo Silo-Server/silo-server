@@ -5008,6 +5008,24 @@
       "body_file": "create_admin_user_identity_ok.json"
     },
     {
+      "name": "create_app_key_challenge_ok",
+      "operation_id": "createAppKeyChallenge",
+      "scenario": "An app asks for a challenge to sign, and the server clock to stamp the payload's iat and exp from.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/keys/challenge",
+        "body": "{}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AppKeyChallenge",
+      "body_file": "create_app_key_challenge_ok.json"
+    },
+    {
       "name": "create_collection_ok",
       "operation_id": "createCollection",
       "scenario": "A non-retryable manual collection creation.",
@@ -6863,7 +6881,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"73534696ae8b82a5859ea222533a0e8be69be28a958358d6397b22c1d3cb884a\""
+        "ETag": "\"a3c0cf4e29533ac8acbe0a5f868133ba008d416b273800bea3aac02d4fa6ffc6\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AppKeyCapability",
@@ -10033,6 +10051,25 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "list_admin_users_permission_denied.json"
+    },
+    {
+      "name": "list_app_keys_ok",
+      "operation_id": "listAppKeys",
+      "scenario": "A person lists their own keys: the person key, a device signed in by introduce, and an administrator's device waiting for approval.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/keys",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AppKeyList",
+      "body_file": "list_app_keys_ok.json"
     },
     {
       "name": "list_audiobook_groups_invalid_group_by",
@@ -15101,6 +15138,23 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/TokenPair",
       "body_file": "setup_server_ok.json"
+    },
+    {
+      "name": "sign_in_with_app_key_signature_invalid",
+      "operation_id": "signInWithAppKey",
+      "scenario": "A key sign-in whose signature does not verify: the problem identifier apps branch on.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/keys/sign-in",
+        "body": "{\"kid\":\"zT321tSgcB7emUH9k0B0oA\",\"payload\":\"eyJ9\",\"sig\":\"c2ln\"}"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "sign_in_with_app_key_signature_invalid.json"
     },
     {
       "name": "sign_in_with_network_identity_off_overlay",

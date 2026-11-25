@@ -22,6 +22,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	catalogsvc "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/downloads"
@@ -1794,7 +1795,44 @@ func fixtureCases() []fixtureCase {
 		scenario: "App key sign-in support before login, with the server setting on.",
 		method:   http.MethodGet, path: "/api/v2/auth/keys/capability",
 		status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/AppKeyCapability"})
+	cases = append(cases, appKeyFixtureCases()...)
 	return cases
+}
+
+// appKeyFixtureCases pin the app key shapes apps decode. A sealed reply is
+// random by design, so its fixture would change on every run; its plaintext
+// is pinned by TestAppKeySealedReply instead.
+func appKeyFixtureCases() []fixtureCase {
+	return []fixtureCase{
+		{name: "create_app_key_challenge_ok", operationID: "createAppKeyChallenge",
+			scenario: "An app asks for a challenge to sign, and the server clock to stamp the payload's iat and exp from.",
+			method:   http.MethodPost, path: "/api/v2/auth/keys/challenge", body: `{}`,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AppKeyChallenge"},
+		{name: "list_app_keys_ok", operationID: "listAppKeys",
+			scenario: "A person lists their own keys: the person key, a device signed in by introduce, and an administrator's device waiting for approval.",
+			method:   http.MethodGet, path: "/api/v2/auth/keys", headers: bearer(memberToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/AppKeyList"},
+		{name: "sign_in_with_app_key_signature_invalid", operationID: "signInWithAppKey",
+			scenario: "A key sign-in whose signature does not verify: the problem identifier apps branch on.",
+			method:   http.MethodPost, path: "/api/v2/auth/keys/sign-in", body: `{"kid":"zT321tSgcB7emUH9k0B0oA","payload":"eyJ9","sig":"c2ln"}`,
+			status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/Problem"},
+	}
+}
+
+// fixtureAppKeys answers the app key fixtures.
+func fixtureAppKeys() *fakeAppKeys {
+	created := fixedTime()
+	used := created.Add(time.Hour)
+	return &fakeAppKeys{enabled: true, err: auth.ErrKeySignatureInvalid, keys: auth.OwnAppKeys{
+		Person: &models.AppPersonKey{KeyID: "PgujdSfBbNNyXngLWCsOgw", CreatedAt: created},
+		Devices: []*models.AppDeviceKey{
+			{ID: "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", KeyID: "zT321tSgcB7emUH9k0B0oA", Kind: models.DeviceKeyKindDevice, Name: "Sam's iPhone", Platform: "ios",
+				Status: models.DeviceKeyStatusActive, EnrolledVia: models.AppKeyEnrolledIntroduce, CreatedAt: created, LastUsedAt: &used},
+			{ID: "5b1d7f0e-6a57-4d0c-8a59-0f3f3a0f4a10", KeyID: "iX--ofJySUkUOsEpPo17PQ", Kind: models.DeviceKeyKindDevice, Name: "Sam's iPad", Platform: "ipados",
+				Status: models.DeviceKeyStatusPending, EnrolledVia: models.AppKeyEnrolledAppCode, CreatedAt: created},
+		},
+		AllowedBy: "sam",
+	}}
 }
 
 // deviceLoginBindingFixtureCases pin the session binding a device-login
@@ -2132,7 +2170,7 @@ func fixtureDeps() Dependencies {
 	deps.NetworkAccess = newFakeNetworkAccess()
 	deps.DirectConnections = fakeDirectConnections{}
 	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
-	deps.AppKeys = &fakeAppKeys{enabled: true}
+	deps.AppKeys = fixtureAppKeys()
 	deps.AdminPluginProvisionStatus = func(context.Context) ([]plugins.ProvisionStatus, error) {
 		return []plugins.ProvisionStatus{{PluginID: "silo.auth.oidc", Version: "0.1.2", State: "pending"}}, nil
 	}
