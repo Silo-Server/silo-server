@@ -1257,6 +1257,10 @@
 ./internal/api/handlers TestProfileSetSessionPINProofDB
 ./internal/api/handlers TestProfileSetSettingsDB
 ./internal/api/handlers TestProfileSetRepeatCountsPINGuessesDB
+./internal/api/handlers TestProfileSetEditsTokenDB
+./internal/api/handlers TestProfileEditRecorderDB
+./internal/api/handlers TestProfileSetOwnerOverridesDB
+./internal/api/handlers TestProfileSetEditsRaceSetDB
 
 # A scan request for a scope with an active run joins that run without a
 # duplicate-key ERROR, and queues a new run if that one finished meanwhile
