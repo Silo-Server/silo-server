@@ -1028,6 +1028,8 @@ type fakeDevices struct {
 	// requests maps a device, browser, or user code to its request.
 	requests map[string]*fakeDeviceRequest
 	err      error
+	// manageErr answers SessionMayManageKeys.
+	manageErr error
 }
 
 type fakeDeviceRequest struct {
@@ -1212,6 +1214,8 @@ const fakePreapprovalLimitName = "Twenty-first TV"
 // fakePreapprovalChangedName is a device name the fake refuses as approved
 // by a main profile that changed, once the route handed it that profile.
 const fakePreapprovalChangedName = "Changed profile TV"
+
+func (f fakeDevices) SessionMayManageKeys(context.Context, *auth.Claims) error { return f.manageErr }
 
 // ActsAsVerifiedMainProfile runs the real main-profile rule over the fake
 // households.
