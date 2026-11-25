@@ -205,3 +205,26 @@ func (p *statsParser) result() []FrameStats {
 	}
 	return frames
 }
+
+// progressParser reads the video frame count from ffmpeg's progress lines
+// ("frame=  120 fps=0.0 q=-0.0 Lsize=…"), which the Stats output is the only
+// video output of. The last line is the final count.
+type progressParser struct {
+	frames *int64
+}
+
+func (p *progressParser) line(line string) {
+	rest, ok := strings.CutPrefix(line, "frame=")
+	if !ok {
+		return
+	}
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return
+	}
+	frames, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil || frames < 0 {
+		return
+	}
+	p.frames = &frames
+}

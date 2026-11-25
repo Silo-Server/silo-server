@@ -2,6 +2,7 @@ package intromarkers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -193,6 +194,9 @@ func (e *ChromaprintExtractor) SampleCreditsTail(ctx context.Context, candidate 
 		return creditsTailSample{}, fmt.Errorf("sampling the credits tail of file %d: %w", candidate.FileID, err)
 	}
 	e.logTailDecoder(ctx, candidate, req, result)
+	if err := checkTailFrames(result); err != nil {
+		return creditsTailSample{}, err
+	}
 	sample := creditsTailSample{Tail: creditsTail{Frames: result.Frames, Silences: result.Silences}}
 	if fingerprint && candidate.hasAudio() {
 		key := creditsFingerprintKey()
@@ -211,4 +215,21 @@ func (e *ChromaprintExtractor) SampleCreditsTail(ctx context.Context, candidate 
 		}
 	}
 	return sample, nil
+}
+
+// errNoTailFrames fails a tail pass that exited cleanly without parsed
+// keyframe statistics although ffmpeg did not report that the window gave
+// none: the log format, not the file, is the likely cause, so the pass is
+// retried later rather than stored as sparse.
+var errNoTailFrames = errors.New("credits tail pass parsed no keyframes")
+
+// checkTailFrames returns errNoTailFrames for a tail pass that has no
+// keyframe statistics unless ffmpeg counted no video frame in its window. A
+// window without a frame (the video ends before it, or it holds no frame a
+// keyframes-only read keeps) is a sparse tail, which the caller stores.
+func checkTailFrames(result mediasample.Result) error {
+	if len(result.Frames) > 0 || (result.VideoFrames != nil && *result.VideoFrames == 0) {
+		return nil
+	}
+	return errNoTailFrames
 }

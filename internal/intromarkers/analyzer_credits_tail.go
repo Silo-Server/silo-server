@@ -197,8 +197,8 @@ func (a *Analyzer) ensureCreditsInputs(ctx context.Context, candidates []Candida
 
 			if needTail {
 				// A clean run without keyframes is a sparse tail like any
-				// other with too few: the video ends before the window, or
-				// the window has no frame a keyframes-only decode keeps.
+				// other with too few; SampleCreditsTail fails a run whose
+				// keyframes ffmpeg counted but the parsers did not read.
 				tail, err := a.settleCreditsTail(ctx, candidate, episodeTailSpec(candidate), sample.Tail, sampleErr)
 				if err != nil {
 					setErr(err)
