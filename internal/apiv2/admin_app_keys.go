@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -26,6 +27,7 @@ type AdminAppPersonKey struct {
 	EnrolledBy    string `json:"enrolled_by" enum:"session,app-code" doc:"How the key was enrolled: from a signed-in session or with an app code" example:"session"`
 	ProviderBound bool   `json:"provider_bound" doc:"Enrolled from a sign-in provider session: it vouches for a device only while that provider account is linked"`
 	IdentityGone  bool   `json:"identity_gone" doc:"Provider-bound and its provider account is no longer linked to the account: it can't introduce a device again"`
+	IdentityID    *ID    `json:"identity_id" nullable:"true" doc:"The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't provider-bound. Unlinking that provider account revokes the key" example:"4"`
 }
 
 // AdminAppDeviceKey is one of an account's device keys as an administrator
@@ -34,6 +36,7 @@ type AdminAppDeviceKey struct {
 	AppDeviceKey
 	ProviderBound bool     `json:"provider_bound" doc:"Enrolled from a sign-in provider session, or introduced by a person key that was: the provider checks the person again at each sign-in"`
 	IdentityGone  bool     `json:"identity_gone" doc:"Provider-bound and its provider account is no longer linked to the account: it can't sign in again and is revoked at its next try. The person's own list leaves such a key out"`
+	IdentityID    *ID      `json:"identity_id" nullable:"true" doc:"The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't provider-bound. Unlinking that provider account revokes the key" example:"4"`
 	WaitingUntil  *Instant `json:"waiting_until" nullable:"true" doc:"For a key with status pending, when it stops waiting for approval (24 hours after it asked); null otherwise"`
 }
 
@@ -94,7 +97,7 @@ func registerAdminAppKeys(reg *Registry) {
 		reg.revokeAdminUserDeviceKey)
 	Register(reg, adminAppKeyOperation(http.MethodDelete, "/person", "revokeAdminUserPersonKey",
 		"Revoke an account's person key.",
-		"No new device can be introduced with it, and the devices it introduced that are still waiting for approval are denied. Devices already enrolled keep their keys and sessions. The person sets up a new person key from a signed-in device (replacePersonKey). 404 not_found when the account has no person key. Audited as user.person_key_revoked."+adminKeyRule),
+		"No new device can be introduced with it, and the devices it introduced that are still waiting for approval are denied. Devices already enrolled keep their keys and sessions. The person sets up a new person key from a signed-in device (replacePersonKey). An account with no person key, as after a first call, changes nothing and records nothing (204); an unknown account is 404 not_found. Audited as user.person_key_revoked."+adminKeyRule),
 		reg.revokeAdminUserPersonKey)
 	Register(reg, adminAppKeyOperation(http.MethodPost, "/pending/{id}/deny", "denyAdminUserPendingKey",
 		"Deny one of an account's device keys waiting for approval.",
@@ -139,6 +142,7 @@ func (reg *Registry) listAdminUserAppKeys(ctx context.Context, in *AdminAppKeysI
 			EnrolledBy:    enrolledBy(person.EnrolledVia),
 			ProviderBound: person.ProviderBound,
 			IdentityGone:  person.IdentityGone,
+			IdentityID:    keyIdentityID(person.ProviderBound, person.IdentityID),
 		}
 	}
 	for _, key := range keys.Devices {
@@ -146,6 +150,7 @@ func (reg *Registry) listAdminUserAppKeys(ctx context.Context, in *AdminAppKeysI
 			AppDeviceKey:  appDeviceKeyOf(key.AppDeviceKey, keys.AllowedBy),
 			ProviderBound: key.ProviderBound,
 			IdentityGone:  key.IdentityGone,
+			IdentityID:    keyIdentityID(key.ProviderBound, key.IdentityID),
 		}
 		if device.Status == "pending" {
 			until := NewInstant(key.CreatedAt.Add(appkeys.PendingKeyLifetime))
@@ -181,9 +186,6 @@ func (reg *Registry) revokeAdminUserPersonKey(ctx context.Context, in *AdminAppK
 		return nil, p
 	}
 	if err := svc.AdminRevokeAppPersonKey(ctx, id); err != nil {
-		if errors.Is(err, auth.ErrAppKeyNotFound) {
-			return nil, NewProblem(TypeNotFound, "This account has no person key.")
-		}
 		return nil, adminAppKeyProblem(err)
 	}
 	return nil, nil
@@ -205,4 +207,14 @@ func (reg *Registry) denyAdminUserPendingKey(ctx context.Context, in *AdminPendi
 		return nil, adminAppKeyProblem(err)
 	}
 	return nil, nil
+}
+
+// keyIdentityID is the wire identity a provider-bound key is bound to, nil
+// for a key that isn't provider-bound or whose session had no identity.
+func keyIdentityID(providerBound bool, identityID *int64) *ID {
+	if !providerBound || identityID == nil {
+		return nil
+	}
+	id := ID(strconv.FormatInt(*identityID, 10))
+	return &id
 }

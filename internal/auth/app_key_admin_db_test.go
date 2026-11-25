@@ -77,14 +77,20 @@ func (e *keyEnv) serverOwner(t *testing.T) int {
 // Who may change another account's keys, one row per operation per kind of
 // caller: any administrator acts on an ordinary account and on their own,
 // only the Owner on another administrator, nobody but the Owner on the
-// Owner, and an account that is not an administrator on none. A key of
-// another account and a missing account are not found.
+// Owner, and a disabled administrator or an account that is not an
+// administrator on none. A key of another account and a missing account are
+// not found. Which account a scoped API key or "view as user" acts as is
+// handlers.TestAdminKeyActor.
 func TestAdminAppKeyAuthorityDB(t *testing.T) {
 	env := newKeyEnv(t, "adminkeyauth")
 	admin := env.localAccount(t, "adminkeyauth-admin", models.RoleAdmin)
 	otherAdmin := env.localAccount(t, "adminkeyauth-other", models.RoleAdmin)
 	user := env.localAccount(t, "adminkeyauth-user", models.RoleUser)
 	owner := env.serverOwner(t)
+	disabled := env.localAccount(t, "adminkeyauth-disabled", models.RoleAdmin)
+	if _, err := env.pool.Exec(t.Context(), `UPDATE users SET enabled = false WHERE id = $1`, disabled.ID); err != nil {
+		t.Fatal(err)
+	}
 	stranger := env.seedKeys(t, otherAdmin.ID)
 
 	ops := []struct {
@@ -116,6 +122,7 @@ func TestAdminAppKeyAuthorityDB(t *testing.T) {
 		{name: "an admin on another admin", actor: admin.ID, target: otherAdmin.ID, want: ErrAdminProtected},
 		{name: "an admin on the Owner", actor: admin.ID, target: owner, want: ErrOwnerProtected},
 		{name: "an account that is not an admin", actor: user.ID, target: user.ID, want: ErrAdminProtected},
+		{name: "a disabled admin on an ordinary account", actor: disabled.ID, target: user.ID, want: ErrAdminProtected},
 		{name: "a key of another account", actor: admin.ID, target: user.ID, keys: &stranger, want: ErrAppKeyNotFound},
 		{name: "a missing account", actor: admin.ID, target: -1, want: ErrNotFound},
 	}
@@ -129,15 +136,14 @@ func TestAdminAppKeyAuthorityDB(t *testing.T) {
 				if tc.keys != nil {
 					keys = *tc.keys
 				}
-				// Revoking a person key needs one on the account; a
-				// stranger's key case has nothing of its own to revoke.
+				want := tc.want
+				// The person key is the account's own, so naming another
+				// account's keys doesn't apply to it.
 				if op.name == "revoke person key" && tc.keys != nil {
-					if _, err := env.pool.Exec(t.Context(), `UPDATE auth_person_keys SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, tc.target); err != nil {
-						t.Fatal(err)
-					}
+					want = nil
 				}
-				if err := op.call(t.Context(), tc.actor, tc.target, keys); !errors.Is(err, tc.want) {
-					t.Fatalf("got %v, want %v", err, tc.want)
+				if err := op.call(t.Context(), tc.actor, tc.target, keys); !errors.Is(err, want) {
+					t.Fatalf("got %v, want %v", err, want)
 				}
 			})
 		}
@@ -185,8 +191,8 @@ func TestAdminRevokeDeviceKeyEndsItsSessionDB(t *testing.T) {
 
 // Revoking the person key stops it vouching for new devices and denies the
 // devices it introduced that are still waiting, which may be the work of a
-// copy of it. Devices already enrolled keep signing in. With no person key
-// left, the next call is not found.
+// copy of it. Devices already enrolled keep signing in. A repeat, with no
+// person key left, succeeds and records nothing more.
 func TestAdminRevokePersonKeyDB(t *testing.T) {
 	env := newKeyEnv(t, "adminkeyperson")
 	ctx := t.Context()
@@ -216,9 +222,10 @@ func TestAdminRevokePersonKeyDB(t *testing.T) {
 	if got := audittest.Value(row.Change(t, auditFieldDeniedDeviceKeys).After); got != "1" {
 		t.Fatalf("audited denied devices = %s (waiting key %s)", got, waiting)
 	}
-	if err := env.signIn.AdminRevokePersonKey(ctx, admin.ID, admin.ID); !errors.Is(err, ErrAppKeyNotFound) {
-		t.Fatalf("revoking with no person key = %v", err)
+	if err := env.signIn.AdminRevokePersonKey(auditCtx, admin.ID, admin.ID); err != nil {
+		t.Fatalf("revoking again: %v", err)
 	}
+	audittest.One(t, env.pool, auditmutation.ActionPersonKeyRevoked, auditmutation.TargetUser, strconv.Itoa(admin.ID))
 }
 
 // The administrator's list shows what the person's own list hides: a key

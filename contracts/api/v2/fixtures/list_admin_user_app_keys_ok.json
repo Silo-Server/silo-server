@@ -4,7 +4,8 @@
     "enrolled_at": "2026-01-02T03:04:05.678Z",
     "enrolled_by": "session",
     "provider_bound": true,
-    "identity_gone": false
+    "identity_gone": false,
+    "identity_id": "7"
   },
   "devices": [
     {
@@ -20,6 +21,7 @@
       "last_used_at": null,
       "provider_bound": true,
       "identity_gone": false,
+      "identity_id": "7",
       "waiting_until": "2026-01-03T03:04:05.678Z"
     },
     {
@@ -35,6 +37,7 @@
       "last_used_at": "2026-01-02T04:04:05.678Z",
       "provider_bound": true,
       "identity_gone": false,
+      "identity_id": "7",
       "waiting_until": null
     },
     {
@@ -50,6 +53,7 @@
       "last_used_at": "2026-01-02T04:04:05.678Z",
       "provider_bound": true,
       "identity_gone": true,
+      "identity_id": "8",
       "waiting_until": null
     }
   ]

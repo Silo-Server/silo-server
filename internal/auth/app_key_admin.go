@@ -137,11 +137,15 @@ func (a *AppKeySignIn) AdminRevokeDeviceKey(ctx context.Context, actorID, userID
 // Owner rules. Devices already enrolled keep their keys and sessions; no new
 // device can be introduced with it, and the devices it introduced that are
 // still waiting for approval are denied, as replacing the key denies them.
-// ErrAppKeyNotFound when the account has no unrevoked person key.
+// An account with no unrevoked person key changes nothing and records
+// nothing, so a repeat succeeds; a missing account is ErrNotFound.
 func (a *AppKeySignIn) AdminRevokePersonKey(ctx context.Context, actorID, userID int) error {
 	return a.adminKeyTx(ctx, actorID, userID, func(tx pgx.Tx) (*auditmutation.Entry, error) {
 		person, err := scanPersonKey(tx.QueryRow(ctx, `SELECT `+personKeyColumns+` FROM auth_person_keys
 			WHERE user_id = $1 AND revoked_at IS NULL FOR UPDATE`, userID))
+		if errors.Is(err, ErrAppKeyNotFound) {
+			return nil, nil
+		}
 		if err != nil {
 			return nil, err
 		}

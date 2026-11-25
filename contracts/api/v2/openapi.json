@@ -2246,6 +2246,17 @@
             "description": "Provider-bound and its provider account is no longer linked to the account: it can't sign in again and is revoked at its next try. The person's own list leaves such a key out",
             "type": "boolean"
           },
+          "identity_id": {
+            "description": "The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't provider-bound. Unlinking that provider account revokes the key",
+            "examples": [
+              "4"
+            ],
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "kid": {
             "description": "The device key's ID",
             "examples": [
@@ -2317,6 +2328,7 @@
         "required": [
           "provider_bound",
           "identity_gone",
+          "identity_id",
           "waiting_until",
           "id",
           "kid",
@@ -2376,6 +2388,17 @@
             "description": "Provider-bound and its provider account is no longer linked to the account: it can't introduce a device again",
             "type": "boolean"
           },
+          "identity_id": {
+            "description": "The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't provider-bound. Unlinking that provider account revokes the key",
+            "examples": [
+              "4"
+            ],
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "kid": {
             "description": "The person key's ID",
             "examples": [
@@ -2392,6 +2415,7 @@
           "enrolled_by",
           "provider_bound",
           "identity_gone",
+          "identity_id",
           "kid",
           "enrolled_at"
         ],
@@ -151588,7 +151612,7 @@
     },
     "/api/v2/admin/users/{user_id}/keys/person": {
       "delete": {
-        "description": "No new device can be introduced with it, and the devices it introduced that are still waiting for approval are denied. Devices already enrolled keep their keys and sessions. The person sets up a new person key from a signed-in device (replacePersonKey). 404 not_found when the account has no person key. Audited as user.person_key_revoked. Any administrator may act on an ordinary account and on their own; only the server Owner may act on another administrator or on the Owner (403 permission_denied). Answers while auth.app_key_sign_in is off.",
+        "description": "No new device can be introduced with it, and the devices it introduced that are still waiting for approval are denied. Devices already enrolled keep their keys and sessions. The person sets up a new person key from a signed-in device (replacePersonKey). An account with no person key, as after a first call, changes nothing and records nothing (204); an unknown account is 404 not_found. Audited as user.person_key_revoked. Any administrator may act on an ordinary account and on their own; only the server Owner may act on another administrator or on the Owner (403 permission_denied). Answers while auth.app_key_sign_in is off.",
         "operationId": "revokeAdminUserPersonKey",
         "parameters": [
           {

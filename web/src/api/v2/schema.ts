@@ -6579,7 +6579,7 @@ export interface paths {
     post?: never;
     /**
      * Revoke an account's person key.
-     * @description No new device can be introduced with it, and the devices it introduced that are still waiting for approval are denied. Devices already enrolled keep their keys and sessions. The person sets up a new person key from a signed-in device (replacePersonKey). 404 not_found when the account has no person key. Audited as user.person_key_revoked. Any administrator may act on an ordinary account and on their own; only the server Owner may act on another administrator or on the Owner (403 permission_denied). Answers while auth.app_key_sign_in is off.
+     * @description No new device can be introduced with it, and the devices it introduced that are still waiting for approval are denied. Devices already enrolled keep their keys and sessions. The person sets up a new person key from a signed-in device (replacePersonKey). An account with no person key, as after a first call, changes nothing and records nothing (204); an unknown account is 404 not_found. Audited as user.person_key_revoked. Any administrator may act on an ordinary account and on their own; only the server Owner may act on another administrator or on the Owner (403 permission_denied). Answers while auth.app_key_sign_in is off.
      */
     delete: operations["revokeAdminUserPersonKey"];
     options?: never;
@@ -15186,6 +15186,11 @@ export interface components {
       /** @description Provider-bound and its provider account is no longer linked to the account: it can't sign in again and is revoked at its next try. The person's own list leaves such a key out */
       identity_gone: boolean;
       /**
+       * @description The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't provider-bound. Unlinking that provider account revokes the key
+       * @example 4
+       */
+      identity_id: string | null;
+      /**
        * @description The device key's ID
        * @example zT321tSgcB7emUH9k0B0oA
        */
@@ -15245,6 +15250,11 @@ export interface components {
       enrolled_by: "session" | "app-code";
       /** @description Provider-bound and its provider account is no longer linked to the account: it can't introduce a device again */
       identity_gone: boolean;
+      /**
+       * @description The linked provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key isn't provider-bound. Unlinking that provider account revokes the key
+       * @example 4
+       */
+      identity_id: string | null;
       /**
        * @description The person key's ID
        * @example PgujdSfBbNNyXngLWCsOgw
