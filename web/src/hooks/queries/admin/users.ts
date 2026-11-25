@@ -180,6 +180,15 @@ function invalidateAdminDeviceCaches(
 }
 
 /**
+ * Keys the server stores as one mirrored pair. A delete of either half clears
+ * both (settingscontract.MirrorKey), so the cache has to drop both too.
+ */
+const MIRRORED_SETTING_KEYS: Partial<Record<string, string>> = {
+  [SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO]: SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE,
+  [SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE]: SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
+};
+
+/**
  * Takes reset device overrides out of the cached settings list before the
  * reset settles. A reopened subtitle appearance editor reads its row and
  * override flag from that list, so it can't wait on a refetch that may be
@@ -191,6 +200,12 @@ async function dropAdminDeviceOverrideRows(
   target: { userId: number; profileId: string; deviceId: string; keys: readonly string[] },
 ) {
   if (target.keys.length === 0) return;
+  const keys = new Set(
+    target.keys.flatMap((key) => {
+      const mirror = MIRRORED_SETTING_KEYS[key];
+      return mirror ? [key, mirror] : [key];
+    }),
+  );
   const settingsKey = adminUserSettingValuesKey(authority, target.userId);
   await queryClient.cancelQueries({ queryKey: settingsKey });
   queryClient.setQueryData<AdminSettingValueRow[]>(settingsKey, (rows) =>
@@ -201,7 +216,7 @@ async function dropAdminDeviceOverrideRows(
           // useAdminUserDeviceSettings reports a missing id as "".
           (row.profile_id ?? "") === target.profileId &&
           (row.device_id ?? "") === target.deviceId &&
-          target.keys.includes(row.key)
+          keys.has(row.key)
         ),
     ),
   );
