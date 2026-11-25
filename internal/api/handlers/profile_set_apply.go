@@ -289,8 +289,10 @@ func (r *profileSetRun) apply(ctx context.Context, w userstore.ProfileSetWriter,
 			}
 		}
 	}
-	for _, i := range plan.create {
-		if err := r.createProfile(ctx, w, audited, recording, i, len(snap.Rows) == 0); err != nil {
+	for n, i := range plan.create {
+		// Only the first profile created in an empty household is its
+		// primary; the ones after it are created like any other.
+		if err := r.createProfile(ctx, w, audited, recording, i, len(snap.Rows) == 0 && n == 0); err != nil {
 			return err
 		}
 	}

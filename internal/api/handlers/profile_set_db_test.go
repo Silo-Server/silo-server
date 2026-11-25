@@ -290,6 +290,26 @@ func TestProfileSetChildCreatedWithNoLibrariesDB(t *testing.T) {
 	if !slices.Equal(res.AwaitingLibraries, []string{kid.syncID()}) {
 		t.Fatalf("awaiting_libraries = %v", res.AwaitingLibraries)
 	}
+
+	// The first set on an account with no profiles: its first profile
+	// becomes the main one and has no library limit, and a child after it
+	// is limited like any other.
+	empty := newProfileSetDBFixture(t, 5)
+	if _, err := empty.pool.Exec(t.Context(), `DELETE FROM user_profiles WHERE user_id = $1`, empty.userID); err != nil {
+		t.Fatal(err)
+	}
+	parent, child := newSetItem("Parent"), newSetItem("Kid").with("is_child", true)
+	res = empty.mustApply(t, setDoc(t, 1, parent, child))
+	main, limited := empty.profileBySyncID(t, parent.syncID()), empty.profileBySyncID(t, child.syncID())
+	if main == nil || !main.IsPrimary || main.LibraryRestrictionsEnabled {
+		t.Fatalf("first profile of an empty household = %+v", main)
+	}
+	if limited == nil || limited.IsPrimary || !limited.LibraryRestrictionsEnabled || len(limited.AllowedLibraryIDs) != 0 {
+		t.Fatalf("child created after it = %+v", limited)
+	}
+	if !slices.Equal(res.AwaitingLibraries, []string{child.syncID()}) {
+		t.Fatalf("awaiting_libraries on an empty household = %v", res.AwaitingLibraries)
+	}
 }
 
 // TestProfileSetNamesDB: a set never leaves two profiles with one name. It
