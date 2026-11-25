@@ -253,6 +253,11 @@ func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInpu
 					if err != nil {
 						return err
 					}
+					// Whoever held the account before the match may hold its
+					// app keys too.
+					if err := revokeAccountKeysTx(ctx, tx, user.ID); err != nil {
+						return err
+					}
 					out.sessionsRevoke = true
 					out.identityID = linked.ID
 					out.audit = append(out.audit, auditEvent{"identity_linked", []any{

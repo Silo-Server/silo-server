@@ -62,6 +62,9 @@ func (p *Payload) parse(raw []byte, purpose Purpose) error {
 	if err := json.Unmarshal(raw, &p.fields); err != nil || p.fields == nil {
 		return fail(CodePayloadMalformed)
 	}
+	// Read the challenge before any other check, so a route can spend it
+	// even when a later check refuses the message.
+	p.Challenge, _ = p.bytesField("challenge", ChallengeSize)
 	var named string
 	if !decodeJSONString(p.fields["purpose"], &named) {
 		return fail(CodeFieldInvalid)

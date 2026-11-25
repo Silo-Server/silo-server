@@ -2132,7 +2132,7 @@ func fixtureDeps() Dependencies {
 	deps.NetworkAccess = newFakeNetworkAccess()
 	deps.DirectConnections = fakeDirectConnections{}
 	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
-	deps.AppKeys = fakeAppKeys{enabled: true}
+	deps.AppKeys = &fakeAppKeys{enabled: true}
 	deps.AdminPluginProvisionStatus = func(context.Context) ([]plugins.ProvisionStatus, error) {
 		return []plugins.ProvisionStatus{{PluginID: "silo.auth.oidc", Version: "0.1.2", State: "pending"}}, nil
 	}

@@ -77,9 +77,13 @@ type NewPersonKey struct {
 	UserID    int
 	PublicKey appkeys.PublicKey
 	// IdentityID is the provider identity of the enrolling session, nil for
-	// a local one. It also sets ProviderBound.
-	IdentityID  *int64
-	EnrolledVia string
+	// a local one or one whose identity is gone.
+	IdentityID *int64
+	// ProviderBound marks a key enrolled from a provider session. It is set
+	// whenever IdentityID is, and stays set for a session whose identity row
+	// was deleted.
+	ProviderBound bool
+	EnrolledVia   string
 }
 
 // NewDeviceKey is a device key to enroll.
@@ -93,7 +97,10 @@ type NewDeviceKey struct {
 	Status      string
 	EnrolledVia string
 	PersonKeyID *string
-	IdentityID  *int64
+	// IdentityID and ProviderBound are as on NewPersonKey: an introduced key
+	// takes its person key's.
+	IdentityID    *int64
+	ProviderBound bool
 }
 
 func scanPersonKey(row pgx.Row) (*models.AppPersonKey, error) {
@@ -196,7 +203,7 @@ func insertPersonKeyTx(ctx context.Context, tx pgx.Tx, k NewPersonKey) (*models.
 		(id, user_id, public_key, key_id, identity_id, provider_bound, enrolled_via)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING `+personKeyColumns,
-		uuid.NewString(), k.UserID, k.PublicKey.Bytes(), k.PublicKey.KeyID(), k.IdentityID, k.IdentityID != nil, k.EnrolledVia))
+		uuid.NewString(), k.UserID, k.PublicKey.Bytes(), k.PublicKey.KeyID(), k.IdentityID, k.ProviderBound || k.IdentityID != nil, k.EnrolledVia))
 	return row, appKeyInsertError(err)
 }
 
@@ -250,7 +257,7 @@ func insertDeviceKeyTx(ctx context.Context, tx pgx.Tx, k NewDeviceKey) (*models.
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11, $12)
 		RETURNING `+deviceKeyColumns,
 		uuid.NewString(), k.UserID, k.PublicKey.Bytes(), k.PublicKey.KeyID(), k.Kind, k.Name, k.Platform, status,
-		k.EnrolledVia, k.PersonKeyID, k.IdentityID, k.IdentityID != nil))
+		k.EnrolledVia, k.PersonKeyID, k.IdentityID, k.ProviderBound || k.IdentityID != nil))
 	return row, appKeyInsertError(err)
 }
 
@@ -374,26 +381,28 @@ func (r *AppKeyRepository) RevokeAccountKeys(ctx context.Context, userID int) er
 }
 
 // revokeAccountKeysTx is RevokeAccountKeys in tx, which holds the account
-// row lock.
-func revokeAccountKeysTx(ctx context.Context, tx pgx.Tx, userID int) error {
+// row lock. The credential sweeps of account changes (a provider refusing
+// the person, an email match taking the account over, a promotion to admin
+// or Owner) call it in their own transaction, so it needs only Exec. The
+// device keys' rows are locked by their UPDATE before the sessions they
+// opened, the documented order.
+func revokeAccountKeysTx(ctx context.Context, tx execer, userID int) error {
 	if _, err := tx.Exec(ctx, `UPDATE auth_person_keys SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, userID); err != nil {
 		return fmt.Errorf("revoking person keys: %w", err)
 	}
-	rows, err := tx.Query(ctx, `SELECT id::text FROM auth_device_keys WHERE user_id = $1 AND revoked_at IS NULL ORDER BY id FOR UPDATE`, userID)
-	if err != nil {
-		return fmt.Errorf("locking device keys: %w", err)
-	}
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return fmt.Errorf("locking device keys: %w", err)
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	if _, err := tx.Exec(ctx, `UPDATE auth_device_keys SET revoked_at = NOW() WHERE id = ANY($1::uuid[])`, ids); err != nil {
+	if _, err := tx.Exec(ctx, `WITH revoked AS (
+			UPDATE auth_device_keys SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL RETURNING id
+		)
+		UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, NOW())
+		WHERE device_key_id IN (SELECT id FROM revoked) AND revoked_at IS NULL`, userID); err != nil {
 		return fmt.Errorf("revoking device keys: %w", err)
 	}
-	return endDeviceKeySessions(ctx, tx, ids)
+	return nil
+}
+
+// execer is a pool or transaction that runs statements.
+type execer interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }
 
 // endDeviceKeySessions ends the live login sessions the device keys opened.

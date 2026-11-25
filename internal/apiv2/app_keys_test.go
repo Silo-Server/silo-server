@@ -2,30 +2,98 @@ package apiv2
 
 import (
 	"context"
+	"crypto/ecdh"
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/appkeys"
+	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
-type fakeAppKeys struct{ enabled bool }
+// fakeAppKeys answers every app key call: err when set, otherwise answer.
+type fakeAppKeys struct {
+	enabled bool
+	err     error
+	answer  *handlers.AppKeyAnswer
+	keys    auth.OwnAppKeys
+	calls   int
+}
 
-func (f fakeAppKeys) AppKeySignInEnabled(context.Context) (bool, error) { return f.enabled, nil }
+func (f *fakeAppKeys) AppKeySignInEnabled(context.Context) (bool, error) { return f.enabled, nil }
+
+func (f *fakeAppKeys) IssueKeyChallenge(context.Context) (string, int64, error) {
+	f.calls++
+	return "8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA", 1795578600, f.err
+}
+
+func (f *fakeAppKeys) signed() (*handlers.AppKeyAnswer, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.answer, nil
+}
+
+func (f *fakeAppKeys) IntroduceAppKey(context.Context, auth.KeyRequest) (*handlers.AppKeyAnswer, error) {
+	return f.signed()
+}
+
+func (f *fakeAppKeys) SignInWithAppKey(context.Context, auth.KeyRequest) (*handlers.AppKeyAnswer, error) {
+	return f.signed()
+}
+
+func (f *fakeAppKeys) EnrollAppKeys(context.Context, auth.KeyEnrollRequest) (*handlers.AppKeyAnswer, error) {
+	return f.signed()
+}
+
+func (f *fakeAppKeys) ListOwnAppKeys(context.Context, *auth.Claims) (auth.OwnAppKeys, error) {
+	f.calls++
+	return f.keys, f.err
+}
+
+func (f *fakeAppKeys) RevokeOwnDeviceKey(context.Context, *auth.Claims, string) error {
+	f.calls++
+	return f.err
+}
+
+func (f *fakeAppKeys) ReplacePersonKey(context.Context, *auth.Claims, appkeys.PublicKey) error {
+	f.calls++
+	return f.err
+}
+
+// A syntactically valid envelope; the fake service never verifies it.
+const testEnvelope = `{"kid":"zT321tSgcB7emUH9k0B0oA","payload":"eyJ9","sig":"c2ln"}`
+
+const testPersonKey = "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q"
+
+func appKeyDeps(keys *fakeAppKeys) Dependencies {
+	deps := pilotDeps(nil, nil)
+	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
+	deps.AppKeys = keys
+	return deps
+}
 
 // Apps read the state to decide whether to offer key sign-in, so it must
-// follow the server setting.
+// follow the server setting, and name the protocol and the server_id they
+// sign for.
 func TestAppKeyCapabilityFollowsSetting(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		keys  fakeAppKeys
-		state string
+		name    string
+		enabled bool
+		state   string
 	}{
-		{name: "setting on", keys: fakeAppKeys{enabled: true}, state: StateAvailable},
-		{name: "setting off", keys: fakeAppKeys{}, state: StateDisabled},
+		{name: "setting on", enabled: true, state: StateAvailable},
+		{name: "setting off", state: StateDisabled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			deps := pilotDeps(nil, nil)
-			deps.AppKeys = tc.keys
-			rec := do(t, NewHandler(deps), http.MethodGet, Prefix+"/auth/keys/capability", "", nil)
+			rec := do(t, NewHandler(appKeyDeps(&fakeAppKeys{enabled: tc.enabled})), http.MethodGet, Prefix+"/auth/keys/capability", "", nil)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 			}
@@ -33,9 +101,204 @@ func TestAppKeyCapabilityFollowsSetting(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 				t.Fatal(err)
 			}
-			if body.State != tc.state || body.SignIn || len(body.SignatureSuites) != 1 {
+			if body.State != tc.state || !body.SignIn || !body.Introduce || !body.Enroll || body.Protocol != appkeys.Protocol || body.ServerID != fixtureServerID {
 				t.Fatalf("body = %s", rec.Body.String())
 			}
 		})
+	}
+}
+
+// While auth.app_key_sign_in is off, every route that issues a challenge,
+// opens a session or changes the person key answers capability_disabled
+// before the service runs; a person's own key list and its revocation stay
+// open, so keys can still be reviewed and revoked.
+func TestAppKeyRoutesFollowTheSwitch(t *testing.T) {
+	for _, tc := range []struct {
+		method, path, body string
+		headers            map[string]string
+		open               int
+	}{
+		{method: http.MethodPost, path: "/auth/keys/challenge", body: `{}`},
+		{method: http.MethodPost, path: "/auth/keys/introduce", body: testEnvelope},
+		{method: http.MethodPost, path: "/auth/keys/sign-in", body: testEnvelope},
+		{method: http.MethodPost, path: "/auth/keys/enroll", body: `{"person_key":"` + testPersonKey + `","message":` + testEnvelope + `}`, headers: bearer(memberToken)},
+		{method: http.MethodPut, path: "/auth/keys/person", body: `{"person_key":"` + testPersonKey + `"}`, headers: bearer(memberToken)},
+		{method: http.MethodGet, path: "/auth/keys", headers: bearer(memberToken), open: http.StatusOK},
+		{method: http.MethodDelete, path: "/auth/keys/devices/0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", headers: bearer(memberToken), open: http.StatusNoContent},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			keys := &fakeAppKeys{}
+			rec := do(t, NewHandler(appKeyDeps(keys)), tc.method, Prefix+tc.path, tc.body, tc.headers)
+			if tc.open != 0 {
+				if rec.Code != tc.open || keys.calls != 1 {
+					t.Fatalf("status = %d, calls %d: %s", rec.Code, keys.calls, rec.Body.String())
+				}
+				return
+			}
+			requireProblem(t, rec, TypeCapabilityDisabled)
+			if keys.calls != 0 {
+				t.Fatalf("service ran %d times with the switch off", keys.calls)
+			}
+		})
+	}
+}
+
+// The sealed reply is the only place session tokens leave a key sign-in, and
+// another team's client parses its plaintext: only the reply key's holder can
+// open it, and its fields are the protocol's.
+func TestAppKeySealedReply(t *testing.T) {
+	reply, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replyKey, err := appkeys.PublicKeyFromBytes(reply.PublicKey().Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	challenge := make([]byte, appkeys.ChallengeSize)
+	user := &models.User{ID: 4}
+	tokens := &handlers.TokenPairView{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 28800,
+		User: handlers.UserView{ID: 4, Username: "sam", Role: "user"}}
+	for _, tc := range []struct {
+		name   string
+		result auth.KeySignInResult
+		tokens *handlers.TokenPairView
+		want   string
+	}{
+		{name: "signed in", tokens: tokens,
+			result: auth.KeySignInResult{Status: appkeys.ReplySignedIn, DeviceID: "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", User: user},
+			want:   `{"status":"signed_in","device_id":"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11","account_id":"4","tokens":{"access_token":"access","refresh_token":"refresh","expires_in":28800,"user":{"id":"4","username":"sam","email":"","role":"user","permissions":[],"download_allowed":false,"password_change_required":false}}}`},
+		{name: "approval required",
+			result: auth.KeySignInResult{Status: appkeys.ReplyApprovalRequired, DeviceID: "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", User: user},
+			want:   `{"status":"approval_required","device_id":"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11","account_id":"4"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := tc.result
+			result.ReplyKey, result.Challenge = replyKey, challenge
+			keys := &fakeAppKeys{enabled: true, answer: &handlers.AppKeyAnswer{Result: &result, Tokens: tc.tokens}}
+			rec := do(t, NewHandler(appKeyDeps(keys)), http.MethodPost, Prefix+"/auth/keys/sign-in", testEnvelope, nil)
+			if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("status = %d, cache %q: %s", rec.Code, rec.Header().Get("Cache-Control"), rec.Body.String())
+			}
+			var sealed appkeys.SealedReply
+			if err := json.Unmarshal(rec.Body.Bytes(), &sealed); err != nil {
+				t.Fatal(err)
+			}
+			plaintext, err := appkeys.Open(reply.Bytes(), challenge, sealed)
+			if err != nil || string(plaintext) != tc.want {
+				t.Fatalf("opened %s, %v", plaintext, err)
+			}
+			other, _ := ecdh.P256().GenerateKey(rand.Reader)
+			if _, err := appkeys.Open(other.Bytes(), challenge, sealed); err == nil {
+				t.Fatal("another private key opened the reply")
+			}
+		})
+	}
+}
+
+// Clients branch on the problem identifier, so each refusal must keep its
+// type: a bad key or signature can't look like a spent challenge, and a
+// malformed message once signed must not look like a bad signature.
+func TestAppKeyProblems(t *testing.T) {
+	for _, tc := range []struct {
+		err   error
+		want  ProblemType
+		retry string
+	}{
+		{err: auth.ErrKeySignatureInvalid, want: TypeSignatureInvalid},
+		{err: &appkeys.Error{Code: appkeys.CodeSignatureInvalid}, want: TypeSignatureInvalid},
+		{err: &appkeys.Error{Code: appkeys.CodeServerMismatch}, want: TypeSignatureInvalid},
+		{err: &appkeys.Error{Code: appkeys.CodePurposeMismatch}, want: TypeSignatureInvalid},
+		{err: &appkeys.Error{Code: appkeys.CodeExpired}, want: TypeSignatureInvalid},
+		{err: &appkeys.Error{Code: appkeys.CodeEnvelopeMalformed}, want: TypeValidationFailed},
+		{err: &appkeys.Error{Code: appkeys.CodeFieldInvalid}, want: TypeValidationFailed},
+		{err: auth.ErrKeyChallengeInvalid, want: TypeChallengeInvalid},
+		{err: auth.ErrKeyOriginMismatch, want: TypeOriginMismatch},
+		{err: auth.ErrAppKeyDenied, want: TypeKeyDenied},
+		{err: auth.ErrAppKeyAlreadyEnrolled, want: TypeConflict},
+		{err: auth.ErrLocalLoginDisabled, want: TypeLocalLoginDisabled},
+		{err: auth.ErrNotPermitted, want: TypeNotPermitted},
+		{err: &auth.KeyRetryError{RetryAfter: 3 * time.Second}, want: TypeRateLimited, retry: "3"},
+	} {
+		t.Run(tc.want.ID+" "+tc.err.Error(), func(t *testing.T) {
+			keys := &fakeAppKeys{enabled: true, err: tc.err}
+			rec := do(t, NewHandler(appKeyDeps(keys)), http.MethodPost, Prefix+"/auth/keys/sign-in", testEnvelope, nil)
+			requireProblem(t, rec, tc.want)
+			if got := rec.Header().Get("Retry-After"); got != tc.retry {
+				t.Fatalf("Retry-After = %q, want %q", got, tc.retry)
+			}
+		})
+	}
+}
+
+// Enrolling keys gives lasting access to the account, so an API key and an
+// administrator acting as the account are refused before anything is
+// verified.
+func TestEnrollAppKeysNeedsOwnSession(t *testing.T) {
+	body := `{"person_key":"` + testPersonKey + `","message":` + testEnvelope + `}`
+	for _, token := range []string{apiKeyToken, impersonatedToken} {
+		keys := &fakeAppKeys{enabled: true}
+		rec := do(t, NewHandler(appKeyDeps(keys)), http.MethodPost, Prefix+"/auth/keys/enroll", body, bearer(token))
+		requireProblem(t, rec, TypePermissionDenied)
+		if keys.calls != 0 {
+			t.Fatalf("%s: service ran", token)
+		}
+	}
+}
+
+// The server refuses a signed origin only where it can judge the address:
+// through a network access provider (its ingress token) and on the public
+// address. Elsewhere (a LAN address, a reverse proxy) it accepts, and the
+// sealed reply protects the answer.
+func TestAppKeyOriginRule(t *testing.T) {
+	cache := netaccess.NewStatusCache()
+	cache.Report(netaccess.Status{InstallationID: 7, Provider: "stub", State: netaccess.StateConnected, Origin: "HTTPS://Silo.Overlay.Example.Test/"})
+	reg := &Registry{deps: Dependencies{ServerConnections: ServerConnections{
+		PublicURL: func() string { return "https://media.example.test/silo/" },
+		Providers: cache,
+	}}}
+	for _, tc := range []struct {
+		name, host, signed string
+		provider           string
+		refused            bool
+	}{
+		{name: "public address, its origin", host: "media.example.test", signed: "https://media.example.test"},
+		{name: "public address, another origin", host: "media.example.test", signed: "https://evil.example.test", refused: true},
+		{name: "provider path, its origin", host: "anything.example.test", provider: "stub", signed: "https://silo.overlay.example.test"},
+		{name: "provider path, the public origin", host: "media.example.test", provider: "stub", signed: "https://media.example.test", refused: true},
+		{name: "LAN address", host: "192.168.1.20:8080", signed: "https://evil.example.test"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "https://"+tc.host+"/api/v2/auth/keys/sign-in", nil)
+			ctx := context.WithValue(r.Context(), requestKey{}, r)
+			if tc.provider != "" {
+				ctx = netaccess.WithPath(ctx, netaccess.Path{Provider: tc.provider, InstallationID: 7})
+			}
+			err := judgeSignedOrigin(reg.appKeyKnownOrigins(ctx), tc.signed)
+			if (err != nil) != tc.refused {
+				t.Fatalf("judge(%q) = %v, refused want %v", tc.signed, err, tc.refused)
+			}
+		})
+	}
+}
+
+// An envelope has exactly its fields, and the route refuses anything else
+// before a key is looked up: an extra field is 422 validation_failed, and a
+// body that isn't JSON is 400 malformed_request.
+func TestAppKeyEnvelopeIsStrict(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want ProblemType
+	}{
+		{body: `{"kid":"zT321tSgcB7emUH9k0B0oA","payload":"eyJ9","sig":"c2ln","alg":"ES256"}`, want: TypeValidationFailed},
+		{body: `{"kid":"zT321tSgcB7emUH9k0B0oA","payload":"eyJ9"}`, want: TypeValidationFailed},
+		{body: `not json`, want: TypeMalformedRequest},
+	} {
+		keys := &fakeAppKeys{enabled: true}
+		rec := do(t, NewHandler(appKeyDeps(keys)), http.MethodPost, Prefix+"/auth/keys/sign-in", tc.body, nil)
+		requireProblem(t, rec, tc.want)
+		if keys.calls != 0 {
+			t.Fatalf("%s: service ran", tc.body)
+		}
 	}
 }
