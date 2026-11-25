@@ -107,8 +107,18 @@ func (r *profileSetRun) attempt(ctx context.Context) error {
 			return err
 		}
 	}
+	// Refusals come in one order, here and under the locks: a set that is
+	// older, other content at the held version, or newer without the
+	// person's latest edits is stale before anything is judged against the
+	// household; then the household must map the set; then the held version
+	// again is compared and answered as a no-op; only a set that will write
+	// is refused for what it would do (plan.refusal).
+	if err := r.checkStale(snap); err != nil {
+		return err
+	}
+	r.repeat = r.isRepeat(snap.State)
 	edits := newProfileSetEdits(snap.Edits)
-	plan, err := planProfileSet(r.doc, snap.Rows, r.limit, edits)
+	plan, err := planProfileSet(r.planDoc(), snap.Rows, r.limit, edits)
 	if err != nil {
 		return err
 	}
@@ -123,17 +133,14 @@ func (r *profileSetRun) attempt(ctx context.Context) error {
 			}
 		}
 	}
-	r.repeat = r.isRepeat(snap.State)
 	if r.pinMatches, err = r.comparePINs(ctx, plan, r.repeat); err != nil {
 		return err
 	}
 	if r.noop, err = r.checkVersion(snap.State, plan); err != nil || r.noop {
 		return err
 	}
-	// A refusal before any PIN is hashed; the check under the locks is the
-	// one that counts.
-	if token := profileSetEditsToken(snap); token != "" && r.doc.EditsSeen != token {
-		return ErrProfileSetStale
+	if plan.refusal != nil {
+		return plan.refusal
 	}
 	if err := r.hashPINs(ctx, plan); err != nil {
 		return err
@@ -212,6 +219,35 @@ func (r *profileSetRun) checkVersion(state userstore.ProfileSetState, plan *prof
 	return true, nil
 }
 
+// checkStale refuses, before anything is judged against the household, a
+// set that is older than the held one, other content at the held version,
+// or newer while the server holds the person's edits and edits_seen is not
+// their current token. The held version again is not judged here: its PINs
+// are compared once the household maps it (checkVersion).
+func (r *profileSetRun) checkStale(snap userstore.ProfileSetSnapshot) error {
+	state := snap.State
+	newer := !state.Held || r.doc.Version > state.Version
+	if !newer && (r.doc.Version < state.Version || !sameHash(r.doc.Hash, state.SHA256)) {
+		return ErrProfileSetStale
+	}
+	if token := profileSetEditsToken(snap); newer && token != "" && r.doc.EditsSeen != token {
+		return ErrProfileSetStale
+	}
+	return nil
+}
+
+// planDoc is the set as it is mapped onto the household. The held version
+// again maps by sync ID alone: its profiles already hold their IDs, and its
+// pairs, which a repeat never needs, can't refuse a set that writes nothing.
+func (r *profileSetRun) planDoc() *profileSetDoc {
+	if !r.repeat {
+		return r.doc
+	}
+	doc := *r.doc
+	doc.Pairs = nil
+	return &doc
+}
+
 // isRepeat reports a set that is the held version with the held content.
 func (r *profileSetRun) isRepeat(state userstore.ProfileSetState) bool {
 	return state.Held && r.doc.Version == state.Version && sameHash(r.doc.Hash, state.SHA256)
@@ -277,8 +313,12 @@ func (r *profileSetRun) apply(ctx context.Context, w userstore.ProfileSetWriter,
 	if err := checkHouseholdPINRevision(ctx, w, active); err != nil {
 		return err
 	}
+	// The order of refusals is attempt's, on the locked read.
+	if err := r.checkStale(snap); err != nil {
+		return err
+	}
 	edits := newProfileSetEdits(snap.Edits)
-	plan, err := planProfileSet(r.doc, snap.Rows, r.limit, edits)
+	plan, err := planProfileSet(r.planDoc(), snap.Rows, r.limit, edits)
 	if err != nil {
 		return err
 	}
@@ -293,8 +333,8 @@ func (r *profileSetRun) apply(ctx context.Context, w userstore.ProfileSetWriter,
 	if r.noop, err = r.checkVersion(snap.State, plan); err != nil || r.noop {
 		return err
 	}
-	if token := profileSetEditsToken(snap); token != "" && r.doc.EditsSeen != token {
-		return ErrProfileSetStale
+	if plan.refusal != nil {
+		return plan.refusal
 	}
 	removable := w.Removable()
 	if len(removable) != len(plan.removed) {

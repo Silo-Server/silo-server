@@ -906,3 +906,42 @@ func TestProfileEditPoolSettingWaitsForPairingDB(t *testing.T) {
 		t.Fatalf("after the set: value stored %v, marked %v", stored(), marked)
 	}
 }
+
+// TestProfileSetRefusalOrderDB: a set is stale before it is judged against
+// the household, and the held version again is never refused for a write it
+// won't make. It catches a repeat answered 422 for a name clash it would not
+// cause, and an app told to rename where it should read the set again.
+func TestProfileSetRefusalOrderDB(t *testing.T) {
+	f := newEditsFixture(t)
+	main, kid, guest := newSetItem("Parent"), newSetItem("Kid"), newSetItem("Guest")
+	f.mustApply(t, setDoc(t, 1, main, kid, guest))
+	kidID, guestID := f.profileBySyncID(t, kid.syncID()).ID, f.profileBySyncID(t, guest.syncID()).ID
+	f.update(t, f.account(), guestID, ProfileUpdateRequest{Name: new("Other")}, false)
+	f.update(t, f.admin(), kidID, ProfileUpdateRequest{Name: new("Guest")}, true)
+
+	t.Run("the held version again is a no-op, though its names would clash", func(t *testing.T) {
+		before := f.state(t)
+		if _, err := f.apply(t, setDoc(t, 1, main, kid, guest)); err != nil {
+			t.Fatalf("repeat: %v", err)
+		}
+		if f.state(t) != before {
+			t.Fatal("a repeat of the held version wrote")
+		}
+	})
+	t.Run("a newer set without the latest edits is stale before its names are judged", func(t *testing.T) {
+		before := f.state(t)
+		if _, err := f.applySeen(t, setDoc(t, 2, main, kid, guest), ""); !isStale(err) {
+			t.Fatalf("err = %v, want profile_set_stale", err)
+		}
+		if f.state(t) != before {
+			t.Fatal("a stale set wrote")
+		}
+	})
+	t.Run("the same set with the latest edits is refused for its names", func(t *testing.T) {
+		_, err := f.applySeen(t, setDoc(t, 2, main, kid, guest), f.held(t).EditsToken)
+		var field *ProfileSetFieldError
+		if !errors.As(err, &field) || field.Code != "name_conflict" {
+			t.Fatalf("err = %v, want name_conflict", err)
+		}
+	})
+}

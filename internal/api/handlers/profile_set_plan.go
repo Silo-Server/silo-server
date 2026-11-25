@@ -27,6 +27,11 @@ type profileSetPlan struct {
 	removed []*userstore.ProfileSetRow
 	// localOnly is the rows outside the set, in creation order.
 	localOnly []*userstore.ProfileSetRow
+	// refusal is why the set can't be applied to this household as it
+	// stands (a name clash, the main profile taking a sync ID the owner
+	// removed), nil when it can. It counts only for a set that will write:
+	// the caller checks it after the version and edits checks.
+	refusal error
 }
 
 // ErrProfileSetNoPrimary is a household with profiles and no primary, which
@@ -38,8 +43,9 @@ var ErrProfileSetNoPrimary = errors.New("the household has profiles but no prima
 // otherwise new. Rows holding a sync ID the set no longer has are removed,
 // the primary never. New items are created in set order while the household
 // is under limit (0 = none); the rest are left off, and nothing is deleted
-// to fit. Names are checked on the household as the set leaves it, names
-// the owner set here kept. An item after the first whose sync ID the owner
+// to fit. Names are judged on the household as the set leaves it, names
+// the owner set here kept, and a clash goes in plan.refusal rather than
+// failing the plan. An item after the first whose sync ID the owner
 // removed here, and that no profile here holds, is hidden: its pair, if
 // any, is ignored.
 func planProfileSet(doc *profileSetDoc, rows []userstore.ProfileSetRow, limit int, edits profileSetEdits) (*profileSetPlan, error) {
@@ -74,7 +80,7 @@ func planProfileSet(doc *profileSetDoc, rows []userstore.ProfileSetRow, limit in
 	// The main profile can't take a sync ID the owner removed here: the
 	// removal would stop hiding it, and a later set could bring it back.
 	if first := doc.Items[0].SyncID; hidden[first] && bySyncID[first] == nil {
-		return nil, profileSetFieldError("set.items[0].sync_id", "The owner of this server removed the profile with this sync_id here; the main profile can't take it.")
+		plan.refusal = profileSetFieldError("set.items[0].sync_id", "The owner of this server removed the profile with this sync_id here; the main profile can't take it.")
 	}
 	for i, item := range doc.Items {
 		if isHidden(i) {
@@ -113,7 +119,10 @@ func planProfileSet(doc *profileSetDoc, rows []userstore.ProfileSetRow, limit in
 			plan.leftOff = append(plan.leftOff, i)
 		}
 	}
-	return plan, checkProfileSetNames(doc, plan, edits.forItems(doc, plan).finalNames(doc, plan))
+	if plan.refusal == nil {
+		plan.refusal = checkProfileSetNames(doc, plan, edits.forItems(doc, plan).finalNames(doc, plan))
+	}
+	return plan, nil
 }
 
 // planProfileSetRow finds the row item i updates, nil for a new item.
