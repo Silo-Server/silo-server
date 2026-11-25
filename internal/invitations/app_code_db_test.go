@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/appkeys/appkeystest"
@@ -321,16 +322,16 @@ func restoreSetting(t *testing.T, pool *pgxpool.Pool, key string) func() {
 	}
 }
 
-// waitForSettingsLockWaiter waits until another backend of this database is
-// blocked on an advisory lock: the settings lock every claim takes first.
-func waitForSettingsLockWaiter(t *testing.T, pool *pgxpool.Pool) {
+// waitUntilBlockedBy waits until a session is waiting on an advisory lock
+// that the transaction with backend pid holder holds: the settings lock.
+// Other tests' waiters in the same database don't count.
+func waitUntilBlockedBy(t *testing.T, pool *pgxpool.Pool, holder uint32) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		var waiting bool
 		if err := pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_locks l
-			JOIN pg_database d ON d.oid = l.database
-			WHERE l.locktype = 'advisory' AND NOT l.granted AND d.datname = current_database())`).Scan(&waiting); err != nil {
+			WHERE l.locktype = 'advisory' AND NOT l.granted AND $1 = ANY (pg_blocking_pids(l.pid)))`, holder).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
 		if waiting {
@@ -339,65 +340,113 @@ func waitForSettingsLockWaiter(t *testing.T, pool *pgxpool.Pool) {
 		// Postgres signals no event for a lock waiter; pg_locks is polled.
 		time.Sleep(20 * time.Millisecond) //nolint:forbidigo // polls pg_locks until the other backend waits; the state itself is what is checked
 	}
-	t.Fatal("the redeem never waited for the settings lock")
+	t.Fatal("the claim never waited for the settings lock")
 }
 
-// A join redeem that supersedes another invitation for its address, racing
-// a request on that other invitation (here a code being issued for it).
-// Every claim and issue takes the settings lock before any invitation row,
-// so the redeem waits at the settings lock holding no row: while it waits,
-// the other request can still lock the redeem's own invitation and code. The
-// old order (invitation and code first) held them there, and the pair could
-// deadlock once the redeem went on to the other invitation's row.
-func TestJoinRedeemTakesSettingsLockFirstDB(t *testing.T) {
+// Every invitation claim takes the settings lock before any invitation or
+// code row: a join redeem, issuing a code and accepting with a password.
+// Each is started while another transaction holds the settings lock, and
+// while it waits there it must hold none of its rows: the other transaction
+// can still lock them without waiting. With a row taken first, a claim that
+// then went on to another invitation's row (a link invitation supersedes the
+// others for its address) could deadlock with a claim of that invitation.
+func TestClaimsTakeSettingsLockFirstDB(t *testing.T) {
 	env := newJoinEnv(t)
 	ctx := t.Context()
-	address := env.name("racer") + "@example.test"
-	linkToken, link := env.invite(t, models.RoleUser)
-	issued, err := env.svc.IssueAppCode(ctx, AppCodeRequest{Token: linkToken, Username: env.name("racer"), Email: address})
-	if err != nil {
-		t.Fatal(err)
+	type claim struct {
+		run  func() error
+		rows func(tx pgx.Tx) error
+		then func(t *testing.T)
 	}
-	emailedToken := fmt.Sprintf("join-%s-emailed", env.suffix)
-	emailed, err := env.svc.repo.Create(ctx, models.CreateInvitationInput{Email: address, Role: models.RoleUser, InvitedBy: int64(env.inviter),
-		ExpiresAt: time.Now().Add(time.Hour)}, HashToken(emailedToken))
-	if err != nil {
-		t.Fatal(err)
+	cases := map[string]func(t *testing.T) claim{
+		"join redeem": func(t *testing.T) claim {
+			address := env.name("racer") + "@example.test"
+			token, link := env.invite(t, models.RoleUser)
+			issued, err := env.svc.IssueAppCode(ctx, AppCodeRequest{Token: token, Username: env.name("racer"), Email: address})
+			if err != nil {
+				t.Fatal(err)
+			}
+			emailed, err := env.svc.repo.Create(ctx, models.CreateInvitationInput{Email: address, Role: models.RoleUser, InvitedBy: int64(env.inviter),
+				ExpiresAt: time.Now().Add(time.Hour)}, HashToken(fmt.Sprintf("join-%s-emailed", env.suffix)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			hash, _ := appCodeHashForTest(issued.Code)
+			return claim{
+				run: func() error { _, err := env.redeem(t, issued.Code); return err },
+				rows: func(tx pgx.Tx) error {
+					if _, err := tx.Exec(ctx, `SELECT 1 FROM invitations WHERE id = $1 FOR UPDATE NOWAIT`, link.ID); err != nil {
+						return err
+					}
+					_, err := tx.Exec(ctx, `SELECT 1 FROM auth_app_codes WHERE code_hash = $1 FOR UPDATE NOWAIT`, hash)
+					return err
+				},
+				then: func(t *testing.T) {
+					var revoked bool
+					if err := env.pool.QueryRow(ctx, `SELECT revoked_at IS NOT NULL FROM invitations WHERE id = $1`, emailed.ID).Scan(&revoked); err != nil || !revoked {
+						t.Fatalf("the emailed invitation for the same address was not superseded: %v, %v", revoked, err)
+					}
+				},
+			}
+		},
+		"issuing a code": func(t *testing.T) claim {
+			token, inv := env.invite(t, models.RoleUser)
+			return claim{
+				run: func() error {
+					_, err := env.svc.IssueAppCode(ctx, AppCodeRequest{Token: token, Username: env.name("issuer")})
+					return err
+				},
+				rows: func(tx pgx.Tx) error {
+					_, err := tx.Exec(ctx, `SELECT 1 FROM invitations WHERE id = $1 FOR UPDATE NOWAIT`, inv.ID)
+					return err
+				},
+			}
+		},
+		"accepting with a password": func(t *testing.T) claim {
+			token, inv := env.invite(t, models.RoleUser)
+			return claim{
+				run: func() error {
+					_, _, err := env.svc.Accept(ctx, token, env.name("accepter")+"@example.test", "accept-pass-1", "test", "")
+					return err
+				},
+				rows: func(tx pgx.Tx) error {
+					_, err := tx.Exec(ctx, `SELECT 1 FROM invitations WHERE id = $1 FOR UPDATE NOWAIT`, inv.ID)
+					return err
+				},
+			}
+		},
 	}
-
-	other, err := env.pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer other.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // the explicit rollback below has run by then
-	if _, err := env.svc.claims.LockClaimableByTokenTx(ctx, other, HashToken(emailedToken)); err != nil {
-		t.Fatal(err)
-	}
-	redeemed := make(chan error, 1)
-	go func() {
-		_, err := env.redeem(t, issued.Code)
-		redeemed <- err
-	}()
-	waitForSettingsLockWaiter(t, env.pool)
-	hash, _ := appCodeHashForTest(issued.Code)
-	if _, err := other.Exec(ctx, `SELECT 1 FROM invitations WHERE id = $1 FOR UPDATE NOWAIT`, link.ID); err != nil {
-		t.Fatalf("the waiting redeem holds its invitation's row: %v", err)
-	}
-	if _, err := other.Exec(ctx, `SELECT 1 FROM auth_app_codes WHERE code_hash = $1 FOR UPDATE NOWAIT`, hash); err != nil {
-		t.Fatalf("the waiting redeem holds its code's row: %v", err)
-	}
-	if err := other.Rollback(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-redeemed; err != nil {
-		t.Fatalf("redeem after the other request ended: %v", err)
-	}
-	if !env.invitationAccepted(t, link.ID) {
-		t.Fatal("the link invitation is still open")
-	}
-	var revoked bool
-	if err := env.pool.QueryRow(ctx, `SELECT revoked_at IS NOT NULL FROM invitations WHERE id = $1`, emailed.ID).Scan(&revoked); err != nil || !revoked {
-		t.Fatalf("the emailed invitation for the same address was not superseded: %v, %v", revoked, err)
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := setup(t)
+			other, err := env.pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer other.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // the explicit rollback below has run by then
+			var holder uint32
+			if err := other.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holder); err != nil {
+				t.Fatal(err)
+			}
+			if err := auth.LockServerSettingsInTransaction(ctx, other); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() { done <- c.run() }()
+			waitUntilBlockedBy(t, env.pool, holder)
+			if err := c.rows(other); err != nil {
+				t.Fatalf("the waiting claim holds a row: %v", err)
+			}
+			if err := other.Rollback(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-done; err != nil {
+				t.Fatalf("the claim after the lock was released: %v", err)
+			}
+			if c.then != nil {
+				c.then(t)
+			}
+		})
 	}
 }
 
