@@ -13994,7 +13994,7 @@
       "request": {
         "method": "POST",
         "path": "/api/v2/auth/device/poll",
-        "body": "{\"device_code\":\"dev-locked\",\"binding_secret\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}"
+        "body": "{\"device_code\":\"dev-locked\",\"binding_secret\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\"}"
       },
       "expected_status": 429,
       "response_headers": {

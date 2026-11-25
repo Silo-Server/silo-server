@@ -2547,7 +2547,7 @@ func devicePreapprovalFixtureCases() []fixtureCase {
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/CollectionDevicePreapproval"},
 		{name: "poll_device_login_preapproval_rate_limited", operationID: "pollDeviceLogin",
 			scenario: "A wrong secret for a sign-in approved in advance, after too many wrong secrets for its device code, waits out the lock. The right secret is never refused by it.",
-			method:   http.MethodPost, path: "/api/v2/auth/device/poll", body: `{"device_code":"dev-locked","binding_secret":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}`,
+			method:   http.MethodPost, path: "/api/v2/auth/device/poll", body: `{"device_code":"dev-locked","binding_secret":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"}`,
 			status: http.StatusTooManyRequests, assertHeaders: []string{"Content-Type", "Cache-Control", "Retry-After"}, schema: problem},
 	}
 }
