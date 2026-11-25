@@ -1262,6 +1262,8 @@
 ./internal/api/handlers TestProfileSetOwnerOverridesDB
 ./internal/api/handlers TestProfileSetEditsRaceSetDB
 ./internal/api/handlers TestProfileEditAccountDeleteRaceDB
+./internal/api TestProfileEditActorThroughNativeAuthDB
+./internal/jellycompat TestProfileEditActorThroughJellyfinRouterDB
 
 # A scan request for a scope with an active run joins that run without a
 # duplicate-key ERROR, and queues a new run if that one finished meanwhile
