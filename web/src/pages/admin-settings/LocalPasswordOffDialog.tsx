@@ -12,6 +12,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   useLocalPasswordOffAccounts,
@@ -19,10 +20,11 @@ import {
 } from "@/hooks/queries/admin/externalSignIn";
 import { useT, type MessageKey } from "@/i18n";
 
-/** How many accounts of each group the dialog names before linking to Users. */
-export const LOCAL_PASSWORD_OFF_SHOWN = 5;
+/** How many accounts of each group a page of the dialog's lists holds. */
+export const LOCAL_PASSWORD_OFF_PAGE = 5;
 
 type Account = LocalPasswordOffAccounts["items"][number];
+type GroupQuery = ReturnType<typeof useLocalPasswordOffAccounts>;
 
 const REASON_TEXT: Partial<Record<Account["reason"], MessageKey>> = {
   administrator: "web.admin.settings.signIn.passwordsOff.reason.administrator",
@@ -30,16 +32,40 @@ const REASON_TEXT: Partial<Record<Account["reason"], MessageKey>> = {
   email_match_off: "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff",
 };
 
-interface LocalPasswordOffDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
+const usersLinkClass =
+  "text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs font-medium transition-colors";
+
+/** What the confirmation is answered for: the page's values, saved or staged. */
+export interface LocalPasswordOffContext {
   /** The provider people sign in with once passwords are off. */
   provider: string;
   /** Whether that provider creates an account at a first sign-in. */
   autoProvision: boolean;
-  /** The page's email matching value, saved or staged. */
+  /** Whether email matching is on. */
   emailMatch: boolean;
+}
+
+interface LocalPasswordOffDialogProps extends LocalPasswordOffContext {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+  /** Where focus goes when the dialog closes: it has no trigger to return to. */
+  onCloseAutoFocus: (event: Event) => void;
+}
+
+/**
+ * A group's state for the dialog. A first load or a reload (the dialog
+ * reopened, or its values changed) is loading, so a cached answer from an
+ * earlier opening is never confirmed against; fetching a further page is not.
+ */
+function groupState(query: GroupQuery) {
+  const pages = query.data?.pages ?? [];
+  return {
+    loading: query.isPending || (query.isFetching && !query.isFetchingNextPage),
+    failed: query.isError && !query.isFetchingNextPage && pages.length === 0,
+    accounts: pages.flatMap((page) => page.items),
+    totals: pages[0]?.totals,
+  };
 }
 
 /**
@@ -52,38 +78,45 @@ export function LocalPasswordOffDialog({
   open,
   onOpenChange,
   onConfirm,
+  onCloseAutoFocus,
   provider,
   autoProvision,
   emailMatch,
 }: LocalPasswordOffDialogProps) {
   const t = useT();
-  const matched = useLocalPasswordOffAccounts(
+  const matchedQuery = useLocalPasswordOffAccounts(
     "email_match",
     emailMatch,
-    LOCAL_PASSWORD_OFF_SHOWN,
+    LOCAL_PASSWORD_OFF_PAGE,
     open,
   );
-  const unmatched = useLocalPasswordOffAccounts(
+  const unmatchedQuery = useLocalPasswordOffAccounts(
     "admin_link",
     emailMatch,
-    LOCAL_PASSWORD_OFF_SHOWN,
+    LOCAL_PASSWORD_OFF_PAGE,
     open,
   );
-  const loading = matched.isPending || unmatched.isPending;
-  const failed = matched.isError || unmatched.isError;
-  const totals = matched.data?.totals ?? unmatched.data?.totals;
+  const matched = groupState(matchedQuery);
+  const unmatched = groupState(unmatchedQuery);
+  const loading = matched.loading || unmatched.loading;
+  const failed = matched.failed || unmatched.failed;
+  const totals = matched.totals ?? unmatched.totals;
   const nobody = totals !== undefined && totals.email_match + totals.admin_link === 0;
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
+      <AlertDialogContent onCloseAutoFocus={onCloseAutoFocus}>
         <AlertDialogHeader>
           <AlertDialogTitle>{t("web.admin.settings.signIn.passwordsOff.title")}</AlertDialogTitle>
           <AlertDialogDescription>
             {t("web.admin.settings.signIn.passwordsOff.description", { provider })}
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <div className="grid gap-4 text-sm" aria-live="polite" aria-busy={loading}>
+        <div
+          className="-mx-1 grid max-h-[55vh] gap-4 overflow-y-auto px-1 text-sm"
+          aria-live="polite"
+          aria-busy={loading}
+        >
           {loading && open ? (
             <div role="status" className="grid gap-2">
               <span className="sr-only">{t("web.admin.settings.signIn.passwordsOff.loading")}</span>
@@ -104,8 +137,9 @@ export function LocalPasswordOffDialog({
                     count: totals.email_match,
                   })}
                   notes={[t("web.admin.settings.signIn.passwordsOff.matchExplain", { provider })]}
-                  accounts={matched.data?.items ?? []}
+                  accounts={matched.accounts}
                   total={totals.email_match}
+                  query={matchedQuery}
                 />
               ) : null}
               {totals && totals.admin_link > 0 ? (
@@ -119,22 +153,26 @@ export function LocalPasswordOffDialog({
                       ? [t("web.admin.settings.signIn.passwordsOff.linkAutoCreate", { provider })]
                       : []),
                   ]}
-                  accounts={unmatched.data?.items ?? []}
+                  accounts={unmatched.accounts}
                   total={totals.admin_link}
+                  query={unmatchedQuery}
                   showReason
                 />
               ) : null}
-              <Link
-                to="/admin/users"
-                className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
-              >
+              <Link to="/admin/users" className={usersLinkClass}>
                 {t("web.admin.settings.signIn.passwordsOff.usersLink")}
                 <ArrowRight className="h-3 w-3" aria-hidden="true" />
               </Link>
             </>
           )}
           <p className="text-muted-foreground">
-            {t("web.admin.settings.signIn.passwordsOff.sessions")}
+            {t("web.admin.settings.signIn.passwordsOff.sessions", {
+              link: (chunks) => (
+                <Link to="/admin/users" className="underline underline-offset-4">
+                  {chunks}
+                </Link>
+              ),
+            })}
           </p>
         </div>
         <AlertDialogFooter>
@@ -153,11 +191,19 @@ interface AccountGroupProps {
   notes: string[];
   accounts: Account[];
   total: number;
+  query: GroupQuery;
   /** Says why each account isn't connected by email. */
   showReason?: boolean;
 }
 
-function AccountGroup({ heading, notes, accounts, total, showReason = false }: AccountGroupProps) {
+function AccountGroup({
+  heading,
+  notes,
+  accounts,
+  total,
+  query,
+  showReason = false,
+}: AccountGroupProps) {
   const t = useT();
   const id = useId();
   const more = total - accounts.length;
@@ -176,7 +222,9 @@ function AccountGroup({ heading, notes, accounts, total, showReason = false }: A
           const reason = showReason ? REASON_TEXT[account.reason] : undefined;
           return (
             <li key={account.id} className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-              <span className="font-medium break-all">{account.username}</span>
+              {account.username ? (
+                <span className="font-medium break-all">{account.username}</span>
+              ) : null}
               {account.email ? (
                 <span className="text-muted-foreground min-w-0 break-all">{account.email}</span>
               ) : null}
@@ -185,10 +233,22 @@ function AccountGroup({ heading, notes, accounts, total, showReason = false }: A
           );
         })}
       </ul>
-      {more > 0 ? (
-        <p className="text-muted-foreground">
-          {t("web.admin.settings.signIn.passwordsOff.more", { count: more })}
+      {query.isError && query.hasNextPage ? (
+        <p role="alert" className="text-destructive">
+          {t("web.admin.settings.signIn.passwordsOff.loadFailed")}
         </p>
+      ) : null}
+      {more > 0 && query.hasNextPage ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="justify-self-start"
+          disabled={query.isFetchingNextPage}
+          onClick={() => void query.fetchNextPage()}
+        >
+          {t("web.admin.settings.signIn.passwordsOff.more", { count: more })}
+        </Button>
       ) : null}
     </section>
   );

@@ -1,7 +1,7 @@
 // Admin side of external sign-in (OIDC and LDAP): the Sign-in settings page
 // and the Sign-in tab of an account. The rules are in
 // docs/architecture/external-sign-in.md; the operations in docs/auth-api.md.
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   captureProfileRequestContext,
@@ -61,9 +61,10 @@ export function useExternalSignInCapabilities() {
 }
 
 /**
- * The first accounts of one group that lose their way in when password
- * sign-in is turned off, with both group totals. emailMatch is the page's
- * email matching value, saved or staged, so the answer fits the edit.
+ * The accounts of one group that lose their way in when password sign-in is
+ * turned off, a page at a time, with both group totals on every page.
+ * emailMatch is the page's email matching value, saved or staged, so the
+ * answer fits the edit; it is part of the key.
  */
 export function useLocalPasswordOffAccounts(
   group: LocalPasswordOffGroup,
@@ -71,12 +72,19 @@ export function useLocalPasswordOffAccounts(
   limit: number,
   enabled: boolean,
 ) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: externalSignInKeys.localPasswordOff(group, emailMatch, limit),
-    queryFn: () =>
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
       v2("GET /api/v2/admin/sign-in/local-password-off/accounts", {
-        query: { group, email_auto_match: emailMatch ? "true" : "false", limit },
+        query: {
+          group,
+          email_auto_match: emailMatch ? "true" : "false",
+          limit,
+          ...(pageParam ? { cursor: pageParam } : {}),
+        },
       }),
+    getNextPageParam: (page) => (page.page?.has_more ? page.page.next_cursor : undefined),
     enabled,
     staleTime: 0,
     retry: false,

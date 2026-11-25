@@ -366,22 +366,18 @@ function useBindingSwitch({
       open={confirmOff}
       onOpenChange={setConfirmOff}
       title={t("web.admin.settings.signIn.provider.binding.turnOffTitle", { name: label })}
+      // With password sign-in off this is the last provider people can use,
+      // and the server refuses turning it off (sign_in_provider_required).
       description={
         localLoginOn
           ? t("web.admin.settings.signIn.provider.binding.turnOffDescription", { name: label })
-          : t("web.admin.settings.signIn.provider.binding.turnOffDescriptionBreakGlass", {
-              name: label,
-            })
+          : t("web.admin.settings.signIn.provider.binding.turnOffBlocked", { name: label })
       }
       confirmLabel={t("web.admin.settings.signIn.provider.binding.turnOffConfirm")}
       variant="destructive"
+      confirmDisabled={!localLoginOn}
       onConfirm={() =>
-        write(
-          false,
-          localLoginOn
-            ? t("web.admin.settings.signIn.provider.binding.turnedOff", { name: label })
-            : t("web.admin.settings.signIn.provider.binding.turnedOffBreakGlass", { name: label }),
-        )
+        write(false, t("web.admin.settings.signIn.provider.binding.turnedOff", { name: label }))
       }
       isPending={updateBinding.isPending}
     />
