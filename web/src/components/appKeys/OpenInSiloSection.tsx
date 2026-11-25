@@ -23,21 +23,25 @@ export function OpenInSiloSection() {
   const access = useAppKeySessionAccess(Boolean(available) && !isImpersonating);
   const [appCode, setAppCode] = useState<AppCode | null>(null);
   const [pending, setPending] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
 
   if (!available || isImpersonating || !access.data) return null;
   const { manage, sign_in_again: signInAgain } = access.data;
 
   async function issue() {
     setPending(true);
-    setFailed(false);
+    setFailed(null);
     try {
       setAppCode(await createSessionAppCode());
     } catch (error) {
-      // A 403 here means the answer above went stale (the profile changed,
-      // say): ask again rather than guess why.
-      if (error instanceof V2ProblemError && error.status === 403) void access.refetch();
-      else setFailed(true);
+      if (error instanceof V2ProblemError && error.problemType === "main_profile_required") {
+        setFailed(t("web.settings.openInSilo.mainProfileOnly"));
+      } else if (error instanceof V2ProblemError && error.problemType === "permission_denied") {
+        // The session answer went stale: ask again rather than guess why.
+        void access.refetch();
+      } else {
+        setFailed(t("web.auth.appCode.failed"));
+      }
     } finally {
       setPending(false);
     }
@@ -60,7 +64,7 @@ export function OpenInSiloSection() {
       )}
       {failed && (
         <p role="alert" className="text-destructive text-sm">
-          {t("web.auth.appCode.failed")}
+          {failed}
         </p>
       )}
     </section>

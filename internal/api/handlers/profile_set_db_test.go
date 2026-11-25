@@ -349,8 +349,9 @@ func assertSetField(t *testing.T, err error, location string) {
 }
 
 // TestProfileSetPairsKeepHistoryDB: pairing an existing profile keeps it,
-// history included, and a profile no pair names is left alone. It catches
-// pairing that creates a new profile and drops the old one's history.
+// history included, and a profile no pair names is left alone, row and
+// history. It catches pairing that creates a new profile and drops the old
+// one's history, and a set that touches a profile it doesn't hold.
 func TestProfileSetPairsKeepHistoryDB(t *testing.T) {
 	f := newProfileSetDBFixture(t, 5)
 	ctx := t.Context()
@@ -364,9 +365,12 @@ func TestProfileSetPairsKeepHistoryDB(t *testing.T) {
 	for _, p := range profiles {
 		ids[p.Name] = p.ID
 	}
-	if err := f.store.SetProgress(ctx, ids["Sam"], "movie:history", 600, 6000, userstore.ProgressThresholds{}); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"Sam", "Guest"} {
+		if err := f.store.SetProgress(ctx, ids[name], "movie:history", 600, 6000, userstore.ProgressThresholds{}); err != nil {
+			t.Fatal(err)
+		}
 	}
+	guestBefore := profileStateLine(f.state(t), ids["Guest"])
 	sam := newSetItem("Sam")
 	pairs, _ := json.Marshal([]map[string]string{{"sync_id": sam.syncID(), "local_id": ids["Sam"]}})
 	if _, err := f.handler.ApplyProfileSet(ctx, ProfileSetCommand{UserID: f.userID, Set: setDoc(t, 1, newSetItem("Parent"), sam), Pairs: pairs, Signed: true}); err != nil {
@@ -376,8 +380,14 @@ func TestProfileSetPairsKeepHistoryDB(t *testing.T) {
 	if paired == nil || paired.ID != ids["Sam"] {
 		t.Fatalf("paired profile = %+v, want the existing %s", paired, ids["Sam"])
 	}
-	if progress, err := f.store.GetProgress(ctx, ids["Sam"], "movie:history"); err != nil || progress == nil {
-		t.Fatalf("progress after pairing = %v, %v", progress, err)
+	for _, name := range []string{"Sam", "Guest"} {
+		if progress, err := f.store.GetProgress(ctx, ids[name], "movie:history"); err != nil || progress == nil || progress.PositionSeconds != 600 {
+			t.Fatalf("%s's progress after the set = %+v, %v", name, progress, err)
+		}
+	}
+	// The profile no pair names is not touched at all: same row, no sync ID.
+	if guestBefore == "" || profileStateLine(f.state(t), ids["Guest"]) != guestBefore {
+		t.Fatalf("the unpaired profile's row changed:\n%s\n%s", guestBefore, profileStateLine(f.state(t), ids["Guest"]))
 	}
 	f.handler.JellyfinCompatEnabled = true
 	held, err := f.handler.HeldProfileSet(ctx, f.userID)
@@ -519,7 +529,18 @@ func TestProfileSetSessionPINProofDB(t *testing.T) {
 	}
 	stale := scope
 	stale.ProfilePINRevision--
+	// Another profile, and no profile, are not the main one.
+	second := uuid.NewString()
+	if err := f.store.CreateProfile(ctx, userstore.Profile{ID: second, Name: "Second"}); err != nil {
+		t.Fatal(err)
+	}
 	before := f.state(t)
+	for _, active := range []string{second, ""} {
+		_, err := f.handler.ApplyProfileSet(ctx, ProfileSetCommand{UserID: f.userID, Set: setDoc(t, 1, newSetItem("Parent")), ActiveProfileID: active, VerifyProfile: scope.CheckProfileVerification})
+		if !errors.Is(err, ErrProfileSetNotMainProfile) {
+			t.Fatalf("session form as profile %q: err = %v, want ErrProfileSetNotMainProfile", active, err)
+		}
+	}
 	if err := session(setDoc(t, 1, newSetItem("Parent")), stale); !errors.Is(err, access.ErrProfileUnverified) {
 		t.Fatalf("stale token: err = %v", err)
 	}

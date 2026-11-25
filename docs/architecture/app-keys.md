@@ -254,15 +254,24 @@ under those locks that the account is still an enabled administrator, the key
 is still waiting, unrevoked, inside its 24 hours and on this account, and the
 approving session is still live. The device's next `sign-in` opens a session
 and runs the provider checks then. Approving an active key changes nothing
-(except from the session that key itself opened, which is refused: a device
-does not approve itself); an unknown, denied, revoked or expired one is 404. `POST
+(from the session that key itself opened it is refused, 403); an unknown,
+denied, revoked or expired one is 404. `POST
 /auth/keys/pending/{id}/deny` marks the key `denied`: its next `sign-in`
 answers `key_denied`, and neither list shows it. Both decisions are recorded
 as domain audit actions on the account (`user.device_key_approved`,
-`user.device_key_denied`, with the key's ID). A session opened by one of the
-administrator's own active device keys may approve, which is how a new device
-is approved from a device already signed in; a session may never decide on the
-key that opened it.
+`user.device_key_denied`, with the key's ID).
+
+An administrator's new device is approved in one of two ways. From a device
+already signed in: a session opened by one of the administrator's own active
+device keys may approve. Or on the new device itself, by signing in on the
+server once there (a password or provider sign-in) and approving the waiting
+key as the main profile. The second is allowed on purpose: the person proved
+who they are to the server on that device, which is all an approval from
+another device proves. A waiting key can't approve itself, because it opens
+no session: its `sign-in` answers `approval_required` or 429 until someone
+approves it, or `key_denied` once it is denied or 24 hours old. (The service
+also refuses a session that names the key that opened it. That key is always
+active, so this is not what keeps a waiting device from approving itself.)
 
 **A cap on waiting keys.** Whoever holds an administrator's person key can call
 `introduce` again and again, and each call leaves a waiting row. An account
@@ -506,7 +515,7 @@ personal API key apply (`canManageHouseholdAs`):
 - `X-Profile-Id` naming the primary profile passes; one with a PIN needs
   `X-Profile-Token` (403 `profile_verification_required` from the viewer gate,
   or from the handler if the PIN changed since the token). Naming any other
-  profile is 403 `permission_denied`, on an administrator's account too.
+  profile is 403 `main_profile_required`, on an administrator's account too.
 - A request with no `X-Profile-Id` passes only from an administrator account
   that has at most one profile, with no PIN and no maturity or library limit:
   there the request can only mean that profile. This is not "administrators
@@ -514,7 +523,7 @@ personal API key apply (`canManageHouseholdAs`):
   profiles, or a PIN, names its main profile and sends its token like any
   other account. Anyone else, including a one-profile account that is not an
   administrator, must name the main profile; without it the request is 403
-  `permission_denied`. This is stricter than `changePassword`, which lets an
+  `main_profile_required`. This is stricter than `changePassword`, which lets an
   administrator leave the header out even when the main profile has a PIN;
   approving a waiting device is only ever done by an administrator, so that
   rule would let any profile on the device skip the PIN.
@@ -703,6 +712,15 @@ answer never depends on a PIN comparison, so it spends nothing. So a PIN
 changes only with a higher version, and a retried or replayed old set cannot
 undo a PIN changed since. These checks run on a first read and again under the
 set's locks.
+
+**Item members.** Every item carries every member the set defines today,
+except `settings` and `settings_reset`; an item that leaves one out is refused
+(422). An absent member is never read as false, empty or "no limit": a client
+that forgot a field would silently drop a child's limit. The rule for later
+versions follows from that. The members required today stay required. A
+member added later is optional and has a stated default, so a set built by an
+older app keeps being accepted by a newer server, and the default is chosen
+so that leaving the member out can't loosen what the profile may see.
 
 The content hash is SHA-256 over a canonical JSON document of the version and
 each item as sent, members the server doesn't know included, keys sorted,

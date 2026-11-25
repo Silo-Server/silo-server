@@ -25771,18 +25771,77 @@
       "value": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
-  "web.admin.common.adminUserSignIn.unlinkConfirm.keysRevoked": [
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
     {
       "type": 0,
       "value": "⟦"
     },
     {
-      "type": 1,
-      "value": "username"
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " çåñ ñö ļöñĝéŕ šîĝñ îñ ŵîţĥ ţĥîš þŕöṽîđéŕ åççöûñţ. "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " ŵöñ’ţ ƀé åƀļé ţö šîĝñ îñ ûñţîļ ýöû šéţ å þåššŵöŕđ öŕ çöññéçţ å þŕöṽîđéŕ åĝåîñ."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " çåñ ñö ļöñĝéŕ šîĝñ îñ ŵîţĥ ţĥîš þŕöṽîđéŕ åççöûñţ."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "’š Šîļö åþþ ķéýš ţîéđ ţö ţĥîš þŕöṽîđéŕ åççöûñţ åŕé ŕéɱöṽéđ, åñđ ţĥöšé đéṽîçéš åŕé šîĝñéđ öûţ."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
     },
     {
       "type": 0,
-      "value": "’š Šîļö åþþ ķéýš ţîéđ ţö ţĥîš þŕöṽîđéŕ åççöûñţ åŕé ŕéɱöṽéđ, åñđ ţĥöšé đéṽîçéš åŕé šîĝñéđ öûţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
@@ -93755,6 +93814,12 @@
       "value": " åþþŕöṽéđ ƒöŕ å đéṽîçé ţĥåţ ĥåšñ’ţ çöññéçţéđ ýéţ.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.users.detail.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ’ţ ļöåđ ţĥé šîĝñ-îñš åþþŕöṽéđ îñ åđṽåñçé.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.users.detail.appKeys.preapprovals.title": [
     {
       "type": 0,
@@ -93785,6 +93850,12 @@
     {
       "type": 0,
       "value": "⟦Šîļö åþþ đéṽîçéš~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö åþþ šîĝñ-îñ îšñ’ţ åṽåîļåƀļé öñ ţĥîš šéŕṽéŕ, šö ţĥéšé đéṽîçéš çåñ’ţ šîĝñ îñ. Ýöû çåñ šţîļļ ŕéɱöṽé ţĥéɱ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.users.detail.appKeys.waiting.description": [
@@ -146421,20 +146492,6 @@
       "value": "⟦Ĥöŵ ţö ûšé ţĥîš ķéý~~~~~~~~⟧"
     }
   ],
-  "web.settings.appKeys.row.added": [
-    {
-      "type": 0,
-      "value": "⟦Åđđéđ "
-    },
-    {
-      "type": 1,
-      "value": "date"
-    },
-    {
-      "type": 0,
-      "value": "~~~⟧"
-    }
-  ],
   "web.settings.appKeys.row.allowedBy": [
     {
       "type": 0,
@@ -151947,6 +152004,12 @@
     {
       "type": 0,
       "value": "⟦Šîĝñ ţĥé Šîļö åþþ öñ ýöûŕ þĥöñé öŕ ţåƀļéţ îñ ţö ţĥîš åççöûñţ, ŵîţĥöûţ å þåššŵöŕđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "⟦Öñļý ţĥé ĥöûšéĥöļđ’š ɱåîñ þŕöƒîļé çåñ öþéñ Šîļö ƒöŕ ţĥîš åççöûñţ. Šŵîţçĥ ţö îţ åñđ ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.settings.openInSilo.title": [

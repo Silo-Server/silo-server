@@ -24987,18 +24987,73 @@
       }
     }
   ],
-  "web.admin.common.adminUserSignIn.unlinkConfirm.keysRevoked": [
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
     {
       "type": 0,
       "value": "\u200F"
     },
     {
-      "type": 1,
-      "value": "username"
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "\u202E can no longer sign in with this provider account. \u202C"
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "\u202E won’t be able to sign in until you set a password or connect a provider again.\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "\u202E can no longer sign in with this provider account.\u202C"
+            }
+          ]
+        }
+      }
     },
     {
-      "type": 0,
-      "value": "\u202E’s Silo app keys tied to this provider account are removed, and those devices are signed out.\u202C"
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "\u202E’s Silo app keys tied to this provider account are removed, and those devices are signed out.\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
     }
   ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
@@ -90711,6 +90766,12 @@
       "value": "\u202E approved for a device that hasn’t connected yet.\u202C"
     }
   ],
+  "web.admin.users.detail.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t load the sign-ins approved in advance.\u202C"
+    }
+  ],
   "web.admin.users.detail.appKeys.preapprovals.title": [
     {
       "type": 0,
@@ -90741,6 +90802,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ESilo app devices\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo app sign-in isn’t available on this server, so these devices can’t sign in. You can still remove them.\u202C"
     }
   ],
   "web.admin.users.detail.appKeys.waiting.description": [
@@ -141417,16 +141484,6 @@
       "value": "\u200F\u202EHow to use this key\u202C"
     }
   ],
-  "web.settings.appKeys.row.added": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdded \u202C"
-    },
-    {
-      "type": 1,
-      "value": "date"
-    }
-  ],
   "web.settings.appKeys.row.allowedBy": [
     {
       "type": 0,
@@ -146779,6 +146836,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ESign the Silo app on your phone or tablet in to this account, without a password.\u202C"
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOnly the household’s main profile can open Silo for this account. Switch to it and try again.\u202C"
     }
   ],
   "web.settings.openInSilo.title": [

@@ -194,8 +194,13 @@ func (h *AuthHandler) VerifyProfileSet(ctx context.Context, req auth.KeyRequest)
 	return h.appKeys.VerifyProfileSet(ctx, req)
 }
 
-// ProfileSetSessionAllowed refuses a login session that may not read or
-// send the account's profile set.
-func (h *AuthHandler) ProfileSetSessionAllowed(ctx context.Context, claims *auth.Claims) error {
-	return h.appKeys.ProfileSetSessionAllowed(ctx, claims)
+// SessionMayManageKeys refuses a login session that may not manage the
+// account's keys or read or send its profile set. Without app key sign-in
+// wired it refuses nothing: approving a device sign-in in advance, which
+// also asks, checks the session again in its own transaction.
+func (h *AuthHandler) SessionMayManageKeys(ctx context.Context, claims *auth.Claims) error {
+	if h.appKeys == nil {
+		return nil
+	}
+	return h.appKeys.SessionMayManageKeys(ctx, claims)
 }
