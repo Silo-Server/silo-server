@@ -617,6 +617,12 @@
       "value": "⟦Ýöûŕ šéššîöñ éẋþîŕéđ. Šîĝñ îñ åĝåîñ.~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "⟦Ţûŕñ öñ å šîĝñ-îñ þŕöṽîđéŕ ƀéƒöŕé ţûŕñîñĝ öƒƒ þåššŵöŕđ šîĝñ-îñ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -86205,6 +86211,242 @@
       "value": "⟦Ļéţ ûšéŕš çŕéåţé ÅÞÎ ķéýš~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "⟦Ţûŕñ öƒƒ þåššŵöŕđ šîĝñ-îñ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "⟦Öñļý ƀŕéåķ-ĝļåšš åđɱîñš ŵîļļ šîĝñ îñ ŵîţĥ å þåššŵöŕđ. Éṽéŕýöñé éļšé šîĝñš îñ ŵîţĥ "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " çŕéåţéš åççöûñţš åţ ƒîŕšţ šîĝñ-îñ, šö îƒ öñé öƒ ţĥéšé þéöþļé šîĝñš îñ ŵîţĥ îţ ƀéƒöŕé ýöû ļîñķ ţĥéɱ, ţĥéý ĝéţ å ñéŵ, šéþåŕåţé åççöûñţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "⟦Ļîñķ éåçĥ öñé ţö å "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " åççöûñţ ƒŕöɱ îţš þåĝé îñ Ûšéŕš.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " åççöûñţ çåñ'ţ šîĝñ îñ ûñţîļ åñ åđɱîñ ļîñķš îţ~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " åççöûñţš çåñ'ţ šîĝñ îñ ûñţîļ åñ åđɱîñ ļîñķš ţĥéɱ~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ'ţ çĥéçķ ŵĥîçĥ åççöûñţš ţĥîš åƒƒéçţš. Ýöû çåñ šţîļļ ţûŕñ îţ öƒƒ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "⟦Çĥéçķîñĝ ŵĥö šîĝñš îñ ŵîţĥ å þåššŵöŕđ~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "⟦Ŵĥéñ "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " çöñƒîŕɱš öñé öƒ ţĥéšé éɱåîļš åţ šîĝñ-îñ, Šîļö çöññéçţš ţĥåţ þéŕšöñ ţö ţĥéîŕ åççöûñţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " åççöûñţ çöññéçţš ƀý éɱåîļ~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " åççöûñţš çöññéçţ ƀý éɱåîļ~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦åñđ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ɱöŕé~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦åñđ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ɱöŕé~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "⟦Éṽéŕý åççöûñţ çåñ šţîļļ šîĝñ îñ åƒţéŕ ţĥîš.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "⟦Éɱåîļ ɱåţçĥîñĝ îš öƒƒ~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "⟦Ñö éɱåîļ~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "⟦Åñýöñé åļŕéåđý šîĝñéđ îñ šţåýš šîĝñéđ îñ ûñţîļ ţĥéîŕ šéššîöñ éñđš.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "⟦Ţûŕñ öƒƒ þåššŵöŕđ šîĝñ-îñ?~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "⟦Šéé éṽéŕý åççöûñţ îñ Ûšéŕš~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -132111,6 +132353,20 @@
     {
       "type": 0,
       "value": "⟦Ļåšţ Åîŕ Đåţé~~~~~~⟧"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "⟦Ļöçķ "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
     }
   ],
   "web.item.editMetadata.locked": [

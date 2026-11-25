@@ -120749,6 +120749,16 @@
       "value": "आखिरी प्रसारण की तारीख"
     }
   ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " लॉक करें"
+    }
+  ],
   "web.item.editMetadata.locked": [
     {
       "type": 0,
