@@ -35,22 +35,28 @@ var allowedMDBListHosts = map[string]struct{}{
 }
 
 // NormalizeMDBListURL accepts either an MDBList page URL or its JSON variant
-// and returns the canonical JSON URL. Trailing slashes and accidental repeated
-// /json suffixes are tolerated. It does not validate the host; call
-// ValidateMDBListURL (or CanonicalMDBListURL) before fetching.
+// and returns the canonical JSON URL. A query string or fragment copied from
+// the browser is dropped, since /json has to end the path for the feed to
+// answer with JSON. Trailing slashes and repeated /json suffixes, in any case,
+// are tolerated. It does not validate the host; call ValidateMDBListURL (or
+// CanonicalMDBListURL) before fetching.
 func NormalizeMDBListURL(raw string) string {
 	raw = strings.TrimSpace(raw)
+	if i := strings.IndexAny(raw, "?#"); i >= 0 {
+		raw = raw[:i]
+	}
+	raw = strings.TrimRight(raw, "/")
 	if raw == "" {
 		return ""
 	}
-	raw = strings.TrimRight(raw, "/")
-	for strings.HasSuffix(raw, "/json/json") {
-		raw = strings.TrimSuffix(raw, "/json")
+	for hasJSONSuffix(raw) {
+		raw = strings.TrimRight(raw[:len(raw)-len("/json")], "/")
 	}
-	if !strings.HasSuffix(raw, "/json") {
-		raw += "/json"
-	}
-	return raw
+	return raw + "/json"
+}
+
+func hasJSONSuffix(s string) bool {
+	return len(s) >= len("/json") && strings.EqualFold(s[len(s)-len("/json"):], "/json")
 }
 
 // CanonicalMDBListURL normalizes then allowlists the URL used for MDBList
