@@ -2826,6 +2826,8 @@ export interface AdminSession {
   updated_at: string;
   position_seconds: number;
   is_paused: boolean;
+  /** Number of the session's last lifecycle transition; absent before lifecycle numbers existed. */
+  lifecycle_seq?: number | null;
   has_playback_control?: boolean;
   client_ip?: string;
   /** Server classification used to select the local or remote stream bitrate policy. */
