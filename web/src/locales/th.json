@@ -93071,6 +93071,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "ซ่อนชื่อเรื่องที่ดูแล้ว"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "แต่ละโปรไฟล์จะเห็นคอลเลกชันนี้โดยไม่มีชื่อเรื่องที่โปรไฟล์นั้นดูแล้ว ทั้งในหน้าคอลเลกชัน ในแถว และในจำนวนชื่อเรื่อง โดยไม่ได้นำสิ่งใดออก คอลเลกชันอัจฉริยะที่จำกัดจำนวนชื่อเรื่องจะเลือกชื่อเรื่องก่อน จึงอาจแสดงได้น้อยลง"
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -111908,6 +111920,16 @@
     {
       "type": 0,
       "value": "วันที่ออกอากาศครั้งล่าสุด"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "ล็อกช่อง "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

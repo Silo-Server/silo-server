@@ -110791,6 +110791,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Ocultar títulos vistos"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Cada perfil ve esta colección sin los títulos que ya vio, en su página, en sus filas y en su recuento. No se elimina nada. Una colección inteligente con límite de títulos elige primero sus títulos, así que puede mostrar menos."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -132236,6 +132248,16 @@
     {
       "type": 0,
       "value": "Fecha del último episodio"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Bloquear "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

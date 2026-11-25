@@ -100890,6 +100890,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Gesehene Titel ausblenden"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Jedes Profil sieht diese Sammlung ohne die Titel, die es gesehen hat: auf ihrer Seite, in ihren Reihen und in ihrer Anzahl. Es wird nichts entfernt. Eine intelligente Sammlung mit Titelbegrenzung wählt zuerst ihre Titel aus und zeigt daher eventuell weniger an."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -120869,6 +120881,16 @@
     {
       "type": 0,
       "value": "Letzte Ausstrahlung"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " sperren"
     }
   ],
   "web.item.editMetadata.locked": [

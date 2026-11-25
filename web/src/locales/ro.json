@@ -110983,6 +110983,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Ascunderea titlurilor vizionate"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Fiecare profil vede această colecție fără titlurile pe care le-a vizionat, pe pagina colecției, în rândurile ei și în numărul de titluri. Nu se elimină nimic. O colecție inteligentă cu o limită de titluri își alege mai întâi titlurile, așa că poate afișa mai puține."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -132616,6 +132628,16 @@
     {
       "type": 0,
       "value": "Data ultimei difuzări"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Blocați câmpul "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

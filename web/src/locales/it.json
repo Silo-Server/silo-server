@@ -110653,6 +110653,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Nascondi i titoli visti"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Ogni profilo vede questa raccolta senza i titoli che ha visto, nella sua pagina, nelle sue righe e nel suo conteggio. Non viene rimosso nulla. Una raccolta smart con un limite di titoli sceglie prima i suoi titoli, quindi può mostrarne meno."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -132114,6 +132126,16 @@
     {
       "type": 0,
       "value": "Ultima messa in onda"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Blocca "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

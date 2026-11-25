@@ -100674,6 +100674,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Bekeken titels verbergen"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Elk profiel ziet deze collectie zonder de titels die het heeft bekeken, op de pagina, in de rijen en in het aantal. Er wordt niets verwijderd. Een slimme collectie met een titellimiet kiest eerst de titels, dus kan er minder tonen."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -120671,6 +120683,16 @@
     {
       "type": 0,
       "value": "Laatste uitzenddatum"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " vergrendelen"
     }
   ],
   "web.item.editMetadata.locked": [

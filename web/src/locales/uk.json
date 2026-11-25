@@ -120358,6 +120358,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Приховувати переглянуті фільми й серіали"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Кожен профіль бачить цю колекцію без фільмів і серіалів, які в ньому переглянуто: на сторінці колекції, у рядах і в лічильнику. Нічого не видаляється. Розумна колекція з обмеженням кількості спершу вибирає фільми й серіали, тому може показувати менше."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -143335,6 +143347,20 @@
     {
       "type": 0,
       "value": "Дата останнього ефіру"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Заблокувати поле «"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "»"
     }
   ],
   "web.item.editMetadata.locked": [

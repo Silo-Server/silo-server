@@ -91747,6 +91747,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Sembunyikan tajuk yang ditonton"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Setiap profil melihat koleksi ini tanpa tajuk yang sudah ditonton oleh profil itu, di halamannya, dalam barisnya dan dalam kiraannya. Tiada apa yang dialih keluar. Koleksi pintar yang mempunyai had tajuk memilih tajuknya dahulu, jadi koleksi itu mungkin menunjukkan lebih sedikit tajuk."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -110490,6 +110502,16 @@
     {
       "type": 0,
       "value": "Tarikh siaran terakhir"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Kunci "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

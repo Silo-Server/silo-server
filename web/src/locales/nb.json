@@ -101336,6 +101336,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Skjul sette titler"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Hver profil ser denne samlingen uten titlene den har sett, på siden, i radene og i antallet. Ingenting blir fjernet. En smart samling med grense for antall titler velger titlene sine først, så den kan vise færre."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -121451,6 +121463,16 @@
     {
       "type": 0,
       "value": "Siste sendedato"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Lås "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

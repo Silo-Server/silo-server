@@ -78995,6 +78995,38 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.settings.signIn.page.demoAccountDescription": [
+    {
+      "type": 0,
+      "value": "The account every visitor of a public demo signs in to. While demo mode is on, failed sign-ins with this account's names don't count toward the per-name limit, which every visitor would otherwise share. Limits per address still apply. Leave empty to name none."
+    }
+  ],
+  "web.admin.settings.signIn.page.demoAccountLabel": [
+    {
+      "type": 0,
+      "value": "Demo account ID"
+    }
+  ],
+  "web.admin.settings.signIn.page.demoAccountNames": [
+    {
+      "type": 0,
+      "value": "Names the account "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.page.demoGroup": [
+    {
+      "type": 0,
+      "value": "Demo mode"
+    }
+  ],
   "web.admin.settings.signIn.page.emailMatchDescription": [
     {
       "type": 0,
@@ -101316,6 +101348,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Hide watched titles"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Each profile sees this collection without the titles it has watched, on its page, in its rows and in its count. Nothing is removed. A smart collection with a title limit picks its titles first, so it can show fewer."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -121455,6 +121499,16 @@
     {
       "type": 0,
       "value": "Last Air Date"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Lock "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

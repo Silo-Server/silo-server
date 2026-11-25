@@ -86007,6 +86007,38 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.settings.signIn.page.demoAccountDescription": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé åççöûñţ éṽéŕý ṽîšîţöŕ öƒ å þûƀļîç đéɱö šîĝñš îñ ţö. Ŵĥîļé đéɱö ɱöđé îš öñ, ƒåîļéđ šîĝñ-îñš ŵîţĥ ţĥîš åççöûñţ'š ñåɱéš đöñ'ţ çöûñţ ţöŵåŕđ ţĥé þéŕ-ñåɱé ļîɱîţ, ŵĥîçĥ éṽéŕý ṽîšîţöŕ ŵöûļđ öţĥéŕŵîšé šĥåŕé. Ļîɱîţš þéŕ åđđŕéšš šţîļļ åþþļý. Ļéåṽé éɱþţý ţö ñåɱé ñöñé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.page.demoAccountLabel": [
+    {
+      "type": 0,
+      "value": "⟦Đéɱö åççöûñţ ÎĐ~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.page.demoAccountNames": [
+    {
+      "type": 0,
+      "value": "⟦Ñåɱéš ţĥé åççöûñţ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.page.demoGroup": [
+    {
+      "type": 0,
+      "value": "⟦Đéɱö ɱöđé~~~~⟧"
+    }
+  ],
   "web.admin.settings.signIn.page.emailMatchDescription": [
     {
       "type": 0,
@@ -110052,6 +110084,18 @@
       "value": "~~~~⟧"
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîđé ŵåţçĥéđ ţîţļéš~~~~~~~~⟧"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "⟦Éåçĥ þŕöƒîļé šééš ţĥîš çöļļéçţîöñ ŵîţĥöûţ ţĥé ţîţļéš îţ ĥåš ŵåţçĥéđ, öñ îţš þåĝé, îñ îţš ŕöŵš åñđ îñ îţš çöûñţ. Ñöţĥîñĝ îš ŕéɱöṽéđ. Å šɱåŕţ çöļļéçţîöñ ŵîţĥ å ţîţļé ļîɱîţ þîçķš îţš ţîţļéš ƒîŕšţ, šö îţ çåñ šĥöŵ ƒéŵéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -132111,6 +132155,20 @@
     {
       "type": 0,
       "value": "⟦Ļåšţ Åîŕ Đåţé~~~~~~⟧"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "⟦Ļöçķ "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
     }
   ],
   "web.item.editMetadata.locked": [

@@ -91815,6 +91815,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "視聴済みのタイトルを非表示"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "各プロフィールでは、そのプロフィールが視聴したタイトルを除いた状態でこのコレクションが表示されます（ページ、行、件数のすべてに適用）。何も削除されません。タイトル数に上限があるスマートコレクションでは先にタイトルが選ばれるため、表示される数が少なくなることがあります。"
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -110256,6 +110268,16 @@
     {
       "type": 0,
       "value": "最終放送日"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "をロック"
     }
   ],
   "web.item.editMetadata.locked": [

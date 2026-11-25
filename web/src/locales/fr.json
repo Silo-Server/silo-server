@@ -110505,6 +110505,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Masquer les titres vus"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Chaque profil voit cette collection sans les titres qu’il a vus, sur sa page, dans ses rangées et dans son nombre de titres. Rien n’est supprimé. Une collection intelligente avec une limite de titres choisit d’abord ses titres ; elle peut donc en afficher moins."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -131876,6 +131888,16 @@
     {
       "type": 0,
       "value": "Date de dernière diffusion"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Verrouiller "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

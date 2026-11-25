@@ -110695,6 +110695,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Ocultar títulos assistidos"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Cada perfil vê esta coleção sem os títulos que já assistiu, na página, nas fileiras e na contagem. Nada é removido. Uma coleção inteligente com limite de títulos escolhe os títulos primeiro, então pode mostrar menos."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -132150,6 +132162,16 @@
     {
       "type": 0,
       "value": "Data da última exibição"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Bloquear "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

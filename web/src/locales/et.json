@@ -101958,6 +101958,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Peida vaadatud pealkirjad"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Iga profiil näeb seda kollektsiooni ilma pealkirjadeta, mida see profiil on vaadanud: kollektsiooni lehel, ridades ja pealkirjade arvus. Midagi ei eemaldata. Pealkirjade piiranguga nutikas kollektsioon valib oma pealkirjad kõigepealt, nii et see võib näidata vähem pealkirju."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -122247,6 +122259,16 @@
     {
       "type": 0,
       "value": "Viimane eetrikuupäev"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Lukusta väli "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

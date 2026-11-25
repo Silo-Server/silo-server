@@ -112315,6 +112315,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Paslēpt noskatītos vienumus"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Katram profilam šī kolekcija tiek rādīta bez šajā profilā noskatītajiem vienumiem: kolekcijas lapā, rindās un vienumu skaitā. Nekas netiek noņemts. Viedā kolekcija ar vienumu skaita ierobežojumu vispirms atlasa vienumus, tāpēc tajā var būt mazāk vienumu."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -134281,6 +134293,20 @@
     {
       "type": 0,
       "value": "Pēdējās pārraides datums"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Bloķēt lauku „"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "”"
     }
   ],
   "web.item.editMetadata.locked": [
