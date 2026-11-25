@@ -141,7 +141,10 @@ func (r *profileSetRun) attempt(ctx context.Context) error {
 	for i, row := range plan.rowOf {
 		// An upload stored before hashes were kept gets its label now, so a
 		// set built from this server's own answer matches it.
-		if isUploadedAvatarRef(row.Avatar) && row.AvatarSourceSHA256 == "" && r.doc.Items[i].Picture != "" {
+		// A picture the owner set stays whatever the item says, so its
+		// upload is not read.
+		if isUploadedAvatarRef(row.Avatar) && row.AvatarSourceSHA256 == "" && r.doc.Items[i].Picture != "" &&
+			!r.edits.itemOverridden(i, profileedits.FieldPicture) {
 			if _, err := r.h.profileSetPicture(ctx, r.store, &row.Profile); err != nil {
 				return err
 			}

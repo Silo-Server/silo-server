@@ -978,6 +978,15 @@ func TestProfileSetAnswerNeedsNoUploadReadDB(t *testing.T) {
 	if res.Version != 2 || !sameOverrides(res.Overrides, want) {
 		t.Fatalf("answer = %+v", res)
 	}
+	// A set that names a picture for that profile is applied too: the
+	// owner's picture stays, so the upload behind it is never read.
+	res, err = f.apply(t, setDoc(t, 3, main, kid.with("max_content_rating", "R").with("picture", "sha256:"+strings.Repeat("a", 64))))
+	if err != nil {
+		t.Fatalf("a set naming a picture the owner overrides answered %v", err)
+	}
+	if res.Version != 3 || !sameOverrides(res.Overrides, want) {
+		t.Fatalf("answer = %+v", res)
+	}
 }
 
 // TestProfileSetLockedTokenRecheckDB: an edit that commits after a set's
