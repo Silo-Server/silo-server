@@ -127,11 +127,11 @@ export function MarkerSettingsGroup({
           dirty={lazyPlaybackKept}
           type="toggle"
           description={
-            lazyPlaybackOnline
-              ? localMarkersEnabled
+            onlineMarkersEnabled && !localMarkersEnabled
+              ? t("web.admin.settings.playback.markers.lazyPlaybackOnline")
+              : lazyPlaybackOnline
                 ? t("web.admin.settings.playback.markers.lazyPlaybackBoth")
-                : t("web.admin.settings.playback.markers.lazyPlaybackOnline")
-              : t("web.admin.settings.playback.markers.lazyPlaybackLocal")
+                : t("web.admin.settings.playback.markers.lazyPlaybackLocal")
           }
           value={form.getValue("markers.lazy_playback") || "true"}
           onChange={(value) => form.setValue("markers.lazy_playback", value)}
