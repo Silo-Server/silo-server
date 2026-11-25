@@ -373,6 +373,19 @@ reverse proxy adds survives; otherwise the request's own canonical origin. The
 older `silo://invite?server=&token=` link, which hands released Android builds
 the raw invitation token, is unchanged.
 
+**Only a join code travels in a link.** A link can be received by an app
+other than Silo (any app may claim a custom scheme), and whatever receives it
+can redeem the code first with its own keys. For a join code that gets it a
+new, empty account: the invitation is spent, so the invited person notices at
+once and the owner removes the account. That risk is accepted. A session code
+reaches an existing account, an administrator's included, so no page ever puts
+one in a link, a scannable link or anything a device could open: "Open in
+Silo" shows the server address and the code as text, to type in the app. The
+server can't tell a typed code from one lifted out of a link, so the
+protection is that no page makes such a link. (The protocol defines no
+scannable form for an app code: its link vectors cover the join link, which a
+camera would open as a URL, and the pairing QR, which carries no code.)
+
 There are two kinds:
 
 - **Join** (`POST /invitations/app-code`, public): the invite page's "Join
@@ -395,7 +408,8 @@ There are two kinds:
   name and block that person's own invitation. A code is refused where accept
   would be (an invitation that creates a profile the store can't create in the
   same transaction), so the page is never handed a code no redeem can use.
-- **Session** (`POST /auth/app-codes`): "Open in Silo" for a signed-in browser.
+- **Session** (`POST /auth/app-codes`): "Open in Silo" for a signed-in browser,
+  shown as text to type, never as a link.
   It is a key-creating operation: only a session that may manage keys
   (`ActionManageKeys`), acting as the household's verified main profile,
   rechecked under the account lock. The code records the session and its

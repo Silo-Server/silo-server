@@ -306,6 +306,14 @@ it("joins a link invitation through the Silo app without creating anything first
   expect(open.getAttribute("href")).toBe(
     "silo://join#v1.aHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbQ.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o",
   );
+  // A join code keeps both forms: the custom scheme and the https link.
+  expect(
+    screen
+      .getByRole("link", { name: "Open with the siloserver.org link instead" })
+      .getAttribute("href"),
+  ).toBe(
+    "https://siloserver.org/join#v1.aHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbQ.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o",
+  );
   expect(bodiesSentTo(fetchMock, "/api/v2/invitations/app-code")).toEqual([
     { token: "first-secret", username: "sam" },
   ]);

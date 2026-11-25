@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { createSessionAppCode, type AppCode } from "@/api/v2/appCodes";
+import { createSessionAppCode, type SessionAppCode } from "@/api/v2/appCodes";
 import { V2ProblemError } from "@/api/v2/request";
-import { OpenSiloStep } from "@/components/appKeys/OpenSiloStep";
+import { SessionCodeStep } from "@/components/appKeys/AppCodeStep";
 import { SignInAgainNotice } from "@/components/appKeys/SignInAgainNotice";
 import { ProfilePinDialog } from "@/components/profiles/ProfilePinDialog";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,7 @@ export function OpenInSiloSection() {
   const capability = useAppKeyCapability();
   const available = capability.data?.state === "available" && capability.data.app_codes;
   const access = useAppKeySessionAccess(Boolean(available) && !isImpersonating);
-  const [appCode, setAppCode] = useState<AppCode | null>(null);
+  const [appCode, setAppCode] = useState<SessionAppCode | null>(null);
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const [askPin, setAskPin] = useState(false);
@@ -70,7 +70,7 @@ export function OpenInSiloSection() {
   } else if (!access.data.manage || denied) {
     body = <SignInAgainNotice signInAgain={access.data.sign_in_again} />;
   } else if (appCode) {
-    body = <OpenSiloStep appCode={appCode} onRenew={() => void issue()} renewing={pending} />;
+    body = <SessionCodeStep appCode={appCode} onRenew={() => void issue()} renewing={pending} />;
   } else {
     body = (
       <Button type="button" onClick={() => void issue()} disabled={pending}>

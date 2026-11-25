@@ -1,3 +1,5 @@
+import type { JoinAppCode } from "@/api/v2/appCodes";
+
 /**
  * The link that hands the Silo app a server address and an app code. It
  * mirrors internal/appkeys/joinlink.go: both forms carry the same fragment,
@@ -19,7 +21,11 @@ function base64Url(text: string): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-/** Builds the join link. `serverAddress` is the server's answer, as given. */
-export function buildJoinLink(serverAddress: string, appCode: string, form: JoinLinkForm): string {
-  return `${prefixes[form]}v1.${base64Url(serverAddress)}.${appCode}`;
+/**
+ * Builds the join link for an invitation's code, with the server address
+ * the server answered with it. Only a join code may be put in a link; a
+ * session code is shown to type (SessionAppCode).
+ */
+export function buildJoinLink(joinCode: JoinAppCode, form: JoinLinkForm): string {
+  return `${prefixes[form]}v1.${base64Url(joinCode.server_address)}.${joinCode.code}`;
 }

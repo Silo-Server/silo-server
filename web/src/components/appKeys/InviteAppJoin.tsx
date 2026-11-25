@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { createInvitationAppCode, type AppCode } from "@/api/v2/appCodes";
+import { createInvitationAppCode, type JoinAppCode } from "@/api/v2/appCodes";
 import type { InvitationLookup } from "@/api/v2/publicInvitations";
 import { V2ProblemError } from "@/api/v2/request";
-import { OpenSiloStep } from "@/components/appKeys/OpenSiloStep";
+import { JoinLinkStep } from "@/components/appKeys/AppCodeStep";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,7 +31,7 @@ export function InviteAppJoin({
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [fieldError, setFieldError] = useState<FieldError>();
-  const [appCode, setAppCode] = useState<AppCode | null>(null);
+  const [appCode, setAppCode] = useState<JoinAppCode | null>(null);
   const [pending, setPending] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const lifetime = useRef<AbortController | null>(null);
@@ -180,7 +180,7 @@ export function InviteAppJoin({
     return (
       <>
         {refusalAlert}
-        <OpenSiloStep appCode={appCode} onRenew={() => void issue()} renewing={pending} />
+        <JoinLinkStep appCode={appCode} onRenew={() => void issue()} renewing={pending} />
       </>
     );
   }

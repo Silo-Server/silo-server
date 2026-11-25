@@ -1131,7 +1131,12 @@ request arrived on.
   creates an account whose only way in is its keys. Spends the `invitation`
   budget (20 a minute with a burst of 10 by default), which the page shares
   between the lookup, each code and each renewal.
-- `POST /auth/app-codes` is "Open in Silo". Refused (403 `permission_denied`)
+- `POST /auth/app-codes` is "Open in Silo". Its code reaches an existing
+  account, so a page shows it as text to type and never puts it in the join
+  link or any other link: an app that receives a link before Silo does could
+  redeem it, and the server can't tell a typed code from a lifted one. Only an
+  invitation's code goes in the link; whoever intercepts that gets a new, empty
+  account the invited person notices at once. Refused (403 `permission_denied`)
   for an API key, an administrator acting as the account, a remote-playback
   session, a session opened by device sign-in or by another app's key, and a
   session older than the record of how sessions open. The keys take this

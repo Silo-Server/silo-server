@@ -146857,7 +146857,25 @@
   "web.settings.openInSilo.action": [
     {
       "type": 0,
-      "value": "\u200F\u202EOpen in Silo\u202C"
+      "value": "\u200F\u202EGet a code for the Silo app\u202C"
+    }
+  ],
+  "web.settings.openInSilo.code": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECode\u202C"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIn the Silo app on your phone or tablet, add this server by its address and type this code. Anyone with the code can sign in to this account, so don’t share it.\u202C"
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECode for the Silo app\u202C"
     }
   ],
   "web.settings.openInSilo.description": [
@@ -146869,19 +146887,25 @@
   "web.settings.openInSilo.loadFailed": [
     {
       "type": 0,
-      "value": "\u200F\u202ECouldn’t check whether this browser can open Silo.\u202C"
+      "value": "\u200F\u202ECouldn’t check whether this browser can get a code for the Silo app.\u202C"
     }
   ],
   "web.settings.openInSilo.mainProfileOnly": [
     {
       "type": 0,
-      "value": "\u200F\u202EOnly the household’s main profile can open Silo for this account. Switch to it and try again.\u202C"
+      "value": "\u200F\u202EOnly the household’s main profile can get a code for the Silo app. Switch to it and try again.\u202C"
     }
   ],
   "web.settings.openInSilo.pinDescription": [
     {
       "type": 0,
-      "value": "\u200F\u202EEnter the main profile’s PIN to open Silo for this account.\u202C"
+      "value": "\u200F\u202EEnter the main profile’s PIN to get a code for the Silo app.\u202C"
+    }
+  ],
+  "web.settings.openInSilo.serverAddress": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EServer address\u202C"
     }
   ],
   "web.settings.openInSilo.title": [

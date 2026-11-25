@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { JoinAppCode } from "@/api/v2/appCodes";
 import { buildJoinLink, type JoinLinkForm } from "./joinLink";
 import vectors from "./joinLink.vectors.json";
 
@@ -20,6 +21,11 @@ describe("buildJoinLink", () => {
     expect(cases.length).toBeGreaterThan(0);
   });
   it.each(cases.map((c) => [c.name, c] as const))("builds %s", (_, c) => {
-    expect(buildJoinLink(c.address, c.app_code, c.form)).toBe(c.string);
+    const joinCode = {
+      code: c.app_code,
+      server_address: c.address,
+      expires_in: 600,
+    } as JoinAppCode;
+    expect(buildJoinLink(joinCode, c.form)).toBe(c.string);
   });
 });

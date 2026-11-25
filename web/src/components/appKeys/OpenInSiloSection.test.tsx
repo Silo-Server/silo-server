@@ -80,11 +80,11 @@ it("asks for the main profile's PIN and tries again", async () => {
     .mockResolvedValueOnce(code);
   state.verifyProfilePin.mockResolvedValue({ valid: true, profile_token: "tok" });
   mount();
-  fireEvent.click(screen.getByRole("button", { name: "Open in Silo" }));
+  fireEvent.click(screen.getByRole("button", { name: "Get a code for the Silo app" }));
   const pin = await screen.findByLabelText("PIN");
   fireEvent.change(pin, { target: { value: "1234" } });
   fireEvent.submit(pin.closest("form")!);
-  await screen.findByRole("link", { name: "Open Silo" });
+  await screen.findByText(code.code);
   expect(state.selectProfile).toHaveBeenCalledWith(
     expect.objectContaining({ id: "p-main" }),
     "tok",
@@ -97,9 +97,9 @@ it("asks for the main profile's PIN and tries again", async () => {
 it("says only the main profile can open Silo", async () => {
   state.createSessionAppCode.mockRejectedValueOnce(problem("main_profile_required", 403));
   mount();
-  fireEvent.click(screen.getByRole("button", { name: "Open in Silo" }));
+  fireEvent.click(screen.getByRole("button", { name: "Get a code for the Silo app" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Only the household’s main profile can open Silo",
+    "Only the household’s main profile can get a code",
   );
 });
 
@@ -108,8 +108,35 @@ it("says only the main profile can open Silo", async () => {
 it("shows the session notice when the server refuses this sign-in", async () => {
   state.createSessionAppCode.mockRejectedValueOnce(problem("permission_denied", 403));
   mount();
-  fireEvent.click(screen.getByRole("button", { name: "Open in Silo" }));
+  fireEvent.click(screen.getByRole("button", { name: "Get a code for the Silo app" }));
   expect(await screen.findByText("Manage your devices in the Silo app.")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Open in Silo" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Get a code for the Silo app" })).toBeNull();
   expect(state.access.refetch).toHaveBeenCalledTimes(1);
+});
+
+// A session code reaches an existing account, so it is shown to type and is
+// never put in anything a device could open: no href, no src and no text
+// with a URL that carries the code. Any app can claim a link's scheme and
+// would redeem the code first.
+it("never puts the session code in a link", async () => {
+  state.createSessionAppCode.mockResolvedValueOnce(code);
+  const { container } = render(
+    <MemoryRouter>
+      <OpenInSiloSection />
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Get a code for the Silo app" }));
+  expect(await screen.findByText(code.code)).toBeTruthy();
+  expect(screen.getByText(code.server_address)).toBeTruthy();
+  const urlWithCode = new RegExp(`(silo|https?):[^\\s"']*${code.code}`);
+  for (const element of container.querySelectorAll("*")) {
+    for (const attribute of element.attributes) {
+      expect(attribute.value, `${element.tagName} ${attribute.name}`).not.toContain(code.code);
+    }
+  }
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    expect(node.textContent ?? "").not.toMatch(urlWithCode);
+  }
+  expect(container.querySelector("a, img, svg, canvas")).toBeNull();
 });
