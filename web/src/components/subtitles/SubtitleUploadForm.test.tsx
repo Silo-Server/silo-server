@@ -42,16 +42,26 @@ describe("SubtitleUploadForm", () => {
   });
 
   it("keeps a language the user picked when a file is rejected", async () => {
+    // With no language cues in the file, the detector echoes the user's pick
+    // back as a "manual" fallback.
+    const detectLanguage = vi.fn(async (_file: File, fallback?: string) => ({
+      language: fallback ?? "",
+      source: "manual" as const,
+    }));
     const { container } = render(
       <SubtitleUploadForm
         mediaFileId={1}
         upload={vi.fn(async () => {})}
+        detectLanguage={detectLanguage}
         onSuccess={vi.fn()}
         variant="player"
       />,
     );
     const languageSelect = screen.getByRole("combobox", { name: "Upload language" });
     fireEvent.change(languageSelect, { target: { value: "de" } });
+    chooseFile(container, new File(["1\n"], "episode.srt", { type: "application/x-subrip" }));
+    await waitFor(() => expect(detectLanguage).toHaveBeenCalledWith(expect.any(File), "de"));
+    await waitFor(() => expect(languageSelect).not.toBeDisabled());
 
     chooseFile(container, new File(["notes"], "notes.txt", { type: "text/plain" }));
 
