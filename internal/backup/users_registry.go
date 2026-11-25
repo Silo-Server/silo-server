@@ -70,6 +70,8 @@ const (
 var excludedUserTables = map[string]string{
 	// Sessions, credentials, devices, and links to outside accounts.
 	"auth_sessions":                    "login sessions",
+	"auth_person_keys":                 "app person keys, left out like login sessions",
+	"auth_device_keys":                 "app device keys, left out like login sessions",
 	tableAPIKeys:                       "API keys",
 	"oauth_completions":                excludedSignIn,
 	"oauth_link_tickets":               excludedSignIn,
