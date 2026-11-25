@@ -132,7 +132,10 @@ export default function AdminDashboard() {
   }, [dashboardDataUpdatedAt, hasDashboardData]);
 
   const refreshDashboard = useCallback(
-    async ({ manual }: { manual: boolean }) => {
+    // freshInsights is for the Refresh button only: it asks the server to
+    // drop its cached Insights, where a catch-up on returning to the page
+    // takes what the server's cache serves.
+    async ({ manual, freshInsights = false }: { manual: boolean; freshInsights?: boolean }) => {
       const profileContext = captureProfileRequestContext();
       if (!profileContext) return;
       const order = dashboardRefreshOrder(queryClient);
@@ -142,7 +145,7 @@ export default function AdminDashboard() {
         setIsManualRefreshPending(true);
       }
       try {
-        if (manual) markAdminInsightsRefresh();
+        if (freshInsights) markAdminInsightsRefresh();
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: adminKeys.stats(), refetchType: "none" }),
           queryClient.invalidateQueries({ queryKey: adminKeys.sessions(), refetchType: "none" }),
@@ -157,9 +160,9 @@ export default function AdminDashboard() {
           ),
           // Insights-backed widgets pace themselves (dashboardInsightsInterval);
           // only a refresh the admin asked for, or a return to the tab, re-reads
-          // them. A refresh the admin asked for also asks the server for fresh
-          // data: between those reads it serves its cached copy while it
-          // refreshes in the background.
+          // them. The Refresh button also asks the server for fresh data:
+          // otherwise it serves its cached copy while it refreshes in the
+          // background.
           ...(manual
             ? [queryClient.invalidateQueries({ queryKey: adminKeys.insightsRoot() })]
             : []),
@@ -293,7 +296,7 @@ export default function AdminDashboard() {
                 size="sm"
                 className="min-w-[8.25rem] justify-center sm:w-auto"
                 onClick={() => {
-                  void refreshDashboard({ manual: true });
+                  void refreshDashboard({ manual: true, freshInsights: true });
                 }}
                 disabled={isManualRefreshPending}
                 aria-busy={isManualRefreshPending}

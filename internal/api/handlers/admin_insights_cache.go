@@ -29,9 +29,10 @@ import (
 //     requests in one generation share that fill, which is canceled once every
 //     request waiting on it has left.
 //
-// Invalidate, which admin events (account, item and node changes) and the
-// Refresh button call, drops every entry instead, and a read that started
-// before it publishes nothing, so the change shows on the next read.
+// Invalidate, which admin events (account, item and node changes) call, drops
+// every entry instead, and a read that started before it publishes nothing,
+// so the change shows on the next read. A refresh=true read (the Refresh
+// button) marks every entry stale and waits for fresh data for its own key.
 //
 // A sweep refreshes keys an event marked stale and read within
 // adminInsightsKeepWarmFor, every insightsKeepWarmInterval of their cost, and
@@ -60,8 +61,10 @@ type AdminInsightsProvider struct {
 
 const (
 	// adminInsightsServeStaleFor bounds how old a cached read can be and
-	// still be served at once, and how long an unread key is kept.
-	adminInsightsServeStaleFor = 30 * time.Minute
+	// still be served at once, and how long an unread key is kept: a tab
+	// someone is browsing stays warm, and one opened again after a longer
+	// break, or polled less often, waits for fresh data as before.
+	adminInsightsServeStaleFor = 10 * time.Minute
 	// adminInsightsKeepWarmFor is how long after its last read the sweep
 	// keeps refreshing a key, so background reads stop soon after the
 	// Insights page is closed.
@@ -71,6 +74,10 @@ const (
 	// admin:monitor API key can ask for any of them; the least recently read
 	// entry makes room for a new one.
 	adminInsightsMaxEntries = 128
+	// adminInsightsMaxQueuedRefreshes caps the background refreshes started
+	// or waiting for the single slot. A waiting one keeps its entry alive
+	// even after eviction, so the cap also bounds what the queue holds.
+	adminInsightsMaxQueuedRefreshes = 8
 	// adminInsightsSweepInterval is how often the warm keys are checked.
 	adminInsightsSweepInterval = 15 * time.Second
 )
@@ -200,13 +207,14 @@ func shouldInvalidateInsightsOnPlaybackEvent(event cache.Event) bool {
 }
 
 // Invalidate drops every cached Insights entry and keeps reads that started
-// before it from publishing, for a change a stale entry must not show: an
-// admin event, or the Refresh button.
+// before it from publishing, for an admin event: a change a stale entry must
+// not show.
 func (p *AdminInsightsProvider) Invalidate() {
 	if p == nil {
 		return
 	}
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.gen++
 	p.dropGen++
 	clear(p.entries)
@@ -215,7 +223,17 @@ func (p *AdminInsightsProvider) Invalidate() {
 	if p.refreshCancel != nil {
 		p.refreshCancel()
 	}
-	p.mu.Unlock()
+}
+
+// Refresh handles a user's refresh=true read: it marks every cached entry
+// stale, so each refreshes when next read, and returns a context whose reads
+// wait for fresh data. Nothing is dropped, so a Refresh on one page doesn't
+// cost every other tab its cached read.
+func (p *AdminInsightsProvider) Refresh(ctx context.Context) context.Context {
+	if p != nil {
+		p.markStale()
+	}
+	return withInsightsForceRefresh(ctx)
 }
 
 // markStale marks every cached entry stale. Reads still serve them while a
@@ -250,6 +268,19 @@ func (p *AdminInsightsProvider) Close() {
 
 func insightsWindowCacheable(rangeVal string) bool {
 	return normalizeInsightsRange(rangeVal) != InsightsRangeCustom
+}
+
+type insightsForceRefreshKey struct{}
+
+// withInsightsForceRefresh marks ctx's reads as user-requested refreshes: they
+// skip the cached entry and wait for a fresh read.
+func withInsightsForceRefresh(ctx context.Context) context.Context {
+	return context.WithValue(ctx, insightsForceRefreshKey{}, true)
+}
+
+func insightsForceRefresh(ctx context.Context) bool {
+	force, _ := ctx.Value(insightsForceRefreshKey{}).(bool)
+	return force
 }
 
 // insightsFillCall is one shared fill and the requests waiting on it.
@@ -289,14 +320,21 @@ func cachedInsightsRead[T any](ctx context.Context, p *AdminInsightsProvider, ke
 
 func (p *AdminInsightsProvider) read(ctx context.Context, key string, load func(context.Context) (any, error)) (any, error) {
 	p.mu.Lock()
-	if val, ok := p.cachedLocked(key); ok {
+	fillKey := fmt.Sprintf("%s#%d", key, p.dropGen)
+	if insightsForceRefresh(ctx) {
+		// A forced read joins only fills that started after the Refresh
+		// behind it, which advanced the generation; it still counts as a read.
+		fillKey = fmt.Sprintf("%s#%d#%d", key, p.dropGen, p.gen)
+		if e := p.entries[key]; e != nil {
+			e.lastRead = time.Now()
+		}
+	} else if val, ok := p.cachedLocked(key); ok {
 		p.mu.Unlock()
 		return val, nil
 	}
-	// One fill per key until Invalidate: a read after it never joins a fill
-	// that started before it, while playback events, which only mark entries
-	// stale, leave concurrent misses sharing one read.
-	fillKey := fmt.Sprintf("%s#%d", key, p.dropGen)
+	// Otherwise one fill per key until Invalidate: a read after it never
+	// joins a fill that started before it, while playback events, which only
+	// mark entries stale, leave concurrent misses sharing one read.
 	call := p.fills[fillKey]
 	if call == nil {
 		fillCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), adminHistoryReadTimeout)
@@ -417,7 +455,8 @@ func (p *AdminInsightsProvider) evictLeastReadLocked() {
 // running; warm marks one the sweep started for a key nobody is reading. It
 // runs only while the provider is open (NewAdminInsightsProvider).
 func (p *AdminInsightsProvider) startRefreshLocked(key string, e *insightsEntry, warm bool) {
-	if p.refreshContext == nil || p.closed() || p.refreshing[key] {
+	if p.refreshContext == nil || p.closed() || p.refreshing[key] ||
+		len(p.refreshing) >= adminInsightsMaxQueuedRefreshes {
 		return
 	}
 	if p.refreshing == nil {

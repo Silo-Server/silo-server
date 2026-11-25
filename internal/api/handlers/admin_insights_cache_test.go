@@ -625,3 +625,77 @@ func TestAdminInsightsPlaybackEventsKeepFillsSharedAndInvalidateStopsRefresh(t *
 		})
 	})
 }
+
+// TestAdminInsightsRefreshForcesOnlyItsOwnKey pins what a refresh=true read
+// does: it waits for fresh data for its own key and keeps it, and leaves the
+// other keys cached (stale, refreshing when read) rather than dropping them,
+// so a Refresh on one page doesn't cost every other tab its cached read.
+func TestAdminInsightsRefreshForcesOnlyItsOwnKey(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p, err := NewAdminInsightsProvider(t.Context(), nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer p.Close()
+		var loadsA, loadsB atomic.Int32
+		loadA := func(context.Context) (int, error) { return int(loadsA.Add(1)), nil }
+		loadB := func(context.Context) (int, error) { return 10 * int(loadsB.Add(1)), nil }
+		read := func(ctx context.Context, key string, load func(context.Context) (int, error)) int {
+			t.Helper()
+			v, err := cachedInsightsRead(ctx, p, key, load)
+			if err != nil {
+				t.Fatalf("read %s: %v", key, err)
+			}
+			return v
+		}
+		read(t.Context(), "a", loadA)
+		read(t.Context(), "b", loadB)
+
+		if v := read(p.Refresh(t.Context()), "a", loadA); v != 2 {
+			t.Fatalf("forced read of a = %d, want the fresh 2", v)
+		}
+		if v := read(t.Context(), "a", loadA); v != 2 || loadsA.Load() != 2 {
+			t.Fatalf("read of a = %d after %d loads, want the forced read's 2 kept", v, loadsA.Load())
+		}
+		if v := read(t.Context(), "b", loadB); v != 10 || loadsB.Load() != 1 {
+			t.Fatalf("read of b = %d after %d loads, want its cached 10 still served", v, loadsB.Load())
+		}
+	})
+}
+
+// TestAdminInsightsQueuedRefreshesAreCapped pins that at most
+// adminInsightsMaxQueuedRefreshes background refreshes wait for the single
+// slot; a waiting one holds its entry even after eviction.
+func TestAdminInsightsQueuedRefreshesAreCapped(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p, err := NewAdminInsightsProvider(t.Context(), nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer p.Close()
+		load := func(context.Context) (int, error) { return 1, nil }
+		keys := adminInsightsMaxQueuedRefreshes + 1
+		for i := range keys {
+			if _, err := cachedInsightsRead(t.Context(), p, fmt.Sprintf("k%d", i), load); err != nil {
+				t.Fatal(err)
+			}
+		}
+		p.markStale()
+		time.Sleep(insightsRefreshInterval(0)) //nolint:forbidigo // synctest fake clock: sleeping advances time; nothing waits on the real clock.
+		p.refreshSlot <- struct{}{}            // a slow refresh holds the slot
+		for i := range keys {
+			if _, err := cachedInsightsRead(t.Context(), p, fmt.Sprintf("k%d", i), load); err != nil {
+				t.Fatal(err)
+			}
+		}
+		synctest.Wait()
+		p.mu.Lock()
+		queued := len(p.refreshing)
+		p.mu.Unlock()
+		<-p.refreshSlot
+		synctest.Wait()
+		if queued != adminInsightsMaxQueuedRefreshes {
+			t.Fatalf("queued refreshes = %d, want %d", queued, adminInsightsMaxQueuedRefreshes)
+		}
+	})
+}
