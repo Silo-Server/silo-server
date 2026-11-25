@@ -514,14 +514,19 @@ func (h *PlaybackHandler) setConfirmedPauseState(sessionID string, paused bool, 
 	// The admin list reads the pause state from the lifecycle row, so it
 	// moves before the sync that cues monitors to re-read the list. It moves
 	// even when this copy already had the state: progress another replica
-	// accepted can have moved the row without reaching this copy.
-	h.sessionPauseConfirmed(context.Background(), sessionID, paused, receivedSequence)
-	if !changed {
+	// accepted can have moved the row without reaching this copy. A moved
+	// row still needs the sync, which is the re-read cue for monitors that
+	// miss the lifecycle event.
+	rowChanged := h.sessionPauseConfirmed(context.Background(), sessionID, paused, receivedSequence)
+	if !changed && !rowChanged {
 		return
 	}
 	syncCtx, cancelSync := context.WithTimeout(context.Background(), 10*time.Second)
 	h.syncSessionsNow(syncCtx, "realtime_pause")
 	cancelSync()
+	if !changed {
+		return // this copy already had the state, so there is no transition to scrobble
+	}
 	// A start scrobble still queued behind busy start workers must reach the
 	// provider first, or it would land after this pause and leave the
 	// provider playing. The admin views above are already up to date.

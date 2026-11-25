@@ -738,16 +738,16 @@ func TestRealtimeConfirmedPauseMovesTheLifecycleBeforeTheSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, step := range []struct {
-		name    playback.CommandName
-		state   string
-		event   string
-		already bool
+		name  playback.CommandName
+		state string
+		event string
 	}{
 		{name: playback.CommandPause, state: LifecyclePaused, event: LifecycleEventPaused},
 		{name: playback.CommandUnpause, state: LifecyclePlaying, event: LifecycleEventResumed},
 		// Progress another replica accepted paused the lifecycle row but not
-		// this copy's memory: the confirmation still moves the row.
-		{name: playback.CommandUnpause, state: LifecyclePlaying, event: LifecycleEventResumed, already: true},
+		// this copy's memory: the confirmation still moves the row, and the
+		// sync still cues monitors to re-read the list.
+		{name: playback.CommandUnpause, state: LifecyclePlaying, event: LifecycleEventResumed},
 	} {
 		log = nil
 		commandID := uuid.NewString()
@@ -756,11 +756,7 @@ func TestRealtimeConfirmedPauseMovesTheLifecycleBeforeTheSync(t *testing.T) {
 			t.Fatal(err)
 		}
 		waitConfirmedPauseStates(t, handler, session.ID)
-		want := []string{"lifecycle " + step.state, "sync"}
-		if step.already {
-			want = want[:1] // memory did not change, so there is nothing to sync
-		}
-		if !slices.Equal(log, want) {
+		if want := []string{"lifecycle " + step.state, "sync"}; !slices.Equal(log, want) {
 			t.Fatalf("%s: steps = %v, want %v", step.name, log, want)
 		}
 		select {

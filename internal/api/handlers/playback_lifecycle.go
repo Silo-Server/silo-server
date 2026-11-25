@@ -347,21 +347,23 @@ func (h *PlaybackHandler) SessionPauseReported(ctx context.Context, sessionID st
 // progress sequence was receivedSequence, and announces it when it changed
 // the session's state. The admin list reads the pause state from this row,
 // so it must commit before the sync that cues monitors to re-read the list.
-func (h *PlaybackHandler) sessionPauseConfirmed(ctx context.Context, sessionID string, paused bool, receivedSequence int64) {
+// It reports whether the row changed.
+func (h *PlaybackHandler) sessionPauseConfirmed(ctx context.Context, sessionID string, paused bool, receivedSequence int64) bool {
 	store, ok := h.AdminStore.(playbackLifecycleStore)
 	if !ok || lifecycleIDParam(sessionID) == nil {
-		return
+		return false
 	}
 	ctx, cancel := lifecycleContext(ctx)
 	defer cancel()
 	t, changed, err := store.ConfirmLifecyclePause(ctx, sessionID, paused, receivedSequence)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to record a confirmed session pause", "component", "api", "session", sessionID, "error", err)
-		return
+		return false
 	}
 	if _, ready := h.lifecycleEventsReady(); changed && ready {
 		h.publishLifecycle(ctx, t, PlaybackSessionsQuery{SessionID: sessionID})
 	}
+	return changed
 }
 
 // publishSequencedPause announces a pause or resume a native client's
