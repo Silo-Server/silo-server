@@ -56,8 +56,8 @@ func New(store Reader) *Setting {
 }
 
 // Get answers key from the store. For SettingKey and AccountSettingKey a
-// failed read is logged and answered with the last value read, or returned
-// when there is none.
+// failed read is logged, unless the request itself was canceled, and
+// answered with the last value read, or returned when there is none.
 func (s *Setting) Get(ctx context.Context, key string) (string, error) {
 	value, err := s.store.Get(ctx, key)
 	switch key {
@@ -78,7 +78,7 @@ func (s *Setting) enabled(ctx context.Context, value string, err error) (string,
 		}
 		return value, nil
 	}
-	slog.WarnContext(ctx, "reading the demo mode setting failed", "component", "demomode", "error", err)
+	logFailure(ctx, "reading the demo mode setting failed", err)
 	switch s.last.Load() {
 	case on:
 		return OnValue, nil
@@ -93,9 +93,17 @@ func (s *Setting) accountID(ctx context.Context, value string, err error) (strin
 		s.account.Store(&value)
 		return value, nil
 	}
-	slog.WarnContext(ctx, "reading the demo account setting failed", "component", "demomode", "error", err)
+	logFailure(ctx, "reading the demo account setting failed", err)
 	if last := s.account.Load(); last != nil {
 		return *last, nil
 	}
 	return "", err
+}
+
+// logFailure logs a failed read. A request its client abandoned cancels the
+// read; that is not a failing store, so it is not logged as one.
+func logFailure(ctx context.Context, msg string, err error) {
+	if ctx.Err() == nil {
+		slog.WarnContext(ctx, msg, "component", "demomode", "error", err)
+	}
 }
