@@ -198,6 +198,9 @@ func TestFavoritesAndIdsWithEpisodeAndOtherTypesIncludeEpisodes(t *testing.T) {
 		{"IncludeItemTypes=Episode&Recursive=true", []string{"ep-1", "ep-2"}, "series", []string{"ep-1", "ep-2"}},
 		{"IncludeItemTypes=Episode&Recursive=true", []string{"ep-1", "ep-2"}, "other-series", nil},
 		{"IncludeItemTypes=Episode&Recursive=true", []string{"ep-1", "ep-3"}, "season-2", []string{"ep-3"}},
+		// The episode browse can't match a collection's members, so it lists
+		// none of the named episodes under a collection ParentId.
+		{"IncludeItemTypes=Episode&Recursive=true", []string{"ep-1"}, "collection-1", nil},
 	} {
 		t.Run(fmt.Sprintf("%s/Ids=%v/ParentId=%s", tc.params, tc.ids, tc.parent), func(t *testing.T) {
 			h, _ := newMixedBrowseHandler(&mixedBrowseMovies{})
@@ -212,8 +215,11 @@ func TestFavoritesAndIdsWithEpisodeAndOtherTypesIncludeEpisodes(t *testing.T) {
 			}
 			if tc.parent != "" {
 				kind := EncodedIDItem
-				if strings.HasPrefix(tc.parent, "season") {
+				switch {
+				case strings.HasPrefix(tc.parent, "season"):
 					kind = EncodedIDSeason
+				case strings.HasPrefix(tc.parent, "collection"):
+					kind = EncodedIDCollection
 				}
 				path += "&ParentId=" + h.codec.EncodeStringID(kind, tc.parent)
 			}
@@ -224,6 +230,21 @@ func TestFavoritesAndIdsWithEpisodeAndOtherTypesIncludeEpisodes(t *testing.T) {
 				t.Fatalf("items = %v total = %d, want %v total %d", gotIDs, result.TotalRecordCount, tc.wantIDs, len(tc.wantIDs))
 			}
 		})
+	}
+}
+
+// Jellyfin's /Shows/{id}/Episodes has no Ids filter, so an Ids parameter
+// there still lists the whole series.
+func TestShowEpisodesIgnoresIds(t *testing.T) {
+	h, _ := newMixedBrowseHandler(&mixedBrowseMovies{countingContentService: countingContentService{seasons: []upstreamSeason{
+		{ContentID: "season-1", SeasonNumber: 1}, {ContentID: "season-2", SeasonNumber: 2},
+	}}})
+	seriesID := h.codec.EncodeStringID(EncodedIDItem, "series")
+
+	result := performEpisodesRequest(t, h, "/Shows/"+seriesID+"/Episodes?Ids="+h.codec.EncodeStringID(EncodedIDItem, "ep-2"), seriesID)
+
+	if gotIDs := decodedItemIDs(t, h.codec, result); !slices.Equal(gotIDs, []string{"ep-1", "ep-2", "ep-3"}) || result.TotalRecordCount != 3 {
+		t.Fatalf("items = %v total = %d, want every episode of the series", gotIDs, result.TotalRecordCount)
 	}
 }
 

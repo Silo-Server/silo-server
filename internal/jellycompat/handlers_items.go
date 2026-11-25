@@ -2179,7 +2179,7 @@ func (h *ItemsHandler) episodeBrowseFilters(ctx context.Context, session *Sessio
 		sortKey = query.sort
 		order = query.order
 	}
-	return access, catalog.BrowseFilters{UserID: session.StreamAppUserID, MaturityLimits: access.MaturityLimits, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, AudioLanguages: query.audioLanguages, SubtitleLanguages: query.subtitleLanguages, ExcludeContentIDs: query.excludeIDs, Studios: query.studios, OfficialRatings: query.officialRatings, MinCommunityRating: query.minCommunityRating, MinCriticRating: query.minCriticRating, MinPremiereDate: query.minPremiereDate, MaxPremiereDate: query.maxPremiereDate, NameLessThan: query.nameLessThan, NameStartsWithOrGreater: query.nameStartsWithOrGreater, ContentIDs: query.specificIDs, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
+	return access, catalog.BrowseFilters{UserID: session.StreamAppUserID, MaturityLimits: access.MaturityLimits, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, AudioLanguages: query.audioLanguages, SubtitleLanguages: query.subtitleLanguages, ExcludeContentIDs: query.excludeIDs, Studios: query.studios, OfficialRatings: query.officialRatings, MinCommunityRating: query.minCommunityRating, MinCriticRating: query.minCriticRating, MinPremiereDate: query.minPremiereDate, MaxPremiereDate: query.maxPremiereDate, NameLessThan: query.nameLessThan, NameStartsWithOrGreater: query.nameStartsWithOrGreater, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
 }
 
 // browseEpisodes pages repo.BrowseEpisodes. The catalog applies favorite and
@@ -2251,8 +2251,9 @@ func (h *ItemsHandler) episodeOnlyBrowser(query itemsQuery) (episodeBrowser, boo
 // handleEpisodeBrowse serves an /Items browse for Episode alone, such as
 // IncludeItemTypes=Episode&Recursive=true. The media_items browse holds no
 // episodes, so this pages the episodes of every series (or of the ParentId
-// library). An episode's Jellyfin SortName is its season and episode number,
-// so a SortName sort keeps the series, season and episode order.
+// library, series, or season). An episode's Jellyfin SortName is its season
+// and episode number, so a SortName sort keeps the series, season and episode
+// order.
 func (h *ItemsHandler) handleEpisodeBrowse(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, repo episodeBrowser) {
 	limit := query.limit
 	if query.countOnly {
@@ -2272,9 +2273,16 @@ func (h *ItemsHandler) handleEpisodeBrowse(w http.ResponseWriter, r *http.Reques
 
 // browseEpisodeItems pages the episodes of every series (or of the ParentId
 // library, series, or season) that match query, from offset for up to limit
-// rows; a zero limit only counts them. ok is false when the ParentId library
-// is outside the session's libraries, so no episode can match.
+// rows; a zero limit only counts them. Ids narrow it. ok is false when no
+// episode can match: the ParentId library is outside the session's libraries,
+// or ParentId names a collection.
 func (h *ItemsHandler) browseEpisodeItems(ctx context.Context, session *Session, query itemsQuery, repo episodeBrowser, offset, limit int) ([]upstreamListItem, map[string]compatEpisodeTarget, int, bool, error) {
+	// Only an Ids lookup reaches here with a collection ParentId. The episode
+	// browse can't match a collection's members, so it lists no episodes rather
+	// than named episodes outside the collection.
+	if query.parentCollectionID != "" {
+		return nil, nil, 0, false, nil
+	}
 	access, filters := h.episodeBrowseFilters(ctx, session, query)
 	// The access filter checks each episode's series, so a ParentId library is
 	// intersected with the session's libraries before episodes are matched to it.
@@ -2282,6 +2290,9 @@ func (h *ItemsHandler) browseEpisodeItems(ctx context.Context, session *Session,
 		return nil, nil, 0, false, nil
 	}
 	filters.LibraryID = query.parentLibraryID
+	// /Shows/{id}/Episodes shares episodeBrowseFilters but has no Ids filter in
+	// Jellyfin, so only this browse applies them.
+	filters.ContentIDs = query.specificIDs
 	// Name still sorts by episode title, as Jellyfin's NameComparer does.
 	if filters.Sort == catalog.BrowseSortTitle && query.sortByKey == sortKeySortName {
 		filters.Sort = ""
