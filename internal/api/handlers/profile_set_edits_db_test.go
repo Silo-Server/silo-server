@@ -175,29 +175,46 @@ func TestProfileEditRecorderDB(t *testing.T) {
 	if err := f.pool.QueryRow(t.Context(), `SELECT id FROM user_profiles WHERE user_id = $1 AND name = 'Local'`, f.userID).Scan(&localID); err != nil {
 		t.Fatal(err)
 	}
-	clear := func(t *testing.T) {
-		t.Helper()
-		if _, err := f.pool.Exec(t.Context(), `DELETE FROM profile_set_edits WHERE user_id = $1`, f.userID); err != nil {
+	for _, tc := range recorderCases(f, main, kid, kidID, localID) {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := f.pool.Exec(t.Context(), `DELETE FROM profile_set_edits WHERE user_id = $1`, f.userID); err != nil {
+				t.Fatal(err)
+			}
+			tc.write(t)
+			var got []string
+			for _, e := range f.edits(t) {
+				got = append(got, fmt.Sprintf("%s:%s:%d", e.By, e.Field, e.ActorUserID))
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("edit rows = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	t.Run("deleting the account leaves no edit row", func(t *testing.T) {
+		if err := auth.NewUserRepository(f.pool).Delete(t.Context(), f.userID); err != nil {
 			t.Fatal(err)
 		}
-	}
-	rows := func(t *testing.T) []string {
-		t.Helper()
-		var out []string
-		for _, e := range f.edits(t) {
-			out = append(out, fmt.Sprintf("%s:%s:%d", e.By, e.Field, e.ActorUserID))
+		if got := f.edits(t); len(got) != 0 {
+			t.Fatalf("rows after the account delete = %+v", got)
 		}
-		return out
-	}
+	})
+}
+
+type recorderCase struct {
+	name  string
+	write func(t *testing.T)
+	want  []string
+}
+
+// recorderCases are TestProfileEditRecorderDB's writes, each with the edit
+// rows it leaves (by:field:actor).
+func recorderCases(f *editsFixture, main, kid setItem, kidID, localID string) []recorderCase {
 	setting := func(key string) userstore.SettingIdentity {
 		return userstore.SettingIdentity{Key: key, Scope: "profile", ProfileID: kidID}
 	}
 	impersonated := f.adminID
-	for _, tc := range []struct {
-		name  string
-		write func(t *testing.T)
-		want  []string
-	}{
+	return []recorderCase{
 		{"the web editor's full save with one field changed marks that field", func(t *testing.T) {
 			f.update(t, f.account(), kidID, ProfileUpdateRequest{
 				Name: new("Kid 2"), IsChild: new(false), MaxContentRating: new("PG"), MaxAdvisoryAge: new(0),
@@ -266,24 +283,7 @@ func TestProfileEditRecorderDB(t *testing.T) {
 				t.Fatalf("removal rows = %+v", e)
 			}
 		}, []string{fmt.Sprintf("account::%d", f.userID)}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			clear(t)
-			tc.write(t)
-			if got := rows(t); !slices.Equal(got, tc.want) {
-				t.Fatalf("edit rows = %v, want %v", got, tc.want)
-			}
-		})
 	}
-
-	t.Run("deleting the account leaves no edit row", func(t *testing.T) {
-		if err := auth.NewUserRepository(f.pool).Delete(t.Context(), f.userID); err != nil {
-			t.Fatal(err)
-		}
-		if got := f.edits(t); len(got) != 0 {
-			t.Fatalf("rows after the account delete = %+v", got)
-		}
-	})
 }
 
 // TestProfileSetOwnerOverridesDB: the owner's edits on this server outlast
