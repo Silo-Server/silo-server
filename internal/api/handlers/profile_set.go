@@ -9,7 +9,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/jellycompat"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -26,6 +29,26 @@ var errProfileSetRetry = errors.New("the household changed while the set was app
 
 // profileSetAttempts bounds how often an apply starts over.
 const profileSetAttempts = 3
+
+// SQLSTATEs of a transaction PostgreSQL aborted so another could go on.
+const (
+	sqlstateDeadlockDetected     = "40P01"
+	sqlstateSerializationFailure = "40001"
+)
+
+// profileSetRetryable reports an attempt that starts over: the household
+// changed under the plan, or PostgreSQL aborted the set's transaction as a
+// deadlock victim. A set locks profile rows before the account row, as a
+// profile save does; deleting the account locks them the other way round,
+// so the two can deadlock. The set then retries, and a retry after the
+// delete committed finds the account gone (ErrProfileSetAccountGone).
+func profileSetRetryable(err error) bool {
+	if errors.Is(err, errProfileSetRetry) {
+		return true
+	}
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (pgErr.Code == sqlstateDeadlockDetected || pgErr.Code == sqlstateSerializationFailure)
+}
 
 // ProfileSetCommand is a profile set with its sender already reduced to an
 // account: a verified signed message, or a login session that passed the
@@ -68,6 +91,10 @@ type ProfileSetResult struct {
 	AwaitingPictures  []string
 	AwaitingPins      []string
 	SkippedSettings   []ProfileSetSkippedSetting
+	// JellyfinBareNameSignIn is whether the bare account name signs in on
+	// the Jellyfin-compatible surface as the profiles now stand; nil while
+	// that surface is off.
+	JellyfinBareNameSignIn *bool
 }
 
 // ProfileSetHeldItem is one profile of the set as this server holds it.
@@ -88,8 +115,9 @@ type ProfileSetHeldItem struct {
 
 // ProfileSetLocal is a profile on the account outside the set.
 type ProfileSetLocal struct {
-	ID   string
-	Name string
+	ID     string
+	Name   string
+	HasPIN bool
 }
 
 // ProfileSetHeld is the set as this server holds it.
@@ -98,6 +126,8 @@ type ProfileSetHeld struct {
 	Items      []ProfileSetHeldItem
 	LocalOnly  []ProfileSetLocal
 	EditsToken string
+	// JellyfinBareNameSignIn is as on ProfileSetResult.
+	JellyfinBareNameSignIn *bool
 }
 
 // ProfileSetSupported reports whether this server applies profile sets: only
@@ -157,10 +187,31 @@ func (h *ProfileHandler) HeldProfileSet(ctx context.Context, userID int) (Profil
 	}
 	for _, row := range snap.Rows {
 		if row.SyncID == "" {
-			held.LocalOnly = append(held.LocalOnly, ProfileSetLocal{ID: row.ID, Name: row.Name})
+			held.LocalOnly = append(held.LocalOnly, ProfileSetLocal{ID: row.ID, Name: row.Name, HasPIN: row.PINHash != ""})
 		}
 	}
+	held.JellyfinBareNameSignIn = h.jellyfinBareNameSignIn(ctx, userID, snap.Rows)
 	return held, nil
+}
+
+// jellyfinBareNameSignIn is whether signing in on the Jellyfin-compatible
+// surface with the bare account name selects one of these profiles
+// (jellycompat.BareNameSelectsProfile); nil while that surface is off or
+// the account can't be read.
+func (h *ProfileHandler) jellyfinBareNameSignIn(ctx context.Context, userID int, rows []userstore.ProfileSetRow) *bool {
+	if !h.JellyfinCompatEnabled || h.UserRepo == nil {
+		return nil
+	}
+	user, err := h.UserRepo.GetByID(ctx, userID)
+	if err != nil || user == nil {
+		return nil
+	}
+	profiles := make([]jellycompat.SignInProfile, len(rows))
+	for i, row := range rows {
+		profiles[i] = jellycompat.SignInProfile{Name: row.Name, HasPIN: row.PINHash != ""}
+	}
+	selects := jellycompat.BareNameSelectsProfile(user.Username, profiles)
+	return &selects
 }
 
 // profileSetEditsToken names the person's own edits on this server that no
@@ -221,7 +272,7 @@ func (h *ProfileHandler) ApplyProfileSet(ctx context.Context, cmd ProfileSetComm
 	}
 	run := &profileSetRun{h: h, cmd: cmd, doc: doc, store: store, setStore: setStore, contract: contract, settings: settings, limit: limit}
 	for range profileSetAttempts {
-		if err := run.attempt(ctx); !errors.Is(err, errProfileSetRetry) {
+		if err := run.attempt(ctx); !profileSetRetryable(err) {
 			if err != nil {
 				return ProfileSetResult{}, err
 			}

@@ -62,17 +62,36 @@ func (ProfileSetValue) Schema(huma.Registry) *huma.Schema {
 	return &huma.Schema{Description: "Any JSON value.", Extensions: map[string]any{extExtensionBag: "profile-set-value"}}
 }
 
-// ProfileSetPIN is an item's PIN instruction: exactly one member.
-type ProfileSetPIN struct {
+// profileSetPINFields is the schema of an item's PIN instruction.
+type profileSetPINFields struct {
 	Set   *string `json:"set,omitempty" pattern:"^[0-9]{4}$" doc:"Set this PIN, exactly four digits. Compared with the stored PIN first; written only when it differs" example:"1234"`
 	Keep  *bool   `json:"keep,omitempty" enum:"true" doc:"Leave the PIN this server holds alone. A profile created from keep has no PIN and is reported in awaiting_pins until it gets one"`
 	Clear *bool   `json:"clear,omitempty" enum:"true" doc:"Remove the PIN"`
 }
 
+// ProfileSetPIN is an item's PIN instruction: exactly one of set, keep and
+// clear. Other members are ignored, as in an item.
+type ProfileSetPIN profileSetPINFields
+
+func (ProfileSetPIN) Schema(r huma.Registry) *huma.Schema {
+	return openSchema(r, reflect.TypeFor[profileSetPINFields](), "profile-set-pin",
+		"Exactly one of set, keep and clear. Members this server does not know are ignored.")
+}
+
+// openSchema is the schema of t with members it doesn't name allowed, for
+// the parts of a set a newer app may extend: this server ignores them.
+func openSchema(r huma.Registry, t reflect.Type, bag, description string) *huma.Schema {
+	s := huma.SchemaFromType(r, t)
+	s.AdditionalProperties = true
+	s.Extensions = map[string]any{extExtensionBag: bag}
+	s.Description = description
+	return s
+}
+
 // profileSetItemFields is the schema of a set item's known members.
 type profileSetItemFields struct {
 	SyncID             string             `json:"sync_id" format:"uuid" pattern:"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" doc:"The profile's ID on every server, a lower-case UUID. Unique in the set" example:"0f8fad5b-d9cb-469f-a165-70867728950e"`
-	Name               string             `json:"name" minLength:"1" maxLength:"64" doc:"Unique in the set, compared trimmed and without case" example:"Sam"`
+	Name               string             `json:"name" minLength:"1" doc:"1 to 64 characters once trimmed; unique in the set, compared trimmed and without case" example:"Sam"`
 	Picture            string             `json:"picture" maxLength:"200" doc:"preset:<id> for a built-in picture (avatar-1 to avatar-8, or dicebear:<style>:<seed>), sha256:<64 lower-case hex> of an uploaded picture as it was first uploaded, or empty for none" example:"preset:avatar-3"`
 	PIN                ProfileSetPIN      `json:"pin"`
 	IsChild            bool               `json:"is_child" example:"false"`
@@ -89,11 +108,8 @@ type profileSetItemFields struct {
 type ProfileSetItem profileSetItemFields
 
 func (ProfileSetItem) Schema(r huma.Registry) *huma.Schema {
-	s := huma.SchemaFromType(r, reflect.TypeFor[profileSetItemFields]())
-	s.AdditionalProperties = true
-	s.Extensions = map[string]any{extExtensionBag: "profile-set-item"}
-	s.Description = "One profile of the set. Members this server does not know are ignored when applying; the content hash still covers them."
-	return s
+	return openSchema(r, reflect.TypeFor[profileSetItemFields](), "profile-set-item",
+		"One profile of the set. Members this server does not know are ignored when applying; the content hash still covers them.")
 }
 
 // profileSetDocumentFields is the schema of the set object.
@@ -110,7 +126,8 @@ type ProfileSetDocument json.RawMessage
 func (d *ProfileSetDocument) UnmarshalJSON([]byte) error { return nil }
 
 func (ProfileSetDocument) Schema(r huma.Registry) *huma.Schema {
-	return huma.SchemaFromType(r, reflect.TypeFor[profileSetDocumentFields]())
+	return openSchema(r, reflect.TypeFor[profileSetDocumentFields](), "profile-set",
+		"The set. Members this server does not know are ignored.")
 }
 
 // ProfileSetPair says which existing profile an item becomes, for the first
@@ -160,15 +177,16 @@ type ProfileSetSkippedSetting struct {
 
 // ProfileSetApplied is the putProfileSet answer.
 type ProfileSetApplied struct {
-	Version           int64                      `json:"version" example:"7"`
-	Profiles          []ProfileSetMember         `json:"profiles" doc:"This server's ID for each profile it holds from the set, in set order"`
-	LeftOff           []string                   `json:"left_off" doc:"Items not applied because of the household's profile limit, in set order"`
-	AwaitingLibraries []string                   `json:"awaiting_libraries" doc:"Child profiles with library limits and no libraries yet, waiting for the person to pick them"`
-	AwaitingPictures  []string                   `json:"awaiting_pictures" doc:"Items whose picture this server doesn't have: a sha256 picture not uploaded here, or a preset it doesn't know. The profile keeps its old picture"`
-	AwaitingPins      []string                   `json:"awaiting_pins" doc:"Profiles created from keep that still have no PIN"`
-	HiddenByOwner     []string                   `json:"hidden_by_owner" doc:"Profiles the owner removed on this server; always empty today"`
-	Overrides         []ProfileSetOverride       `json:"overrides" doc:"Values the owner set on this server; always empty today"`
-	SkippedSettings   []ProfileSetSkippedSetting `json:"skipped_settings" doc:"Known settings whose value this server refused; it kept its own value"`
+	Version                int64                      `json:"version" example:"7"`
+	Profiles               []ProfileSetMember         `json:"profiles" doc:"This server's ID for each profile it holds from the set, in set order"`
+	LeftOff                []string                   `json:"left_off" doc:"Items not applied because of the household's profile limit, in set order"`
+	AwaitingLibraries      []string                   `json:"awaiting_libraries" doc:"Child profiles with library limits and no libraries yet, waiting for the person to pick them"`
+	AwaitingPictures       []string                   `json:"awaiting_pictures" doc:"Items whose picture this server doesn't have: a sha256 picture not uploaded here, or a preset it doesn't know. The profile keeps its old picture"`
+	AwaitingPins           []string                   `json:"awaiting_pins" doc:"Profiles created from keep that still have no PIN"`
+	HiddenByOwner          []string                   `json:"hidden_by_owner" doc:"Profiles the owner removed on this server; always empty today"`
+	Overrides              []ProfileSetOverride       `json:"overrides" doc:"Values the owner set on this server; always empty today"`
+	SkippedSettings        []ProfileSetSkippedSetting `json:"skipped_settings" doc:"Known settings whose value this server refused; it kept its own value"`
+	JellyfinBareNameSignIn *bool                      `json:"jellyfin_bare_name_sign_in,omitempty" doc:"Whether signing in on the Jellyfin-compatible surface with the bare account name (no #profile) picks a profile, as the account's profiles stand after the set: true when exactly one profile is named like the account, or else exactly one profile has no PIN. Absent while that surface is off" example:"true"`
 }
 
 // ProfileSetPutOutput is the putProfileSet response.
@@ -210,18 +228,20 @@ type ProfileSetHeldItem struct {
 
 // ProfileSetLocal is a profile on the account that is not part of the set.
 type ProfileSetLocal struct {
-	ID   ID     `json:"id" example:"15"`
-	Name string `json:"name" example:"Guest"`
+	ID     ID     `json:"id" example:"15"`
+	Name   string `json:"name" example:"Guest"`
+	HasPIN bool   `json:"has_pin" example:"false"`
 }
 
 // ProfileSetHeld is the getProfileSet answer.
 type ProfileSetHeld struct {
-	Version     int64                `json:"version" doc:"The version of the last set this server accepted; 0 when it never took one" example:"7"`
-	Items       []ProfileSetHeldItem `json:"items"`
-	DeletedHere []ProfileSetDeletion `json:"deleted_here" doc:"Profiles of the set deleted on this server outside a set; always empty today"`
-	Overrides   []ProfileSetOverride `json:"overrides" doc:"Values the owner set on this server; always empty today"`
-	LocalOnly   []ProfileSetLocal    `json:"local_only" doc:"Profiles on this account that are not part of the set"`
-	EditsToken  string               `json:"edits_token" doc:"Names the person's own edits on this server that no set has settled; empty when there are none. A set sends it back as edits_seen" example:""`
+	Version                int64                `json:"version" doc:"The version of the last set this server accepted; 0 when it never took one" example:"7"`
+	Items                  []ProfileSetHeldItem `json:"items"`
+	DeletedHere            []ProfileSetDeletion `json:"deleted_here" doc:"Profiles of the set deleted on this server outside a set; always empty today"`
+	Overrides              []ProfileSetOverride `json:"overrides" doc:"Values the owner set on this server; always empty today"`
+	LocalOnly              []ProfileSetLocal    `json:"local_only" doc:"Profiles on this account that are not part of the set"`
+	JellyfinBareNameSignIn *bool                `json:"jellyfin_bare_name_sign_in,omitempty" doc:"Whether signing in on the Jellyfin-compatible surface with the bare account name (no #profile) picks a profile as the account's profiles now stand: true when exactly one profile is named like the account, or else exactly one profile has no PIN. Absent while that surface is off" example:"true"`
+	EditsToken             string               `json:"edits_token" doc:"Names the person's own edits on this server that no set has settled; empty when there are none. A set sends it back as edits_seen" example:""`
 }
 
 // ProfileSetGetInput is the getProfileSet request.
@@ -241,7 +261,7 @@ const putProfileSetDescription = "Makes the account's household profiles match a
 	"The body is either a signed profile-set envelope ({kid, payload, sig}, signed by the account's person key on a challenge from createAppKeyChallenge; with or without a login session), " +
 	"or {set, pairs?, edits_seen?} over the account's own login session acting as its main profile (X-Profile-Id), with X-Profile-Token when that profile has a PIN. " +
 	"The signed form is refused for an administrator's account (403 permission_denied) and while auth.app_key_sign_in is off (409 capability_disabled); the session form takes neither rule. " +
-	"Sessions opened by device sign-in, by another app's key, by an administrator acting as the account, API keys, and sessions older than the record of how sessions open are 403 permission_denied. " +
+	"Sessions opened by device sign-in, by another app's key, or by an administrator acting as the account, remote-playback handoffs, and sessions older than the record of how sessions open are 403 permission_denied; an API key carries no login session and is 401 authentication_required. In demo mode a non-administrator is 403 permission_denied in both forms. " +
 	"The first item is the main profile; items match profiles by sync_id, then by pairs, and are otherwise created in set order up to the household's profile limit (the rest are left_off; nothing is deleted to fit). " +
 	"A profile holding a sync_id the set no longer has is deleted with everything that belongs to it; a profile with no sync_id that pairs does not name is left alone. " +
 	"Only a newer version changes anything: an older version, the same version with other content, the same version whose PINs differ from the stored ones, and a set without the person's latest edits (edits_seen) are 409 profile_set_stale; the same version and content again answers 200 and writes nothing. " +
@@ -288,6 +308,12 @@ func (reg *Registry) putProfileSet(ctx context.Context, in *ProfileSetPutInput) 
 	sets, err := reg.profileSetService()
 	if err != nil {
 		return nil, err
+	}
+	// Demo mode refuses a set before the forms split: with no session the
+	// caller is never an administrator, so every signed set is refused while
+	// demo mode is on, as the ordinary profile writes are.
+	if demoRestricted(ctx, reg.deps.DemoSettings) {
+		return nil, NewProblem(TypePermissionDenied, "This action is not available in demo mode.")
 	}
 	body := in.Body
 	signed := body.KeyID != nil || body.Payload != nil || body.Sig != nil
@@ -345,9 +371,6 @@ func (reg *Registry) sessionProfileSet(ctx context.Context, raw []byte) (handler
 	if err := reg.profileSetSessionAllowed(ctx, claims); err != nil {
 		return handlers.ProfileSetCommand{}, err
 	}
-	if demoRestricted(ctx, reg.deps.DemoSettings) {
-		return handlers.ProfileSetCommand{}, NewProblem(TypePermissionDenied, "This action is not available in demo mode.")
-	}
 	active := profileFrom(ctx)
 	if active == "" && apimw.UnverifiedProfileID(ctx) != "" {
 		return handlers.ProfileSetCommand{}, NewProblem(TypeProfileVerificationRequired, "Verify the main profile's PIN first.")
@@ -387,12 +410,17 @@ func profileSetProblem(err error, signed bool) error {
 			location = locationBody + ".payload"
 		}
 		return validationProblem(location, field.Code, field.Message)
+	case errors.Is(err, handlers.ErrProfileSetNoPrimary):
+		return NewProblem(TypeConflict, "This account's profiles are in a state the server can't apply a profile set to: it has profiles but no main profile.")
 	case errors.Is(err, handlers.ErrProfileSetStale):
 		return NewProblem(TypeProfileSetStale, "This server holds a newer profile set, or the same version with other content; read it and send a newer one.")
 	case errors.Is(err, auth.ErrProfileSetAdminAccount):
 		return NewProblem(TypePermissionDenied, "An administrator's profiles change only from a session verified as the main profile.")
 	case errors.Is(err, access.ErrProfileUnverified):
 		return NewProblem(TypeProfileVerificationRequired, "Verify the main profile's PIN first.")
+	case errors.Is(err, userstore.ErrProfileSetAccountGone):
+		// As any request for a deleted account: its sessions ended with it.
+		return NewProblem(TypeSessionExpired, "The login session is no longer valid.")
 	case errors.Is(err, userstore.ErrProfileSetUnsupported):
 		return CapabilityProblem(StateUnsupported, profileSetDomain)
 	}
@@ -405,6 +433,7 @@ func profileSetAppliedOf(r handlers.ProfileSetResult) ProfileSetApplied {
 		AwaitingPictures: NonNil(r.AwaitingPictures), AwaitingPins: NonNil(r.AwaitingPins),
 		HiddenByOwner: []string{}, Overrides: []ProfileSetOverride{},
 		Profiles: make([]ProfileSetMember, 0, len(r.Profiles)), SkippedSettings: make([]ProfileSetSkippedSetting, 0, len(r.SkippedSettings)),
+		JellyfinBareNameSignIn: r.JellyfinBareNameSignIn,
 	}
 	for _, p := range r.Profiles {
 		out.Profiles = append(out.Profiles, ProfileSetMember{SyncID: p.SyncID, ID: ID(p.ID)})
@@ -458,6 +487,7 @@ func profileSetHeldOf(h handlers.ProfileSetHeld) ProfileSetHeld {
 		Version: h.Version, Items: make([]ProfileSetHeldItem, 0, len(h.Items)),
 		DeletedHere: []ProfileSetDeletion{}, Overrides: []ProfileSetOverride{},
 		LocalOnly: make([]ProfileSetLocal, 0, len(h.LocalOnly)), EditsToken: h.EditsToken,
+		JellyfinBareNameSignIn: h.JellyfinBareNameSignIn,
 	}
 	for _, item := range h.Items {
 		var age *int
@@ -482,7 +512,7 @@ func profileSetHeldOf(h handlers.ProfileSetHeld) ProfileSetHeld {
 		})
 	}
 	for _, local := range h.LocalOnly {
-		out.LocalOnly = append(out.LocalOnly, ProfileSetLocal{ID: ID(local.ID), Name: local.Name})
+		out.LocalOnly = append(out.LocalOnly, ProfileSetLocal{ID: ID(local.ID), Name: local.Name, HasPIN: local.HasPIN})
 	}
 	return out
 }

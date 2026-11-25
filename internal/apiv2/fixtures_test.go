@@ -2628,14 +2628,15 @@ func (fixtureProfileSets) ApplyProfileSet(_ context.Context, cmd handlers.Profil
 	}
 	sam := "0f8fad5b-d9cb-469f-a165-70867728950e"
 	return handlers.ProfileSetResult{Version: 1, Profiles: []handlers.ProfileSetMember{{SyncID: sam, ID: "p-owner"}},
-		AwaitingPins: []string{}, SkippedSettings: []handlers.ProfileSetSkippedSetting{{SyncID: sam, Key: "playback.subtitle_mode"}}}, nil
+		AwaitingPins: []string{}, SkippedSettings: []handlers.ProfileSetSkippedSetting{{SyncID: sam, Key: "playback.subtitle_mode"}},
+		JellyfinBareNameSignIn: new(true)}, nil
 }
 
 func (fixtureProfileSets) HeldProfileSet(_ context.Context, userID int) (handlers.ProfileSetHeld, error) {
 	if userID == 2 {
 		return handlers.ProfileSetHeld{LocalOnly: []handlers.ProfileSetLocal{{ID: "p-admin", Name: "Ada"}}}, nil
 	}
-	return handlers.ProfileSetHeld{Version: 7, LocalOnly: []handlers.ProfileSetLocal{{ID: "p-guest", Name: "Guest"}},
+	return handlers.ProfileSetHeld{Version: 7, LocalOnly: []handlers.ProfileSetLocal{{ID: "p-guest", Name: "Guest"}}, JellyfinBareNameSignIn: new(false),
 		Items: []handlers.ProfileSetHeldItem{{SyncID: "0f8fad5b-d9cb-469f-a165-70867728950e", ID: "p-owner", Name: "Sam",
 			Picture: "preset:avatar-3", HasPIN: true, MaxAdvisoryAge: 12,
 			Settings: map[string]json.RawMessage{"playback.audio_language": json.RawMessage(`"en"`)}}}}, nil

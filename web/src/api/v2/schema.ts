@@ -11781,7 +11781,7 @@ export interface paths {
     get: operations["getProfileSet"];
     /**
      * Make the account's household profiles match a versioned profile set.
-     * @description Makes the account's household profiles match a versioned set, in one transaction. The body is either a signed profile-set envelope ({kid, payload, sig}, signed by the account's person key on a challenge from createAppKeyChallenge; with or without a login session), or {set, pairs?, edits_seen?} over the account's own login session acting as its main profile (X-Profile-Id), with X-Profile-Token when that profile has a PIN. The signed form is refused for an administrator's account (403 permission_denied) and while auth.app_key_sign_in is off (409 capability_disabled); the session form takes neither rule. Sessions opened by device sign-in, by another app's key, by an administrator acting as the account, API keys, and sessions older than the record of how sessions open are 403 permission_denied. The first item is the main profile; items match profiles by sync_id, then by pairs, and are otherwise created in set order up to the household's profile limit (the rest are left_off; nothing is deleted to fit). A profile holding a sync_id the set no longer has is deleted with everything that belongs to it; a profile with no sync_id that pairs does not name is left alone. Only a newer version changes anything: an older version, the same version with other content, the same version whose PINs differ from the stored ones, and a set without the person's latest edits (edits_seen) are 409 profile_set_stale; the same version and content again answers 200 and writes nothing. A set that changes the main profile's PIN ends every X-Profile-Token minted for its old PIN, the caller's included. A malformed member is 422 validation_failed at its member (at body.payload in the signed form); a new item named like a profile outside the set is 422 with code name_conflict. Spends the per-address profile_set rate-limit budget; the signed form also spends its challenge. A body over 256 KiB is 413 payload_too_large. 501 capability_unsupported where profiles are not kept in PostgreSQL.
+     * @description Makes the account's household profiles match a versioned set, in one transaction. The body is either a signed profile-set envelope ({kid, payload, sig}, signed by the account's person key on a challenge from createAppKeyChallenge; with or without a login session), or {set, pairs?, edits_seen?} over the account's own login session acting as its main profile (X-Profile-Id), with X-Profile-Token when that profile has a PIN. The signed form is refused for an administrator's account (403 permission_denied) and while auth.app_key_sign_in is off (409 capability_disabled); the session form takes neither rule. Sessions opened by device sign-in, by another app's key, or by an administrator acting as the account, remote-playback handoffs, and sessions older than the record of how sessions open are 403 permission_denied; an API key carries no login session and is 401 authentication_required. In demo mode a non-administrator is 403 permission_denied in both forms. The first item is the main profile; items match profiles by sync_id, then by pairs, and are otherwise created in set order up to the household's profile limit (the rest are left_off; nothing is deleted to fit). A profile holding a sync_id the set no longer has is deleted with everything that belongs to it; a profile with no sync_id that pairs does not name is left alone. Only a newer version changes anything: an older version, the same version with other content, the same version whose PINs differ from the stored ones, and a set without the person's latest edits (edits_seen) are 409 profile_set_stale; the same version and content again answers 200 and writes nothing. A set that changes the main profile's PIN ends every X-Profile-Token minted for its old PIN, the caller's included. A malformed member is 422 validation_failed at its member (at body.payload in the signed form); a new item named like a profile outside the set is 422 with code name_conflict. Spends the per-address profile_set rate-limit budget; the signed form also spends its challenge. A body over 256 KiB is 413 payload_too_large. 501 capability_unsupported where profiles are not kept in PostgreSQL.
      */
     put: operations["putProfileSet"];
     post?: never;
@@ -35155,6 +35155,11 @@ export interface components {
       awaiting_pins: string[];
       /** @description Profiles the owner removed on this server; always empty today */
       hidden_by_owner: string[];
+      /**
+       * @description Whether signing in on the Jellyfin-compatible surface with the bare account name (no #profile) picks a profile, as the account's profiles stand after the set: true when exactly one profile is named like the account, or else exactly one profile has no PIN. Absent while that surface is off
+       * @example true
+       */
+      jellyfin_bare_name_sign_in?: boolean;
       /** @description Items not applied because of the household's profile limit, in set order */
       left_off: string[];
       /** @description Values the owner set on this server; always empty today */
@@ -35211,6 +35216,11 @@ export interface components {
        */
       edits_token: string;
       items: components["schemas"]["ProfileSetHeldItem"][];
+      /**
+       * @description Whether signing in on the Jellyfin-compatible surface with the bare account name (no #profile) picks a profile as the account's profiles now stand: true when exactly one profile is named like the account, or else exactly one profile has no PIN. Absent while that surface is off
+       * @example true
+       */
+      jellyfin_bare_name_sign_in?: boolean;
       /** @description Profiles on this account that are not part of the set */
       local_only: components["schemas"]["ProfileSetLocal"][];
       /** @description Values the owner set on this server; always empty today */
@@ -35269,6 +35279,8 @@ export interface components {
       sync_id: string;
     };
     ProfileSetLocal: {
+      /** @example false */
+      has_pin: boolean;
       /**
        * @description Opaque identifier
        * @example 15
@@ -35316,23 +35328,6 @@ export interface components {
        */
       sync_id: string;
     };
-    ProfileSetPIN: {
-      /**
-       * @description Remove the PIN
-       * @enum {boolean}
-       */
-      clear?: true;
-      /**
-       * @description Leave the PIN this server holds alone. A profile created from keep has no PIN and is reported in awaiting_pins until it gets one
-       * @enum {boolean}
-       */
-      keep?: true;
-      /**
-       * @description Set this PIN, exactly four digits. Compared with the stored PIN first; written only when it differs
-       * @example 1234
-       */
-      set?: string;
-    };
     ProfileSetPutBody: {
       /**
        * @description Session form: the edits_token getProfileSet answered when the set was built; absent is the empty string
@@ -35369,7 +35364,7 @@ export interface components {
            */
           max_content_rating: string;
           /**
-           * @description Unique in the set, compared trimmed and without case
+           * @description 1 to 64 characters once trimmed; unique in the set, compared trimmed and without case
            * @example Sam
            */
           name: string;
@@ -35378,7 +35373,26 @@ export interface components {
            * @example preset:avatar-3
            */
           picture: string;
-          pin: components["schemas"]["ProfileSetPIN"];
+          /** @description Exactly one of set, keep and clear. Members this server does not know are ignored. */
+          pin: {
+            /**
+             * @description Remove the PIN
+             * @enum {boolean}
+             */
+            clear?: true;
+            /**
+             * @description Leave the PIN this server holds alone. A profile created from keep has no PIN and is reported in awaiting_pins until it gets one
+             * @enum {boolean}
+             */
+            keep?: true;
+            /**
+             * @description Set this PIN, exactly four digits. Compared with the stored PIN first; written only when it differs
+             * @example 1234
+             */
+            set?: string;
+          } & {
+            [key: string]: unknown;
+          };
           /** @example false */
           requests_blocked: boolean;
           /** @example false */
@@ -35409,6 +35423,8 @@ export interface components {
          * @example 7
          */
         version: number;
+      } & {
+        [key: string]: unknown;
       };
       /**
        * @description Signed form: the person key's signature

@@ -52125,6 +52125,13 @@
             },
             "type": "array"
           },
+          "jellyfin_bare_name_sign_in": {
+            "description": "Whether signing in on the Jellyfin-compatible surface with the bare account name (no #profile) picks a profile, as the account's profiles stand after the set: true when exactly one profile is named like the account, or else exactly one profile has no PIN. Absent while that surface is off",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "left_off": {
             "description": "Items not applied because of the household's profile limit, in set order",
             "items": {
@@ -52272,6 +52279,13 @@
             },
             "type": "array"
           },
+          "jellyfin_bare_name_sign_in": {
+            "description": "Whether signing in on the Jellyfin-compatible surface with the bare account name (no #profile) picks a profile as the account's profiles now stand: true when exactly one profile is named like the account, or else exactly one profile has no PIN. Absent while that surface is off",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "local_only": {
             "description": "Profiles on this account that are not part of the set",
             "items": {
@@ -52418,6 +52432,12 @@
       "ProfileSetLocal": {
         "additionalProperties": false,
         "properties": {
+          "has_pin": {
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "id": {
             "description": "Opaque identifier",
             "examples": [
@@ -52435,7 +52455,8 @@
         },
         "required": [
           "id",
-          "name"
+          "name",
+          "has_pin"
         ],
         "type": "object"
       },
@@ -52491,34 +52512,6 @@
           "field",
           "value"
         ],
-        "type": "object"
-      },
-      "ProfileSetPIN": {
-        "additionalProperties": false,
-        "properties": {
-          "clear": {
-            "description": "Remove the PIN",
-            "enum": [
-              true
-            ],
-            "type": "boolean"
-          },
-          "keep": {
-            "description": "Leave the PIN this server holds alone. A profile created from keep has no PIN and is reported in awaiting_pins until it gets one",
-            "enum": [
-              true
-            ],
-            "type": "boolean"
-          },
-          "set": {
-            "description": "Set this PIN, exactly four digits. Compared with the stored PIN first; written only when it differs",
-            "examples": [
-              "1234"
-            ],
-            "pattern": "^[0-9]{4}$",
-            "type": "string"
-          }
-        },
         "type": "object"
       },
       "ProfileSetPair": {
@@ -52585,7 +52578,7 @@
             "type": "string"
           },
           "set": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "description": "Session form: the set",
             "properties": {
               "items": {
@@ -52622,11 +52615,10 @@
                       "type": "string"
                     },
                     "name": {
-                      "description": "Unique in the set, compared trimmed and without case",
+                      "description": "1 to 64 characters once trimmed; unique in the set, compared trimmed and without case",
                       "examples": [
                         "Sam"
                       ],
-                      "maxLength": 64,
                       "minLength": 1,
                       "type": "string"
                     },
@@ -52639,7 +52631,34 @@
                       "type": "string"
                     },
                     "pin": {
-                      "$ref": "#/components/schemas/ProfileSetPIN"
+                      "additionalProperties": true,
+                      "description": "Exactly one of set, keep and clear. Members this server does not know are ignored.",
+                      "properties": {
+                        "clear": {
+                          "description": "Remove the PIN",
+                          "enum": [
+                            true
+                          ],
+                          "type": "boolean"
+                        },
+                        "keep": {
+                          "description": "Leave the PIN this server holds alone. A profile created from keep has no PIN and is reported in awaiting_pins until it gets one",
+                          "enum": [
+                            true
+                          ],
+                          "type": "boolean"
+                        },
+                        "set": {
+                          "description": "Set this PIN, exactly four digits. Compared with the stored PIN first; written only when it differs",
+                          "examples": [
+                            "1234"
+                          ],
+                          "pattern": "^[0-9]{4}$",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object",
+                      "x-silo-extension-bag": "profile-set-pin"
                     },
                     "requests_blocked": {
                       "examples": [
@@ -52715,7 +52734,8 @@
               "version",
               "items"
             ],
-            "type": "object"
+            "type": "object",
+            "x-silo-extension-bag": "profile-set"
           },
           "sig": {
             "description": "Signed form: the person key's signature",
@@ -218050,7 +218070,7 @@
         "x-silo-service-backed": true
       },
       "put": {
-        "description": "Makes the account's household profiles match a versioned set, in one transaction. The body is either a signed profile-set envelope ({kid, payload, sig}, signed by the account's person key on a challenge from createAppKeyChallenge; with or without a login session), or {set, pairs?, edits_seen?} over the account's own login session acting as its main profile (X-Profile-Id), with X-Profile-Token when that profile has a PIN. The signed form is refused for an administrator's account (403 permission_denied) and while auth.app_key_sign_in is off (409 capability_disabled); the session form takes neither rule. Sessions opened by device sign-in, by another app's key, by an administrator acting as the account, API keys, and sessions older than the record of how sessions open are 403 permission_denied. The first item is the main profile; items match profiles by sync_id, then by pairs, and are otherwise created in set order up to the household's profile limit (the rest are left_off; nothing is deleted to fit). A profile holding a sync_id the set no longer has is deleted with everything that belongs to it; a profile with no sync_id that pairs does not name is left alone. Only a newer version changes anything: an older version, the same version with other content, the same version whose PINs differ from the stored ones, and a set without the person's latest edits (edits_seen) are 409 profile_set_stale; the same version and content again answers 200 and writes nothing. A set that changes the main profile's PIN ends every X-Profile-Token minted for its old PIN, the caller's included. A malformed member is 422 validation_failed at its member (at body.payload in the signed form); a new item named like a profile outside the set is 422 with code name_conflict. Spends the per-address profile_set rate-limit budget; the signed form also spends its challenge. A body over 256 KiB is 413 payload_too_large. 501 capability_unsupported where profiles are not kept in PostgreSQL.",
+        "description": "Makes the account's household profiles match a versioned set, in one transaction. The body is either a signed profile-set envelope ({kid, payload, sig}, signed by the account's person key on a challenge from createAppKeyChallenge; with or without a login session), or {set, pairs?, edits_seen?} over the account's own login session acting as its main profile (X-Profile-Id), with X-Profile-Token when that profile has a PIN. The signed form is refused for an administrator's account (403 permission_denied) and while auth.app_key_sign_in is off (409 capability_disabled); the session form takes neither rule. Sessions opened by device sign-in, by another app's key, or by an administrator acting as the account, remote-playback handoffs, and sessions older than the record of how sessions open are 403 permission_denied; an API key carries no login session and is 401 authentication_required. In demo mode a non-administrator is 403 permission_denied in both forms. The first item is the main profile; items match profiles by sync_id, then by pairs, and are otherwise created in set order up to the household's profile limit (the rest are left_off; nothing is deleted to fit). A profile holding a sync_id the set no longer has is deleted with everything that belongs to it; a profile with no sync_id that pairs does not name is left alone. Only a newer version changes anything: an older version, the same version with other content, the same version whose PINs differ from the stored ones, and a set without the person's latest edits (edits_seen) are 409 profile_set_stale; the same version and content again answers 200 and writes nothing. A set that changes the main profile's PIN ends every X-Profile-Token minted for its old PIN, the caller's included. A malformed member is 422 validation_failed at its member (at body.payload in the signed form); a new item named like a profile outside the set is 422 with code name_conflict. Spends the per-address profile_set rate-limit budget; the signed form also spends its challenge. A body over 256 KiB is 413 payload_too_large. 501 capability_unsupported where profiles are not kept in PostgreSQL.",
         "operationId": "putProfileSet",
         "requestBody": {
           "content": {

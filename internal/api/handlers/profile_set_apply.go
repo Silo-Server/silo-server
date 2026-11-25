@@ -35,6 +35,7 @@ type profileSetRun struct {
 	limit    int
 
 	// Decided before the transaction, on the unlocked read.
+	repeat     bool
 	pinMatches map[int]bool
 	newPINs    map[int]string
 	devices    map[string]profileDevicesRead
@@ -107,7 +108,8 @@ func (r *profileSetRun) attempt(ctx context.Context) error {
 			}
 		}
 	}
-	if r.pinMatches, err = r.comparePINs(ctx, plan); err != nil {
+	r.repeat = r.isRepeat(snap.State)
+	if r.pinMatches, err = r.comparePINs(ctx, plan, r.repeat); err != nil {
 		return err
 	}
 	if r.noop, err = r.checkVersion(snap.State, plan); err != nil || r.noop {
@@ -127,19 +129,34 @@ func (r *profileSetRun) attempt(ctx context.Context) error {
 }
 
 // comparePINs compares each set PIN with the stored hash of the profile it
-// lands on, outside any lock.
-func (r *profileSetRun) comparePINs(ctx context.Context, plan *profileSetPlan) (map[int]bool, error) {
+// lands on, outside any lock. On a repeat of the held version the answer
+// (200 or profile_set_stale) tells whether the PIN matched, so each
+// comparison there is a PIN guess: it spends the profile's PIN attempts as
+// verifyProfilePIN does, a match clears them as it does there, and a locked
+// profile answers that check's 429 without comparing. On a newer version the
+// answer never depends on the match, which only decides whether to write.
+func (r *profileSetRun) comparePINs(ctx context.Context, plan *profileSetPlan, repeat bool) (map[int]bool, error) {
 	matches := map[int]bool{}
-	for i, row := range plan.rowOf {
+	for i := range r.doc.Items {
+		row, mapped := plan.rowOf[i]
 		item := r.doc.Items[i]
-		if item.PIN.kind != profileSetPINSet || row.PINHash == "" {
+		if !mapped || item.PIN.kind != profileSetPINSet || row.PINHash == "" {
 			continue
+		}
+		attemptKey := ratelimit.ProfilePINKey(r.cmd.UserID, row.ID)
+		if repeat {
+			if retryAfter, ok := r.h.PINAttempts.Reserve(ctx, attemptKey); !ok {
+				return nil, PINLockedError(retryAfter)
+			}
 		}
 		err := passwordhash.Compare(ctx, []byte(row.PINHash), []byte(item.PIN.digits))
 		if apiErr := busyError(err); apiErr != nil {
 			return nil, apiErr
 		}
 		matches[i] = err == nil
+		if repeat && matches[i] {
+			r.h.PINAttempts.Reset(ctx, attemptKey)
+		}
 	}
 	return matches, nil
 }
@@ -169,6 +186,11 @@ func (r *profileSetRun) checkVersion(state userstore.ProfileSetState, plan *prof
 		}
 	}
 	return true, nil
+}
+
+// isRepeat reports a set that is the held version with the held content.
+func (r *profileSetRun) isRepeat(state userstore.ProfileSetState) bool {
+	return state.Held && r.doc.Version == state.Version && sameHash(r.doc.Hash, state.SHA256)
 }
 
 // hashPINs hashes each set PIN that is to be written: on a new profile, or
@@ -234,7 +256,9 @@ func (r *profileSetRun) apply(ctx context.Context, w userstore.ProfileSetWriter,
 	if err != nil {
 		return err
 	}
-	if !samePlanBasis(pre, plan) {
+	// A set that became a repeat of the held version since the first read
+	// starts over, so its PIN comparisons count as guesses (comparePINs).
+	if !samePlanBasis(pre, plan) || (r.isRepeat(snap.State) && !r.repeat) {
 		return errProfileSetRetry
 	}
 	if r.noop, err = r.checkVersion(snap.State, plan); err != nil || r.noop {
@@ -536,5 +560,7 @@ func (r *profileSetRun) result(ctx context.Context) (ProfileSetResult, error) {
 	if err != nil {
 		return ProfileSetResult{}, err
 	}
-	return buildProfileSetResult(r.doc, snap, r.settings), nil
+	result := buildProfileSetResult(r.doc, snap, r.settings)
+	result.JellyfinBareNameSignIn = r.h.jellyfinBareNameSignIn(ctx, r.cmd.UserID, snap.Rows)
+	return result, nil
 }

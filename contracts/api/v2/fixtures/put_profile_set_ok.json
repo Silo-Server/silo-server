@@ -17,5 +17,6 @@
       "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
       "key": "playback.subtitle_mode"
     }
-  ]
+  ],
+  "jellyfin_bare_name_sign_in": true
 }

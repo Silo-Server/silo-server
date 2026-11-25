@@ -91,7 +91,7 @@ func readProfileSetState(ctx context.Context, tx pgx.Tx, userID int, lock string
 		SELECT profile_set_version, profile_set_sha256, profile_set_accepted_at, role, enabled
 		FROM users WHERE id = $1 `+lock, userID).Scan(&version, &st.SHA256, &acceptedAt, &st.Role, &st.Enabled)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return st, fmt.Errorf("account %d not found", userID)
+		return st, fmt.Errorf("account %d: %w", userID, userstore.ErrProfileSetAccountGone)
 	}
 	if err != nil {
 		return st, fmt.Errorf("reading the account's profile set: %w", err)

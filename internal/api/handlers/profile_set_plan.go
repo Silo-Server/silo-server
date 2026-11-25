@@ -25,9 +25,9 @@ type profileSetPlan struct {
 	localOnly []*userstore.ProfileSetRow
 }
 
-// errProfileSetNoPrimary is a household with profiles and no primary, which
-// the set cannot place its first item on.
-var errProfileSetNoPrimary = errors.New("the household has profiles but no primary profile")
+// ErrProfileSetNoPrimary is a household with profiles and no primary, which
+// the set cannot place its first item on: stored data a set can't apply to.
+var ErrProfileSetNoPrimary = errors.New("the household has profiles but no primary profile")
 
 // planProfileSet maps the set onto rows, pure. The first item is always the
 // primary profile; the rest match a row by sync ID, then by pairs, and are
@@ -51,7 +51,7 @@ func planProfileSet(doc *profileSetDoc, rows []userstore.ProfileSetRow, limit in
 		}
 	}
 	if primary == nil && len(rows) > 0 {
-		return nil, errProfileSetNoPrimary
+		return nil, ErrProfileSetNoPrimary
 	}
 	pairOf := map[string]int{}
 	for j, pair := range doc.Pairs {

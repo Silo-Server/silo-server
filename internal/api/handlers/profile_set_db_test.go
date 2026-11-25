@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -357,9 +359,15 @@ func TestProfileSetPairsKeepHistoryDB(t *testing.T) {
 	if progress, err := f.store.GetProgress(ctx, ids["Sam"], "movie:history"); err != nil || progress == nil {
 		t.Fatalf("progress after pairing = %v, %v", progress, err)
 	}
+	f.handler.JellyfinCompatEnabled = true
 	held, err := f.handler.HeldProfileSet(ctx, f.userID)
 	if err != nil || len(held.LocalOnly) != 1 || held.LocalOnly[0].ID != ids["Guest"] {
 		t.Fatalf("local_only = %+v, %v", held.LocalOnly, err)
+	}
+	// Three profiles with no PIN and none named after the account: the bare
+	// account name no longer picks one on the Jellyfin-compatible surface.
+	if held.JellyfinBareNameSignIn == nil || *held.JellyfinBareNameSignIn {
+		t.Fatalf("jellyfin_bare_name_sign_in = %v, want false", held.JellyfinBareNameSignIn)
 	}
 }
 
@@ -581,4 +589,30 @@ func TestProfileSetSettingsDB(t *testing.T) {
 	_, err = f.apply(t, setDoc(t, 3, main.with("settings", map[string]any{settingskeys.PlaybackAudioLanguage: "en"}).
 		with("settings_reset", []string{settingskeys.PlaybackAudioLanguage})))
 	assertSetField(t, err, "set.items[0].settings_reset[0]")
+}
+
+// TestProfileSetRepeatCountsPINGuessesDB: a repeat of the held set answers
+// whether its set PIN matches the stored one, so each comparison spends the
+// profile's PIN attempts as verifyProfilePIN does. It catches the repeat
+// becoming an unthrottled way to read another profile's PIN.
+func TestProfileSetRepeatCountsPINGuessesDB(t *testing.T) {
+	f := newProfileSetDBFixture(t, 5)
+	f.handler.PINAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.ProfilePINPolicy)
+	main, kid := newSetItem("Parent"), newSetItem("Kid")
+	f.mustApply(t, setDoc(t, 1, main, kid.with("pin", map[string]any{"set": "1234"})))
+	guess := func(pin string) error {
+		_, err := f.apply(t, setDoc(t, 1, main, kid.with("pin", map[string]any{"set": pin})))
+		return err
+	}
+	for i := range ratelimit.ProfilePINPolicy.MaxAttempts {
+		if err := guess("0000"); !isStale(err) {
+			t.Fatalf("wrong guess %d: err = %v, want profile_set_stale", i+1, err)
+		}
+	}
+	for _, pin := range []string{"1234", "0000"} {
+		var apiErr *APIError
+		if err := guess(pin); !errors.As(err, &apiErr) || apiErr.Status != http.StatusTooManyRequests || apiErr.RetryAfter <= 0 {
+			t.Fatalf("guess %s while locked: err = %v, want 429 with Retry-After either way", pin, err)
+		}
+	}
 }

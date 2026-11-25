@@ -6,7 +6,8 @@
   "local_only": [
     {
       "id": "p-admin",
-      "name": "Ada"
+      "name": "Ada",
+      "has_pin": false
     }
   ],
   "edits_token": ""

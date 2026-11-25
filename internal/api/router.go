@@ -2957,6 +2957,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if profileHandler != nil {
 		v2deps.Profiles = profileHandler
 		v2deps.ProfileSet = profileHandler
+		profileHandler.JellyfinCompatEnabled = deps.Config != nil && deps.Config.JellyfinCompat.Enabled && deps.Config.JellyfinCompat.Listen != ""
 	}
 	if deps.FolderRepo != nil {
 		v2deps.Libraries = deps.FolderRepo

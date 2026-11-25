@@ -24,8 +24,10 @@
   "local_only": [
     {
       "id": "p-guest",
-      "name": "Guest"
+      "name": "Guest",
+      "has_pin": false
     }
   ],
+  "jellyfin_bare_name_sign_in": false,
   "edits_token": ""
 }

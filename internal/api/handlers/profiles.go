@@ -100,6 +100,10 @@ type ProfileHandler struct {
 	// ProfileSetAvailable turns the profile set on: the stores keep accounts
 	// in PostgreSQL, where a set applies in one transaction.
 	ProfileSetAvailable bool
+	// JellyfinCompatEnabled reports that the Jellyfin-compatible listener
+	// runs, so the profile set can say how its sign-in by bare account name
+	// will behave.
+	JellyfinCompatEnabled bool
 }
 
 // NewProfileHandler creates a new ProfileHandler.

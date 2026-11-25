@@ -12,6 +12,10 @@ import (
 // per-account file while other profile data lives in PostgreSQL.
 var ErrProfileSetUnsupported = errors.New("this user store cannot apply a profile set")
 
+// ErrProfileSetAccountGone is a profile set whose account was deleted before
+// or while the set was applied.
+var ErrProfileSetAccountGone = errors.New("the account no longer exists")
+
 // ProfileSetState is the account's profile set as stored: the version and
 // content hash of the last set it accepted.
 type ProfileSetState struct {
