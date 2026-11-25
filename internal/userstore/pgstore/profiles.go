@@ -249,15 +249,15 @@ func (s *PostgresUserStore) ListProfiles(ctx context.Context) ([]userstore.Profi
 // records commit together. It locks the profile row, then the account row
 // (for an access field), then edit rows.
 //
-// A write that may record an edit first takes the account's
-// preference-settings lock, as every other recording writer and an account
-// deletion do, so the deletion can't run between the write and its record.
+// It first takes the account's preference-settings lock, as every other
+// profile writer and an account deletion do. The deletion then runs wholly
+// before or after it: never between a write and the edit it records, and
+// never holding the account row while this transaction holds the profile
+// row and waits for the account row (an access field's revision bump).
 func (s *PostgresUserStore) UpdateProfile(ctx context.Context, id string, u userstore.UpdateProfileInput) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, ok := profileedits.ActorFor(ctx, s.userID); ok && touchesRecordedFields(u) {
-			if err := lockPreferenceSettings(ctx, tx, s.userID); err != nil {
-				return err
-			}
+		if err := lockPreferenceSettings(ctx, tx, s.userID); err != nil {
+			return err
 		}
 		return updateProfile(ctx, tx, s.userID, id, u)
 	})
