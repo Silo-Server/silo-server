@@ -5,12 +5,15 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -227,6 +230,9 @@ func TestAppKeyProblems(t *testing.T) {
 		{err: auth.ErrNotPermitted, want: TypeNotPermitted},
 		{err: auth.ErrProviderSignInRequired, want: TypeProviderSignInRequired},
 		{err: &auth.KeyRetryError{RetryAfter: 3 * time.Second}, want: TypeRateLimited, retry: "3"},
+		{err: fmt.Errorf("getting session: %w", auth.ErrSessionCheckUnavailable), want: TypeDependencyUnavailable, retry: strconv.Itoa(apimw.CredentialCheckRetryAfterSeconds)},
+		{err: auth.ErrProviderCheckIncomplete, want: TypeDependencyUnavailable},
+		{err: auth.ErrProviderUnavailable, want: TypeProviderUnavailable},
 	} {
 		t.Run(tc.want.ID+" "+tc.err.Error(), func(t *testing.T) {
 			keys := &fakeAppKeys{enabled: true, err: tc.err}
@@ -301,6 +307,7 @@ func TestAppKeyEnvelopeIsStrict(t *testing.T) {
 		{body: `{"kid":"zT321tSgcB7emUH9k0B0oA","payload":"eyJ9","sig":"c2ln","alg":"ES256"}`, want: TypeValidationFailed},
 		{body: `{"kid":"zT321tSgcB7emUH9k0B0oA","payload":"eyJ9"}`, want: TypeValidationFailed},
 		{body: `not json`, want: TypeMalformedRequest},
+		{body: `{"KID":"zT321tSgcB7emUH9k0B0oA","Payload":"eyJ9","Sig":"c2ln"}`, want: TypeValidationFailed},
 	} {
 		keys := &fakeAppKeys{enabled: true}
 		rec := do(t, NewHandler(appKeyDeps(keys)), http.MethodPost, Prefix+"/auth/keys/sign-in", tc.body, nil)

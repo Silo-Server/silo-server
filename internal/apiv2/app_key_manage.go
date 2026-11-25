@@ -25,7 +25,7 @@ type AppDeviceKey struct {
 	EnrolledBy string   `json:"enrolled_by" enum:"introduce,session,app-code,grant" doc:"How the key was enrolled: introduced by the person key, from a signed-in session, with an app code, or through a grant" example:"introduce"`
 	AllowedBy  *string  `json:"allowed_by" nullable:"true" doc:"For a key a grant enrolled, the name of the account whose person key signed the grant; null otherwise" example:"sam"`
 	EnrolledAt Instant  `json:"enrolled_at" doc:"When the key was enrolled"`
-	LastUsedAt *Instant `json:"last_used_at" nullable:"true" doc:"When the key last signed in, or last asked while waiting for approval; null before that"`
+	LastUsedAt *Instant `json:"last_used_at" nullable:"true" doc:"When the key last opened a login session. enroll and an introduce that signs in open one, so a key not used since shows enrolled_at; null for a key waiting for approval, which has never opened one"`
 }
 
 // AppKeyList is a person's own keys.

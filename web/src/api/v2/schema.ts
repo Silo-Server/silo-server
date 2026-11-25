@@ -25034,7 +25034,7 @@ export interface components {
       kind: "device" | "app";
       /**
        * Format: date-time
-       * @description When the key last signed in, or last asked while waiting for approval; null before that
+       * @description When the key last opened a login session. enroll and an introduce that signs in open one, so a key not used since shows enrolled_at; null for a key waiting for approval, which has never opened one
        */
       last_used_at: string | null;
       /**

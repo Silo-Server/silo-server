@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
@@ -21,10 +22,6 @@ type AppKeyEnvelope struct {
 	Payload   string  `json:"payload" minLength:"1" maxLength:"8192" doc:"base64url (no padding) of the UTF-8 JSON payload; the signatures cover silo-sync-v1.<purpose>.<payload> exactly as sent" example:"eyJwdXJwb3NlIjoic2lnbi1pbiJ9"`
 	Sig       string  `json:"sig" minLength:"1" maxLength:"128" doc:"base64url of the 64-byte r || s ECDSA P-256 signature over SHA-256 of the signing input" example:"nnyAt7pV-XsUSmpX0IAk1d0QmUrO4z9CZ5Oeoy9QlVSyCq2EED4Ns_Aakhd5DgOmSqWWrT5xs8an1Ye0a4smgg"`
 	DeviceSig *string `json:"device_sig,omitempty" minLength:"1" maxLength:"128" doc:"The device key's own signature over the same bytes. Required on introduce and enroll, refused on sign-in" example:"fMNUAuxbYE4rOU1dn5PqgBmxSoSu8GmnvtS_M3syK8N-uOt2jcfwhFX5z3BbCfmGy8V3ToHIzxZ8ySiNfdXqOw"`
-}
-
-func (e AppKeyEnvelope) envelope() appkeys.Envelope {
-	return appkeys.Envelope{KeyID: e.KeyID, Payload: e.Payload, Sig: e.Sig, DeviceSig: e.DeviceSig}
 }
 
 // AppKeyEnvelopeInput is the body of introduce and sign-in: the envelope.
@@ -147,33 +144,36 @@ func (reg *Registry) createAppKeyChallenge(ctx context.Context, in *AppKeyChalle
 }
 
 // keyRequest builds the service request of a signed envelope.
-func (reg *Registry) keyRequest(ctx context.Context, env AppKeyEnvelope) (auth.KeyRequest, error) {
+func (reg *Registry) keyRequest(ctx context.Context, env appkeys.Envelope) (auth.KeyRequest, error) {
 	serverID, err := reg.serverID(ctx)
 	if err != nil {
 		return auth.KeyRequest{}, err
 	}
 	known := reg.appKeyKnownOrigins(ctx)
 	return auth.KeyRequest{
-		Envelope: env.envelope(), ServerID: serverID, IP: clientip.FromContext(ctx),
+		Envelope: env, ServerID: serverID, IP: clientip.FromContext(ctx),
 		CheckOrigin: func(origin string) error { return judgeSignedOrigin(known, origin) },
 	}, nil
 }
 
 func (reg *Registry) introduceAppKey(ctx context.Context, in *AppKeyEnvelopeInput) (*SealedReplyOutput, error) {
-	return reg.signedKeyRequest(ctx, in, func(svc AppKeyService, ctx context.Context, req auth.KeyRequest) (*handlers.AppKeyAnswer, error) {
+	return reg.signedKeyRequest(ctx, in, appkeys.PurposeIntroduce, func(svc AppKeyService, ctx context.Context, req auth.KeyRequest) (*handlers.AppKeyAnswer, error) {
 		return svc.IntroduceAppKey(ctx, req)
 	})
 }
 
 func (reg *Registry) signInWithAppKey(ctx context.Context, in *AppKeyEnvelopeInput) (*SealedReplyOutput, error) {
-	return reg.signedKeyRequest(ctx, in, func(svc AppKeyService, ctx context.Context, req auth.KeyRequest) (*handlers.AppKeyAnswer, error) {
+	return reg.signedKeyRequest(ctx, in, appkeys.PurposeSignIn, func(svc AppKeyService, ctx context.Context, req auth.KeyRequest) (*handlers.AppKeyAnswer, error) {
 		return svc.SignInWithAppKey(ctx, req)
 	})
 }
 
 // signedKeyRequest runs a public signed route: the switch, the request, the
-// service call and the sealed answer.
-func (reg *Registry) signedKeyRequest(ctx context.Context, in *AppKeyEnvelopeInput,
+// service call and the sealed answer. The envelope is read from the raw body
+// by appkeys.ParseEnvelope, the parser the protocol's vectors test: the
+// framework's decoding matches field names regardless of case, and an
+// envelope has exactly its fields.
+func (reg *Registry) signedKeyRequest(ctx context.Context, in *AppKeyEnvelopeInput, purpose appkeys.Purpose,
 	call func(AppKeyService, context.Context, auth.KeyRequest) (*handlers.AppKeyAnswer, error),
 ) (*SealedReplyOutput, error) {
 	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
@@ -183,7 +183,11 @@ func (reg *Registry) signedKeyRequest(ctx context.Context, in *AppKeyEnvelopeInp
 	if err != nil {
 		return nil, err
 	}
-	req, err := reg.keyRequest(ctx, in.Body)
+	env, err := appkeys.ParseEnvelope(in.RawBody, purpose)
+	if err != nil {
+		return nil, appKeyProblem(err)
+	}
+	req, err := reg.keyRequest(ctx, env)
 	if err != nil {
 		return nil, err
 	}
@@ -206,11 +210,11 @@ func (reg *Registry) enrollAppKeys(ctx context.Context, in *EnrollAppKeysInput) 
 	if !claims.IsOwnLoginSession() {
 		return nil, appKeyProblem(auth.ErrSessionNotAllowed)
 	}
-	personKey, err := appkeys.ParsePublicKey(in.Body.PersonKey)
+	personKey, env, err := appkeys.ParseKeyBody(in.RawBody, appkeys.PurposeEnroll)
 	if err != nil {
-		return nil, validationProblem(locationBody+".person_key", codeInvalid, "person_key is not a P-256 public key.")
+		return nil, appKeyProblem(err)
 	}
-	req, err := reg.keyRequest(ctx, in.Body.Message)
+	req, err := reg.keyRequest(ctx, env)
 	if err != nil {
 		return nil, err
 	}
@@ -323,6 +327,15 @@ func judgeSignedOrigin(known []string, signed string) error {
 // before the signature is signature_invalid; a malformed envelope or payload
 // field, once the signature verifies, is validation_failed.
 func appKeyProblem(err error) error {
+	if errors.Is(err, auth.ErrSessionCheckUnavailable) {
+		// As at refresh: the store couldn't be asked, and the key is not
+		// judged.
+		return NewProblem(TypeDependencyUnavailable, "The sign-in could not be checked right now. Retry after the Retry-After delay.").
+			WithRetryAfter(apimw.CredentialCheckRetryAfterSeconds)
+	}
+	if errors.Is(err, auth.ErrProviderCheckIncomplete) {
+		return NewProblem(TypeDependencyUnavailable, "The sign-in provider's answer could not be applied; try again later.")
+	}
 	var retry *auth.KeyRetryError
 	if errors.As(err, &retry) {
 		return NewProblem(TypeRateLimited, "This device is waiting for approval; ask again later.").
