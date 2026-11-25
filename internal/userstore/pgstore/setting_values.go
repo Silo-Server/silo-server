@@ -282,6 +282,52 @@ func upsertSettingValue(
 	return &stored, nil
 }
 
+// putSettingValueIfChanged is upsertSettingValue that leaves a row holding
+// an equal value alone: its revision and updated_at stay as they are. The
+// column is jsonb, so equal means equal JSON, whatever the key order or
+// spacing. It reports whether it wrote a row.
+func putSettingValueIfChanged(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	id userstore.SettingIdentity,
+	value json.RawMessage,
+) (bool, error) {
+	if err := id.Validate(); err != nil {
+		return false, err
+	}
+	if err := userstore.ValidateSettingValueJSON(value); err != nil {
+		return false, err
+	}
+	target, ok := settingConflictTargets[id.Scope]
+	if !ok {
+		return false, fmt.Errorf("%w: %q has no storage identity", userstore.ErrInvalidSettingIdentity, id.Scope)
+	}
+	var one int
+	err := exec.QueryRow(ctx, fmt.Sprintf(`
+		INSERT INTO user_setting_values
+			(user_id, key, scope, profile_id, client_family, device_id, library_id, series_id, value)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT %s DO UPDATE SET
+			value = excluded.value,
+			revision = user_setting_values.revision + 1,
+			updated_at = now()
+		WHERE user_setting_values.value IS DISTINCT FROM excluded.value
+		RETURNING 1`, target),
+		userID, id.Key, string(id.Scope),
+		nullableText(id.ProfileID), nullableText(string(id.ClientFamily)), nullableText(id.DeviceID),
+		nullableInt(id.LibraryID), nullableText(id.SeriesID),
+		[]byte(value),
+	).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("writing setting value %q at %s: %w", id.Key, id.Scope, err)
+	}
+	return true, nil
+}
+
 // CompareAndSetSettingValue writes only when expectedRevision still names the
 // current row. Revision zero is insert-if-absent. PostgreSQL performs either
 // comparison and write in one statement, so concurrent document mutations can

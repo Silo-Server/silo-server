@@ -460,7 +460,10 @@ type Dependencies struct {
 	AdminAPIKeys            AdminAPIKeyService
 	PersonalAPIKeys         PersonalAPIKeyService
 	// AppKeys stores app keys; nil reports the capability not_configured.
-	AppKeys          AppKeyService
+	AppKeys AppKeyService
+	// ProfileSet applies and reads profile sets; nil reports the capability
+	// not_configured.
+	ProfileSet       ProfileSetService
 	PolicyCapability PolicyCapabilityService
 	Branding         BrandingService
 	OverlayImages    OverlayImageService
