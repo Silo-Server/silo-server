@@ -771,7 +771,7 @@ account.
 
 | Refusal | Problem |
 | --- | --- |
-| The grant was already used; it names another server, or its `origins` leave out the redeem's `origin`; it doesn't verify by the account's live person key (unknown account, replaced or revoked person key); the account is an administrator's or disabled; the outer `kid` isn't the `app_key`'s ID | 403 `app_grant_invalid` |
+| The grant was already used; it names another server, or its `origins` leave out the redeem's `origin`; it doesn't verify by the account's live person key (unknown account, replaced or revoked person key); the account is an administrator's or disabled | 403 `app_grant_invalid` |
 | The grant's own `exp` has passed | 403 `app_grant_expired` |
 | The redeemer doesn't hold the grant's `app_key` (the outer signature doesn't verify by it, or the envelope's `kid` isn't that key's ID), or the `grant-redeem` envelope is outside its own `iat` and `exp` | 401 `signature_invalid` |
 | The `app_key` is already enrolled on this server | 409 `conflict` |
