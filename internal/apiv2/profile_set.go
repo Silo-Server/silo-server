@@ -269,7 +269,7 @@ const putProfileSetDescription = "Makes the account's household profiles match a
 	"Only a newer version changes anything: an older version, the same version with other content, the same version whose PINs differ from the stored ones, and a set without the person's latest edits (edits_seen) are 409 profile_set_stale; the same version and content again answers 200 and writes nothing. " +
 	"A set that changes the main profile's PIN ends every X-Profile-Token minted for its old PIN, the caller's included. " +
 	"A malformed member is 422 validation_failed at its member (at body.payload in the signed form); a new item named like a profile outside the set is 422 with code name_conflict. " +
-	"Limited per account by the profile_set rate-limit budget (the session's account, or the one a verified signature names), with a per-address budget ten times that spent first; 429 rate_limited with Retry-After from either. The signed form also spends its challenge. A body over 256 KiB is 413 payload_too_large. " +
+	"Limited per account by the profile_set rate-limit budget (the session's account, or the one a verified signature names), with a per-address budget ten times that spent first; 429 rate_limited with Retry-After from either. The signed form also spends its challenge, and has spent it when the account's limit refuses the set: the next try needs a new challenge and a newly signed envelope. A body over 256 KiB is 413 payload_too_large. " +
 	"501 capability_unsupported where profiles are not kept in PostgreSQL."
 
 func registerProfileSet(reg *Registry) {

@@ -363,10 +363,14 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 				epCfg, ok := cfg.AuthEndpoints[endpoint]
 				if ok {
 					epRate := endpointRate(epCfg)
+					// What every client behind one forwarding peer shares.
+					peerRate := authPeerRate(epRate)
 					if byAccount {
 						// The account spends the endpoint's budget in the
-						// handler; the address gets the looser shared one.
-						epRate = authPeerRate(epRate)
+						// handler; the address gets the looser shared one,
+						// which is as much as its forwarding peer gets: the
+						// two are not multiplied.
+						epRate = peerRate
 					}
 					epKey := fmt.Sprintf("authip:%s:%s", source, endpoint)
 					epResult := mw.perKey.Allow(r.Context(), epKey, epRate)
@@ -380,7 +384,7 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 					if epResult.Allowed {
 						if peer := clientip.PeerIP(r.Context()); peer != "" && peer != clientIP && netaccess.PathFromContext(r.Context()).IsDefault() {
 							peerKey := fmt.Sprintf("authpeer:%s:%s", SourceKey(peer), endpoint)
-							epResult = mw.perKey.Allow(r.Context(), peerKey, authPeerRate(epRate))
+							epResult = mw.perKey.Allow(r.Context(), peerKey, peerRate)
 						}
 					}
 					if !epResult.Allowed && !mw.admitOverBudget(r, admit, clientIP, endpoint, epRate) {

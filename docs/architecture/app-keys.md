@@ -727,7 +727,9 @@ reverse proxy that doesn't pass the client address on; counting the address
 would give all of them one person's allowance. The address still has a budget,
 ten times the account's, spent in the gate before anything about the request
 is trusted (`KeyEndpointByAccount`). An unverified signed request can only
-count there. The signed form also spends a challenge.
+count there. A forwarding proxy's own address gets that same tenfold budget,
+not ten times it again. The signed form also spends a challenge, and has
+spent it by the time the account's limit refuses the set.
 
 ## Multi-node rules
 
