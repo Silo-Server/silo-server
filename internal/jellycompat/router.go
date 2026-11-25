@@ -87,7 +87,8 @@ func NewRouter(deps Dependencies) chi.Router {
 	// activity log and the request logger, so each records it as that 500. chi's
 	// Recoverer writes no status for a Connection: Upgrade request, which those
 	// recorders then kept as a 200 (#5236); this one writes it for every request.
-	r.Use(apimw.Recoverer)
+	// Its log redacts the HLS play session ID, as the request logger does.
+	r.Use(apimw.RecovererRedactingPath(redactHLSPlaySessionID))
 
 	artworkHandler := deps.ArtworkHandler
 	if artworkHandler == nil {

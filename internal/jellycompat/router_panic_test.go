@@ -1,8 +1,13 @@
 package jellycompat
 
 import (
+	"bufio"
+	"bytes"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -73,5 +78,57 @@ func TestCompatPanickingRequestIsRecordedAsServerError(t *testing.T) {
 				t.Fatalf("activity entries = %+v, want one 500 row for %s", entries, tc.pattern)
 			}
 		})
+	}
+}
+
+// A panic on an HLS route logs the path with the play session ID redacted, as
+// the request logger does: the ID authorizes the play's media requests.
+func TestCompatPanicLogRedactsTheHLSPlaySessionID(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	cfg, err := config.LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+	const play = "s3cr3tplaysession"
+	router := NewRouter(Dependencies{Config: cfg})
+	router.Get("/Videos/{itemId}/hls/{playlistId}/zzpanic", func(http.ResponseWriter, *http.Request) { panic("boom") })
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/Videos/item/hls/"+play+"/zzpanic", nil))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if !strings.Contains(logs.String(), "panic serving request") || strings.Contains(logs.String(), play) {
+		t.Fatalf("panic log = %q, want it without the play session ID", logs.String())
+	}
+}
+
+// hijackableRecorder is a ResponseWriter whose connection can be hijacked.
+type hijackableRecorder struct {
+	*httptest.ResponseRecorder
+}
+
+func (hijackableRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	server, client := net.Pipe()
+	_ = client.Close()
+	return server, bufio.NewReadWriter(bufio.NewReader(server), bufio.NewWriter(server)), nil
+}
+
+// A status written after a hijack, as a recoverer's 500 for a panic after the
+// upgrade, leaves the outcome hijacked: the server sent no such response.
+func TestStatusResponseWriterKeepsAHijackedOutcome(t *testing.T) {
+	sw := &statusResponseWriter{ResponseWriter: hijackableRecorder{httptest.NewRecorder()}}
+	conn, _, err := sw.Hijack()
+	if err != nil {
+		t.Fatalf("Hijack: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	sw.WriteHeader(http.StatusInternalServerError)
+	if got := compatStatusClass(sw.status, sw.hijacked); got != compatStatusHijacked {
+		t.Fatalf("status class = %q, want %q", got, compatStatusHijacked)
 	}
 }

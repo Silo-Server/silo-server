@@ -36,6 +36,29 @@ func TestRecovererRedactsSecretPathParams(t *testing.T) {
 	}
 }
 
+// A listener whose paths carry another credential redacts it too, after the
+// {token} and {secret} parameters.
+func TestRecovererRedactingPathAppliesTheListenersRedaction(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	const token, play = "s3cr3t-stream-token", "s3cr3t-play-session"
+	router := chi.NewRouter()
+	router.Use(RecovererRedactingPath(func(path string) string { return strings.ReplaceAll(path, play, "[play]") }))
+	router.Get("/stream/{token}/{play}", func(http.ResponseWriter, *http.Request) { panic("boom") })
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/stream/"+token+"/"+play, nil))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if strings.Contains(logs.String(), token) || strings.Contains(logs.String(), play) || !strings.Contains(logs.String(), "/stream/[redacted]/[play]") {
+		t.Fatalf("panic log = %q, want both credentials redacted", logs.String())
+	}
+}
+
 // The panic value is logged with its credential assignments masked, nested
 // ones included: an error from a plugin or gRPC call can carry one in its
 // text (desc = api_key=...), and the log handler redacts by key only.

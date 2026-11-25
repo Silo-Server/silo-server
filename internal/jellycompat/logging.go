@@ -32,8 +32,13 @@ type statusResponseWriter struct {
 	hijacked bool
 }
 
+// WriteHeader records the status, except on a hijacked connection: net/http
+// sends nothing for it there, so a recoverer's 500 after a hijack must not
+// replace the hijacked outcome.
 func (w *statusResponseWriter) WriteHeader(status int) {
-	w.status = status
+	if !w.hijacked {
+		w.status = status
+	}
 	w.ResponseWriter.WriteHeader(status)
 }
 
