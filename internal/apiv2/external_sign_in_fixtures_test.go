@@ -127,10 +127,6 @@ func externalSignInFixtureCases() []fixtureCase {
 			scenario: "The directory accepts the password, but the server has no account for the person and does not create one: an administrator has to add it (v1 answers not_permitted).",
 			method:   http.MethodPost, path: "/api/v2/auth/login", body: `{"username":"newcomer","password":"directory password"}`,
 			status: http.StatusForbidden, assertHeaders: json, schema: problem},
-		{name: "list_admin_local_password_off_accounts_ok", operationID: "listAdminLocalPasswordOffAccounts",
-			scenario: "Before turning password sign-in off, an administrator reads the first accounts email auto-match can link, with both group totals.",
-			method:   http.MethodGet, path: "/api/v2/admin/sign-in/local-password-off/accounts?group=email_match&limit=1", headers: actingRequestAdmin,
-			status: http.StatusOK, assertHeaders: json, schema: schema("AdminLocalPasswordOffAccounts")},
 		{name: "admin_account_delete_break_glass_required", operationID: "deleteAdminUser",
 			scenario: "Deleting the last break-glass administrator while local password sign-in is off is refused.",
 			method:   http.MethodDelete, path: "/api/v2/admin/users/8", headers: with(actingRequestAdmin, "If-Match", "*"),
@@ -148,5 +144,16 @@ func externalSignInFixtureCases() []fixtureCase {
 			method:   http.MethodPost, path: "/api/v2/account/identities/link-network", headers: bearer(memberToken),
 			body:   `{"installation_id":"5","password":"right password"}`,
 			status: http.StatusCreated, assertHeaders: append([]string{"Location"}, json...), schema: schema("AccountIdentity")},
+	}
+}
+
+// localPasswordOffFixtureCases covers the read of who loses sign-in when
+// local password sign-in is turned off. Records are synthetic.
+func localPasswordOffFixtureCases() []fixtureCase {
+	return []fixtureCase{
+		{name: "list_admin_local_password_off_accounts_ok", operationID: "listAdminLocalPasswordOffAccounts",
+			scenario: "Before turning password sign-in off, an administrator reads the first accounts email auto-match can link, with both group totals.",
+			method:   http.MethodGet, path: "/api/v2/admin/sign-in/local-password-off/accounts?group=email_match&limit=1", headers: actingRequestAdmin,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminLocalPasswordOffAccounts"},
 	}
 }

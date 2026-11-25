@@ -289,7 +289,7 @@ func (s *IdentityService) LocalPasswordOffAccounts(ctx context.Context, q LocalP
 	if q.Limit <= 0 {
 		return page, errors.New("limit must be positive")
 	}
-	matching := false
+	var matching bool
 	if q.EmailAutoMatch != nil {
 		matching = *q.EmailAutoMatch
 	} else {

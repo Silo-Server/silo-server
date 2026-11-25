@@ -35,11 +35,8 @@ var (
 	TypeIdentityLinkedElsewhere = ProblemType{"identity_linked_elsewhere", http.StatusConflict, "Identity linked elsewhere"}
 	TypeProviderAlreadyEnabled  = ProblemType{"provider_already_enabled", http.StatusConflict, "Provider already enabled"}
 	TypeBreakGlassRequired      = ProblemType{"break_glass_required", http.StatusConflict, "Break-glass account required"}
-	// TypeSignInProviderRequired: local password sign-in cannot be turned
-	// off while no OIDC or LDAP sign-in provider is on.
-	TypeSignInProviderRequired = ProblemType{"sign_in_provider_required", http.StatusConflict, "Sign-in provider required"}
-	TypeLastSignInMethod       = ProblemType{"last_sign_in_method", http.StatusConflict, "Last sign-in method"}
-	TypeProviderUnavailable    = ProblemType{"provider_unavailable", http.StatusServiceUnavailable, "Provider unavailable"}
+	TypeLastSignInMethod        = ProblemType{"last_sign_in_method", http.StatusConflict, "Last sign-in method"}
+	TypeProviderUnavailable     = ProblemType{"provider_unavailable", http.StatusServiceUnavailable, "Provider unavailable"}
 	// Directory linking (linkAccountIdentityWithCredentials) refusals.
 	TypeAccountDisabled       = ProblemType{"account_disabled", http.StatusForbidden, "Account disabled"}
 	TypeLocalPasswordRequired = ProblemType{"local_password_required", http.StatusConflict, "Local password required"}
@@ -52,6 +49,11 @@ var (
 	// verifier that does not fit it (RFC 6749 invalid_grant).
 	TypeInvalidGrant = ProblemType{"invalid_grant", http.StatusBadRequest, "Invalid grant"}
 )
+
+// TypeSignInProviderRequired: local password sign-in cannot be turned off
+// while no OIDC or LDAP sign-in provider is on, since only break-glass
+// admins could still sign in.
+var TypeSignInProviderRequired = ProblemType{"sign_in_provider_required", http.StatusConflict, "Sign-in provider required"}
 
 // TypePreparedFileExpired: a finished download's prepared file was cleaned up
 // from the server. The client keeps its copy and calls prepareDownloadAgain

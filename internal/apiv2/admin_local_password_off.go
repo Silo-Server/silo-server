@@ -65,11 +65,8 @@ func registerLocalPasswordOffAccounts(reg *Registry) {
 			return nil, p
 		}
 		query := auth.LocalPasswordOffQuery{Group: in.Group, Limit: in.Limit}
-		switch in.EmailAutoMatch {
-		case "true":
-			query.EmailAutoMatch = new(true)
-		case "false":
-			query.EmailAutoMatch = new(false)
+		if in.EmailAutoMatch != "" {
+			query.EmailAutoMatch = new(in.EmailAutoMatch == strconv.FormatBool(true))
 		}
 		scope := CursorScope{OperationID: "listAdminLocalPasswordOffAccounts",
 			Security: strconv.Itoa(claimsFrom(ctx).UserID) + "/" + profileFrom(ctx) + "/" + viewerScopeDigest(ctx),
