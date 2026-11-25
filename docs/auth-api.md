@@ -817,7 +817,10 @@ What counts as an edit:
   digits included.
 - A setting, `settings.<key>`, when a write or reset changes the profile's
   own value. Writing the value already stored, or the default when nothing is
-  stored, and resetting a value that isn't there, are not edits.
+  stored, and resetting a value that isn't there, are not edits. Two keys
+  the settings contract keeps as spellings of one preference
+  (`playback.intro_skip_mode` and `playback.auto_skip_intro`) are recorded
+  together: a change of either moves both to whoever made it.
   `server_local` keys and settings stored per device, library or series are
   not in the set and are never recorded. A Jellyfin-compatible app's
   configuration save writes only the values that differ from the ones it
@@ -850,8 +853,9 @@ In `GET /profiles/set`:
   lists only that set's items. An app that doesn't find one of these
   `sync_id`s in its own set ignores it; the server is not out of step.
 - `edits_token`: names the marks (`by: "account"` entries of `changed_here`
-  and `deleted_here`); `""` when there are none. It changes with every
-  recorded edit, including one that puts a field back as it was.
+  and `deleted_here`); `""` when there are none. It changes whenever the
+  marks change, including an edit that puts a field back as it was. An
+  owner's edit is not a mark and need not change it.
 
 While `edits_token` is not empty, a newer set must carry it as `edits_seen`,
 or it is `profile_set_stale` with nothing written: read the set, merge the
@@ -859,8 +863,11 @@ marks, and send again. An accepted newer set settles exactly the marks its
 `edits_seen` named and they leave `changed_here` and `deleted_here`; a mark
 recorded after the read stays. A repeat of the held version settles nothing.
 An override stays until the person edits that field on this server, or the
-profile is deleted here. A profile an administrator deleted stays hidden on
-this server: no operation clears that yet.
+profile is deleted here. An override belongs to its profile: a set that drops
+the profile removes what the owner recorded for it, and an item under a new
+`sync_id` is a new profile with none of the old one's overrides. A profile an
+administrator deleted stays hidden on this server: no operation clears that
+yet.
 
 ## Profile PINs
 

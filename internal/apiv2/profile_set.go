@@ -224,7 +224,7 @@ type ProfileSetHeldItem struct {
 	RequireAdvisoryAge bool                    `json:"require_advisory_age" example:"false"`
 	RequestsBlocked    bool                    `json:"requests_blocked" example:"false"`
 	Settings           ProfileSetSettings      `json:"settings"`
-	ChangedHere        []ProfileSetFieldChange `json:"changed_here" doc:"Fields edited on this server outside a set and not yet settled: by account until the next set this server accepts, by owner until the owner's value is replaced"`
+	ChangedHere        []ProfileSetFieldChange `json:"changed_here" doc:"Fields edited on this server outside a set and not yet settled: by account until the next accepted newer set settles them, by owner until the owner's value is replaced"`
 }
 
 // ProfileSetLocal is a profile on the account that is not part of the set.
@@ -288,7 +288,7 @@ func registerProfileSet(reg *Registry) {
 	get := humaOp(http.MethodGet, Prefix+"/profiles/set", "getProfileSet", "profiles",
 		"Read the account's profile set as this server holds it.")
 	get.Description = "The same sessions as putProfileSet's session form may read it, without the main profile's PIN. An account that never took a set answers version 0, no items, and every profile in local_only. " +
-		"changed_here and deleted_here list edits made on this server outside a set: by account for the account's own sessions, by owner for an administrator. The next accepted set settles the account ones; edits_token names them. " +
+		"changed_here and deleted_here list edits made on this server outside a set: by account for the account's own sessions, by owner for an administrator. The next accepted newer set settles the account ones (a repeat of the held version settles nothing); edits_token names them and changes when they change, not with an owner's edit. " +
 		"overrides lists the owner's values, which a set leaves as they are until the account edits that field here; hidden_by_owner lists profiles the owner removed, which a set does not bring back. " +
 		"Strong ETag; If-None-Match answers 304. 501 capability_unsupported where profiles are not kept in PostgreSQL."
 	get.Errors = []int{http.StatusForbidden, http.StatusNotImplemented}

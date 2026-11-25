@@ -681,7 +681,12 @@ by a set built elsewhere.
   person's edit of an overridden field on this server makes it a mark, with
   `replaced_owner` set. Until an owner can clear an override directly, a
   profile delete clears its overrides, and a profile an administrator deleted
-  stays hidden.
+  stays hidden. An override decides which value wins for a field of a profile
+  both sides still hold; it does not lock the household. A set that drops the
+  profile removes what the owner recorded for it, and an item under a new
+  `sync_id` is a new profile with none of the old one's overrides, as the
+  main profile can already delete a profile and create another through the
+  profile routes.
 - *Edits follow the profile.* An item that lands on an existing profile reads
   the edits recorded under that profile's `sync_id`, not the one the item
   names. Item 0 always lands on the main profile, so a set can give the main
@@ -700,7 +705,8 @@ by a set built elsewhere.
   SHA-256 over each open mark's `sync_id`, field and revision, sorted. The
   revision comes from a sequence on every write of a row, so an edit that puts
   a field back still moves the token; a timestamp could repeat. Owner rows are
-  left out: the person's app cannot settle them.
+  left out: the person's app cannot settle them, so an owner's edit need not
+  move the token.
 - *What `sync_applied` holds.* The set's value of every field it carries, an
   overridden field included, as if it had been written. A repeat of the held
   version does not compare a PIN the owner overrides, so a retry is not stale
@@ -712,7 +718,9 @@ after under the row lock (a web save sends every field, so presence would
 mark them all); the setting upsert, compare-and-set and delete helpers for a
 profile-scope key a set carries, when the profile's value changes (the stored
 value, or the contract default when nothing is stored, is read under the
-row's lock first; a reset that removes nothing changes nothing); the profile
+row's lock first; a reset that removes nothing changes nothing), with the key
+its contract mirror names (`settingscontract.MirrorKey`) recorded alongside,
+since a set leaves the pair alone while either is the owner's; the profile
 delete for the removal. The preference columns are recorded
 through their settings keys only. The pool-level profile update runs in a
 transaction of its own so the avatar writes and their record commit together.
@@ -732,10 +740,14 @@ store records nothing; it does not take sets either.
 
 The edit rows are the last rows any transaction locks: after the account
 locks, profile rows and the account row in the set, and after the profile row
-in a profile save, avatar write or delete. Every writer that can record an
-edit takes the account's preference-settings lock first, the pool-level
-profile and setting writes included, and so does an account deletion, before
-it locks the account row. So a deletion runs wholly before or after a
+in a profile save, avatar write or delete. The account's preference-settings
+lock comes first: the profile, settings and Jellyfin-compatible configuration
+transactions, a profile delete and the set take it always; the pool-level
+profile update (the avatar routes) takes it always too, since it may also
+lock the account row for an access field's revision; a pool-level setting
+write takes it when it may record an edit, and otherwise writes one row on
+its own and locks nothing else. An account deletion takes it before it locks
+the account row. So a deletion runs wholly before or after a
 recorded edit, never between the write and its record. The recording
 statement also key-share locks the profile row it reads, so a delete of that
 profile that took no such lock either waits for it or leaves it no profile.
