@@ -197,15 +197,19 @@ func (a *Analyzer) ensureCreditsInputs(ctx context.Context, candidates []Candida
 
 			if needTail {
 				// A clean run without keyframes is a sparse tail like any
-				// other with too few; SampleCreditsTail fails a run whose
-				// keyframes ffmpeg counted but the parsers did not read.
-				tail, err := a.settleCreditsTail(ctx, candidate, episodeTailSpec(candidate), sample.Tail, sampleErr)
+				// other with too few, unless ffmpeg counted keyframes the
+				// parsers did not read (sample.TailErr).
+				tailErr := sampleErr
+				if tailErr == nil {
+					tailErr = sample.TailErr
+				}
+				tail, err := a.settleCreditsTail(ctx, candidate, episodeTailSpec(candidate), sample.Tail, tailErr)
 				if err != nil {
 					setErr(err)
 					return
 				}
 				switch {
-				case sampleErr != nil && !mediasample.Classify(sampleErr).Permanent():
+				case tailErr != nil && !mediasample.Classify(tailErr).Permanent():
 					count(&inputs.tailCounts.failed)
 				case tail != nil:
 					addTail(candidate, tail, true)

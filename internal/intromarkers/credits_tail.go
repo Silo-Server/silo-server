@@ -148,6 +148,9 @@ type creditsTailSample struct {
 	// Fingerprint is set when the pass was asked for one; its Points are
 	// empty when the tail has no audio to fingerprint.
 	Fingerprint *Fingerprint
+	// TailErr fails the tail alone when its keyframes could not be read
+	// (see checkTailFrames); the fingerprint stands.
+	TailErr error
 }
 
 // creditsTailSampler runs tail passes. ChromaprintExtractor implements it.
@@ -194,10 +197,7 @@ func (e *ChromaprintExtractor) SampleCreditsTail(ctx context.Context, candidate 
 		return creditsTailSample{}, fmt.Errorf("sampling the credits tail of file %d: %w", candidate.FileID, err)
 	}
 	e.logTailDecoder(ctx, candidate, req, result)
-	if err := checkTailFrames(result); err != nil {
-		return creditsTailSample{}, err
-	}
-	sample := creditsTailSample{Tail: creditsTail{Frames: result.Frames, Silences: result.Silences}}
+	sample := creditsTailSample{Tail: creditsTail{Frames: result.Frames, Silences: result.Silences}, TailErr: checkTailFrames(result)}
 	if fingerprint && candidate.hasAudio() {
 		key := creditsFingerprintKey()
 		sample.Fingerprint = &Fingerprint{

@@ -140,8 +140,14 @@ func TestSampleCreditsTailWithoutVideoInTheWindow(t *testing.T) {
 		t.Skipf("cannot generate the clip: %v: %s", err, output)
 	}
 
-	sample, err := NewChromaprintExtractor(DefaultConfig(ffmpeg)).SampleCreditsTail(ctx, candidate, false)
-	if err != nil || len(sample.Tail.Frames) != 0 {
-		t.Fatalf("SampleCreditsTail: %d keyframes, %v; want none and no error", len(sample.Tail.Frames), err)
+	// ffmpeg's colored log puts a color reset in front of its progress line.
+	for _, color := range []bool{false, true} {
+		if color {
+			t.Setenv("AV_LOG_FORCE_COLOR", "1")
+		}
+		sample, err := NewChromaprintExtractor(DefaultConfig(ffmpeg)).SampleCreditsTail(ctx, candidate, false)
+		if err != nil || sample.TailErr != nil || len(sample.Tail.Frames) != 0 {
+			t.Fatalf("color %t: SampleCreditsTail: %d keyframes, %v, tail %v; want none and no error", color, len(sample.Tail.Frames), err, sample.TailErr)
+		}
 	}
 }

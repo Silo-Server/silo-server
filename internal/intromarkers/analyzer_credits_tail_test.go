@@ -18,7 +18,9 @@ type fakeTailSampler struct {
 	// points is each candidate's tail fingerprint.
 	points map[int][]uint32
 	errs   map[int]error
-	calls  []tailSampleCall
+	// tailErrs fail a candidate's tail alone, keeping its fingerprint.
+	tailErrs map[int]error
+	calls    []tailSampleCall
 }
 
 type tailSampleCall struct {
@@ -35,7 +37,7 @@ func (f *fakeTailSampler) SampleCreditsTail(_ context.Context, candidate Candida
 	if err := f.errs[candidate.FileID]; err != nil {
 		return creditsTailSample{}, err
 	}
-	sample := creditsTailSample{}
+	sample := creditsTailSample{TailErr: f.tailErrs[candidate.FileID]}
 	if f.frames != nil {
 		sample.Tail.Frames = f.frames(candidate)
 	}
@@ -120,5 +122,29 @@ func TestTailPassWithoutKeyframesSettlesAsSparse(t *testing.T) {
 	}
 	if sampler.callCount() != 1 || inputs.tailCounts.unusable != 1 {
 		t.Fatalf("%d tail passes, counts %+v; want the settled tail left alone", sampler.callCount(), inputs.tailCounts)
+	}
+}
+
+// A tail whose keyframes ffmpeg counted but the parsers did not read fails
+// and is retried, while the fingerprint from the same run is kept.
+func TestUnreadTailKeepsItsFingerprint(t *testing.T) {
+	repo := &fakeIntroRepository{}
+	sampler := &fakeTailSampler{points: map[int][]uint32{3: {1, 2, 3}}, tailErrs: map[int]error{3: errNoTailFrames}}
+	analyzer := &Analyzer{
+		repo: repo, extractor: &fakeFingerprintExtractor{}, tailSampler: sampler, config: DefaultConfig("ffmpeg"),
+		node: "node-a", logger: slog.New(slog.DiscardHandler),
+	}
+	episode := Candidate{FileID: 3, FileHash: "h", FileSize: 3, DurationSeconds: 600, CodecVideo: "h264", CodecAudio: "aac"}
+	opts := creditsInputOptions{fingerprints: true, tails: true, tailFileIDs: map[int]struct{}{3: {}}}
+
+	inputs, err := analyzer.ensureCreditsInputs(context.Background(), []Candidate{episode}, opts)
+	if err != nil {
+		t.Fatalf("ensureCreditsInputs: %v", err)
+	}
+	if inputs.tailCounts.failed != 1 || inputs.fingerprintCounts.computed != 1 || inputs.fingerprintCounts.failed != 0 {
+		t.Fatalf("tail counts %+v, fingerprint counts %+v; want the tail failed and the fingerprint stored", inputs.tailCounts, inputs.fingerprintCounts)
+	}
+	if artifact := repo.artifact(3, ArtifactKindCreditsTail); artifact.Status != mediaartifact.StatusFailed {
+		t.Fatalf("tail artifact %q, want failed", artifact.Status)
 	}
 }
