@@ -182,6 +182,15 @@ type AuthHandler struct {
 	storeProvider userstore.UserStoreProvider
 	// avatars decides the PrimaryImageTag; nil reports no user avatars.
 	avatars *compatUserAvatars
+	// passwordSignIn answers whether the account signs in with a password
+	// here (auth.Service.PasswordSignInFor). Nil reports that it does.
+	passwordSignIn passwordSignInReader
+}
+
+// passwordSignInReader is auth.Service.PasswordSignInFor: whether a password
+// signs the account in, with its own local password or through a directory.
+type passwordSignInReader interface {
+	PasswordSignInFor(ctx context.Context, userID int) (auth.PasswordSignIn, error)
 }
 
 // NewAuthHandler creates a new auth handler. The config provider is invoked
@@ -369,7 +378,10 @@ func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *AuthHandler) userDTO(session *Session) userDTOResponse {
+// userDTO builds the user from the session. hasPassword fills HasPassword and
+// HasConfiguredPassword: Jellyfin Web offers a password box on its sign-in
+// screen only for a user that has one.
+func (h *AuthHandler) userDTO(session *Session, hasPassword bool) userDTOResponse {
 	name := session.Username
 	now := time.Now()
 	lastLogin := session.CreatedAt
@@ -381,8 +393,8 @@ func (h *AuthHandler) userDTO(session *Session) userDTOResponse {
 		ID:                        compatUserID(session.PseudoUserID),
 		Name:                      name,
 		ServerID:                  h.cfg().JellyfinCompat.ServerID,
-		HasPassword:               true,
-		HasConfiguredPassword:     true,
+		HasPassword:               hasPassword,
+		HasConfiguredPassword:     hasPassword,
 		HasConfiguredEasyPassword: false,
 		EnableAutoLogin:           false,
 		LastLoginDate:             jellyfinDate(lastLogin),
