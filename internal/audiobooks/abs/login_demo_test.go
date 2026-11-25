@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/demomode"
 )
@@ -81,6 +82,69 @@ func TestHandleLogout_DemoModeEndsOnlyThePresentedToken(t *testing.T) {
 			other, _ := store.GetTokenByJTI(context.Background(), "visitor-b")
 			if live := other.RevokedAt == nil; live != tc.othersLive {
 				t.Fatalf("other token live = %v, want %v", live, tc.othersLive)
+			}
+		})
+	}
+}
+
+// persistRefresh mints a refresh token for userID with jti and stores it.
+func persistRefresh(t *testing.T, store *memTokenStore, cfg *staticConfig, userID, jti string) string {
+	t.Helper()
+	refresh, err := IssueRefreshToken(cfg.secret, userID, "", nil, jti, time.Hour)
+	if err != nil {
+		t.Fatalf("mint refresh: %v", err)
+	}
+	if err := store.InsertToken(context.Background(), ABSToken{ID: jti, UserID: userID, JTI: jti, Type: tokenTypeRefresh, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	return refresh
+}
+
+// TestHandleLogout_DemoModeRevokesPresentedRefreshToken: a demo sign-out
+// that carries its refresh token (header or cookie) ends it too, since
+// possession makes it the caller's own, while another visitor's tokens stay
+// live and a refresh token of another account is ignored. Catches a demo
+// sign-out leaving the client able to refresh, or ending a token it was not
+// entitled to end.
+func TestHandleLogout_DemoModeRevokesPresentedRefreshToken(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		carry   func(*http.Request, string)
+		owner   string
+		revoked bool
+	}{
+		{"header", func(r *http.Request, tok string) { r.Header.Set("x-refresh-token", tok) }, "1", true},
+		{"cookie", func(r *http.Request, tok string) { r.AddCookie(&http.Cookie{Name: "refresh_token", Value: tok}) }, "1", true},
+		{"another account's", func(r *http.Request, tok string) { r.Header.Set("x-refresh-token", tok) }, "2", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, store, cfg := newRefreshTestHandler(t)
+			h.deps.DemoSettings = demoSetting{on: true}
+			mine := mintAndPersistAccess(t, store, cfg, "1", "visitor-a")
+			presented := persistRefresh(t, store, cfg, tc.owner, "presented-refresh")
+			_ = mintAndPersistAccess(t, store, cfg, "1", "visitor-b")
+			_ = persistRefresh(t, store, cfg, "1", "visitor-b-refresh")
+
+			req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+			req.Header.Set("Authorization", "Bearer "+mine)
+			tc.carry(req, presented)
+			rec := httptest.NewRecorder()
+			h.handleLogout(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d", rec.Code)
+			}
+			revoked := func(jti string) bool {
+				tok, _ := store.GetTokenByJTI(context.Background(), jti)
+				return tok.RevokedAt != nil
+			}
+			if !revoked("visitor-a") {
+				t.Fatal("the presented access token is still live")
+			}
+			if revoked("presented-refresh") != tc.revoked {
+				t.Fatalf("presented refresh token revoked = %v, want %v", !tc.revoked, tc.revoked)
+			}
+			if revoked("visitor-b") || revoked("visitor-b-refresh") {
+				t.Fatal("another visitor's tokens were revoked")
 			}
 		})
 	}
