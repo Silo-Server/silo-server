@@ -301,7 +301,8 @@ func enhancementLayer(present bool, frameSideData []SideData) string {
 }
 
 // DolbyVisionEnhancementLayer classifies the enhancement layer of a Dolby
-// Vision stream from its first frame's side data, as dovi_tool does: "mel"
+// Vision stream from the first Dolby Vision metadata in its decoded frames'
+// side data, as dovi_tool does: "mel"
 // (minimal enhancement layer) when every component's NLQ coefficients are the
 // identity, offset 0, vdr_in_max exactly 1.0 and no deadzone, so the layer
 // adds nothing to the picture; "fel" (full enhancement layer) when any
@@ -312,8 +313,10 @@ func DolbyVisionEnhancementLayer(frameSideData []SideData) string {
 		if !strings.EqualFold(data.SideDataType, "Dolby Vision Metadata") {
 			continue
 		}
-		// Only the first frame's metadata counts; a fallback read can return
-		// several frames.
+		// The first Dolby Vision metadata found answers for the stream: a
+		// fallback read can return several frames, and the first decoded one
+		// may carry none. A Profile 7 RPU carries the same NLQ setup on every
+		// frame, so a later frame's tells the same story.
 		return dolbyVisionNLQLayer(data)
 	}
 	return ""
