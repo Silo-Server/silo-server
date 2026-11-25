@@ -482,8 +482,7 @@ func (reg *Registry) getEffectiveSubtitleAppearance(ctx context.Context, in *Eff
 	return &EffectiveSubtitleAppearanceOutput{Body: body}, nil
 }
 
-// updateSubtitleAppearanceDeviceOverride stores the override through the
-// same path as v1 PUT /settings/device/subtitle_appearance and answers with
+// updateSubtitleAppearanceDeviceOverride stores the override and answers with
 // the resolved appearance, the canonical representation after the write.
 func (reg *Registry) updateSubtitleAppearanceDeviceOverride(ctx context.Context, in *SubtitleAppearanceDeviceOverrideInput) (*EffectiveSubtitleAppearanceOutput, error) {
 	if reg.deps.Settings == nil {

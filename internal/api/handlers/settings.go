@@ -331,9 +331,8 @@ func (h *SettingsHandler) SetDeviceSetting(ctx context.Context, cmd DeviceSettin
 }
 
 // DeleteDeviceSetting removes a device-scoped setting for the acting profile
-// (and its legacy alias row), refreshing the device registry as the v1 route
-// does. v1 DELETE /settings/device/{key} and v2
-// deleteSubtitleAppearanceDeviceOverride both go through it.
+// (and its legacy alias row), refreshing the device registry. v2
+// deleteSubtitleAppearanceDeviceOverride goes through it.
 func (h *SettingsHandler) DeleteDeviceSetting(ctx context.Context, cmd DeviceSettingCommand) error {
 	if err := validateDeviceSettingTarget(&cmd); err != nil {
 		return err
