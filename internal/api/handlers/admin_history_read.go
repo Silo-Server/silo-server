@@ -17,8 +17,9 @@ const (
 	// adminHistoryMaxConcurrentReads bounds the gated reads one process runs
 	// at once; a burst waits here instead of taking the database pool.
 	adminHistoryMaxConcurrentReads = 3
-	// adminHistoryReadTimeout bounds one gated read, including an Insights
-	// cache fill that outlives the request that started it.
+	// adminHistoryReadTimeout bounds one gated read, including a shared
+	// Insights cache fill that outlives the request that started it while
+	// another request still waits on it.
 	adminHistoryReadTimeout = 2 * time.Minute
 	// adminHistoryRollbackTimeout bounds closing a read's transaction.
 	adminHistoryRollbackTimeout = 5 * time.Second

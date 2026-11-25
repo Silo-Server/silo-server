@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 )
@@ -17,8 +16,8 @@ import (
 // 60 seconds and clears local entries on admin/playback bus events (the same
 // channels the sibling admin_stats_* providers subscribe to). Title detail is
 // read on demand and not cached. Misses for one key fill once per generation:
-// concurrent requests share the read, and a later fill starts only after the
-// earlier one published, so fills publish in order. The generation counter,
+// concurrent requests share the read, and the read is canceled once every
+// request waiting on it has left. The generation counter,
 // compared and published under publishMu, keeps a fill whose DB snapshot
 // predates an invalidation from repopulating the cache with stale results.
 type AdminInsightsProvider struct {
@@ -29,7 +28,8 @@ type AdminInsightsProvider struct {
 	bandwidth *cache.TTLCache[*AdminInsightsBandwidth]
 	titles    *cache.TTLCache[*AdminInsightsTitles]
 	ttl       time.Duration
-	fills     singleflight.Group
+	fillMu    sync.Mutex
+	fills     map[string]*insightsFillCall // guarded by fillMu
 	publishMu sync.Mutex
 	gen       uint64 // guarded by publishMu
 }
@@ -121,51 +121,101 @@ func insightsWindowCacheable(rangeVal string) bool {
 	return normalizeInsightsRange(rangeVal) != InsightsRangeCustom
 }
 
+// insightsFillCall is one shared cache fill and the requests waiting on it.
+type insightsFillCall struct {
+	done    chan struct{} // closed once val and err are set
+	val     any
+	err     error
+	waiters int // guarded by AdminInsightsProvider.fillMu
+	cancel  context.CancelFunc
+}
+
 // cachedInsightsRead serves key from c or fills it. One fill runs per key and
-// generation, on a context detached from the caller so one request leaving
-// does not fail the others sharing it; adminHistoryReadTimeout still bounds it. The fill is published only when no
-// invalidation ran while it was in flight; the comparison and the Set share
-// publishMu with Invalidate, so an invalidation cannot slip in between.
+// generation, shared by every request that misses while it runs. It runs on a
+// context detached from the caller, so one request leaving does not fail the
+// others, but it is canceled when the last request waiting on it leaves: a
+// fill nobody waits for gives up its read-gate slot or its queued place
+// instead of running out adminHistoryReadTimeout. The fill is published only
+// when no invalidation ran while it was in flight; the comparison and the Set
+// share publishMu with Invalidate, so an invalidation cannot slip in between.
 func cachedInsightsRead[T comparable](ctx context.Context, p *AdminInsightsProvider, c *cache.TTLCache[T], key string, load func(context.Context) (T, error)) (T, error) {
+	var zero T
 	if v, ok := c.Get(key); ok {
 		return v, nil
 	}
 	gen := p.generation()
-	fill := p.fills.DoChan(fmt.Sprintf("%s#%d", key, gen), func() (any, error) {
+	fillKey := fmt.Sprintf("%s#%d", key, gen)
+
+	p.fillMu.Lock()
+	call := p.fills[fillKey]
+	if call == nil {
 		fillCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), adminHistoryReadTimeout)
-		defer cancel()
-		v, err := load(fillCtx)
-		if err != nil {
-			return nil, err
+		call = &insightsFillCall{done: make(chan struct{}), cancel: cancel}
+		if p.fills == nil {
+			p.fills = make(map[string]*insightsFillCall)
 		}
-		p.publishMu.Lock()
-		if p.gen == gen {
-			c.Set(key, v, p.ttl)
-		}
-		p.publishMu.Unlock()
-		return insightsFill[T]{v}, nil
-	})
-	var zero T
-	// A caller whose request ends stops waiting; the fill carries on for
-	// anyone else sharing it, within its own deadline.
-	var res singleflight.Result
+		p.fills[fillKey] = call
+		go p.runInsightsFill(fillCtx, call, fillKey, func(ctx context.Context) (any, error) {
+			v, err := load(ctx)
+			if err != nil {
+				return nil, err
+			}
+			p.publishMu.Lock()
+			// A fill canceled after its last waiter left publishes nothing,
+			// even when its read finished in that moment.
+			if p.gen == gen && ctx.Err() == nil {
+				c.Set(key, v, p.ttl)
+			}
+			p.publishMu.Unlock()
+			return v, nil
+		})
+	}
+	call.waiters++
+	p.fillMu.Unlock()
+
 	select {
-	case res = <-fill:
+	case <-call.done:
 	case <-ctx.Done():
+		p.leaveInsightsFill(call, fillKey)
 		return zero, ctx.Err()
 	}
-	if res.Err != nil {
-		return zero, res.Err
+	if call.err != nil {
+		return zero, call.err
 	}
-	filled, ok := res.Val.(insightsFill[T])
+	v, ok := call.val.(T)
 	if !ok {
-		return zero, fmt.Errorf("insights cache fill for %s returned %T", key, res.Val)
+		return zero, fmt.Errorf("insights cache fill for %s returned %T", key, call.val)
 	}
-	return filled.v, nil
+	return v, nil
 }
 
-// insightsFill carries a fill's value through singleflight's untyped result.
-type insightsFill[T any] struct{ v T }
+// runInsightsFill runs one shared fill, records its result, and retires it.
+func (p *AdminInsightsProvider) runInsightsFill(ctx context.Context, call *insightsFillCall, fillKey string, fill func(context.Context) (any, error)) {
+	defer call.cancel()
+	call.val, call.err = fill(ctx)
+	p.fillMu.Lock()
+	if p.fills[fillKey] == call {
+		delete(p.fills, fillKey)
+	}
+	p.fillMu.Unlock()
+	close(call.done)
+}
+
+// leaveInsightsFill drops one waiter from call and cancels the fill when it
+// was the last. The fill also leaves the map then, so a later request starts a
+// fresh fill instead of joining one that is shutting down.
+func (p *AdminInsightsProvider) leaveInsightsFill(call *insightsFillCall, fillKey string) {
+	p.fillMu.Lock()
+	defer p.fillMu.Unlock()
+	call.waiters--
+	if call.waiters > 0 {
+		return
+	}
+	call.cancel()
+	if p.fills[fillKey] == call {
+		delete(p.fills, fillKey)
+	}
+}
 
 // insightsScopeKey is the cache-key fragment for the shared row filters.
 func insightsScopeKey(q AdminInsightsWindowQuery) string {
