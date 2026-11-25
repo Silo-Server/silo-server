@@ -145,8 +145,8 @@ func (reg *Registry) getAppKeyCapability(ctx context.Context, _ *CapabilityInput
 // capability says disabled and no key is enrolled or signs in, for
 // administrators too.
 func (reg *Registry) appKeySwitch(ctx context.Context, svc AppKeyService) (bool, error) {
-	if demoMode(ctx, reg.deps.DemoSettings) {
-		return false, nil
+	if demo, err := demoMode(ctx, reg.deps.DemoSettings); err != nil || demo {
+		return false, err
 	}
 	return svc.AppKeySignInEnabled(ctx)
 }

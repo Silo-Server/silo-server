@@ -62,7 +62,7 @@ type PersonKeyReplacedOutput struct {
 	Body PersonKeyReplaced
 }
 
-const ownKeySessionRule = "Only the account's own login session: an API key and an administrator acting as the account are 403 permission_denied."
+const ownKeySessionRule = "Only the account's own login session: an API key and an administrator acting as the account are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that."
 
 func registerAppKeyManagement(reg *Registry) {
 	list := humaOp(http.MethodGet, Prefix+"/auth/keys", "listAppKeys", "app-keys", "List the signed-in account's app keys.")

@@ -64,7 +64,7 @@ type AdminDevicePreapprovalInput struct {
 }
 
 // preapprovalSessionRule says who may approve in advance.
-const preapprovalSessionRule = "Only the account's own signed-in session: an API key, a session an administrator opened as the account, or a remote-playback session is 403 permission_denied."
+const preapprovalSessionRule = "Only the account's own signed-in session: an API key, a session an administrator opened as the account, a remote-playback session, or a session opened by device sign-in or by another app's key is 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that."
 
 func registerDevicePreapprovals(reg *Registry) {
 	create := humaOp(http.MethodPost, Prefix+"/auth/device/preapprove", "preapproveDeviceLogin", "device-login",

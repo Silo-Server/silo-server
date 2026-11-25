@@ -312,6 +312,9 @@ func (reg *Registry) getDeviceLoginCapability(ctx context.Context, _ *Capability
 	if reg.deps.Devices != nil && reg.deps.Devices.DeviceLoginConfigured() {
 		state = StateAvailable
 	}
+	// An unreadable demo setting reports no pre-approval, as demo mode does.
+	demo, err := demoMode(ctx, reg.deps.DemoSettings)
+	demoKnown := err == nil
 	return &DeviceLoginCapabilityOutput{
 		CacheControl: cachePrivateNoCache,
 		Body: DeviceLoginCapability{
@@ -325,7 +328,7 @@ func (reg *Registry) getDeviceLoginCapability(ctx context.Context, _ *Capability
 			// A demo server's visitors share one account: none of them
 			// leaves a 30-day sign-in on it (preapproveDeviceLogin is
 			// demo-restricted).
-			Preapprove: !demoMode(ctx, reg.deps.DemoSettings),
+			Preapprove: demoKnown && !demo,
 		},
 	}, nil
 }

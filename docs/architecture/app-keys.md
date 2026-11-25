@@ -566,7 +566,8 @@ everyone, administrators included, whatever the setting says
 answer `capability_disabled`, so a demo account never holds a key and one
 enrolled before demo mode was turned on does not sign in. It is one
 condition where the switch is read, so every route the switch closes
-inherits it. Approving a device sign-in in advance is not behind the switch;
+inherits it. A `demo.enabled` that can't be read fails those routes; it is
+never taken as "not a demo". Approving a device sign-in in advance is not behind the switch;
 it carries the ordinary demo restriction (refused for a caller who is not an
 administrator) and the device login capability reports `preapprove: false`.
 

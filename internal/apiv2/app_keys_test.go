@@ -217,6 +217,14 @@ func TestAppKeyRoutesFollowTheSwitch(t *testing.T) {
 			if demo.calls != 0 {
 				t.Fatalf("service ran %d times in demo mode", demo.calls)
 			}
+			// A demo setting that can't be read closes them too: the
+			// route fails, and the service doesn't run.
+			unread := &fakeAppKeys{enabled: true}
+			deps = appKeyDeps(unread)
+			deps.DemoSettings = fakeSettings{err: errors.New("settings unavailable")}
+			if rec := do(t, NewHandler(deps), tc.method, Prefix+tc.path, tc.body, tc.headers); rec.Code < http.StatusInternalServerError || unread.calls != 0 {
+				t.Fatalf("with the demo setting unreadable: status %d, service ran %d times", rec.Code, unread.calls)
+			}
 		})
 	}
 }

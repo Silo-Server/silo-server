@@ -31,10 +31,10 @@ type PendingAppKeyDecisionInput struct {
 // mainProfileRule is how an operation that creates lasting access to the
 // shared account is limited to the household's main profile
 // (requireVerifiedMainProfile).
-const mainProfileRule = " It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 permission_denied."
+const mainProfileRule = " It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile of the account is 403 permission_denied, and an X-Profile-Id that names no profile of the account is 404 not_found. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 permission_denied. The operation checks the profile again once it holds the account: if the profile's PIN changed, it stopped being the main profile, or it was being written at that moment, the answer is 403 profile_verification_required with nothing changed, and the request is made again (enrollAppKeys on a new challenge, since the first is spent)."
 
 // pendingSessionRule names the sessions the pending key operations refuse.
-const pendingSessionRule = "Only the account's own login session: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied."
+const pendingSessionRule = "Only the account's own login session: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that."
 
 // mainProfileOnly declares an operation that creates lasting access to the
 // shared account: profile-scoped, so the viewer gate verifies a PIN-locked
@@ -95,14 +95,14 @@ func registerAppKeyPending(reg *Registry) {
 
 	approve := humaOp(http.MethodPost, Prefix+"/auth/keys/pending/{id}/approve", "approvePendingAppKey", "app-keys",
 		"Approve a device waiting to sign in to the signed-in administrator account.")
-	approve.Description = pendingSessionRule + " Send an empty JSON object. The device's next signInWithAppKey opens a session. The account must still be an enabled administrator (403 permission_denied otherwise). Approving an active key changes nothing; a key that is unknown, denied, revoked or past its 24 hours is 404 not_found. 409 capability_disabled while auth.app_key_sign_in is off." + mainProfileRule
+	approve.Description = pendingSessionRule + " Send an empty JSON object. The key becomes active: the device's next signInWithAppKey, on a new challenge, opens a session if it passes the usual sign-in checks. The account must still be an enabled administrator (403 permission_denied otherwise). Approving an active key changes nothing; a key that is unknown, denied, revoked or past its 24 hours is 404 not_found. 409 capability_disabled while auth.app_key_sign_in is off." + mainProfileRule
 	approve.DefaultStatus = http.StatusNoContent
 	approve.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict}
 	Register(reg, mainProfileOnly(Operation{Operation: approve, RetrySafety: RetrySafetyNaturalIdempotent, ServiceBacked: true, Audited: true}), reg.approvePendingAppKey)
 
 	deny := humaOp(http.MethodPost, Prefix+"/auth/keys/pending/{id}/deny", "denyPendingAppKey", "app-keys",
 		"Refuse a device waiting to sign in to the signed-in account.")
-	deny.Description = pendingSessionRule + " Send an empty JSON object. The device's next signInWithAppKey answers 403 key_denied, and neither listAppKeys nor listPendingAppKeys shows the key. Denying a denied key changes nothing; an active, revoked or unknown key is 404 not_found. Answers while auth.app_key_sign_in is off."
+	deny.Description = pendingSessionRule + " Send an empty JSON object. The device's next signInWithAppKey that reaches the key answers 403 key_denied (409 capability_disabled comes first while auth.app_key_sign_in is off), and neither listAppKeys nor listPendingAppKeys shows the key. Denying a denied key changes nothing; an active, revoked or unknown key is 404 not_found. Answers while auth.app_key_sign_in is off."
 	deny.DefaultStatus = http.StatusNoContent
 	deny.Errors = []int{http.StatusForbidden, http.StatusNotFound}
 	Register(reg, Operation{Operation: deny, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true}, reg.denyPendingAppKey)

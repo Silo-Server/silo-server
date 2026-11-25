@@ -864,7 +864,8 @@ call them. Approving a device sign-in that is waiting now keeps no profile
 rule. `X-Profile-Id` must
 name the account's primary profile, with `X-Profile-Token` when it has a PIN
 (without it, 403 `profile_verification_required`); naming any other profile is
-403 `permission_denied`, on an administrator's account too. A request without
+403 `permission_denied`, on an administrator's account too, and an
+`X-Profile-Id` that names no profile of the account is 404 `not_found`. A request without
 `X-Profile-Id` is accepted only from an administrator account that has at most
 one profile, with no PIN, maturity or library limit. An administrator's account
 with several profiles, or a PIN, names its main profile and sends its token
@@ -874,10 +875,14 @@ for a one-profile account that isn't an administrator. The other key routes have
 Each of the four checks the named profile a second time once it holds the
 account, and answers 403 `profile_verification_required` if the profile's PIN
 changed in between, the profile is no longer the main one, or another write to
-the profile is in progress. Nothing was changed. Send the same request again;
-if that is refused too, the PIN changed, so get a new `X-Profile-Token` first.
-A profile without a PIN can get this answer too, when a PIN was added or the
-profile was being written at that moment.
+the profile is in progress. Nothing was changed, and the request can be made
+again. For `enroll` that means a new challenge and a newly signed envelope:
+the first challenge is spent once its signature verifies. The other three are
+sent again as they were. If the second try gets `profile_verification_required`
+too, verify the profile's PIN again for a new `X-Profile-Token`; if it gets
+`permission_denied`, the profile is no longer the main one. A profile without
+a PIN can get the first answer too, when a PIN was added or the profile was
+being written at that moment.
 
 **Switch.** While `auth.app_key_sign_in` is off the challenge, `introduce`,
 `sign-in`, `enroll`, `POST /auth/grants/redeem`, `PUT /auth/keys/person` and

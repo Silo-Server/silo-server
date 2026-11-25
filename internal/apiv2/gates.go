@@ -211,12 +211,17 @@ func demoGate(settings apimw.DemoSettingsReader) func(http.Handler) http.Handler
 // demoMode reports whether the server runs as a public demo, whoever is
 // asking: every visitor shares one account there, so nothing that leaves a
 // lasting credential of a visitor's on it may run.
-func demoMode(ctx context.Context, settings apimw.DemoSettingsReader) bool {
+// A setting that can't be read is an error, not "no": the callers close what
+// they guard.
+func demoMode(ctx context.Context, settings apimw.DemoSettingsReader) (bool, error) {
 	if settings == nil {
-		return false
+		return false, nil
 	}
-	enabled, _ := settings.Get(ctx, "demo.enabled")
-	return enabled == "true" //nolint:goconst // settings literal, not a shared constant
+	enabled, err := settings.Get(ctx, "demo.enabled")
+	if err != nil {
+		return false, err
+	}
+	return enabled == "true", nil //nolint:goconst // settings literal, not a shared constant
 }
 
 // demoRestricted is shared by mutation admission and capability discovery.

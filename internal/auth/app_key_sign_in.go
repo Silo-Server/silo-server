@@ -351,7 +351,9 @@ func (a *AppKeySignIn) SignIn(ctx context.Context, req KeyRequest) (*KeySignInRe
 			return err
 		}
 		key, err := lockDeviceKey(ctx, tx, user.ID, device.ID)
-		if errors.Is(err, ErrAppKeyNotFound) || (err == nil && key.RevokedAt != nil) {
+		// A waiting key the cleanup revoked since the read above still
+		// answers key_denied below, as one it revoked earlier does.
+		if errors.Is(err, ErrAppKeyNotFound) || (err == nil && key.RevokedAt != nil && !sweptPendingKey(key)) {
 			return ErrKeySignatureInvalid
 		}
 		if err != nil {

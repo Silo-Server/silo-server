@@ -90,9 +90,16 @@ func (fakeResolver) Resolve(_ context.Context, in access.ResolveInput) (access.S
 	return access.Scope{}, access.ErrProfileNotFound
 }
 
-type fakeSettings struct{ demo bool }
+type fakeSettings struct {
+	demo bool
+	// err fails every read.
+	err error
+}
 
 func (f fakeSettings) Get(_ context.Context, key string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
 	if key == "demo.enabled" && f.demo {
 		return "true", nil
 	}
