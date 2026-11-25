@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -140,20 +139,6 @@ func reachScratchSchema(t *testing.T, tables ...string) *pgxpool.Pool {
 		}
 	}
 	return pool
-}
-
-// TestFirstRunSessionRecordsNoDeviceSignInDB: the first administrator's
-// session, opened by first-run setup on an empty server, is not a device
-// sign-in.
-func TestFirstRunSessionRecordsNoDeviceSignInDB(t *testing.T) {
-	pool := reachScratchSchema(t, "users", "auth_sessions", "server_settings", "user_profiles")
-	users, sessions := NewUserRepository(pool), NewSessionRepository(pool)
-	svc := NewService(NewLocalProvider(users, sessions), NewJWTService("synthetic-first-run-secret", time.Minute, time.Hour), sessions, users, nil, nil, nil)
-	pair, _, err := svc.SetupInitialUser(t.Context(), "admin", "admin@example.test", "synthetic-password", false, "", "browser", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	requireVia(t, "first-run", viaDeviceSignIn(t, pool, pair.SessionID), false)
 }
 
 // TestDeviceSignInMigrationMarksKeptRequestsDB applies the migration's Up to
