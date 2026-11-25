@@ -132,7 +132,8 @@ export interface CollectionDraft {
    * Pin (`featured`) is not here: it is set in Arrange, so an editor creates
    * with it off and never sends it on a save.
    */
-  server?: { visibility: "visible" | "hidden" };
+  /** `hideWatched`: each profile sees it without the titles it has watched. */
+  server?: { visibility: "visible" | "hidden"; hideWatched?: boolean };
   personal?: { shared: boolean; inLibraryTabs: boolean };
 }
 
@@ -166,7 +167,12 @@ export interface CollectionView<Raw extends WireCollection = WireCollection> {
   /** Personal: the profile that created it, the only one that may change it. */
   ownerProfileId?: string;
   sync?: { status: string; message: string; lastAt?: string; nextAt?: string; schedule: string };
-  server?: { visibility: "visible" | "hidden"; pinFirst: boolean; managementKey?: string };
+  server?: {
+    visibility: "visible" | "hidden";
+    pinFirst: boolean;
+    managementKey?: string;
+    hideWatched: boolean;
+  };
   personal?: { shared: boolean; inLibraryTabs: boolean };
   raw: Raw;
 }
@@ -590,6 +596,7 @@ function serverListRequest(
     description: draft.description,
     collection_type: COLLECTION_TYPE_OF[draft.list.source],
     visibility: draft.server?.visibility ?? "visible",
+    hide_watched: draft.server?.hideWatched ?? false,
     sort_config: draft.rawSortConfig ?? {},
     sync_schedule: draft.list.schedule.trim(),
     ...editedSource(draft.list, changedFields(base, draft).includes("list")),
@@ -635,6 +642,7 @@ function serverRequest(
     description: draft.description,
     collection_type: draft.kind,
     visibility: draft.server?.visibility ?? "visible",
+    hide_watched: draft.server?.hideWatched ?? false,
     query_definition: smartRules(draft),
     sort_config: draft.kind === "smart" ? (draft.rawSortConfig ?? {}) : undefined,
     poster_source_url: trimmedSource(draft.artwork.poster),
@@ -740,6 +748,7 @@ export const SERVER_SCOPE: CollectionScope<LibraryCollection> = {
       visibility: raw.visibility,
       pinFirst: raw.featured,
       managementKey: raw.management_key || undefined,
+      hideWatched: raw.hide_watched ?? false,
     },
     raw,
   }),
@@ -756,7 +765,10 @@ export const SERVER_SCOPE: CollectionScope<LibraryCollection> = {
       rules: rulesFor(draftKind, view ? view.raw.query_definition : { library_ids: libraryIds }),
       rawSortConfig: view?.raw.sort_config ?? {},
       artwork: {},
-      server: { visibility: view?.server?.visibility ?? "visible" },
+      server: {
+        visibility: view?.server?.visibility ?? "visible",
+        hideWatched: view?.server?.hideWatched ?? false,
+      },
       ...(!view && kind === "synced" ? { synced: emptySyncedDraft() } : {}),
       list: view ? listDraftOf(view, view.raw.sync_schedule ?? "") : undefined,
     };

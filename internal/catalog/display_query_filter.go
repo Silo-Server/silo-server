@@ -17,6 +17,23 @@ const (
 	displayFilterFieldWatched = "watched"
 )
 
+// hideWatchedDisplayQuery is the display filter a server collection that hides
+// watched titles applies for each viewer: the viewer's profile has not watched
+// the title. A series counts as watched once every episode is.
+const hideWatchedDisplayQuery = `{"groups":[{"match":"all","rules":[{"field":"watched","op":"is","value":false}]}]}`
+
+// LibraryCollectionDisplayFor is the display filter a server collection
+// applies for the viewer in access, or "" for none, including for a read
+// without a profile. The collection's members stay the same for everyone; the
+// filter only hides, per viewer, the members that viewer's profile has
+// watched.
+func LibraryCollectionDisplayFor(c *models.LibraryCollection, access AccessFilter) string {
+	if c == nil || !c.HideWatched || access.UserID <= 0 || strings.TrimSpace(access.ProfileID) == "" {
+		return ""
+	}
+	return hideWatchedDisplayQuery
+}
+
 // displayFilterFields are the QueryRule fields a personal-collection display
 // filter may use. Display filters are intentionally a small, fixed vocabulary
 // (the "watched" and "movies/series" controls); richer rules belong in a

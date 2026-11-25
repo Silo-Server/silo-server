@@ -99,10 +99,11 @@ func (r *CatalogResolver) resolveLibraryCollectionCursor(ctx context.Context, re
 		if membership.OutOfScope {
 			return &CatalogResult{Items: []*models.MediaItem{}, TotalExact: true}, nil
 		}
+		display := r.libraryCollectionDisplay(ctx, collection, access)
 		if membership.Live {
-			return r.resolveSmartCollectionCursor(ctx, effective, access, membership.Query)
+			return r.resolveSmartCollectionCursorWithDisplay(ctx, effective, access, membership.Query, display)
 		}
-		return r.resolveLibraryMembershipQueryCursor(ctx, effective, access)
+		return r.resolveLibraryMembershipQueryCursor(ctx, effective, access, display)
 	})
 	return finishCollectionCursor(ctx, req, revision, repo.CollectionRevision, result, err)
 }
@@ -162,9 +163,6 @@ func (r *CatalogResolver) resolveUserCollectionCursor(ctx context.Context, req C
 	return finishCollectionCursor(ctx, req, revision, pager.CollectionRevision, result, err)
 }
 
-func (r *CatalogResolver) resolveSmartCollectionCursor(ctx context.Context, req CatalogRequest, access AccessFilter, def QueryDefinition) (*CatalogResult, error) {
-	return r.resolveSmartCollectionCursorWithDisplay(ctx, req, access, def, "")
-}
 func (r *CatalogResolver) resolveSmartCollectionCursorWithDisplay(ctx context.Context, req CatalogRequest, access AccessFilter, def QueryDefinition, display string) (*CatalogResult, error) {
 	baseAccess := access
 	if req.Source == CatalogSourceLibraryCollection {
@@ -314,7 +312,7 @@ func (r *CatalogResolver) resolveManualCollectionCursor(ctx context.Context, req
 
 // The membership predicate remains in PostgreSQL, so arbitrary structured
 // filters and sorting do not materialize a collection's IDs in the API process.
-func (r *CatalogResolver) resolveLibraryMembershipQueryCursor(ctx context.Context, req CatalogRequest, access AccessFilter) (*CatalogResult, error) {
+func (r *CatalogResolver) resolveLibraryMembershipQueryCursor(ctx context.Context, req CatalogRequest, access AccessFilter, display string) (*CatalogResult, error) {
 	if err := r.requireQueryStore(ctx, req.Query, access); err != nil {
 		return nil, err
 	}
@@ -323,10 +321,17 @@ func (r *CatalogResolver) resolveLibraryMembershipQueryCursor(ctx context.Contex
 	if req.Query.Sort.Field == "" {
 		applyCollectionPositionOrder(executor, libraryMembershipOrderJoin)
 	} else {
-		executor.SourceWhere = "EXISTS (SELECT 1 FROM library_collection_items cursor_membership WHERE cursor_membership.collection_id=$1 AND cursor_membership.media_item_id=mi.content_id)"
+		executor.SourceWhere = libraryMembershipSourceWhere
+	}
+	if err := r.applyCollectionDisplayPredicate(ctx, executor, display, access); err != nil {
+		return nil, err
 	}
 	return resolveCollectionExecutorCursor(ctx, executor, req, req.Query, access)
 }
+
+// libraryMembershipSourceWhere admits a library collection's stored members;
+// $1 is the collection ID.
+const libraryMembershipSourceWhere = "EXISTS (SELECT 1 FROM library_collection_items cursor_membership WHERE cursor_membership.collection_id=$1 AND cursor_membership.media_item_id=mi.content_id)"
 
 func resolveCollectionExecutorCursor(ctx context.Context, executor *QueryExecutor, req CatalogRequest, def QueryDefinition, access AccessFilter) (*CatalogResult, error) {
 	executor.GroupByWork = req.GroupByWork
@@ -469,4 +474,19 @@ func applyCollectionPositionOrder(executor *QueryExecutor, membershipJoin string
 		{expression: "COALESCE(cursor_membership.position,0)", kind: cursorKindNumber, nullsLast: true, notNull: true, sqlType: "integer"},
 		{expression: "cursor_membership.media_item_id", kind: cursorKindText, nullsLast: true, notNull: true},
 	}
+}
+
+// libraryCollectionDisplay is LibraryCollectionDisplayFor for the resolver,
+// whose display predicates require a user store PostgreSQL can read. With any
+// other store it lists every member rather than failing the page.
+func (r *CatalogResolver) libraryCollectionDisplay(ctx context.Context, c *models.LibraryCollection, access AccessFilter) string {
+	display := LibraryCollectionDisplayFor(c, access)
+	if display == "" {
+		return ""
+	}
+	store, err := r.catalogStoreForAccess(ctx, access)
+	if err != nil || !userstore.HasCatalogSQLState(store) {
+		return ""
+	}
+	return display
 }

@@ -6554,7 +6554,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"f9bfba671c81dbcc510b4d4cc41d4c6feb58ad9165a71786799d47524f7d7217\""
+        "ETag": "\"2edacd38c51e74d36a4436e3271a93c7586514a94fddb5a2c96dda6f42865e82\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminCollectionCapabilityOutputBody",

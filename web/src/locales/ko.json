@@ -92335,6 +92335,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "시청한 작품 숨기기"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "각 프로필에서는 이 컬렉션의 페이지, 행, 개수에서 해당 프로필이 시청한 작품이 빠진 채로 표시돼요. 삭제되는 항목은 없어요. 작품 수 제한이 있는 스마트 컬렉션은 작품을 먼저 고르므로 표시되는 작품이 더 적을 수 있어요."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,

@@ -1360,6 +1360,26 @@ those servers wrote, does the same for the collections it creates. Rules that na
 outside the collection's own matched nothing on those servers; they now draw from the libraries
 they name, as the admin preview always showed.
 
+## Server collections that hide watched titles
+
+A server collection with `hide_watched` (`createAdminCollection`, `updateAdminCollection`) keeps
+one set of members for everyone, and each profile reads it without the members that profile has
+watched. That applies to every viewer read: the catalog `library_collection` source,
+`getLibraryCollectionItems`, play and shuffle of the collection, its Home and library rows, and the
+`item_count` user surfaces show (Collections tabs, rows of collections, `listServerCollections`).
+A series counts as watched once every episode is. A smart collection with a `limit` picks its
+members first and then hides, so a viewer can see fewer titles than the limit. Its row is read per
+profile and never shared through the row cache. Admin reads (`getAdminCollection`,
+`previewAdminCollection`, the editor's counts), posters, and Jellyfin BoxSets (children and
+counts) show every member. A `getLibraryCollectionItems` page of a manual or synced collection
+reads on past members the viewer has watched, in up to ten reads (each after the first takes at
+least 100 stored members), so it can still come back empty with a `next` cursor when more watched
+members than that come first; keep paging until `next` is absent. A full page has no `next` when
+those reads find nothing more the viewer can see.
+A read without a profile, or through a user store whose watch state PostgreSQL cannot read, also
+shows every member. `getAdminCollectionCapabilities` reports `hide_watched: true` when the field
+is accepted. `/api/v1` neither takes nor answers it.
+
 ## Admin template list
 
 `listAdminCollectionTemplates` (`GET /api/v2/admin/collections/templates`) lists only the

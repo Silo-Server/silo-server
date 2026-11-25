@@ -100,7 +100,10 @@ change forward or stops at the conflict.
 A Smart collection's Contents is Add row's rule sentence (`RuleBuilder`), with the libraries it
 draws from inside it. With none picked it reads "all libraries" on a server collection and "all my
 libraries" on a personal one, and matches every library the viewer can see. Rules about the viewer
-(Watched and the like) are offered only on a personal collection. A rule the builder can't show
+(Watched and the like) are offered only on a personal collection. A server collection instead
+has the Hide watched titles switch in its details card: each profile reads it without the titles it
+has watched, and its members stay shared. A new synced list gets the switch once it exists, because
+the import takes no such setting. A rule the builder can't show
 stays as a locked line and is saved unchanged until someone removes it.
 
 Where the titles come from and where the collection shows are separate on a server collection. The

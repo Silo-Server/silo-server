@@ -214,6 +214,7 @@ var restoredFlagColumns = map[string]string{
 	"episode_catalog_entries.has_non_hdr":                     whyFacts,
 	"item_videos.is_official":                                 whyFacts,
 	"library_collections.featured":                            whyShown,
+	"library_collections.hide_watched":                        whyShown,
 	"library_collections.poster_auto_generated":               whyShown,
 	"library_collections.poster_from_template":                whyShown,
 	"library_provider_chains.enabled":                         "orders metadata providers; each provider's plugin switch and credentials gate it",

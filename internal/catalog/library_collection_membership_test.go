@@ -84,7 +84,7 @@ func TestResolveLibraryCollectionMembershipHasNoMembersOutsideScope(t *testing.T
 		t.Fatalf("membership = %+v, want a live collection with no members", m)
 	}
 	// No query runs, so no database is needed to answer it.
-	items, total, err := PreviewLiveLibraryCollection(t.Context(), nil, m, AccessFilter{}, 20)
+	items, total, err := PreviewLiveLibraryCollection(t.Context(), nil, m, AccessFilter{}, "", 20)
 	if err != nil || len(items) != 0 || total != 0 {
 		t.Fatalf("preview = %v (total %d, err %v), want nothing", items, total, err)
 	}

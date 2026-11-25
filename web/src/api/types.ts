@@ -1669,6 +1669,8 @@ export interface LibraryCollection {
   sort_order: number;
   group_id?: string | null;
   featured: boolean;
+  /** Each profile sees the collection without the titles it has watched. */
+  hide_watched?: boolean;
   poster_url: string;
   backdrop_url: string;
   poster_thumbhash?: string;
@@ -1739,6 +1741,8 @@ export interface CreateLibraryCollectionRequest {
   sort_order?: number;
   group_id?: string | null;
   featured?: boolean;
+  /** Each profile sees the collection without the titles it has watched (/api/v2 only). */
+  hide_watched?: boolean;
   poster_url?: string;
   backdrop_url?: string;
   poster_source_url?: string;

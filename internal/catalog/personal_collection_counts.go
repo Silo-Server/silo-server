@@ -2,7 +2,6 @@ package catalog
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -29,40 +28,39 @@ type PersonalCollectionDefinition struct {
 // personalCollectionCountQuery uses the catalog view's predicates for visible
 // members or smart matches, including its display filter and item limit.
 func personalCollectionCountQuery(userID int, c PersonalCollectionDefinition, access AccessFilter) (string, []any, error) {
-	display := QueryDefinition{}.Normalize()
-	canonical, err := NormalizeDisplayQueryFragment([]byte(c.DisplayQueryDefinition))
-	if err != nil {
-		return "", nil, err
-	}
-	if canonical != "" {
-		if err := json.Unmarshal([]byte(canonical), &display); err != nil {
-			return "", nil, err
-		}
-	}
-	executor := &QueryExecutor{BaseRelationSQL: catalogBaseRelationForScope("")}
 	if !IsLiveQueryType(c.CollectionType) {
-		executor.SourceWhere = personalMembershipSourceWhere
-		executor.SourceArgs = []any{userID, c.ID}
-		return executor.buildCountQuery(display, access)
+		return displayedMemberCountQuery(personalMembershipSourceWhere, []any{userID, c.ID}, nil, c.DisplayQueryDefinition, access, access)
 	}
 	def, err := parseCatalogCollectionQueryDefinition([]byte(c.QueryDefinition))
 	if err != nil {
 		return "", nil, err
 	}
 	def = ApplySmartCollectionItemLimit(def)
-	base := &QueryExecutor{Scope: def.MediaScope, BaseRelationSQL: catalogBaseRelationForScope(def.MediaScope)}
-	if canonical == "" {
-		return base.buildCountQuery(def, access)
+	return displayedMemberCountQuery("", nil, &def, c.DisplayQueryDefinition, access, access)
+}
+
+// displayedMemberCountQuery counts a collection's members, as its catalog
+// page lists them for access, less those display hides: stored members
+// admitted by storedWhere (with storedArgs), or the matches of live, read
+// with memberAccess.
+func displayedMemberCountQuery(storedWhere string, storedArgs []any, live *QueryDefinition, display string, memberAccess, access AccessFilter) (string, []any, error) {
+	if live == nil {
+		executor := QueryExecutor{BaseRelationSQL: catalogBaseRelationForScope(""), SourceWhere: storedWhere, SourceArgs: storedArgs}
+		outer, err := displayFilterDefinition(display)
+		if err != nil {
+			return "", nil, err
+		}
+		return executor.buildCountQuery(outer, access)
 	}
-	predicate, args, err := collectionDefinitionPredicate(base, def, access)
+	base := QueryExecutor{Scope: live.MediaScope, BaseRelationSQL: catalogBaseRelationForScope(live.MediaScope)}
+	if strings.TrimSpace(display) == "" {
+		return base.buildCountQuery(*live, memberAccess)
+	}
+	executor, outer, err := displayedMembersExecutor(base, *live, display, QuerySort{}, memberAccess)
 	if err != nil {
 		return "", nil, err
 	}
-	executor.Scope = def.MediaScope
-	executor.SourceWhere = predicate
-	executor.SourceArgs = args
-	display.MediaScope = def.MediaScope
-	return executor.buildCountQuery(display, access)
+	return executor.buildCountQuery(outer, access)
 }
 
 // Collection counts run as at most collectionCountConcurrency concurrent

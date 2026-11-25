@@ -10,6 +10,11 @@
 ./internal/catalog TestCatalogQuerySortsDateViewedUnwatchedLastDB
 ./internal/catalog TestCatalogQuerySortsSeriesByEpisodeDateViewedDB
 ./internal/catalog TestLibraryCollectionDrawsFromItsRulesLibrariesDB
+./internal/catalog TestLibraryCollectionHidesViewersWatchedTitlesDB
+./internal/catalog TestLibraryCollectionCountsHideViewersWatchedTitlesDB
+./internal/catalog TestCappedLibraryCollectionHidesAfterPickingMembersDB
+./internal/catalog TestEpisodeLibraryCollectionHidesWatchedEpisodesDB
+./internal/catalog TestHideWatchedCollectionKeepsItsCardWhenItsCountFailsDB
 ./internal/catalog TestLibraryCollectionReplaceItemsWritesOnlyTheDifferenceDB
 ./internal/catalog TestLibraryCollectionReplaceItemsRacesMemberDeleteDB
 ./internal/catalog TestLibraryCollectionNamesDB
@@ -1619,3 +1624,8 @@
 # Image cache queue metrics count future-deferred retries in queued depth while
 # reporting oldest queued age only for due rows (next_attempt_at <= NOW()).
 ./internal/workmetrics TestQueueSamplerImagesReportsDueQueuedAgeDB
+./internal/sections TestHideWatchedCollectionRowsArePerProfileDB
+./internal/api/handlers TestLibraryCollectionItemsPageReadsPastWatchedMembersDB
+./internal/api/handlers TestLibraryCollectionItemsPageReadsPastALongWatchedRunDB
+./internal/jellycompat TestBoxSetCountIgnoresHideWatchedDB
+./internal/api/handlers TestHideWatchedCollectionCardCountsTheProfileDB

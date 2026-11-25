@@ -101272,6 +101272,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Katsottujen nimikkeiden piilotus"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Jokainen profiili näkee tämän kokoelman ilman katsomiaan nimikkeitä kokoelman sivulla, riveillä ja nimikemäärässä. Mitään ei poisteta. Älykäs kokoelma, jolla on nimikeraja, valitsee nimikkeensä ensin, joten siinä voi näkyä vähemmän nimikkeitä."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,

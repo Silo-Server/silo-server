@@ -229,7 +229,7 @@ func (h *ItemsHandler) collectionsForViewer(ctx context.Context, session *Sessio
 	if session == nil || h.collections == nil || len(collections) == 0 {
 		return collections
 	}
-	counts, err := h.collections.ViewerCollectionCounts(ctx, collections, h.resolveAccessFilter(ctx, session))
+	counts, err := h.collections.ViewerCollectionCounts(ctx, collections, compatCollectionCountAccess(h.resolveAccessFilter(ctx, session)))
 	if err != nil {
 		slog.WarnContext(ctx, "counting compat collections for the viewer failed", "component", "jellycompat", "error", err)
 	}
@@ -1311,4 +1311,13 @@ func (h *ItemsHandler) smartCollectionContentIDs(ctx context.Context, session *S
 		contentIDs = append(contentIDs, item.ContentID)
 	}
 	return contentIDs, nil
+}
+
+// compatCollectionCountAccess is the access a BoxSet is counted with: the
+// viewer's limits without its profile. BoxSet children list every member,
+// including ones a server collection hides from the profile because it has
+// watched them, so the count leaves the viewer's watch state out too.
+func compatCollectionCountAccess(access catalog.AccessFilter) catalog.AccessFilter {
+	access.UserID, access.ProfileID = 0, ""
+	return access
 }

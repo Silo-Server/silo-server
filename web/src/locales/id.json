@@ -91849,6 +91849,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Sembunyikan judul yang sudah ditonton"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Setiap profil melihat koleksi ini tanpa judul yang sudah ditonton profil tersebut, di halaman koleksi, di barisnya, dan dalam jumlah judulnya. Tidak ada yang dihapus. Koleksi pintar dengan batas judul memilih judulnya terlebih dahulu, sehingga dapat menampilkan lebih sedikit judul."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,

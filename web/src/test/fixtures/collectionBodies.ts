@@ -682,6 +682,7 @@ export const goldens = {
         title: "Original",
         description: "",
         visibility: "visible",
+        hide_watched: false,
         collection_type: "mdblist",
         source_url: "https://mdblist.com/lists/user/top-watched/json",
         source_config: {
@@ -707,6 +708,7 @@ export const goldens = {
         title: "Trending This Week",
         description: "",
         visibility: "visible",
+        hide_watched: false,
         collection_type: "tmdb",
         source_url: "tmdb://trending/movie/week",
         source_config: {
@@ -734,6 +736,7 @@ export const goldens = {
         title: "Festival Picks",
         description: "",
         visibility: "visible",
+        hide_watched: false,
         collection_type: "tmdb",
         source_url: "https://www.themoviedb.org/list/310",
         source_config: {

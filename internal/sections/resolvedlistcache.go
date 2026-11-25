@@ -556,8 +556,11 @@ func resolvedListCacheKey(resolved ResolvedSection, libraryID *int, libraryIDs [
 // instead of serving it until the entry expires. A seasonal row's key carries
 // the list in season, so the row changes with the season rather than showing
 // the last season's titles until the entry expires.
-func (f *Fetcher) resolvedListKey(ctx context.Context, resolved ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) (string, error) {
-	key := resolvedListCacheKey(resolved, libraryID, libraryIDs, filter)
+//
+// shared is false for a library collection row that hides watched titles: its
+// items depend on the viewing profile, so it must not be cached for others.
+func (f *Fetcher) resolvedListKey(ctx context.Context, resolved ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) (key string, shared bool, err error) {
+	key = resolvedListCacheKey(resolved, libraryID, libraryIDs, filter)
 	if dailyMixSectionTypes[resolved.SectionType] {
 		key += "|day=" + strconv.FormatInt(dailyMixDay(f.now()), 10)
 	}
@@ -566,17 +569,17 @@ func (f *Fetcher) resolvedListKey(ctx context.Context, resolved ResolvedSection,
 		key += "|seasonal=" + pick.ListURL
 	}
 	if resolved.SectionType != SectionCollection || f.CollectionRepo == nil {
-		return key, nil
+		return key, true, nil
 	}
 	collectionID := strings.TrimSpace(ParseCollectionConfig(resolved.Config).LibraryCollectionID)
 	if collectionID == "" {
-		return key, nil
+		return key, true, nil
 	}
-	revision, err := f.CollectionRepo.CollectionRevision(ctx, collectionID)
+	revision, hideWatched, err := f.CollectionRepo.CollectionRowState(ctx, collectionID)
 	if err != nil {
-		return "", fmt.Errorf("loading library collection revision: %w", err)
+		return "", false, fmt.Errorf("loading library collection revision: %w", err)
 	}
-	return key + "|collection_revision=" + strconv.FormatInt(revision, 10), nil
+	return key + "|collection_revision=" + strconv.FormatInt(revision, 10), !hideWatched, nil
 }
 
 func hashSectionConfig(config json.RawMessage) string {

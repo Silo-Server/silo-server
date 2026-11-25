@@ -6659,6 +6659,13 @@
               "null"
             ]
           },
+          "hide_watched": {
+            "description": "Each viewer sees the collection without the titles its profile has watched: on the collection's page, in its Home and library rows, and in its counts. Members and posters stay the same for everyone; a capped smart collection picks its members first, so it can show fewer titles than its limit. A series counts as watched once every episode is. Jellyfin clients see every member.",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "home_row_count": {
             "description": "Turned-on rows on the administrator Home page that show this collection; turned-off rows are not counted. Set on listAdminCollections items only. Rows profiles added themselves are not counted.",
             "format": "int64",
@@ -6789,6 +6796,7 @@
           "sort_order",
           "group_id",
           "featured",
+          "hide_watched",
           "poster_url",
           "backdrop_url",
           "poster_is_collage",
@@ -6850,6 +6858,13 @@
             "type": "boolean"
           },
           "groups": {
+            "type": "boolean"
+          },
+          "hide_watched": {
+            "description": "Collections take hide_watched on create and update, and answer it",
+            "examples": [
+              true
+            ],
             "type": "boolean"
           },
           "import_sources": {
@@ -6926,6 +6941,7 @@
           "mdblist_search",
           "schedule_time_zone",
           "section_references",
+          "hide_watched",
           "revision",
           "state",
           "allowed"
@@ -6958,6 +6974,10 @@
               "string",
               "null"
             ]
+          },
+          "hide_watched": {
+            "description": "Hide from each viewer the titles its profile has watched; see AdminCollection.hide_watched",
+            "type": "boolean"
           },
           "library_id": {
             "description": "Opaque identifier",
@@ -7493,6 +7513,10 @@
               "string",
               "null"
             ]
+          },
+          "hide_watched": {
+            "description": "Hide from each viewer the titles its profile has watched; see AdminCollection.hide_watched",
+            "type": "boolean"
           },
           "library_ids": {
             "items": {

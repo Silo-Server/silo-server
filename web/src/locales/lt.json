@@ -121694,6 +121694,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Slėpti peržiūrėtus pavadinimus"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Kiekvienas profilis šią kolekciją mato be savo peržiūrėtų pavadinimų: jos puslapyje, eilutėse ir pavadinimų skaičiuje. Niekas nepašalinama. Išmanioji kolekcija su pavadinimų apribojimu pirmiausia atrenka savo pavadinimus, todėl gali rodyti mažiau."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,

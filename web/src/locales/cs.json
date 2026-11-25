@@ -120700,6 +120700,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Skrýt zhlédnuté tituly"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Každý profil uvidí tuto kolekci bez titulů, které už zhlédl – na stránce kolekce, v řádcích i v počtu titulů. Nic se neodebere. Chytrá kolekce s omezením počtu titulů nejprve vybere své tituly, takže jich může zobrazit méně."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,

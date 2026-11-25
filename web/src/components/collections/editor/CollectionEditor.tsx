@@ -889,6 +889,9 @@ export function CollectionEditor<Raw extends WireCollection>({
           draft={draft}
           onChange={editor.setDraft}
           showOnly={!isServer && !smart}
+          // A new synced list is created by an import that takes no such
+          // setting; it can be turned on once the list exists.
+          hideWatched={isServer && !draft.synced}
           nameNote={synced ? syncedNameNote(draft) : undefined}
           nameError={editor.nameError}
         />

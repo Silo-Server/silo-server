@@ -100906,6 +100906,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Megtekintett címek elrejtése"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Minden profil az általa megtekintett címek nélkül látja ezt a gyűjteményt az oldalán, a soraiban és a darabszámában. Semmi sem törlődik. A címkorláttal rendelkező intelligens gyűjtemény előbb kiválasztja a címeit, ezért kevesebbet is megjeleníthet."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,

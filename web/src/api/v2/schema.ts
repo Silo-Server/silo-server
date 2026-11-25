@@ -16518,6 +16518,11 @@ export interface components {
        */
       group_id: string | null;
       /**
+       * @description Each viewer sees the collection without the titles its profile has watched: on the collection's page, in its Home and library rows, and in its counts. Members and posters stay the same for everyone; a capped smart collection picks its members first, so it can show fewer titles than its limit. A series counts as watched once every episode is. Jellyfin clients see every member.
+       * @example false
+       */
+      hide_watched: boolean;
+      /**
        * Format: int64
        * @description Turned-on rows on the administrator Home page that show this collection; turned-off rows are not counted. Set on listAdminCollections items only. Rows profiles added themselves are not counted.
        */
@@ -16598,6 +16603,11 @@ export interface components {
       artwork: boolean;
       groups: boolean;
       /**
+       * @description Collections take hide_watched on create and update, and answer it
+       * @example true
+       */
+      hide_watched: boolean;
+      /**
        * @description Import sources a new collection can be created from; empty when imports is false
        * @example [
        *       "mdblist",
@@ -16643,6 +16653,8 @@ export interface components {
        * @example 1
        */
       group_id?: string | null;
+      /** @description Hide from each viewer the titles its profile has watched; see AdminCollection.hide_watched */
+      hide_watched?: boolean;
       /**
        * @description Opaque identifier
        * @example 1
@@ -16844,6 +16856,8 @@ export interface components {
        * @example 1
        */
       group_id?: string | null;
+      /** @description Hide from each viewer the titles its profile has watched; see AdminCollection.hide_watched */
+      hide_watched?: boolean;
       library_ids?: string[];
       management_key?: string;
       management_mode?: string;
