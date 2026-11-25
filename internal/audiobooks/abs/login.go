@@ -754,10 +754,8 @@ func (h *Handler) revokeLogoutPrincipal(r *http.Request) {
 		// Demo visitors share one account and profile: end only the
 		// presented token. A refresh token is a row of its own, and no
 		// playback session records which token opened it, so neither is
-		// touched. A setting that can't be read is treated the same way.
-		if err != nil {
-			slog.WarnContext(r.Context(), "abs logout: reading demo mode failed", "component", "audiobooks", "err", err)
-		}
+		// touched. A setting this process has never read, or a role that
+		// can't be read, is treated the same way.
 		if err := h.deps.TokenStore.RevokeTokenByJTI(r.Context(), claims.JTI); err != nil {
 			slog.WarnContext(r.Context(), "abs logout: revoke token failed", "component", "audiobooks", "jti", claims.JTI, "err", err)
 		}

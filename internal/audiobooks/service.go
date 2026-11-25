@@ -47,6 +47,9 @@ type ABSHandlerDeps struct {
 	Items    *catalog.ItemRepository
 	Files    *scanner.FileRepository
 	Settings serversettings.SettingsStore // encrypting decorator in production
+	// DemoSettings reads demo.enabled for sign-out (the shared
+	// demomode.Setting in production); nil reads Settings directly.
+	DemoSettings abs.DemoSettingsReader
 	// Auth signs ABS clients in and rechecks each token's profile. Nil
 	// leaves standalone login unavailable.
 	Auth           *SiloCredValidator
@@ -158,7 +161,10 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 		accountIsAdmin = deps.Auth.IsAdmin
 	}
 	var demoSettings abs.DemoSettingsReader
-	if deps.Settings != nil {
+	switch {
+	case deps.DemoSettings != nil:
+		demoSettings = deps.DemoSettings
+	case deps.Settings != nil:
 		demoSettings = deps.Settings
 	}
 

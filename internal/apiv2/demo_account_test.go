@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/demomode"
 )
 
 const demoRefusalDetail = "This action is not available in demo mode."
@@ -108,6 +109,55 @@ type failingSettings struct{}
 
 func (failingSettings) Get(context.Context, string) (string, error) {
 	return "", errors.New("settings store unreachable")
+}
+
+// flakySettings answers demo.enabled with value once, then fails every read.
+type flakySettings struct {
+	value string
+	reads int
+}
+
+func (f *flakySettings) Get(context.Context, string) (string, error) {
+	f.reads++
+	if f.reads > 1 {
+		return "", errors.New("settings store unreachable")
+	}
+	return f.value, nil
+}
+
+// TestDemoModeRemembersLastRead: through the shared demomode.Setting, a
+// failed read answers the last value read. Catches a database hiccup turning
+// an ordinary server's restricted operations into 500s and its capabilities
+// to no, or a demo server's demo refusal into a 500.
+func TestDemoModeRemembersLastRead(t *testing.T) {
+	member := with(bearer(memberToken), "X-Profile-Id", "p-primary")
+	const password = `{"current_password":"pw","new_password":"margin fossil quench"}`
+	handler := func(first string) http.Handler {
+		deps := externalSignInDeps(&fakeExternalSignIn{allowUnlink: true})
+		deps.Accounts = passwordChanger{deps.Accounts.(fakeAccounts)}
+		deps.Sessions = &fakeSessionService{}
+		setting := demomode.New(&flakySettings{value: first})
+		if _, err := setting.Get(context.Background(), demomode.SettingKey); err != nil {
+			t.Fatal(err)
+		}
+		deps.DemoSettings = setting
+		return newTestHandler(t, deps)
+	}
+	off := handler("false")
+	// Past the gate: the fake's own primary-profile rule answers, not a 500
+	// or the demo refusal.
+	if rec := do(t, off, http.MethodPost, Prefix+"/account/password", password, member); rec.Code == http.StatusInternalServerError || isDemoRefusal(rec) {
+		t.Fatalf("not a demo, read failed: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := do(t, off, http.MethodGet, Prefix+"/auth/sessions/capabilities", "", member)
+	var body map[string]any
+	if json.Unmarshal(rec.Body.Bytes(), &body) != nil || body["revoke_other_sessions"] != true {
+		t.Fatalf("not a demo, read failed: capability %s", rec.Body.String())
+	}
+	rec = do(t, handler(demomode.OnValue), http.MethodPost, Prefix+"/account/password", password, member)
+	if !isDemoRefusal(rec) {
+		t.Fatalf("demo, read failed: %d %s", rec.Code, rec.Body.String())
+	}
 }
 
 // TestDemoModeUnreadableSetting: when the demo setting can't be read, a

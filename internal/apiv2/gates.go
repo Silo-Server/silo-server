@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"mime"
 	"net/http"
 	"os"
@@ -240,16 +239,17 @@ func demoMode(ctx context.Context, settings apimw.DemoSettingsReader) (bool, err
 // demoRestricted reports whether demo mode restricts the caller: demo mode
 // is on and the caller is not an administrator. It is shared by mutation
 // admission and capability discovery. An administrator is never restricted,
-// so the setting is not read for one. A setting that can't be read is
-// logged here and returned as an error; callers refuse the mutation and
-// answer capabilities with the restricted value.
+// so the setting is not read for one. In production settings is the shared
+// demomode.Setting, which logs a failed read and answers the last value it
+// read; it returns an error only when this process has never read the
+// setting, and then callers refuse the mutation and answer capabilities
+// with the restricted value.
 func demoRestricted(ctx context.Context, settings apimw.DemoSettingsReader) (bool, error) {
 	if claims := claimsFrom(ctx); claims != nil && claims.Role == models.RoleAdmin {
 		return false, nil
 	}
 	demo, err := demoMode(ctx, settings)
 	if err != nil {
-		slog.WarnContext(ctx, "reading the demo mode setting failed", logComponentKey, "apiv2", "error", err)
 		return true, err
 	}
 	return demo, nil

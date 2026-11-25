@@ -1,15 +1,30 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/demomode"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+// poolSettings reads server settings straight from the test database.
+type poolSettings struct{ env *externalSignInEnv }
+
+func (p poolSettings) Get(ctx context.Context, key string) (string, error) {
+	var value string
+	err := p.env.pool.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, key).Scan(&value)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return value, err
+}
 
 // TestExternalSignInDemoModeDB: on a demo server every visitor shares one
 // account that is not an administrator, so no external sign-in may attach an
@@ -19,7 +34,8 @@ import (
 func TestExternalSignInDemoModeDB(t *testing.T) {
 	env := newExternalSignInEnv(t)
 	ctx := t.Context()
-	t.Cleanup(saveSettings(t, env.pool, demoModeSettingKey))
+	t.Cleanup(saveSettings(t, env.pool, demomode.SettingKey))
+	env.resolver.WithDemoSettings(demomode.New(poolSettings{env}))
 	attached := func(identity ExternalIdentity) bool {
 		t.Helper()
 		_, err := identityBySubject(ctx, env.pool, env.installationID, identity.Subject)
@@ -30,7 +46,7 @@ func TestExternalSignInDemoModeDB(t *testing.T) {
 	}
 
 	t.Run("linking flow", func(t *testing.T) {
-		env.setSetting(t, demoModeSettingKey, "true")
+		env.setSetting(t, demomode.SettingKey, "true")
 		visitor := env.localAccount(t, "demo-link", models.RoleUser)
 		identity := env.identity("demo-link-idp")
 		if _, err := env.resolve(t, identity, false, visitor.ID); !errors.Is(err, ErrDemoRestricted) || !errors.Is(err, ErrNotPermitted) {
@@ -50,7 +66,7 @@ func TestExternalSignInDemoModeDB(t *testing.T) {
 
 	t.Run("email auto-match", func(t *testing.T) {
 		env.setSetting(t, config.AuthEmailAutoMatchSettingKey, "true")
-		env.setSetting(t, demoModeSettingKey, "true")
+		env.setSetting(t, demomode.SettingKey, "true")
 		visitor := env.localAccount(t, "demo-match", models.RoleUser)
 		sessions := NewSessionRepository(env.pool)
 		session := models.AuthSession{ID: uuid.New().String(), UserID: visitor.ID, DeviceName: "demo-visitor", ExpiresAt: time.Now().Add(time.Hour)}

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/demomode"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
@@ -41,6 +42,9 @@ type AccountResolver struct {
 	onSessionsRevoked func(context.Context, int)
 	// cipher encrypts the plugins' refresh_state at rest; nil stores none.
 	cipher *secret.Cipher
+	// demo reads demo.enabled (the shared demomode.Setting in production);
+	// nil means demo mode cannot be on.
+	demo demomode.Reader
 }
 
 // NewAccountResolver builds the resolver. accounts provisions new accounts
@@ -54,6 +58,29 @@ func NewAccountResolver(pool *pgxpool.Pool, accounts *AccountProvisioner, onSess
 func (r *AccountResolver) WithSecretCipher(c *secret.Cipher) *AccountResolver {
 	r.cipher = c
 	return r
+}
+
+// WithDemoSettings makes the resolver enforce demo mode as read through
+// demo: no identity is attached to an account that is not an administrator
+// while it is on.
+func (r *AccountResolver) WithDemoSettings(demo demomode.Reader) *AccountResolver {
+	r.demo = demo
+	return r
+}
+
+// demoState is demo mode as read before a resolution's transaction, so a
+// failed read cannot abort it.
+type demoState struct {
+	on  bool
+	err error
+}
+
+func (r *AccountResolver) readDemo(ctx context.Context) demoState {
+	if r.demo == nil {
+		return demoState{}
+	}
+	value, err := r.demo.Get(ctx, demomode.SettingKey)
+	return demoState{on: value == demomode.OnValue, err: err}
 }
 
 // ResolveInput is one sign-in to resolve.
@@ -120,9 +147,10 @@ func (r *AccountResolver) Resolve(ctx context.Context, in ResolveInput) (*models
 		return nil, 0, ErrProviderUnavailable
 	}
 	var result resolution
+	demo := r.readDemo(ctx)
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		result = resolution{}
-		if err := r.resolve(ctx, tx, in, &result); err != nil {
+		if err := r.resolve(ctx, tx, in, demo, &result); err != nil {
 			return err
 		}
 		if result.identityID == 0 {
@@ -142,7 +170,7 @@ func (r *AccountResolver) Resolve(ctx context.Context, in ResolveInput) (*models
 	return result.user, result.identityID, nil
 }
 
-func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInput, out *resolution) error {
+func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInput, demo demoState, out *resolution) error {
 	identity := in.Identity
 	if err := lockExternalSubject(ctx, tx, in.InstallationID, identity.Subject); err != nil {
 		return err
@@ -203,14 +231,13 @@ func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInpu
 		}
 		// Demo visitors share one account that is not an administrator, so
 		// none may change how it signs in, even through a flow started
-		// before demo mode was turned on. A setting that can't be read
-		// fails the link.
+		// before demo mode was turned on. A setting this process has never
+		// read fails the link.
 		if user.Role != models.RoleAdmin {
-			demo, err := demoModeOn(ctx, tx)
-			if err != nil {
-				return err
+			if demo.err != nil {
+				return demo.err
 			}
-			if demo {
+			if demo.on {
 				return ErrDemoRestricted
 			}
 		}
@@ -241,16 +268,10 @@ func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInpu
 			return err
 		}
 		// Every account matching could reach is not an administrator, and
-		// on a demo server that is the account every visitor shares: there
-		// matching does not apply, as when it is off. A setting that can't
-		// be read matches nothing.
-		if autoMatch {
-			demo, err := demoModeOn(ctx, tx)
-			if err != nil {
-				slog.WarnContext(ctx, "email auto-match skipped: reading demo mode failed", "component", "auth", "error", err)
-			}
-			autoMatch = err == nil && !demo
-		}
+		// on a demo server visitors share one of them: there matching
+		// applies to no account, as when it is off. A setting this process
+		// has never read matches nothing.
+		autoMatch = autoMatch && demo.err == nil && !demo.on
 		if autoMatch {
 			user, err := scanUser(tx.QueryRow(ctx, `SELECT `+allColumns+` FROM users
 				WHERE email = $1 AND role = 'user' AND NOT is_owner AND NOT break_glass FOR UPDATE`, NormalizeEmail(identity.Email)))
