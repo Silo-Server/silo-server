@@ -70,7 +70,10 @@ the same for each of its device keys.
 bound to (`keySignInPolicy`), then the person key, then device key rows, then
 the login sessions those keys opened. A sign-in reads the key's binding
 without a lock, locks the installation and identity, then locks the key row
-and refuses the sign-in when its binding changed meanwhile. `enroll` and
+and, when its binding changed meanwhile (a link committed in between),
+answers 429 with a one-second `Retry-After`: the key is still good, and the
+next attempt sees the new binding. An identity deleted in between has revoked
+the key (below), so that sign-in answers `signature_invalid`. `enroll` and
 `PUT /auth/keys/person` lock the enrolling session's identity before the key
 rows and the session's own row last. Every sweep that revokes an account's
 keys and sessions together (a provider refusal, an email match, a promotion,
@@ -99,7 +102,10 @@ signature over `silo-sync-v1.<purpose>.<payload>`. The verifier takes the
 purpose from the route, never from the payload, so a message signed for one
 route never verifies at another; the payload must then name the same purpose.
 It checks the signature first and parses the payload after: nothing is
-re-serialised. Enrolling purposes (`introduce`, `enroll`) also carry
+re-serialised. The envelope and the key body have each member once; a body
+that repeats one is refused. Inside the signed payload a repeated member keeps
+its last value, as JSON readers do: a signer never repeats one, and the
+signature covers the payload as sent. Enrolling purposes (`introduce`, `enroll`) also carry
 `device_sig`, the new device key's signature over the same bytes, which proves
 the caller holds the key being enrolled; every other purpose refuses it. The
 payload names this server's `server_id` and its own `iat` and `exp`: at most
@@ -267,7 +273,9 @@ it. An app that signs in by key follows these rules:
 - The reply is sealed but not signed, so a pin learned from it is trust on
   first use, and only when the device holds no pin for that server. A reply
   whose pin differs from the one the device holds is a mismatch, and the device
-  stops.
+  stops, unless the connection it arrived on is one that may replace a pin: TLS
+  presenting the old pin, or validated HTTPS at an address the person reached
+  themselves (next rule).
 - A device replaces a pin it holds only over TLS that presents the old pin, over
   HTTPS with a system-trusted certificate at an address the person reached
   themselves, or when the person says so. HTTPS with a system-trusted
@@ -291,6 +299,12 @@ it. An app that signs in by key follows these rules:
 - An address behind a proxy that offers only plain HTTP has no pinned route:
   HTTPS on that host and port does not present the key. Such an address has
   only the trust of an address the person typed themselves.
+
+First contact has a limit the pin can't remove. The reply is sealed, not
+signed, so on a first contact over plain HTTP someone on the network path can
+answer in the server's place, with their own pin, and the device has no way to
+tell. First contact is as trustworthy as the address the person was given. The
+pin protects every contact after it.
 
 The server authenticates the connection rather than signing the reply because
 a signature would cover one message: whatever follows it over plain HTTP (the

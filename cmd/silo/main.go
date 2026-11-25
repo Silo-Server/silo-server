@@ -3631,6 +3631,9 @@ func main() {
 		}
 		maintenanceSteps = append(maintenanceSteps, tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
+		// Registered on its own, not as a maintenance step, so its hourly
+		// trigger applies: challenges live two minutes.
+		taskMgr.Register(tasks.NewAppKeyChallengeCleanupTask(auth.NewKeyChallenges(deps.DB)))
 		taskMgr.Register(tasks.NewSummarizeAPIUsageTask(deps.APIUsage))
 		maintenanceSteps = append(maintenanceSteps,
 			tasks.NewTaskHistoryCleanupTask(historyRepo, settingsRepo),
@@ -3638,7 +3641,6 @@ func main() {
 			// or unconfigured autoscan still age out.
 			tasks.NewAutoscanEventCleanupTask(autoscan.NewRepository(deps.DB, deps.SecretCipher), settingsRepo),
 			tasks.NewDeviceLoginCleanupTask(auth.NewDeviceLoginRetention(deps.DB)),
-			tasks.NewAppKeyChallengeCleanupTask(auth.NewKeyChallenges(deps.DB)),
 			tasks.NewOAuthFlowCleanupTask(auth.NewPGOAuthStore(deps.DB)),
 		)
 		var diagnosticsStore diagnostics.ObjectStore

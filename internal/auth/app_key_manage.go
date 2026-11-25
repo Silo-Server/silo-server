@@ -40,7 +40,7 @@ func (a *AppKeySignIn) ListOwnKeys(ctx context.Context, claims *Claims) (OwnAppK
 	}
 	// A grant's person key is always the account's own: the reference to
 	// it includes the account.
-	if err := a.pool.QueryRow(ctx, `SELECT username FROM users WHERE id = $1`, claims.UserID).Scan(&out.AllowedBy); err != nil {
+	if err := a.pool.QueryRow(ctx, `SELECT COALESCE(username, '') FROM users WHERE id = $1`, claims.UserID).Scan(&out.AllowedBy); err != nil {
 		return OwnAppKeys{}, fmt.Errorf("reading account name: %w", err)
 	}
 	return out, nil
@@ -88,7 +88,10 @@ func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key
 		}
 		// The identity the new key records is locked before the session
 		// row, in the order every key path takes.
-		if unlocked.identityID != nil {
+		if unlocked.binding().ProviderBound {
+			// A provider session whose identity is gone (identity_id NULL,
+			// provider_since set) is refused as enroll refuses it: a person
+			// key bound to no identity could never vouch for a device.
 			if _, _, err := lockKeyIdentity(ctx, tx, user, unlocked.identityID); err != nil {
 				return err
 			}

@@ -184,6 +184,22 @@ func (c lockedChain) session(ip string, expiry time.Time) KeySession {
 	return KeySession{IP: ip, Expiry: expiry, IdentityID: c.identityID, ProviderSince: c.providerSince}
 }
 
+// errKeyBindingChanged is a key brought under another identity (linking)
+// between reading its binding and locking its row. The key is still good, so
+// the device is asked to try again on a fresh challenge, when it sees the
+// new binding; answering it as a bad key would make the device discard it.
+var errKeyBindingChanged = &KeyRetryError{RetryAfter: time.Second}
+
+// keyChainError maps a failure of the provider locks in a key sign-in: an
+// identity deleted meanwhile has had its keys revoked by its trigger, so the
+// key is answered as revoked.
+func keyChainError(err error) error {
+	if errors.Is(err, errKeyIdentityGone) {
+		return ErrKeySignatureInvalid
+	}
+	return err
+}
+
 // unknownKey answers a request signed by a key this server doesn't hold, or
 // holds revoked, after a signature check against a throwaway key, so it takes
 // about as long as a known key's refusal.
@@ -227,15 +243,17 @@ func (a *AppKeySignIn) Introduce(ctx context.Context, req KeyRequest) (*KeySignI
 		}
 		chain, err := lockChain(ctx, tx, user, binding)
 		if err != nil {
-			return err
+			return keyChainError(err)
 		}
 		locked, err := lockPersonKey(ctx, tx, user.ID, person.ID)
-		if err != nil || locked.RevokedAt != nil {
+		if errors.Is(err, ErrAppKeyNotFound) || (err == nil && locked.RevokedAt != nil) {
 			return ErrKeySignatureInvalid
 		}
+		if err != nil {
+			return err
+		}
 		if !(KeyBinding{IdentityID: locked.IdentityID, ProviderBound: locked.ProviderBound}).same(binding) {
-			// The person key was brought under another identity meanwhile.
-			return ErrKeySignatureInvalid
+			return errKeyBindingChanged
 		}
 		status := models.DeviceKeyStatusActive
 		if user.Role == models.RoleAdmin {
@@ -270,7 +288,7 @@ func (a *AppKeySignIn) Introduce(ctx context.Context, req KeyRequest) (*KeySignI
 // refused now. A waiting key never opened a session, so last_used_at stays
 // empty.
 func holdForApproval(ctx context.Context, tx pgx.Tx, key *models.AppDeviceKey, out *KeySignInResult) error {
-	if _, err := tx.Exec(ctx, `UPDATE auth_device_keys SET last_attempt_at = NOW() WHERE id = $1`, key.ID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE auth_device_keys SET last_attempt_at = clock_timestamp() WHERE id = $1`, key.ID); err != nil {
 		return fmt.Errorf("recording device key attempt: %w", err)
 	}
 	out.Status = appkeys.ReplyApprovalRequired
@@ -318,11 +336,17 @@ func (a *AppKeySignIn) SignIn(ctx context.Context, req KeyRequest) (*KeySignInRe
 		}
 		chain, err := lockChain(ctx, tx, user, bindingOfDeviceKey(device))
 		if err != nil {
-			return err
+			return keyChainError(err)
 		}
 		key, err := lockDeviceKey(ctx, tx, user.ID, device.ID)
-		if err != nil || key.RevokedAt != nil || !bindingOfDeviceKey(key).same(bindingOfDeviceKey(device)) {
+		if errors.Is(err, ErrAppKeyNotFound) || (err == nil && key.RevokedAt != nil) {
 			return ErrKeySignatureInvalid
+		}
+		if err != nil {
+			return err
+		}
+		if !bindingOfDeviceKey(key).same(bindingOfDeviceKey(device)) {
+			return errKeyBindingChanged
 		}
 		out.User = user
 		if err := keyStatusAllows(ctx, tx, key); err != nil {
@@ -358,7 +382,9 @@ func keyStatusAllows(ctx context.Context, db rowQuerier, key *models.AppDeviceKe
 		return nil
 	}
 	var now time.Time
-	if err := db.QueryRow(ctx, `SELECT NOW()`).Scan(&now); err != nil {
+	// The wall clock, not the transaction's start: a request that waited on
+	// the account lock must not judge, or stamp, a time already past.
+	if err := db.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 		return fmt.Errorf("reading the clock: %w", err)
 	}
 	if now.Sub(key.CreatedAt) >= appkeys.PendingKeyLifetime {

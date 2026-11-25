@@ -14,6 +14,7 @@ import (
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -407,12 +408,15 @@ func TestSessionAllowsDB(t *testing.T) {
 		{name: "another app's key", claims: grantSession},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := SessionAllows(ctx, env.pool, tc.claims, ActionManageKeys); (err == nil) != tc.manage {
-				t.Fatalf("manage keys: %v", err)
+			allowed := func(action SessionAction, want bool) {
+				t.Helper()
+				err := SessionAllows(ctx, env.pool, tc.claims, action)
+				if want && err != nil || !want && !errors.Is(err, ErrSessionNotAllowed) {
+					t.Fatalf("action %d: err = %v, want allowed %v", action, err, want)
+				}
 			}
-			if err := SessionAllows(ctx, env.pool, tc.claims, ActionApproveDeviceSignIn); (err == nil) != tc.approve {
-				t.Fatalf("approve a device: %v", err)
-			}
+			allowed(ActionManageKeys, tc.manage)
+			allowed(ActionApproveDeviceSignIn, tc.approve)
 		})
 	}
 }
@@ -462,6 +466,70 @@ func TestKeyEnrollRulesDB(t *testing.T) {
 	keys, err := env.signIn.ListOwnKeys(ctx, browser)
 	if err != nil || keys.Person == nil || keys.Person.KeyID != replacement.pub.KeyID() || len(keys.Devices) != 1 {
 		t.Fatalf("keys after replacement = %+v, %v", keys, err)
+	}
+	// An account with no username (a later join creates them) still lists.
+	if _, err := env.pool.Exec(ctx, `UPDATE users SET username = NULL WHERE id = $1`, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.signIn.ListOwnKeys(ctx, browser); err != nil {
+		t.Fatalf("list keys of an account with no username = %v", err)
+	}
+	// A session whose provider identity is gone (identity_id NULL,
+	// provider_since set) can't make a person key bound to nothing.
+	gone := env.loginSession(t, user, models.SessionOpenedProvider, nil)
+	if _, err := env.pool.Exec(ctx, `UPDATE auth_sessions SET provider_since = NOW() WHERE id = $1`, gone.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.signIn.ReplacePersonKey(ctx, gone, newTestKey(t).pub); !errors.Is(err, ErrProviderSignInRequired) {
+		t.Fatalf("replace from a session whose identity is gone = %v", err)
+	}
+}
+
+// A signature that verifies spends its challenge even when the kid beside it
+// names another key: the signer committed to the challenge.
+func TestKeyChallengeSpentOnKidMismatchDB(t *testing.T) {
+	env := newKeyEnv(t, "keykid")
+	ctx := t.Context()
+	user := env.localAccount(t, "keykid-user", models.RoleUser)
+	person, device := newTestKey(t), newTestKey(t)
+	claims := env.loginSession(t, user, models.SessionOpenedPassword, nil)
+	challenge := env.challenge(t)
+	req := env.request(t, message{purpose: appkeys.PurposeEnroll, signer: person, device: &device, fields: map[string]any{"challenge": challenge}})
+	req.Envelope.KeyID = newTestKey(t).pub.KeyID()
+	if _, err := env.signIn.Enroll(ctx, KeyEnrollRequest{KeyRequest: req, PersonKey: person.pub, Claims: claims}); appkeys.CodeOf(err) != appkeys.CodeKidMismatch {
+		t.Fatalf("enroll under another kid = %v", err)
+	}
+	retry := env.request(t, message{purpose: appkeys.PurposeEnroll, signer: person, device: &device, fields: map[string]any{"challenge": challenge}})
+	if _, err := env.signIn.Enroll(ctx, KeyEnrollRequest{KeyRequest: retry, PersonKey: person.pub, Claims: claims}); !errors.Is(err, ErrKeyChallengeInvalid) {
+		t.Fatalf("the same challenge again = %v, want it spent", err)
+	}
+}
+
+// A provider-bound key's session limit, decided before the request waited on
+// the account lock, may pass meanwhile: the sign-in is then refused before a
+// session row exists or the key is marked used.
+func TestKeySessionRefusedPastItsLimitDB(t *testing.T) {
+	env := newKeyEnv(t, "keylimit")
+	ctx := t.Context()
+	_, enrolled := env.enrollFromProvider(t)
+	err := pgx.BeginFunc(ctx, env.pool, func(tx pgx.Tx) error {
+		user, err := lockEnabledUser(ctx, tx, env.user.ID)
+		if err != nil {
+			return err
+		}
+		key, err := lockDeviceKey(ctx, tx, user.ID, enrolled.DeviceID)
+		if err != nil {
+			return err
+		}
+		_, err = env.svc.openKeySessionTx(ctx, tx, user, key, KeySession{Expiry: time.Now().Add(-time.Second), IdentityID: &env.identityID})
+		return err
+	})
+	if !errors.Is(err, ErrProviderSignInRequired) {
+		t.Fatalf("open a session past its limit = %v", err)
+	}
+	var sessions int
+	if err := env.pool.QueryRow(ctx, `SELECT COUNT(*) FROM auth_sessions WHERE device_key_id = $1`, enrolled.DeviceID).Scan(&sessions); err != nil || sessions != 1 {
+		t.Fatalf("sessions of the key = %d, %v; want only the enrolling one", sessions, err)
 	}
 }
 

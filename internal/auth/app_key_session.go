@@ -126,6 +126,14 @@ func lockKeyIdentity(ctx context.Context, tx pgx.Tx, user *models.User, identity
 		return nil, nil, ErrProviderSignInRequired
 	}
 	installationID, err := lockOAuthIdentity(ctx, tx, user.ID, *identityID)
+	if errors.Is(err, ErrNotPermitted) {
+		var exists bool
+		if qerr := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM plugin_auth_identities WHERE id = $1)`, *identityID).Scan(&exists); qerr == nil && !exists {
+			// Deleted since the binding was read: the identity's trigger has
+			// revoked the keys bound to it.
+			return nil, nil, errKeyIdentityGone
+		}
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -143,6 +151,11 @@ func lockKeyIdentity(ctx context.Context, tx pgx.Tx, user *models.User, identity
 	id := *identityID
 	return &id, &anchor, nil
 }
+
+// errKeyIdentityGone is a key's identity deleted while the request ran. It is
+// ErrNotPermitted to any caller that doesn't look for it; a key sign-in
+// answers it as the revoked key it now is.
+var errKeyIdentityGone = fmt.Errorf("%w: the key's provider identity was deleted", ErrNotPermitted)
 
 // KeySession describes the login session a device key opens.
 type KeySession struct {
@@ -166,6 +179,12 @@ func (s *Service) openKeySessionTx(ctx context.Context, tx pgx.Tx, user *models.
 		return nil, ErrKeySignatureInvalid
 	}
 	identityID, providerSince := in.IdentityID, in.ProviderSince
+	// keyProviderExpiry decided before the request waited on the account
+	// lock; a limit that passed meanwhile ends the sign-in, rather than
+	// opening a session that is already over.
+	if !in.Expiry.IsZero() && !in.Expiry.After(time.Now()) {
+		return nil, ErrProviderSignInRequired
+	}
 	expiresAt := time.Now().Add(s.jwt.RefreshExpiry())
 	if !in.Expiry.IsZero() && in.Expiry.Before(expiresAt) {
 		expiresAt = in.Expiry
