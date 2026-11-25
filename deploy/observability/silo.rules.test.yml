@@ -71,8 +71,9 @@ tests:
         severity: warning
       exp_annotations:
         summary: Silo has old queued work
-        description: Includes delayed retries. Inspect queue retry gates, worker attempts and admin job progress before treating
-          this as a stall.
+        description: Includes delayed retries, except for images, which reports only due work; there a job deferred again and
+          again (a full artwork store or a missing local mount) shows as growing queued depth, not age. Inspect queue retry
+          gates, worker attempts and admin job progress before treating this as a stall.
 - name: memory pressure and cgroup OOM
   interval: 1m
   input_series:
@@ -251,3 +252,40 @@ tests:
         summary: A Silo PostgreSQL pool is near capacity
         description: Compare postgres acquire duration and timeout/error outcomes by pool role, then inspect long transactions
           and query spans before increasing the connection limit.
+- name: future-deferred images retries do not alert while due work still does
+  interval: 1m
+  input_series:
+  - series: silo_queue_sample_available{job="silo",cluster="deferred",instance="api-one",queue="images"}
+    values: 1+0x45
+  - series: silo_queue_items{job="silo",cluster="deferred",instance="api-one",queue="images",state="queued"}
+    values: 5+0x45
+  - series: silo_queue_oldest_requested_timestamp_seconds{job="silo",cluster="deferred",instance="api-one",queue="images",state="running"}
+    values: 0+0x45
+  - series: silo_queue_sample_available{job="silo",cluster="due",instance="api-one",queue="images"}
+    values: 1+0x45
+  - series: silo_queue_items{job="silo",cluster="due",instance="api-one",queue="images",state="queued"}
+    values: 2+0x45
+  - series: silo_queue_oldest_requested_timestamp_seconds{job="silo",cluster="due",instance="api-one",queue="images",state="queued"}
+    values: 0+0x45
+  promql_expr_test:
+  - expr: silo:queue_items:max{queue="images",state="queued"}
+    eval_time: 41m
+    exp_samples:
+    - labels: silo:queue_items:max{cluster="deferred",queue="images",state="queued"}
+      value: 5
+    - labels: silo:queue_items:max{cluster="due",queue="images",state="queued"}
+      value: 2
+  alert_rule_test:
+  - eval_time: 41m
+    alertname: SiloQueueAgeHigh
+    exp_alerts:
+    - exp_labels:
+        cluster: due
+        queue: images
+        state: queued
+        severity: warning
+      exp_annotations:
+        summary: Silo has old queued work
+        description: Includes delayed retries, except for images, which reports only due work; there a job deferred again and
+          again (a full artwork store or a missing local mount) shows as growing queued depth, not age. Inspect queue retry
+          gates, worker attempts and admin job progress before treating this as a stall.

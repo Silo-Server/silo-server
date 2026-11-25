@@ -1610,3 +1610,7 @@
 ./internal/api/handlers TestPlaybackHistoryEntrySkipsTheReadGateDB
 ./internal/backup TestCarryCredentialsReconcilesRestoredStreamNodesDB
 ./internal/backup TestCarryCredentialsKeepsNodeSamplesWithoutDailyArchiveDB
+
+# Image cache queue metrics count future-deferred retries in queued depth while
+# reporting oldest queued age only for due rows (next_attempt_at <= NOW()).
+./internal/workmetrics TestQueueSamplerImagesReportsDueQueuedAgeDB
