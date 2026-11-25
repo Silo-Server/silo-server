@@ -75,6 +75,12 @@ type demoState struct {
 	err error
 }
 
+// knownOff reports that demo mode is known to be off. A setting this process
+// has never read (err) is not known off.
+func (d demoState) knownOff() bool {
+	return d.err == nil && !d.on
+}
+
 func (r *AccountResolver) readDemo(ctx context.Context) demoState {
 	if r.demo == nil {
 		return demoState{}
@@ -131,6 +137,8 @@ type resolution struct {
 	identityID     int64
 	sessionsRevoke bool
 	audit          []auditEvent
+	// demo is demo mode as read before the transaction.
+	demo demoState
 }
 
 type auditEvent struct {
@@ -149,8 +157,8 @@ func (r *AccountResolver) Resolve(ctx context.Context, in ResolveInput) (*models
 	var result resolution
 	demo := r.readDemo(ctx)
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
-		result = resolution{}
-		if err := r.resolve(ctx, tx, in, demo, &result); err != nil {
+		result = resolution{demo: demo}
+		if err := r.resolve(ctx, tx, in, &result); err != nil {
 			return err
 		}
 		if result.identityID == 0 {
@@ -170,7 +178,7 @@ func (r *AccountResolver) Resolve(ctx context.Context, in ResolveInput) (*models
 	return result.user, result.identityID, nil
 }
 
-func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInput, demo demoState, out *resolution) error {
+func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInput, out *resolution) error {
 	identity := in.Identity
 	if err := lockExternalSubject(ctx, tx, in.InstallationID, identity.Subject); err != nil {
 		return err
@@ -234,10 +242,10 @@ func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInpu
 		// before demo mode was turned on. A setting this process has never
 		// read fails the link.
 		if user.Role != models.RoleAdmin {
-			if demo.err != nil {
-				return demo.err
+			if out.demo.err != nil {
+				return out.demo.err
 			}
-			if demo.on {
+			if out.demo.on {
 				return ErrDemoRestricted
 			}
 		}
@@ -271,7 +279,7 @@ func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInpu
 		// on a demo server visitors share one of them: there matching
 		// applies to no account, as when it is off. A setting this process
 		// has never read matches nothing.
-		autoMatch = autoMatch && demo.err == nil && !demo.on
+		autoMatch = autoMatch && out.demo.knownOff()
 		if autoMatch {
 			user, err := scanUser(tx.QueryRow(ctx, `SELECT `+allColumns+` FROM users
 				WHERE email = $1 AND role = 'user' AND NOT is_owner AND NOT break_glass FOR UPDATE`, NormalizeEmail(identity.Email)))
