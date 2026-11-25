@@ -28,7 +28,7 @@ devices and playback sessions. All paths below use `/api/v2`.
 | --- | --- |
 | `GET /auth/sessions/capabilities` (`getLoginSessionCapabilities`) | Authenticated account. Reports `available`, `last_seen`, `admin_management` and `revoke_other_sessions`, with the standard capability state, permission answer and revision. `revoke_other_sessions` is false in [demo mode](#demo-mode) for a caller that is not an administrator. |
 | `GET /auth/sessions` (`listSessions`) | Lists the caller's live, unrevoked login sessions, newest first, with cursor pagination. Account-level access does not require profile selection. |
-| `DELETE /auth/sessions/{id}` (`deleteSession`) | Revokes a session owned by the caller. Unknown or another account's session returns 404. |
+| `DELETE /auth/sessions/{id}` (`deleteSession`) | Revokes a session owned by the caller. Unknown or another account's session returns 404. In [demo mode](#demo-mode) a caller that is not an administrator ending another session of the same account gets 403 `permission_denied`. |
 | `GET /admin/users/{user_id}/login-sessions` (`listAdminUserLoginSessions`) | Acting admin. Lists a selected account's live login sessions. The cursor is bound to the operation, administrator and target account. |
 | `DELETE /admin/users/{user_id}/login-sessions/{session_id}` (`deleteAdminUserLoginSession`) | Acting admin. Revokes one session of the selected account; 204 on success, 404 for an unknown or mismatched session. |
 | `DELETE /admin/users/{user_id}/login-sessions` (`deleteAdminUserLoginSessions`) | Acting admin. Revokes all live sessions of the selected account and returns `{ "revoked": N }`. Repeating an account-wide request returns zero when no live sessions remain. |
@@ -872,7 +872,9 @@ Server settings: `auth.local_password_login` (default `true`; turning it off
 needs a break-glass admin; while it is off, `signup` and `acceptInvitation`
 are refused with 403 `local_login_disabled` and `getSignupStatus` reports
 signup off), `auth.email_auto_match` (default `false`; matches ordinary
-accounts only, never an admin, the Owner or a break-glass account),
+accounts only, never an admin, the Owner or a break-glass account; in
+[demo mode](#demo-mode) it matches no account on the server, not only the
+shared demo account),
 `auth.provider_recheck_interval` (default `12h`, 5m to 30d: how old the
 provider's last answer about an identity may be before a refresh asks again)
 and `auth.provider_recheck_outage_policy` (`fail_open`, the default, keeps a
@@ -973,11 +975,16 @@ answers a caller that is not an administrator `403 permission_denied` with the d
 action is not available in demo mode." Reads are never restricted, and administrators are
 never restricted.
 
-When the `demo.enabled` setting can't be read, the server can't tell whether it is a demo, so
-it fails closed without claiming to be one: a non-administrator's demo-restricted change is
+Every request reads `demo.enabled` (one setting read, no time-based cache), through one
+`demomode.Setting` per process shared by every surface that enforces demo mode. Only the
+stored value `true`, compared untrimmed, turns demo mode on. When a read fails, the error is
+logged and the last value this process read is used: a server that is not a demo keeps
+working, and a demo server keeps its demo refusal. Each API replica remembers its own value.
+Only a process that has never read the setting can't tell whether it is a demo, and then it
+fails closed without claiming to be one: a non-administrator's demo-restricted change is
 `500 internal_error`, `deleteSession` on another session is `500 internal_error` (the caller's
-own session still ends), and the capability answers below say no. The read error is logged.
-An administrator's request does not read the setting.
+own session still ends), and the capability answers below say no. An administrator's request
+does not read the setting.
 
 A visitor can:
 
@@ -1002,8 +1009,9 @@ account resolution: a linking flow that ends on an account that is not an admini
 demo mode is on, including one started before demo mode was turned on, is refused with
 `not_permitted` and attaches nothing. Email auto-match (`auth.email_auto_match`) does not apply
 in demo mode, as when it is off, so a provider sign-in whose verified email equals the demo
-account's goes on to account creation, which refuses the taken email. When the setting can't be
-read, the link fails and matching matches nothing.
+account's goes on to account creation, which refuses the taken email. Matching applies to no
+account in demo mode, not only the shared demo account. Demo mode is read before resolution's
+transaction; a process that has never read it fails the link and matches nothing.
 
 The capability answers clients read before offering these actions say no to a visitor:
 `getAccountPasswordCapability` `allowed`, `getLoginSessionCapabilities`
@@ -1013,14 +1021,16 @@ The Jellyfin-compatible listener serves no password change, identity linking, or
 another session; its `POST /Sessions/Logout` ends only the calling session. On the
 Audiobookshelf-compatible listener (beta), signing out normally revokes every token of the
 account and profile and closes their playback sessions; in demo mode, for an account that is
-not an administrator, it revokes only the presented token and closes no playback session (none
-records which token opened it). A refresh token is a row of its own and stays live until it
-expires. When the setting or the account's role can't be read, sign-out takes the demo path.
+not an administrator, it revokes only the caller's own credentials: the presented access token,
+and the refresh token the request carries (the `x-refresh-token` header or the `refresh_token`
+cookie) when it verifies as one of the same account and profile. It closes no playback session
+(none records which token opened it). A refresh token the request does not carry stays live
+until it expires. When the account's role can't be read, or the process has never read the
+setting, sign-out takes the demo path. An expired access token revokes nothing.
 
 `TestDemoModeCoversAccountOperations` in `internal/apiv2` fails when an operation tagged
 `account`, `api-keys`, `auth`, `device-login`, `notifications` or `profiles` that a
-non-administrator can call
-is neither demo-restricted nor listed, with its reason, as allowed.
+non-administrator can call is neither demo-restricted nor listed, with its reason, as allowed.
 
 ## Policy discovery
 
