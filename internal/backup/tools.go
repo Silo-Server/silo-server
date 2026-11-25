@@ -373,6 +373,30 @@ func WithDatabase(databaseURL, dbname string) (string, error) {
 	return u.String(), nil
 }
 
+// applicationNameParam is the connection parameter that names a session in
+// pg_stat_activity.
+const applicationNameParam = "application_name"
+
+// WithApplicationName returns databaseURL with its application name set to
+// name, in either form WithDatabase accepts. Everything else is kept.
+func WithApplicationName(databaseURL, name string) (string, error) {
+	if !strings.Contains(databaseURL, "://") {
+		pairs, err := keyValuePairs(databaseURL)
+		if err != nil {
+			return "", err
+		}
+		pairs = slices.DeleteFunc(pairs, func(p dsnPair) bool { return p.key == applicationNameParam })
+		return joinKeyValueDSN(append(pairs, dsnPair{key: applicationNameParam, value: name})), nil
+	}
+	u, query, err := parseDatabaseURL(databaseURL)
+	if err != nil {
+		return "", err
+	}
+	query.Set(applicationNameParam, name)
+	u.RawQuery = query.Encode()
+	return u.String(), nil
+}
+
 func quoteDSNValue(value string) string {
 	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(value) + "'"
 }

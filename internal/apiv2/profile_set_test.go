@@ -16,14 +16,20 @@ import (
 // fakeProfileSets records the command it was asked to apply.
 type fakeProfileSets struct {
 	unsupported bool
-	calls       int
-	cmd         handlers.ProfileSetCommand
-	held        handlers.ProfileSetHeld
+	// applyErr is the service's refusal; a refused set is not counted as
+	// applied.
+	applyErr error
+	calls    int
+	cmd      handlers.ProfileSetCommand
+	held     handlers.ProfileSetHeld
 }
 
 func (f *fakeProfileSets) ProfileSetSupported() bool { return !f.unsupported }
 
 func (f *fakeProfileSets) ApplyProfileSet(_ context.Context, cmd handlers.ProfileSetCommand) (handlers.ProfileSetResult, error) {
+	if f.applyErr != nil {
+		return handlers.ProfileSetResult{}, f.applyErr
+	}
 	f.calls++
 	f.cmd = cmd
 	return handlers.ProfileSetResult{Version: 1}, nil
@@ -47,7 +53,7 @@ func (k *profileSetKeys) VerifyProfileSet(context.Context, auth.KeyRequest) (*au
 	return &auth.ProfileSetAuthority{UserID: 1, Set: []byte(`{"version":1,"items":[]}`)}, nil
 }
 
-func (k *profileSetKeys) ProfileSetSessionAllowed(context.Context, *auth.Claims) error {
+func (k *profileSetKeys) SessionMayManageKeys(context.Context, *auth.Claims) error {
 	return k.sessionErr
 }
 
@@ -105,6 +111,8 @@ func TestPutProfileSetAuthority(t *testing.T) {
 		{name: "switch off, session", body: testSessionSet, headers: map[string]string{"Authorization": "Bearer " + memberToken, profileHeader: "p-owner"}},
 		{name: "held-back session", body: testSessionSet, headers: bearer(memberToken), sessionErr: auth.ErrSessionNotAllowed, want: TypePermissionDenied},
 		{name: "session form without a session", body: testSessionSet, want: TypeAuthenticationRequired},
+		{name: "session form not as the main profile", body: testSessionSet, headers: map[string]string{"Authorization": "Bearer " + memberToken, profileHeader: "p-owner"},
+			sets: fakeProfileSets{applyErr: handlers.ErrProfileSetNotMainProfile}, want: TypeMainProfileRequired},
 		{name: "main profile PIN not proven", body: testSessionSet, headers: map[string]string{"Authorization": "Bearer " + householdToken, profileHeader: "p-primary-locked"}, want: TypeProfileVerificationRequired},
 		{name: "both forms", body: `{"kid":"zT321tSgcB7emUH9k0B0oA","payload":"eyJ9","sig":"c2ln","set":{"version":1,"items":[]}}`, enabled: true, want: TypeValidationFailed},
 		{name: "neither form", body: `{}`, enabled: true, want: TypeValidationFailed},

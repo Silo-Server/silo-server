@@ -24,6 +24,10 @@ import (
 // person's latest edits on this server.
 var ErrProfileSetStale = errors.New("the profile set on this server is newer")
 
+// ErrProfileSetNotMainProfile refuses the session form from a request that
+// does not act as the household's main profile.
+var ErrProfileSetNotMainProfile = errors.New("a profile set is sent by the household's main profile")
+
 // errProfileSetRetry is a household that changed between the read the set
 // was planned on and the transaction; the apply starts over.
 var errProfileSetRetry = errors.New("the household changed while the set was applied")
@@ -318,7 +322,7 @@ func (h *ProfileHandler) ApplyProfileSet(ctx context.Context, cmd ProfileSetComm
 // household's main profile, verified with its PIN where it has one. Unlike
 // the household manager rule, naming no profile never passes.
 func requireSetPrimary(rows []userstore.ProfileSetRow, activeID string, verify func(*userstore.Profile) error) (*userstore.Profile, error) {
-	forbidden := apiError(http.StatusForbidden, "forbidden", "A profile set is sent by the household's main profile")
+	forbidden := ErrProfileSetNotMainProfile
 	if activeID == "" {
 		return nil, forbidden
 	}
