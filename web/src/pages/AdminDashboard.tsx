@@ -9,6 +9,7 @@ import {
   useAdminSessions,
   useAdminStats,
 } from "@/hooks/queries/admin/stats";
+import { markAdminInsightsRefresh } from "@/hooks/queries/admin/insights";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { usePolicyCapability } from "@/hooks/queries/admin/policy";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
@@ -141,6 +142,7 @@ export default function AdminDashboard() {
         setIsManualRefreshPending(true);
       }
       try {
+        if (manual) markAdminInsightsRefresh();
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: adminKeys.stats(), refetchType: "none" }),
           queryClient.invalidateQueries({ queryKey: adminKeys.sessions(), refetchType: "none" }),
@@ -155,7 +157,9 @@ export default function AdminDashboard() {
           ),
           // Insights-backed widgets pace themselves (dashboardInsightsInterval);
           // only a refresh the admin asked for, or a return to the tab, re-reads
-          // them, and the server's 60-second cache still absorbs repeats.
+          // them. A refresh the admin asked for also asks the server for fresh
+          // data: between those reads it serves its cached copy while it
+          // refreshes in the background.
           ...(manual
             ? [queryClient.invalidateQueries({ queryKey: adminKeys.insightsRoot() })]
             : []),
