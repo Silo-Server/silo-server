@@ -116,7 +116,9 @@ func TestCheckTailFrames(t *testing.T) {
 
 // TestSampleCreditsTailWithoutVideoInTheWindow runs the tail pass on an
 // episode whose video stops long before its audio, so the tail window holds
-// no video: the pass succeeds with no keyframes rather than failing.
+// no video: the pass succeeds with no keyframes rather than failing. It runs
+// real ffmpeg twice, about three seconds, because only ffmpeg shows that such
+// a window reports a zero frame count, in a plain and in a colored log.
 func TestSampleCreditsTailWithoutVideoInTheWindow(t *testing.T) {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {

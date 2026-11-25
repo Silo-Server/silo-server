@@ -86,7 +86,7 @@ minimum, 10th percentile, average, 90th percentile, and maximum. A frame
 missing any value, such as one cut short when ffmpeg stopped, is dropped.
 `Result.VideoFrames` is ffmpeg's own count of the frames the `Stats` output
 received, from its last `frame=` progress line, and is absent when ffmpeg
-reported none (an older node). A caller tells a span with no frame (zero)
+printed none. A caller tells a span with no frame (zero)
 from frames the log parsers could not read (a count with no `Frames`): the
 credits tail pass stores the first as `sparse` and retries the second.
 

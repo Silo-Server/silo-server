@@ -104,8 +104,7 @@ type Result struct {
 	// VideoFrames is ffmpeg's own count of the frames the Stats output
 	// received, from its last progress line, when the request asked for
 	// Stats. It tells a span without a frame (zero) from statistics the
-	// log parsers could not read. Nil when ffmpeg reported no count, as an
-	// older remote node does.
+	// log parsers could not read. Nil when ffmpeg printed no count.
 	VideoFrames *int64 `json:"video_frames,omitempty"`
 	// Decoder names the attempt that produced the result: "software", or
 	// "hardware:<accel>".
