@@ -620,7 +620,7 @@
   "error.sign_in_provider_required": [
     {
       "type": 0,
-      "value": "Turn on a sign-in provider before turning off password sign-in."
+      "value": "While password sign-in is off, a sign-in provider people can use has to stay on. OpenID Connect also needs the server's public URL."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -79105,6 +79105,20 @@
       "value": "Turn on a sign-in provider first. With password sign-in off and no provider on, only break-glass admins could sign in."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Set the server's public URL first. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " can't sign anyone in without it, so with password sign-in off only break-glass admins could sign in."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -79338,7 +79352,7 @@
           "value": [
             {
               "type": 0,
-              "value": "and "
+              "value": "Show "
             },
             {
               "type": 7
@@ -79353,7 +79367,7 @@
           "value": [
             {
               "type": 0,
-              "value": "and "
+              "value": "Show "
             },
             {
               "type": 7
@@ -79396,7 +79410,21 @@
   "web.admin.settings.signIn.passwordsOff.sessions": [
     {
       "type": 0,
-      "value": "Anyone already signed in stays signed in until their session ends."
+      "value": "This doesn't sign anyone out. People who are already signed in stay signed in, their API keys keep working, and they can still approve new devices. To sign someone out, end their sessions from their page in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Users"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.settings.signIn.passwordsOff.title": [
@@ -79453,6 +79481,28 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Password sign-in is off, so "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " is how everyone except break-glass admins signs in. Turn password sign-in back on first, then turn "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " off."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
