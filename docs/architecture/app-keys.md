@@ -65,12 +65,19 @@ and reads no key table: the session is already revoked, so its next request
 fails like any other revoked session's. Revoking every key of an account does
 the same for each of its device keys.
 
-**Lock order.** Every write to keys takes its locks in one order: the account
-row (`lockUser`), then the person key, then device key rows, then the login
-sessions those keys opened. Code that opens a session by key must take the
-account and key locks in the same order before it inserts the session, so a
-sign-in cannot create a live session after a concurrent revocation has ended
-the key's sessions.
+**Lock order.** Every key path takes its locks in one order: the account row
+(`lockUser`), then the plugin installation and the provider identity a key is
+bound to (`keySignInPolicy`), then the person key, then device key rows, then
+the login sessions those keys opened. A sign-in reads the key's binding
+without a lock, locks the installation and identity, then locks the key row
+and refuses the sign-in when its binding changed meanwhile. `enroll` and
+`PUT /auth/keys/person` lock the enrolling session's identity before the key
+rows and the session's own row last. Uninstalling a plugin and deleting an
+identity take the installation, the identity, the key rows (the revoking
+trigger) and the sessions in the same order without the account lock, so the
+two cannot deadlock. Opening a session by key holds the account and key locks
+when it inserts the session, so a sign-in cannot create a live session after a
+concurrent revocation has ended the key's sessions.
 
 ## Protocol
 
@@ -96,16 +103,24 @@ The server stores only its SHA-256 in `auth_key_challenges` and spends it with
 `DELETE ... RETURNING`, so two requests carrying one challenge succeed at most
 once across every API process. A challenge is spent as soon as the request's
 signature verifies, even when a later check refuses the request, and a request
-whose signature fails spends nothing: a stranger can't burn another device's
-challenge, and a signer can't retry one message against different checks.
+whose signature fails spends nothing. A challenge is not tied to whoever
+asked for it: anyone who holds an enrolled key, or a login session, and has
+seen a challenge can spend it by signing a request on it, and the device that
+asked then asks for another. What is guaranteed is that a signed message can't
+be replayed, and a signer can't retry one message against different checks.
 Spending happens outside the enrollment transaction. An hourly retention step
 (`cleanup_app_key_challenges`) deletes the challenges that expired unspent.
 
-**Addresses.** An address has one spelling. `CanonicalOrigin` lower-cases the
-scheme and host and refuses every other variation instead of rewriting it: a
-host outside ASCII, an IPv4 host that isn't four decimal numbers, a trailing
-dot, userinfo, a leading-zero or default port, an IPv6 zone or embedded IPv4
-address. The signed `origin` must already be canonical. The same function
+**Addresses.** An address has one spelling. `CanonicalOrigin` normalises
+three things: it lower-cases the scheme and an ASCII host, rewrites an IPv6
+host into its RFC 5952 form, and drops any path, query and fragment. It
+refuses every other variation instead of rewriting it: a host with any
+character outside ASCII (checked before lower-casing), an IPv4 host that isn't
+four decimal numbers, a trailing dot or empty label, userinfo, an empty,
+leading-zero or default port, an IPv6 zone or embedded IPv4 address.
+`CanonicalServerAddress` keeps the path, drops trailing slashes, and refuses
+an empty, `.` or `..` segment, a character a path can't hold unescaped, and an
+escape that is lower-case or not needed. The signed `origin` must already be canonical. The same function
 canonicalizes the request's origin, `server.public_url` and provider origins
 before any comparison; one that won't canonicalize can't be judged.
 
@@ -116,10 +131,20 @@ its payload; `sign-in` is signed by an enrolled device key; `enroll` comes from
 a login session with the person key beside the envelope. Each opens an ordinary
 account session with `device_key_id` set and `opened_via = 'app_key'`.
 
-Opening the session takes the account row lock, then the key row lock, then
-inserts the session, in one transaction: the order every revocation takes, so
-a sign-in racing a revocation either is refused or has its session ended by it.
-A disabled account, and a revoked, waiting or denied key, opens nothing.
+Opening the session takes the locks in the order above, then inserts the
+session, in one transaction, so a sign-in racing a revocation either is
+refused or has its session ended by it. A disabled account, and a revoked,
+waiting or denied key, opens nothing. A waiting or denied key is refused
+before any provider check, so it never causes a provider call. A request
+naming a key the server doesn't hold, or holds revoked, is refused after one
+signature check against a throwaway key, so that refusal takes about as long
+as a known key's.
+
+`last_used_at` on a device key is the last time it opened a session. `enroll`
+and an `introduce` that answers `signed_in` open one, so a key enrolled and not
+used since shows `last_used_at` equal to `enrolled_at`. A waiting key never
+opens one: its `last_used_at` stays empty, and its sign-in attempts are counted
+in `last_attempt_at`, which no answer shows.
 
 **Provider-bound keys.** A key enrolled from a session that came through a
 sign-in provider records that identity (`identity_id`, `provider_bound`); an
@@ -134,12 +159,31 @@ re-checks the provider when due, under the outage policy, and where the
 provider can't re-check the identity it refuses the sign-in once that time is
 more than `auth.refresh_token_expiry` ago. Inside the transaction the identity
 and its installation are locked and checked as an OAuth sign-in checks them.
-A key whose identity row is gone, or past that age limit, is 409
-`provider_sign_in_required`; one the provider refused is 403 `not_permitted`,
-as an OAuth sign-in answers it; a disabled installation or a fail-closed outage
-is 503 `provider_unavailable`. The person recovers by signing in through the
-provider again on any device, which moves `last_authenticated_at`; their keys
-then work again without enrolling anew. That age limit does not revoke keys.
+A key past that age limit is 409 `provider_sign_in_required`: its identity
+still exists, and the provider last vouched for it too long ago. The person
+recovers by signing in through the provider again on any device, which moves
+`last_authenticated_at`; their keys then work again without enrolling anew.
+That age limit does not revoke keys. One the provider refused is 403
+`not_permitted`, as an OAuth sign-in answers it; a disabled installation or a
+fail-closed outage is 503 `provider_unavailable`; a store failure during the
+check is 503 `dependency_unavailable` with `Retry-After`, as at refresh.
+
+**Linking a provider later.** When a provider is linked to an account in a
+way that moves the account's open sessions under the identity (a link the
+person or an administrator makes, not a break-glass account or a network
+provider), the account's live keys that are not provider-bound are bound to
+the identity in the same transaction. From then on the provider rule applies
+to them, so a key enrolled from a password session can't keep opening sessions
+the provider never checks.
+
+**Deleting an identity.** Unlinking an identity, or uninstalling its plugin,
+revokes every key bound to that identity and ends the sessions its device keys
+opened: a new provider sign-in makes a new identity row, so such a key could
+never sign in again. A trigger on `plugin_auth_identities` does it, so it
+holds on every path that deletes one, the cascade from uninstalling a plugin
+and nodes on an older release included. The device then gets
+`signature_invalid` and enrolls again. A provider-bound key with no identity
+should not exist; the sign-in code refuses one as a guard.
 
 **Local passwords off.** A key that is not provider-bound is a local
 credential. While `auth.local_password_login` is off it signs in only for a
@@ -152,7 +196,7 @@ person signs in through the provider and enrolls from that session.
 copied person key alone can't open an admin session. Keys from `enroll` start
 active: the enrolling session already proves the admin. A waiting device asks
 again with `sign-in` on a fresh challenge, no sooner than five seconds after
-its last try (`last_used_at`; sooner is 429 with `Retry-After`), and a key that
+its last try (`last_attempt_at`; sooner is 429 with `Retry-After`), and a key that
 has waited 24 hours, or was denied, answers `key_denied`. The routes that
 approve and deny waiting keys are not served yet; until then a waiting key
 stays out.
@@ -206,9 +250,11 @@ any later operation that seals a session the same way) also carries
 `local_route`, in the shape `getServerConnections` gives it: `spki_sha256`, the
 pin of the key the API listener presents over TLS on its own port, and `url`,
 `server.local_url` when an admin set one. How the listener and the key work is
-in [server-identity.md](server-identity.md#local-network-tls). A server whose
-listener has no TLS identity leaves `local_route` out. `approval_required`
-never carries it. An app that signs in by key follows these rules:
+in [server-identity.md](server-identity.md#local-network-tls). On a running
+server every `signed_in` reply carries it, because the server always has the
+key: it is derived from `SECRET_KEY` at start. It is absent only on a server
+built without one, which happens in tests. `approval_required` never carries
+it. An app that signs in by key follows these rules:
 
 - The reply is sealed but not signed, so a pin learned from it is trust on
   first use, and only when the device holds no pin for that server. A reply
@@ -258,6 +304,8 @@ TLS connection covers all of it.
 - **A password reset, "sign out everywhere" and a password change** end
   sessions as before and keep keys: the device signs in again with its key. The
   devices list is where a key is revoked.
+- **Deleting an identity** (unlinking it, or uninstalling its plugin) revokes
+  the keys bound to it and ends their sessions (above).
 - **A provider that can't re-check** bounds key sign-in by age (above) without
   revoking anything.
 

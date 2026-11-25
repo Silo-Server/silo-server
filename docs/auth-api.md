@@ -703,7 +703,7 @@ operation contract.
 | `POST /auth/keys/introduce` (`introduceAppKey`) | an `introduce` envelope signed by the account's person key, with `device_sig` | Enrolls the payload's `device_key` and opens a session. For an administrator's account the key is stored waiting and the sealed answer is `approval_required`. |
 | `POST /auth/keys/sign-in` (`signInWithAppKey`) | a `sign-in` envelope signed by an enrolled device key, without `device_sig` | Opens a session. A waiting key answers `approval_required`; see below. |
 | `POST /auth/keys/enroll` (`enrollAppKeys`) | the account's own login session, and `{ "person_key", "message" }` where `message` is an `enroll` envelope signed with that person key, with `device_sig` | Registers the person key when the account has none and the device key, then opens a session bound to the device key. The sealed plaintext adds `person_key_id` (the person key's `kid`); the client drops the session it called with. |
-| `GET /auth/keys` (`listAppKeys`) | the account's own login session | `person_key` (`kid`, `enrolled_at`; absent when the account has none) and `devices[]` (`id`, `kid`, `kind` `device`\|`app`, `name`, `platform`, `status` `active`\|`pending`, `enrolled_by` `introduce`\|`session`\|`app-code`\|`grant`, `allowed_by`, `enrolled_at`, `last_used_at`), newest first. Revoked and denied keys are left out. |
+| `GET /auth/keys` (`listAppKeys`) | the account's own login session | `person_key` (`kid`, `enrolled_at`; absent when the account has none) and `devices[]` (`id`, `kid`, `kind` `device`\|`app`, `name`, `platform`, `status` `active`\|`pending`, `enrolled_by` `introduce`\|`session`\|`app-code`\|`grant`, `allowed_by`, `enrolled_at`, `last_used_at`), newest first. Revoked and denied keys are left out. `last_used_at` is the last time the key opened a session: a key enrolled and not used since shows it equal to `enrolled_at`, and a key waiting for approval shows `null`. |
 | `DELETE /auth/keys/devices/{id}` (`revokeAppDeviceKey`) | the account's own login session | 204. Revokes the key and ends every session it opened. A device may revoke its own key, which ends the session making the request. 404 for a key that isn't the account's. |
 | `PUT /auth/keys/person` (`replacePersonKey`) | the account's own login session | Body `{ "person_key" }`, unsigned. Answers `{ "person_key_id": "<kid>" }`. The old person key is revoked; devices already enrolled keep their keys. Sending the current key again changes nothing. |
 
@@ -766,12 +766,15 @@ public key already enrolled on this server, or a different person key already
 on the account, is 409 `conflict`. While `auth.local_password_login` is off, a
 key not enrolled through the sign-in provider is 403 `local_login_disabled`
 except for a break-glass account. A key enrolled through the provider is 409
-`provider_sign_in_required` when its identity is gone, or the provider can't
-re-check it and last vouched longer ago than `auth.refresh_token_expiry`: the
-person signs in through the provider once and the key works again. It is 403
-`not_permitted` when the provider refused the person, and 503
-`provider_unavailable` while its provider is disabled or, under the fail-closed
-outage policy, unreachable. A disabled
+`provider_sign_in_required` when the provider can't re-check its identity and
+last vouched longer ago than `auth.refresh_token_expiry`: the person signs in
+through the provider once and the key works again. It is 403 `not_permitted`
+when the provider refused the person, 503 `provider_unavailable` while its
+provider is disabled or, under the fail-closed outage policy, unreachable, and
+503 `dependency_unavailable` with `Retry-After` when the check could not be
+made, as at refresh. Unlinking an identity or uninstalling its plugin revokes
+the keys bound to it, which then answer `signature_invalid`. A `device_name` or
+`device_platform` holding a control character is 422. A disabled
 account is 403 `permission_denied`.
 
 `enroll`, `PUT /auth/keys/person` and `DELETE /auth/keys/devices/{id}` refuse an

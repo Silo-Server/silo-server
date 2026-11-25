@@ -49,12 +49,15 @@ func identityAnchor(ctx context.Context, db rowQuerier, userID int, identityID i
 // runs before the sign-in's transaction, because a re-check takes the
 // account lock in a transaction of its own.
 //
-// An identity row that is gone, and a chain past its end, refuse the sign-in
-// with ErrProviderSignInRequired: the person signs in through the provider
-// again, which moves the anchor, and the key works again. A refusal on record
-// is ErrNotPermitted, as an OAuth sign-in answers it. An outage under the
-// fail-closed policy is ErrProviderUnavailable. A key that is not
-// provider-bound runs the ordinary refresh_token_expiry.
+// A chain past its end refuses the sign-in with ErrProviderSignInRequired:
+// the person signs in through the provider again, which moves the anchor, and
+// the key works again. A refusal on record is ErrNotPermitted, as an OAuth
+// sign-in answers it. An outage under the fail-closed policy is
+// ErrProviderUnavailable, and a store failure ErrSessionCheckUnavailable, as
+// at refresh. A key that is not provider-bound runs the ordinary
+// refresh_token_expiry. A provider-bound key with no identity row should not
+// exist (deleting an identity revokes the keys bound to it); it is refused
+// with ErrProviderSignInRequired as a guard.
 func (s *Service) keyProviderExpiry(ctx context.Context, userID int, binding KeyBinding) (time.Time, error) {
 	now := time.Now()
 	if !binding.ProviderBound {
@@ -75,21 +78,28 @@ func (s *Service) keyProviderExpiry(ctx context.Context, userID int, binding Key
 		return time.Time{}, ErrProviderSignInRequired
 	case errors.Is(err, ErrSessionRevoked):
 		return time.Time{}, ErrNotPermitted
+	case errors.Is(err, errAnswerNotApplied):
+		return time.Time{}, fmt.Errorf("%w: %w", ErrProviderCheckIncomplete, err)
 	}
 	return expiry, err
 }
 
-// keySignInPolicy decides, under the account and key row locks, whether a
-// device key may open a login session now, and answers the provider identity
-// and provider_since the session continues (nil for none).
+// keySignInPolicy decides whether a key may open a login session now, and
+// answers the provider identity and provider_since the session continues
+// (nil for none). It runs after the account row lock and before any key or
+// session row is locked, from a binding read without a lock: the caller then
+// locks the row and checks its binding is still the one decided here. That
+// keeps the lock order every key path and plugin uninstall share: the
+// account, the installation, the identity, the person key, the device keys,
+// the sessions.
 //
 // A provider-bound key inherits the provider checks of the session that
 // enrolled it. Its identity is locked and checked as an OAuth sign-in checks
 // it (the installation enabled, no refusal on record, and a network
 // identity's primary provider not refusing the account), and the session is
 // opened under it from the identity's anchor (identityAnchor), read under
-// that lock. A key whose identity row is gone is ErrProviderSignInRequired. keyProviderExpiry
-// has already applied the re-check and the age limit.
+// that lock. keyProviderExpiry has already applied the re-check and the age
+// limit.
 //
 // A key that is not provider-bound is a local credential. While the server
 // has local password sign-in off it works only for a break-glass account,
@@ -139,22 +149,23 @@ type KeySession struct {
 	IP string
 	// Expiry is keyProviderExpiry's answer for the key.
 	Expiry time.Time
+	// IdentityID and ProviderSince are keySignInPolicy's answer, decided
+	// before the key row was locked.
+	IdentityID    *int64
+	ProviderSince *time.Time
 }
 
 // openKeySessionTx opens the login session of an active device key and
-// mints its token pair. tx holds the account row lock (user is what it
-// read) and the key's row lock, in that order, so a revocation of the key
-// either ends this session or happens after it is refused. The session is
-// an ordinary account session that records the key (device_key_id), so
-// revoking the key ends it.
+// mints its token pair. tx holds, in order, the account row lock (user is
+// what it read), the provider locks keySignInPolicy took for in, and the
+// key's row lock, so a revocation of the key either ends this session or
+// happens after it is refused. The session is an ordinary account session
+// that records the key (device_key_id), so revoking the key ends it.
 func (s *Service) openKeySessionTx(ctx context.Context, tx pgx.Tx, user *models.User, key *models.AppDeviceKey, in KeySession) (*TokenPair, error) {
 	if key.RevokedAt != nil || key.Status != models.DeviceKeyStatusActive {
 		return nil, ErrKeySignatureInvalid
 	}
-	identityID, providerSince, err := keySignInPolicy(ctx, tx, user, bindingOfDeviceKey(key))
-	if err != nil {
-		return nil, err
-	}
+	identityID, providerSince := in.IdentityID, in.ProviderSince
 	expiresAt := time.Now().Add(s.jwt.RefreshExpiry())
 	if !in.Expiry.IsZero() && in.Expiry.Before(expiresAt) {
 		expiresAt = in.Expiry

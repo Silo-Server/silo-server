@@ -77,14 +77,21 @@ func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key
 	if err := SessionAllows(ctx, a.pool, claims, ActionManageKeys); err != nil {
 		return err
 	}
+	unlocked, err := sessionChainUnlocked(ctx, a.pool, claims.SessionID, claims.UserID)
+	if err != nil {
+		return err
+	}
 	return a.inTx(ctx, func(tx pgx.Tx) error {
 		user, err := lockEnabledUser(ctx, tx, claims.UserID)
 		if err != nil {
 			return err
 		}
-		chain, err := sessionProviderChainOf(ctx, tx, claims.SessionID, user.ID)
-		if err != nil {
-			return err
+		// The identity the new key records is locked before the session
+		// row, in the order every key path takes.
+		if unlocked.identityID != nil {
+			if _, _, err := lockKeyIdentity(ctx, tx, user, unlocked.identityID); err != nil {
+				return err
+			}
 		}
 		current, err := livePersonKeyTx(ctx, tx, user.ID)
 		if err != nil {
@@ -98,10 +105,22 @@ func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key
 				return fmt.Errorf("revoking person key: %w", err)
 			}
 		}
-		_, err = insertPersonKeyTx(ctx, tx, NewPersonKey{
-			UserID: user.ID, PublicKey: key, IdentityID: chain.identityID,
-			ProviderBound: chain.identityID != nil || chain.providerSince != nil, EnrolledVia: models.AppKeyEnrolledSession,
-		})
-		return err
+		binding := unlocked.binding()
+		if _, err := insertPersonKeyTx(ctx, tx, NewPersonKey{
+			UserID: user.ID, PublicKey: key, IdentityID: binding.IdentityID,
+			ProviderBound: binding.ProviderBound, EnrolledVia: models.AppKeyEnrolledSession,
+		}); err != nil {
+			return err
+		}
+		// The session row last, after the key rows; a session that moved
+		// under another identity or ended meanwhile rolls everything back.
+		chain, err := sessionProviderChainOf(ctx, tx, claims.SessionID, user.ID)
+		if err != nil {
+			return err
+		}
+		if !chain.binding().same(binding) {
+			return ErrSessionRevoked
+		}
+		return nil
 	})
 }

@@ -234,9 +234,20 @@ func TestKeySignInRefusalsDB(t *testing.T) {
 		{name: "expired message", m: message{purpose: appkeys.PurposeSignIn, signer: device, fields: map[string]any{"iat": env.now.Unix() - 200, "exp": env.now.Unix()}}, code: appkeys.CodeExpired},
 		{name: "sign-in carrying device_sig", m: message{purpose: appkeys.PurposeSignIn, signer: device, device: &device}, code: appkeys.CodeEnvelopeMalformed},
 		{name: "payload signed for another purpose", m: message{purpose: appkeys.PurposeSignIn, signer: device, fields: map[string]any{"purpose": "introduce"}}, code: appkeys.CodePurposeMismatch},
+		// Names reach the database and an administrator's screen: a NUL would
+		// fail the insert after the challenge is spent.
+		{name: "a NUL in device_name", m: message{purpose: appkeys.PurposeIntroduce, signer: person, device: &[]testKey{newTestKey(t)}[0], fields: map[string]any{"device_name": "a\x00b"}}, code: appkeys.CodeFieldInvalid},
+		{name: "an escape in device_platform", m: message{purpose: appkeys.PurposeIntroduce, signer: person, device: &[]testKey{newTestKey(t)}[0], fields: map[string]any{"device_platform": "ios\x1b"}}, code: appkeys.CodeFieldInvalid},
+		{name: "a DEL in device_name", m: message{purpose: appkeys.PurposeIntroduce, signer: person, device: &[]testKey{newTestKey(t)}[0], fields: map[string]any{"device_name": "a\x7f"}}, code: appkeys.CodeFieldInvalid},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := signIn(tc.m); appkeys.CodeOf(err) != tc.code {
+			var err error
+			if tc.m.purpose == appkeys.PurposeIntroduce {
+				_, err = env.signIn.Introduce(ctx, env.request(t, tc.m))
+			} else {
+				err = signIn(tc.m)
+			}
+			if appkeys.CodeOf(err) != tc.code {
 				t.Fatalf("err = %v, want %s", err, tc.code)
 			}
 		})
@@ -322,18 +333,35 @@ func TestKeySignInAdminWaitsForApprovalDB(t *testing.T) {
 	signIn := func() (*KeySignInResult, error) {
 		return env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: waiting}))
 	}
+	// A waiting key never opened a session, so it shows as never used,
+	// however often it asks.
+	neverUsed := func(when string) {
+		t.Helper()
+		keys, err := env.signIn.ListOwnKeys(ctx, env.loginSession(t, admin, models.SessionOpenedPassword, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range keys.Devices {
+			if key.ID == result.DeviceID && key.LastUsedAt != nil {
+				t.Fatalf("%s: a waiting key shows last_used_at %v", when, key.LastUsedAt)
+			}
+		}
+	}
+	neverUsed("after introduce")
 	var retry *KeyRetryError
 	if _, err := signIn(); !errors.As(err, &retry) || retry.RetryAfter <= 0 || retry.RetryAfter > appkeys.PendingRetryInterval {
 		t.Fatalf("asking again at once = %v", err)
 	}
-	if _, err := env.pool.Exec(ctx, `UPDATE auth_device_keys SET last_used_at = NOW() - INTERVAL '6 seconds' WHERE id = $1`, result.DeviceID); err != nil {
+	neverUsed("after a throttled sign-in")
+	if _, err := env.pool.Exec(ctx, `UPDATE auth_device_keys SET last_attempt_at = NOW() - INTERVAL '6 seconds' WHERE id = $1`, result.DeviceID); err != nil {
 		t.Fatal(err)
 	}
 	again, err := signIn()
 	if err != nil || again.Status != appkeys.ReplyApprovalRequired || again.Pair != nil || sessions() != 0 {
 		t.Fatalf("waiting sign-in = %+v, %v, %d sessions", again, err, sessions())
 	}
-	if _, err := env.pool.Exec(ctx, `UPDATE auth_device_keys SET created_at = NOW() - INTERVAL '25 hours', last_used_at = NULL WHERE id = $1`, result.DeviceID); err != nil {
+	neverUsed("after an allowed sign-in")
+	if _, err := env.pool.Exec(ctx, `UPDATE auth_device_keys SET created_at = NOW() - INTERVAL '25 hours', last_attempt_at = NULL WHERE id = $1`, result.DeviceID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := signIn(); !errors.Is(err, ErrAppKeyDenied) {
@@ -410,6 +438,12 @@ func TestKeyEnrollRulesDB(t *testing.T) {
 		t.Fatalf("replace from device sign-in = %v", err)
 	}
 	browser := env.loginSession(t, user, models.SessionOpenedPassword, nil)
+	forged := env.request(t, message{purpose: appkeys.PurposeEnroll, signer: person, device: &device})
+	forgedSig := newTestKey(t).sign(t, appkeys.PurposeEnroll, forged.Envelope.Payload)
+	forged.Envelope.DeviceSig = &forgedSig
+	if _, err := env.signIn.Enroll(ctx, KeyEnrollRequest{KeyRequest: forged, PersonKey: person.pub, Claims: browser}); appkeys.CodeOf(err) != appkeys.CodeDeviceSignatureInvalid {
+		t.Fatalf("enroll without a valid device_sig = %v", err)
+	}
 	other := newTestKey(t)
 	if _, err := env.signIn.Enroll(ctx, KeyEnrollRequest{
 		KeyRequest: env.request(t, message{purpose: appkeys.PurposeEnroll, signer: other, device: &device}), PersonKey: other.pub, Claims: browser,
@@ -565,5 +599,133 @@ func TestPromotionRevokesAppKeysDB(t *testing.T) {
 	}
 	if _, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: device})); !errors.Is(err, ErrKeySignatureInvalid) {
 		t.Fatalf("a key from before the promotion = %v", err)
+	}
+}
+
+// enrollFromProvider enrolls keys for the env's provider account from a
+// session opened through its identity.
+func (e *keyEnv) enrollFromProvider(t *testing.T) (testKey, *KeySignInResult) {
+	t.Helper()
+	person, device := newTestKey(t), newTestKey(t)
+	claims := e.loginSession(t, e.user, models.SessionOpenedProvider, &e.identityID)
+	result, err := e.signIn.Enroll(t.Context(), KeyEnrollRequest{
+		KeyRequest: e.request(t, message{purpose: appkeys.PurposeEnroll, signer: person, device: &device}),
+		PersonKey:  person.pub, Claims: claims,
+	})
+	if err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	return device, result
+}
+
+// keyRevoked reports whether the device key with id is revoked.
+func (e *keyEnv) keyRevoked(t *testing.T, id string) bool {
+	t.Helper()
+	var revoked bool
+	if err := e.pool.QueryRow(t.Context(), `SELECT revoked_at IS NOT NULL FROM auth_device_keys WHERE id = $1`, id).Scan(&revoked); err != nil {
+		t.Fatal(err)
+	}
+	return revoked
+}
+
+// Linking a provider to an account brings the keys it enrolled from a
+// password session under the provider: the next key session carries the
+// identity and its last vouched time, and is refused once the provider can't
+// re-check and vouched too long ago. Without it such a key would open
+// sessions no provider ever checks.
+func TestLinkingBindsAppKeysDB(t *testing.T) {
+	env := newKeyEnv(t, "keylink")
+	t.Cleanup(saveSettings(t, env.pool, config.AuthRefreshTokenExpirySettingKey))
+	ctx := t.Context()
+	if _, err := env.pool.Exec(ctx, `DELETE FROM server_settings WHERE key = $1`, config.AuthRefreshTokenExpirySettingKey); err != nil {
+		t.Fatal(err)
+	}
+	user := env.localAccount(t, "keylink-user", models.RoleUser)
+	_, device, _ := env.enroll(t, user)
+	_, identityID, err := env.resolver.Resolve(ctx, ResolveInput{InstallationID: env.installationID, Identity: env.identity("keylink-identity"), LinkingUserID: user.ID})
+	if err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	var vouched time.Time
+	if err := env.pool.QueryRow(ctx, `SELECT COALESCE(last_authenticated_at, linked_at) FROM plugin_auth_identities WHERE id = $1`, identityID).Scan(&vouched); err != nil {
+		t.Fatal(err)
+	}
+	result, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: device}))
+	if err != nil {
+		t.Fatalf("key sign-in after linking = %v", err)
+	}
+	session := env.sessionRow(t, result.Pair.SessionID)
+	if session.IdentityID == nil || *session.IdentityID != identityID || session.ProviderSince == nil || !session.ProviderSince.Equal(vouched) {
+		t.Fatalf("key session after linking = identity %v since %v, want %d since %v", session.IdentityID, session.ProviderSince, identityID, vouched)
+	}
+	env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_UNSUPPORTED, "")
+	if _, err := env.pool.Exec(ctx, `UPDATE plugin_auth_identities SET last_checked_at = NOW() - INTERVAL '13 hours',
+		last_authenticated_at = NOW() - $2::interval WHERE id = $1`, identityID, (recheckRefreshExpiry + time.Hour).String()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: device})); !errors.Is(err, ErrProviderSignInRequired) {
+		t.Fatalf("key sign-in past the provider's age after linking = %v", err)
+	}
+}
+
+// Deleting an identity revokes the keys bound to it and ends their
+// sessions, so the device enrolls again instead of being refused for ever; a
+// key of the same account not bound to it is untouched. The trigger also
+// fires on the cascade from uninstalling the plugin.
+func TestDeletedIdentityRevokesItsKeysDB(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		delete string
+	}{
+		{name: "unlink", delete: `DELETE FROM plugin_auth_identities WHERE id = $1`},
+		{name: "plugin uninstall", delete: `DELETE FROM plugin_installations WHERE id = (SELECT plugin_installation_id FROM plugin_auth_identities WHERE id = $1)`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newKeyEnv(t, "keyidgone")
+			ctx := t.Context()
+			_, bound := env.enrollFromProvider(t)
+			unbound, err := env.signIn.keys.InsertDeviceKey(ctx, NewDeviceKey{UserID: env.user.ID, PublicKey: newTestKey(t).pub,
+				Kind: models.DeviceKeyKindDevice, Name: "Tablet", EnrolledVia: models.AppKeyEnrolledSession})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := env.pool.Exec(ctx, tc.delete, env.identityID); err != nil {
+				t.Fatal(err)
+			}
+			if !env.keyRevoked(t, bound.DeviceID) || env.sessionLive(t, bound.Pair.SessionID, env.user.ID) {
+				t.Fatal("the bound key or its session survived the identity")
+			}
+			var personRevoked bool
+			if err := env.pool.QueryRow(ctx, `SELECT revoked_at IS NOT NULL FROM auth_person_keys WHERE user_id = $1`, env.user.ID).Scan(&personRevoked); err != nil || !personRevoked {
+				t.Fatalf("person key revoked = %v, %v", personRevoked, err)
+			}
+			if env.keyRevoked(t, unbound.ID) {
+				t.Fatal("a key not bound to the identity was revoked")
+			}
+		})
+	}
+}
+
+// A provider refusing the person revokes the account's app keys with its
+// API keys, and ends the sessions they opened.
+func TestProviderRefusalRevokesAppKeysDB(t *testing.T) {
+	env := newKeyEnv(t, "keyrefuse")
+	ctx := t.Context()
+	device, enrolled := env.enrollFromProvider(t)
+	providerSession := env.loginSession(t, env.user, models.SessionOpenedProvider, &env.identityID)
+	pair, err := env.svc.generateTokenPair(*providerSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_DISABLED, "")
+	env.makeDue(t)
+	if _, err := env.svc.Refresh(ctx, pair.RefreshToken); !errors.Is(err, ErrSessionRevoked) {
+		t.Fatalf("refresh after the refusal = %v", err)
+	}
+	if !env.keyRevoked(t, enrolled.DeviceID) || env.sessionLive(t, enrolled.Pair.SessionID, env.user.ID) {
+		t.Fatal("the refused person's key or its session survived")
+	}
+	if _, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: device})); !errors.Is(err, ErrKeySignatureInvalid) {
+		t.Fatalf("key sign-in after the refusal = %v", err)
 	}
 }

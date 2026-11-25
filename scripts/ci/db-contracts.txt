@@ -337,6 +337,9 @@
 ./internal/auth TestKeySignInLocalPasswordsOffDB
 ./internal/auth TestKeySessionContinuesProviderChainDB
 ./internal/auth TestPromotionRevokesAppKeysDB
+./internal/auth TestLinkingBindsAppKeysDB
+./internal/auth TestDeletedIdentityRevokesItsKeysDB
+./internal/auth TestProviderRefusalRevokesAppKeysDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
 ./internal/auth TestSignupPolicySerializationDB
 ./internal/apiv2 TestSignupCommitPolicyErrorsDB
