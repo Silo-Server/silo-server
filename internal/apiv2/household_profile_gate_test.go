@@ -288,6 +288,7 @@ var householdGateExemptOperations = map[string]string{
 	"listWebhookConnections":               exemptAccount,
 	"listWebhookEvents":                    exemptAccount,
 	"loginEmbyConnect":                     exemptAccount,
+	"preapproveDeviceLogin":                exemptAccount,
 	"replacePersonKey":                     exemptAccount,
 	"rotateWebhookConnection":              exemptAccount,
 	"unlinkNotificationDiscord":            exemptAccount,

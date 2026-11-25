@@ -301,13 +301,16 @@ The key routes against each kind of session:
 | Route | Password, provider, own device key | Device sign-in (a TV) | Grant-enrolled app | No `opened_via` | Admin acting as the account, API key, remote playback |
 |---|---|---|---|---|---|
 | `GET /auth/keys`, `GET /auth/keys/pending`, `pending/{id}/deny` | allowed | refused | refused | refused | refused |
-| `enroll`, `PUT /auth/keys/person`, `pending/{id}/approve` | main profile only | refused | refused | refused | refused |
+| `enroll`, `PUT /auth/keys/person`, `pending/{id}/approve`, `POST /auth/device/preapprove` | main profile only | refused | refused | refused | refused |
 | `DELETE /auth/keys/devices/{id}` | allowed | refused | its own key only | refused | refused |
 
 **The household's main profile.** Every profile of a household shares the
 account and its login session, so a change that creates lasting access to the
 account is limited to the household's main profile, the one that manages the
-household: `enroll`, `PUT /auth/keys/person` and `pending/{id}/approve`. The
+household: `enroll`, `PUT /auth/keys/person`, `pending/{id}/approve` and
+approving a device sign-in in advance (`POST /auth/device/preapprove`, a
+sign-in that lasts 30 days). Approving a device sign-in that is waiting now
+keeps no profile rule. The
 check is one function, `handlers.AuthHandler.ActsAsVerifiedMainProfile`,
 called through `requireVerifiedMainProfile` in the v2 handler of each, which is
 registered with `mainProfileOnly` (profile-scoped, `X-Profile-Id` optional). It
@@ -458,6 +461,19 @@ any node applies at once. While it is off, `getAppKeyCapability` reports
 list and `deny` stay open, so keys can be reviewed, revoked and refused; sessions keys
 opened before are not ended by the switch. Backups classify it as an access setting: a restore keeps the
 stricter of the live and the backed-up value.
+
+**Demo mode.** On a demo server (`demo.enabled`) every visitor signs in to
+one shared account. A key a visitor enrolled would be a lasting credential of
+theirs on an account that isn't theirs, able to replace the person key or
+approve devices after they left. So in demo mode app key sign-in is off for
+everyone, administrators included, whatever the setting says
+(`appKeySwitch`): the capability reports `disabled` and the same routes
+answer `capability_disabled`, so a demo account never holds a key and one
+enrolled before demo mode was turned on does not sign in. It is one
+condition where the switch is read, so every route the switch closes
+inherits it. Approving a device sign-in in advance is not behind the switch;
+it carries the ordinary demo restriction (refused for a caller who is not an
+administrator) and the device login capability reports `preapprove: false`.
 
 ## Backups
 

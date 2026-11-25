@@ -126,13 +126,17 @@ func TestAppKeyCapabilityFollowsSetting(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		enabled bool
+		demo    bool
 		state   string
 	}{
 		{name: "setting on", enabled: true, state: StateAvailable},
 		{name: "setting off", state: StateDisabled},
+		{name: "setting on, demo mode", enabled: true, demo: true, state: StateDisabled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := do(t, NewHandler(appKeyDeps(&fakeAppKeys{enabled: tc.enabled})), http.MethodGet, Prefix+"/auth/keys/capability", "", nil)
+			deps := appKeyDeps(&fakeAppKeys{enabled: tc.enabled})
+			deps.DemoSettings = fakeSettings{demo: tc.demo}
+			rec := do(t, NewHandler(deps), http.MethodGet, Prefix+"/auth/keys/capability", "", nil)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 			}
@@ -180,6 +184,16 @@ func TestAppKeyRoutesFollowTheSwitch(t *testing.T) {
 			requireProblem(t, rec, TypeCapabilityDisabled)
 			if keys.calls != 0 {
 				t.Fatalf("service ran %d times with the switch off", keys.calls)
+			}
+			// A demo server's visitors share one account, so app keys are
+			// off there whatever the setting says: the same routes close,
+			// and the same ones stay open.
+			demo := &fakeAppKeys{enabled: true}
+			deps := appKeyDeps(demo)
+			deps.DemoSettings = fakeSettings{demo: true}
+			requireProblem(t, do(t, NewHandler(deps), tc.method, Prefix+tc.path, tc.body, tc.headers), TypeCapabilityDisabled)
+			if demo.calls != 0 {
+				t.Fatalf("service ran %d times in demo mode", demo.calls)
 			}
 		})
 	}

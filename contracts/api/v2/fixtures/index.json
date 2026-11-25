@@ -14133,7 +14133,8 @@
         "method": "POST",
         "path": "/api/v2/auth/device/preapprove",
         "headers": {
-          "Authorization": "Bearer tok-member"
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
         },
         "body": "{\"device_name\":\"Twenty-first TV\",\"binding\":\"Zmh6rfhivXdsj8GLjp-OIAiXFIVu4jOzkCpZHQ1fKSU\"}"
       },
@@ -14154,7 +14155,8 @@
         "method": "POST",
         "path": "/api/v2/auth/device/preapprove",
         "headers": {
-          "Authorization": "Bearer tok-member"
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
         },
         "body": "{\"device_name\":\"Living room TV\",\"device_platform\":\"tvos\",\"binding\":\"Zmh6rfhivXdsj8GLjp-OIAiXFIVu4jOzkCpZHQ1fKSU\"}"
       },

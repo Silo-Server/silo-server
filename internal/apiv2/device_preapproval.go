@@ -68,13 +68,13 @@ const preapprovalSessionRule = "Only the account's own signed-in session: an API
 func registerDevicePreapprovals(reg *Registry) {
 	create := humaOp(http.MethodPost, Prefix+"/auth/device/preapprove", "preapproveDeviceLogin", "device-login",
 		"Approve a device sign-in in advance for the device holding the secret behind a fingerprint.")
-	create.Description = preapprovalSessionRule + " The sign-in is single use and lasts 30 days. An account has at most 20 waiting; another is 409 conflict."
+	create.Description = preapprovalSessionRule + " The sign-in is single use and lasts 30 days. An account has at most 20 waiting; another is 409 conflict. Refused in demo mode for a caller who is not an administrator, and the capability then reports preapprove false." + mainProfileRule
 	create.DefaultStatus = http.StatusCreated
 	create.Errors = []int{http.StatusForbidden, http.StatusConflict}
-	Register(reg, Operation{
+	Register(reg, mainProfileOnly(Operation{
 		Operation: create, RetrySafety: RetrySafetyNonRetryable,
-		Class: ClassAuthenticated, ServiceBacked: true, RateLimitBucket: bucketDeviceStart,
-	}, reg.preapproveDeviceLogin)
+		ServiceBacked: true, RateLimitBucket: bucketDeviceStart, DemoRestricted: true,
+	}), reg.preapproveDeviceLogin)
 	list := humaOp(http.MethodGet, Prefix+"/auth/device/preapprovals", "listDevicePreapprovals", "device-login",
 		"List the account's device sign-ins approved in advance and not yet redeemed.")
 	list.Description = preapprovalSessionRule
@@ -122,6 +122,12 @@ func (reg *Registry) preapproveDeviceLogin(ctx context.Context, in *PreapproveDe
 	claims, p := ownLoginSession(ctx)
 	if p != nil {
 		return nil, p
+	}
+	// A sign-in approved in advance is lasting access to the account every
+	// profile shares, so it takes the household's main profile, as enrolling
+	// a key does. Approving a sign-in that is waiting now keeps no such rule.
+	if err := reg.requireVerifiedMainProfile(ctx, reg.deps.Devices); err != nil {
+		return nil, err
 	}
 	result, err := reg.deps.Devices.PreapproveDeviceLogin(ctx, auth.DevicePreapprovalInput{
 		DeviceName: in.Body.DeviceName, DevicePlatform: in.Body.DevicePlatform, Binding: in.Body.Binding,

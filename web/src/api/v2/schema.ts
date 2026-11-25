@@ -6859,7 +6859,7 @@ export interface paths {
     put?: never;
     /**
      * Approve a device sign-in in advance for the device holding the secret behind a fingerprint.
-     * @description Only the account's own signed-in session: an API key, a session an administrator opened as the account, or a remote-playback session is 403 permission_denied. The sign-in is single use and lasts 30 days. An account has at most 20 waiting; another is 409 conflict.
+     * @description Only the account's own signed-in session: an API key, a session an administrator opened as the account, or a remote-playback session is 403 permission_denied. The sign-in is single use and lasts 30 days. An account has at most 20 waiting; another is 409 conflict. Refused in demo mode for a caller who is not an administrator, and the capability then reports preapprove false. It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 permission_denied.
      */
     post: operations["preapproveDeviceLogin"];
     delete?: never;
@@ -6948,7 +6948,7 @@ export interface paths {
     };
     /**
      * Describe app key sign-in support.
-     * @description Public, so an app can ask before it signs in. state is available while the auth.app_key_sign_in server setting is on and disabled while it is off. Each feature field turns true once this server supports that operation.
+     * @description Public, so an app can ask before it signs in. state is available while the auth.app_key_sign_in server setting is on and disabled while it is off; it is always disabled on a server in demo mode, where every visitor shares one account. Each feature field turns true once this server supports that operation.
      */
     get: operations["getAppKeyCapability"];
     put?: never;
@@ -101071,7 +101071,12 @@ export interface operations {
   preapproveDeviceLogin: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
       path?: never;
       cookie?: never;
     };
@@ -101110,6 +101115,15 @@ export interface operations {
       };
       /** @description Forbidden */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

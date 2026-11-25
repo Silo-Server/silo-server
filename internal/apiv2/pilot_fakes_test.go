@@ -1209,6 +1209,14 @@ const fakePreapprovalID = "6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"
 // per-account cap.
 const fakePreapprovalLimitName = "Twenty-first TV"
 
+// ActsAsVerifiedMainProfile runs the real main-profile rule over the fake
+// households.
+func (f fakeDevices) ActsAsVerifiedMainProfile(ctx context.Context, userID int, profileID string, verify func(*userstore.Profile) error) (bool, error) {
+	rule := handlers.NewAuthHandler(nil, nil, nil)
+	rule.SetHouseholdStores(fakeHouseholds{})
+	return rule.ActsAsVerifiedMainProfile(ctx, userID, profileID, verify)
+}
+
 func (f fakeDevices) PreapproveDeviceLogin(_ context.Context, in auth.DevicePreapprovalInput, _ int) (*auth.DevicePreapprovalResult, error) {
 	if in.DeviceName == fakePreapprovalLimitName {
 		return nil, &handlers.APIError{Status: 409, Code: "preapproval_limit", Message: "This account already has the most waiting sign-ins approved in advance; revoke one first"}

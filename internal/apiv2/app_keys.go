@@ -78,7 +78,7 @@ type AppKeyCapabilityOutput struct {
 func registerAppKeys(reg *Registry) {
 	op := humaOp(http.MethodGet, Prefix+"/auth/keys/capability", "getAppKeyCapability", "app-keys",
 		"Describe app key sign-in support.")
-	op.Description = "Public, so an app can ask before it signs in. state is available while the auth.app_key_sign_in server setting is on and disabled while it is off. Each feature field turns true once this server supports that operation."
+	op.Description = "Public, so an app can ask before it signs in. state is available while the auth.app_key_sign_in server setting is on and disabled while it is off; it is always disabled on a server in demo mode, where every visitor shares one account. Each feature field turns true once this server supports that operation."
 	Register(reg, Operation{Operation: op, Class: ClassPublic, ServiceBacked: true}, reg.getAppKeyCapability)
 	registerAppKeySignIn(reg)
 	registerAppKeyManagement(reg)
@@ -88,7 +88,7 @@ func registerAppKeys(reg *Registry) {
 func (reg *Registry) getAppKeyCapability(ctx context.Context, _ *CapabilityInput) (*AppKeyCapabilityOutput, error) {
 	state := StateNotConfigured
 	if svc := reg.deps.AppKeys; svc != nil {
-		enabled, err := svc.AppKeySignInEnabled(ctx)
+		enabled, err := reg.appKeySwitch(ctx, svc)
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
@@ -112,15 +112,29 @@ func (reg *Registry) getAppKeyCapability(ctx context.Context, _ *CapabilityInput
 	}, nil
 }
 
+// appKeySwitch reports whether app key sign-in is on: the
+// auth.app_key_sign_in server setting, and never in demo mode. A demo
+// server's visitors share one account, and a key any of them enrolled would
+// be a lasting credential on an account that isn't theirs, so there the
+// capability says disabled and no key is enrolled or signs in, for
+// administrators too.
+func (reg *Registry) appKeySwitch(ctx context.Context, svc AppKeyService) (bool, error) {
+	if demoMode(ctx, reg.deps.DemoSettings) {
+		return false, nil
+	}
+	return svc.AppKeySignInEnabled(ctx)
+}
+
 // appKeysOn answers the service while the switch is on, and the
 // capability problem otherwise: not_configured without the service,
-// capability_disabled while auth.app_key_sign_in is off.
+// capability_disabled while auth.app_key_sign_in is off or the server is in
+// demo mode.
 func (reg *Registry) appKeysOn(ctx context.Context) (AppKeyService, error) {
 	svc, err := reg.appKeysWired()
 	if err != nil {
 		return nil, err
 	}
-	enabled, err := svc.AppKeySignInEnabled(ctx)
+	enabled, err := reg.appKeySwitch(ctx, svc)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

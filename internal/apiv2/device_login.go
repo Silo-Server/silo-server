@@ -307,7 +307,7 @@ func registerDeviceLogin(reg *Registry) {
 	}, reg.startDeviceLogin)
 }
 
-func (reg *Registry) getDeviceLoginCapability(_ context.Context, _ *CapabilityInput) (*DeviceLoginCapabilityOutput, error) {
+func (reg *Registry) getDeviceLoginCapability(ctx context.Context, _ *CapabilityInput) (*DeviceLoginCapabilityOutput, error) {
 	state := StateNotConfigured
 	if reg.deps.Devices != nil && reg.deps.Devices.DeviceLoginConfigured() {
 		state = StateAvailable
@@ -322,7 +322,10 @@ func (reg *Registry) getDeviceLoginCapability(_ context.Context, _ *CapabilityIn
 			Cancel:                true,
 			OpenedSignal:          true,
 			SessionBinding:        true,
-			Preapprove:            true,
+			// A demo server's visitors share one account: none of them
+			// leaves a 30-day sign-in on it (preapproveDeviceLogin is
+			// demo-restricted).
+			Preapprove: !demoMode(ctx, reg.deps.DemoSettings),
 		},
 	}, nil
 }

@@ -676,7 +676,7 @@ it where they are signed in. Rules for codes, links and lifetimes are in
 | `POST /auth/device/cancel` (`cancelDeviceLogin`) | device code | Withdraws a live pending, or approved but uncollected, request and answers `canceled`; any other request answers its unchanged state (`denied`, `consumed`, `canceled`) or `expired`. Repeating converges. A request approved in advance is left unchanged and answers 404. |
 | `GET /auth/device?code=` or `?token=` (`getDeviceLogin`) | none; a login session's bearer token when sent | Adds `requested_at`, `server_name`, `binding` for a bound request and, when known, `server_id`. A lookup of a pending request marks it opened and holds its code for at least five more minutes, never past 30 minutes after start. A six-digit Jellyfin Quick Connect code is looked up only with the account's own login session: without a valid token it answers 401 and from an impersonation session 403, for every six-digit code. |
 | `POST /auth/device/approve`, `/approve-handoff`, `/deny` | the account's own login session | A canceled request is refused with 409, and so is approving a request another account (for `approve-handoff`, another profile) already approved, or denying one another account approved (`conflict`). An API key, an impersonation session or a remote-playback handoff session is refused with 403 `permission_denied`, because an approval gives the device a login session. `approve-handoff` approves a remote-playback or Jellyfin Quick Connect request for the verified profile in `X-Profile-Id` (with `X-Profile-Token` for a PIN profile); `approve` refuses both with 409. |
-| `POST /auth/device/preapprove` (`preapproveDeviceLogin`) | the account's own login session | Body `device_name` (1 to 128 characters), optional `device_platform` (at most 64), required `binding` (43 characters of unpadded base64url). Answers 201 with `id`, `device_code` and `expires_at`, 30 days on: an approved, single-use sign-in that only a poll with that `device_code` and the secret behind `binding` redeems. An API key, an impersonation session or a remote-playback handoff session is 403 `permission_denied`; a session whose provider identity is gone is 403 `not_permitted`; an account already holding 20 waiting is 409 `conflict`. Spends the `device_start` bucket. |
+| `POST /auth/device/preapprove` (`preapproveDeviceLogin`) | the account's own login session acting as the household's main profile (see "The household's main profile" under app keys) | Body `device_name` (1 to 128 characters), optional `device_platform` (at most 64), required `binding` (43 characters of unpadded base64url). Answers 201 with `id`, `device_code` and `expires_at`, 30 days on: an approved, single-use sign-in that only a poll with that `device_code` and the secret behind `binding` redeems. An API key, an impersonation session or a remote-playback handoff session is 403 `permission_denied`; a session whose provider identity is gone is 403 `not_permitted`; an account already holding 20 waiting is 409 `conflict`. Spends the `device_start` bucket. |
 | `GET /auth/device/preapprovals` (`listDevicePreapprovals`) | the account's own login session | The account's waiting sign-ins approved in advance, newest first: `items` of `id`, `device_name`, `device_platform`, `created_at`, `expires_at`. Never the device code or the binding. Not paged; the cap bounds it. |
 | `DELETE /auth/device/preapprovals/{id}` (`revokeDevicePreapproval`) | the account's own login session | 204; the request moves to `denied` and the device's next poll answers `denied`. Revoking one already withdrawn is 204; a redeemed, expired, unknown or other account's id is 404. |
 | `GET /admin/users/{user_id}/device-preapprovals`, `DELETE .../{id}` (`listAdminUserDevicePreapprovals`, `revokeAdminUserDevicePreapproval`) | administrator | The same list and revoke for any account; revoking follows the owner protection of revoking login sessions (403 `permission_denied`). |
@@ -822,12 +822,14 @@ account is 403 `permission_denied`.
 | Route | Password, provider, own device key | Device sign-in (a TV) | Another app's key (grant) | No record of how it opened | Admin acting as the account, API key, remote playback |
 | --- | --- | --- | --- | --- | --- |
 | `GET /auth/keys`, `GET /auth/keys/pending`, `POST /auth/keys/pending/{id}/deny` | allowed | refused | refused | refused | refused |
-| `POST /auth/keys/enroll`, `PUT /auth/keys/person`, `POST /auth/keys/pending/{id}/approve` | main profile only | refused | refused | refused | refused |
+| `POST /auth/keys/enroll`, `PUT /auth/keys/person`, `POST /auth/keys/pending/{id}/approve`, `POST /auth/device/preapprove` | main profile only | refused | refused | refused | refused |
 | `DELETE /auth/keys/devices/{id}` | allowed | refused | its own key only | refused | refused |
 
-**The household's main profile.** `enroll`, `PUT /auth/keys/person` and
-`pending/{id}/approve` create lasting access to the account every profile
-shares, so only the household's main profile may call them. `X-Profile-Id` must
+**The household's main profile.** `enroll`, `PUT /auth/keys/person`,
+`pending/{id}/approve` and `POST /auth/device/preapprove` create lasting access
+to the account every profile shares, so only the household's main profile may
+call them. Approving a device sign-in that is waiting now keeps no profile
+rule. `X-Profile-Id` must
 name the account's primary profile, with `X-Profile-Token` when it has a PIN
 (without it, 403 `profile_verification_required`); naming any other profile is
 403 `permission_denied`, on an administrator's account too. A request without
@@ -840,7 +842,12 @@ for a one-profile account that isn't an administrator. The other key routes have
 **Switch.** While `auth.app_key_sign_in` is off the challenge, `introduce`,
 `sign-in`, `enroll`, `PUT /auth/keys/person` and `pending/{id}/approve` answer
 409 `capability_disabled`. The capability, `GET /auth/keys` and its deletes,
-`GET /auth/keys/pending` and `pending/{id}/deny` stay open.
+`GET /auth/keys/pending` and `pending/{id}/deny` stay open. A server in demo
+mode (`demo.enabled`) behaves as if the switch were off, for administrators
+too, and its capability reports `disabled`: every visitor shares one account
+there, so no key is enrolled on it and none signs in. For the same reason
+`POST /auth/device/preapprove` is refused in demo mode for a caller who is not
+an administrator, and the device login capability reports `preapprove: false`.
 
 **Rate limits.** `createAppKeyChallenge` spends the per-address
 `key_challenge` budget and `introduce`, `sign-in` and `enroll` the

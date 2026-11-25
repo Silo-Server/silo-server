@@ -2573,11 +2573,11 @@ func devicePreapprovalFixtureCases() []fixtureCase {
 	return []fixtureCase{
 		{name: "preapprove_device_login_ok", operationID: "preapproveDeviceLogin",
 			scenario: "A signed-in phone approves a sign-in in advance for a TV's fingerprint and gets the device code to hand the TV.",
-			method:   http.MethodPost, path: "/api/v2/auth/device/preapprove", body: `{"device_name":"Living room TV","device_platform":"tvos","binding":"` + fakeBinding + `"}`, headers: bearer(memberToken),
+			method:   http.MethodPost, path: "/api/v2/auth/device/preapprove", body: `{"device_name":"Living room TV","device_platform":"tvos","binding":"` + fakeBinding + `"}`, headers: mainProfile(memberToken),
 			status: http.StatusCreated, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/DevicePreapprovalCreated"},
 		{name: "preapprove_device_login_limit", operationID: "preapproveDeviceLogin",
 			scenario: "An account already holding 20 waiting sign-ins approved in advance is refused another as a conflict.",
-			method:   http.MethodPost, path: "/api/v2/auth/device/preapprove", body: `{"device_name":"` + fakePreapprovalLimitName + `","binding":"` + fakeBinding + `"}`, headers: bearer(memberToken),
+			method:   http.MethodPost, path: "/api/v2/auth/device/preapprove", body: `{"device_name":"` + fakePreapprovalLimitName + `","binding":"` + fakeBinding + `"}`, headers: mainProfile(memberToken),
 			status: http.StatusConflict, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "preapprove_device_login_api_key_forbidden", operationID: "preapproveDeviceLogin",
 			scenario: "An API key cannot approve a device in advance: only the account's own signed-in session can.",

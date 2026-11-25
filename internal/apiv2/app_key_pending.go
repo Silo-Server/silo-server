@@ -7,6 +7,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // PendingAppKeyList is the account's device keys waiting for approval.
@@ -46,12 +47,20 @@ func mainProfileOnly(op Operation) Operation {
 	return op
 }
 
+// mainProfileChecker answers the household main-profile rule
+// (handlers.AuthHandler.ActsAsVerifiedMainProfile); the app key service and
+// the device login service both carry it.
+type mainProfileChecker interface {
+	ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, error)
+}
+
 // requireVerifiedMainProfile refuses a request that does not act as the
 // account's household main profile, verified with its PIN when it has one.
 // Every operation that creates lasting access to the account (enrolling or
-// replacing app keys, approving a waiting device) calls it after its own
-// session checks, and is registered with mainProfileOnly.
-func (reg *Registry) requireVerifiedMainProfile(ctx context.Context, svc AppKeyService) error {
+// replacing app keys, approving a waiting device, approving a device sign-in
+// in advance) calls it after its own session checks, and is registered with
+// mainProfileOnly.
+func (reg *Registry) requireVerifiedMainProfile(ctx context.Context, svc mainProfileChecker) error {
 	claims := claimsFrom(ctx)
 	if !claims.IsOwnLoginSession() {
 		return appKeyProblem(auth.ErrSessionNotAllowed)

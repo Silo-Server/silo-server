@@ -208,6 +208,17 @@ func demoGate(settings apimw.DemoSettingsReader) func(http.Handler) http.Handler
 	}
 }
 
+// demoMode reports whether the server runs as a public demo, whoever is
+// asking: every visitor shares one account there, so nothing that leaves a
+// lasting credential of a visitor's on it may run.
+func demoMode(ctx context.Context, settings apimw.DemoSettingsReader) bool {
+	if settings == nil {
+		return false
+	}
+	enabled, _ := settings.Get(ctx, "demo.enabled")
+	return enabled == "true" //nolint:goconst // settings literal, not a shared constant
+}
+
 // demoRestricted is shared by mutation admission and capability discovery.
 func demoRestricted(ctx context.Context, settings apimw.DemoSettingsReader) bool {
 	if settings == nil {
