@@ -1265,6 +1265,7 @@
 ./internal/api/handlers TestProfileEditRecorderDB
 ./internal/api/handlers TestProfileSetOwnerOverridesDB
 ./internal/api/handlers TestProfileSetOwnerEditsFollowTheProfileDB
+./internal/api/handlers TestProfileSetNamesWithOwnerRenamesDB
 ./internal/api/handlers TestProfileSetEditsRaceSetDB
 ./internal/api/handlers TestProfileEditAccountDeleteRaceDB
 ./internal/api TestProfileEditActorThroughNativeAuthDB

@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -37,10 +38,12 @@ var ErrProfileSetNoPrimary = errors.New("the household has profiles but no prima
 // otherwise new. Rows holding a sync ID the set no longer has are removed,
 // the primary never. New items are created in set order while the household
 // is under limit (0 = none); the rest are left off, and nothing is deleted
-// to fit. Names are checked on the household as the set leaves it. An item
-// after the first whose sync ID is in hidden, and that no profile here
-// holds, is hidden: its pair, if any, is ignored.
-func planProfileSet(doc *profileSetDoc, rows []userstore.ProfileSetRow, limit int, hidden map[string]bool) (*profileSetPlan, error) {
+// to fit. Names are checked on the household as the set leaves it, names
+// the owner set here kept. An item after the first whose sync ID the owner
+// removed here, and that no profile here holds, is hidden: its pair, if
+// any, is ignored.
+func planProfileSet(doc *profileSetDoc, rows []userstore.ProfileSetRow, limit int, edits profileSetEdits) (*profileSetPlan, error) {
+	hidden := edits.hidden
 	plan := &profileSetPlan{rowOf: map[int]*userstore.ProfileSetRow{}}
 	bySyncID := map[string]*userstore.ProfileSetRow{}
 	byID := map[string]*userstore.ProfileSetRow{}
@@ -110,7 +113,7 @@ func planProfileSet(doc *profileSetDoc, rows []userstore.ProfileSetRow, limit in
 			plan.leftOff = append(plan.leftOff, i)
 		}
 	}
-	return plan, checkProfileSetNames(doc, plan)
+	return plan, checkProfileSetNames(doc, plan, edits.forItems(doc, plan).finalNames(doc, plan))
 }
 
 // planProfileSetRow finds the row item i updates, nil for a new item.
@@ -152,25 +155,27 @@ func planProfileSetRow(
 }
 
 // checkProfileSetNames refuses a set that would leave one name on two
-// profiles: an item named like a profile outside the set. Names inside the
-// set are unique already, so renames among set profiles, a chain included,
-// never collide. Duplicates among the profiles outside the set are not the
-// set's to judge.
-func checkProfileSetNames(doc *profileSetDoc, plan *profileSetPlan) error {
-	held := make([]int, 0, len(plan.rowOf)+len(plan.create))
-	for i := range plan.rowOf {
-		held = append(held, i)
-	}
-	held = append(held, plan.create...)
+// profiles, judged on final, the names the set's profiles will have (each
+// item's name, or the name the owner gave its profile here): a profile of
+// the set named like a profile outside it, or two profiles of the set named
+// alike, which only an owner's rename can cause, since the items' own names
+// are unique. The later item of a clash is refused at its name. Duplicates
+// among the profiles outside the set are not the set's to judge.
+func checkProfileSetNames(doc *profileSetDoc, plan *profileSetPlan, final []string) error {
+	held := slices.Concat(slices.Collect(maps.Keys(plan.rowOf)), plan.create)
 	slices.Sort(held)
-	for _, i := range held {
+	clash := func(i int, message string) error {
+		return &ProfileSetFieldError{Location: fmt.Sprintf("set.items[%d].name", i), Code: "name_conflict", Message: message}
+	}
+	for n, i := range held {
 		for _, local := range plan.localOnly {
-			if sameProfileName(local.Name, doc.Items[i].Name) {
-				return &ProfileSetFieldError{
-					Location: fmt.Sprintf("set.items[%d].name", i),
-					Code:     "name_conflict",
-					Message:  "A profile on this server that is not part of the set already has this name; pair it or rename one.",
-				}
+			if sameProfileName(local.Name, final[i]) {
+				return clash(i, "A profile on this server that is not part of the set already has this name; pair it or rename one.")
+			}
+		}
+		for _, j := range held[:n] {
+			if sameProfileName(final[i], final[j]) {
+				return clash(i, "The owner of this server gave another profile in the set this name; rename this one.")
 			}
 		}
 	}

@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -115,11 +114,9 @@ func (e itemEdits) pinOverridden() []int {
 	return out
 }
 
-// checkNames refuses a set that would leave two of its profiles with one
-// name once the names the owner set here are kept: an item's own name is
-// unique in the set, but a profile keeps an overridden name whatever its
-// item says. The later item of a clash is refused at its name.
-func (e itemEdits) checkNames(doc *profileSetDoc, plan *profileSetPlan) error {
+// finalNames is the name each item's profile will have: the item's, or the
+// name the owner gave the profile here, which the set keeps.
+func (e itemEdits) finalNames(doc *profileSetDoc, plan *profileSetPlan) []string {
 	final := make([]string, len(doc.Items))
 	for i, item := range doc.Items {
 		final[i] = item.Name
@@ -127,20 +124,7 @@ func (e itemEdits) checkNames(doc *profileSetDoc, plan *profileSetPlan) error {
 			final[i] = row.Name
 		}
 	}
-	held := slices.Concat(slices.Collect(maps.Keys(plan.rowOf)), plan.create)
-	slices.Sort(held)
-	for n, i := range held {
-		for _, j := range held[:n] {
-			if sameProfileName(final[i], final[j]) {
-				return &ProfileSetFieldError{
-					Location: fmt.Sprintf("set.items[%d].name", i),
-					Code:     "name_conflict",
-					Message:  "The owner of this server gave another profile in the set this name; rename this one.",
-				}
-			}
-		}
-	}
-	return nil
+	return final
 }
 
 // withoutOverrides is an item's settings plan without the keys the owner

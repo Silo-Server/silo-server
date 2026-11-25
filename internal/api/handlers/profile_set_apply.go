@@ -108,14 +108,11 @@ func (r *profileSetRun) attempt(ctx context.Context) error {
 		}
 	}
 	edits := newProfileSetEdits(snap.Edits)
-	plan, err := planProfileSet(r.doc, snap.Rows, r.limit, edits.hidden)
+	plan, err := planProfileSet(r.doc, snap.Rows, r.limit, edits)
 	if err != nil {
 		return err
 	}
 	r.edits = edits.forItems(r.doc, plan)
-	if err := r.edits.checkNames(r.doc, plan); err != nil {
-		return err
-	}
 	r.pinOverrides = r.edits.pinOverridden()
 	for i, row := range plan.rowOf {
 		// An upload stored before hashes were kept gets its label now, so a
@@ -281,14 +278,11 @@ func (r *profileSetRun) apply(ctx context.Context, w userstore.ProfileSetWriter,
 		return err
 	}
 	edits := newProfileSetEdits(snap.Edits)
-	plan, err := planProfileSet(r.doc, snap.Rows, r.limit, edits.hidden)
+	plan, err := planProfileSet(r.doc, snap.Rows, r.limit, edits)
 	if err != nil {
 		return err
 	}
 	locked := edits.forItems(r.doc, plan)
-	if err := locked.checkNames(r.doc, plan); err != nil {
-		return err
-	}
 	// A set that became a repeat of the held version since the first read
 	// starts over, so its PIN comparisons count as guesses (comparePINs), and
 	// so does one whose PIN overrides changed, which decide what was hashed.

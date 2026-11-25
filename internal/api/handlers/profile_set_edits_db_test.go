@@ -699,3 +699,46 @@ func TestProfileEditAccountDeleteRaceDB(t *testing.T) {
 		t.Fatalf("%d edit rows outlived the deleted account", left)
 	}
 }
+
+// TestProfileSetNamesWithOwnerRenamesDB: names are judged as the profiles
+// will end up, the owner's renames kept, against profiles outside the set
+// too. It catches a set refused for a clash that applying it would not
+// leave, and one accepted though it would leave two profiles with one name.
+func TestProfileSetNamesWithOwnerRenamesDB(t *testing.T) {
+	f := newEditsFixture(t)
+	main, kid := newSetItem("Parent"), newSetItem("Kid")
+	f.mustApply(t, setDoc(t, 1, main, kid))
+	kidID := f.profileBySyncID(t, kid.syncID()).ID
+	f.update(t, f.admin(), kidID, ProfileUpdateRequest{Name: new("Buddy")}, true)
+	if err := f.create("Kid"); err != nil {
+		t.Fatal(err)
+	}
+	var localID string
+	if err := f.pool.QueryRow(t.Context(), `SELECT id FROM user_profiles WHERE user_id = $1 AND name = 'Kid'`, f.userID).Scan(&localID); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("an item named like a local profile whose own profile keeps the owner's name", func(t *testing.T) {
+		if _, err := f.apply(t, setDoc(t, 2, main, kid)); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if p := f.profileBySyncID(t, kid.syncID()); p.Name != "Buddy" {
+			t.Fatalf("name = %q, want the owner's Buddy", p.Name)
+		}
+	})
+	t.Run("the owner's name equal to a local profile's name", func(t *testing.T) {
+		buddy := "Buddy"
+		if err := f.store.UpdateProfile(t.Context(), localID, userstore.UpdateProfileInput{Name: &buddy}); err != nil {
+			t.Fatal(err)
+		}
+		before := f.state(t)
+		_, err := f.apply(t, setDoc(t, 3, main, kid))
+		var field *ProfileSetFieldError
+		if !errors.As(err, &field) || field.Location != "set.items[1].name" || field.Code != "name_conflict" {
+			t.Fatalf("err = %v, want name_conflict at set.items[1].name", err)
+		}
+		if f.state(t) != before {
+			t.Fatal("a refused set wrote")
+		}
+	})
+}
