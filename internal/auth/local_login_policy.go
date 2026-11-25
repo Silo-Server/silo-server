@@ -173,11 +173,12 @@ func usableBreakGlassCount(ctx context.Context, db rowQuerier, excludeID int) (i
 
 // CheckLocalLoginSettingChange refuses turning local password sign-in off
 // while no break-glass admin could still sign in (ErrBreakGlassRequired), or
-// while no sign-in provider is on for everyone else
+// while no sign-in provider can sign everyone else in
 // (ErrSignInProviderRequired). The caller runs it inside the settings
 // mutation, which already holds the settings lock; before and after are the
-// effective values.
-func CheckLocalLoginSettingChange(ctx context.Context, db rowQuerier, before, after string) error {
+// effective values, and publicURL is the server.public_url the same save
+// leaves in effect.
+func CheckLocalLoginSettingChange(ctx context.Context, db dbQuerier, before, after, publicURL string) error {
 	wasOn := settingBool(before, true)
 	isOn := settingBool(after, true)
 	if !wasOn || isOn {
@@ -190,7 +191,7 @@ func CheckLocalLoginSettingChange(ctx context.Context, db rowQuerier, before, af
 	if count == 0 {
 		return ErrBreakGlassRequired
 	}
-	enabled, err := signInProviderEnabled(ctx, db)
+	enabled, err := signInProviderEnabled(ctx, db, publicURL)
 	if err != nil {
 		return err
 	}
@@ -200,19 +201,39 @@ func CheckLocalLoginSettingChange(ctx context.Context, db rowQuerier, before, af
 	return nil
 }
 
-// signInProviderEnabled reports whether an OIDC or LDAP sign-in provider is
-// on: an enabled installation with an enabled sign-in binding that is not a
-// network identity binding. A network provider signs in only people on its
-// network, so it does not count.
-func signInProviderEnabled(ctx context.Context, db rowQuerier) (bool, error) {
-	var enabled bool
-	err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM plugin_installations p
-		JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND b.enabled
-		WHERE p.enabled AND NOT `+plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id")+`)`).Scan(&enabled)
+// signInProviderEnabled reports whether an OIDC or LDAP sign-in provider can
+// sign people in: an enabled installation with an enabled sign-in binding
+// that is not a network identity binding, whose mode is served. A network
+// provider signs in only people on its network, and an OAuth provider signs
+// nobody in without a public URL (OAuthSignInServed), so neither counts. A
+// credentials (directory) provider needs no public URL.
+func signInProviderEnabled(ctx context.Context, db dbQuerier, publicURL string) (bool, error) {
+	rows, err := db.Query(ctx, `SELECT COALESCE((SELECT c.metadata->'auth_modes' FROM plugin_capabilities c
+			WHERE c.plugin_installation_id = b.plugin_installation_id AND c.capability_type = 'auth_provider.v1'
+				AND c.capability_id = b.capability_id), '[]'::jsonb)
+		FROM plugin_installations p
+		JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND `+primarySignInBindingSQL("b")+`
+		WHERE p.enabled`)
 	if err != nil {
 		return false, fmt.Errorf("checking for an enabled sign-in provider: %w", err)
 	}
-	return enabled, nil
+	modes, err := pgx.CollectRows(rows, pgx.RowTo[[]string])
+	if err != nil {
+		return false, fmt.Errorf("checking for an enabled sign-in provider: %w", err)
+	}
+	for _, binding := range modes {
+		if ProviderModeForAuthModes(binding) != ProviderModeOAuth || OAuthSignInServed(publicURL) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// primarySignInBindingSQL is the SQL test that the plugin_auth_bindings row
+// named by alias is an enabled OIDC or LDAP binding: enabled, and not a
+// network identity binding, which signs in only people on its network.
+func primarySignInBindingSQL(alias string) string {
+	return alias + `.enabled AND NOT ` + plugins.AuthBindingIsNetworkSQL(alias+".plugin_installation_id", alias+".capability_id")
 }
 
 // Who loses password sign-in when the server turns it off, grouped by what

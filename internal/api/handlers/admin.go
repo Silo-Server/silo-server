@@ -1536,18 +1536,18 @@ func (h *AdminHandler) checkLocalLoginSetting(ctx context.Context, tx pgx.Tx, be
 		return nil
 	}
 	if tx != nil {
-		return localLoginSettingError(auth.CheckLocalLoginSettingChange(ctx, tx, before[key], after[key]))
+		return localLoginSettingError(auth.CheckLocalLoginSettingChange(ctx, tx, before[key], after[key], after[config.ServerPublicURLSettingKey]))
 	}
 	if h.pool == nil {
 		return ErrAdminSettingsUnavailable
 	}
-	return localLoginSettingError(auth.CheckLocalLoginSettingChange(ctx, h.pool, before[key], after[key]))
+	return localLoginSettingError(auth.CheckLocalLoginSettingChange(ctx, h.pool, before[key], after[key], after[config.ServerPublicURLSettingKey]))
 }
 
 // localLoginSettingError answers a refused auth.local_password_login change.
 func localLoginSettingError(err error) error {
 	if errors.Is(err, auth.ErrSignInProviderRequired) {
-		return apiError(http.StatusConflict, "sign_in_provider_required", "Turn on a sign-in provider before turning local password sign-in off")
+		return apiError(http.StatusConflict, "sign_in_provider_required", "Turn on a sign-in provider that can sign people in before turning local password sign-in off; an OpenID Connect provider also needs server.public_url")
 	}
 	return breakGlassError(err)
 }

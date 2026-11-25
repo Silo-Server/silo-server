@@ -13,9 +13,9 @@ import (
 )
 
 // Turning local password sign-in off needs a break-glass admin and an
-// enabled OIDC or LDAP sign-in provider, through the batch and the
-// single-key settings writes alike. Without the provider check the server
-// accepted the change with nobody else able to sign in.
+// OIDC or LDAP sign-in provider that can sign people in, through the batch
+// and the single-key settings writes alike. Without the provider check the
+// server accepted the change with nobody else able to sign in.
 func TestLocalLoginSettingRequiresBreakGlassDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -78,10 +78,44 @@ func TestLocalLoginSettingRequiresBreakGlassDB(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM plugin_installations WHERE id = $1`, installation)
 	})
-	if _, err := pool.Exec(t.Context(), `INSERT INTO plugin_auth_bindings (plugin_installation_id, capability_id, enabled) VALUES ($1, 'oidc', true)`, installation); err != nil {
+	if _, err := pool.Exec(t.Context(), `INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id, metadata)
+		VALUES ($1, 'auth_provider.v1', 'oidc', '{"auth_modes":["oauth2"]}'),
+		       ($1, 'auth_provider.v1', 'ldap', '{"auth_modes":["password"]}')`, installation); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveAdminSetting(t, h, key, "false", true); err != nil || store.values[key] != "false" {
-		t.Fatalf("with break-glass and a provider: %v, stored %v", err, store.values)
+	if _, err := pool.Exec(t.Context(), `INSERT INTO plugin_auth_bindings (plugin_installation_id, capability_id, enabled)
+		VALUES ($1, 'oidc', false), ($1, 'ldap', false)`, installation); err != nil {
+		t.Fatal(err)
+	}
+
+	// An OpenID Connect provider signs nobody in without a public URL, so it
+	// does not count until one is set; a directory provider needs none.
+	for _, tc := range []struct {
+		name, binding, publicURL string
+		accepted                 bool
+	}{
+		{"oauth without a public URL", "oidc", "", false},
+		{"oauth with a public URL", "oidc", "https://silo.example.test", true},
+		{"directory without a public URL", "ldap", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := pool.Exec(t.Context(), `UPDATE plugin_auth_bindings SET enabled = (capability_id = $2) WHERE plugin_installation_id = $1`,
+				installation, tc.binding); err != nil {
+				t.Fatal(err)
+			}
+			delete(store.values, key)
+			store.values[config.ServerPublicURLSettingKey] = tc.publicURL
+			err := saveAdminSetting(t, h, key, "false", true)
+			if !tc.accepted {
+				requireAdminError(t, err, 409, "sign_in_provider_required")
+				if _, stored := store.values[key]; stored {
+					t.Fatalf("refused write stored %q", store.values[key])
+				}
+				return
+			}
+			if err != nil || store.values[key] != "false" {
+				t.Fatalf("accepted write: %v, stored %v", err, store.values)
+			}
+		})
 	}
 }
