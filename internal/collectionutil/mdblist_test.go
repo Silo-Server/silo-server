@@ -23,22 +23,24 @@ func TestCanonicalMDBListURLRejectsPrivateHosts(t *testing.T) {
 }
 
 // A list URL copied from the browser can carry a query or fragment, and /json
-// must end the path or mdblist.com answers with the HTML list page.
-func TestCanonicalMDBListURLDropsQueryAndFragment(t *testing.T) {
+// must end the path or mdblist.com answers with the HTML list page. The query
+// is the feed's too (sort=rank orders it), so it stays.
+func TestCanonicalMDBListURLPutsJSONOnThePath(t *testing.T) {
 	t.Parallel()
 
-	const want = "https://mdblist.com/lists/example-user/watchlist/json"
-	for _, raw := range []string{
-		"https://mdblist.com/lists/example-user/watchlist?sort=rank&sortorder=asc",
-		"https://mdblist.com/lists/example-user/watchlist/?ref=share",
-		"https://mdblist.com/lists/example-user/watchlist#top",
-		// What earlier builds stored for the two URLs above; a sync
-		// normalizes the stored URL again, so these collections recover.
-		"https://mdblist.com/lists/example-user/watchlist?sort=rank&sortorder=asc/json",
-		"https://mdblist.com/lists/example-user/watchlist#top/json",
-		"https://mdblist.com/lists/example-user/watchlist/json?limit=50",
-		"https://mdblist.com/lists/example-user/watchlist/JSON",
-		"https://mdblist.com/lists/example-user/watchlist/json/json/",
+	const list = "https://mdblist.com/lists/example-user/watchlist"
+	for raw, want := range map[string]string{
+		list + "?sort=rank&sortorder=asc": list + "/json?sort=rank&sortorder=asc",
+		list + "/?ref=share":              list + "/json?ref=share",
+		list + "#top":                     list + "/json",
+		list + "/json?sort=imdbpopular":   list + "/json?sort=imdbpopular",
+		list + "/JSON":                    list + "/json",
+		list + "/json/json/":              list + "/json",
+		list + "/json?sort=rank#top":      list + "/json?sort=rank",
+		// What earlier builds stored for the first and third URLs; a sync
+		// normalizes the stored URL again, so those collections recover.
+		list + "?sort=rank&sortorder=asc/json": list + "/json?sort=rank&sortorder=asc",
+		list + "#top/json":                     list + "/json",
 	} {
 		got, err := CanonicalMDBListURL(raw)
 		if err != nil {

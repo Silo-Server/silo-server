@@ -35,24 +35,27 @@ var allowedMDBListHosts = map[string]struct{}{
 }
 
 // NormalizeMDBListURL accepts either an MDBList page URL or its JSON variant
-// and returns the canonical JSON URL. A query string or fragment copied from
-// the browser is dropped, since /json has to end the path for the feed to
-// answer with JSON. Trailing slashes and repeated /json suffixes, in any case,
-// are tolerated. It does not validate the host; call ValidateMDBListURL (or
-// CanonicalMDBListURL) before fetching.
+// and returns the canonical JSON URL. /json goes at the end of the path, where
+// the feed needs it; a query string such as sort=rank is kept for the feed and a
+// fragment is dropped. Trailing slashes and repeated /json suffixes, in any
+// case, are tolerated. It does not validate the host; call ValidateMDBListURL
+// (or CanonicalMDBListURL) before fetching.
 func NormalizeMDBListURL(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if i := strings.IndexAny(raw, "?#"); i >= 0 {
-		raw = raw[:i]
+	raw, _, _ = strings.Cut(strings.TrimSpace(raw), "#")
+	path, query, _ := strings.Cut(raw, "?")
+	path = strings.TrimRight(path, "/")
+	for hasJSONSuffix(path) {
+		path = strings.TrimRight(path[:len(path)-len("/json")], "/")
 	}
-	raw = strings.TrimRight(raw, "/")
-	if raw == "" {
+	if path == "" {
 		return ""
 	}
-	for hasJSONSuffix(raw) {
-		raw = strings.TrimRight(raw[:len(raw)-len("/json")], "/")
+	// Earlier builds appended /json to the end of the query; drop it so a URL
+	// they stored recovers on its next sync.
+	if query = strings.TrimSuffix(query, "/json"); query != "" {
+		return path + "/json?" + query
 	}
-	return raw + "/json"
+	return path + "/json"
 }
 
 func hasJSONSuffix(s string) bool {
