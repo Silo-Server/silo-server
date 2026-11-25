@@ -347,6 +347,10 @@
 ./internal/auth TestUnlinkRevokesItsKeysDB
 ./internal/auth TestKeyChallengeSpentOnKidMismatchDB
 ./internal/auth TestKeySessionRefusedPastItsLimitDB
+./internal/auth TestGrantRedeemDB
+./internal/auth TestGrantRedeemRefusalsDB
+./internal/auth TestGrantRedeemConcurrentDB
+./internal/auth TestGrantSessionCannotManageKeysDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
 ./internal/auth TestSignupPolicySerializationDB
 ./internal/apiv2 TestSignupCommitPolicyErrorsDB
