@@ -1,4 +1,4 @@
-import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { AdminSessionActions } from "@/components/AdminSessionActions";
@@ -351,6 +351,8 @@ export function LiveActivityTab() {
     setStoredView(next);
   }, []);
   const [detailsSessionId, setDetailsSessionId] = useState<string | null>(null);
+  // The control that opened a card's details, which takes focus back when they close.
+  const detailsReturnFocusRef = useRef<HTMLElement | null>(null);
   const [search, setSearch] = useState("");
   const [methodFilter, setMethodFilter] = useState<string | null>(null);
   const [nodeFilter, setNodeFilter] = useState<string | null>(null);
@@ -667,7 +669,10 @@ export function LiveActivityTab() {
                 session={session}
                 showRoute={showRoute}
                 onIPLookup={runIPLookup}
-                onOpenDetails={() => setDetailsSessionId(session.session_id)}
+                onOpenDetails={(returnFocusTo) => {
+                  detailsReturnFocusRef.current = returnFocusTo;
+                  setDetailsSessionId(session.session_id);
+                }}
               />
             ))}
           </div>
@@ -736,6 +741,7 @@ export function LiveActivityTab() {
       <StreamDetailsSheet
         session={detailsSession}
         onClose={() => setDetailsSessionId(null)}
+        returnFocusRef={detailsReturnFocusRef}
         onIPLookup={runIPLookup}
       />
       <IPLookupDialog open={ipLookupOpen} onOpenChange={setIPLookupOpen} seed={ipLookupSeed} />
@@ -1094,6 +1100,8 @@ function SortBar({
  * One stream as a card: what is playing and who is watching, over the
  * poster's colors, then how the server delivers it, then where playback is.
  * A click on the card outside its links and buttons opens the details panel.
+ * Closing the panel returns focus to the button that opened it, or to the
+ * card's details button after a click on the card itself.
  */
 function StreamCard({
   session,
@@ -1104,16 +1112,27 @@ function StreamCard({
   session: AdminSession;
   showRoute: boolean;
   onIPLookup: (ip: string) => void;
-  onOpenDetails: () => void;
+  onOpenDetails: (returnFocusTo: HTMLElement | null) => void;
 }) {
   const t = useT();
+  const cardRef = useRef<HTMLElement>(null);
+  const detailsButtonRef = useRef<HTMLButtonElement>(null);
   const reasons = getAdaptationReasons(session);
   const subtitle = getPlaybackSessionSubtitle(session);
   const progress = getPlaybackProgress(session);
+  const openDetails = () => {
+    // A button in the card that opened the panel is focused; a click on the
+    // card itself focuses nothing in it.
+    const active = document.activeElement;
+    const opener =
+      active instanceof HTMLElement && cardRef.current?.contains(active) ? active : null;
+    onOpenDetails(opener ?? detailsButtonRef.current);
+  };
   return (
     <article
+      ref={cardRef}
       onClick={(event) => {
-        if (isPlainSurfaceClick(event)) onOpenDetails();
+        if (isPlainSurfaceClick(event)) openDetails();
       }}
       className="bg-card border-border hover:border-foreground/25 flex min-w-0 cursor-pointer flex-col overflow-hidden rounded-xl border transition-colors"
     >
@@ -1156,7 +1175,7 @@ function StreamCard({
         <MethodLine
           method={classifyActivityMethod(session)}
           reasons={reasons}
-          onMore={onOpenDetails}
+          onMore={openDetails}
         />
         <ConversionLine kind="video" session={session} />
         <ConversionLine kind="audio" session={session} />
@@ -1173,8 +1192,9 @@ function StreamCard({
         </div>
         <SessionCell session={session} />
         <button
+          ref={detailsButtonRef}
           type="button"
-          onClick={onOpenDetails}
+          onClick={openDetails}
           aria-haspopup="dialog"
           aria-label={t("web.admin.activity.row.details")}
           title={t("web.admin.activity.row.details")}
@@ -1213,10 +1233,13 @@ function StreamDetailsSheet({
   session,
   onClose,
   onIPLookup,
+  returnFocusRef,
 }: {
   session: AdminSession | undefined;
   onClose: () => void;
   onIPLookup: (ip: string) => void;
+  /** Focused when the panel closes; the panel opens from no Radix trigger. */
+  returnFocusRef: RefObject<HTMLElement | null>;
 }) {
   const t = useT();
   const panelId = useId();
@@ -1243,6 +1266,14 @@ function StreamDetailsSheet({
       <SheetContent
         side="right"
         className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-xl"
+        onCloseAutoFocus={(event) => {
+          // A card that left the list (its stream ended) can't take focus back.
+          const target = returnFocusRef.current;
+          if (target?.isConnected) {
+            event.preventDefault();
+            target.focus();
+          }
+        }}
       >
         {session ? (
           <>
