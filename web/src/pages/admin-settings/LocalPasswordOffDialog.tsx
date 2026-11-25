@@ -57,7 +57,6 @@ export function LocalPasswordOffDialog({
   emailMatch,
 }: LocalPasswordOffDialogProps) {
   const t = useT();
-  const id = useId();
   const matched = useLocalPasswordOffAccounts(
     "email_match",
     emailMatch,
@@ -77,13 +76,11 @@ export function LocalPasswordOffDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent aria-describedby={`${id}-description ${id}-sessions`}>
+      <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{t("web.admin.settings.signIn.passwordsOff.title")}</AlertDialogTitle>
           <AlertDialogDescription>
-            <span id={`${id}-description`}>
-              {t("web.admin.settings.signIn.passwordsOff.description", { provider })}
-            </span>
+            {t("web.admin.settings.signIn.passwordsOff.description", { provider })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="grid gap-4 text-sm" aria-live="polite" aria-busy={loading}>
@@ -136,7 +133,7 @@ export function LocalPasswordOffDialog({
               </Link>
             </>
           )}
-          <p id={`${id}-sessions`} className="text-muted-foreground">
+          <p className="text-muted-foreground">
             {t("web.admin.settings.signIn.passwordsOff.sessions")}
           </p>
         </div>
