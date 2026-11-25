@@ -12,44 +12,105 @@ import (
 	"github.com/Silo-Server/silo-server/internal/cache"
 )
 
-// AdminInsightsProvider caches standard preset Insights reads in memory for
-// 60 seconds and clears local entries on relevant admin/playback bus events
-// while ignoring unrelated realtime and operational chatter on those channels.
-// Title detail is read on demand and not cached. Misses for one key fill once
-// per generation: concurrent requests share the read, and the read is canceled
-// once every request waiting on it has left. The generation counter, compared
-// and published under publishMu, keeps a fill whose DB snapshot predates an
-// invalidation from repopulating the cache with stale results.
+// AdminInsightsProvider serves preset Insights reads from memory and keeps them
+// current in the background, so a tab opens at once however busy the server is.
+//
+// Each read is cached under its key (tab, window, scope). A playback event
+// marks every entry stale by advancing the generation and drops nothing:
+// dropping meant that on a server with steady playback nearly every tab load
+// ran its full scan. An admin event (an account, item or node change, rare by
+// comparison) drops every entry, and a fill that started before it publishes
+// nothing, so the next read shows the change. A read then:
+//
+//   - returns a fresh entry: filled in the current generation and younger than
+//     adminInsightsCacheTTL;
+//   - returns a stale entry younger than adminInsightsServeStaleFor at once and
+//     starts a background refresh of its key, at most every
+//     insightsRefreshInterval of the entry's read cost;
+//   - fills a missing or older entry while the request waits. Concurrent
+//     requests in one generation share that fill, which is canceled once every
+//     request waiting on it has left.
+//
+// A sweep keeps keys read within adminInsightsServeStaleFor warm, refreshing
+// stale ones every insightsKeepWarmInterval of their cost, and drops keys
+// nobody read in that time. Background refreshes run one at a time, so they
+// hold at most one read-gate slot. A read on a context from
+// withInsightsForceRefresh (the page's Refresh button) always fills while it
+// waits. Title detail and custom ranges are read on demand and not cached.
 type AdminInsightsProvider struct {
-	pool      *pgxpool.Pool
-	activity  *cache.TTLCache[*AdminInsightsActivity]
-	people    *cache.TTLCache[*AdminInsightsPeople]
-	devices   *cache.TTLCache[*AdminInsightsDevices]
-	bandwidth *cache.TTLCache[*AdminInsightsBandwidth]
-	titles    *cache.TTLCache[*AdminInsightsTitles]
-	library   *cache.TTLCache[*AdminInsightsLibrary]
-	ttl       time.Duration
-	fillMu    sync.Mutex
-	fills     map[string]*insightsFillCall // guarded by fillMu
-	publishMu sync.Mutex
-	gen       uint64 // guarded by publishMu
+	pool *pgxpool.Pool
+
+	mu         sync.Mutex
+	gen        uint64                       // guarded by mu
+	dropGen    uint64                       // guarded by mu; advanced by dropAll
+	entries    map[string]*insightsEntry    // guarded by mu
+	fills      map[string]*insightsFillCall // guarded by mu; key and generation
+	refreshing map[string]bool              // guarded by mu; keys with a background refresh
+
+	refreshSlot chan struct{} // one background refresh at a time
+	// refreshContext gives a background refresh its context, canceled by
+	// Close; nil until NewAdminInsightsProvider starts the provider.
+	refreshContext func() (context.Context, context.CancelFunc)
+	done           <-chan struct{} // closed by Close
+	stop           context.CancelFunc
+	stopOnce       sync.Once
+}
+
+const (
+	// adminInsightsServeStaleFor bounds how old a cached read can be and
+	// still be served at once; it is also how long an unread key stays warm.
+	adminInsightsServeStaleFor = 30 * time.Minute
+	// adminInsightsSweepInterval is how often the warm keys are checked.
+	adminInsightsSweepInterval = 15 * time.Second
+)
+
+// insightsRefreshInterval is how old a stale entry must be before a read
+// refreshes it in the background: a cheap key refreshes often, and no key
+// spends more than a quarter of its time reading however often events arrive.
+func insightsRefreshInterval(cost time.Duration) time.Duration {
+	return max(15*time.Second, 4*cost)
+}
+
+// insightsKeepWarmInterval is the same for the sweep, which refreshes keys
+// nobody is reading right now and so can lag further behind.
+func insightsKeepWarmInterval(cost time.Duration) time.Duration {
+	return max(2*time.Minute, 10*cost)
+}
+
+// insightsEntry is one cached read.
+type insightsEntry struct {
+	val      any
+	gen      uint64        // generation its read started in
+	filledAt time.Time     // when its read started
+	cost     time.Duration // how long its read took
+	lastRead time.Time     // last request served from it
+	load     func(context.Context) (any, error)
 }
 
 var _ AdminInsightsSource = (*AdminInsightsProvider)(nil)
 
-// NewAdminInsightsProvider creates an event-bus-invalidated Insights cache provider.
+// NewAdminInsightsProvider creates an event-bus-invalidated Insights cache
+// provider. Its sweep runs until ctx ends or Close.
 func NewAdminInsightsProvider(ctx context.Context, pool *pgxpool.Pool, bus cache.EventBus) (*AdminInsightsProvider, error) {
-	p := &AdminInsightsProvider{
-		pool:      pool,
-		activity:  cache.NewTTLCache[*AdminInsightsActivity](),
-		people:    cache.NewTTLCache[*AdminInsightsPeople](),
-		devices:   cache.NewTTLCache[*AdminInsightsDevices](),
-		bandwidth: cache.NewTTLCache[*AdminInsightsBandwidth](),
-		titles:    cache.NewTTLCache[*AdminInsightsTitles](),
-		library:   cache.NewTTLCache[*AdminInsightsLibrary](),
-		ttl:       adminInsightsCacheTTL,
+	p := &AdminInsightsProvider{pool: pool}
+	if ctx == nil {
+		return p, nil
 	}
-	if bus == nil || ctx == nil {
+	life, stop := context.WithCancel(context.WithoutCancel(ctx))
+	p.stop, p.done = stop, life.Done()
+	p.refreshSlot = make(chan struct{}, 1)
+	p.refreshContext = func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(life, adminHistoryReadTimeout)
+	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			p.Close()
+		case <-p.done:
+		}
+	}()
+	go p.sweepLoop()
+	if bus == nil {
 		return p, nil
 	}
 	for _, sub := range []struct {
@@ -69,7 +130,7 @@ func NewAdminInsightsProvider(ctx context.Context, pool *pgxpool.Pool, bus cache
 
 func (p *AdminInsightsProvider) handleAdminEvent(event cache.Event) {
 	if shouldInvalidateInsightsOnAdminEvent(event) {
-		p.Invalidate()
+		p.dropAll()
 	}
 }
 
@@ -109,97 +170,112 @@ func shouldInvalidateInsightsOnPlaybackEvent(event cache.Event) bool {
 	return event.Type == cache.EventPlaybackSessionsChanged
 }
 
-// Invalidate drops all cached Insights entries across every tab and advances
-// the generation counter so concurrent in-flight reads do not repopulate the
-// cache with pre-invalidation snapshots.
+// Invalidate marks every cached Insights entry stale. Later reads still serve
+// them while a background refresh replaces them, and a fill already in flight
+// still publishes, since its result is newer than the entry it replaces.
 func (p *AdminInsightsProvider) Invalidate() {
 	if p == nil {
 		return
 	}
-	p.publishMu.Lock()
-	defer p.publishMu.Unlock()
+	p.mu.Lock()
 	p.gen++
-	if p.activity != nil {
-		p.activity.InvalidatePrefix(adminInsightsCacheKeyPrefix)
-	}
-	if p.people != nil {
-		p.people.InvalidatePrefix(adminInsightsCacheKeyPrefix)
-	}
-	if p.devices != nil {
-		p.devices.InvalidatePrefix(adminInsightsCacheKeyPrefix)
-	}
-	if p.bandwidth != nil {
-		p.bandwidth.InvalidatePrefix(adminInsightsCacheKeyPrefix)
-	}
-	if p.titles != nil {
-		p.titles.InvalidatePrefix(adminInsightsCacheKeyPrefix)
-	}
-	if p.library != nil {
-		p.library.InvalidatePrefix(adminInsightsCacheKeyPrefix)
+	p.mu.Unlock()
+}
+
+// dropAll drops every cached entry, for an admin change a stale entry must not
+// show, and keeps reads that started before it from publishing.
+func (p *AdminInsightsProvider) dropAll() {
+	p.mu.Lock()
+	p.gen++
+	p.dropGen++
+	clear(p.entries)
+	p.mu.Unlock()
+}
+
+func (p *AdminInsightsProvider) closed() bool {
+	select {
+	case <-p.done:
+		return true
+	default:
+		return false
 	}
 }
 
-func (p *AdminInsightsProvider) generation() uint64 {
-	p.publishMu.Lock()
-	defer p.publishMu.Unlock()
-	return p.gen
-}
-
-// Close stops all background TTL sweepers.
+// Close stops the sweep and cancels background refreshes.
 func (p *AdminInsightsProvider) Close() {
 	if p == nil {
 		return
 	}
-	if p.activity != nil {
-		p.activity.Close()
-	}
-	if p.people != nil {
-		p.people.Close()
-	}
-	if p.devices != nil {
-		p.devices.Close()
-	}
-	if p.bandwidth != nil {
-		p.bandwidth.Close()
-	}
-	if p.titles != nil {
-		p.titles.Close()
-	}
-	if p.library != nil {
-		p.library.Close()
-	}
+	p.stopOnce.Do(func() {
+		if p.stop != nil {
+			p.stop()
+		}
+	})
 }
 
 func insightsWindowCacheable(rangeVal string) bool {
 	return normalizeInsightsRange(rangeVal) != InsightsRangeCustom
 }
 
-// insightsFillCall is one shared cache fill and the requests waiting on it.
+type insightsForceRefreshKey struct{}
+
+// withInsightsForceRefresh marks ctx's reads as user-requested refreshes: they
+// skip any cached entry and wait for a fresh read.
+func withInsightsForceRefresh(ctx context.Context) context.Context {
+	return context.WithValue(ctx, insightsForceRefreshKey{}, true)
+}
+
+func insightsForceRefresh(ctx context.Context) bool {
+	force, _ := ctx.Value(insightsForceRefreshKey{}).(bool)
+	return force
+}
+
+// insightsFillCall is one shared fill and the requests waiting on it.
 type insightsFillCall struct {
 	done    chan struct{} // closed once val and err are set
 	val     any
 	err     error
-	waiters int // guarded by AdminInsightsProvider.fillMu
+	waiters int // guarded by AdminInsightsProvider.mu
 	cancel  context.CancelFunc
 }
 
-// cachedInsightsRead serves key from c or fills it. One fill runs per key and
-// generation, shared by every request that misses while it runs. It runs on a
-// context detached from the caller, so one request leaving does not fail the
-// others, but it is canceled when the last request waiting on it leaves: a
-// fill nobody waits for gives up its read-gate slot or its queued place
-// instead of running out adminHistoryReadTimeout. The fill is published only
-// when no invalidation ran while it was in flight; the comparison and the Set
-// share publishMu with Invalidate, so an invalidation cannot slip in between.
-func cachedInsightsRead[T comparable](ctx context.Context, p *AdminInsightsProvider, c *cache.TTLCache[T], key string, load func(context.Context) (T, error)) (T, error) {
-	var zero T
-	if v, ok := c.Get(key); ok {
-		return v, nil
-	}
-	gen := p.generation()
-	fillKey := fmt.Sprintf("%s#%d", key, gen)
+// insightsFill carries a fill's value through the cache's untyped entries.
+// Asserting to this struct, not to T itself, keeps the route inventory check
+// from reading the assertion as a possible router recovery.
+type insightsFill[T any] struct{ v T }
 
-	p.fillMu.Lock()
+// cachedInsightsRead serves key from the cache, or fills it while the request
+// waits (see AdminInsightsProvider).
+func cachedInsightsRead[T any](ctx context.Context, p *AdminInsightsProvider, key string, load func(context.Context) (T, error)) (T, error) {
+	var zero T
+	v, err := p.read(ctx, key, func(ctx context.Context) (any, error) {
+		v, err := load(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return insightsFill[T]{v}, nil
+	})
+	if err != nil {
+		return zero, err
+	}
+	filled, ok := v.(insightsFill[T])
+	if !ok {
+		return zero, fmt.Errorf("insights cache entry for %s holds %T", key, v)
+	}
+	return filled.v, nil
+}
+
+func (p *AdminInsightsProvider) read(ctx context.Context, key string, load func(context.Context) (any, error)) (any, error) {
+	p.mu.Lock()
+	if !insightsForceRefresh(ctx) {
+		if val, ok := p.cachedLocked(key); ok {
+			p.mu.Unlock()
+			return val, nil
+		}
+	}
+	// One fill per key and generation: a forced read, which advanced the
+	// generation, never joins a fill that started before it.
+	fillKey := fmt.Sprintf("%s#%d", key, p.gen)
 	call := p.fills[fillKey]
 	if call == nil {
 		fillCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), adminHistoryReadTimeout)
@@ -208,63 +284,68 @@ func cachedInsightsRead[T comparable](ctx context.Context, p *AdminInsightsProvi
 			p.fills = make(map[string]*insightsFillCall)
 		}
 		p.fills[fillKey] = call
-		go p.runInsightsFill(fillCtx, call, fillKey, func(ctx context.Context) (any, error) {
-			v, err := load(ctx)
-			if err != nil {
-				return nil, err
-			}
-			p.publishMu.Lock()
-			// A fill canceled after its last waiter left publishes nothing,
-			// even when its read finished in that moment.
-			if p.gen == gen && ctx.Err() == nil {
-				c.Set(key, v, p.ttl)
-			}
-			p.publishMu.Unlock()
-			return insightsFill[T]{v}, nil
-		})
+		go p.runFill(fillCtx, call, fillKey, key, p.gen, p.dropGen, load)
 	}
 	call.waiters++
-	p.fillMu.Unlock()
+	p.mu.Unlock()
 
 	select {
 	case <-call.done:
+		return call.val, call.err
 	case <-ctx.Done():
-		p.leaveInsightsFill(call, fillKey)
-		return zero, ctx.Err()
+		p.leaveFill(call, fillKey)
+		return nil, ctx.Err()
 	}
-	if call.err != nil {
-		return zero, call.err
-	}
-	filled, ok := call.val.(insightsFill[T])
-	if !ok {
-		return zero, fmt.Errorf("insights cache fill for %s returned %T", key, call.val)
-	}
-	return filled.v, nil
 }
 
-// insightsFill carries a fill's value through insightsFillCall's untyped
-// result. Asserting to this struct, not to T itself, keeps the route
-// inventory check from reading the assertion as a possible router recovery.
-type insightsFill[T any] struct{ v T }
+// cachedLocked serves key from its entry when it is fresh, or stale but
+// younger than adminInsightsServeStaleFor, starting a background refresh of a
+// stale one at most every insightsRefreshInterval of its cost.
+func (p *AdminInsightsProvider) cachedLocked(key string) (any, bool) {
+	e := p.entries[key]
+	if e == nil {
+		return nil, false
+	}
+	now := time.Now()
+	e.lastRead = now
+	age := now.Sub(e.filledAt)
+	if e.gen == p.gen && age < adminInsightsCacheTTL {
+		return e.val, true
+	}
+	if age >= adminInsightsServeStaleFor {
+		return nil, false
+	}
+	if age >= insightsRefreshInterval(e.cost) {
+		p.startRefreshLocked(key, e)
+	}
+	return e.val, true
+}
 
-// runInsightsFill runs one shared fill, records its result, and retires it.
-func (p *AdminInsightsProvider) runInsightsFill(ctx context.Context, call *insightsFillCall, fillKey string, fill func(context.Context) (any, error)) {
+// runFill runs one shared foreground fill, publishes it unless every waiter
+// left first, and retires it.
+func (p *AdminInsightsProvider) runFill(ctx context.Context, call *insightsFillCall, fillKey, key string, gen, dropGen uint64, load func(context.Context) (any, error)) {
 	defer call.cancel()
-	call.val, call.err = fill(ctx)
-	p.fillMu.Lock()
+	start := time.Now()
+	call.val, call.err = load(ctx)
+	p.mu.Lock()
+	// A fill canceled after its last waiter left publishes nothing, even when
+	// its read finished in that moment.
+	if call.err == nil && ctx.Err() == nil {
+		p.publishLocked(key, gen, dropGen, start, load, call.val)
+	}
 	if p.fills[fillKey] == call {
 		delete(p.fills, fillKey)
 	}
-	p.fillMu.Unlock()
+	p.mu.Unlock()
 	close(call.done)
 }
 
-// leaveInsightsFill drops one waiter from call and cancels the fill when it
-// was the last. The fill also leaves the map then, so a later request starts a
-// fresh fill instead of joining one that is shutting down.
-func (p *AdminInsightsProvider) leaveInsightsFill(call *insightsFillCall, fillKey string) {
-	p.fillMu.Lock()
-	defer p.fillMu.Unlock()
+// leaveFill drops one waiter from call and cancels the fill when it was the
+// last. The fill also leaves the map then, so a later request starts a fresh
+// fill instead of joining one that is shutting down.
+func (p *AdminInsightsProvider) leaveFill(call *insightsFillCall, fillKey string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	call.waiters--
 	if call.waiters > 0 {
 		return
@@ -272,6 +353,99 @@ func (p *AdminInsightsProvider) leaveInsightsFill(call *insightsFillCall, fillKe
 	call.cancel()
 	if p.fills[fillKey] == call {
 		delete(p.fills, fillKey)
+	}
+}
+
+// publishLocked stores a read that started at start in generation gen, unless
+// an admin change dropped the cache since (dropGen moved) or the entry already
+// holds a read that started later.
+func (p *AdminInsightsProvider) publishLocked(key string, gen, dropGen uint64, start time.Time, load func(context.Context) (any, error), val any) {
+	if dropGen != p.dropGen {
+		return
+	}
+	if p.entries == nil {
+		p.entries = make(map[string]*insightsEntry)
+	}
+	e := p.entries[key]
+	if e != nil && e.filledAt.After(start) {
+		return
+	}
+	// A refresh is no read: keeping lastRead lets an unread key expire.
+	lastRead := time.Now()
+	if e != nil {
+		lastRead = e.lastRead
+	}
+	p.entries[key] = &insightsEntry{val: val, gen: gen, filledAt: start, cost: time.Since(start), lastRead: lastRead, load: load}
+}
+
+// startRefreshLocked starts a background refresh of key unless one is running.
+// It runs only while the provider is open (NewAdminInsightsProvider).
+func (p *AdminInsightsProvider) startRefreshLocked(key string, e *insightsEntry) {
+	if p.refreshContext == nil || p.closed() || p.refreshing[key] {
+		return
+	}
+	if p.refreshing == nil {
+		p.refreshing = make(map[string]bool)
+	}
+	p.refreshing[key] = true
+	go p.refresh(key, e.load)
+}
+
+func (p *AdminInsightsProvider) refresh(key string, load func(context.Context) (any, error)) {
+	defer func() {
+		p.mu.Lock()
+		delete(p.refreshing, key)
+		p.mu.Unlock()
+	}()
+	select {
+	case p.refreshSlot <- struct{}{}:
+		defer func() { <-p.refreshSlot }()
+	case <-p.done:
+		return
+	}
+	ctx, cancel := p.refreshContext()
+	defer cancel()
+	p.mu.Lock()
+	gen, dropGen := p.gen, p.dropGen
+	p.mu.Unlock()
+	start := time.Now()
+	val, err := load(ctx)
+	if err != nil {
+		return // the stale entry stays; the next read or sweep retries
+	}
+	p.mu.Lock()
+	p.publishLocked(key, gen, dropGen, start, load, val)
+	p.mu.Unlock()
+}
+
+// sweepLoop keeps recently read keys warm and drops the rest.
+func (p *AdminInsightsProvider) sweepLoop() {
+	ticker := time.NewTicker(adminInsightsSweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-p.done:
+			return
+		case <-ticker.C:
+			p.sweep()
+		}
+	}
+}
+
+func (p *AdminInsightsProvider) sweep() {
+	now := time.Now()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for key, e := range p.entries {
+		if now.Sub(e.lastRead) >= adminInsightsServeStaleFor {
+			delete(p.entries, key)
+			continue
+		}
+		age := now.Sub(e.filledAt)
+		stale := e.gen != p.gen || age >= adminInsightsCacheTTL
+		if stale && age >= insightsKeepWarmInterval(e.cost) {
+			p.startRefreshLocked(key, e)
+		}
 	}
 }
 
@@ -288,7 +462,7 @@ func (p *AdminInsightsProvider) Activity(ctx context.Context, q AdminInsightsWin
 		return queryAdminInsightsActivity(ctx, p.pool, q)
 	}
 	key := adminInsightsCacheKeyPrefix + "activity:" + insightsScopeKey(q)
-	return cachedInsightsRead(ctx, p, p.activity, key, func(ctx context.Context) (*AdminInsightsActivity, error) {
+	return cachedInsightsRead(ctx, p, key, func(ctx context.Context) (*AdminInsightsActivity, error) {
 		return queryAdminInsightsActivity(ctx, p.pool, q)
 	})
 }
@@ -304,7 +478,7 @@ func (p *AdminInsightsProvider) People(ctx context.Context, q AdminInsightsPeopl
 	// past the first page reads from the same snapshot without skipping or
 	// duplicating accounts across concurrent plays.
 	key := fmt.Sprintf("%speople:r=%s:tz=%s:lib=%d:s=%s:d=%s", adminInsightsCacheKeyPrefix, normalizeInsightsRange(q.Range), normalizeInsightsTZ(q.TZ), q.LibraryID, strings.TrimSpace(q.Sort), strings.TrimSpace(q.Dir))
-	full, err := cachedInsightsRead(ctx, p, p.people, key, func(ctx context.Context) (*AdminInsightsPeople, error) {
+	full, err := cachedInsightsRead(ctx, p, key, func(ctx context.Context) (*AdminInsightsPeople, error) {
 		return queryAdminInsightsPeopleSnapshot(ctx, p.pool, q)
 	})
 	if err != nil {
@@ -321,7 +495,7 @@ func (p *AdminInsightsProvider) Devices(ctx context.Context, q AdminInsightsDevi
 		return queryAdminInsightsDevices(ctx, p.pool, q)
 	}
 	key := fmt.Sprintf("%sdevices:%s:m=%d", adminInsightsCacheKeyPrefix, insightsScopeKey(q.AdminInsightsWindowQuery), clampInsightsMinSessions(q.MinSessions))
-	return cachedInsightsRead(ctx, p, p.devices, key, func(ctx context.Context) (*AdminInsightsDevices, error) {
+	return cachedInsightsRead(ctx, p, key, func(ctx context.Context) (*AdminInsightsDevices, error) {
 		return queryAdminInsightsDevices(ctx, p.pool, q)
 	})
 }
@@ -334,7 +508,7 @@ func (p *AdminInsightsProvider) Bandwidth(ctx context.Context, q AdminInsightsBa
 		return queryAdminInsightsBandwidth(ctx, p.pool, q)
 	}
 	key := fmt.Sprintf("%sbandwidth:r=%s:tz=%s", adminInsightsCacheKeyPrefix, normalizeInsightsRange(q.Range), normalizeInsightsTZ(q.TZ))
-	return cachedInsightsRead(ctx, p, p.bandwidth, key, func(ctx context.Context) (*AdminInsightsBandwidth, error) {
+	return cachedInsightsRead(ctx, p, key, func(ctx context.Context) (*AdminInsightsBandwidth, error) {
 		return queryAdminInsightsBandwidth(ctx, p.pool, q)
 	})
 }
@@ -347,7 +521,7 @@ func (p *AdminInsightsProvider) Titles(ctx context.Context, q AdminInsightsTitle
 		return queryAdminInsightsTitles(ctx, p.pool, q)
 	}
 	key := fmt.Sprintf("%stitles:%s:s=%s:n=%d", adminInsightsCacheKeyPrefix, insightsScopeKey(q.AdminInsightsWindowQuery), normalizeInsightsTitlesSort(q.Sort), clampInsightsTitlesLimit(q.Limit))
-	return cachedInsightsRead(ctx, p, p.titles, key, func(ctx context.Context) (*AdminInsightsTitles, error) {
+	return cachedInsightsRead(ctx, p, key, func(ctx context.Context) (*AdminInsightsTitles, error) {
 		return queryAdminInsightsTitles(ctx, p.pool, q)
 	})
 }
@@ -360,7 +534,7 @@ func (p *AdminInsightsProvider) Library(ctx context.Context, q AdminInsightsWind
 		return queryAdminInsightsLibrary(ctx, p.pool, q)
 	}
 	key := adminInsightsCacheKeyPrefix + "library:" + insightsScopeKey(q)
-	return cachedInsightsRead(ctx, p, p.library, key, func(ctx context.Context) (*AdminInsightsLibrary, error) {
+	return cachedInsightsRead(ctx, p, key, func(ctx context.Context) (*AdminInsightsLibrary, error) {
 		return queryAdminInsightsLibrary(ctx, p.pool, q)
 	})
 }
