@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -48,7 +49,14 @@ func configurationKey(profileID string) string { return "jellycompat:configurati
 func (h *AuthHandler) resolvedUserDTO(ctx context.Context, session *Session) (userDTOResponse, error) {
 	hasPassword, err := h.hasPassword(ctx, session.StreamAppUserID)
 	if err != nil {
-		return userDTOResponse{}, err
+		// The member only decides whether a client offers a password box.
+		// A sign-in that has already opened its session, or a settings
+		// save, must not fail over it: answer as before the member was
+		// read, that there is a password.
+		if ctx.Err() == nil {
+			slog.WarnContext(ctx, "could not read whether the account has a password", "component", "jellycompat", "error", err)
+		}
+		hasPassword = true
 	}
 	dto := h.userDTO(session, hasPassword)
 	if h.storeProvider == nil {

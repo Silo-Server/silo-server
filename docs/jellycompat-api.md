@@ -846,9 +846,8 @@ starting another.
 A failed `AuthenticateByName` answers `401` with `Error: "InvalidUsernameOrPassword"`
 and the same message, "Invalid username or password. Accounts without a password
 sign in with Quick Connect.", whether the name has no account, the password is
-wrong, or the account has no password. All three take one password comparison, so
-neither the answer nor its timing tells a stranger which names exist or have a
-password. Refusals of the server's sign-in policy keep their own messages, below.
+wrong, or the account has no password. All three take the same work, so neither
+the answer nor its timing tells a stranger which names exist or have a password. Refusals of the server's sign-in policy keep their own messages, below.
 
 Sign-in refuses an account holding a temporary password with `401` and a message to
 sign in to Silo first: Jellyfin clients cannot run the password change it requires
