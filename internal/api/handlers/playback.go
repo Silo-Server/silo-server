@@ -211,6 +211,10 @@ type PlaybackHandler struct {
 	// InstallationID is diagnostics.ServerInstanceID; v2 playback mutations
 	// carry it and are refused when it differs. Empty leaves v2 unconfigured.
 	InstallationID string
+	// ReportingNode identifies this API node on finalized admin playback
+	// history rows when the session itself does not carry one recovered from
+	// playback_sessions_sync.
+	ReportingNode string
 	// WatchTogetherAvailable is set when the room service and authenticated
 	// socket are wired, so capability discovery reflects their dependencies.
 	WatchTogetherAvailable bool
@@ -249,6 +253,9 @@ type PlaybackHandler struct {
 	SettingsRepo       PlaybackSettingsReader     // optional; reads server settings (e.g., allow_4k_transcode)
 	FileVersionFetcher PlaybackFileVersionFetcher // optional; queries sibling file versions for 4K guard
 	ProbeEnsurer       PlaybackProbeEnsurer       // optional; repairs missing probe metadata on demand
+	// StreamEnds stores where a transcode found a file's media ends; nil
+	// stores nothing.
+	StreamEnds *playback.StreamEndRecorder
 	// CopySafetyRacer resolves an unknown H.264 copy-safety verdict behind an
 	// already-issued stream-copy plan. Optional: without it an unknown verdict
 	// stays unknown, and strict web decoders and downloads treat the file as
@@ -283,6 +290,10 @@ type PlaybackHandler struct {
 	beforeIdentityLifecycleLockV3 func()
 	realtimeCommandMu             sync.Mutex
 	realtimeCommands              map[string]playbackCommandRecord
+	// realtimeResultWaiters holds the commands an administrator request is
+	// waiting on a player's result for, keyed by session and command
+	// (playback_realtime.go). Guarded by realtimeCommandMu.
+	realtimeResultWaiters map[realtimeResultKey]chan playback.RealtimeResultStatus
 	// tm owns the transcode-session lifecycle (live map, recipe cards, and
 	// restart reconstruct) shared with the jellycompat handler. The handler
 	// delegates all transcode-session and recipe operations to it.
@@ -327,6 +338,14 @@ type PlaybackHandler struct {
 	v3ReplanSlots           chan struct{}
 	v3EventRateMu           sync.Mutex
 	v3EventRates            map[string]v3EventRate
+	// pausedTimeoutSetting caches the paused-session timeout the lifecycle
+	// sweep enforces; built on first use from SettingsRepo.
+	pausedTimeoutOnce    sync.Once
+	pausedTimeoutSetting *config.CachedSetting[time.Duration]
+	// pausedTimeoutCursor is where the paused timeout's next candidate page
+	// starts; nil starts from the oldest pause.
+	pausedTimeoutCursorMu sync.Mutex
+	pausedTimeoutCursor   *pausedTimeoutCursor
 }
 
 type PlaybackWatchScrobbler interface {
@@ -379,6 +398,7 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 		h.maybeStartThrottler(ctx, ts)
 	}
 	h.tm.RestoreReconstructedClient = h.restoreReconstructedClient
+	h.tm.StreamEndsFn = func() *playback.StreamEndRecorder { return h.StreamEnds }
 	h.tm.RestoreReconstructedWatch = h.restoreReconstructedWatch
 	h.tm.OnFFmpegCrash = func(ctx context.Context, sessionID string, dead *playback.TranscodeSession) {
 		// ffmpeg crash — tear the session down; a client holding a valid stream
@@ -595,6 +615,23 @@ func (h *PlaybackHandler) signStreamClaims(claims streamtoken.Claims) string {
 	return token
 }
 
+// markerNamesLiveNodeTransportV3 reports whether a request whose
+// silo_transport differs from this copy's generation names a node transport
+// of the session that still runs. Without session affinity, this replica's
+// copy can miss a replan another replica made onto a transcode node (#4601):
+// it keeps its own generation while the client's current player names the
+// node transport, and the serve handler relays that player to the node.
+// Every teardown and replan deletes a node transport's stored recipe before
+// stopping it, so a stored recipe marks the transport current. A copy with a
+// node or local runtime of its own never relays, so it keeps the refusal.
+func (h *PlaybackHandler) markerNamesLiveNodeTransportV3(r *http.Request, session *playback.Session) bool {
+	if session.TranscodeNodeURL != "" || h.tm.GetTranscodeSession(session.ID) != nil {
+		return false
+	}
+	marker := r.URL.Query().Get(playback.TransportQueryParam)
+	return marker != "" && h.storedTransportNodeV3(r, session, session.ID+"-"+marker) != ""
+}
+
 // loadTranscodeServeSession resolves the playback Session for the transcode
 // manifest/segment serve routes while keeping stream-token verification off the
 // hot path. A V3 session that negotiated header-authenticated media requires a
@@ -631,7 +668,8 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 		}
 		// A request from a superseded plan's playlist must not drive the
 		// current transport: no wait, restart, relay or reconstruct.
-		if playback.TransportSuperseded(session.ID, session.TransportGeneration, r.URL.Query()) {
+		if playback.TransportSuperseded(session.ID, session.TransportGeneration, r.URL.Query()) &&
+			!h.markerNamesLiveNodeTransportV3(r, session) {
 			return nil, playback.SessionUnavailable, nil, nil, errPlaybackTransportSuperseded
 		}
 		// A non-API or incomplete route is returned to the handler for the
@@ -660,6 +698,21 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 				return session, playback.SessionLoaded, nil, nil, nil
 			}
 			if card != nil {
+				if card.TranscodeNodeURL != "" {
+					if !movedHereFromCardNode(session, *card) {
+						// The card runs on a node this copy does not know
+						// about: another replica replanned the session there.
+						// The serve handler relays to the card's node; nothing
+						// is rebuilt here (#4601).
+						return session, playback.SessionLoaded, card, claims, nil
+					}
+					// This copy moved the card's transport off its node to
+					// this server, and the client still presents the token
+					// minted for that node. The local runtime was lost since:
+					// rebuild it here, as the move did.
+					local := localTranscodeCard(*card)
+					card = &local
+				}
 				session, _, status, reconstructErr := h.tm.LoadOrReconstructTranscodeWithError(r.Context(), h.sessionMgr.GetSession, sessionID, requestUserID, requestedSegment, card)
 				return session, status, card, claims, reconstructErr
 			}
@@ -898,6 +951,16 @@ func fileBitrateKbps(file *models.MediaFile) int {
 		return 0
 	}
 	return file.Bitrate
+}
+
+func effectiveMediaFileID(session *playback.Session) int {
+	if session == nil {
+		return 0
+	}
+	if session.MediaFileID > 0 {
+		return session.MediaFileID
+	}
+	return session.RequestedMediaFileID
 }
 
 func requestedMediaFileID(session *playback.Session) int {
@@ -1248,6 +1311,36 @@ func (h *PlaybackHandler) scrobbleEventForStoppedSession(
 	return event, true
 }
 
+func (h *PlaybackHandler) resolveHistoryOutputFormat(
+	ctx context.Context,
+	session *playback.Session,
+	file *models.MediaFile,
+	effFileID int,
+	playMethod playback.PlayMethod,
+) (outputContainer, outputProtocol string) {
+	outputContainer = session.OutputContainer
+	outputProtocol = session.OutputProtocol
+	if playMethod != playback.PlayDirect {
+		return outputContainer, outputProtocol
+	}
+	if outputProtocol == "" {
+		outputProtocol = playback.OutputProtocolHTTP
+	}
+	if outputContainer != "" {
+		return outputContainer, outputProtocol
+	}
+	effFile := file
+	if effFileID > 0 && (effFile == nil || effFile.ID != effFileID) {
+		if loaded, loadErr := h.fileResolver.GetByID(ctx, effFileID); loadErr == nil && loaded != nil {
+			effFile = loaded
+		}
+	}
+	if effFile != nil {
+		outputContainer = effFile.Container
+	}
+	return outputContainer, outputProtocol
+}
+
 func (h *PlaybackHandler) buildAdminHistoryEntry(
 	ctx context.Context,
 	session *playback.Session,
@@ -1297,26 +1390,63 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 		completed = h.playbackThresholdsForFile(ctx, session, file, duration).Watched(session.Position, duration)
 	}
 
+	playMethod := semanticPlayMethod(session)
+	var adaptationReasons []string
+	if playMethod != playback.PlayDirect {
+		adaptationReasons = playback.NormalizeAdaptationReasons(session.AdaptationReasons)
+	}
+	reportingNode := session.ReportingNode
+	if reportingNode == "" {
+		reportingNode = h.ReportingNode
+	}
+	effFileID := effectiveMediaFileID(session)
+	outputContainer, outputProtocol := h.resolveHistoryOutputFormat(ctx, session, file, effFileID, playMethod)
+	var audioTrackIndex *int
+	if session.AudioTrackIndex >= 0 {
+		idx := session.AudioTrackIndex
+		audioTrackIndex = &idx
+	}
+
 	entry := &AdminPlaybackHistoryEntry{
-		SessionID:          session.ID,
-		UserID:             session.UserID,
-		ProfileID:          session.ProfileID,
-		ProfileName:        profileName,
-		MediaItemID:        targetID,
-		MediaFileID:        requestedMediaFileID(session),
-		PlayMethod:         string(semanticPlayMethod(session)),
-		StartedAt:          session.StartedAt.UTC().Format(time.RFC3339Nano),
-		EndedAt:            time.Now().UTC().Format(time.RFC3339Nano),
-		EndPositionSeconds: session.Position,
-		DurationSeconds:    durationPtr,
-		Completed:          completed,
-		ClientIP:           session.ClientIP,
-		Watch:              session.Watch,
-		DeviceID:           session.DeviceID,
-		DevicePlatform:     session.DevicePlatform,
-		ClientName:         session.ClientName,
-		ClientVersion:      session.ClientVersion,
-		Subtitle:           session.Subtitle,
+		SessionID:              session.ID,
+		UserID:                 session.UserID,
+		ProfileID:              session.ProfileID,
+		ProfileName:            profileName,
+		MediaItemID:            targetID,
+		MediaFileID:            requestedMediaFileID(session),
+		EffectiveMediaFileID:   effFileID,
+		AudioTrackIndex:        audioTrackIndex,
+		PlayMethod:             string(playMethod),
+		StartedAt:              session.StartedAt.UTC().Format(time.RFC3339Nano),
+		EndedAt:                time.Now().UTC().Format(time.RFC3339Nano),
+		EndPositionSeconds:     session.Position,
+		DurationSeconds:        durationPtr,
+		Completed:              completed,
+		ClientIP:               session.ClientIP,
+		Watch:                  session.Watch,
+		DeviceID:               session.DeviceID,
+		DevicePlatform:         session.DevicePlatform,
+		ClientName:             session.ClientName,
+		ClientVersion:          session.ClientVersion,
+		Subtitle:               session.Subtitle,
+		TargetVideoCodec:       session.TargetVideoCodec,
+		TargetResolution:       session.TargetResolution,
+		TargetAudioCodec:       session.TargetAudioCodec,
+		TargetAudioChannels:    session.TargetAudioChannels,
+		OutputContainer:        outputContainer,
+		OutputProtocol:         outputProtocol,
+		TargetBitrateKbps:      session.TargetBitrateKbps,
+		TranscodeHWAccel:       session.TranscodeHWAccel,
+		ToneMapMode:            string(session.ToneMapMode),
+		AdaptationReasons:      adaptationReasons,
+		ReportingNode:          reportingNode,
+		StreamLocation:         session.StreamLocation,
+		CompatOrigin:           session.IsJellyfinCompat,
+		RoutingExecution:       session.RoutingExecution,
+		RoutingExecutionNodeID: session.RoutingExecutionNodeID,
+		RoutingEgress:          session.RoutingEgress,
+		RoutingEgressNodeID:    session.RoutingEgressNodeID,
+		RouteFactsRecorded:     true,
 	}
 	// The decisions the live admin row showed for the transport the play
 	// ended on.
@@ -1488,6 +1618,8 @@ func (h *PlaybackHandler) recordAdminEnd(ctx context.Context, session *playback.
 	}
 	entry.EndReason = reason
 	entry.SubtitleAt = subtitleAt
+	// The sweep reads the route facts from the same row as the subtitle.
+	entry.RouteFactsAt = subtitleAt
 	if subtitleAt.IsZero() {
 		h.recordCommittedSubtitle(ctx, session, entry)
 	}
@@ -1745,18 +1877,29 @@ type liveSessionReader interface {
 // built from a Jellyfin play row, which keeps only a pseudo-account) takes
 // the live row's. A start time still unknown after that is startedAt, then
 // now.
-func (h *PlaybackHandler) fillDetachedSession(ctx context.Context, session *playback.Session, startedAt time.Time) {
-	if reader, ok := h.AdminStore.(liveSessionReader); ok {
-		live, err := reader.LiveSession(ctx, session.ID)
-		if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
-			slog.WarnContext(ctx, "failed to read the live row of a detached session", "component", "api", "session", session.ID, "error", err)
-		}
-		if live != nil && session.UserID == 0 {
-			session.UserID, session.ProfileID = live.UserID, live.ProfileID
-		}
-		if live != nil && live.UserID == session.UserID {
-			fillEmptySessionFacts(session, live)
-		}
+// liveSessionOriginReader is liveSessionReader plus whether the row came from
+// the live playback_sessions_sync table rather than the start-time fallback.
+type liveSessionOriginReader interface {
+	LiveSessionWithOrigin(ctx context.Context, sessionID string) (*playback.Session, bool, error)
+}
+
+func (h *PlaybackHandler) fillDetachedSession(ctx context.Context, session *playback.Session, startedAt time.Time) bool {
+	fromLiveRow := false
+	var live *playback.Session
+	var err error
+	if originReader, ok := h.AdminStore.(liveSessionOriginReader); ok {
+		live, fromLiveRow, err = originReader.LiveSessionWithOrigin(ctx, session.ID)
+	} else if reader, ok := h.AdminStore.(liveSessionReader); ok {
+		live, err = reader.LiveSession(ctx, session.ID)
+	}
+	if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
+		slog.WarnContext(ctx, "failed to read the live row of a detached session", "component", "api", "session", session.ID, "error", err)
+	}
+	if live != nil && session.UserID == 0 {
+		session.UserID, session.ProfileID = live.UserID, live.ProfileID
+	}
+	if live != nil && live.UserID == session.UserID {
+		fillEmptySessionFacts(session, live)
 	}
 	if session.Position < 0 {
 		session.Position = 0
@@ -1772,6 +1915,7 @@ func (h *PlaybackHandler) fillDetachedSession(ctx context.Context, session *play
 	if watch, ok := h.savedWatch(ctx, session.ID); ok && (!session.Watch.Measured || watch.Until.After(session.Watch.Until)) {
 		session.Watch = watch
 	}
+	return fromLiveRow
 }
 
 // sessionWatchReader reads the watch-time measurement a session's server
@@ -1864,6 +2008,35 @@ func fillEmptySessionFacts(session, live *playback.Session) {
 		session.TargetVideoCodec = live.TargetVideoCodec
 		session.Subtitle = live.Subtitle
 	}
+	fill(&session.TargetVideoCodec, live.TargetVideoCodec)
+	fill(&session.TargetResolution, live.TargetResolution)
+	fill(&session.TargetAudioCodec, live.TargetAudioCodec)
+	if session.TargetAudioChannels == 0 {
+		session.TargetAudioChannels = live.TargetAudioChannels
+	}
+	fill(&session.OutputContainer, live.OutputContainer)
+	fill(&session.OutputProtocol, live.OutputProtocol)
+	if session.TargetBitrateKbps == 0 {
+		session.TargetBitrateKbps = live.TargetBitrateKbps
+	}
+	fill(&session.TranscodeHWAccel, live.TranscodeHWAccel)
+	if session.ToneMapMode == "" {
+		session.ToneMapMode = live.ToneMapMode
+	}
+	if len(session.AdaptationReasons) == 0 && len(live.AdaptationReasons) > 0 && session.PlayMethod != playback.PlayDirect {
+		session.AdaptationReasons = append([]string(nil), live.AdaptationReasons...)
+	}
+	fill(&session.ReportingNode, live.ReportingNode)
+	fill(&session.PlanID, live.PlanID)
+	fill(&session.StreamLocation, live.StreamLocation)
+	fill(&session.RoutingExecution, live.RoutingExecution)
+	if session.RoutingExecutionNodeID == 0 {
+		session.RoutingExecutionNodeID = live.RoutingExecutionNodeID
+	}
+	fill(&session.RoutingEgress, live.RoutingEgress)
+	if session.RoutingEgressNodeID == 0 {
+		session.RoutingEgressNodeID = live.RoutingEgressNodeID
+	}
 	fill(&session.ClientIP, live.ClientIP)
 	fill(&session.ClientName, live.ClientName)
 	fill(&session.ClientVersion, live.ClientVersion)
@@ -1881,6 +2054,9 @@ func fillEmptySessionFacts(session, live *playback.Session) {
 	}
 	if session.RequestedMediaFileID == 0 {
 		session.RequestedMediaFileID = live.RequestedMediaFileID
+	}
+	if session.AudioTrackIndex == 0 && live.AudioTrackIndex > 0 {
+		session.AudioTrackIndex = live.AudioTrackIndex
 	}
 	if session.TimelineDuration <= 0 {
 		session.TimelineDuration = live.TimelineDuration
@@ -2244,6 +2420,9 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 			return
 		}
 	}
+	if transcodeSession == nil && h.relayStaleCopyToCardNode(w, r, session, card, "/master.m3u8") {
+		return
+	}
 	if transcodeSession == nil {
 		// Local transcode whose process state was lost: reconstruct it from the
 		// token recipe. The manifest path has no segment context, so pass -1 (use
@@ -2383,6 +2562,9 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 			return
 		}
 	}
+	if transcodeSession == nil && h.relayStaleCopyToCardNode(w, r, session, card, "/segment/"+chi.URLParam(r, "name")) {
+		return
+	}
 	if transcodeSession == nil {
 		// Resume near the segment the client is fetching so reconstruct does not
 		// restart from the original seek point and stall. A non-segment name
@@ -2416,6 +2598,9 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 		CopyLookaheadTimeout: 1200 * time.Millisecond,
 	})
 	if err != nil {
+		if h.tm.ServePastEndOfStream(r.Context(), w, transcodeSession, transcodeSession.Opts().MediaFileID, segmentName, err) {
+			return
+		}
 		if r.Context().Err() != nil {
 			// net/http also ends the context of a client that only
 			// half-closed and is still reading. Answer it as a timed-out
