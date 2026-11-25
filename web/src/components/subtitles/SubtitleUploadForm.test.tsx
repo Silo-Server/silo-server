@@ -40,4 +40,22 @@ describe("SubtitleUploadForm", () => {
     fireEvent.click(uploadButton);
     expect(upload).not.toHaveBeenCalled();
   });
+
+  it("keeps a language the user picked when a file is rejected", async () => {
+    const { container } = render(
+      <SubtitleUploadForm
+        mediaFileId={1}
+        upload={vi.fn(async () => {})}
+        onSuccess={vi.fn()}
+        variant="player"
+      />,
+    );
+    const languageSelect = screen.getByRole("combobox", { name: "Upload language" });
+    fireEvent.change(languageSelect, { target: { value: "de" } });
+
+    chooseFile(container, new File(["notes"], "notes.txt", { type: "text/plain" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Unsupported file type/);
+    expect(languageSelect).toHaveValue("de");
+  });
 });

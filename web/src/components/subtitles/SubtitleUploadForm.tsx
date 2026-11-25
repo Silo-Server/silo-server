@@ -150,7 +150,7 @@ export function SubtitleUploadForm({
         detectRequestRef.current++;
         setDetectingLanguage(false);
         setSelectedFile(null);
-        if (detectionSource && detectionSource !== "manual") {
+        if (!languageOverride) {
           setLanguage(defaultLanguage);
         }
         setDetectionSource(null);
@@ -164,7 +164,7 @@ export function SubtitleUploadForm({
       setError(null);
       void runLanguageDetection(file, language);
     },
-    [defaultLanguage, detectionSource, language, reportError, runLanguageDetection, t],
+    [defaultLanguage, language, languageOverride, reportError, runLanguageDetection, t],
   );
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
