@@ -339,7 +339,13 @@ function Badge({ badge, preset, scalingMode, rail }: BadgeProps) {
       ) : sourceChip ? (
         <span
           className="shrink-0 rounded-[0.2em] px-[0.35em] py-[0.15em] leading-none"
-          style={{ background: chipColor, color: readableTextOn(chipColor) }}
+          style={{
+            background: chipColor,
+            color: readableTextOn(chipColor),
+            // The chip is its own solid fill, so a text shadow the badge draws
+            // for bare artwork stays off it.
+            textShadow: "none",
+          }}
         >
           {badge.sourceMark}
         </span>
