@@ -192,7 +192,7 @@ func (f *fakeAdminInsights) ReadAdminInsightsTitles(_ context.Context, q handler
 		}},
 		Libraries: []handlers.AdminInsightsLibraryRow{{LibraryID: 2, Name: "TV Shows", Plays: 18, Viewers: 3, WatchSeconds: 54000}},
 		LeastFinished: []handlers.AdminInsightsTitleRow{{
-			ContentID: "movie-2", Kind: "movie", Title: "Tenet", Year: &year, Plays: 4, Viewers: 3, CompletedPlays: 1,
+			ContentID: "movie-2", Kind: "movie", Title: "The Glass Harbor", Year: &year, Plays: 4, Viewers: 3, CompletedPlays: 1,
 			WatchSeconds: 12000, LastPlayedAt: &lastPlayed,
 		}},
 	}, nil
