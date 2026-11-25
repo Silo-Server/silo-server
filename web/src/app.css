@@ -2325,6 +2325,47 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     }
   }
 
+  /* ── Insights refresh ───────────────────────────────────── */
+  /* A region of an Insights tab that still shows the previous result while a
+     new sort, search, or filter loads. The content stays opaque, so its
+     contrast never changes; a sweep along the top edge shows the load, and
+     fades in after 150 ms so a quick response never flickers. */
+  .insight-refreshing {
+    position: relative;
+  }
+  /* Its links mix the new filters with the old result's window, so they wait
+     for the new result. insightRefreshProps blocks Enter on them too. */
+  .insight-refreshing a {
+    pointer-events: none;
+  }
+  .insight-refreshing::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: -0.625rem;
+    height: 2px;
+    border-radius: 9999px;
+    pointer-events: none;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--primary) 50%, transparent) 40%,
+      var(--primary) 50%,
+      color-mix(in srgb, var(--primary) 50%, transparent) 60%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation:
+      fade-in 200ms ease-out 150ms both,
+      scan-accent-sweep 1.6s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .insight-refreshing::before {
+      background: var(--primary);
+      animation: fade-in 200ms ease-out 150ms both;
+    }
+  }
+
   .auth-shell {
     min-height: 100dvh;
     position: relative;
