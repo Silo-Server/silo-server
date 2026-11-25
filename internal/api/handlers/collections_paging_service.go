@@ -236,12 +236,15 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 		}
 		full := false
 		for _, member := range page.Items {
-			if len(out.Items) == opts.Limit {
+			item, ok := byID[member.MediaItemID]
+			if ok && len(out.Items) == opts.Limit {
+				// Only a visible member makes a full page continue; hidden
+				// ones after it are read past, so no empty page follows.
 				full = true
 				break
 			}
 			out.Last = &userstore.CollectionItemPosition{Position: member.Position, MediaItemID: member.MediaItemID}
-			if item, ok := byID[member.MediaItemID]; ok {
+			if ok {
 				out.Items = append(out.Items, h.itemListResponseOf(ctx, item))
 				listed = append(listed, item)
 			}

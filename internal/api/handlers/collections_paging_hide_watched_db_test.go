@@ -190,6 +190,25 @@ func TestLibraryCollectionItemsPageReadsPastALongWatchedRunDB(t *testing.T) {
 	if want := fmt.Sprintf("%s-%02d", prefix, members-1); len(v.Items) != 1 || v.Items[0].ContentID != want || v.HasMore {
 		t.Fatalf("first page = %d items (has more %t), want only %s", len(v.Items), v.HasMore, want)
 	}
+	// A profile that has watched the first member and everything after the
+	// fourth fills its page from the widened second read, which also shows
+	// nothing visible follows: no continuation to an empty page.
+	early := prefix + "-early"
+	exec(`INSERT INTO user_profiles (id, user_id, name) VALUES ($1, $2, 'early')`, early, userID)
+	for i := range members {
+		if i >= 1 && i <= 3 {
+			continue
+		}
+		exec(`INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at) VALUES ($1, $2, $3, 5400, 5400, TRUE, NOW())`,
+			userID, early, fmt.Sprintf("%s-%02d", prefix, i))
+	}
+	v, err = h.LibraryCollectionItemsPage(ctx, library, collection.ID, catalog.AccessFilter{UserID: userID, ProfileID: early}, userstore.CollectionItemsPageOptions{Limit: 3}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Items) != 3 || v.HasMore {
+		t.Fatalf("early profile's page = %d items (has more %t), want 3 and no more", len(v.Items), v.HasMore)
+	}
 }
 
 // TestHideWatchedCollectionCardCountsTheProfileDB checks that a row of
