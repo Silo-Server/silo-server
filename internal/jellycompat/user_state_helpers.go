@@ -1,6 +1,10 @@
 package jellycompat
 
-import "context"
+import (
+	"context"
+	"maps"
+	"slices"
+)
 
 func normalizeContentIDs(contentIDs []string) []string {
 	if len(contentIDs) == 0 {
@@ -32,15 +36,21 @@ func resolveFavoritesForContentIDs(ctx context.Context, session *Session, userDa
 		return map[string]bool{}, nil
 	}
 
-	favorites, err := userData.ListFavoritesByMediaItems(ctx, session, normalized)
-	if err != nil {
-		return nil, err
-	}
-	if favorites == nil {
-		return map[string]bool{}, nil
+	favorites := make(map[string]bool, len(normalized))
+	for chunk := range slices.Chunk(normalized, userStateLookupChunk) {
+		found, err := userData.ListFavoritesByMediaItems(ctx, session, chunk)
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(favorites, found)
 	}
 	return favorites, nil
 }
+
+// userStateLookupChunk bounds the IDs one favorites or progress lookup names.
+// A browse without Limit can list a whole library, and the SQLite user store
+// binds one parameter per ID, which SQLite caps.
+const userStateLookupChunk = 1000
 
 func resolveProgressForContentIDs(ctx context.Context, session *Session, userData UserDataService, contentIDs []string) (map[string]*upstreamProgress, error) {
 	if userData == nil {
@@ -52,12 +62,13 @@ func resolveProgressForContentIDs(ctx context.Context, session *Session, userDat
 		return map[string]*upstreamProgress{}, nil
 	}
 
-	progress, err := userData.ListProgressByMediaItems(ctx, session, normalized)
-	if err != nil {
-		return nil, err
-	}
-	if progress == nil {
-		return map[string]*upstreamProgress{}, nil
+	progress := make(map[string]*upstreamProgress, len(normalized))
+	for chunk := range slices.Chunk(normalized, userStateLookupChunk) {
+		found, err := userData.ListProgressByMediaItems(ctx, session, chunk)
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(progress, found)
 	}
 	return progress, nil
 }

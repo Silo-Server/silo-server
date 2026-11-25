@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -23,13 +24,14 @@ type pagedLibraryContent struct {
 type pagedLibraryCall struct {
 	limit, offset int
 	total         bool
+	sort          string
 }
 
 func (s *pagedLibraryContent) BrowseItems(_ context.Context, _ *Session, params url.Values) (*upstreamBrowseResponse, error) {
 	limit, _ := strconv.Atoi(params.Get("limit"))
 	offset, _ := strconv.Atoi(params.Get("offset"))
 	wantTotal := params.Get("include_total") != "false"
-	s.calls = append(s.calls, pagedLibraryCall{limit, offset, wantTotal})
+	s.calls = append(s.calls, pagedLibraryCall{limit, offset, wantTotal, params.Get("sort")})
 	limit = min(limit, compatBrowseMaxLimit)
 	end := min(offset+limit, s.n)
 	items := []upstreamListItem{}
@@ -53,10 +55,10 @@ func TestBrowseItemsWithoutLimitReturnsEveryItem(t *testing.T) {
 		wantFirst string
 		wantCalls []pagedLibraryCall
 	}{
-		{"", 2037, "movie-0", []pagedLibraryCall{{1000, 0, true}, {1000, 1000, false}, {1000, 2000, false}}},
-		{"&StartIndex=1000", 1037, "movie-1000", []pagedLibraryCall{{1000, 1000, true}, {1000, 2000, false}}},
-		{"&Limit=24", 24, "movie-0", []pagedLibraryCall{{24, 0, true}}},
-		{"&Limit=0", 0, "", []pagedLibraryCall{{1, 0, true}}},
+		{"", 2037, "movie-0", []pagedLibraryCall{{1000, 0, true, "sort_title"}, {1000, 1000, false, "sort_title"}, {1000, 2000, false, "sort_title"}}},
+		{"&StartIndex=1000", 1037, "movie-1000", []pagedLibraryCall{{1000, 1000, true, "sort_title"}, {1000, 2000, false, "sort_title"}}},
+		{"&Limit=24", 24, "movie-0", []pagedLibraryCall{{24, 0, true, "sort_title"}}},
+		{"&Limit=0", 0, "", []pagedLibraryCall{{1, 0, true, "sort_title"}}},
 	} {
 		t.Run(tc.params, func(t *testing.T) {
 			content := &pagedLibraryContent{n: 2037}
@@ -83,5 +85,56 @@ func TestBrowseItemsWithoutLimitReturnsEveryItem(t *testing.T) {
 				t.Fatalf("browse calls = %v, want %v", content.calls, tc.wantCalls)
 			}
 		})
+	}
+}
+
+// countingUserData records the IDs each favorites and progress lookup names.
+type countingUserData struct {
+	mockUserDataService
+	favoriteLookups, progressLookups []int
+}
+
+func (u *countingUserData) ListFavoritesByMediaItems(ctx context.Context, session *Session, ids []string) (map[string]bool, error) {
+	u.favoriteLookups = append(u.favoriteLookups, len(ids))
+	return u.mockUserDataService.ListFavoritesByMediaItems(ctx, session, ids)
+}
+
+func (u *countingUserData) ListProgressByMediaItems(ctx context.Context, session *Session, ids []string) (map[string]*upstreamProgress, error) {
+	u.progressLookups = append(u.progressLookups, len(ids))
+	return u.mockUserDataService.ListProgressByMediaItems(ctx, session, ids)
+}
+
+// A browse without Limit can list a whole library. Its user state is read in
+// lookups of at most 1,000 IDs, as the SQLite user store binds one parameter
+// per ID; a random order is read in a stable order and shuffled once, so no
+// item is skipped between pages.
+func TestBrowseItemsWithoutLimitBoundsLookupsAndShufflesOnce(t *testing.T) {
+	content := &pagedLibraryContent{n: 2037}
+	userData := &countingUserData{}
+	codec := NewResourceIDCodec()
+	h := &ItemsHandler{
+		catalogUserState: true,
+		content:          content,
+		codec:            codec,
+		mapper:           newMapper(codec, &config.Config{}),
+		userData:         userData,
+		images:           NewImageCache(time.Hour, time.Now),
+	}
+
+	result := performItemsRequest(t, h, "/Items?IncludeItemTypes=Movie&Recursive=true&SortBy=Random")
+
+	ids := decodedItemIDs(t, codec, result)
+	sorted := slices.Clone(ids)
+	slices.Sort(sorted)
+	if len(slices.Compact(sorted)) != 2037 {
+		t.Fatalf("items = %d distinct of %d, want all 2037 once", len(slices.Compact(sorted)), len(ids))
+	}
+	for _, call := range content.calls {
+		if call.sort != "sort_title" {
+			t.Fatalf("browse call sort = %q, want the stable title order", call.sort)
+		}
+	}
+	if want := []int{1000, 1000, 37}; !slices.Equal(userData.favoriteLookups, want) || !slices.Equal(userData.progressLookups, want) {
+		t.Fatalf("favorite lookups = %v progress lookups = %v, want %v", userData.favoriteLookups, userData.progressLookups, want)
 	}
 }
