@@ -197,6 +197,10 @@ func overrideValue(item *ProfileSetHeldItem, field string) json.RawMessage {
 	case profileedits.FieldName:
 		value = item.Name
 	case profileedits.FieldPicture:
+		if item.pictureUnknown {
+			// An upload this answer can't name without reading it.
+			return nil
+		}
 		value = item.Picture
 	case profileedits.FieldPIN:
 		value = profileSetPINClear

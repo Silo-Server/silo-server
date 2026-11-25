@@ -1267,6 +1267,7 @@
 ./internal/api/handlers TestProfileSetOwnerEditsFollowTheProfileDB
 ./internal/api/handlers TestProfileSetNamesWithOwnerRenamesDB
 ./internal/api/handlers TestProfileSetRefusalOrderDB
+./internal/api/handlers TestProfileSetAnswerNeedsNoUploadReadDB
 ./internal/api/handlers TestProfileSetEditsRaceSetDB
 ./internal/api/handlers TestProfileEditAccountDeleteRaceDB
 ./internal/api/handlers TestProfileEditPoolSettingWaitsForPairingDB

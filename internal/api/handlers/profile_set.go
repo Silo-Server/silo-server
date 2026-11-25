@@ -127,6 +127,10 @@ type ProfileSetHeldItem struct {
 	// ChangedHere is the profile's fields edited on this server outside a
 	// set and not yet settled by one.
 	ChangedHere []ProfileSetFieldChange
+	// pictureUnknown marks an item built without reading storage
+	// (heldItemStored) whose upload has no stored hash, so Picture can't
+	// name it.
+	pictureUnknown bool
 }
 
 // ProfileSetLocal is a profile on the account outside the set.
@@ -246,6 +250,37 @@ func (h *ProfileHandler) heldItem(ctx context.Context, store userstore.UserStore
 		MaxAdvisoryAge: row.MaxAdvisoryAge, RequireAdvisoryAge: row.RequireAdvisoryAge, RequestsBlocked: row.RequestsBlocked,
 		Settings: profileSetHeldSettings(contract, settings),
 	}, nil
+}
+
+// heldItemStored is heldItem from what the database holds alone: it never
+// reads an upload, so it can't fail. An upload with no stored hash is marked
+// pictureUnknown.
+func heldItemStored(contract *settingscontract.Manifest, row *userstore.ProfileSetRow, settings map[string]json.RawMessage) ProfileSetHeldItem {
+	picture, known := storedPicture(&row.Profile)
+	return ProfileSetHeldItem{
+		SyncID: row.SyncID, ID: row.ID, Position: row.SyncPosition, Name: row.Name, Picture: picture, pictureUnknown: !known,
+		HasPIN: row.PINHash != "", IsChild: row.IsChild, MaxContentRating: row.MaxContentRating,
+		MaxAdvisoryAge: row.MaxAdvisoryAge, RequireAdvisoryAge: row.RequireAdvisoryAge, RequestsBlocked: row.RequestsBlocked,
+		Settings: profileSetHeldSettings(contract, settings),
+	}
+}
+
+// storedPicture is profileSetPicture without reading an upload: known is
+// false for an upload whose hash isn't stored yet.
+func storedPicture(p *userstore.Profile) (picture string, known bool) {
+	switch {
+	case p.Avatar == "":
+		return "", true
+	case isUploadedAvatarRef(p.Avatar):
+		if p.AvatarSourceSHA256 == "" {
+			return "", false
+		}
+		return profileSetPicturePrefixHash + p.AvatarSourceSHA256, true
+	}
+	if preset, err := normalizePresetAvatarReference(p.Avatar); err == nil {
+		return preset, true
+	}
+	return "", true
 }
 
 // profileSetEditsToken names the person's own edits on this server that no

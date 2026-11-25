@@ -51,6 +51,9 @@ type profileSetRun struct {
 	// moves maps a profile's sync ID to the one its item gives it, for each
 	// profile whose ID the set changes; its edit rows move with it.
 	moves map[string]string
+	// final is the household as the committed transaction left it, read
+	// inside it, so the answer needs no read after the commit.
+	final *userstore.ProfileSetSnapshot
 
 	// Done by the committed transaction.
 	noop      bool
@@ -384,6 +387,13 @@ func (r *profileSetRun) apply(ctx context.Context, w userstore.ProfileSetWriter,
 			return err
 		}
 	}
+	// The answer's read, inside the transaction: once the set commits,
+	// nothing the answer needs can fail.
+	final, err := w.Snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	r.final = &final
 	return nil
 }
 
@@ -658,21 +668,32 @@ func (r *profileSetRun) afterCommit(ctx context.Context) {
 }
 
 // result reads the account back and describes it.
+//
+// A set that wrote is described from the read its transaction made before
+// committing, and nothing below can fail: an applied set is never answered
+// with an error, which would send the app to retry a set the server holds.
+// A set that wrote nothing (the held version again) is read now.
 func (r *profileSetRun) result(ctx context.Context) (ProfileSetResult, error) {
-	snap, err := r.setStore.ReadProfileSet(ctx)
-	if err != nil {
-		return ProfileSetResult{}, err
+	var snap userstore.ProfileSetSnapshot
+	if r.final != nil {
+		snap = *r.final
+	} else {
+		var err error
+		if snap, err = r.setStore.ReadProfileSet(ctx); err != nil {
+			return ProfileSetResult{}, err
+		}
 	}
 	result := buildProfileSetResult(r.doc, snap, r.settings)
-	if result.Overrides, err = r.overrides(ctx, snap); err != nil {
-		return ProfileSetResult{}, err
-	}
+	result.Overrides = r.overrides(snap)
+	// nil when the account can't be read: best effort, never an error.
 	result.JellyfinBareNameSignIn = r.h.jellyfinBareNameSignIn(ctx, r.cmd.UserID, snap.Rows)
 	return result, nil
 }
 
-// overrides lists the owner's values of the set's profiles, as they stand.
-func (r *profileSetRun) overrides(ctx context.Context, snap userstore.ProfileSetSnapshot) ([]ProfileSetOverride, error) {
+// overrides lists the owner's values of the set's profiles, as they stand,
+// from the database alone: an override is never answered by reading an
+// upload (an upload with no stored hash has no value here).
+func (r *profileSetRun) overrides(snap userstore.ProfileSetSnapshot) []ProfileSetOverride {
 	edits := newProfileSetEdits(snap.Edits)
 	inSet := map[string]bool{}
 	for _, item := range r.doc.Items {
@@ -684,11 +705,7 @@ func (r *profileSetRun) overrides(ctx context.Context, snap userstore.ProfileSet
 		if !inSet[row.SyncID] || len(edits.overrides[row.SyncID]) == 0 {
 			continue
 		}
-		item, err := r.h.heldItem(ctx, r.store, r.contract, row, snap.Settings[row.ID])
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
+		items = append(items, heldItemStored(r.contract, row, snap.Settings[row.ID]))
 	}
-	return edits.overridesOf(items), nil
+	return edits.overridesOf(items)
 }

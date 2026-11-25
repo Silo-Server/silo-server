@@ -945,3 +945,33 @@ func TestProfileSetRefusalOrderDB(t *testing.T) {
 		}
 	})
 }
+
+// TestProfileSetAnswerNeedsNoUploadReadDB: an applied set is answered from
+// what its transaction read, without reading an upload, even when an
+// owner's override names an upload with no stored hash and the upload
+// can't be read. It catches a set that committed and then answered an
+// error, sending the app to retry a set the server already holds.
+func TestProfileSetAnswerNeedsNoUploadReadDB(t *testing.T) {
+	f := newEditsFixture(t) // the handler has no avatar store: any upload read fails
+	main, kid := newSetItem("Parent"), newSetItem("Kid")
+	f.mustApply(t, setDoc(t, 1, main, kid))
+	kidID := f.profileBySyncID(t, kid.syncID()).ID
+	f.update(t, f.admin(), kidID, ProfileUpdateRequest{Avatar: new("avatar-3"), MaxContentRating: new("G")}, true)
+	// An upload stored by a node that kept no hash, behind the owner's
+	// picture override.
+	if _, err := f.pool.Exec(t.Context(), `UPDATE user_profiles SET avatar = $3, avatar_source_sha256 = NULL WHERE user_id = $1 AND id = $2`,
+		f.userID, kidID, testAvatarRef(f.userID, kidID)); err != nil {
+		t.Fatal(err)
+	}
+	res, err := f.apply(t, setDoc(t, 2, main, kid.with("max_content_rating", "R")))
+	if err != nil {
+		t.Fatalf("an applied set answered %v", err)
+	}
+	want := []ProfileSetOverride{
+		{SyncID: kid.syncID(), Field: "max_content_rating", Value: json.RawMessage(`"G"`)},
+		{SyncID: kid.syncID(), Field: "picture"},
+	}
+	if res.Version != 2 || !sameOverrides(res.Overrides, want) {
+		t.Fatalf("answer = %+v", res)
+	}
+}
