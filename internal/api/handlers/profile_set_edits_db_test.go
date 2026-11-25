@@ -393,6 +393,23 @@ func TestProfileSetOwnerOverridesDB(t *testing.T) {
 			t.Fatalf("the set did not apply the field the person took back: %q", p.MaxContentRating)
 		}
 	})
+}
+
+// TestProfileSetOwnerEditsFollowTheProfileDB: an owner's edits hold however
+// a set names the profile. It catches overrides shed by giving the main
+// profile a new sync_id, a hidden profile un-hidden by the main profile
+// taking its sync_id, and two profiles left with one name because the owner
+// renamed one.
+func TestProfileSetOwnerEditsFollowTheProfileDB(t *testing.T) {
+	f := newEditsFixture(t)
+	main, kid, guest := newSetItem("Parent"), newSetItem("Kid"), newSetItem("Guest")
+	f.mustApply(t, setDoc(t, 1, main, kid, guest))
+	kidID := f.profileBySyncID(t, kid.syncID()).ID
+	if err := f.handler.DeleteProfile(f.admin(), ProfileDeleteCommand{UserID: f.userID,
+		ProfileID: f.profileBySyncID(t, guest.syncID()).ID, AccountAdmin: true}); err != nil {
+		t.Fatal(err)
+	}
+
 	t.Run("a name the owner gave one profile refuses another item with that name", func(t *testing.T) {
 		f.update(t, f.admin(), kidID, ProfileUpdateRequest{Name: new("Buddy")}, true)
 		before := f.state(t)
@@ -471,51 +488,7 @@ func TestProfileSetEditsRaceSetDB(t *testing.T) {
 	f.mustApply(t, setDoc(t, 1, main, kid, extra))
 	kidID := f.profileBySyncID(t, kid.syncID()).ID
 	extraID := f.profileBySyncID(t, extra.syncID()).ID
-	ref := testAvatarRef(f.userID, kidID)
-	version := 1
-	var versionMu sync.Mutex
-	nextVersion := func() int {
-		versionMu.Lock()
-		defer versionMu.Unlock()
-		version++
-		return version
-	}
-	setting := userstore.SettingIdentity{Key: language, Scope: "profile", ProfileID: kidID}
-
-	racers := map[string]func(i int) error{
-		"set": func(int) error {
-			held, err := f.handler.HeldProfileSet(t.Context(), f.userID)
-			if err != nil {
-				return err
-			}
-			_, err = f.applySeen(t, setDoc(t, nextVersion(), main, kid), held.EditsToken)
-			return err
-		},
-		"web edit": func(i int) error {
-			_, err := f.handler.UpdateProfile(f.account(), ProfileUpdateCommand{UserID: f.userID, ProfileID: kidID,
-				ActiveProfileID: f.primary, VerifyProfile: noProfileVerification, Request: ProfileUpdateRequest{Name: new(fmt.Sprintf("Kid %d", i))}})
-			return err
-		},
-		"admin edit": func(i int) error {
-			_, err := f.handler.UpdateProfile(f.admin(), ProfileUpdateCommand{UserID: f.userID, ProfileID: kidID, AccountAdmin: true,
-				Request: ProfileUpdateRequest{RequestsBlocked: new(i%2 == 0)}})
-			return err
-		},
-		"avatar upload": func(i int) error {
-			return f.store.UpdateProfile(f.account(), kidID, userstore.UpdateProfileInput{Avatar: &ref, AvatarSourceSHA256: new(fmt.Sprintf("%064d", i))})
-		},
-		"pool setting write": func(i int) error {
-			_, err := f.store.UpsertSettingValue(f.account(), setting, json.RawMessage([]string{`"fr"`, `"de"`}[i%2]))
-			return err
-		},
-		"profile delete": func(i int) error {
-			if i > 0 {
-				return nil
-			}
-			return f.handler.DeleteProfile(f.account(), ProfileDeleteCommand{UserID: f.userID, ProfileID: extraID,
-				ActiveProfileID: f.primary, VerifyProfile: noProfileVerification})
-		},
-	}
+	racers := raceRacers(t, f, main, kid, kidID, extraID)
 	race := func(t *testing.T, rounds int, also func() error, allowed func(racer string, err error) bool) {
 		t.Helper()
 		var wg sync.WaitGroup
@@ -608,6 +581,58 @@ func TestProfileSetEditsRaceSetDB(t *testing.T) {
 			t.Fatalf("%d edit rows outlived the deleted account", left)
 		}
 	})
+}
+
+// raceRacers are TestProfileSetEditsRaceSetDB's writers, by name, each run
+// once per round with the round's number.
+func raceRacers(t *testing.T, f *editsFixture, main, kid setItem, kidID, extraID string) map[string]func(i int) error {
+
+	language := settingskeys.PlaybackAudioLanguage
+	ref := testAvatarRef(f.userID, kidID)
+	version := 1
+	var versionMu sync.Mutex
+	nextVersion := func() int {
+		versionMu.Lock()
+		defer versionMu.Unlock()
+		version++
+		return version
+	}
+	setting := userstore.SettingIdentity{Key: language, Scope: "profile", ProfileID: kidID}
+
+	return map[string]func(i int) error{
+		"set": func(int) error {
+			held, err := f.handler.HeldProfileSet(t.Context(), f.userID)
+			if err != nil {
+				return err
+			}
+			_, err = f.applySeen(t, setDoc(t, nextVersion(), main, kid), held.EditsToken)
+			return err
+		},
+		"web edit": func(i int) error {
+			_, err := f.handler.UpdateProfile(f.account(), ProfileUpdateCommand{UserID: f.userID, ProfileID: kidID,
+				ActiveProfileID: f.primary, VerifyProfile: noProfileVerification, Request: ProfileUpdateRequest{Name: new(fmt.Sprintf("Kid %d", i))}})
+			return err
+		},
+		"admin edit": func(i int) error {
+			_, err := f.handler.UpdateProfile(f.admin(), ProfileUpdateCommand{UserID: f.userID, ProfileID: kidID, AccountAdmin: true,
+				Request: ProfileUpdateRequest{RequestsBlocked: new(i%2 == 0)}})
+			return err
+		},
+		"avatar upload": func(i int) error {
+			return f.store.UpdateProfile(f.account(), kidID, userstore.UpdateProfileInput{Avatar: &ref, AvatarSourceSHA256: new(fmt.Sprintf("%064d", i))})
+		},
+		"pool setting write": func(i int) error {
+			_, err := f.store.UpsertSettingValue(f.account(), setting, json.RawMessage([]string{`"fr"`, `"de"`}[i%2]))
+			return err
+		},
+		"profile delete": func(i int) error {
+			if i > 0 {
+				return nil
+			}
+			return f.handler.DeleteProfile(f.account(), ProfileDeleteCommand{UserID: f.userID, ProfileID: extraID,
+				ActiveProfileID: f.primary, VerifyProfile: noProfileVerification})
+		},
+	}
 }
 
 // TestProfileEditAccountDeleteRaceDB: an edit recorded while the account is
