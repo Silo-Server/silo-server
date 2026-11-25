@@ -120673,6 +120673,16 @@
       "value": "Laatste uitzenddatum"
     }
   ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " vergrendelen"
+    }
+  ],
   "web.item.editMetadata.locked": [
     {
       "type": 0,

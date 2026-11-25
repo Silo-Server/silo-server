@@ -110258,6 +110258,16 @@
       "value": "最終放送日"
     }
   ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "をロック"
+    }
+  ],
   "web.item.editMetadata.locked": [
     {
       "type": 0,

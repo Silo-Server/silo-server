@@ -111910,6 +111910,16 @@
       "value": "วันที่ออกอากาศครั้งล่าสุด"
     }
   ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "ล็อกช่อง "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    }
+  ],
   "web.item.editMetadata.locked": [
     {
       "type": 0,

@@ -132113,6 +132113,20 @@
       "value": "⟦Ļåšţ Åîŕ Đåţé~~~~~~⟧"
     }
   ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "⟦Ļöçķ "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
+    }
+  ],
   "web.item.editMetadata.locked": [
     {
       "type": 0,
