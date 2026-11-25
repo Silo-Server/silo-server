@@ -43,10 +43,12 @@ const (
 
 // profileSetRetryable reports an attempt that starts over: the household
 // changed under the plan, or PostgreSQL aborted the set's transaction as a
-// deadlock victim. A set locks profile rows before the account row, as a
-// profile save does; deleting the account locks them the other way round,
-// so the two can deadlock. The set then retries, and a retry after the
-// delete committed finds the account gone (ErrProfileSetAccountGone).
+// deadlock victim or serialization failure. Every profile writer and an
+// account deletion take the account's locks before any row, as the set
+// does, so no deadlock with them is known; the retry stays as a guard for a
+// writer that locks the account row and then a profile row without those
+// locks. A retry after the account was deleted finds it gone
+// (ErrProfileSetAccountGone).
 func profileSetRetryable(err error) bool {
 	if errors.Is(err, errProfileSetRetry) {
 		return true
