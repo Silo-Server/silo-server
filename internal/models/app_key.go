@@ -34,7 +34,8 @@ type AppPersonKey struct {
 	PublicKey []byte // 65-byte uncompressed P-256 point
 	KeyID     string
 	// IdentityID is the provider identity of the session that enrolled the
-	// key, while that identity exists.
+	// key. It is a plain number: it stays after that identity is deleted,
+	// and a key whose identity is gone from its account is dead.
 	IdentityID *int64
 	// ProviderBound is true when the enrolling session came from a provider
 	// identity, and stays true after the identity is deleted.

@@ -429,7 +429,7 @@ func (a *AppKeySignIn) Enroll(ctx context.Context, req KeyEnrollRequest) (*KeySi
 	}
 	expiry, err := a.service.keyProviderExpiry(ctx, req.Claims.UserID, enrolling.binding())
 	if err != nil {
-		return nil, err
+		return nil, sessionIdentityGone(err)
 	}
 	out := &KeySignInResult{ReplyKey: *payload.ReplyKey, Challenge: payload.Challenge, PersonKeyID: req.PersonKey.KeyID()}
 	err = a.inTx(ctx, func(tx pgx.Tx) error {
@@ -439,7 +439,7 @@ func (a *AppKeySignIn) Enroll(ctx context.Context, req KeyEnrollRequest) (*KeySi
 		}
 		locked, err := lockChain(ctx, tx, user, enrolling.binding())
 		if err != nil {
-			return err
+			return sessionIdentityGone(err)
 		}
 		binding := enrolling.binding()
 		person, err := enrollPersonKeyTx(ctx, tx, user.ID, req.PersonKey, binding.IdentityID, binding.ProviderBound)
@@ -507,14 +507,33 @@ func (b KeyBinding) same(other KeyBinding) bool {
 }
 
 // livePersonKeyTx locks the account's live person key, or answers nil. tx
-// holds the account row lock.
+// holds the account row lock. A provider-bound key whose identity is gone
+// from the account is dead and the key list leaves it out, so it is revoked
+// here and the account counts as having no person key: enrolling or
+// replacing must not answer a conflict with a key nobody can see or use.
 func livePersonKeyTx(ctx context.Context, tx pgx.Tx, userID int) (*models.AppPersonKey, error) {
 	key, err := scanPersonKey(tx.QueryRow(ctx, `SELECT `+personKeyColumns+` FROM auth_person_keys
 		WHERE user_id = $1 AND revoked_at IS NULL FOR UPDATE`, userID))
 	if errors.Is(err, ErrAppKeyNotFound) {
 		return nil, nil
 	}
-	return key, err
+	if err != nil {
+		return nil, err
+	}
+	if !key.ProviderBound || key.IdentityID == nil {
+		return key, nil
+	}
+	live, err := accountHasIdentity(ctx, tx, userID, *key.IdentityID)
+	if err != nil {
+		return nil, fmt.Errorf("reading person key identity: %w", err)
+	}
+	if live {
+		return key, nil
+	}
+	if err := revokePersonKeyTx(ctx, tx, userID, key.ID); err != nil {
+		return nil, err
+	}
+	return nil, nil
 }
 
 // enrollPersonKeyTx returns the account's person key when it is key, or

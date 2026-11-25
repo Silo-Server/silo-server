@@ -15,6 +15,7 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -982,6 +983,81 @@ func TestKeysOfAGoneIdentityAreDeadDB(t *testing.T) {
 	}
 	if !env.keyRevoked(t, key.ID) {
 		t.Fatal("the misbound key was not revoked")
+	}
+}
+
+// An administrator's unlink takes the identity row before the key rows and
+// their sessions, the order a plugin uninstall's cascade takes the identity
+// and the sessions it clears. Here another transaction holds the bound
+// device key's row, so the unlink has to wait for it; by then it must hold
+// the identity row. Revoking keys and sessions first deadlocks with an
+// uninstall.
+func TestAdminUnlinkLocksIdentityBeforeKeysDB(t *testing.T) {
+	env := newKeyEnv(t, "keyadminunlink")
+	ctx := t.Context()
+	_, bound := env.enrollFromProvider(t)
+	holder, err := env.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(context.WithoutCancel(ctx)) }()
+	if _, err := holder.Exec(ctx, `SELECT 1 FROM auth_device_keys WHERE id = $1 FOR UPDATE`, bound.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- NewIdentityService(env.pool).AdminUnlink(ctx, env.user.ID, env.identityID, 0, false) }()
+	deadline := time.After(10 * time.Second)
+	for held := false; !held; {
+		select {
+		case err := <-done:
+			t.Fatalf("unlink finished while its key row was held: %v", err)
+		case <-deadline:
+			t.Fatal("unlink waits for a key row without holding its identity row")
+		case <-time.After(20 * time.Millisecond):
+		}
+		_, err := env.pool.Exec(ctx, `SELECT 1 FROM plugin_auth_identities WHERE id = $1 FOR UPDATE NOWAIT`, env.identityID)
+		var pgErr *pgconn.PgError
+		held = errors.As(err, &pgErr) && pgErr.Code == "55P03"
+		if err != nil && !held {
+			t.Fatal(err)
+		}
+	}
+	if err := holder.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("unlink = %v", err)
+	}
+	if !env.keyRevoked(t, bound.DeviceID) {
+		t.Fatal("the unlinked identity's key was not revoked")
+	}
+}
+
+// After a sign-in provider is uninstalled, the person key it bound is dead
+// and the key list leaves it out. Enrolling again from a password session
+// must then take a new person key, not answer a conflict with a key nobody
+// can see: the dead key is revoked on the way.
+func TestDeadPersonKeyDoesNotBlockEnrollDB(t *testing.T) {
+	env := newKeyEnv(t, "keydeadenroll")
+	ctx := t.Context()
+	env.enrollFromProvider(t)
+	if _, err := env.pool.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, env.installationID); err != nil {
+		t.Fatal(err)
+	}
+	person, device := newTestKey(t), newTestKey(t)
+	if _, err := env.signIn.Enroll(ctx, KeyEnrollRequest{
+		KeyRequest: env.request(t, message{purpose: appkeys.PurposeEnroll, signer: person, device: &device}),
+		PersonKey:  person.pub, Claims: env.loginSession(t, env.user, models.SessionOpenedPassword, nil),
+	}); err != nil {
+		t.Fatalf("enroll after the uninstall = %v", err)
+	}
+	var live, revoked int
+	if err := env.pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE revoked_at IS NULL), count(*) FILTER (WHERE revoked_at IS NOT NULL)
+		FROM auth_person_keys WHERE user_id = $1`, env.user.ID).Scan(&live, &revoked); err != nil {
+		t.Fatal(err)
+	}
+	if live != 1 || revoked != 1 {
+		t.Fatalf("person keys after enrolling again: %d live, %d revoked", live, revoked)
 	}
 }
 

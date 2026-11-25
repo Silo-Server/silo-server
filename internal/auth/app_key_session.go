@@ -24,6 +24,16 @@ func bindingOfDeviceKey(key *models.AppDeviceKey) KeyBinding {
 	return KeyBinding{IdentityID: key.IdentityID, ProviderBound: key.ProviderBound}
 }
 
+// accountHasIdentity reports whether the account has an identity with this
+// ID. The account is always compared: a number that names another account's
+// identity is not this account's.
+func accountHasIdentity(ctx context.Context, db rowQuerier, userID int, identityID int64) (bool, error) {
+	var exists bool
+	err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM plugin_auth_identities WHERE id = $1 AND user_id = $2)`,
+		identityID, userID).Scan(&exists)
+	return exists, err
+}
+
 // identityAnchor is when the provider last vouched for the person behind an
 // identity: its last interactive sign-in or ACTIVE re-check answer, or its
 // linking until there is one (docs/architecture/external-sign-in.md,
@@ -57,9 +67,11 @@ func identityAnchor(ctx context.Context, db rowQuerier, userID int, identityID i
 // sign-in answers it. An outage under the fail-closed policy is
 // ErrProviderUnavailable, and a store failure ErrSessionCheckUnavailable, as
 // at refresh. A key that is not provider-bound runs the ordinary
-// refresh_token_expiry. A provider-bound key with no identity row should not
-// exist (deleting an identity revokes the keys bound to it); it is refused
-// with ErrProviderSignInRequired as a guard.
+// refresh_token_expiry. A provider-bound key that names no identity is
+// refused with ErrProviderSignInRequired. One whose identity is gone from
+// the account (unlinked, or its plugin uninstalled) answers
+// errKeyIdentityGone: a key sign-in carries on to its transaction, which
+// revokes the key under the account lock.
 func (s *Service) keyProviderExpiry(ctx context.Context, userID int, binding KeyBinding) (time.Time, error) {
 	now := time.Now()
 	if !binding.ProviderBound {
@@ -91,9 +103,10 @@ func (s *Service) keyProviderExpiry(ctx context.Context, userID int, binding Key
 // (nil for none). It runs after the account row lock and before any key or
 // session row is locked, from a binding read without a lock: the caller then
 // locks the row and checks its binding is still the one decided here. That
-// keeps the lock order every key path and plugin uninstall share: the
-// account, the installation, the identity, the person key, the device keys,
-// the sessions.
+// keeps the lock order every key path shares: the account, the installation,
+// the identity, the person key, the device keys, the sessions. A plugin
+// uninstall takes the installation, its identities and the sessions whose
+// identity it clears, and never a key row.
 //
 // A provider-bound key inherits the provider checks of the session that
 // enrolled it. Its identity is locked and checked as an OAuth sign-in checks
@@ -132,9 +145,11 @@ func lockKeyIdentity(ctx context.Context, tx pgx.Tx, user *models.User, identity
 		// No identity of this account has that ID: unlinked, its plugin
 		// uninstalled, or a number that names another account's identity.
 		// Either way the key can never sign in again.
-		var exists bool
-		if qerr := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM plugin_auth_identities WHERE id = $1 AND user_id = $2)`,
-			*identityID, user.ID).Scan(&exists); qerr == nil && !exists {
+		exists, qerr := accountHasIdentity(ctx, tx, user.ID, *identityID)
+		if qerr != nil {
+			return nil, nil, sessionCheckUnavailable("reading provider identity", qerr)
+		}
+		if !exists {
 			return nil, nil, errKeyIdentityGone
 		}
 	}
@@ -161,6 +176,16 @@ func lockKeyIdentity(ctx context.Context, tx pgx.Tx, user *models.User, identity
 // it; a key sign-in revokes the key and answers it as the revoked key it now
 // is.
 var errKeyIdentityGone = fmt.Errorf("%w: the key's provider identity was deleted", ErrNotPermitted)
+
+// sessionIdentityGone answers a login session whose provider identity was
+// deleted while it enrolled or replaced a key as the provider sign-in it now
+// needs. The provider did not refuse the person, so it is not ErrNotPermitted.
+func sessionIdentityGone(err error) error {
+	if errors.Is(err, errKeyIdentityGone) {
+		return ErrProviderSignInRequired
+	}
+	return err
+}
 
 // KeySession describes the login session a device key opens.
 type KeySession struct {

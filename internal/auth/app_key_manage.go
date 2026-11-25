@@ -97,7 +97,7 @@ func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key
 			// provider_since set) is refused as enroll refuses it: a person
 			// key bound to no identity could never vouch for a device.
 			if _, _, err := lockKeyIdentity(ctx, tx, user, unlocked.identityID); err != nil {
-				return err
+				return sessionIdentityGone(err)
 			}
 		}
 		current, err := livePersonKeyTx(ctx, tx, user.ID)

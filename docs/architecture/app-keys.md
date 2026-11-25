@@ -191,13 +191,17 @@ the cascade from uninstalling a plugin, which takes no account lock, out of
 the key rows that application transactions write under it.
 
 - **Unlinking** (`UnlinkOwn`, `AdminUnlink`, both through `deleteIdentity`,
-  which runs under the account lock) revokes the keys bound to that identity
-  and ends the sessions they opened, before the identity is deleted.
+  which runs under the account lock) locks the identity row, then revokes
+  the keys bound to that identity and ends the sessions they opened, before
+  the identity is deleted. The identity comes first because an uninstall's
+  cascade takes the identity and then the sessions whose identity it clears.
 - **Uninstalling a plugin** deletes its identities by cascade and does nothing
   to keys. A provider-bound key whose identity is gone is dead: the key list
   leaves it out, and its next `sign-in` or `introduce` revokes it, under the
   account lock, and answers `signature_invalid`, which tells the device to
-  enroll again. Sessions such a key opened earlier lose their identity through
+  enroll again. A dead person key is also revoked when the account next
+  enrolls or replaces its person key, so it never answers `conflict` for a
+  key the list doesn't show. Sessions such a key opened earlier lose their identity through
   `auth_sessions.identity_id`'s `ON DELETE SET NULL`, as every provider
   session does when its identity disappears, and refresh ends them at the
   provider age limit (`checkSessionStanding`).

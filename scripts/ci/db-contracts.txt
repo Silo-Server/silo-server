@@ -342,6 +342,8 @@
 ./internal/auth TestAccountWithKeysCanBeDeletedDB
 ./internal/auth TestUninstallNeverTouchesKeyRowsDB
 ./internal/auth TestKeysOfAGoneIdentityAreDeadDB
+./internal/auth TestDeadPersonKeyDoesNotBlockEnrollDB
+./internal/auth TestAdminUnlinkLocksIdentityBeforeKeysDB
 ./internal/auth TestUnlinkRevokesItsKeysDB
 ./internal/auth TestKeyChallengeSpentOnKidMismatchDB
 ./internal/auth TestKeySessionRefusedPastItsLimitDB
