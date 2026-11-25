@@ -617,8 +617,73 @@ settled. A set sends it back as `edits_seen`. When the server holds such
 edits, a newer set whose `edits_seen` is not the current token is stale and
 writes nothing, so a set built before an edit can't silently undo it; with
 none, `edits_seen` is not looked at. A repeat of the held version stays a
-no-op whatever it says. The server records no such edits yet, so the token is
-always empty today (`profileSetEditsToken`).
+no-op whatever it says. The edits are described next.
+
+**Edits made on this server.** A profile from the set can still be changed on
+each server outside the set. The server records each such change in
+`profile_set_edits`, one row per profile (by `sync_id`) and field, so the
+person's app can merge it and the owner's choice on this server is not undone
+by a set built elsewhere.
+
+- *Marks and overrides.* The account's own sessions, API keys and
+  Jellyfin-compatible sessions make marks (`by = 'account'`). An
+  administrator on an admin route, or signed in as the account, makes
+  overrides (`by = 'owner'`); `actor_user_id` is the administrator. A set
+  leaves an overridden field as it is and reports it in `overrides`; an
+  owner's deletion of a profile hides it, so a set neither creates nor pairs
+  that `sync_id` here and reports it in `hidden_by_owner`. The later edit of a
+  field replaces the row, whoever makes it, so an override is not a lock: the
+  person's edit of an overridden field on this server makes it a mark, with
+  `replaced_owner` set. Until an owner can clear an override directly, a
+  profile delete clears its overrides.
+- *What an accepted set clears.* It deletes exactly the marks its token was
+  computed from, matched by revision, so a mark written after that read is
+  kept. A mark with `replaced_owner` is kept instead, stamped `settled_at`, as
+  the record that the person ended an override; a settled row is history only
+  and counts nowhere. Rows of a profile the set removes go with it. A repeat of
+  the held version clears nothing.
+- *The token.* `edits_token` is `"e1."` and 32 characters of base64url
+  SHA-256 over each open mark's `sync_id`, field and revision, sorted. The
+  revision comes from a sequence on every write of a row, so an edit that puts
+  a field back still moves the token; a timestamp could repeat. Owner rows are
+  left out: the person's app cannot settle them.
+- *What `sync_applied` holds.* The set's value of every field it carries, an
+  overridden field included, as if it had been written. A repeat of the held
+  version does not compare a PIN the owner overrides, so a retry is not stale
+  because of it.
+
+**Recording edits.** The store's shared write helpers record, in the write's
+transaction: `updateProfile` for the set's item fields, compared before and
+after under the row lock (a web save sends every field, so presence would
+mark them all); the setting upsert, compare-and-set and delete helpers for a
+profile-scope key a set carries, on every write or reset, unchanged value or
+not; the profile delete for the removal. The preference columns are recorded
+through their settings keys only. The pool-level profile update runs in a
+transaction of its own so the avatar writes and their record commit together.
+Who acted comes from a holder the request gets before auth
+(`profileedits.Middleware`), filled in by the native and Jellyfin-compatible
+auth: the account itself, another account (an admin route), or an
+administrator signed in as the account. A write with no holder or no account
+named (background work), and a context marked `WithoutRecording` (the set's
+own apply, a restore set, a profile import), records nothing; restore and
+import also write through raw SQL the recorder never sees. The username
+rename skips a main profile with a `sync_id`, and the Jellyfin-compatible
+configuration writer skips a value equal to the stored one. The SQLite user
+store records nothing; it does not take sets either.
+
+The edit rows are the last rows any transaction locks: after the account
+locks, profile rows and the account row in the set, and after the profile row
+in a profile save, avatar write or delete. Writers serialize with the set on
+the account's preference-settings lock, or, for the avatar write, which does
+not take it, on the profile row the set locks before any edit row. The table
+has no foreign keys: one to `users` would take a key-share lock on the account
+row on every edit, which an account deletion holding that row while it
+cascades into the profiles could deadlock against. Deleting an account deletes
+its rows after the account, in the same transaction, at both deletion sites.
+
+After a request that recorded an edit, the middleware calls the server's
+waker for each account that got one, to tell the person's apps. No waker is
+wired yet, so nothing is sent.
 
 **Mapping.** The first item is always the main profile, which the set never
 creates, deletes or swaps; a set naming the main profile's `sync_id` anywhere
@@ -788,7 +853,10 @@ device reports that the server's key changed.
 
 A restore of selected accounts does not carry the profile set: restored
 profiles have no `sync_id`, so they are outside the set and the app pairs them
-again. A full database restore carries everything.
+again. A full database restore carries everything, the edits made on the
+server included (`profile_set_edits`): marks, overrides and hidden profiles
+come back with the profiles they name. A restore set and a profile import
+carry no edits and record none.
 
 ## Cloned databases
 
