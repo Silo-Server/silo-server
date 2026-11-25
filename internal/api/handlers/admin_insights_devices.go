@@ -152,7 +152,7 @@ func queryInsightsDevicesSessions(ctx context.Context, tx pgx.Tx, win resolvedIn
 	toneMap := make(map[string]int64)
 	burnIn := make(map[string]int64)
 	reasons := make(map[string]int64)
-	buckets := make(map[string]*AdminInsightsProtocolBucket)
+	buckets := make(map[time.Time]*AdminInsightsProtocolBucket)
 	subtitles := newInsightsSubtitleTally(&out.Subtitles)
 	for rows.Next() {
 		var grp int
@@ -203,10 +203,11 @@ func queryInsightsDevicesSessions(ctx context.Context, tx pgx.Tx, win resolvedIn
 			if bucketStart == nil || bucketLabel == nil {
 				continue
 			}
-			b := buckets[*bucketLabel]
+			start := bucketStart.UTC()
+			b := buckets[start]
 			if b == nil {
-				b = &AdminInsightsProtocolBucket{BucketStart: bucketStart.UTC(), LabelDate: *bucketLabel}
-				buckets[*bucketLabel] = b
+				b = &AdminInsightsProtocolBucket{BucketStart: start, LabelDate: *bucketLabel}
+				buckets[start] = b
 			}
 			if jellyfin != nil && *jellyfin {
 				b.JellyfinSessions += total
@@ -249,9 +250,8 @@ func queryInsightsDevicesSessions(ctx context.Context, tx pgx.Tx, win resolvedIn
 	for _, b := range buckets {
 		out.ProtocolBuckets = append(out.ProtocolBuckets, *b)
 	}
-	// YYYY-MM-DD labels sort as the buckets do.
 	slices.SortFunc(out.ProtocolBuckets, func(a, b AdminInsightsProtocolBucket) int {
-		return cmp.Compare(a.LabelDate, b.LabelDate)
+		return a.BucketStart.Compare(b.BucketStart)
 	})
 	subtitles.finish()
 	return nil
@@ -273,8 +273,8 @@ const (
 
 // queryInsightsDevicesFiles reads the client codec matrix, the resolution
 // breakdowns and audio usage: the Devices reads that need each session's media
-// file. One scan of the window's sessions feeds all three, and each file the
-// window played is looked up once. Only the matrix's rows (over the
+// file. One scan of the window's sessions, each joined to its file once,
+// feeds all three. Only the matrix's rows (over the
 // threshold, within the cap) and the top transcoders (whatever their size)
 // leave the database.
 func queryInsightsDevicesFiles(ctx context.Context, tx pgx.Tx, libraryID int, whereSQL string, whereArgs []any, minSessions int, out *AdminInsightsDevices) error {
@@ -308,36 +308,39 @@ func queryInsightsDevicesFiles(ctx context.Context, tx pgx.Tx, libraryID int, wh
 					NULLIF(BTRIM(h.client_name), '') AS client_name,
 					NULLIF(BTRIM(h.device_platform), '') AS device_platform,
 					COALESCE(h.compat_origin, FALSE) AS compat_origin,
-					LOWER(COALESCE(NULLIF(BTRIM(%[13]s.codec_video), ''), 'unknown')) AS source_codec,
+					LOWER(COALESCE(NULLIF(BTRIM(h.codec_video), ''), 'unknown')) AS source_codec,
 					%[1]s AS direct, %[2]s AS remux, %[3]s AS transcode,
-					COALESCE(%[13]s.resolution, '') AS resolution,
-					CASE WHEN %[13]s.video_tracks->0->>'width' ~ '^[0-9]{1,5}$' THEN (%[13]s.video_tracks->0->>'width')::int ELSE 0 END AS width,
-					CASE WHEN %[13]s.video_tracks->0->>'height' ~ '^[0-9]{1,5}$' THEN (%[13]s.video_tracks->0->>'height')::int ELSE 0 END AS height,
+					COALESCE(h.resolution, '') AS resolution,
+					CASE WHEN h.video_tracks->0->>'width' ~ '^[0-9]{1,5}$' THEN (h.video_tracks->0->>'width')::int ELSE 0 END AS width,
+					CASE WHEN h.video_tracks->0->>'height' ~ '^[0-9]{1,5}$' THEN (h.video_tracks->0->>'height')::int ELSE 0 END AS height,
 					LOWER(BTRIM(h.play_method)) AS play_method,
 					LOWER(BTRIM(COALESCE(h.video_decision, ''))) AS video_decision,
 					LOWER(BTRIM(COALESCE(h.target_video_codec, ''))) AS target_video_codec,
 					COALESCE(h.target_resolution, '') AS target_resolution,
 					h.route_facts_recorded AS route_facts,
-					-- Audio usage counts only sessions with route facts.
-					CASE WHEN h.route_facts_recorded THEN COALESCE(a.track->>'language', '') END AS language,
-					CASE WHEN h.route_facts_recorded THEN a.decision END AS audio_decision,
+					-- Audio usage counts only sessions with route facts. The
+					-- track is computed here, in the projection, so it only
+					-- reads files of sessions the window and filters kept.
+					CASE WHEN h.route_facts_recorded THEN COALESCE(h.track->>'language', '') END AS language,
+					CASE WHEN h.route_facts_recorded THEN h.decision END AS audio_decision,
 					CASE WHEN NOT h.route_facts_recorded THEN NULL
-						WHEN a.decision = 'transcode' AND h.target_audio_channels > 0 THEN h.target_audio_channels
-						ELSE COALESCE(NULLIF(a.track->>'channels', '')::int, %[13]s.audio_channels) END AS delivered
-				FROM admin_playback_history h %[8]s
-				CROSS JOIN LATERAL (
-					-- The track a session played: its recorded index into the
-					-- file's audio_tracks, else the file's default track, else
-					-- its first (pickAdminAudioTrack's order).
-					SELECT CASE WHEN h.route_facts_recorded THEN COALESCE(
-						CASE WHEN h.audio_track_index IS NOT NULL THEN %[13]s.audio_tracks -> h.audio_track_index END,
-						(SELECT t FROM jsonb_array_elements(CASE WHEN jsonb_typeof(%[13]s.audio_tracks) = 'array' THEN %[13]s.audio_tracks ELSE '[]'::jsonb END) AS t
-							WHERE (t->>'default')::boolean LIMIT 1),
-						CASE WHEN jsonb_typeof(%[13]s.audio_tracks) = 'array' THEN %[13]s.audio_tracks -> 0 END) END AS track,
+						WHEN h.decision = 'transcode' AND h.target_audio_channels > 0 THEN h.target_audio_channels
+						ELSE COALESCE(NULLIF(h.track->>'channels', '')::int, h.file_channels) END AS delivered
+				FROM (
+					SELECT h.*, %[13]s.codec_video, %[13]s.resolution, %[13]s.video_tracks,
+						%[13]s.audio_channels AS file_channels,
+						-- The track a session played: its recorded index into
+						-- the file's audio_tracks, else the file's default
+						-- track, else its first (pickAdminAudioTrack's order).
+						CASE WHEN h.route_facts_recorded THEN COALESCE(
+							CASE WHEN h.audio_track_index IS NOT NULL THEN %[13]s.audio_tracks -> h.audio_track_index END,
+							(SELECT t FROM jsonb_array_elements(CASE WHEN jsonb_typeof(%[13]s.audio_tracks) = 'array' THEN %[13]s.audio_tracks ELSE '[]'::jsonb END) AS t
+								WHERE (t->>'default')::boolean LIMIT 1),
+							CASE WHEN jsonb_typeof(%[13]s.audio_tracks) = 'array' THEN %[13]s.audio_tracks -> 0 END) END AS track,
 						COALESCE(NULLIF(LOWER(BTRIM(h.audio_decision)), ''), '%[9]s') AS decision
-					OFFSET 0
-				) a
-				WHERE %[4]s
+					FROM admin_playback_history h %[8]s
+					WHERE %[4]s
+				) h
 			) s
 			GROUP BY GROUPING SETS (
 				(client_key, platform_key, source_codec),

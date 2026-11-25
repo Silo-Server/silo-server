@@ -78,8 +78,27 @@ func TestPopulateInsightsLibraryFirstPlays(t *testing.T) {
 		}
 		roundOut := &AdminInsightsLibrary{}
 		populateInsightsLibraryFirstPlays(roundAdded, roundTitles, roundOut)
-		if m := roundOut.Summary.MedianDaysToFirstPlay; m == nil || *m != 0 {
-			t.Fatalf("median = %v, want 0 as percentile_cont rounds it", roundOut.Summary)
+		if m := roundOut.Summary.MedianDaysToFirstPlay; m == nil {
+			t.Fatal("median missing")
+		} else if *m != 0 {
+			t.Fatalf("median = %v, want 0 as percentile_cont rounds it", *m)
+		}
+
+		// Added on a fractional second: EXTRACT(EPOCH ...) gives 2808.018777 s,
+		// and percentile_cont 12959.999999999998 s (0.1 days); seconds and
+		// fractions added as two floats give 12960 s (0.2 days).
+		frac := base.Add(999999 * time.Microsecond)
+		fracAdded := []insightsAddedTitle{{contentID: "a", addedAt: frac}, {contentID: "b", addedAt: frac}}
+		fracTitles := map[string]insightsTitlePlays{
+			"a": {firstPlayAt: frac.Add(2808018777 * time.Microsecond)},
+			"b": {firstPlayAt: frac.Add(23111981223 * time.Microsecond)},
+		}
+		fracOut := &AdminInsightsLibrary{}
+		populateInsightsLibraryFirstPlays(fracAdded, fracTitles, fracOut)
+		if m := fracOut.Summary.MedianDaysToFirstPlay; m == nil {
+			t.Fatal("median missing")
+		} else if *m != 0.1 {
+			t.Fatalf("median = %v, want 0.1 as percentile_cont rounds it", *m)
 		}
 	})
 }

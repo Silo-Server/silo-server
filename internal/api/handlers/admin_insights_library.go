@@ -310,12 +310,17 @@ func insightsLibraryCoverageSQL(win resolvedInsightsWindow, q AdminInsightsWindo
 	// media_item_id before probing episodes: the whole catalog probes slower
 	// than that, and one account's or profile's sessions are few.
 	startedJoin := ""
-	// Only a series has episodes; keeping the movies out of that probe also
-	// keeps the planner from hashing every session's episode instead.
-	neverStarted := `NOT (EXISTS (SELECT 1 FROM admin_playback_history h WHERE h.media_item_id = mi.content_id)
-		OR CASE WHEN mi.type = 'series' THEN EXISTS (
-			SELECT 1 FROM episodes ep JOIN admin_playback_history h ON h.media_item_id = ep.content_id
-			WHERE ep.series_id = mi.content_id) ELSE FALSE END)`
+	// The probes map sessions to titles as the collected set does: an
+	// episode's sessions start its series (and only it), any other item's
+	// sessions start the item itself. The LIMIT 1 lookup per episode keeps
+	// the planner from hashing every session's episode instead.
+	neverStarted := `NOT ((mi.content_id <> ''
+			AND EXISTS (SELECT 1 FROM admin_playback_history h WHERE h.media_item_id = mi.content_id)
+			AND NOT EXISTS (SELECT 1 FROM episodes e WHERE e.content_id = mi.content_id))
+		OR EXISTS (SELECT 1 FROM episodes ep
+			CROSS JOIN LATERAL (SELECT 1 FROM admin_playback_history h
+				WHERE h.media_item_id = ep.content_id AND h.media_item_id <> '' LIMIT 1) played
+			WHERE ep.series_id = mi.content_id))`
 	if q.LibraryID <= 0 || len(startedConds) > 1 {
 		ctes += `,
 		started AS (
@@ -479,7 +484,10 @@ func insightsWaitSeconds(addedAt, firstPlayAt time.Time) float64 {
 	if !firstPlayAt.After(addedAt) {
 		return 0
 	}
-	return float64(firstPlayAt.Unix()-addedAt.Unix()) + float64(firstPlayAt.Nanosecond()-addedAt.Nanosecond())/1e9
+	// One division of the whole microsecond difference gives the float
+	// PostgreSQL's EXTRACT(EPOCH ...) gave; adding seconds and fractions as
+	// two floats can differ in the last bit and tip the shown median.
+	return float64(firstPlayAt.Sub(addedAt).Microseconds()) / 1e6
 }
 
 // insightsPercentileCont50 matches PostgreSQL's percentile_cont(0.5) over a
