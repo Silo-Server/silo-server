@@ -64,7 +64,7 @@ const IDENTITY = {
 let identities: Array<typeof IDENTITY>;
 let passwordAllowed: boolean;
 // False in demo mode: the server refuses linking and unlinking.
-let linkAllowed: boolean;
+let linkAllowed: boolean | undefined;
 let failures: Record<string, unknown>;
 const calls: Array<{ op: string; options?: unknown }> = [];
 
@@ -95,8 +95,10 @@ beforeEach(() => {
         return Promise.resolve({
           items: identities,
           can_unlink:
-            linkAllowed && identities.length > 0 && (identities.length > 1 || passwordAllowed),
-          can_link: linkAllowed,
+            linkAllowed !== false &&
+            identities.length > 0 &&
+            (identities.length > 1 || passwordAllowed),
+          ...(linkAllowed === undefined ? {} : { can_link: linkAllowed }),
         });
       case "GET /api/v2/account/password/capability":
         return Promise.resolve({
@@ -177,6 +179,13 @@ it("offers neither connect nor disconnect when the server refuses linking", asyn
   expect(
     screen.queryByText("This is how you sign in to this account, so it stays connected."),
   ).toBeNull();
+});
+
+// A server that doesn't send can_link yet (mid-upgrade) keeps linking.
+it("offers connect when the server does not say whether linking is allowed", async () => {
+  linkAllowed = undefined;
+  mount();
+  await screen.findByRole("button", { name: "Connect Company SSO" });
 });
 
 it("disconnects while the local password still signs in", async () => {
