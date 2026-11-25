@@ -67,6 +67,17 @@ func revokeSignInsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int, k
 	if len(userIDs) == 0 {
 		return nil
 	}
+	// Identities, device sign-in requests, then sessions: the order a plugin
+	// uninstall takes them (see lockIdentitiesBeforeSessions). Every caller
+	// holds the account row, which approving and collecting a device sign-in
+	// also lock first, so withdrawing the approvals before the sessions end
+	// leaves no window for a session to approve or a device to collect.
+	if err := lockIdentitiesBeforeSessions(ctx, tx, userIDs, false); err != nil {
+		return err
+	}
+	if _, err := withdrawDeviceSignInApprovalsInTransaction(ctx, tx, userIDs); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE auth_sessions SET revoked_at = NOW()
 		WHERE (user_id = ANY($1::int[]) OR impersonator_user_id = ANY($1::int[])) AND revoked_at IS NULL
@@ -76,10 +87,7 @@ func revokeSignInsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int, k
 	if _, err := revokeAudiobookshelfSessionsInTransaction(ctx, tx, userIDs); err != nil {
 		return err
 	}
-	if _, err := deleteJellyfinSessionsInTransaction(ctx, tx, userIDs); err != nil {
-		return err
-	}
-	_, err := withdrawDeviceSignInApprovalsInTransaction(ctx, tx, userIDs)
+	_, err := deleteJellyfinSessionsInTransaction(ctx, tx, userIDs)
 	return err
 }
 

@@ -22,11 +22,16 @@ SDK's `docs/auth-provider.md`.
   to one account.
 - Upgrading a plugin keeps its installation id, so links survive. Uninstalling
   removes the installation and its identity rows; the accounts stay.
-- Lock order: account row, then identity rows, then login sessions. The
-  uninstall's cascade deletes identities and then clears
-  `auth_sessions.identity_id`, so a transaction that deletes an account's
-  identities and also writes its sessions locks the identities first
-  (`lockIdentitiesBeforeSessions`, used by the administrator account delete).
+- Lock order: account row, then identities, then device sign-in requests,
+  then login sessions. That is the order an uninstall's cascade takes them:
+  it deletes the identities, clears `device_login_requests.approved_identity_id`,
+  then clears `auth_sessions.identity_id`. The administrator account delete
+  and every revocation of an account's sign-ins (`revokeSignInsInTransaction`)
+  lock the account's identities first (`lockIdentitiesBeforeSessions`), and the
+  revocation withdraws device sign-in approvals before it revokes sessions.
+  The expired-session cleanup deletes sessions before the requests that name
+  them, so it never waits: it skips a session or request another transaction
+  holds and deletes that session on a later run.
 
 ## Plugin answers
 

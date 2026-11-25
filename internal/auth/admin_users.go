@@ -55,7 +55,7 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 		return current, ErrAdminUserRevision
 	}
 	if input == nil {
-		if err = lockIdentitiesBeforeSessions(ctx, tx, id); err != nil {
+		if err = lockIdentitiesBeforeSessions(ctx, tx, []int{id}, true); err != nil {
 			return current, err
 		}
 	}

@@ -505,8 +505,24 @@ func (r *SessionRepository) ExtendExpiresAt(ctx context.Context, id string, newE
 
 // DeleteExpired removes all sessions whose expires_at is in the past,
 // regardless of their revocation status. Returns the number of deleted rows.
+//
+// Deleting a session clears device_login_requests.auth_session_id, so the
+// delete takes sessions before requests, the reverse of a plugin uninstall
+// (see lockIdentitiesBeforeSessions). It therefore never waits: it skips a
+// session or request row another transaction holds, and leaves that session
+// for the next run.
 func (r *SessionRepository) DeleteExpired(ctx context.Context) (int, error) {
-	query := `DELETE FROM auth_sessions WHERE expires_at < NOW()`
+	query := `
+		WITH expired AS (
+			SELECT id FROM auth_sessions WHERE expires_at < NOW() FOR UPDATE SKIP LOCKED
+		), requests AS (
+			SELECT id FROM device_login_requests
+			WHERE auth_session_id IN (SELECT id FROM expired) FOR UPDATE SKIP LOCKED
+		)
+		DELETE FROM auth_sessions s USING expired e
+		WHERE s.id = e.id AND NOT EXISTS (
+			SELECT 1 FROM device_login_requests d
+			WHERE d.auth_session_id = s.id AND d.id NOT IN (SELECT id FROM requests))`
 	tag, err := r.pool.Exec(ctx, query)
 	if err != nil {
 		return 0, fmt.Errorf("deleting expired sessions: %w", err)

@@ -102,13 +102,20 @@ func listIdentitiesForUser(ctx context.Context, db dbQuerier, userID int) ([]Lin
 	return identities, nil
 }
 
-// lockIdentitiesBeforeSessions locks the account's provider identities, in id
-// order, for a transaction that deletes them and also writes the account's
-// login sessions. Identities come before sessions: uninstalling a plugin
-// deletes its identities and then clears auth_sessions.identity_id, so a
-// transaction that locked the sessions first would deadlock against it.
-func lockIdentitiesBeforeSessions(ctx context.Context, db dbQuerier, userID int) error {
-	if _, err := db.Exec(ctx, `SELECT id FROM plugin_auth_identities WHERE user_id = $1 ORDER BY id FOR UPDATE`, userID); err != nil {
+// lockIdentitiesBeforeSessions locks the accounts' provider identities, in
+// id order, before a transaction writes their device sign-in requests and
+// login sessions. A plugin uninstall's cascade takes those rows in that order
+// (identities, the requests approved through them, then the sessions opened
+// through them), so taking the identities first makes it wait for this
+// transaction, or this one wait for it, instead of deadlocking. forDelete
+// takes the lock that deleting them needs; otherwise the lock only stops an
+// uninstall or unlink from deleting them meanwhile.
+func lockIdentitiesBeforeSessions(ctx context.Context, db dbQuerier, userIDs []int, forDelete bool) error {
+	lock := "FOR KEY SHARE"
+	if forDelete {
+		lock = "FOR UPDATE"
+	}
+	if _, err := db.Exec(ctx, `SELECT id FROM plugin_auth_identities WHERE user_id = ANY($1::int[]) ORDER BY id `+lock, userIDs); err != nil {
 		return fmt.Errorf("locking provider identities: %w", err)
 	}
 	return nil
