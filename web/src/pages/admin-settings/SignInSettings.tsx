@@ -20,12 +20,15 @@ import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import {
   activeSignInInstallation,
+  authProviderLabel,
   breakGlassRequiredText,
   primarySignInInstallations,
+  savedAutoProvision,
 } from "@/lib/externalSignInAdmin";
 import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
+import { LocalPasswordOffDialog } from "./LocalPasswordOffDialog";
 import { SettingField, SettingFieldStatus } from "./SettingField";
 import { NetworkSignInSection } from "./NetworkSignInSection";
 import { SignInProviderSlot } from "./SignInProviderSlot";
@@ -76,6 +79,7 @@ export default function SignInSettings() {
   const [localError, setLocalError] = useState<string | null>(null);
   const localErrorRef = useRef<HTMLParagraphElement>(null);
   const [providerFeedback, setProviderFeedback] = useState<Feedback>(null);
+  const [confirmLocalOff, setConfirmLocalOff] = useState(false);
   const providerFeedbackRef = useRef<HTMLParagraphElement>(null);
 
   const breakGlass = useMemo(
@@ -87,10 +91,11 @@ export default function SignInSettings() {
   );
   const breakGlassKnown = users.data !== undefined;
   // With passwords off, the provider that is on is how everyone else signs in.
-  const providerOn = useMemo(() => {
-    const active = activeSignInInstallation(installations.data);
-    return active?.enabled === true;
-  }, [installations.data]);
+  const activeProvider = useMemo(
+    () => activeSignInInstallation(installations.data),
+    [installations.data],
+  );
+  const providerOn = activeProvider?.enabled === true;
   const providerKnown = installations.data !== undefined;
   // Email matching only acts on accounts OIDC or LDAP signs in (a network
   // sign-in never matches by email). Without one installed it is noise, but it
@@ -113,6 +118,12 @@ export default function SignInSettings() {
       return;
     }
     setLocalError(null);
+    // Turning passwords off first shows who loses their way in; turning
+    // them back on needs no confirmation.
+    if (value === "false") {
+      setConfirmLocalOff(true);
+      return;
+    }
     form.setValue(LOCAL_LOGIN_KEY, value);
   }
 
@@ -132,6 +143,9 @@ export default function SignInSettings() {
     } catch (error) {
       if (error instanceof V2ProblemError && error.problemType === "break_glass_required") {
         showLocalError(breakGlassRequiredText());
+      }
+      if (error instanceof V2ProblemError && error.problemType === "sign_in_provider_required") {
+        showLocalError(t("web.admin.settings.signIn.page.noProviderError"));
       }
       // Every other failure is already reported by the save's own toast.
     }
@@ -216,6 +230,17 @@ export default function SignInSettings() {
                 </SettingFieldStatus>
               )
             }
+          />
+          <LocalPasswordOffDialog
+            open={confirmLocalOff}
+            onOpenChange={setConfirmLocalOff}
+            onConfirm={() => {
+              setConfirmLocalOff(false);
+              form.setValue(LOCAL_LOGIN_KEY, "false");
+            }}
+            provider={activeProvider ? authProviderLabel(activeProvider) : ""}
+            autoProvision={activeProvider ? savedAutoProvision(activeProvider) : false}
+            emailMatch={emailMatchOn}
           />
           {localError ? (
             <p

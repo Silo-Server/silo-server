@@ -152,6 +152,18 @@ ordered against each other.
   clearing, demoting, disabling, removing password sign-in from or deleting the
   last such account, are refused with `break_glass_required`. Both sides take
   the server-settings advisory lock, so they cannot pass each other's check.
+- Turning the switch off also needs an enabled OIDC or LDAP provider (an
+  enabled installation with an enabled binding that is not a network
+  binding); otherwise it is refused with `sign_in_provider_required`. The
+  provider's own enable switch is not checked against this (see
+  `updateAdminPluginAuthBinding`).
+- `listAdminLocalPasswordOffAccounts` answers who the switch would lock out,
+  reading the same predicates sign-in uses: `usableIdentitySQL` for a linked
+  identity that still signs in, and `emailMatchCandidateSQL` for the accounts
+  email auto-match may link. Change them there, not in a copy.
+- Turning the switch off ends no session: refresh does not read it
+  (`checkSessionStanding`), so an affected account stays signed in on its open
+  sessions until they end or are revoked.
 - Recovery from a shell with the server's `DATABASE_URL`:
   `silo auth local-login enable` turns the switch back on;
   `silo auth local-login enable -user <name or email>` turns one account's

@@ -186,6 +186,8 @@ let failures: Record<string, unknown>;
 // Operations that answer only when the test resolves them.
 let held: Record<string, Promise<unknown>>;
 let testResult: unknown;
+// Who loses sign-in when passwords go off, per group.
+let localOff: Record<string, { items: unknown[]; total: number }>;
 // The server's restart registry, served to the page's useRestartKeys.
 let restartKeys: { keys: string[]; prefixes: string[] };
 const calls: Array<{ op: string; options?: { body?: unknown; path?: unknown } }> = [];
@@ -245,8 +247,12 @@ beforeEach(() => {
       { id: "client", label: "Client credentials accepted", ok: false, message: "invalid_client" },
     ],
   };
+  localOff = { email_match: { items: [], total: 0 }, admin_link: { items: [], total: 0 } };
   calls.length = 0;
-  vi.mocked(v2).mockImplementation(((op: string, options?: { body?: unknown }) => {
+  vi.mocked(v2).mockImplementation(((
+    op: string,
+    options?: { body?: unknown; query?: { group: string; email_auto_match: string } },
+  ) => {
     calls.push({ op, options });
     if (failures[op]) return Promise.reject(failures[op]);
     if (held[op]) return held[op];
@@ -255,6 +261,16 @@ beforeEach(() => {
         return Promise.resolve(capabilities);
       case "GET /api/v2/admin/settings/restart-keys":
         return Promise.resolve(restartKeys);
+      case "GET /api/v2/admin/sign-in/local-password-off/accounts":
+        return Promise.resolve({
+          items: localOff[options!.query!.group]!.items,
+          page: { has_more: false },
+          email_auto_match: options!.query!.email_auto_match === "true",
+          totals: {
+            email_match: localOff.email_match!.total,
+            admin_link: localOff.admin_link!.total,
+          },
+        });
       case "GET /api/v2/auth/providers":
         return Promise.resolve({
           items: [
@@ -961,11 +977,98 @@ describe("SignInSettings password sign-in", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Turn on a sign-in provider first");
   });
 
-  it("stages turning password sign-in off when a break-glass admin exists", async () => {
+  it("names who loses sign-in and stages the change only on confirm", async () => {
+    const user = userEvent.setup();
+    state.values["auth.email_auto_match"] = "true";
+    localOff = {
+      email_match: {
+        items: [
+          {
+            id: "12",
+            username: "alice",
+            email: "alice@example.test",
+            role: "user",
+            is_owner: false,
+            reason: "email_match",
+          },
+        ],
+        total: 7,
+      },
+      admin_link: {
+        items: [
+          {
+            id: "2",
+            username: "carol",
+            email: "carol@example.test",
+            role: "admin",
+            is_owner: false,
+            reason: "administrator",
+          },
+          {
+            id: "9",
+            username: "dave",
+            email: "",
+            role: "user",
+            is_owner: false,
+            reason: "no_email",
+          },
+        ],
+        total: 2,
+      },
+    };
+    mount();
+    await user.click(screen.getByRole("switch", { name: "Allow password sign-in" }));
+    const dialog = await screen.findByRole("alertdialog");
+    const matched = await within(dialog).findByRole("region", {
+      name: "7 accounts connect by email",
+    });
+    expect(matched).toHaveTextContent("alice");
+    expect(matched).toHaveTextContent("and 6 more");
+    const unmatched = within(dialog).getByRole("region", {
+      name: "2 accounts can't sign in until an admin links them",
+    });
+    expect(unmatched).toHaveTextContent("carol");
+    expect(unmatched).toHaveTextContent("Admin");
+    expect(unmatched).toHaveTextContent("No email");
+    // The provider creates accounts, so the second group is warned.
+    expect(unmatched).toHaveTextContent("a new, separate account");
+    expect(dialog).toHaveTextContent("stays signed in until their session ends");
+    expect(within(dialog).getByRole("link", { name: /Users/ })).toHaveAttribute(
+      "href",
+      "/admin/users",
+    );
+    // The staged email matching value decides the grouping.
+    expect(
+      opCalls("GET /api/v2/admin/sign-in/local-password-off/accounts").map(
+        (call) => (call.options as { query?: unknown }).query,
+      ),
+    ).toContainEqual({ group: "email_match", email_auto_match: "true", limit: 5 });
+    expect(state.setValue).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole("button", { name: "Turn off password sign-in" }));
+    expect(state.setValue).toHaveBeenCalledWith("auth.local_password_login", "false");
+  });
+
+  it("says when nobody loses sign-in and still asks", async () => {
     const user = userEvent.setup();
     mount();
     await user.click(screen.getByRole("switch", { name: "Allow password sign-in" }));
-    expect(state.setValue).toHaveBeenCalledWith("auth.local_password_login", "false");
+    const dialog = await screen.findByRole("alertdialog");
+    expect(
+      await within(dialog).findByText("Every account can still sign in after this."),
+    ).toBeInTheDocument();
+    expect(state.setValue).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(state.setValue).not.toHaveBeenCalled();
+  });
+
+  it("turns password sign-in back on without asking", async () => {
+    const user = userEvent.setup();
+    state.values["auth.local_password_login"] = "false";
+    mount();
+    await user.click(screen.getByRole("switch", { name: "Allow password sign-in" }));
+    expect(state.setValue).toHaveBeenCalledWith("auth.local_password_login", "true");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
   it("explains the server refusing the save for want of a break-glass admin", async () => {
@@ -976,6 +1079,16 @@ describe("SignInSettings password sign-in", () => {
     mount();
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(breakGlassRequiredText());
+  });
+
+  it("explains the server refusing the save for want of a provider", async () => {
+    const user = userEvent.setup();
+    state.values["auth.local_password_login"] = "false";
+    state.dirty = new Set(["auth.local_password_login"]);
+    state.save.mockRejectedValue(problem("sign_in_provider_required", 409));
+    mount();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Turn on a sign-in provider first");
   });
 });
 
