@@ -333,20 +333,25 @@ func lockPreapprovalIdentity(ctx context.Context, tx pgx.Tx, preview *deviceLogi
 // now rather than 30 days ago. It reports denied, after withdrawing the
 // request in tx, when the request was approved through a provider identity
 // that is gone or refused since; identityErr is lockPreapprovalIdentity's
-// answer. Any other identity failure (a disabled provider) is returned.
-func preapprovedSession(ctx context.Context, tx pgx.Tx, record *deviceLoginRecord, identityErr error, session *models.AuthSession) (bool, error) {
+// answer. It answers that denial once the withdrawal is committed, any other
+// identity failure (a disabled provider) as its error, and nil to go on
+// collecting.
+func preapprovedSession(ctx context.Context, tx pgx.Tx, record *deviceLoginRecord, identityErr error, session *models.AuthSession) (*DeviceLoginPollResult, error) {
 	gone := record.ApprovedIdentityID == nil && record.ApprovedProviderSince != nil
 	if errors.Is(identityErr, ErrNotPermitted) || gone {
 		if _, err := tx.Exec(ctx, `UPDATE device_login_requests SET status = $2, denied_at = NOW(), updated_at = NOW() WHERE id = $1`,
 			record.ID, DeviceLoginStatusDenied); err != nil {
-			return false, fmt.Errorf("withdraw device pre-approval: %w", err)
+			return nil, fmt.Errorf("withdraw device pre-approval: %w", err)
 		}
-		return true, nil
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit device pre-approval withdrawal: %w", err)
+		}
+		return deviceLoginDeniedResult(), nil
 	}
 	if identityErr != nil {
-		return false, identityErr
+		return nil, identityErr
 	}
 	session.IPAddress = clientip.FromContext(ctx)
 	session.ProviderSince = nil
-	return false, nil
+	return nil, nil
 }

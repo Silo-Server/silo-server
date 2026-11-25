@@ -1112,15 +1112,8 @@ func (s *DeviceLoginService) poll(ctx context.Context, deviceCode, bindingSecret
 	now := time.Now().UTC()
 	session, claims := s.deviceLoginSession(record, user, profileID, now)
 	if record.PreapprovedAt != nil {
-		denied, err := preapprovedSession(ctx, tx, record, identityErr, &session)
-		if err != nil {
-			return nil, err
-		}
-		if denied {
-			if err := tx.Commit(ctx); err != nil {
-				return nil, fmt.Errorf("commit device pre-approval withdrawal: %w", err)
-			}
-			return deviceLoginDeniedResult(), nil
+		if answer, err := preapprovedSession(ctx, tx, record, identityErr, &session); answer != nil || err != nil {
+			return answer, err
 		}
 	}
 	sessionID, sessionExpiresAt := session.ID, session.ExpiresAt
