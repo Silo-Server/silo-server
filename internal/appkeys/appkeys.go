@@ -75,3 +75,15 @@ func (k PublicKey) KeyID() string {
 	sum := sha256.Sum256(k.raw[:])
 	return encoding.EncodeToString(sum[:keyIDSize])
 }
+
+// TokenHash is how a 32-byte token is named where the token itself must not
+// be kept: base64url of SHA-256 over the bytes the base64url token decodes
+// to.
+func TokenHash(token string) (string, error) {
+	raw, err := encoding.DecodeString(token)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return encoding.EncodeToString(sum[:]), nil
+}
