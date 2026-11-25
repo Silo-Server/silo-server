@@ -2863,6 +2863,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if deps.DB != nil && authHandler != nil && authService != nil {
 		authHandler.SetAppKeySignIn(auth.NewAppKeySignIn(deps.DB, authService))
+		authHandler.SetHouseholdStores(deps.UserStoreProvider)
 		v2deps.AppKeys = authHandler
 	}
 	if markersHandler != nil {

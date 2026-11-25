@@ -7,6 +7,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // AppKeyService signs devices in with app keys and manages a person's own
@@ -23,6 +25,12 @@ type AppKeyService interface {
 	ListOwnAppKeys(context.Context, *auth.Claims) (auth.OwnAppKeys, error)
 	RevokeOwnDeviceKey(ctx context.Context, claims *auth.Claims, id string) error
 	ReplacePersonKey(context.Context, *auth.Claims, appkeys.PublicKey) error
+	ListPendingAppKeys(context.Context, *auth.Claims) ([]*models.AppDeviceKey, error)
+	ApprovePendingAppKey(ctx context.Context, claims *auth.Claims, id string) error
+	DenyPendingAppKey(ctx context.Context, claims *auth.Claims, id string) error
+	// ActsAsVerifiedMainProfile is the main-profile rule of the operations
+	// that create lasting access (requireVerifiedMainProfile).
+	ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, error)
 }
 
 // appKeyDomain names the capability in its problems.
@@ -74,6 +82,7 @@ func registerAppKeys(reg *Registry) {
 	Register(reg, Operation{Operation: op, Class: ClassPublic, ServiceBacked: true}, reg.getAppKeyCapability)
 	registerAppKeySignIn(reg)
 	registerAppKeyManagement(reg)
+	registerAppKeyPending(reg)
 }
 
 func (reg *Registry) getAppKeyCapability(ctx context.Context, _ *CapabilityInput) (*AppKeyCapabilityOutput, error) {

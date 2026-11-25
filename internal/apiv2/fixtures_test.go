@@ -1817,6 +1817,19 @@ func appKeyFixtureCases() []fixtureCase {
 			scenario: "A key sign-in whose signature does not verify: the problem identifier apps branch on.",
 			method:   http.MethodPost, path: "/api/v2/auth/keys/sign-in", body: `{"kid":"zT321tSgcB7emUH9k0B0oA","payload":"eyJ9","sig":"c2ln"}`,
 			status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/Problem"},
+		{name: "list_pending_app_keys_ok", operationID: "listPendingAppKeys",
+			scenario: "An administrator lists the devices waiting for approval: one introduced with the person key, oldest first.",
+			method:   http.MethodGet, path: "/api/v2/auth/keys/pending", headers: bearer(adminToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/PendingAppKeyList"},
+		{name: "approve_pending_app_key_secondary_profile", operationID: "approvePendingAppKey",
+			scenario: "A secondary profile of the household can't approve a waiting device: only the main profile, verified with its PIN when it has one, creates lasting access.",
+			method:   http.MethodPost, path: "/api/v2/auth/keys/pending/5b1d7f0e-6a57-4d0c-8a59-0f3f3a0f4a10/approve", body: `{}`,
+			headers: with(bearer(householdToken), "X-Profile-Id", "p-kid"),
+			status:  http.StatusForbidden, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/Problem"},
+		{name: "deny_pending_app_key_ok", operationID: "denyPendingAppKey",
+			scenario: "An administrator refuses a waiting device; its next sign-in answers key_denied.",
+			method:   http.MethodPost, path: "/api/v2/auth/keys/pending/5b1d7f0e-6a57-4d0c-8a59-0f3f3a0f4a10/deny", body: `{}`, headers: bearer(adminToken),
+			status: http.StatusNoContent, assertHeaders: []string{"Cache-Control"}},
 	}
 }
 
@@ -1833,6 +1846,9 @@ func fixtureAppKeys() *fakeAppKeys {
 				Status: models.DeviceKeyStatusPending, EnrolledVia: models.AppKeyEnrolledAppCode, CreatedAt: created},
 		},
 		AllowedBy: "sam",
+	}, pending: []*models.AppDeviceKey{
+		{ID: "5b1d7f0e-6a57-4d0c-8a59-0f3f3a0f4a10", KeyID: "iX--ofJySUkUOsEpPo17PQ", Kind: models.DeviceKeyKindDevice, Name: "Sam's iPad", Platform: "ipados",
+			Status: models.DeviceKeyStatusPending, EnrolledVia: models.AppKeyEnrolledIntroduce, CreatedAt: created},
 	}}
 }
 

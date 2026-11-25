@@ -6928,7 +6928,7 @@ export interface paths {
     };
     /**
      * List the signed-in account's app keys.
-     * @description Only the account's own login session: an API key and an administrator acting as the account are 403 permission_denied. Answers while auth.app_key_sign_in is off, so keys can still be reviewed and revoked.
+     * @description Only the account's own login session: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. The list names every device the person signed in, so a TV's or another app's session can't read it. Answers while auth.app_key_sign_in is off, so keys can still be reviewed and revoked.
      */
     get: operations["listAppKeys"];
     put?: never;
@@ -7010,7 +7010,7 @@ export interface paths {
     put?: never;
     /**
      * Enroll a person key and a device key on the signed-in account and open a session bound to the device key.
-     * @description Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. When the account has no person key, person_key is registered and takes the provider identity of the session that enrolls it. When person_key is the account's person key already, it is reused as it is, binding unchanged. A different person key on the account is 409 conflict, and so is a device key already enrolled on this server. The new device key takes the session's provider identity. The sealed plaintext adds person_key_id; the client drops the session it called with. Keys enrolled here start active, also on an administrator's account, so enroll never answers approval_required. A malformed payload field is 422 at body.message.payload. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status: signed_in, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity). Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
+     * @description Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. When the account has no person key, person_key is registered and takes the provider identity of the session that enrolls it. When person_key is the account's person key already, it is reused as it is, binding unchanged. A different person key on the account is 409 conflict, and so is a device key already enrolled on this server. The new device key takes the session's provider identity. The sealed plaintext adds person_key_id; the client drops the session it called with. Keys enrolled here start active, also on an administrator's account, so enroll never answers approval_required. A malformed payload field is 422 at body.message.payload. It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied. A request without X-Profile-Id is accepted only from an administrator account while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status: signed_in, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity). Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
      */
     post: operations["enrollAppKeys"];
     delete?: never;
@@ -7030,9 +7030,69 @@ export interface paths {
     put?: never;
     /**
      * Enroll this device's key with the account's person key and open a login session.
-     * @description The body is an introduce envelope signed with the account's person key, with device_sig from the device key in the payload. The device key is enrolled and opens the session. For an administrator's account it is stored waiting for approval, and the device repeats signInWithAppKey until it is approved. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
+     * @description The body is an introduce envelope signed with the account's person key, with device_sig from the device key in the payload. The device key is enrolled and opens the session. For an administrator's account it is stored waiting for approval, and the device repeats signInWithAppKey until it is approved. An account holds at most 10 waiting keys inside their 24 hours; an introduce that would add an eleventh is 409 conflict, after its challenge is spent. A waiting key past its 24 hours does not count, and a retention task later revokes it. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
      */
     post: operations["introduceAppKey"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/keys/pending": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the signed-in account's devices waiting for approval.
+     * @description Only the account's own login session: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. Only an administrator's account has waiting devices: a device a person key introduces to it waits for approval for 24 hours. Each item is a device object as listAppKeys returns it. Answers while auth.app_key_sign_in is off.
+     */
+    get: operations["listPendingAppKeys"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/keys/pending/{id}/approve": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Approve a device waiting to sign in to the signed-in administrator account.
+     * @description Only the account's own login session: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. Send an empty JSON object. The device's next signInWithAppKey opens a session. The account must still be an enabled administrator (403 permission_denied otherwise). Approving an active key changes nothing; a key that is unknown, denied, revoked or past its 24 hours is 404 not_found. 409 capability_disabled while auth.app_key_sign_in is off. It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied. A request without X-Profile-Id is accepted only from an administrator account while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.
+     */
+    post: operations["approvePendingAppKey"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/keys/pending/{id}/deny": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Refuse a device waiting to sign in to the signed-in account.
+     * @description Only the account's own login session: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. Send an empty JSON object. The device's next signInWithAppKey answers 403 key_denied, and neither listAppKeys nor listPendingAppKeys shows the key. Denying a denied key changes nothing; an active, revoked or unknown key is 404 not_found. Answers while auth.app_key_sign_in is off.
+     */
+    post: operations["denyPendingAppKey"];
     delete?: never;
     options?: never;
     head?: never;
@@ -7049,7 +7109,7 @@ export interface paths {
     get?: never;
     /**
      * Replace the signed-in account's person key.
-     * @description Only the account's own login session: an API key and an administrator acting as the account are 403 permission_denied. A session opened by device sign-in or by another app's key is refused too. The old person key is revoked: new devices need the new one, and devices already enrolled keep their own keys. Sending the current key again changes nothing; a public key enrolled anywhere else on this server is 409 conflict. 409 capability_disabled while auth.app_key_sign_in is off.
+     * @description Only the account's own login session: an API key and an administrator acting as the account are 403 permission_denied. A session opened by device sign-in or by another app's key is refused too. The old person key is revoked: new devices need the new one, and devices already enrolled keep their own keys. Sending the current key again changes nothing; a public key enrolled anywhere else on this server is 409 conflict. 409 capability_disabled while auth.app_key_sign_in is off. It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied. A request without X-Profile-Id is accepted only from an administrator account while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.
      */
     put: operations["replacePersonKey"];
     post?: never;
@@ -7070,7 +7130,7 @@ export interface paths {
     put?: never;
     /**
      * Open a login session with an enrolled device key.
-     * @description The body is a sign-in envelope signed with the device key, with no device_sig. A key waiting for an administrator's approval answers approval_required, sealed, at most once every five seconds (sooner is 429 rate_limited with Retry-After) and for 24 hours; after that, or once denied, it is 403 key_denied. A device waiting for approval asks again each time with a fresh challenge and a newly signed envelope: resending the same envelope after a 429 answers 401 challenge_invalid, because its challenge was spent. A key whose provider binding changed during the request also answers 429 with a one-second Retry-After; asking again succeeds. Spends the per-address key_sign_in rate-limit budget. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
+     * @description The body is a sign-in envelope signed with the device key, with no device_sig. A key waiting for an administrator's approval answers approval_required, sealed, at most once every five seconds (sooner is 429 rate_limited with Retry-After) and for 24 hours; after that, or once denied, it is 403 key_denied. A device waiting for approval asks again each time with a fresh challenge and a newly signed envelope: resending the same envelope after a 429 answers 401 challenge_invalid, because its challenge was spent. A key whose provider binding changed during the request also answers 429 with a one-second Retry-After: wait, get a fresh challenge and sign a new envelope. That attempt goes through every sign-in check again, so it can still be refused (for example 409 provider_sign_in_required or 503). Spends the per-address key_sign_in rate-limit budget. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
      */
     post: operations["signInWithAppKey"];
     delete?: never;
@@ -25053,7 +25113,7 @@ export interface components {
        */
       platform: string;
       /**
-       * @description active, or pending while an administrator's device waits for approval
+       * @description active, or pending while an administrator's device waits for approval. A waiting key older than 24 hours is left out of the list without anyone denying or revoking it
        * @example active
        * @enum {string}
        */
@@ -33058,6 +33118,11 @@ export interface components {
        * @example alice
        */
       login: string;
+    };
+    PendingAppKeyDecisionInputBody: Record<string, never>;
+    PendingAppKeyList: {
+      /** @description Device keys waiting for approval, oldest first, each with status pending; a key past its 24 hours is left out */
+      items: components["schemas"]["AppDeviceKey"][];
     };
     Person: {
       bio?: string;
@@ -101703,7 +101768,7 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         headers: {
-          /** @description Seconds to wait before asking again, on a fresh challenge. */
+          /** @description Seconds to wait before repeating the empty POST. */
           "Retry-After"?: string;
           [name: string]: unknown;
         };
@@ -101723,7 +101788,7 @@ export interface operations {
       /** @description Service Unavailable */
       503: {
         headers: {
-          /** @description Seconds to wait before asking again, on a fresh challenge. */
+          /** @description Seconds to wait before repeating the empty POST. */
           "Retry-After"?: string;
           [name: string]: unknown;
         };
@@ -101839,6 +101904,10 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
         /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
         "X-Silo-Device-Id"?: string;
         /** @description Optional device name recorded on the login session (first 120 characters) */
@@ -101884,6 +101953,15 @@ export interface operations {
       };
       /** @description Forbidden */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };
@@ -102121,10 +102199,387 @@ export interface operations {
       };
     };
   };
-  replacePersonKey: {
+  listPendingAppKeys: {
     parameters: {
       query?: never;
       header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PendingAppKeyList"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  approvePendingAppKey: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The waiting device key's id from listPendingAppKeys */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PendingAppKeyDecisionInputBody"];
+      };
+    };
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  denyPendingAppKey: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The waiting device key's id from listPendingAppKeys */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PendingAppKeyDecisionInputBody"];
+      };
+    };
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  replacePersonKey: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
       path?: never;
       cookie?: never;
     };
@@ -102163,6 +102618,15 @@ export interface operations {
       };
       /** @description Forbidden */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

@@ -140,7 +140,7 @@ const (
 // householdUserID is the account whose household has limited profiles.
 const householdUserID = 4
 
-// fakeHouseholdStore answers only ListProfiles; any other store call panics
+// fakeHouseholdStore answers only ListProfiles and GetProfile; any other store call panics
 // on the embedded nil interface.
 type fakeHouseholdStore struct {
 	userstore.UserStore
@@ -149,6 +149,16 @@ type fakeHouseholdStore struct {
 
 func (s fakeHouseholdStore) ListProfiles(context.Context) ([]userstore.Profile, error) {
 	return s.profiles, nil
+}
+
+// GetProfile finds one of the household's profiles, or nil.
+func (s fakeHouseholdStore) GetProfile(_ context.Context, id string) (*userstore.Profile, error) {
+	for i := range s.profiles {
+		if s.profiles[i].ID == id {
+			return &s.profiles[i], nil
+		}
+	}
+	return nil, nil
 }
 
 // fakeHouseholds lists each account's profiles for the household profile

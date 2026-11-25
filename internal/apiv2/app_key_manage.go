@@ -21,7 +21,7 @@ type AppDeviceKey struct {
 	Kind       string   `json:"kind" enum:"device,app" doc:"device: an install of the person's own app; app: another app the person allowed" example:"device"`
 	Name       string   `json:"name" doc:"The name the device gave itself" example:"Sam's iPhone"`
 	Platform   string   `json:"platform" doc:"The platform the device named; empty when it named none" example:"ios"`
-	Status     string   `json:"status" enum:"active,pending" doc:"active, or pending while an administrator's device waits for approval" example:"active"`
+	Status     string   `json:"status" enum:"active,pending" doc:"active, or pending while an administrator's device waits for approval. A waiting key older than 24 hours is left out of the list without anyone denying or revoking it" example:"active"`
 	EnrolledBy string   `json:"enrolled_by" enum:"introduce,session,app-code,grant" doc:"How the key was enrolled: introduced by the person key, from a signed-in session, with an app code, or through a grant" example:"introduce"`
 	AllowedBy  *string  `json:"allowed_by" nullable:"true" doc:"For a key a grant enrolled, the name of the account whose person key signed the grant; null otherwise" example:"sam"`
 	EnrolledAt Instant  `json:"enrolled_at" doc:"When the key was enrolled"`
@@ -66,7 +66,7 @@ const ownKeySessionRule = "Only the account's own login session: an API key and 
 
 func registerAppKeyManagement(reg *Registry) {
 	list := humaOp(http.MethodGet, Prefix+"/auth/keys", "listAppKeys", "app-keys", "List the signed-in account's app keys.")
-	list.Description = ownKeySessionRule + " Answers while auth.app_key_sign_in is off, so keys can still be reviewed and revoked."
+	list.Description = pendingSessionRule + " The list names every device the person signed in, so a TV's or another app's session can't read it. Answers while auth.app_key_sign_in is off, so keys can still be reviewed and revoked."
 	list.Errors = []int{http.StatusForbidden}
 	Register(reg, Operation{Operation: list, Class: ClassAuthenticated, ServiceBacked: true}, reg.listAppKeys)
 
@@ -79,9 +79,9 @@ func registerAppKeyManagement(reg *Registry) {
 
 	replace := humaOp(http.MethodPut, Prefix+"/auth/keys/person", "replacePersonKey", "app-keys",
 		"Replace the signed-in account's person key.")
-	replace.Description = ownKeySessionRule + " A session opened by device sign-in or by another app's key is refused too. The old person key is revoked: new devices need the new one, and devices already enrolled keep their own keys. Sending the current key again changes nothing; a public key enrolled anywhere else on this server is 409 conflict. 409 capability_disabled while auth.app_key_sign_in is off."
+	replace.Description = ownKeySessionRule + " A session opened by device sign-in or by another app's key is refused too. The old person key is revoked: new devices need the new one, and devices already enrolled keep their own keys. Sending the current key again changes nothing; a public key enrolled anywhere else on this server is 409 conflict. 409 capability_disabled while auth.app_key_sign_in is off." + mainProfileRule
 	replace.Errors = []int{http.StatusForbidden, http.StatusConflict}
-	Register(reg, Operation{Operation: replace, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true}, reg.replacePersonKey)
+	Register(reg, mainProfileOnly(Operation{Operation: replace, RetrySafety: RetrySafetyNaturalIdempotent, ServiceBacked: true}), reg.replacePersonKey)
 }
 
 func (reg *Registry) listAppKeys(ctx context.Context, _ *struct{}) (*AppKeyListOutput, error) {
@@ -98,21 +98,26 @@ func (reg *Registry) listAppKeys(ctx context.Context, _ *struct{}) (*AppKeyListO
 		out.PersonKey = &AppPersonKey{KeyID: keys.Person.KeyID, EnrolledAt: NewInstant(keys.Person.CreatedAt)}
 	}
 	for _, key := range keys.Devices {
-		device := AppDeviceKey{
-			ID: key.ID, KeyID: key.KeyID, Kind: key.Kind, Name: key.Name, Platform: key.Platform, Status: key.Status,
-			EnrolledBy: enrolledBy(key.EnrolledVia), EnrolledAt: NewInstant(key.CreatedAt),
-		}
-		if key.EnrolledVia == models.AppKeyEnrolledGrant {
-			allowedBy := keys.AllowedBy
-			device.AllowedBy = &allowedBy
-		}
-		if key.LastUsedAt != nil {
-			used := NewInstant(*key.LastUsedAt)
-			device.LastUsedAt = &used
-		}
-		out.Devices = append(out.Devices, device)
+		out.Devices = append(out.Devices, appDeviceKeyOf(key, keys.AllowedBy))
 	}
 	return &AppKeyListOutput{Body: out}, nil
+}
+
+// appDeviceKeyOf is the device object of a key. allowedBy is the account
+// name shown beside a key a grant enrolled.
+func appDeviceKeyOf(key *models.AppDeviceKey, allowedBy string) AppDeviceKey {
+	device := AppDeviceKey{
+		ID: key.ID, KeyID: key.KeyID, Kind: key.Kind, Name: key.Name, Platform: key.Platform, Status: key.Status,
+		EnrolledBy: enrolledBy(key.EnrolledVia), EnrolledAt: NewInstant(key.CreatedAt),
+	}
+	if key.EnrolledVia == models.AppKeyEnrolledGrant {
+		device.AllowedBy = &allowedBy
+	}
+	if key.LastUsedAt != nil {
+		used := NewInstant(*key.LastUsedAt)
+		device.LastUsedAt = &used
+	}
+	return device
 }
 
 // enrolledBy is the wire spelling of how a key was enrolled.
@@ -140,6 +145,9 @@ func (reg *Registry) replacePersonKey(ctx context.Context, in *ReplacePersonKeyI
 	}
 	svc, err := reg.appKeysOn(ctx)
 	if err != nil {
+		return nil, err
+	}
+	if err := reg.requireVerifiedMainProfile(ctx, svc); err != nil {
 		return nil, err
 	}
 	key, err := appkeys.ParsePublicKey(in.Body.PersonKey)

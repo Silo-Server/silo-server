@@ -5,6 +5,8 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // AppKeyAnswer is an app key sign-in's answer before it is sealed: the
@@ -63,6 +65,42 @@ func (h *AuthHandler) RevokeOwnDeviceKey(ctx context.Context, claims *auth.Claim
 // ReplacePersonKey replaces the caller's person key.
 func (h *AuthHandler) ReplacePersonKey(ctx context.Context, claims *auth.Claims, key appkeys.PublicKey) error {
 	return h.appKeys.ReplacePersonKey(ctx, claims, key)
+}
+
+// ListPendingAppKeys lists the caller's device keys waiting for approval.
+func (h *AuthHandler) ListPendingAppKeys(ctx context.Context, claims *auth.Claims) ([]*models.AppDeviceKey, error) {
+	return h.appKeys.ListPendingKeys(ctx, claims)
+}
+
+// ApprovePendingAppKey approves one of the caller's waiting device keys.
+func (h *AuthHandler) ApprovePendingAppKey(ctx context.Context, claims *auth.Claims, id string) error {
+	return h.appKeys.ApprovePendingKey(ctx, claims, id)
+}
+
+// DenyPendingAppKey refuses one of the caller's waiting device keys.
+func (h *AuthHandler) DenyPendingAppKey(ctx context.Context, claims *auth.Claims, id string) error {
+	return h.appKeys.DenyPendingKey(ctx, claims, id)
+}
+
+// SetHouseholdStores wires the profile stores ActsAsVerifiedMainProfile
+// reads. Without them it refuses every caller.
+func (h *AuthHandler) SetHouseholdStores(stores userstore.UserStoreProvider) {
+	h.householdStores = stores
+}
+
+// ActsAsVerifiedMainProfile reports whether the request acts as the
+// account's household main profile, verified with its PIN when it has one.
+// It is the rule for every operation that creates lasting access to the
+// shared account (enrolling or replacing app keys, approving a waiting
+// device), and it is the household manager rule that disconnecting a sign-in
+// and creating a personal API key already apply (canManageHouseholdAs): a
+// named profile must be the primary one and pass verify; a request that names
+// none passes only from an administrator account whose profiles are all
+// unlimited (no PIN, no maturity or library limit). verify returns
+// access.ErrProfileUnverified for a PIN-locked main profile the request did
+// not verify.
+func (h *AuthHandler) ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, error) {
+	return mayManageHouseholdOf(ctx, h.householdStores, userID, activeProfileID, verify)
 }
 
 // appKeyAnswer adds the token view a signed-in result carries. Errors pass

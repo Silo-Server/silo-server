@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // fakeAppKeys answers the app key calls: the signed ones, the revocation and
@@ -29,7 +30,39 @@ type fakeAppKeys struct {
 	err     error
 	answer  *handlers.AppKeyAnswer
 	keys    auth.OwnAppKeys
-	calls   int
+	pending []*models.AppDeviceKey
+	// pendingErr is what the waiting-device operations answer.
+	pendingErr error
+	calls      int
+	// households backs the real main-profile rule; nil uses fakeHouseholds.
+	households userstore.UserStoreProvider
+}
+
+// ActsAsVerifiedMainProfile runs the production rule against the fake
+// households, so the route tests exercise it, not a stand-in.
+func (f *fakeAppKeys) ActsAsVerifiedMainProfile(ctx context.Context, userID int, profileID string, verify func(*userstore.Profile) error) (bool, error) {
+	rule := handlers.NewAuthHandler(nil, nil, nil)
+	if f.households != nil {
+		rule.SetHouseholdStores(f.households)
+	} else {
+		rule.SetHouseholdStores(fakeHouseholds{})
+	}
+	return rule.ActsAsVerifiedMainProfile(ctx, userID, profileID, verify)
+}
+
+func (f *fakeAppKeys) ListPendingAppKeys(context.Context, *auth.Claims) ([]*models.AppDeviceKey, error) {
+	f.calls++
+	return f.pending, f.pendingErr
+}
+
+func (f *fakeAppKeys) ApprovePendingAppKey(context.Context, *auth.Claims, string) error {
+	f.calls++
+	return f.pendingErr
+}
+
+func (f *fakeAppKeys) DenyPendingAppKey(context.Context, *auth.Claims, string) error {
+	f.calls++
+	return f.pendingErr
 }
 
 func (f *fakeAppKeys) AppKeySignInEnabled(context.Context) (bool, error) { return f.enabled, nil }
@@ -131,6 +164,9 @@ func TestAppKeyRoutesFollowTheSwitch(t *testing.T) {
 		{method: http.MethodPut, path: "/auth/keys/person", body: `{"person_key":"` + testPersonKey + `"}`, headers: bearer(memberToken)},
 		{method: http.MethodGet, path: "/auth/keys", headers: bearer(memberToken), open: http.StatusOK},
 		{method: http.MethodDelete, path: "/auth/keys/devices/0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", headers: bearer(memberToken), open: http.StatusNoContent},
+		{method: http.MethodPost, path: "/auth/keys/pending/0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11/approve", body: `{}`, headers: mainProfile(memberToken)},
+		{method: http.MethodGet, path: "/auth/keys/pending", headers: bearer(memberToken), open: http.StatusOK},
+		{method: http.MethodPost, path: "/auth/keys/pending/0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11/deny", body: `{}`, headers: bearer(memberToken), open: http.StatusNoContent},
 	} {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			keys := &fakeAppKeys{}
@@ -228,6 +264,7 @@ func TestAppKeyProblems(t *testing.T) {
 		{err: auth.ErrKeyOriginMismatch, want: TypeOriginMismatch},
 		{err: auth.ErrAppKeyDenied, want: TypeKeyDenied},
 		{err: auth.ErrAppKeyAlreadyEnrolled, want: TypeConflict},
+		{err: auth.ErrPendingKeyLimit, want: TypeConflict},
 		{err: auth.ErrLocalLoginDisabled, want: TypeLocalLoginDisabled},
 		{err: auth.ErrNotPermitted, want: TypeNotPermitted},
 		{err: auth.ErrProviderSignInRequired, want: TypeProviderSignInRequired},
@@ -343,7 +380,7 @@ func TestEnrollAppKeysBodyIsStrict(t *testing.T) {
 		{body: `{"person_key":"` + strings.Repeat("A", 87) + `","message":` + testEnvelope + `}`, location: "body.person_key"},
 	} {
 		keys := &fakeAppKeys{enabled: true}
-		p := requireProblem(t, do(t, NewHandler(appKeyDeps(keys)), http.MethodPost, Prefix+"/auth/keys/enroll", tc.body, bearer(memberToken)), TypeValidationFailed)
+		p := requireProblem(t, do(t, NewHandler(appKeyDeps(keys)), http.MethodPost, Prefix+"/auth/keys/enroll", tc.body, mainProfile(memberToken)), TypeValidationFailed)
 		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || keys.calls != 0 {
 			t.Fatalf("errors = %+v, calls %d; want location %s", p.Errors, keys.calls, tc.location)
 		}
@@ -359,7 +396,7 @@ func TestAppKeyPayloadErrorLocation(t *testing.T) {
 		headers              map[string]string
 	}{
 		{path: "/auth/keys/sign-in", body: testEnvelope, location: "body.payload"},
-		{path: "/auth/keys/enroll", body: `{"person_key":"` + testPersonKey + `","message":` + enrollEnvelope + `}`, headers: bearer(memberToken), location: "body.message.payload"},
+		{path: "/auth/keys/enroll", body: `{"person_key":"` + testPersonKey + `","message":` + enrollEnvelope + `}`, headers: mainProfile(memberToken), location: "body.message.payload"},
 	} {
 		keys := &fakeAppKeys{enabled: true, err: &appkeys.Error{Code: appkeys.CodeFieldInvalid}}
 		p := requireProblem(t, do(t, NewHandler(appKeyDeps(keys)), http.MethodPost, Prefix+tc.path, tc.body, tc.headers), TypeValidationFailed)

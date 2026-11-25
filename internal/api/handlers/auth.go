@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // AuthHandler handles authentication-related HTTP endpoints.
@@ -27,6 +28,9 @@ type AuthHandler struct {
 	checkPrimaryProfile  apimw.PrimaryProfileChecker
 	// appKeys signs devices in with app keys; nil until SetAppKeySignIn.
 	appKeys *auth.AppKeySignIn
+	// householdStores opens an account's profiles for the main-profile rule
+	// (ActsAsVerifiedMainProfile); nil refuses everyone.
+	householdStores userstore.UserStoreProvider
 }
 
 type accountPasswordService interface {

@@ -27,6 +27,11 @@ const (
 	// ActionApproveDeviceSignIn: approving a device sign-in that is waiting
 	// now.
 	ActionApproveDeviceSignIn
+	// ActionReadKeys: reading the account's key list or its waiting devices,
+	// and denying a waiting device. The list names every device the person
+	// signed in, which a TV or another app has no business seeing, and a TV
+	// must not refuse the administrator's new phone.
+	ActionReadKeys
 )
 
 // SessionOrigin is how a login session was opened.
@@ -71,10 +76,13 @@ func ReadSessionOrigin(ctx context.Context, db rowQuerier, claims *Claims) (Sess
 //
 // Every action refuses a session from a grant-enrolled app key: the app's
 // access ends when its key is revoked, so it must not mint access that would
-// outlive that. ActionManageKeys also refuses a session opened by device
-// sign-in (a TV or shared device holds it, not the person's own app), by an
-// administrator acting as the account, and one with no record of how it was
-// opened.
+// outlive that, nor read the person's devices. ActionManageKeys and
+// ActionReadKeys also refuse a session opened by device sign-in (a TV or
+// shared device holds it, not the person's own app), and one with no record
+// of how it was opened: only a session the person opened by password, by a
+// sign-in provider or with their own device key passes. SessionAllows
+// refuses an administrator acting as the account, an API key and a
+// remote-playback session before this runs.
 func (o SessionOrigin) Allows(action SessionAction) bool {
 	if o.GrantKey {
 		return false

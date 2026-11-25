@@ -333,6 +333,12 @@
 ./internal/auth TestKeySignInAdminWaitsForApprovalDB
 ./internal/auth TestSessionAllowsDB
 ./internal/auth TestKeyEnrollRulesDB
+./internal/auth TestPendingKeyApproveDB
+./internal/auth TestPendingKeyDenyDB
+./internal/auth TestPendingKeyRefusalsDB
+./internal/auth TestPendingKeyCapDB
+./internal/auth TestExpiredPendingKeySweepDB
+./internal/apiv2 TestKeyListRefusesDeviceSignInSessionDB
 ./internal/auth TestRevokeOwnDeviceKeyRulesDB
 ./internal/auth TestKeySignInLocalPasswordsOffDB
 ./internal/auth TestKeySessionContinuesProviderChainDB

@@ -393,10 +393,11 @@ func TestKeySignInAdminWaitsForApprovalDB(t *testing.T) {
 	}
 }
 
-// The session rule: changes that hand out lasting access are refused from a
-// session a device sign-in opened, from one another app's key opened, and
-// from one older than the record; approving a device sign-in refuses only
-// the app's.
+// The session rule: changes that hand out lasting access, and reading the
+// key list, are refused from a session a device sign-in opened, from one
+// another app's key opened, and from one older than the record; approving a
+// device sign-in refuses only the app's. An API key, an administrator acting
+// as the account and a remote-playback session are refused everything.
 func TestSessionAllowsDB(t *testing.T) {
 	env := newKeyEnv(t, "keyrule")
 	ctx := t.Context()
@@ -412,16 +413,25 @@ func TestSessionAllowsDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	keySession := &Claims{UserID: user.ID, SessionID: enrolled.Pair.SessionID, TokenType: TokenTypeAccess}
+	impersonated := *env.loginSession(t, user, models.SessionOpenedPassword, nil)
+	impersonator := user.ID + 1
+	impersonated.ImpersonatorUserID = &impersonator
+	remote := *env.loginSession(t, user, models.SessionOpenedPassword, nil)
+	remote.SessionPurpose = models.SessionPurposeRemotePlayback
 	for _, tc := range []struct {
-		name            string
-		claims          *Claims
-		manage, approve bool
+		name                  string
+		claims                *Claims
+		manage, approve, read bool
 	}{
-		{name: "password", claims: env.loginSession(t, user, models.SessionOpenedPassword, nil), manage: true, approve: true},
-		{name: "own app key", claims: keySession, manage: true, approve: true},
+		{name: "password", claims: env.loginSession(t, user, models.SessionOpenedPassword, nil), manage: true, approve: true, read: true},
+		{name: "provider", claims: env.loginSession(t, user, models.SessionOpenedProvider, nil), manage: true, approve: true, read: true},
+		{name: "own app key", claims: keySession, manage: true, approve: true, read: true},
 		{name: "device sign-in", claims: env.loginSession(t, user, models.SessionOpenedDeviceLogin, nil), approve: true},
 		{name: "older than the record", claims: env.loginSession(t, user, "", nil), approve: true},
 		{name: "another app's key", claims: grantSession},
+		{name: "administrator acting as the account", claims: &impersonated},
+		{name: "API key", claims: &Claims{UserID: user.ID, TokenType: TokenTypeAPIKey}},
+		{name: "remote playback", claims: &remote},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			allowed := func(action SessionAction, want bool) {
@@ -433,6 +443,7 @@ func TestSessionAllowsDB(t *testing.T) {
 			}
 			allowed(ActionManageKeys, tc.manage)
 			allowed(ActionApproveDeviceSignIn, tc.approve)
+			allowed(ActionReadKeys, tc.read)
 		})
 	}
 }

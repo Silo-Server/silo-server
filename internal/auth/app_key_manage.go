@@ -23,11 +23,11 @@ type OwnAppKeys struct {
 	AllowedBy string
 }
 
-// ListOwnKeys lists the keys of the claims' account, for the account's own
-// login session.
+// ListOwnKeys lists the keys of the claims' account, for a session the
+// person opened themselves (ActionReadKeys).
 func (a *AppKeySignIn) ListOwnKeys(ctx context.Context, claims *Claims) (OwnAppKeys, error) {
-	if !claims.IsOwnLoginSession() {
-		return OwnAppKeys{}, ErrSessionNotAllowed
+	if err := SessionAllows(ctx, a.pool, claims, ActionReadKeys); err != nil {
+		return OwnAppKeys{}, err
 	}
 	keys, err := a.keys.ListAccountKeys(ctx, claims.UserID)
 	if err != nil {
