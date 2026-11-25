@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -87,6 +89,43 @@ func TestAdminInsightsBreakdownsDB(t *testing.T) {
 	t.Run("library coverage", func(t *testing.T) { assertBreakdownsLibraryCoverageDB(t, h, s, month) })
 	t.Run("library breakdowns", func(t *testing.T) { assertBreakdownsLibraryPlaysDB(t, h, s, month) })
 	t.Run("library past window", func(t *testing.T) { assertBreakdownsLibraryPastWindowDB(t, h, pool, s) })
+}
+
+// Titles added at the same moment list, and are cut to the first 20, in
+// content_id's "C" order whatever the database's default collation: "B-x"
+// (upper case sorts first in C) leads and "a-20" is cut, where en_US would
+// list a-01..a-20 and cut "B-x".
+func TestInsightsLibraryUnplayedTieOrderDB(t *testing.T) {
+	pool := insightsTestPool(t)
+	ctx := t.Context()
+	at := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	ids := []string{"B-x"}
+	for i := 1; i <= 20; i++ {
+		ids = append(ids, fmt.Sprintf("a-%02d", i))
+	}
+	added := make([]insightsAddedTitle, 0, len(ids))
+	for _, id := range ids {
+		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title) VALUES ($1, 'movie', $1)`, id); err != nil {
+			t.Fatal(err)
+		}
+		added = append(added, insightsAddedTitle{contentID: id, addedAt: at})
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	out := &AdminInsightsLibrary{}
+	if err := queryInsightsLibraryUnplayed(ctx, tx, added, nil, out); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(out.RecentlyAddedUnplayed))
+	for _, u := range out.RecentlyAddedUnplayed {
+		got = append(got, u.ContentID)
+	}
+	if want := ids[:insightsLibraryUnplayedLimit]; !slices.Equal(got, want) {
+		t.Errorf("unplayed = %v, want %v", got, want)
+	}
 }
 
 // A window that ended before M2's first play: M2 is not played in it, but it
