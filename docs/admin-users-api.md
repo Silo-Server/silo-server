@@ -290,7 +290,7 @@ response replay; after an uncertain result, reload before starting another inten
 
 | Route below `/api/v2/admin` | Response |
 | --- | --- |
-| `GET /users/{id}/profiles` | Complete profile collection with string IDs, names, `has_pin`, `is_primary`, `is_child`, `last_seen_at`, and the `avatar`, `avatar_url` and `avatar_source` that `GET /api/v2/profiles` returns for the same profile |
+| `GET /users/{id}/profiles` | Complete profile collection with string IDs, `sync_id` (as on `GET /api/v2/profiles`), names, `has_pin`, `is_primary`, `is_child`, `last_seen_at`, and the `avatar`, `avatar_url` and `avatar_source` that `GET /api/v2/profiles` returns for the same profile |
 | `GET /users/{id}/api-keys` | Bounded metadata-only key collection; no stored credential |
 | `GET /users/{id}/ips` | Bounded IP history for one account, each address with its `location` |
 | `GET /ips?ip=...` | Bounded account history for one valid IP address |

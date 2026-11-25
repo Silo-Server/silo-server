@@ -331,7 +331,7 @@ func (f *fakeProfiles) VerifyPIN(_ context.Context, cmd handlers.ProfileVerifyPI
 
 func (f *fakeProfiles) UploadAvatar(_ context.Context, up handlers.ProfileAvatarUpload) (handlers.ProfileView, error) {
 	data, _ := io.ReadAll(up.File)
-	f.lastUpload = &fakeUpload{ProfileID: up.ProfileID, ContentType: up.ContentType, Size: len(data)}
+	f.lastUpload = &fakeUpload{ProfileID: up.ProfileID, ContentType: up.ContentType, Size: len(data), SourceSHA256: up.SourceSHA256}
 	if f.err != nil {
 		return handlers.ProfileView{}, f.err
 	}
@@ -364,9 +364,10 @@ func (f *fakeProfiles) DeleteAvatar(_ context.Context, _ int, profileID string) 
 }
 
 type fakeUpload struct {
-	ProfileID   string
-	ContentType string
-	Size        int
+	ProfileID    string
+	ContentType  string
+	Size         int
+	SourceSHA256 string
 }
 
 // fixtureProfilelessSession is a live session the reporting node attributed to

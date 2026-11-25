@@ -1,5 +1,6 @@
 {
   "id": "p-owner",
+  "sync_id": null,
   "name": "Laura",
   "avatar": "upload:avatars/1/p-owner/original",
   "avatar_url": "https://s3.example.test/avatars/1/p-owner/256.jpg",

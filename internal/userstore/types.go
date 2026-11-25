@@ -53,6 +53,15 @@ type Profile struct {
 	// service writes the rows.
 	AllowedTitleIDs    []string
 	MaxPlaybackQuality string
+	// SyncID is the profile's shared ID: a lower-case UUID that is the same
+	// for this profile on every server its person uses; "" when it has none.
+	SyncID string
+	// AvatarSourceSHA256 is the lower-case hex SHA-256 that names an uploaded
+	// avatar: the hash the uploader supplied, or of the bytes this server
+	// received. It is "" when the avatar is not an upload, and for an upload
+	// that predates the column until profileAvatarSourceSHA256 in the
+	// handlers records the hash of the stored original, a re-encoded file.
+	AvatarSourceSHA256 string
 	CreatedAt          string
 	UpdatedAt          string
 }
@@ -83,8 +92,14 @@ type DeviceEntry struct {
 
 // UpdateProfileInput holds optional fields for updating a profile.
 type UpdateProfileInput struct {
-	Name   *string
+	Name *string
+	// Avatar replaces the avatar reference. It also clears the avatar's
+	// source hash unless AvatarSourceSHA256 comes with it, so a hash never
+	// outlives the picture it names.
 	Avatar *string
+	// AvatarSourceSHA256 is the source hash of an uploaded avatar, written
+	// only together with Avatar; Profile.AvatarSourceSHA256 says what it is.
+	AvatarSourceSHA256 *string
 	// PINHash replaces the profile's PIN: a bcrypt hash the caller made
 	// (passwordhash.Generate) before opening any transaction, or "" to remove
 	// the PIN.

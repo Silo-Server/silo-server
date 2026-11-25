@@ -1,5 +1,6 @@
 {
   "id": "p-owner",
+  "sync_id": null,
   "name": "Laura",
   "avatar": "preset:fox",
   "avatar_url": "/avatars/presets/fox.png",

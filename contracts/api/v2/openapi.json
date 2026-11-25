@@ -1996,10 +1996,19 @@
           },
           "name": {
             "type": "string"
+          },
+          "sync_id": {
+            "description": "The profile's shared ID: a lower-case UUID that is the same for this profile on every server its person uses; null when the profile has none",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "id",
+          "sync_id",
           "name",
           "has_pin",
           "is_primary",
@@ -51352,6 +51361,17 @@
             ],
             "type": "string"
           },
+          "sync_id": {
+            "description": "The profile's shared ID: a lower-case UUID that is the same for this profile on every server its person uses, so apps can line up one person's profiles across servers. null when the profile has none",
+            "examples": [
+              "0f8fad5b-d9cb-469f-a165-70867728950e"
+            ],
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "updated_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "examples": [
@@ -51365,6 +51385,7 @@
         },
         "required": [
           "id",
+          "sync_id",
           "name",
           "has_pin",
           "is_child",
@@ -51401,6 +51422,11 @@
             "contentMediaType": "application/octet-stream",
             "description": "The image; resized server-side to the avatar variants",
             "format": "binary",
+            "type": "string"
+          },
+          "source_sha256": {
+            "description": "SHA-256 of the picture's file as it was first uploaded, on this server or another, as 64 lower-case hexadecimal characters. A device copying a profile's picture from another server sends it so both servers name the picture by the same hash. Without it the server stores the hash of the bytes it received",
+            "pattern": "^[0-9a-f]{64}$",
             "type": "string"
           }
         },
@@ -219023,6 +219049,9 @@
               "encoding": {
                 "avatar": {
                   "contentType": "image/jpeg,image/png,image/webp"
+                },
+                "source_sha256": {
+                  "contentType": "text/plain"
                 }
               },
               "schema": {
