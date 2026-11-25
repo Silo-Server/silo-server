@@ -412,7 +412,8 @@ its payload. The challenge is spent once the signature verifies. Then:
   the claim revokes, then the new account's rows. Accepting with a password
   and issuing a code take the settings lock first too, before any invitation
   or code row, so all three run one after the other and the rows each locks
-  after it can't close a cycle. It spends the code, claims the
+  after it can't close a cycle. The hourly cleanup of expired codes never
+  waits: it skips a code row a request holds (`FOR UPDATE SKIP LOCKED`). It spends the code, claims the
   invitation through the same claim accept uses (re-checked: it may have been
   revoked, resent or expired since), creates the account with no password and
   the invitation's role, libraries, access group and first-profile choice,

@@ -80,7 +80,10 @@ const grantUseRetention = time.Hour
 // DeleteExpiredChallenges removes challenges that expired unspent, the IDs
 // of used grants past their exp and grantUseRetention, and app codes past
 // their expiry, spent or not, for the retention step. A spent challenge has
-// no row left.
+// no row left. The challenge and grant deletes may wait, but no request holds
+// one of their rows while it waits on anything: a challenge is spent by one
+// statement, and a grant redemption holds only the fresh row it inserted.
+// The app code delete skips rows a request holds.
 func (c *KeyChallenges) DeleteExpiredChallenges(ctx context.Context) (int, error) {
 	tag, err := c.pool.Exec(ctx, `DELETE FROM auth_key_challenges WHERE expires_at < NOW()`)
 	if err != nil {
@@ -91,7 +94,12 @@ func (c *KeyChallenges) DeleteExpiredChallenges(ctx context.Context) (int, error
 	if err != nil {
 		return int(tag.RowsAffected()), fmt.Errorf("deleting expired grant uses: %w", err)
 	}
-	codes, err := c.pool.Exec(ctx, `DELETE FROM auth_app_codes WHERE expires_at < NOW()`)
+	// Never waits: issuing a code deletes its invitation's own code and then
+	// other expired codes for the name, holding the first while it waits on
+	// the second, so a cleanup that waited could close a cycle with it. A
+	// row it skips is being deleted by that request, or goes next hour.
+	codes, err := c.pool.Exec(ctx, `DELETE FROM auth_app_codes WHERE code_hash IN (
+		SELECT code_hash FROM auth_app_codes WHERE expires_at < NOW() FOR UPDATE SKIP LOCKED)`)
 	if err != nil {
 		return int(tag.RowsAffected() + grants.RowsAffected()), fmt.Errorf("deleting expired app codes: %w", err)
 	}

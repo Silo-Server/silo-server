@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -281,5 +283,49 @@ func TestRedeemAppCodeKeyEnrolledDB(t *testing.T) {
 				t.Fatalf("the same code with the keys made again: %v", err)
 			}
 		})
+	}
+}
+
+// The hourly cleanup of expired app codes never waits for a row a request
+// holds: issuing a code holds its invitation's own expired code while it
+// deletes other expired codes for the name, so a cleanup that waited could
+// deadlock with it. It skips the held row and deletes the rest.
+func TestAppCodeCleanupSkipsHeldRowsDB(t *testing.T) {
+	env := newKeyEnv(t, "appcodeclean")
+	ctx := t.Context()
+	user := env.localAccount(t, "appcodeclean-user", models.RoleUser)
+	expired := func() []byte {
+		_, hash, err := newAppCode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := env.pool.Exec(ctx, `INSERT INTO auth_app_codes (code_hash, kind, user_id, expires_at)
+			VALUES ($1, $2, $3, NOW() - INTERVAL '1 minute')`, hash, appCodeKindSession, user.ID); err != nil {
+			t.Fatal(err)
+		}
+		return hash
+	}
+	held, other := expired(), expired()
+	tx, err := env.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // nothing to keep
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM auth_app_codes WHERE code_hash = $1 FOR UPDATE`, held); err != nil {
+		t.Fatal(err)
+	}
+	// A wait would block until the deadline; the cleanup must return first.
+	cleanupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if _, err := NewKeyChallenges(env.pool).DeleteExpiredChallenges(cleanupCtx); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	var heldLeft, otherLeft bool
+	if err := env.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM auth_app_codes WHERE code_hash = $1),
+		EXISTS (SELECT 1 FROM auth_app_codes WHERE code_hash = $2)`, held, other).Scan(&heldLeft, &otherLeft); err != nil {
+		t.Fatal(err)
+	}
+	if !heldLeft || otherLeft {
+		t.Fatalf("held row left %v (want true), other expired row left %v (want false)", heldLeft, otherLeft)
 	}
 }

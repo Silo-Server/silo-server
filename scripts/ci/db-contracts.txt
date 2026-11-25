@@ -358,6 +358,7 @@
 ./internal/auth TestDeadPersonKeyDoesNotBlockEnrollDB
 ./internal/auth TestRedeemSessionAppCodeDB
 ./internal/auth TestRedeemAppCodeKeyEnrolledDB
+./internal/auth TestAppCodeCleanupSkipsHeldRowsDB
 ./internal/auth TestIssueSessionAppCodeRefusalsDB
 ./internal/auth TestSessionKeyAccessDB
 ./internal/auth TestAdminUnlinkLocksIdentityBeforeKeysDB
