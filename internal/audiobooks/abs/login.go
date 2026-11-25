@@ -750,6 +750,19 @@ func (h *Handler) revokeLogoutPrincipal(r *http.Request) {
 		slog.DebugContext(r.Context(), "abs logout: parse failed", "component", "audiobooks", "err", err)
 		return
 	}
+	if restricted, err := h.demoRestricted(r.Context(), claims.UserID); err != nil || restricted {
+		// Demo visitors share one account and profile: end only the
+		// presented token. A refresh token is a row of its own, and no
+		// playback session records which token opened it, so neither is
+		// touched. A setting that can't be read is treated the same way.
+		if err != nil {
+			slog.WarnContext(r.Context(), "abs logout: reading demo mode failed", "component", "audiobooks", "err", err)
+		}
+		if err := h.deps.TokenStore.RevokeTokenByJTI(r.Context(), claims.JTI); err != nil {
+			slog.WarnContext(r.Context(), "abs logout: revoke token failed", "component", "audiobooks", "jti", claims.JTI, "err", err)
+		}
+		return
+	}
 	if err := h.deps.TokenStore.RevokeTokensForPrincipal(r.Context(), claims.UserID, claims.ProfileID); err != nil {
 		slog.WarnContext(r.Context(), "abs logout: revoke principal tokens failed", "component", "audiobooks", "jti", claims.JTI, "user", claims.UserID, "err", err)
 		return
@@ -760,4 +773,27 @@ func (h *Handler) revokeLogoutPrincipal(r *http.Request) {
 		}
 	}
 	slog.DebugContext(r.Context(), "abs logout: revoked principal tokens", "component", "audiobooks", "jti", claims.JTI, "user", claims.UserID)
+}
+
+// demoRestricted reports whether demo mode is on and userID is not an
+// administrator. An error means it could not be told; the caller restricts.
+func (h *Handler) demoRestricted(ctx context.Context, userID string) (bool, error) {
+	if h.deps.DemoSettings == nil {
+		return false, nil
+	}
+	enabled, err := h.deps.DemoSettings.Get(ctx, "demo.enabled")
+	if err != nil {
+		return true, err
+	}
+	if enabled != "true" {
+		return false, nil
+	}
+	if h.deps.AccountIsAdmin == nil {
+		return true, nil
+	}
+	admin, err := h.deps.AccountIsAdmin(ctx, userID)
+	if err != nil {
+		return true, err
+	}
+	return !admin, nil
 }
