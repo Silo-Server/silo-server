@@ -1122,8 +1122,10 @@ request arrived on.
   that isn't the email the same request gives is 422 at `body.username`. A
   name or email already held, or reserved by another unspent code, is 409
   `conflict` with `errors[0]` `{ "code": "duplicate", "location":
-  "body.username" }` or `"body.email"`, naming the field that clashed. An
-  invitation that creates a profile the store can't create in the same
+  "body.username" }` or `"body.email"`, naming the field that clashed. A
+  code that is expired, or whose invitation was accepted, revoked, resent or
+  has expired, reserves nothing: it is deleted when another code asks for its
+  name or email. An invitation that creates a profile the store can't create in the same
   transaction is 501 `capability_unsupported`, as accept answers. While local password
   sign-in is off it is 409 `provider_sign_in_required`: an invitation never
   creates an account whose only way in is its keys. Spends the `invitation`
@@ -1167,7 +1169,7 @@ rolls it back, so it stays good until it expires.
 | 401 `signature_invalid` because the signature doesn't verify by `person_key` | not spent | not spent |
 | 401 `signature_invalid` after the signature verified (`kid` isn't `person_key`'s ID, wrong `server_id` or purpose, outside `iat` and `exp`), 422 at `body.message.payload`, 403 `origin_mismatch` | spent | not spent |
 | 401 `challenge_invalid` | (already unusable) | not spent |
-| 404 `app_code_invalid` | spent | unknown, used or expired already; a code whose invitation or session can no longer be used stays unspent but can never succeed |
+| 404 `app_code_invalid` | spent | unknown, used or expired already. A code whose session ended, or whose invitation was accepted, revoked, resent or expired, can't succeed; a join code like that is deleted once another code is issued for its name or email, and answers the same |
 | 409 `conflict` (`duplicate` or `key_enrolled`), 409 `provider_sign_in_required`, 501 `capability_unsupported`, 403 `permission_denied` (the account is disabled), 503 | spent | not spent |
 | 200 | spent | spent |
 

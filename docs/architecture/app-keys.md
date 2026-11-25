@@ -382,7 +382,12 @@ There are two kinds:
   invitation replaces the first. The reservation is advisory: a partial unique
   index on the reserved name among unspent codes stops two joins choosing one
   name, and the account insert at redeem decides, so a name an administrator
-  creates in between refuses the redeem with `conflict`. An emailed
+  creates in between refuses the redeem with `conflict`. Only a live code
+  reserves: issuing first deletes, under the settings lock, the unspent join
+  codes for the same name or email that are expired or whose invitation can
+  no longer be claimed (accepted, revoked, resent, superseded or expired), so
+  a resent or revoked invitation doesn't hold its invitee's name for the rest
+  of its code's ten minutes; such a code could never be redeemed. An emailed
   invitation's account takes its address as name and email, as accept gives
   it; for an invitation with no address the person chooses a username, and an
   email is optional. A username containing `@` must be the email the same
