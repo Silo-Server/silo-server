@@ -345,21 +345,21 @@ func (a *AppKeySignIn) RedeemAppCode(ctx context.Context, req KeyRedeemRequest) 
 }
 
 // redeemJoin creates the account a join code describes and enrolls both
-// keys on it. Lock order: the invitation, the settings lock, the code, then
-// the new account's rows. Issuing a code takes the invitation, the settings
-// lock (the claim check) and then code rows, other invitations' expired
-// reservations included, so both take them in one order.
+// keys on it. Lock order: the settings lock, the invitation, the code, then
+// other invitations the claim supersedes and the new account's rows. Every
+// invitation claim and every app code issue takes the settings lock before
+// any invitation or code row, so they run one after the other.
 func (a *AppKeySignIn) redeemJoin(ctx context.Context, req KeyRedeemRequest, payload *appkeys.Payload, hash []byte, code appCodeRow, out *KeySignInResult) error {
 	if a.joins == nil {
 		return ErrAppCodeInvalid
 	}
 	expiry := time.Now().Add(a.service.jwt.RefreshExpiry())
 	return a.inTx(ctx, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT 1 FROM invitations WHERE id = $1 FOR UPDATE`, *code.invitationID); err != nil {
-			return fmt.Errorf("locking invitation: %w", err)
-		}
 		if err := lockServerSettings(ctx, tx); err != nil {
 			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM invitations WHERE id = $1 FOR UPDATE`, *code.invitationID); err != nil {
+			return fmt.Errorf("locking invitation: %w", err)
 		}
 		if err := spendAppCode(ctx, tx, hash); err != nil {
 			return err

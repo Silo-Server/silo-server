@@ -397,6 +397,7 @@
 ./internal/invitations TestJoinWithAppCodeDB
 ./internal/invitations TestJoinWithAppCodeRefusalsDB
 ./internal/invitations TestJoinWithAppCodeConcurrentRedeemDB
+./internal/invitations TestJoinRedeemTakesSettingsLockFirstDB
 
 # Audiobookshelf-compatible tokens minted while the account is signed out everywhere do not outlive it.
 ./internal/audiobooks TestABSTokensMintedDuringSignOutEverywhereDB

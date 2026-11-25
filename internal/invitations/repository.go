@@ -248,6 +248,9 @@ func (r *Repository) AcceptAs(ctx context.Context, tokenHash string, linkAddress
 		return nil, err
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	if err := auth.LockServerSettingsInTransaction(ctx, tx); err != nil {
+		return nil, err
+	}
 	inv, err := scanInvitation(tx.QueryRow(ctx, `SELECT `+invitationColumns+invitationFrom+`WHERE i.token_hash=$1 FOR UPDATE OF i`, tokenHash))
 	if err != nil {
 		return nil, err
@@ -269,6 +272,9 @@ func (r *Repository) AcceptAs(ctx context.Context, tokenHash string, linkAddress
 // transaction, as AcceptAs claims one by token: an app code's join, which
 // creates its account in the same transaction as the app's keys.
 func (r *Repository) ClaimByIDTx(ctx context.Context, tx pgx.Tx, id int64, linkAddress func() (string, error), provision func(*models.Invitation, pgx.Tx) (*models.User, error)) (*models.User, error) {
+	if err := auth.LockServerSettingsInTransaction(ctx, tx); err != nil {
+		return nil, err
+	}
 	inv, err := scanInvitation(tx.QueryRow(ctx, `SELECT `+invitationColumns+invitationFrom+`WHERE i.id=$1 FOR UPDATE OF i`, id))
 	if err != nil {
 		return nil, err
@@ -282,6 +288,9 @@ func (r *Repository) ClaimByIDTx(ctx context.Context, tx pgx.Tx, id int64, linkA
 // under the settings lock): the checks claimTx starts with, for issuing an
 // app code.
 func (r *Repository) LockClaimableByTokenTx(ctx context.Context, tx pgx.Tx, tokenHash string) (*models.Invitation, error) {
+	if err := auth.LockServerSettingsInTransaction(ctx, tx); err != nil {
+		return nil, err
+	}
 	inv, err := scanInvitation(tx.QueryRow(ctx, `SELECT `+invitationColumns+invitationFrom+`WHERE i.token_hash=$1 FOR UPDATE OF i`, tokenHash))
 	if err != nil {
 		return nil, err
@@ -311,14 +320,14 @@ func checkClaimableTx(ctx context.Context, tx pgx.Tx, inv *models.Invitation) er
 	return auth.EnsureLocalPasswordLoginAllowedInTransaction(ctx, tx)
 }
 
-// claimTx is the claim both accept and an app code's join make, inv's row
-// locked: it re-checks the invitation, provisions the account and marks the
+// claimTx is the claim both accept and an app code's join make. The caller
+// took the settings lock, then inv's row: it re-checks the invitation, provisions the account and marks the
 // invitation accepted. For a link invitation linkAddress supplies the
 // address the account takes, and every other live invitation for that
 // address is revoked before provision runs; an empty address (a join with no
-// email) supersedes nothing. Taking those row locks before the account
-// insert keeps the lock order of emailed acceptance (invitation row, then
-// account), so a concurrent claim of both cannot deadlock.
+// email) supersedes nothing. Every claim, and every app code issue, takes the
+// settings lock before any invitation row, so two claims run one after the
+// other and the other invitations' rows locked here can't close a cycle.
 func claimTx(ctx context.Context, tx pgx.Tx, inv *models.Invitation, linkAddress func() (string, error), provision func(*models.Invitation, pgx.Tx) (*models.User, error)) (*models.User, error) {
 	if err := checkClaimableTx(ctx, tx, inv); err != nil {
 		return nil, err

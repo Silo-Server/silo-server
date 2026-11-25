@@ -402,10 +402,12 @@ body is `{ person_key, message }`, a `redeem` envelope signed with
 `person_key`'s private half, with `device_sig`, on a challenge, the code in
 its payload. The challenge is spent once the signature verifies. Then:
 
-- A join runs in one transaction, locking the invitation, then the settings
-  lock, then the code, the order issuing a code takes them in (issuing also
-  deletes other invitations' expired reservations, after the settings lock):
-  it spends the code, claims the
+- A join runs in one transaction. Lock order: the settings lock, the
+  invitation, the code, then the other invitations for the same address that
+  the claim revokes, then the new account's rows. Accepting with a password
+  and issuing a code take the settings lock first too, before any invitation
+  or code row, so all three run one after the other and the rows each locks
+  after it can't close a cycle. It spends the code, claims the
   invitation through the same claim accept uses (re-checked: it may have been
   revoked, resent or expired since), creates the account with no password and
   the invitation's role, libraries, access group and first-profile choice,

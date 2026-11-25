@@ -2,6 +2,8 @@ package invitations
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -317,4 +319,93 @@ func restoreSetting(t *testing.T, pool *pgxpool.Pool, key string) func() {
 		}
 		_, _ = pool.Exec(ctx, `UPDATE server_settings SET value = $2 WHERE key = $1`, key, *value)
 	}
+}
+
+// waitForSettingsLockWaiter waits until another backend of this database is
+// blocked on an advisory lock: the settings lock every claim takes first.
+func waitForSettingsLockWaiter(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var waiting bool
+		if err := pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_locks l
+			JOIN pg_database d ON d.oid = l.database
+			WHERE l.locktype = 'advisory' AND NOT l.granted AND d.datname = current_database())`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("the redeem never waited for the settings lock")
+}
+
+// A join redeem that supersedes another invitation for its address, racing
+// a request on that other invitation (here a code being issued for it).
+// Every claim and issue takes the settings lock before any invitation row,
+// so the redeem waits at the settings lock holding no row: while it waits,
+// the other request can still lock the redeem's own invitation and code. The
+// old order (invitation and code first) held them there, and the pair could
+// deadlock once the redeem went on to the other invitation's row.
+func TestJoinRedeemTakesSettingsLockFirstDB(t *testing.T) {
+	env := newJoinEnv(t)
+	ctx := t.Context()
+	address := env.name("racer") + "@example.test"
+	linkToken, link := env.invite(t, models.RoleUser)
+	issued, err := env.svc.IssueAppCode(ctx, AppCodeRequest{Token: linkToken, Username: env.name("racer"), Email: address})
+	if err != nil {
+		t.Fatal(err)
+	}
+	emailedToken := fmt.Sprintf("join-%s-emailed", env.suffix)
+	emailed, err := env.svc.repo.Create(ctx, models.CreateInvitationInput{Email: address, Role: models.RoleUser, InvitedBy: int64(env.inviter),
+		ExpiresAt: time.Now().Add(time.Hour)}, HashToken(emailedToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	other, err := env.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	if _, err := env.svc.claims.LockClaimableByTokenTx(ctx, other, HashToken(emailedToken)); err != nil {
+		t.Fatal(err)
+	}
+	redeemed := make(chan error, 1)
+	go func() {
+		_, err := env.redeem(t, issued.Code)
+		redeemed <- err
+	}()
+	waitForSettingsLockWaiter(t, env.pool)
+	hash, _ := appCodeHashForTest(issued.Code)
+	if _, err := other.Exec(ctx, `SELECT 1 FROM invitations WHERE id = $1 FOR UPDATE NOWAIT`, link.ID); err != nil {
+		t.Fatalf("the waiting redeem holds its invitation's row: %v", err)
+	}
+	if _, err := other.Exec(ctx, `SELECT 1 FROM auth_app_codes WHERE code_hash = $1 FOR UPDATE NOWAIT`, hash); err != nil {
+		t.Fatalf("the waiting redeem holds its code's row: %v", err)
+	}
+	if err := other.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-redeemed; err != nil {
+		t.Fatalf("redeem after the other request ended: %v", err)
+	}
+	if !env.invitationAccepted(t, link.ID) {
+		t.Fatal("the link invitation is still open")
+	}
+	var revoked bool
+	if err := env.pool.QueryRow(ctx, `SELECT revoked_at IS NOT NULL FROM invitations WHERE id = $1`, emailed.ID).Scan(&revoked); err != nil || !revoked {
+		t.Fatalf("the emailed invitation for the same address was not superseded: %v, %v", revoked, err)
+	}
+}
+
+// appCodeHashForTest is the stored hash of a code.
+func appCodeHashForTest(code string) ([]byte, bool) {
+	raw, err := base64.RawURLEncoding.DecodeString(code)
+	if err != nil {
+		return nil, false
+	}
+	sum := sha256.Sum256(raw)
+	return sum[:], true
 }
