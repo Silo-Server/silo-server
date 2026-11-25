@@ -540,3 +540,23 @@ func mapAuthError(err error) error {
 	}
 	return err
 }
+
+// SignInProfile is what bare-name sign-in reads of a profile.
+type SignInProfile struct {
+	Name   string
+	HasPIN bool
+}
+
+// BareNameSelectsProfile reports whether signing in with the bare account
+// name, no #profile suffix, selects one of these profiles: the one profile
+// named like the account; failing that, the one profile with no PIN.
+// Otherwise the person must sign in as account#Name. It is selectProfile's
+// own rule, so the two can't drift.
+func BareNameSelectsProfile(accountUsername string, profiles []SignInProfile) bool {
+	candidates := make([]upstreamProfile, len(profiles))
+	for i, p := range profiles {
+		candidates[i] = upstreamProfile{Name: p.Name, HasPIN: p.HasPIN}
+	}
+	_, err := selectProfile(accountUsername, "", false, candidates)
+	return err == nil
+}
