@@ -751,6 +751,7 @@
 # secrets spend the request's own budget and never change it.
 ./internal/auth TestDevicePreapprovalRedeemDB
 ./internal/auth TestDevicePreapprovalRefusedDB
+./internal/auth TestDevicePreapprovalWithdrawnWithSessionDB
 ./internal/auth TestDevicePreapprovalProviderIdentityDB
 ./internal/auth TestDevicePreapprovalCapDB
 ./internal/auth TestDevicePreapprovalWrongSecretBudgetDB

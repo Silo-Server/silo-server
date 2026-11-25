@@ -183,83 +183,10 @@ func TestDevicePreapprovalRefusedDB(t *testing.T) {
 		t.Fatalf("list after revoke = %+v, %v", list, err)
 	}
 
-	// Ending the one session that approved a sign-in withdraws it, and leaves
-	// what the account approved from another session.
-	otherPhone := preapprovalApprover(t, svc, userID, nil, nil)
-	endedSecret, endedBinding := preapprovalSecret(t)
-	ended, err := svc.Preapprove(otherPhone, DevicePreapprovalInput{DeviceName: name("ended"), Binding: endedBinding}, userID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	endedSession := ClaimsFromContext(otherPhone).SessionID
-	if err := svc.sessions.revokeChecked(t.Context(), endedSession, func(*models.AuthSession) error { return nil },
-		func(pgx.Tx, *models.AuthSession) (*auditmutation.Entry, error) { return nil, nil }); err != nil {
-		t.Fatal(err)
-	}
-	// So does that session logging itself out, or a caller holding someone
-	// else's session could approve a sign-in and leave no session to end.
-	loggedOutPhone := preapprovalApprover(t, svc, userID, nil, nil)
-	loggedOutSecret, loggedOutBinding := preapprovalSecret(t)
-	loggedOut, err := svc.Preapprove(loggedOutPhone, DevicePreapprovalInput{DeviceName: name("logged out"), Binding: loggedOutBinding}, userID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.sessions.Revoke(t.Context(), ClaimsFromContext(loggedOutPhone).SessionID); err != nil {
-		t.Fatal(err)
-	}
-	// An administrator ending that one session withdraws them as well.
-	var adminID int
-	if err := pool.QueryRow(t.Context(), `INSERT INTO users (username, email, password_hash, role, enabled)
-		VALUES ($1, $2, 'x', 'admin', true) RETURNING id`, name("admin"), name("admin")+"@example.invalid").Scan(&adminID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.WithoutCancel(t.Context()), `DELETE FROM users WHERE id = $1`, adminID)
-	})
-	adminEndedPhone := preapprovalApprover(t, svc, userID, nil, nil)
-	adminEndedSecret, adminEndedBinding := preapprovalSecret(t)
-	adminEnded, err := svc.Preapprove(adminEndedPhone, DevicePreapprovalInput{DeviceName: name("admin ended"), Binding: adminEndedBinding}, userID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	adminEndedSession := ClaimsFromContext(adminEndedPhone).SessionID
-	if _, err := svc.sessions.RevokeAsAdmin(t.Context(), adminID, userID, &adminEndedSession); err != nil {
-		t.Fatal(err)
-	}
-	// And so does revoking the app key that opened the session.
-	key, err := NewAppKeyRepository(pool).InsertDeviceKey(t.Context(), NewDeviceKey{
-		UserID: userID, PublicKey: newAppPublicKey(t), Kind: models.DeviceKeyKindDevice, Name: "Phone",
-		EnrolledVia: models.AppKeyEnrolledSession,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	keySession := models.AuthSession{ID: uuid.New().String(), UserID: userID, DeviceName: "key phone",
-		ExpiresAt: time.Now().Add(24 * time.Hour), DeviceKeyID: &key.ID}
-	if err := svc.sessions.Create(t.Context(), keySession); err != nil {
-		t.Fatal(err)
-	}
-	keyPhone := WithClaims(t.Context(), &Claims{UserID: userID, SessionID: keySession.ID, TokenType: TokenTypeAccess})
-	keyRevokedSecret, keyRevokedBinding := preapprovalSecret(t)
-	keyRevoked, err := svc.Preapprove(keyPhone, DevicePreapprovalInput{DeviceName: name("key revoked"), Binding: keyRevokedBinding}, userID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := NewAppKeyRepository(pool).RevokeDeviceKey(t.Context(), userID, key.ID); err != nil {
-		t.Fatal(err)
-	}
-	if got := preapprovalStatus(t, pool, keptID); got != DeviceLoginStatusApproved {
-		t.Fatalf("ending another session left the kept pre-approval %s", got)
-	}
-
 	_, oldCode, oldSecret := preapprove("old", -(DevicePreapprovalTTL + time.Hour))
 	for label, tc := range map[string]struct{ code, secret, want string }{
-		"revoked":                           {revokedCode, revokedSecret, DeviceLoginStatusDenied},
-		"session ended":                     {ended.DeviceCode, endedSecret, DeviceLoginStatusDenied},
-		"session logged out":                {loggedOut.DeviceCode, loggedOutSecret, DeviceLoginStatusDenied},
-		"session ended by an administrator": {adminEnded.DeviceCode, adminEndedSecret, DeviceLoginStatusDenied},
-		"app key revoked":                   {keyRevoked.DeviceCode, keyRevokedSecret, DeviceLoginStatusDenied},
-		"expired":                           {oldCode, oldSecret, DeviceLoginStatusExpired},
+		"revoked": {revokedCode, revokedSecret, DeviceLoginStatusDenied},
+		"expired": {oldCode, oldSecret, DeviceLoginStatusExpired},
 	} {
 		poll, err := svc.Poll(t.Context(), tc.code, tc.secret)
 		if err != nil || poll.TokenPair != nil || poll.Status != tc.want {
@@ -279,6 +206,80 @@ func TestDevicePreapprovalRefusedDB(t *testing.T) {
 	}
 	if poll, err := svc.Poll(t.Context(), disabledCode, disabledSecret); err != nil || poll.Status != DeviceLoginStatusDenied {
 		t.Fatalf("deleted approver: poll = %+v, %v", poll, err)
+	}
+}
+
+// TestDevicePreapprovalWithdrawnWithSessionDB: ending the one login session
+// that approved a sign-in in advance withdraws it, whichever way the session
+// ends, and leaves what the account approved from another session. Without
+// this a caller holding someone else's session could leave a sign-in behind
+// after the session was ended, or hide it by logging the session out.
+func TestDevicePreapprovalWithdrawnWithSessionDB(t *testing.T) {
+	svc, pool, userID, name := deviceLoginTestService(t)
+	keys := NewAppKeyRepository(pool)
+	// approve pre-approves from a new session of the account, opened by the
+	// device key when one is given, and returns that session's ID with the
+	// pre-approval's ID, device code and secret.
+	approve := func(label string, deviceKeyID *string) (session, id, code, secret string) {
+		t.Helper()
+		row := models.AuthSession{ID: uuid.New().String(), UserID: userID, DeviceName: "approving phone",
+			ExpiresAt: time.Now().Add(24 * time.Hour), DeviceKeyID: deviceKeyID}
+		if err := svc.sessions.Create(t.Context(), row); err != nil {
+			t.Fatal(err)
+		}
+		ctx := WithClaims(t.Context(), &Claims{UserID: userID, SessionID: row.ID, TokenType: TokenTypeAccess})
+		secret, binding := preapprovalSecret(t)
+		created, err := svc.Preapprove(ctx, DevicePreapprovalInput{DeviceName: name(label), Binding: binding}, userID)
+		if err != nil {
+			t.Fatalf("%s: preapprove: %v", label, err)
+		}
+		return row.ID, created.ID, created.DeviceCode, secret
+	}
+	var adminID int
+	if err := pool.QueryRow(t.Context(), `INSERT INTO users (username, email, password_hash, role, enabled)
+		VALUES ($1, $2, 'x', 'admin', true) RETURNING id`, name("admin"), name("admin")+"@example.invalid").Scan(&adminID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.WithoutCancel(t.Context()), `DELETE FROM users WHERE id = $1`, adminID)
+	})
+	key, err := keys.InsertDeviceKey(t.Context(), NewDeviceKey{
+		UserID: userID, PublicKey: newAppPublicKey(t), Kind: models.DeviceKeyKindDevice, Name: "Phone",
+		EnrolledVia: models.AppKeyEnrolledSession,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, keptID, _, _ := approve("kept", nil)
+	for label, end := range map[string]struct {
+		deviceKeyID *string
+		end         func(session string) error
+	}{
+		"ended from the session list": {end: func(session string) error {
+			return svc.sessions.revokeChecked(t.Context(), session, func(*models.AuthSession) error { return nil },
+				func(pgx.Tx, *models.AuthSession) (*auditmutation.Entry, error) { return nil, nil })
+		}},
+		"logged out": {end: func(session string) error { return svc.sessions.Revoke(t.Context(), session) }},
+		"ended by an administrator": {end: func(session string) error {
+			_, err := svc.sessions.RevokeAsAdmin(t.Context(), adminID, userID, &session)
+			return err
+		}},
+		"app key revoked": {deviceKeyID: &key.ID, end: func(string) error {
+			return keys.RevokeDeviceKey(t.Context(), userID, key.ID)
+		}},
+	} {
+		session, _, code, secret := approve(label, end.deviceKeyID)
+		if err := end.end(session); err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		poll, err := svc.Poll(t.Context(), code, secret)
+		if err != nil || poll.TokenPair != nil || poll.Status != DeviceLoginStatusDenied {
+			t.Fatalf("%s: poll = %+v, %v; want denied", label, poll, err)
+		}
+	}
+	if got := preapprovalStatus(t, pool, keptID); got != DeviceLoginStatusApproved {
+		t.Fatalf("ending other sessions left the kept pre-approval %s", got)
 	}
 }
 
