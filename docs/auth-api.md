@@ -801,8 +801,12 @@ through the provider once and the key works again. It is 403 `not_permitted`
 when the provider refused the person, 503 `provider_unavailable` while its
 provider is disabled or, under the fail-closed outage policy, unreachable, and
 503 `dependency_unavailable` with `Retry-After` when the check could not be
-made, as at refresh. Unlinking an identity or uninstalling its plugin revokes
-the keys bound to it, which then answer `signature_invalid`. A `device_name` or
+made, as at refresh. Unlinking an identity revokes the keys bound to it and
+ends the sessions they opened, at once. Uninstalling its plugin leaves those
+keys dead instead: the key list leaves them out, their next use revokes them,
+and a session one opened earlier lasts until the provider age limit, as any
+provider session whose identity is gone. Either way such a key answers
+`signature_invalid`. A `device_name` or
 `device_platform` holding a control character is 422. A disabled
 account is 403 `permission_denied`.
 
