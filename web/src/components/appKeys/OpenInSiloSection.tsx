@@ -28,12 +28,17 @@ export function OpenInSiloSection() {
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const [askPin, setAskPin] = useState(false);
+  // The server refused this session although the access answer said it may:
+  // the answer went stale (the session was replaced, say). Show the notice
+  // for this session, with the refreshed answer's sign-in-again choice.
+  const [denied, setDenied] = useState(false);
 
   if (!available || isImpersonating || access.isPending) return null;
 
   async function issue() {
     setPending(true);
     setFailed(null);
+    setDenied(false);
     try {
       setAppCode(await createSessionAppCode());
     } catch (error) {
@@ -41,9 +46,10 @@ export function OpenInSiloSection() {
       else if (error.problemType === "profile_verification_required") setAskPin(true);
       else if (error.problemType === "main_profile_required")
         setFailed(t("web.settings.openInSilo.mainProfileOnly"));
-      // The session answer went stale: ask again rather than guess why.
-      else if (error.problemType === "permission_denied") void access.refetch();
-      else setFailed(t("web.auth.appCode.failed"));
+      else if (error.problemType === "permission_denied") {
+        setDenied(true);
+        void access.refetch();
+      } else setFailed(t("web.auth.appCode.failed"));
     } finally {
       setPending(false);
     }
@@ -61,7 +67,7 @@ export function OpenInSiloSection() {
         </Button>
       </div>
     );
-  } else if (!access.data.manage) {
+  } else if (!access.data.manage || denied) {
     body = <SignInAgainNotice signInAgain={access.data.sign_in_again} />;
   } else if (appCode) {
     body = <OpenSiloStep appCode={appCode} onRenew={() => void issue()} renewing={pending} />;

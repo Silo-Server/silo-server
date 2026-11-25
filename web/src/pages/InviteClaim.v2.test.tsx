@@ -367,9 +367,9 @@ it("puts a taken email on the email field and moves focus there", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   const email = screen.getByLabelText("Email (optional)");
   await waitFor(() => expect(document.activeElement).toBe(email));
-  expect(screen.getByRole("alert")).toHaveTextContent(
-    "An account already uses this email address.",
-  );
+  // Read with the field it describes, not also announced as an alert.
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(email).toHaveAccessibleDescription(/An account already uses this email address\./);
 });
 
 it("moves focus to the Open Silo step when the code arrives", async () => {
@@ -379,4 +379,56 @@ it("moves focus to the Open Silo step when the code arrives", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   const heading = await screen.findByRole("heading", { name: "Open Silo" });
   await waitFor(() => expect(document.activeElement).toBe(heading));
+});
+
+it("moves focus to the renewal button when the code expires, and keeps a refused renewal on the step", async () => {
+  lookup = async () => json({ ...invitation, app_join: true });
+  let issued = 0;
+  appCode = async () =>
+    ++issued === 1 ? json({ ...issuedCode, expires_in: 1 }) : problemResponse(429, "rate_limited");
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  await screen.findByRole("link", { name: "Open Silo" });
+  const renew = await screen.findByRole("button", { name: "Get a new code" }, { timeout: 3000 });
+  await waitFor(() => expect(document.activeElement).toBe(renew));
+  fireEvent.click(renew);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Too many requests");
+  expect(screen.getByRole("heading", { name: "Open Silo" })).toBeTruthy();
+  await waitFor(() =>
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Get a new code" })),
+  );
+});
+
+it("returns to the form when a renewal finds the name taken", async () => {
+  lookup = async () => json({ ...linkInvitation, app_join: true });
+  let issued = 0;
+  appCode = async () =>
+    ++issued === 1
+      ? json({ ...issuedCode, expires_in: 1 })
+      : problemResponse(409, "conflict", {
+          errors: [{ location: "body.username", code: "duplicate", detail: "taken" }],
+        });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.change(screen.getByLabelText("Username"), { target: { value: "sam" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Get a new code" }, { timeout: 3000 }));
+  const username = await screen.findByLabelText("Username");
+  await waitFor(() => expect(document.activeElement).toBe(username));
+  expect(username).toHaveAccessibleDescription("That username is already in use. Choose another.");
+});
+
+it("says an emailed invitation's address is taken when its code is refused", async () => {
+  lookup = async () => json({ ...invitation, app_join: true });
+  appCode = async () =>
+    problemResponse(409, "conflict", {
+      errors: [{ location: "body.username", code: "duplicate", detail: "taken" }],
+    });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "An account already uses this email address.",
+  );
 });

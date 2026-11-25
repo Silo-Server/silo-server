@@ -39,20 +39,22 @@ export function InviteAppJoin({
   const chosen = useRef<{ username: string; email: string } | undefined>(undefined);
   const usernameInput = useRef<HTMLInputElement>(null);
   const emailInput = useRef<HTMLInputElement>(null);
-  const refusalRef = useRef<HTMLParagraphElement>(null);
+  const continueButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const controller = new AbortController();
     lifetime.current = controller;
     return () => controller.abort();
   }, []);
-  // The field the answer is about gets focus once the form is usable again:
-  // the button that was pressed may be gone, and the inputs were disabled.
+  // Once the form is usable again focus returns to it: the button that was
+  // pressed may be gone, and the inputs were disabled. A field's error is
+  // read with the field (aria-describedby), as other forms here do, so it
+  // isn't also an alert; a refusal that belongs to no field is the alert, and
+  // focus goes back to the form's first control without reading it twice.
   useEffect(() => {
-    if (pending) return;
-    if (fieldError?.field === "username") usernameInput.current?.focus();
-    else if (fieldError?.field === "email") emailInput.current?.focus();
-    else if (refusal) refusalRef.current?.focus();
-  }, [fieldError, refusal, pending]);
+    if (pending || appCode) return;
+    if (fieldError?.field === "email") emailInput.current?.focus();
+    else if (fieldError || refusal) (usernameInput.current ?? continueButton.current)?.focus();
+  }, [fieldError, refusal, pending, appCode]);
 
   // A refusal that belongs to a field sends the person back to the form.
   // The server names the field: a taken name is `duplicate` at body.username
@@ -89,6 +91,10 @@ export function InviteAppJoin({
         return t("web.auth.forgotPassword.rateLimited");
       case "capability_unsupported":
         return t("web.auth.invite.profileUnavailable");
+      case "conflict":
+        // An emailed invitation has no field to put it on: its address,
+        // the account's name, is taken since the invitation was sent.
+        return t("web.auth.invite.emailTaken");
       default:
         return t("web.auth.appCode.failed");
     }
@@ -134,7 +140,7 @@ export function InviteAppJoin({
   }
 
   const refusalAlert = refusal && (
-    <p ref={refusalRef} role="alert" tabIndex={-1} className="mb-4 outline-none">
+    <p role="alert" className="mb-4">
       {refusal}
     </p>
   );
@@ -157,6 +163,7 @@ export function InviteAppJoin({
           {t("web.auth.invite.appAccountEmail", { email: invitation.email })}
         </p>
         <Button
+          ref={continueButton}
           type="button"
           className="w-full"
           onClick={() => void issue()}
@@ -193,7 +200,7 @@ export function InviteAppJoin({
           autoFocus
         />
         {errorFor("username") && (
-          <p id="invite-app-username-error" role="alert" className="text-destructive text-xs">
+          <p id="invite-app-username-error" className="text-destructive text-xs">
             {errorFor("username")}
           </p>
         )}
@@ -217,7 +224,7 @@ export function InviteAppJoin({
           aria-describedby={errorFor("email") ? "invite-app-email-error" : undefined}
         />
         {errorFor("email") && (
-          <p id="invite-app-email-error" role="alert" className="text-destructive text-xs">
+          <p id="invite-app-email-error" className="text-destructive text-xs">
             {errorFor("email")}
           </p>
         )}

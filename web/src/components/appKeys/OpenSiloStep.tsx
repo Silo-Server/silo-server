@@ -57,6 +57,11 @@ function OpenSiloStepFor({
   useEffect(() => {
     if (expired && focusRenew.current) renew.current?.focus();
   }, [expired]);
+  // A renewal that was refused leaves the step as it was; the button was
+  // disabled while it ran, so focus that fell to the page comes back to it.
+  useEffect(() => {
+    if (!renewing && expired && document.activeElement === document.body) renew.current?.focus();
+  }, [renewing, expired]);
 
   return (
     <section ref={section} aria-labelledby="open-silo-title" className="space-y-3">

@@ -91,3 +91,25 @@ it("asks for the main profile's PIN and tries again", async () => {
   );
   await waitFor(() => expect(state.createSessionAppCode).toHaveBeenCalledTimes(2));
 });
+
+// The request isn't acting as the household's main profile: say so, rather
+// than the generic failure.
+it("says only the main profile can open Silo", async () => {
+  state.createSessionAppCode.mockRejectedValueOnce(problem("main_profile_required", 403));
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "Open in Silo" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Only the household’s main profile can open Silo",
+  );
+});
+
+// The server refused this session though the access answer said it may:
+// the person gets the notice for this session instead of a silent button.
+it("shows the session notice when the server refuses this sign-in", async () => {
+  state.createSessionAppCode.mockRejectedValueOnce(problem("permission_denied", 403));
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "Open in Silo" }));
+  expect(await screen.findByText("Manage your devices in the Silo app.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Open in Silo" })).toBeNull();
+  expect(state.access.refetch).toHaveBeenCalledTimes(1);
+});
