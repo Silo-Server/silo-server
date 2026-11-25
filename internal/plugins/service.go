@@ -486,8 +486,11 @@ func (s *Service) UpdateToAvailableVersion(ctx context.Context, installationID i
 
 	targetVersion := *installation.AvailableVersion
 
+	// A repository deleted after the caller's own read leaves the offer with
+	// nowhere to install it from: no update to apply, not a server error
+	// (#5237).
 	if installation.RepositoryID == nil || *installation.RepositoryID == 0 {
-		return nil, fmt.Errorf("plugin %q has no repository_id, cannot update from catalog", installation.PluginID)
+		return nil, fmt.Errorf("%w %q: it has no repository to update from", ErrNoUpdateAvailable, installation.PluginID)
 	}
 
 	_, err = s.installCatalog(ctx, InstallCatalogRequest{
