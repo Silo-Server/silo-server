@@ -328,15 +328,25 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
         {/* User. One line at every width, so the card never grows taller:
             the name truncates and the times keep their full width. */}
         <div className="mt-auto flex items-center gap-1.5">
-          <div
-            className="text-primary-foreground flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full text-[0.5625rem] font-bold"
-            style={{ background: `var(--primary)` }}
+          <Link
+            to={`/admin/users/${session.user_id}`}
+            title={username}
+            className="group flex min-w-0 items-center gap-1.5"
           >
-            {getInitial(username)}
-          </div>
-          <span dir="auto" className="min-w-0 truncate text-xs font-medium">
-            {username}
-          </span>
+            <div
+              aria-hidden="true"
+              className="text-primary-foreground flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full text-[0.5625rem] font-bold"
+              style={{ background: `var(--primary)` }}
+            >
+              {getInitial(username)}
+            </div>
+            <span
+              dir="auto"
+              className="group-hover:text-primary min-w-0 truncate text-xs font-medium transition-colors group-hover:underline"
+            >
+              {username}
+            </span>
+          </Link>
           <span className="text-muted-foreground ms-auto shrink-0 text-[0.625rem] whitespace-nowrap">
             <span className="tabular-nums">{position}</span>
             {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- punctuation separating two already-formatted times */}
