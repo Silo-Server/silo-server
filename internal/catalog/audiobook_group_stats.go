@@ -259,9 +259,13 @@ func RefreshAudiobookGroupStats(ctx context.Context, pool *pgxpool.Pool, skipWit
 	// effective_io_concurrency; during REFRESH MATERIALIZED VIEW CONCURRENTLY,
 	// a high server setting with default temp_buffers can pin every local
 	// buffer and fail with SQLSTATE 53000 ("no empty local buffer available").
-	// SET LOCAL caps prefetching for this refresh without leaking the GUC to
-	// pgxpool.
-	if _, err := tx.Exec(ctx, `SET LOCAL effective_io_concurrency = 16`); err != nil {
+	// Lower it to 16 for this transaction only, so the setting doesn't leak
+	// into the pool. A lower setting stays: raising it would undo an operator's
+	// tuning, and PostgreSQL 17 and older reject any nonzero value on platforms
+	// without posix_fadvise.
+	if _, err := tx.Exec(ctx, `
+		SELECT set_config('effective_io_concurrency', '16', true)
+		WHERE current_setting('effective_io_concurrency')::int > 16`); err != nil {
 		return false, fmt.Errorf("setting effective_io_concurrency for audiobook group stats refresh: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `REFRESH MATERIALIZED VIEW CONCURRENTLY audiobook_group_stats`); err != nil {
