@@ -305,12 +305,13 @@ func (ctxCommandHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.
 // waiting for that census to end by itself.
 func TestShutdownInterruptsInFlightReplicaUpdate(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		var stall atomic.Bool
+		var stall, stalled atomic.Bool
 		client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:6379"})
 		t.Cleanup(func() { _ = client.Close() })
 		client.AddHook(ctxCommandHook{process: func(ctx context.Context, cmd redis.Cmder) error {
 			if cmd, ok := cmd.(*redis.Cmd); ok {
 				if op := classifyLease(cmd); stall.Load() && (op == leaseCensusCount || op == leaseCensusTouch) {
+					stalled.Store(true)
 					<-ctx.Done()
 					cmd.SetErr(ctx.Err())
 					return ctx.Err()
@@ -324,10 +325,17 @@ func TestShutdownInterruptsInFlightReplicaUpdate(t *testing.T) {
 		cfg.RedisClient = client
 		cfg.ReplicaPresence = cache.NewAPIReplicaPresence(client, "api")
 		svc := New(t.Context(), cfg)
+		// New reads no settings; this first read starts the monitor and its census.
+		if err := svc.SettingsChanged(t.Context()); err != nil {
+			t.Fatal(err)
+		}
 		synctest.Wait()
 		stall.Store(true)
 		time.Sleep(censusInterval) //nolint:forbidigo // Advance synctest virtual time to the next census, which stalls.
 		synctest.Wait()
+		if !stalled.Load() {
+			t.Fatal("no census reached the stalled Redis call before Shutdown")
+		}
 		start := time.Now()
 		shutdownService(t, svc)
 		if elapsed := time.Since(start); elapsed != 0 {

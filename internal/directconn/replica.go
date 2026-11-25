@@ -302,8 +302,10 @@ func (m *replicaMonitor) update(ctx context.Context) (leaseFailed bool) {
 		m.logger.WarnContext(leaseCtx, "direct connections: engine lease unavailable", "component", "directconn", "error", leaseErr)
 	}
 	m.mu.Lock()
-	// The deadline is judged under the lock that the fence reads the window under,
-	// so a packet that latched the fence at the old deadline sees the new grant.
+	// The deadline is judged under the lock that the fence reads the window under.
+	// The fence reads the clock after that lock, so a renewal that commits on or
+	// just before the old deadline can still leave the fence latched while the
+	// grant stays held.
 	if renewed && time.Now().After(expires) {
 		m.lease.open(m.lease.lastRenew)
 	}
