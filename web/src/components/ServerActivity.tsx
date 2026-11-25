@@ -262,7 +262,7 @@ function ServerActivityContent({ hideWhenEmpty = false, className }: ServerActiv
                 <ActivitySection
                   title={t("web.admin.common.serverActivity.streams")}
                   count={sessions.length}
-                  href="/admin/activity"
+                  href="/admin/insights"
                   onNavigate={() => setOpen(false)}
                 >
                   {sessions.length > 0 ? (

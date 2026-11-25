@@ -126,7 +126,7 @@ func (h *AdminHandler) UpdateCatalogItemMetadata(ctx context.Context, contentID 
 
 	if h.EventBus != nil {
 		_ = h.EventBus.Publish(ctx, cache.ChannelAdmin,
-			cache.Event{Type: "item:updated", Payload: contentID})
+			cache.Event{Type: cache.EventItemUpdated, Payload: contentID})
 	}
 	publishCatalogItemChanged(ctx, h.EventBus, contentID)
 	if h.RealtimeHub != nil {

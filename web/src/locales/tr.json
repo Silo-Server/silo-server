@@ -8027,6 +8027,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kartlar"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Düzen"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tablo"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -48757,7 +48775,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "İzleme eğilimleri, popüler içerikler, hane etkinliği, cihazlarda oynatma ve bant genişliği."
+      "value": "Canlı akışlar, izleme eğilimleri, popüler içerikler, hane etkinliği, cihazlarda oynatma ve bant genişliği."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -80610,7 +80628,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "İzleme eğilimleri, popüler içerikler, hesaplar, cihazlar ve bant genişliği."
+      "value": "Canlı akışlar, izleme eğilimleri, popüler içerikler, hesaplar, cihazlar ve bant genişliği."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

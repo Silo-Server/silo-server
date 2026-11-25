@@ -91,9 +91,10 @@ type Stream struct {
 
 // Disposition is the subset of FFprobe disposition flags used by scans.
 type Disposition struct {
-	Default     int `json:"default"`
-	Forced      int `json:"forced"`
-	AttachedPic int `json:"attached_pic"`
+	Default         int `json:"default"`
+	Forced          int `json:"forced"`
+	HearingImpaired int `json:"hearing_impaired"`
+	AttachedPic     int `json:"attached_pic"`
 }
 
 // SideData describes FFprobe metadata attached to a stream.

@@ -579,7 +579,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 				Resolution:       subtitleResolutionLabel(s),
 				Forced:           s.Disposition.Forced == 1,
 				Default:          s.Disposition.Default == 1,
-				HearingImpaired:  dispositionFlag(s.Tags, "hearing_impaired"),
+				HearingImpaired:  s.Disposition.HearingImpaired == 1,
 			}
 			pd.SubtitleTracks = append(pd.SubtitleTracks, track)
 		}
@@ -1416,14 +1416,6 @@ func subtitleResolutionLabel(s ffprobeStream) string {
 		return ""
 	}
 	return fmt.Sprintf("%dx%d", s.Width, s.Height)
-}
-
-func dispositionFlag(tags map[string]string, key string) bool {
-	if tags == nil {
-		return false
-	}
-	value := strings.TrimSpace(strings.ToLower(tags[key]))
-	return value == "1" || value == "true" || value == "yes"
 }
 
 func firstNonEmpty(values ...string) string {

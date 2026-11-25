@@ -35,22 +35,37 @@ var allowedMDBListHosts = map[string]struct{}{
 }
 
 // NormalizeMDBListURL accepts either an MDBList page URL or its JSON variant
-// and returns the canonical JSON URL. Trailing slashes and accidental repeated
-// /json suffixes are tolerated. It does not validate the host; call
-// ValidateMDBListURL (or CanonicalMDBListURL) before fetching.
+// and returns the canonical JSON URL. /json goes at the end of the path, where
+// the feed needs it; a query string such as sort=rank is kept for the feed and a
+// fragment is dropped. Trailing slashes and repeated /json suffixes, in any
+// case, are tolerated. It does not validate the host; call ValidateMDBListURL
+// (or CanonicalMDBListURL) before fetching.
 func NormalizeMDBListURL(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+	// Trim after each cut: space before a removed #fragment or /json would
+	// otherwise survive this pass and be trimmed by the next.
+	raw, _, _ = strings.Cut(raw, "#")
+	path, query, _ := strings.Cut(strings.TrimSpace(raw), "?")
+	path = strings.TrimRight(path, "/")
+	for hasJSONSuffix(path) {
+		path = strings.TrimRight(path[:len(path)-len("/json")], "/")
+	}
+	if path == "" {
 		return ""
 	}
-	raw = strings.TrimRight(raw, "/")
-	for strings.HasSuffix(raw, "/json/json") {
-		raw = strings.TrimSuffix(raw, "/json")
+	// Earlier builds appended /json to the end of the query; drop it so a URL
+	// they stored recovers on its next sync. No feed parameter value ends in
+	// /json, and trimming every one keeps a second pass from changing the URL.
+	for strings.HasSuffix(query, "/json") {
+		query = strings.TrimSpace(strings.TrimSuffix(query, "/json"))
 	}
-	if !strings.HasSuffix(raw, "/json") {
-		raw += "/json"
+	if query != "" {
+		return path + "/json?" + query
 	}
-	return raw
+	return path + "/json"
+}
+
+func hasJSONSuffix(s string) bool {
+	return len(s) >= len("/json") && strings.EqualFold(s[len(s)-len("/json"):], "/json")
 }
 
 // CanonicalMDBListURL normalizes then allowlists the URL used for MDBList

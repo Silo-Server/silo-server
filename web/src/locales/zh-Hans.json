@@ -7814,6 +7814,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "卡片"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "布局"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "表格"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -43911,7 +43929,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "观看趋势、热门作品、家庭活动、设备播放和带宽。"
+      "value": "实时串流、观看趋势、热门作品、家庭活动、设备播放和带宽。"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -74583,7 +74601,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "观看趋势、热门作品、账户、设备和带宽。"
+      "value": "实时串流、观看趋势、热门作品、账户、设备和带宽。"
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

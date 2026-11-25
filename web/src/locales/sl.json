@@ -8521,6 +8521,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kartice"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Postavitev"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabela"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -60870,7 +60888,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Trendi ogledovanja, najbolj gledani naslovi, dejavnost gospodinjstva, predvajanje na napravah in pasovna širina."
+      "value": "Pretoki v živo, trendi ogledovanja, najbolj gledani naslovi, dejavnost gospodinjstva, predvajanje na napravah in pasovna širina."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -96001,7 +96019,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Trendi ogledovanja, najbolj gledani naslovi, računi, naprave in pasovna širina."
+      "value": "Pretoki v živo, trendi ogledovanja, najbolj gledani naslovi, računi, naprave in pasovna širina."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

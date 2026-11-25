@@ -8529,6 +8529,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Karty"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Rozloženie"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabuľka"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -61103,7 +61121,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Trendy sledovania, populárne tituly, aktivita domácnosti, prehrávanie na zariadeniach a šírka pásma."
+      "value": "Živé streamy, trendy sledovania, populárne tituly, aktivita domácnosti, prehrávanie na zariadeniach a šírka pásma."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -96290,7 +96308,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Trendy sledovania, populárne tituly, účty, zariadenia a šírka pásma."
+      "value": "Živé streamy, trendy sledovania, populárne tituly, účty, zariadenia a šírka pásma."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

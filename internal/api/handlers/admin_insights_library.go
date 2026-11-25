@@ -50,6 +50,12 @@ type insightsTitlePlays struct {
 	firstPlayAt time.Time
 }
 
+type insightsAddedTitle struct {
+	contentID string
+	addedAt   time.Time
+	libraryID int
+}
+
 func queryAdminInsightsLibrary(ctx context.Context, pool *pgxpool.Pool, q AdminInsightsWindowQuery) (*AdminInsightsLibrary, error) {
 	if pool == nil {
 		return nil, ErrAdminDashboardUnavailable
@@ -84,30 +90,23 @@ func queryAdminInsightsLibrary(ctx context.Context, pool *pgxpool.Pool, q AdminI
 	if err != nil {
 		return nil, err
 	}
+	added, err := queryInsightsLibraryAdded(ctx, tx, win, q.LibraryID)
+	if err != nil {
+		return nil, err
+	}
 	// "Played" counts plays inside the window, but "not played yet" is about
 	// today: a window that ended in the past looks up, to now, the first play
 	// of the titles it added that had none in it.
 	if dbNow.After(win.To) {
-		if err := addInsightsLibraryLaterFirstPlays(ctx, tx, win, dbNow, q, titles); err != nil {
+		if err := addInsightsLibraryLaterFirstPlays(ctx, tx, win, dbNow, q, added, titles); err != nil {
 			return nil, err
 		}
 	}
-	ids := make([]string, 0, len(titles))
-	plays := make([]int64, 0, len(titles))
-	firstPlays := make([]time.Time, 0, len(titles))
-	for id, tp := range titles {
-		ids = append(ids, id)
-		plays = append(plays, tp.plays)
-		firstPlays = append(firstPlays, tp.firstPlayAt)
-	}
-	catalog := insightsLibraryCatalogArgs{ids: ids, plays: plays, firstPlays: firstPlays, win: win, q: q}
-	if err := queryInsightsLibraryCoverage(ctx, tx, catalog, out); err != nil {
+	if err := queryInsightsLibraryCoverage(ctx, tx, win, q, titles, out); err != nil {
 		return nil, err
 	}
-	if err := queryInsightsLibraryFirstPlays(ctx, tx, catalog, out); err != nil {
-		return nil, err
-	}
-	if err := queryInsightsLibraryUnplayed(ctx, tx, catalog, out); err != nil {
+	populateInsightsLibraryFirstPlays(added, titles, out)
+	if err := queryInsightsLibraryUnplayed(ctx, tx, added, titles, out); err != nil {
 		return nil, err
 	}
 	if err := queryInsightsLibraryBreakdowns(ctx, tx, libraryPlays, out); err != nil {
@@ -125,9 +124,17 @@ func queryAdminInsightsLibrary(ctx context.Context, pool *pgxpool.Pool, q AdminI
 func queryInsightsLibraryTitlePlays(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, q AdminInsightsWindowQuery) (map[string]insightsTitlePlays, map[string]int64, error) {
 	scopeQuery := q
 	scopeQuery.LibraryID = 0
+	scope := newInsightsPlaysScope(win, scopeQuery)
+	scope.needFileLibrary = q.LibraryID > 0
 	var args []any
-	with, counted := newInsightsPlaysScope(win, scopeQuery).viewingRowsSQL(&args)
-	rows, err := tx.Query(ctx, with+fmt.Sprintf(`,
+	with, counted := scope.viewingRowsSQL(&args)
+	// Without a library filter every play counts, so skip attributing rows
+	// to a library (and the media_files join it needs).
+	libraryExpr := "0::int"
+	if q.LibraryID > 0 {
+		libraryExpr = insightsLibraryOfRowSQL("vr")
+	}
+	query := with + fmt.Sprintf(`,
 		counted AS (
 			SELECT vr.started_at, %[1]s AS is_play,
 				COALESCE(vr.series_id, vr.media_item_id) AS title_id, %[2]s AS library_id
@@ -137,7 +144,8 @@ func queryInsightsLibraryTitlePlays(ctx context.Context, tx pgx.Tx, win resolved
 		FROM counted
 		WHERE is_play AND title_id <> ''
 		GROUP BY title_id, library_id
-	`, insightsIsPlaySQL("vr"), insightsLibraryOfRowSQL("vr"), counted), args...)
+	`, insightsIsPlaySQL("vr"), libraryExpr, counted)
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("querying insights library plays: %w", err)
 	}
@@ -165,6 +173,60 @@ func queryInsightsLibraryTitlePlays(ctx context.Context, tx pgx.Tx, win resolved
 	return titles, libraryPlays, rows.Err()
 }
 
+// queryInsightsLibraryAdded reads the movies and series added in the window
+// once per request, to reuse across later-first-play lookup, wait-time
+// bucketing, and the recently-added unplayed list.
+//
+// When unfiltered, pre-filtering candidate content_ids on first_seen_at lets
+// Postgres range-scan the first_seen_at index before resolving each candidate's
+// earliest membership across all libraries (a title's MIN(first_seen_at) can
+// only fall in [from, to) if at least one of its rows does).
+func queryInsightsLibraryAdded(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, libraryID int) ([]insightsAddedTitle, error) {
+	var rows pgx.Rows
+	var err error
+	if libraryID > 0 {
+		// (content_id, media_folder_id) is the primary key of media_item_libraries,
+		// so a single library holds at most one row per title.
+		rows, err = tx.Query(ctx, `
+			SELECT mil.content_id, mil.first_seen_at, mil.media_folder_id
+			FROM media_item_libraries mil
+			JOIN media_items mi ON mi.content_id = mil.content_id
+			WHERE mil.media_folder_id = $3
+			  AND mil.first_seen_at >= $1 AND mil.first_seen_at < $2
+			  AND mi.type IN ('movie', 'series')
+		`, win.From, win.To, libraryID)
+	} else {
+		rows, err = tx.Query(ctx, `
+			WITH candidates AS (
+				SELECT DISTINCT mil.content_id
+				FROM media_item_libraries mil
+				WHERE mil.first_seen_at >= $1 AND mil.first_seen_at < $2
+			)
+			SELECT mil.content_id, MIN(mil.first_seen_at) AS added_at,
+				(ARRAY_AGG(mil.media_folder_id ORDER BY mil.first_seen_at, mil.media_folder_id))[1] AS library_id
+			FROM candidates c
+			JOIN media_items mi ON mi.content_id = c.content_id
+			JOIN media_item_libraries mil ON mil.content_id = c.content_id
+			WHERE mi.type IN ('movie', 'series')
+			GROUP BY mil.content_id
+			HAVING MIN(mil.first_seen_at) >= $1 AND MIN(mil.first_seen_at) < $2
+		`, win.From, win.To)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying insights library added titles: %w", err)
+	}
+	defer rows.Close()
+	added := make([]insightsAddedTitle, 0)
+	for rows.Next() {
+		var a insightsAddedTitle
+		if err := rows.Scan(&a.contentID, &a.addedAt, &a.libraryID); err != nil {
+			return nil, fmt.Errorf("scanning insights library added title: %w", err)
+		}
+		added = append(added, a)
+	}
+	return added, rows.Err()
+}
+
 // addInsightsLibraryLaterFirstPlays finds, for a window that ended before
 // now, the first play up to now of each title it added that had no play in
 // it, and adds those titles to titles with no window plays. Only those
@@ -173,38 +235,28 @@ func queryInsightsLibraryTitlePlays(ctx context.Context, tx pgx.Tx, win resolved
 // read them. The grouping starts at the window's start, not its end, so a
 // viewing that began in the window and qualified only once resumed after it
 // still counts, from when it began.
-func addInsightsLibraryLaterFirstPlays(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, now time.Time, q AdminInsightsWindowQuery, titles map[string]insightsTitlePlays) error {
-	played := make([]string, 0, len(titles))
-	for id := range titles {
-		played = append(played, id)
+func addInsightsLibraryLaterFirstPlays(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, now time.Time, q AdminInsightsWindowQuery, added []insightsAddedTitle, titles map[string]insightsTitlePlays) error {
+	waiting := make([]string, 0)
+	for _, a := range added {
+		if _, ok := titles[a.contentID]; !ok {
+			waiting = append(waiting, a.contentID)
+		}
 	}
-	// The added titles (same rule as insightsLibraryAddedCTE) still waiting
-	// at the window's end, and the items whose sessions play them: a movie
-	// itself, a series' episodes.
-	rows, err := tx.Query(ctx, `
-		WITH added AS (
-			SELECT mil.content_id
-			FROM media_item_libraries mil
-			JOIN media_items mi ON mi.content_id = mil.content_id
-			WHERE mi.type IN ('movie', 'series') AND ($3::int = 0 OR mil.media_folder_id = $3::int)
-			GROUP BY mil.content_id
-			HAVING MIN(mil.first_seen_at) >= $1 AND MIN(mil.first_seen_at) < $2
-		),
-		waiting AS (SELECT content_id FROM added WHERE content_id <> ALL($4::text[]))
-		SELECT content_id FROM waiting
-		UNION ALL
-		SELECT ep.content_id FROM episodes ep JOIN waiting w ON w.content_id = ep.series_id
-	`, win.From, win.To, max(q.LibraryID, 0), played)
-	if err != nil {
-		return fmt.Errorf("querying insights library titles still waiting: %w", err)
-	}
-	items, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return fmt.Errorf("scanning insights library titles still waiting: %w", err)
-	}
-	if len(items) == 0 {
+	if len(waiting) == 0 {
 		return nil
 	}
+	// The items whose sessions play waiting titles: movies themselves plus the
+	// episodes of waiting series.
+	rows, err := tx.Query(ctx, `SELECT ep.content_id FROM episodes ep WHERE ep.series_id = ANY($1::text[])`, waiting)
+	if err != nil {
+		return fmt.Errorf("querying insights library waiting episodes: %w", err)
+	}
+	epIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("scanning insights library waiting episodes: %w", err)
+	}
+	items := append(waiting, epIDs...)
+
 	toNow := win
 	toNow.To = now
 	scopeQuery := q
@@ -233,61 +285,129 @@ func addInsightsLibraryLaterFirstPlays(ctx context.Context, tx pgx.Tx, win resol
 	return firstRows.Err()
 }
 
-// insightsLibraryCatalogArgs carries the played titles into the catalog
-// statements as parallel arrays ($1 ids, $2 plays in the window, $3 first
-// play, which for a title added in a past window may come after it), with the
-// window ($4 from, $5 to) and scope ($6 library, $7 account, $8 profile).
-type insightsLibraryCatalogArgs struct {
-	ids        []string
-	plays      []int64
-	firstPlays []time.Time
-	win        resolvedInsightsWindow
-	q          AdminInsightsWindowQuery
-}
+func insightsLibraryCoverageSQL(win resolvedInsightsWindow, q AdminInsightsWindowQuery, playedIDs []string) (string, []any) {
+	args := []any{playedIDs, win.From, win.To}
+	param := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	startedConds := []string{"h.media_item_id <> ''"}
+	if q.UserID > 0 {
+		startedConds = append(startedConds, "h.user_id = "+param(q.UserID))
+	}
+	if profileID := strings.TrimSpace(q.ProfileID); profileID != "" {
+		startedConds = append(startedConds, "h.profile_id = "+param(profileID))
+	}
 
-// args returns the first n parameters: Postgres rejects a statement that
-// leaves one of its parameters unused.
-func (a insightsLibraryCatalogArgs) args(n int) []any {
-	all := []any{a.ids, a.plays, a.firstPlays, a.win.From, a.win.To, max(a.q.LibraryID, 0), max(a.q.UserID, 0), strings.TrimSpace(a.q.ProfileID)}
-	return all[:n]
-}
+	ctes := `
+		WITH played AS (
+			SELECT id AS title_id FROM unnest($1::text[]) AS t(id)
+		)`
+	// A title was started when any session played it or one of its episodes.
+	// Within one library, across every account, each title probes the
+	// history's item index, which beats collecting the distinct items of the
+	// whole history. Otherwise the started titles are collected, deduplicating
+	// media_item_id before probing episodes: the whole catalog probes slower
+	// than that, and one account's or profile's sessions are few.
+	startedJoin := ""
+	// The probes map sessions to titles as the collected set does: an
+	// episode's sessions start its series (and only it), any other item's
+	// sessions start the item itself. The LIMIT 1 lookup per episode keeps
+	// the planner from hashing every session's episode instead.
+	neverStarted := `NOT ((mi.content_id <> ''
+			AND EXISTS (SELECT 1 FROM admin_playback_history h WHERE h.media_item_id = mi.content_id)
+			AND NOT EXISTS (SELECT 1 FROM episodes e WHERE e.content_id = mi.content_id))
+		OR EXISTS (SELECT 1 FROM episodes ep
+			CROSS JOIN LATERAL (SELECT 1 FROM admin_playback_history h
+				WHERE h.media_item_id = ep.content_id AND h.media_item_id <> '' LIMIT 1) played
+			WHERE ep.series_id = mi.content_id))`
+	if q.LibraryID <= 0 || len(startedConds) > 1 {
+		ctes += `,
+		started AS (
+			SELECT DISTINCT COALESCE(ep.series_id, h.media_item_id) AS title_id
+			FROM (
+				SELECT DISTINCT h.media_item_id
+				FROM admin_playback_history h
+				WHERE ` + strings.Join(startedConds, " AND ") + `
+			) h
+			LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
+		)`
+		startedJoin = "LEFT JOIN started s ON s.title_id = mi.content_id"
+		neverStarted = "s.title_id IS NULL"
+	}
 
-const insightsLibraryPlayedCTE = `
-	tp AS (
-		SELECT * FROM unnest($1::text[], $2::bigint[], $3::timestamptz[]) AS t(title_id, plays, first_play_at)
-	)`
+	if q.LibraryID > 0 {
+		// Within one library, (content_id, media_folder_id) is unique, so per-
+		// library counts are already distinct titles and equal the summary.
+		libParam := param(q.LibraryID)
+		return ctes + `
+			SELECT 0, g.library_id, COALESCE(lib.name, ''), g.titles, g.played_titles, g.never_started, g.added_titles
+			FROM (
+				SELECT mil.media_folder_id AS library_id,
+					COUNT(*)::bigint AS titles,
+					COUNT(*) FILTER (WHERE p.title_id IS NOT NULL)::bigint AS played_titles,
+					COUNT(*) FILTER (WHERE ` + neverStarted + `)::bigint AS never_started,
+					COUNT(*) FILTER (WHERE mil.first_seen_at >= $2)::bigint AS added_titles
+				FROM media_item_libraries mil
+				JOIN media_items mi ON mi.content_id = mil.content_id
+				LEFT JOIN played p ON p.title_id = mi.content_id
+				` + startedJoin + `
+				WHERE mi.type IN ('movie', 'series') AND mil.first_seen_at < $3
+				  AND mil.media_folder_id = ` + libParam + `
+				GROUP BY mil.media_folder_id
+			) g
+			LEFT JOIN media_folders lib ON lib.id = g.library_id`, args
+	}
+
+	// Per-library rows are unique by content_id so they hash-aggregate without
+	// COUNT(DISTINCT) sorts; the cross-library summary deduplicates content_id
+	// in a single hash-aggregate over the materialized slice.
+	return ctes + `,
+			lt AS MATERIALIZED (
+				SELECT mil.media_folder_id AS library_id, mil.content_id,
+					(mil.first_seen_at >= $2) AS is_added,
+					(p.title_id IS NOT NULL) AS is_played,
+					(` + neverStarted + `) AS is_never_started
+				FROM media_item_libraries mil
+				JOIN media_items mi ON mi.content_id = mil.content_id
+				LEFT JOIN played p ON p.title_id = mi.content_id
+				` + startedJoin + `
+				WHERE mi.type IN ('movie', 'series') AND mil.first_seen_at < $3
+			)
+			SELECT 0, g.library_id, COALESCE(lib.name, ''), g.titles, g.played_titles, g.never_started, g.added_titles
+			FROM (
+				SELECT lt.library_id,
+					COUNT(*)::bigint AS titles,
+					COUNT(*) FILTER (WHERE lt.is_played)::bigint AS played_titles,
+					COUNT(*) FILTER (WHERE lt.is_never_started)::bigint AS never_started,
+					COUNT(*) FILTER (WHERE lt.is_added)::bigint AS added_titles
+				FROM lt
+				GROUP BY lt.library_id
+			) g
+			LEFT JOIN media_folders lib ON lib.id = g.library_id
+			UNION ALL
+			SELECT 1, 0, '',
+				COUNT(*)::bigint,
+				COUNT(*) FILTER (WHERE d.is_played)::bigint,
+				COUNT(*) FILTER (WHERE d.is_never_started)::bigint,
+				0::bigint
+			FROM (
+				SELECT DISTINCT content_id, is_played, is_never_started
+				FROM lt
+			) d`, args
+}
 
 // queryInsightsLibraryCoverage counts each library's movies and series, and
 // how many were played in the window or never started (no session to now).
-func queryInsightsLibraryCoverage(ctx context.Context, tx pgx.Tx, a insightsLibraryCatalogArgs, out *AdminInsightsLibrary) error {
-	rows, err := tx.Query(ctx, `
-		WITH `+insightsLibraryPlayedCTE+`,
-		started AS (
-			SELECT DISTINCT COALESCE(ep.series_id, h.media_item_id) AS title_id
-			FROM admin_playback_history h
-			LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
-			WHERE h.media_item_id <> ''
-			  AND ($7::int = 0 OR h.user_id = $7::int)
-			  AND ($8::text = '' OR h.profile_id = $8::text)
-		),
-		lt AS (
-			SELECT mil.media_folder_id AS library_id, mil.content_id, mil.first_seen_at
-			FROM media_item_libraries mil
-			JOIN media_items mi ON mi.content_id = mil.content_id
-			WHERE mi.type IN ('movie', 'series') AND mil.first_seen_at < $5
-			  AND ($6::int = 0 OR mil.media_folder_id = $6::int)
-		)
-		SELECT GROUPING(lt.library_id)::int, COALESCE(lt.library_id, 0), COALESCE(MIN(lib.name), ''),
-			COUNT(DISTINCT lt.content_id)::bigint,
-			COUNT(DISTINCT lt.content_id) FILTER (WHERE tp.plays > 0)::bigint,
-			COUNT(DISTINCT lt.content_id) FILTER (WHERE s.title_id IS NULL)::bigint,
-			COUNT(DISTINCT lt.content_id) FILTER (WHERE lt.first_seen_at >= $4)::bigint
-		FROM lt
-		LEFT JOIN tp ON tp.title_id = lt.content_id
-		LEFT JOIN started s ON s.title_id = lt.content_id
-		LEFT JOIN media_folders lib ON lib.id = lt.library_id
-		GROUP BY GROUPING SETS ((lt.library_id), ())
-	`, a.args(8)...)
+func queryInsightsLibraryCoverage(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, q AdminInsightsWindowQuery, titles map[string]insightsTitlePlays, out *AdminInsightsLibrary) error {
+	playedIDs := make([]string, 0, len(titles))
+	for id, tp := range titles {
+		if tp.plays > 0 {
+			playedIDs = append(playedIDs, id)
+		}
+	}
+	query, args := insightsLibraryCoverageSQL(win, q, playedIDs)
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("querying insights library coverage: %w", err)
 	}
@@ -309,6 +429,11 @@ func queryInsightsLibraryCoverage(ctx context.Context, tx pgx.Tx, a insightsLibr
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	if q.LibraryID > 0 && len(out.Libraries) == 1 {
+		row := out.Libraries[0]
+		out.Summary.Titles, out.Summary.PlayedTitles = row.Titles, row.PlayedTitles
+		out.Summary.PlayedShare, out.Summary.NeverStarted = row.PlayedShare, row.NeverStarted
+	}
 	slices.SortFunc(out.Libraries, func(x, y AdminInsightsLibraryCoverage) int {
 		if c := cmp.Compare(y.Titles, x.Titles); c != 0 {
 			return c
@@ -318,89 +443,101 @@ func queryInsightsLibraryCoverage(ctx context.Context, tx pgx.Tx, a insightsLibr
 	return nil
 }
 
-// insightsLibraryAddedCTE extends insightsLibraryPlayedCTE with the titles
-// added in the window ($4, $5) in scope ($6) and how long each waited for its
-// first play: NULL while it has none.
-const insightsLibraryAddedCTE = insightsLibraryPlayedCTE + `,
-	added AS (
-		SELECT mil.content_id, MIN(mil.first_seen_at) AS added_at,
-			(ARRAY_AGG(mil.media_folder_id ORDER BY mil.first_seen_at, mil.media_folder_id))[1] AS library_id
-		FROM media_item_libraries mil
-		JOIN media_items mi ON mi.content_id = mil.content_id
-		WHERE mi.type IN ('movie', 'series') AND ($6::int = 0 OR mil.media_folder_id = $6::int)
-		GROUP BY mil.content_id
-		HAVING MIN(mil.first_seen_at) >= $4 AND MIN(mil.first_seen_at) < $5
-	),
-	waited AS (
-		-- GREATEST skips NULLs, so an unplayed title keeps its NULL wait
-		-- only through the CASE.
-		SELECT a.*, CASE WHEN tp.first_play_at IS NOT NULL
-			THEN GREATEST(EXTRACT(EPOCH FROM tp.first_play_at - a.added_at), 0) END AS wait_seconds
-		FROM added a LEFT JOIN tp ON tp.title_id = a.content_id
-	)`
-
-// queryInsightsLibraryFirstPlays buckets the titles added in the window by how
-// long each waited for its first play, and reads the median wait.
-func queryInsightsLibraryFirstPlays(ctx context.Context, tx pgx.Tx, a insightsLibraryCatalogArgs, out *AdminInsightsLibrary) error {
-	rows, err := tx.Query(ctx, `
-		WITH `+insightsLibraryAddedCTE+`
-		SELECT GROUPING(bucket)::int, COALESCE(bucket, ''), COUNT(*)::bigint,
-			percentile_cont(0.5) WITHIN GROUP (ORDER BY wait_seconds) FILTER (WHERE wait_seconds IS NOT NULL)
-		FROM (
-			SELECT wait_seconds, CASE
-				WHEN wait_seconds IS NULL THEN '`+insightsFirstPlayNotYet+`'
-				WHEN wait_seconds < 86400 THEN '`+insightsFirstPlayDay+`'
-				WHEN wait_seconds < 7 * 86400 THEN '`+insightsFirstPlayWeek+`'
-				WHEN wait_seconds < 30 * 86400 THEN '`+insightsFirstPlayMonth+`'
-				ELSE '`+insightsFirstPlayLater+`' END AS bucket
-			FROM waited
-		) w
-		GROUP BY GROUPING SETS ((bucket), ())
-	`, a.args(6)...)
-	if err != nil {
-		return fmt.Errorf("querying insights library first plays: %w", err)
-	}
-	defer rows.Close()
-	waits := make(map[string]int64)
-	for rows.Next() {
-		var grouping int
-		var bucket string
-		var count int64
-		var medianSeconds *float64
-		if err := rows.Scan(&grouping, &bucket, &count, &medianSeconds); err != nil {
-			return fmt.Errorf("scanning insights library first plays: %w", err)
-		}
-		if grouping == 0 {
-			waits[bucket] = count
+// populateInsightsLibraryFirstPlays buckets the titles added in the window by
+// how long each waited for its first play, and computes the median wait using
+// the same linear interpolation as PostgreSQL's percentile_cont(0.5).
+func populateInsightsLibraryFirstPlays(added []insightsAddedTitle, titles map[string]insightsTitlePlays, out *AdminInsightsLibrary) {
+	waits := make(map[string]int64, 5)
+	waitsPlayed := make([]float64, 0, len(added))
+	for _, a := range added {
+		tp, ok := titles[a.contentID]
+		if !ok || tp.firstPlayAt.IsZero() {
+			waits[insightsFirstPlayNotYet]++
 			continue
 		}
-		out.Summary.AddedTitles = count
-		if medianSeconds != nil {
-			out.Summary.MedianDaysToFirstPlay = new(math.Round(*medianSeconds/86400*10) / 10)
+		waitSec := insightsWaitSeconds(a.addedAt, tp.firstPlayAt)
+		waitsPlayed = append(waitsPlayed, waitSec)
+		switch {
+		case waitSec < 86400:
+			waits[insightsFirstPlayDay]++
+		case waitSec < 7*86400:
+			waits[insightsFirstPlayWeek]++
+		case waitSec < 30*86400:
+			waits[insightsFirstPlayMonth]++
+		default:
+			waits[insightsFirstPlayLater]++
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
+	out.Summary.AddedTitles = int64(len(added))
 	out.Summary.AddedPlayed = out.Summary.AddedTitles - waits[insightsFirstPlayNotYet]
+	if len(waitsPlayed) > 0 {
+		slices.Sort(waitsPlayed)
+		medianSec := insightsPercentileCont50(waitsPlayed)
+		out.Summary.MedianDaysToFirstPlay = new(math.Round(medianSec/86400*10) / 10)
+	}
 	for _, key := range []string{insightsFirstPlayDay, insightsFirstPlayWeek, insightsFirstPlayMonth, insightsFirstPlayLater, insightsFirstPlayNotYet} {
 		out.TimeToFirstPlay = append(out.TimeToFirstPlay, AdminInsightsLabeledCount{Key: key, Sessions: waits[key]})
 	}
-	return nil
+}
+
+func insightsWaitSeconds(addedAt, firstPlayAt time.Time) float64 {
+	if !firstPlayAt.After(addedAt) {
+		return 0
+	}
+	// One division of the whole microsecond difference gives the float
+	// PostgreSQL's EXTRACT(EPOCH ...) gave; adding seconds and fractions as
+	// two floats can differ in the last bit and tip the shown median.
+	return float64(firstPlayAt.Sub(addedAt).Microseconds()) / 1e6
+}
+
+// insightsPercentileCont50 matches PostgreSQL's percentile_cont(0.5) over a
+// non-empty sorted slice, including its lo + (hi-lo)*0.5 rounding: (lo+hi)/2
+// can differ in the last bit and tip the displayed median across a 0.1 day.
+func insightsPercentileCont50(sorted []float64) float64 {
+	n := len(sorted)
+	mid := n / 2
+	if n%2 == 1 {
+		return sorted[mid]
+	}
+	lo, hi := sorted[mid-1], sorted[mid]
+	return lo + (hi-lo)*0.5
 }
 
 // queryInsightsLibraryUnplayed lists the newest titles added in the window
 // that still have no play.
-func queryInsightsLibraryUnplayed(ctx context.Context, tx pgx.Tx, a insightsLibraryCatalogArgs, out *AdminInsightsLibrary) error {
+func queryInsightsLibraryUnplayed(ctx context.Context, tx pgx.Tx, added []insightsAddedTitle, titles map[string]insightsTitlePlays, out *AdminInsightsLibrary) error {
+	unplayed := make([]insightsAddedTitle, 0)
+	for _, a := range added {
+		if tp, ok := titles[a.contentID]; !ok || tp.firstPlayAt.IsZero() {
+			unplayed = append(unplayed, a)
+		}
+	}
+	if len(unplayed) == 0 {
+		return nil
+	}
+	// Go compares strings byte by byte, the same order as content_id's
+	// COLLATE "C", so the cut here and the ORDER BY below agree.
+	slices.SortFunc(unplayed, func(x, y insightsAddedTitle) int {
+		if c := y.addedAt.Compare(x.addedAt); c != 0 {
+			return c
+		}
+		return cmp.Compare(x.contentID, y.contentID)
+	})
+	top := unplayed[:min(len(unplayed), insightsLibraryUnplayedLimit)]
+	ids := make([]string, len(top))
+	addedAts := make([]time.Time, len(top))
+	libIDs := make([]int, len(top))
+	for i, a := range top {
+		ids[i] = a.contentID
+		addedAts[i] = a.addedAt
+		libIDs[i] = a.libraryID
+	}
 	rows, err := tx.Query(ctx, `
-		WITH `+insightsLibraryAddedCTE+`
-		SELECT w.content_id, mi.type, COALESCE(mi.title, ''), mi.year, w.added_at, w.library_id, COALESCE(lib.name, '')
-		FROM waited w
-		JOIN media_items mi ON mi.content_id = w.content_id
-		LEFT JOIN media_folders lib ON lib.id = w.library_id
-		WHERE w.wait_seconds IS NULL
-		ORDER BY w.added_at DESC, w.content_id
-		LIMIT `+strconv.Itoa(insightsLibraryUnplayedLimit), a.args(6)...)
+		SELECT u.content_id, mi.type, COALESCE(mi.title, ''), mi.year, u.added_at, u.library_id, COALESCE(lib.name, '')
+		FROM unnest($1::text[], $2::timestamptz[], $3::int[]) AS u(content_id, added_at, library_id)
+		JOIN media_items mi ON mi.content_id = u.content_id
+		LEFT JOIN media_folders lib ON lib.id = u.library_id
+		ORDER BY u.added_at DESC, u.content_id COLLATE "C"`, ids, addedAts, libIDs)
 	if err != nil {
 		return fmt.Errorf("querying insights library unplayed titles: %w", err)
 	}

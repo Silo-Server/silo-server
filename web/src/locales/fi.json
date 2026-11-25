@@ -8015,6 +8015,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kortit"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Asettelu"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Taulukko"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -49261,7 +49279,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Katselutrendit, suosituimmat nimikkeet, kotitalouden toiminta, laitteiden toisto ja kaistanleveys."
+      "value": "Käynnissä olevat suoratoistot, katselutrendit, suosituimmat nimikkeet, kotitalouden toiminta, laitteiden toisto ja kaistanleveys."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -81266,7 +81284,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Katselutrendit, suosituimmat nimikkeet, tilit, laitteet ja kaistanleveys."
+      "value": "Käynnissä olevat suoratoistot, katselutrendit, suosituimmat nimikkeet, tilit, laitteet ja kaistanleveys."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

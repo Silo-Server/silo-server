@@ -8244,6 +8244,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Carduri"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Aspect"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabel"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -55126,7 +55144,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tendințe de vizionare, titluri populare, activitatea din gospodărie, redarea pe dispozitive și lățimea de bandă."
+      "value": "Streamuri în direct, tendințe de vizionare, titluri populare, activitatea din gospodărie, redarea pe dispozitive și lățimea de bandă."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -88688,7 +88706,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tendințe de vizionare, titluri populare, conturi, dispozitive și lățime de bandă."
+      "value": "Streamuri în direct, tendințe de vizionare, titluri populare, conturi, dispozitive și lățime de bandă."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

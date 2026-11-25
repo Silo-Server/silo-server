@@ -8171,6 +8171,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECards\u202C"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELayout\u202C"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETable\u202C"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -52277,7 +52295,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "\u200F\u202EWatch trends, top titles, household activity, device playback, and bandwidth.\u202C"
+      "value": "\u200F\u202ELive streams, watch trends, top titles, household activity, device playback, and bandwidth.\u202C"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -85426,7 +85444,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "\u200F\u202EWatch trends, top titles, accounts, devices, and bandwidth.\u202C"
+      "value": "\u200F\u202ELive streams, watch trends, top titles, accounts, devices, and bandwidth.\u202C"
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

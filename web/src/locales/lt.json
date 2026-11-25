@@ -8557,6 +8557,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kortelės"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Išdėstymas"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Lentelė"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -61650,7 +61668,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Žiūrėjimo tendencijos, populiariausi kūriniai, namų ūkio veikla, atkūrimas įrenginiuose ir pralaidumas."
+      "value": "Tiesioginiai srautai, žiūrėjimo tendencijos, populiariausi kūriniai, namų ūkio veikla, atkūrimas įrenginiuose ir pralaidumas."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -97017,7 +97035,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Žiūrėjimo tendencijos, populiariausi kūriniai, paskyros, įrenginiai ir pralaidumas."
+      "value": "Tiesioginiai srautai, žiūrėjimo tendencijos, populiariausi kūriniai, paskyros, įrenginiai ir pralaidumas."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

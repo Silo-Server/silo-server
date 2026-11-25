@@ -8175,6 +8175,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "כרטיסים"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "פריסה"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "טבלה"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -54452,7 +54470,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "מגמות צפייה, פריטים מובילים, פעילות במשק הבית, הפעלה במכשירים ורוחב פס."
+      "value": "הזרמות פעילות, מגמות צפייה, פריטים מובילים, פעילות במשק הבית, הפעלה במכשירים ורוחב פס."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -87988,7 +88006,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "מגמות צפייה, פריטים מובילים, חשבונות, מכשירים ורוחב פס."
+      "value": "הזרמות פעילות, מגמות צפייה, פריטים מובילים, חשבונות, מכשירים ורוחב פס."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

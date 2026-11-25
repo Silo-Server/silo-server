@@ -7818,6 +7818,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "卡片"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "版面配置"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "表格"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -44041,7 +44059,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "觀看趨勢、熱門作品、家庭活動、裝置播放情形與頻寬。"
+      "value": "即時串流、觀看趨勢、熱門作品、家庭活動、裝置播放情形與頻寬。"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -74733,7 +74751,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "觀看趨勢、熱門作品、帳號、裝置與頻寬。"
+      "value": "即時串流、觀看趨勢、熱門作品、帳號、裝置與頻寬。"
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

@@ -7979,6 +7979,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kaarten"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Weergave"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabel"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -49005,7 +49023,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Kijktrends, populaire titels, activiteit in het huishouden, afspelen per apparaat en bandbreedte."
+      "value": "Livestreams, kijktrends, populaire titels, activiteit in het huishouden, afspelen per apparaat en bandbreedte."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -80882,7 +80900,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Kijktrends, populaire titels, accounts, apparaten en bandbreedte."
+      "value": "Livestreams, kijktrends, populaire titels, accounts, apparaten en bandbreedte."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

@@ -7834,6 +7834,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "카드"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "레이아웃"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "표"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -43971,7 +43989,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "시청 추이, 인기 작품, 가구 활동, 기기별 재생, 대역폭."
+      "value": "실시간 스트림, 시청 추이, 인기 작품, 가구 활동, 기기별 재생, 대역폭."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -74519,7 +74537,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "시청 추이, 인기 작품, 계정, 기기, 대역폭."
+      "value": "실시간 스트림, 시청 추이, 인기 작품, 계정, 기기, 대역폭."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

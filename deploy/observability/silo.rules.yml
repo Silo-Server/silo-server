@@ -32,7 +32,7 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: Silo has old queued work
-          description: Includes delayed retries. Inspect queue retry gates, worker attempts and admin job progress before treating this as a stall.
+          description: Includes delayed retries, except for images, which reports only due work; there a job deferred again and again (a full artwork store or a missing local mount) shows as growing queued depth, not age. Inspect queue retry gates, worker attempts and admin job progress before treating this as a stall.
       - alert: SiloCgroupMemoryHigh
         expr: silo_cgroup_memory_current_bytes / silo_cgroup_memory_limit_bytes > 0.9
         for: 5m

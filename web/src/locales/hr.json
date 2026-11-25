@@ -8252,6 +8252,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kartice"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Raspored"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tablica"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -55186,7 +55204,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Trendovi gledanja, popularni naslovi, aktivnost u kućanstvu, reprodukcija na uređajima i propusnost."
+      "value": "Streamovi uživo, trendovi gledanja, popularni naslovi, aktivnost u kućanstvu, reprodukcija na uređajima i propusnost."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -88676,7 +88694,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Trendovi gledanja, popularni naslovi, računi, uređaji i propusnost."
+      "value": "Streamovi uživo, trendovi gledanja, popularni naslovi, računi, uređaji i propusnost."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

@@ -7995,6 +7995,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kort"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Layout"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabell"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -49213,7 +49231,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tittartrender, populära titlar, hushållets aktivitet, uppspelning per enhet och bandbredd."
+      "value": "Livestreams, tittartrender, populära titlar, hushållets aktivitet, uppspelning per enhet och bandbredd."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -81106,7 +81124,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tittartrender, populära titlar, konton, enheter och bandbredd."
+      "value": "Livestreams, tittartrender, populära titlar, konton, enheter och bandbredd."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
