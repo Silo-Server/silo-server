@@ -210,8 +210,9 @@ func TestLocalPasswordOffAccountsDB(t *testing.T) {
 
 // TestLocalPasswordOffKeepsOpenSessionsDB pins what turning local password
 // sign-in off does to sessions already open: nothing. Refresh does not read
-// the switch (checkSessionStanding), so an account whose password no longer
-// signs in stays signed in until its sessions end or are revoked. The
+// the switch (checkSessionStanding) and slides the session forward, so an
+// account whose password no longer signs in stays signed in until it signs
+// out or its sessions are revoked, and can still approve a new device. The
 // Sign-in settings page tells the administrator so; if this changes, that
 // text must change with it.
 func TestLocalPasswordOffKeepsOpenSessionsDB(t *testing.T) {
@@ -235,5 +236,22 @@ func TestLocalPasswordOffKeepsOpenSessionsDB(t *testing.T) {
 	}
 	if _, err := svc.Refresh(ctx, refreshed.RefreshToken); err != nil {
 		t.Fatalf("second refresh = %v", err)
+	}
+
+	// From that session the account can still approve a new device, which
+	// then gets a session of its own.
+	devices := NewDeviceLoginService(env.pool, users, NewJWTService("synthetic-jwt-secret-synthetic-jwt-secret", time.Minute, time.Hour), sessions, nil, nil)
+	t.Cleanup(func() {
+		_, _ = env.pool.Exec(context.Background(), `DELETE FROM device_login_requests WHERE device_name = $1`, env.name("tv"))
+	})
+	start, err := devices.Start(ctx, DeviceLoginStartInput{DeviceName: env.name("tv")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := devices.Approve(ctx, DeviceLoginLookupInput{UserCode: start.UserCode}, member.ID); err != nil {
+		t.Fatalf("device approval from the open session = %v; want it to work", err)
+	}
+	if poll, err := devices.Poll(ctx, start.DeviceCode, ""); err != nil || poll.TokenPair == nil {
+		t.Fatalf("approved device poll = %+v, %v", poll, err)
 	}
 }

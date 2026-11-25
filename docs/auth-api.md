@@ -714,7 +714,7 @@ linking rule whether or not `network_sign_in` is served.
 | `POST /admin/users/{id}/identities` (`createAdminUserIdentity`) | acting admin | Links by `installation_id` and the exact `external_subject`. Turns local password sign-in off unless the account is break-glass or the installation is a network identity provider. |
 | `DELETE /admin/users/{id}/identities/{identity_id}` (`deleteAdminUserIdentity`) | acting admin | May leave the account without a sign-in method; setting a password with `updateAdminUser` turns its local password sign-in back on. |
 | `PUT /admin/users/{id}` (`updateAdminUser`) | acting admin | `break_glass` sets or clears the flag: admin accounts only, and only the server Owner may change it (403 `permission_denied`). The Owner has it by default (set at first-run setup and on every ownership move) and may clear it on its own account. A `password` also turns the account's local password sign-in back on, so an admin other than the Owner may not set its own while its local sign-in is off (403 `permission_denied`). Demoting, disabling or clearing the last usable break-glass admin while local sign-in is off is 409 `break_glass_required`; so is deleting it (`deleteAdminUser`) or turning `auth.local_password_login` off without one (`updateAdminSettings`, `updateAdminSetting`). |
-| `GET /admin/sign-in/local-password-off/accounts` (`listAdminLocalPasswordOffAccounts`) | acting admin | Who loses their way in if `auth.local_password_login` is turned off: enabled accounts whose local password signs in today, that are not break-glass and have no linked identity at an enabled provider (the identities `deleteAccountIdentity` counts). Disabled and break-glass accounts are not listed. `group` (required) picks one group: `email_match`, the ordinary accounts with an email that email auto-match can link at their first provider sign-in (the provider must assert that email as verified), or `admin_link`, everyone else, whom nothing links until an administrator does. Each account carries `reason`: `email_match`, `email_match_off` (it would match, but `auth.email_auto_match` is off), `administrator` (an admin or the Owner, which auto-match never links) or `no_email`. `email_auto_match` (`true` or `false`, optional) answers as if the setting had that value, for an edit that changes both; the response's `email_auto_match` is the value used. `totals` counts both groups on every page. Ordered by username, paginated with `limit` and `cursor`; pages are live, not a snapshot. Advertised by `local_password_off_accounts` in `getExternalSignInCapabilities`. |
+| `GET /admin/sign-in/local-password-off/accounts` (`listAdminLocalPasswordOffAccounts`) | acting admin | Who loses their way in if `auth.local_password_login` is turned off: enabled accounts whose local password signs in today (password sign-in on and a password set), that are not break-glass and have no linked identity at an enabled OIDC or LDAP provider. A link only to a network provider does not count: once passwords are off it signs the account in only from that network. Disabled and break-glass accounts are not listed. `group` (required) picks one group: `email_match`, the ordinary accounts with an email that email auto-match can link at their first provider sign-in (the provider must assert that email as verified), or `admin_link`, everyone else, whom nothing links until an administrator does. Each account carries `reason`: `email_match`, `email_match_off` (it would match, but `auth.email_auto_match` is off), `administrator` (an admin or the Owner, which auto-match never links) or `no_email`. `email_auto_match` (`true` or `false`, optional) answers as if the setting had that value, for an edit that changes both; the response's `email_auto_match` is the value used. `totals` counts both groups on every page. Ordered by username (an account without one sorts first), then ID, and paginated with `limit` and `cursor`; pages are live, not a snapshot. Advertised by `local_password_off_accounts` in `getExternalSignInCapabilities`. |
 | `POST /admin/plugins/installations/{id}/auth-binding/test` (`testAdminPluginAuthBinding`) | acting admin | Sends staged `config` entries (blank secrets keep the stored value only while the rest of that entry is unchanged and no secret in it is typed) to the plugin's `TestConnection`; answers `ok`, the plugin's `steps` and `callback_url`, the redirect URI to register at an OAuth provider. If the public URL is unset or the binding mode cannot be read, the response keeps the test results and leaves the URL empty. A plugin without a connection test, or a disabled installation, is 409. Not retried automatically. |
 | `PUT /admin/plugins/installations/{id}/auth-binding` (`updateAdminPluginAuthBinding`) | acting admin | Applies without a restart (`X-Silo-Restart-Required: false`). `auto_provision` defaults to true. Enabling a second binding of the same kind is 409 `provider_already_enabled`; one network identity binding may be enabled beside the one OIDC or LDAP binding. |
 | `GET /admin/plugins/installations` (`listAdminPluginInstallations`) | acting admin | Each OAuth auth binding carries `callback_url` (the callback to register at the provider) and `post_logout_redirect_url` (`/login`, to register for provider logout), both on `server.public_url`; empty without a public URL and for a password provider. The other operations that answer an installation carry them too. |
@@ -736,8 +736,9 @@ admitted the person but the server has no account for them and account
 creation is off), `local_login_disabled`
 (403), `password_expired` (403), `email_in_use` (409),
 `identity_linked_elsewhere` (409), `provider_already_enabled` (409),
-`break_glass_required` (409), `sign_in_provider_required` (409, turning
-`auth.local_password_login` off while no OIDC or LDAP provider is on),
+`break_glass_required` (409), `sign_in_provider_required` (409: a change
+that would leave `auth.local_password_login` off with no OIDC or LDAP
+provider people can sign in with; see below),
 `last_sign_in_method` (409),
 `provider_unavailable` (503; also a sign-in the provider answered before a
 re-check of the same account recorded a later answer, which succeeds when
@@ -867,12 +868,15 @@ end-session URL is the plugin's own setting (the OIDC plugin's
 and logs out of Silo without the provider when it does not answer in time.
 
 Server settings: `auth.local_password_login` (default `true`; turning it off
-needs a break-glass admin and an enabled OIDC or LDAP provider, and is
-otherwise applied at once: the settings write takes no acknowledgement, so a
-client that wants to show who is affected reads
-`listAdminLocalPasswordOffAccounts` first. Sessions already open stay
-signed in until they end or are revoked, since refresh does not check the
-switch. While it is off, `signup` and `acceptInvitation`
+needs a break-glass admin and an OIDC or LDAP provider people can sign in
+with, and is otherwise applied at once: the settings write takes no
+acknowledgement, so a client that wants to show who is affected reads
+`listAdminLocalPasswordOffAccounts` first. Turning it off signs nobody out:
+nothing but password sign-in, signup and invitations reads the switch, and
+refresh slides a session forward, so people already signed in stay signed in
+until they sign out or an administrator ends their sessions, their personal
+API keys keep working, and they can still approve new devices. While it is
+off, `signup` and `acceptInvitation`
 are refused with 403 `local_login_disabled` and `getSignupStatus` reports
 signup off), `auth.email_auto_match` (default `false`; matches ordinary
 accounts only, never an admin, the Owner or a break-glass account),
@@ -881,6 +885,19 @@ provider's last answer about an identity may be before a refresh asks again)
 and `auth.provider_recheck_outage_policy` (`fail_open`, the default, keeps a
 session whose provider cannot be reached; `fail_closed` refuses its refresh
 until the provider answers).
+
+A provider people can sign in with is an enabled installation with an
+enabled OIDC or LDAP binding (a network binding does not count). An OpenID
+Connect provider counts only while `server.public_url` is set, since every
+OAuth start needs it; a directory (LDAP) provider needs none. While
+`auth.local_password_login` is off, every change that would leave no such
+provider is refused with 409 `sign_in_provider_required`: turning off its
+binding (`updateAdminPluginAuthBinding`), disabling its installation
+(`updateAdminPluginInstallation`), uninstalling it
+(`deleteAdminPluginInstallation`), or clearing `server.public_url` when it is
+the only provider and uses OpenID Connect. Disable and uninstall are refused
+before the plugin stops. Turn password sign-in back on first; break-glass
+admins can sign in with a password either way.
 
 Provider re-check: a login session opened through the provider (an OAuth or
 LDAP sign-in, a device sign-in approved from such a session, or a session of
