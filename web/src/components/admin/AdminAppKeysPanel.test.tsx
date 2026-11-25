@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({ revokeDevice: vi.fn() }));
 const idle = { isPending: false, mutateAsync: vi.fn() };
 vi.mock("@/hooks/queries/appKeys", () => ({
   useAppKeyCapability: () => ({ data: { state: "available" } }),
+}));
+vi.mock("@/hooks/queries/admin/appKeys", () => ({
   useAdminAppKeys: () => ({
     keys: {
       isPending: false,

@@ -5,10 +5,28 @@ import { Button } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/datetime";
 import { loginSessionDevice } from "@/lib/loginSessionDevice";
 import { useT } from "@/i18n";
-import type { AppKeyRowKey, DevicePreapproval } from "@/hooks/queries/appKeys";
+import type { V2Result } from "@/api/v2/request";
+
+type OwnAppKey = V2Result<"GET /api/v2/auth/keys">["devices"][number];
+
+/**
+ * A device key as the row shows it: the object the person's own key list
+ * returns, plus what an administrator's list adds.
+ */
+export type AppKeyRowKey = OwnAppKey & {
+  provider_bound?: boolean;
+  identity_gone?: boolean;
+  waiting_until?: string | null;
+};
+
+/** A device sign-in approved in advance, as the person's own list returns it. */
+export type DevicePreapproval = V2Result<"GET /api/v2/auth/device/preapprovals">["items"][number];
 
 /** One button on a device row: its visible label and its accessible name. */
 export type AppKeyRowAction = { label: string; ariaLabel: string; onClick: () => void };
+
+/** Between the parts of a row line; punctuation, not words. */
+const SEPARATOR = " · ";
 
 const ICONS = { tv: Tv, phone: Smartphone, desktop: Monitor, unknown: HelpCircle } as const;
 
@@ -39,7 +57,9 @@ function DeviceRow({
         </span>
         <div className="min-w-0 flex-1 basis-40">
           <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
-            <span className="max-w-full min-w-0 wrap-anywhere">{device.name}</span>
+            <span dir="auto" className="max-w-full min-w-0 wrap-anywhere">
+              {device.name}
+            </span>
             {badges}
           </div>
           {lines.map((line, index) => (
@@ -84,20 +104,22 @@ export function AppKeyRow({
   const t = useT();
   const how =
     appKey.enrolled_by === "grant"
-      ? t("web.settings.appKeys.row.allowedBy", { name: appKey.allowed_by ?? "" })
+      ? t("web.settings.appKeys.row.allowedBy", {
+          name: <span dir="auto">{appKey.allowed_by ?? ""}</span>,
+        })
       : appKey.enrolled_by === "introduce"
         ? t("web.settings.appKeys.row.viaPersonKey")
         : appKey.enrolled_by === "app-code"
           ? t("web.settings.appKeys.row.viaAppCode")
           : t("web.settings.appKeys.row.viaSession");
   const waiting = appKey.status === "pending";
+  // "how" already says it was added; the date follows it alone.
   const lines: ReactNode[] = [
-    [
-      how,
-      t("web.settings.appKeys.row.added", {
-        date: formatDateTime(appKey.enrolled_at, { seconds: false }),
-      }),
-    ].join(" · "),
+    <>
+      {how}
+      {SEPARATOR}
+      {formatDateTime(appKey.enrolled_at, { seconds: false })}
+    </>,
   ];
   if (appKey.identity_gone) {
     lines.push(

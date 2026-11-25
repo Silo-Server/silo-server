@@ -35,7 +35,7 @@ import {
   type AdminUserIdentity,
 } from "@/hooks/queries/admin/externalSignIn";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
-import { useAdminAppKeys } from "@/hooks/queries/appKeys";
+import { useAdminAppKeys } from "@/hooks/queries/admin/appKeys";
 import { useAdminUserCapabilities } from "@/hooks/queries/admin/users";
 import { useAdminSettingValue } from "@/hooks/queries/admin/settings";
 import { formatDateTime } from "@/lib/datetime";
@@ -441,10 +441,15 @@ export function AdminUserSignIn({
   const unlink = useUnlinkAdminUserIdentity();
   // Unlinking a provider account revokes the app keys added through it.
   const appKeysServed = useAdminUserCapabilities().data?.app_keys === true;
-  const appKeys = useAdminAppKeys(user.id, appKeysServed && identitiesServed).keys.data;
-  const providerKeys =
-    (appKeys?.person_key?.provider_bound === true && !appKeys.person_key.identity_gone) ||
-    (appKeys?.devices ?? []).some((key) => key.provider_bound && !key.identity_gone);
+  const appKeysRead = appKeysServed && identitiesServed;
+  const appKeys = useAdminAppKeys(user.id, appKeysRead).keys;
+  // Unlinking revokes only the keys bound to that provider account. While the
+  // list hasn't answered, the dialog says nothing about keys and waits.
+  const keysSettling = appKeysRead && appKeys.isPending && !appKeys.isError;
+  const keysBoundTo = (identityId: string) =>
+    [appKeys.data?.person_key, ...(appKeys.data?.devices ?? [])].some(
+      (key) => key?.identity_id === identityId && !key.identity_gone,
+    );
   const updateSignIn = useUpdateAdminUserSignIn();
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [linkOpen, setLinkOpen] = useState(false);
@@ -681,19 +686,12 @@ export function AdminUserSignIn({
               })
             : t("web.admin.common.adminUserSignIn.unlinkConfirm.titleUnknownProvider")
         }
-        description={[
-          t("web.admin.common.adminUserSignIn.unlinkConfirm.description", {
-            username: user.username,
-            last_way: lastWay ? "yes" : "no",
-          }),
-          providerKeys
-            ? t("web.admin.common.adminUserSignIn.unlinkConfirm.keysRevoked", {
-                username: user.username,
-              })
-            : "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
+        description={t("web.admin.common.adminUserSignIn.unlinkConfirm.text", {
+          username: user.username,
+          last_way: lastWay ? "yes" : "no",
+          keys: unlinking && keysBoundTo(String(unlinking.id)) ? "yes" : "no",
+        })}
+        confirmDisabled={keysSettling}
         confirmLabel={t("web.admin.common.adminUserSignIn.unlink")}
         className={TOUCH_TARGETS}
         variant="destructive"

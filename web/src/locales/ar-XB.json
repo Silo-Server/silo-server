@@ -215,6 +215,12 @@
       "value": "\u200F\u202EThat’s already linked to this account.\u202C"
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis code is unknown, used or expired. Get a new one from the server’s page.\u202C"
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -24981,18 +24987,73 @@
       }
     }
   ],
-  "web.admin.common.adminUserSignIn.unlinkConfirm.keysRevoked": [
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
     {
       "type": 0,
       "value": "\u200F"
     },
     {
-      "type": 1,
-      "value": "username"
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "\u202E can no longer sign in with this provider account. \u202C"
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "\u202E won’t be able to sign in until you set a password or connect a provider again.\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "\u202E can no longer sign in with this provider account.\u202C"
+            }
+          ]
+        }
+      }
     },
     {
-      "type": 0,
-      "value": "\u202E’s Silo app keys tied to this provider account are removed, and those devices are signed out.\u202C"
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "\u202E’s Silo app keys tied to this provider account are removed, and those devices are signed out.\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
     }
   ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
@@ -90705,6 +90766,12 @@
       "value": "\u202E approved for a device that hasn’t connected yet.\u202C"
     }
   ],
+  "web.admin.users.detail.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t load the sign-ins approved in advance.\u202C"
+    }
+  ],
   "web.admin.users.detail.appKeys.preapprovals.title": [
     {
       "type": 0,
@@ -90735,6 +90802,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ESilo app devices\u202C"
+    }
+  ],
+  "web.admin.users.detail.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo app sign-in isn’t available on this server, so these devices can’t sign in. You can still remove them.\u202C"
     }
   ],
   "web.admin.users.detail.appKeys.waiting.description": [
@@ -97947,6 +98020,54 @@
       "value": "\u200F\u202EApprove sign-in\u202C"
     }
   ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis code has expired.\u202C"
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo couldn’t make a code. Try again.\u202C"
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPress Open Silo to continue in the Silo app on this device. If the app isn’t installed, install it, come back to this tab and press Open Silo again.\u202C"
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen Silo\u202C"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EGet a new code\u202C"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis code works once and expires after a few minutes.\u202C"
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen Silo\u202C"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen with the siloserver.org link instead\u202C"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -98149,10 +98270,50 @@
       ]
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour account will use \u202C"
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EContinue\u202C"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWith an email address, this server can send you a sign-in link if you lose your devices.\u202C"
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "\u200F\u202ENothing happens? The app isn't installed — just continue below.\u202C"
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "\u202E adds people through its sign-in provider. Sign in with it on this site, then open Silo from your account settings.\u202C"
     }
   ],
   "web.auth.invite.created": [
@@ -98181,6 +98342,18 @@
       "value": "\u200F\u202EEnter your email address and choose a password. You'll sign in with your email address.\u202C"
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EJoin with the Silo app on your phone or tablet, or choose a password to sign in.\u202C"
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEmail (optional)\u202C"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -98201,6 +98374,18 @@
     {
       "type": 1,
       "value": "inviter"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EJoin with the Silo app\u202C"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EJoin with the Silo app instead\u202C"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -98301,6 +98486,24 @@
     {
       "type": 0,
       "value": "\u200F\u202EInvitation unavailable\u202C"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUse a password instead\u202C"
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChoose a username.\u202C"
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThat username or email address is already in use. Choose another.\u202C"
     }
   ],
   "web.auth.languagePicker.label": [
@@ -141281,16 +141484,6 @@
       "value": "\u200F\u202EHow to use this key\u202C"
     }
   ],
-  "web.settings.appKeys.row.added": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdded \u202C"
-    },
-    {
-      "type": 1,
-      "value": "date"
-    }
-  ],
   "web.settings.appKeys.row.allowedBy": [
     {
       "type": 0,
@@ -146633,6 +146826,24 @@
       "value": "\u200F\u202EYou're offline, so this change wasn't saved\u202C"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen in Silo\u202C"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign the Silo app on your phone or tablet in to this account, without a password.\u202C"
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo app\u202C"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -149739,6 +149950,24 @@
     {
       "type": 0,
       "value": "\u200F\u202ESettings\u202C"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign in again\u202C"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign in again to manage your devices\u202C"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EManage your devices in the Silo app.\u202C"
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

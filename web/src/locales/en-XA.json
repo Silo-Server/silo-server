@@ -215,6 +215,12 @@
       "value": "⟦Ţĥåţ’š åļŕéåđý ļîñķéđ ţö ţĥîš åççöûñţ.~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš çöđé îš ûñķñöŵñ, ûšéđ öŕ éẋþîŕéđ. Ĝéţ å ñéŵ öñé ƒŕöɱ ţĥé šéŕṽéŕ’š þåĝé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -25765,18 +25771,77 @@
       "value": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
-  "web.admin.common.adminUserSignIn.unlinkConfirm.keysRevoked": [
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
     {
       "type": 0,
       "value": "⟦"
     },
     {
-      "type": 1,
-      "value": "username"
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " çåñ ñö ļöñĝéŕ šîĝñ îñ ŵîţĥ ţĥîš þŕöṽîđéŕ åççöûñţ. "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " ŵöñ’ţ ƀé åƀļé ţö šîĝñ îñ ûñţîļ ýöû šéţ å þåššŵöŕđ öŕ çöññéçţ å þŕöṽîđéŕ åĝåîñ."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " çåñ ñö ļöñĝéŕ šîĝñ îñ ŵîţĥ ţĥîš þŕöṽîđéŕ åççöûñţ."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "’š Šîļö åþþ ķéýš ţîéđ ţö ţĥîš þŕöṽîđéŕ åççöûñţ åŕé ŕéɱöṽéđ, åñđ ţĥöšé đéṽîçéš åŕé šîĝñéđ öûţ."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
     },
     {
       "type": 0,
-      "value": "’š Šîļö åþþ ķéýš ţîéđ ţö ţĥîš þŕöṽîđéŕ åççöûñţ åŕé ŕéɱöṽéđ, åñđ ţĥöšé đéṽîçéš åŕé šîĝñéđ öûţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
@@ -93749,6 +93814,12 @@
       "value": " åþþŕöṽéđ ƒöŕ å đéṽîçé ţĥåţ ĥåšñ’ţ çöññéçţéđ ýéţ.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.users.detail.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ’ţ ļöåđ ţĥé šîĝñ-îñš åþþŕöṽéđ îñ åđṽåñçé.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.users.detail.appKeys.preapprovals.title": [
     {
       "type": 0,
@@ -93779,6 +93850,12 @@
     {
       "type": 0,
       "value": "⟦Šîļö åþþ đéṽîçéš~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö åþþ šîĝñ-îñ îšñ’ţ åṽåîļåƀļé öñ ţĥîš šéŕṽéŕ, šö ţĥéšé đéṽîçéš çåñ’ţ šîĝñ îñ. Ýöû çåñ šţîļļ ŕéɱöṽé ţĥéɱ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.users.detail.appKeys.waiting.description": [
@@ -101275,6 +101352,54 @@
       "value": "⟦Åþþŕöṽé šîĝñ-îñ~~~~~~⟧"
     }
   ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš çöđé ĥåš éẋþîŕéđ.~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö çöûļđñ’ţ ɱåķé å çöđé. Ţŕý åĝåîñ.~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "⟦Þŕéšš Öþéñ Šîļö ţö çöñţîñûé îñ ţĥé Šîļö åþþ öñ ţĥîš đéṽîçé. Îƒ ţĥé åþþ îšñ’ţ îñšţåļļéđ, îñšţåļļ îţ, çöɱé ƀåçķ ţö ţĥîš ţåƀ åñđ þŕéšš Öþéñ Šîļö åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "⟦Öþéñ Šîļö~~~~⟧"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "⟦Ĝéţ å ñéŵ çöđé~~~~~~⟧"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš çöđé ŵöŕķš öñçé åñđ éẋþîŕéš åƒţéŕ å ƒéŵ ɱîñûţéš.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "⟦Öþéñ Šîļö~~~~⟧"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "⟦Öþéñ ŵîţĥ ţĥé šîļöšéŕṽéŕ.öŕĝ ļîñķ îñšţéåđ~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -101489,10 +101614,50 @@
       "value": "~~~~~~~~~~~~⟧"
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ åççöûñţ ŵîļļ ûšé "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "⟦Çöñţîñûé~~~~⟧"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "⟦Ŵîţĥ åñ éɱåîļ åđđŕéšš, ţĥîš šéŕṽéŕ çåñ šéñđ ýöû å šîĝñ-îñ ļîñķ îƒ ýöû ļöšé ýöûŕ đéṽîçéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "⟦Ñöţĥîñĝ ĥåþþéñš? Ţĥé åþþ îšñ'ţ îñšţåļļéđ — ĵûšţ çöñţîñûé ƀéļöŵ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " åđđš þéöþļé ţĥŕöûĝĥ îţš šîĝñ-îñ þŕöṽîđéŕ. Šîĝñ îñ ŵîţĥ îţ öñ ţĥîš šîţé, ţĥéñ öþéñ Šîļö ƒŕöɱ ýöûŕ åççöûñţ šéţţîñĝš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.invite.created": [
@@ -101521,6 +101686,18 @@
       "value": "⟦Éñţéŕ ýöûŕ éɱåîļ åđđŕéšš åñđ çĥööšé å þåššŵöŕđ. Ýöû'ļļ šîĝñ îñ ŵîţĥ ýöûŕ éɱåîļ åđđŕéšš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "⟦Ĵöîñ ŵîţĥ ţĥé Šîļö åþþ öñ ýöûŕ þĥöñé öŕ ţåƀļéţ, öŕ çĥööšé å þåššŵöŕđ ţö šîĝñ îñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "⟦Éɱåîļ (öþţîöñåļ)~~~~~~~⟧"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -101545,6 +101722,18 @@
     {
       "type": 0,
       "value": "~~~~~⟧"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "⟦Ĵöîñ ŵîţĥ ţĥé Šîļö åþþ~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "⟦Ĵöîñ ŵîţĥ ţĥé Šîļö åþþ îñšţéåđ~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -101653,6 +101842,24 @@
     {
       "type": 0,
       "value": "⟦Îñṽîţåţîöñ ûñåṽåîļåƀļé~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "⟦Ûšé å þåššŵöŕđ îñšţéåđ~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "⟦Çĥööšé å ûšéŕñåɱé.~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥåţ ûšéŕñåɱé öŕ éɱåîļ åđđŕéšš îš åļŕéåđý îñ ûšé. Çĥööšé åñöţĥéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.languagePicker.label": [
@@ -146285,20 +146492,6 @@
       "value": "⟦Ĥöŵ ţö ûšé ţĥîš ķéý~~~~~~~~⟧"
     }
   ],
-  "web.settings.appKeys.row.added": [
-    {
-      "type": 0,
-      "value": "⟦Åđđéđ "
-    },
-    {
-      "type": 1,
-      "value": "date"
-    },
-    {
-      "type": 0,
-      "value": "~~~⟧"
-    }
-  ],
   "web.settings.appKeys.row.allowedBy": [
     {
       "type": 0,
@@ -151801,6 +151994,24 @@
       "value": "⟦Ýöû'ŕé öƒƒļîñé, šö ţĥîš çĥåñĝé ŵåšñ'ţ šåṽéđ~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "⟦Öþéñ îñ Šîļö~~~~~⟧"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "⟦Šîĝñ ţĥé Šîļö åþþ öñ ýöûŕ þĥöñé öŕ ţåƀļéţ îñ ţö ţĥîš åççöûñţ, ŵîţĥöûţ å þåššŵöŕđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö åþþ~~~~⟧"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -154967,6 +155178,24 @@
     {
       "type": 0,
       "value": "⟦Šéţţîñĝš~~~~⟧"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "⟦Šîĝñ îñ åĝåîñ~~~~~~⟧"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "⟦Šîĝñ îñ åĝåîñ ţö ɱåñåĝé ýöûŕ đéṽîçéš~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "⟦Ṁåñåĝé ýöûŕ đéṽîçéš îñ ţĥé Šîļö åþþ.~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.settings.signedInSessions.loadFailed": [
