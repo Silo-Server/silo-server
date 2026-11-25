@@ -46,7 +46,7 @@ func VerifyGrantRedeem(env Envelope, serverID string, now time.Time, personKey P
 	if env.KeyID != grant.AppKey.KeyID() {
 		return nil, nil, fail(CodeKidMismatch)
 	}
-	if err := outer.parseFields(PurposeGrantRedeem); err != nil {
+	if err := outer.parseFields(PurposeGrantRedeem, false); err != nil {
 		return outer, nil, err
 	}
 	if err := outer.CheckClaims(serverID, now); err != nil {
@@ -73,7 +73,7 @@ func readUnverifiedGrant(env Envelope) (*Payload, error) {
 	if err := p.parse(raw, PurposeGrant); err != nil {
 		return nil, fail(CodeGrantInvalid)
 	}
-	if err := p.parseFields(PurposeGrant); err != nil {
+	if err := p.parseFields(PurposeGrant, false); err != nil {
 		return nil, fail(CodeGrantInvalid)
 	}
 	return p, nil
