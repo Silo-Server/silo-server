@@ -1325,6 +1325,9 @@ type SessionService interface {
 	// longer live.
 	CurrentLoginSession(ctx context.Context, userID int, sessionID string) (*models.AuthSession, error)
 	RevokeSession(ctx context.Context, sessionID string, userID int) error
+	// RevokeSessionChecked runs check on the session after confirming it is
+	// userID's, in the same transaction; check's error leaves it live.
+	RevokeSessionChecked(ctx context.Context, sessionID string, userID int, check func(*models.AuthSession) error) error
 	SetupInitialUser(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
 	SignupEnabled(ctx context.Context) (bool, error)
 	Signup(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)

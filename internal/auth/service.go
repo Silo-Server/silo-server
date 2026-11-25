@@ -1620,9 +1620,19 @@ func (s *Service) LoginSessionActive(ctx context.Context, sessionID string) (boo
 // RevokeSession revokes a specific session. It verifies the session belongs
 // to the given user before revoking.
 func (s *Service) RevokeSession(ctx context.Context, sessionID string, userID int) error {
+	return s.RevokeSessionChecked(ctx, sessionID, userID, nil)
+}
+
+// RevokeSessionChecked is RevokeSession with a further check on the loaded
+// session, run after the ownership check in the same transaction. An error
+// from check leaves the session live and is returned unchanged.
+func (s *Service) RevokeSessionChecked(ctx context.Context, sessionID string, userID int, check func(*models.AuthSession) error) error {
 	return s.sessions.revokeChecked(ctx, sessionID, func(session *models.AuthSession) error {
 		if session.UserID != userID {
 			return ErrSessionNotFound
+		}
+		if check != nil {
+			return check(session)
 		}
 		return nil
 	}, func(tx pgx.Tx, session *models.AuthSession) (*auditmutation.Entry, error) {

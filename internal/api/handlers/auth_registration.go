@@ -143,12 +143,20 @@ func (h *AuthHandler) CurrentLoginSession(ctx context.Context, userID int, sessi
 }
 
 // RevokeSession revokes one of the caller's sessions. v1 DELETE
-// /auth/sessions/{id} and v2 deleteSession both call it.
+// /auth/sessions/{id} calls it.
 func (h *AuthHandler) RevokeSession(ctx context.Context, sessionID string, userID int) error {
+	return h.RevokeSessionChecked(ctx, sessionID, userID, nil)
+}
+
+// RevokeSessionChecked is RevokeSession with auth.Service's further check on
+// the caller's own session; v2 deleteSession calls it. The check's error is
+// answered as an internal error here, so a caller that refuses through it
+// keeps its own answer.
+func (h *AuthHandler) RevokeSessionChecked(ctx context.Context, sessionID string, userID int, check func(*models.AuthSession) error) error {
 	if sessionID == "" {
 		return apiError(http.StatusBadRequest, "bad_request", "Session ID is required")
 	}
-	if err := h.service.RevokeSession(ctx, sessionID, userID); err != nil {
+	if err := h.service.RevokeSessionChecked(ctx, sessionID, userID, check); err != nil {
 		if auth.IsSessionNotFound(err) {
 			return apiError(http.StatusNotFound, "not_found", "Session not found")
 		}

@@ -3,8 +3,10 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -90,8 +92,64 @@ func TestDemoModeAccountChanges(t *testing.T) {
 	sessions := &fakeSessionService{}
 	deps := pilotDeps(nil, nil)
 	deps.Sessions, deps.DemoSettings = sessions, fakeSettings{demo: true}
-	if rec := do(t, newTestHandler(t, deps), http.MethodDelete, Prefix+"/auth/sessions/s1", "", bearer(memberToken)); rec.Code != http.StatusNoContent || len(sessions.revoked) != 1 {
+	h := newTestHandler(t, deps)
+	if rec := do(t, h, http.MethodDelete, Prefix+"/auth/sessions/s1", "", bearer(memberToken)); rec.Code != http.StatusNoContent || len(sessions.revoked) != 1 {
 		t.Fatalf("own session: %d %s %v", rec.Code, rec.Body.String(), sessions.revoked)
+	}
+	// Whose session it is comes first: an unknown session, or another
+	// account's (s2), is 404 in demo mode exactly as with it off.
+	for _, id := range []string{"unknown", "s2"} {
+		requireProblem(t, do(t, h, http.MethodDelete, Prefix+"/auth/sessions/"+id, "", bearer(memberToken)), TypeNotFound)
+	}
+}
+
+// failingSettings cannot read any setting, as when the store is unreachable.
+type failingSettings struct{}
+
+func (failingSettings) Get(context.Context, string) (string, error) {
+	return "", errors.New("settings store unreachable")
+}
+
+// TestDemoModeUnreadableSetting: when the demo setting can't be read, a
+// non-administrator's restricted change is refused as an internal failure
+// (the server may not be a demo, so not with the demo refusal), the caller's
+// own session can still end, and capabilities answer no. Catches the check
+// failing open, which on a demo server would let every visitor through.
+func TestDemoModeUnreadableSetting(t *testing.T) {
+	deps := externalSignInDeps(&fakeExternalSignIn{allowUnlink: true})
+	deps.Accounts = passwordChanger{deps.Accounts.(fakeAccounts)}
+	sessions := &fakeSessionService{}
+	deps.Sessions = sessions
+	deps.DemoSettings = failingSettings{}
+	h := newTestHandler(t, deps)
+	member := with(bearer(memberToken), "X-Profile-Id", "p-primary")
+	for _, tc := range []struct{ name, method, path, body string }{
+		{"gate", http.MethodPost, "/account/password", `{"current_password":"pw","new_password":"margin fossil quench"}`},
+		{"another session", http.MethodDelete, "/auth/sessions/s9", ""},
+	} {
+		rec := do(t, h, tc.method, Prefix+tc.path, tc.body, member)
+		if isDemoRefusal(rec) {
+			t.Fatalf("%s: answered as a demo server: %s", tc.name, rec.Body.String())
+		}
+		requireProblem(t, rec, TypeInternalError)
+	}
+	if rec := do(t, h, http.MethodDelete, Prefix+"/auth/sessions/s1", "", member); rec.Code != http.StatusNoContent || !slices.Equal(sessions.revoked, []string{"s1"}) {
+		t.Fatalf("own session: %d %s %v", rec.Code, rec.Body.String(), sessions.revoked)
+	}
+	for _, tc := range []struct{ path, name string }{
+		{"/account/password/capability", "allowed"},
+		{"/auth/sessions/capabilities", "revoke_other_sessions"},
+		{"/account/identities", "can_link"},
+	} {
+		rec := do(t, h, http.MethodGet, Prefix+tc.path, "", member)
+		var body map[string]any
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &body) != nil || body[tc.name] != false {
+			t.Fatalf("%s %s: %d %s", tc.path, tc.name, rec.Code, rec.Body.String())
+		}
+	}
+	// An administrator is never restricted, so the setting is not needed.
+	if rec := do(t, h, http.MethodPost, Prefix+"/account/password", `{"current_password":"pw","new_password":"margin fossil quench"}`, with(bearer(adminToken), "X-Profile-Id", "p-primary")); rec.Code != http.StatusNoContent {
+		t.Fatalf("administrator: %d %s", rec.Code, rec.Body.String())
 	}
 }
 

@@ -121,7 +121,7 @@ func (reg *Registry) getAccountPasswordCapability(ctx context.Context, _ *Capabi
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	allowed := view.ChangePassword && !demoRestricted(ctx, reg.deps.DemoSettings)
+	allowed := view.ChangePassword && demoAllows(ctx, reg.deps.DemoSettings)
 	out := &AccountPasswordCapabilityOutput{CacheControl: cachePrivateNoCache, Body: AccountPasswordCapability{
 		Capability:              Capability{State: StateAvailable, Allowed: &allowed},
 		RequiresCurrentPassword: view.RequiresCurrentPassword,

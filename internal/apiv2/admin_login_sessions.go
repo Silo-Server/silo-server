@@ -41,7 +41,7 @@ func registerLoginSessionCapabilities(reg *Registry) {
 			state = StateAvailable
 		}
 		return &LoginSessionCapabilitiesOutput{Body: LoginSessionCapabilities{Capability: Capability{State: state}, Available: available, LastSeen: available, AdminManagement: reg.deps.AdminLoginSessions != nil && reg.deps.AdminLoginSessions.AdminLoginSessionsAvailable(),
-			RevokeOtherSessions: available && !demoRestricted(ctx, reg.deps.DemoSettings)}}, nil
+			RevokeOtherSessions: available && demoAllows(ctx, reg.deps.DemoSettings)}}, nil
 	})
 }
 

@@ -384,12 +384,33 @@ func (reg *Registry) deleteSession(ctx context.Context, in *DeleteSessionInput) 
 	if claims == nil {
 		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
-	// Demo visitors share one account, so its other sessions are other
-	// visitors': they may sign themselves out, not each other.
-	if string(in.ID) != claims.SessionID && demoRestricted(ctx, reg.deps.DemoSettings) {
-		return nil, demoRestrictedProblem()
+	// Read before the revocation's transaction, so no setting read waits
+	// under its row lock.
+	restricted, demoErr := demoRestricted(ctx, reg.deps.DemoSettings)
+	// The check runs after the ownership check, in the revocation's
+	// transaction, so an unknown session or another account's is 404 as
+	// without demo mode.
+	var refused *Problem
+	check := func(session *models.AuthSession) error {
+		// Demo visitors share one account, so its other sessions are other
+		// visitors': they may sign themselves out, not each other.
+		if session.ID != claims.SessionID {
+			if demoErr != nil {
+				refused = serviceProblem(demoErr)
+			} else if restricted {
+				refused = demoRestrictedProblem()
+			}
+		}
+		if refused != nil {
+			return refused
+		}
+		return nil
 	}
-	if err := reg.deps.Sessions.RevokeSession(ctx, string(in.ID), claims.UserID); err != nil {
+	err := reg.deps.Sessions.RevokeSessionChecked(ctx, string(in.ID), claims.UserID, check)
+	if refused != nil {
+		return nil, refused
+	}
+	if err != nil {
 		return nil, serviceProblem(err)
 	}
 	return nil, nil

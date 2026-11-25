@@ -381,9 +381,9 @@ func registerExternalSignIn(reg *Registry) {
 				items = append(items, accountIdentityOf(v))
 			}
 			// Demo visitors share one account: none may change how it signs in.
-			demo := demoRestricted(ctx, reg.deps.DemoSettings)
+			allows := demoAllows(ctx, reg.deps.DemoSettings)
 			canUnlink := false
-			if len(items) > 0 && !demo {
+			if len(items) > 0 && allows {
 				if canUnlink, err = svc.CanUnlinkAccountIdentity(ctx, claims.UserID); err != nil {
 					return nil, serviceProblem(err)
 				}
@@ -398,7 +398,7 @@ func registerExternalSignIn(reg *Registry) {
 					return nil, serviceProblem(err)
 				}
 			}
-			canLink := claims.IsOwnLoginSession() && !demo
+			canLink := claims.IsOwnLoginSession() && allows
 			return &AccountIdentityCollectionOutput{Body: AccountIdentityCollection{Collection: NewCollection(items), CanUnlink: canUnlink, CanLink: canLink}}, nil
 		})
 
