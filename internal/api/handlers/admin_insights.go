@@ -629,6 +629,10 @@ type AdminInsightsSource interface {
 	Titles(ctx context.Context, q AdminInsightsTitlesQuery) (*AdminInsightsTitles, error)
 	Library(ctx context.Context, q AdminInsightsWindowQuery) (*AdminInsightsLibrary, error)
 	Invalidate()
+	// Refresh handles a user's refresh=true read: it marks every cached read
+	// stale and returns the context the caller reads with to wait for fresh
+	// data for its own key.
+	Refresh(ctx context.Context) context.Context
 }
 
 // Service entrypoints on AdminHandler used by internal/apiv2.
@@ -636,7 +640,7 @@ type AdminInsightsSource interface {
 func (h *AdminHandler) ReadAdminInsightsActivity(ctx context.Context, q AdminInsightsWindowQuery, refresh bool) (*AdminInsightsActivity, error) {
 	if h.InsightsSource != nil {
 		if refresh {
-			h.InsightsSource.Invalidate()
+			ctx = h.InsightsSource.Refresh(ctx)
 		}
 		return h.InsightsSource.Activity(ctx, q)
 	}
@@ -649,7 +653,7 @@ func (h *AdminHandler) ReadAdminInsightsActivity(ctx context.Context, q AdminIns
 func (h *AdminHandler) ReadAdminInsightsPeople(ctx context.Context, q AdminInsightsPeopleQuery, refresh bool) (*AdminInsightsPeople, error) {
 	if h.InsightsSource != nil {
 		if refresh {
-			h.InsightsSource.Invalidate()
+			ctx = h.InsightsSource.Refresh(ctx)
 		}
 		return h.InsightsSource.People(ctx, q)
 	}
@@ -662,7 +666,7 @@ func (h *AdminHandler) ReadAdminInsightsPeople(ctx context.Context, q AdminInsig
 func (h *AdminHandler) ReadAdminInsightsDevices(ctx context.Context, q AdminInsightsDevicesQuery, refresh bool) (*AdminInsightsDevices, error) {
 	if h.InsightsSource != nil {
 		if refresh {
-			h.InsightsSource.Invalidate()
+			ctx = h.InsightsSource.Refresh(ctx)
 		}
 		return h.InsightsSource.Devices(ctx, q)
 	}
@@ -675,7 +679,7 @@ func (h *AdminHandler) ReadAdminInsightsDevices(ctx context.Context, q AdminInsi
 func (h *AdminHandler) ReadAdminInsightsBandwidth(ctx context.Context, q AdminInsightsBandwidthQuery, refresh bool) (*AdminInsightsBandwidth, error) {
 	if h.InsightsSource != nil {
 		if refresh {
-			h.InsightsSource.Invalidate()
+			ctx = h.InsightsSource.Refresh(ctx)
 		}
 		return h.InsightsSource.Bandwidth(ctx, q)
 	}
@@ -688,7 +692,7 @@ func (h *AdminHandler) ReadAdminInsightsBandwidth(ctx context.Context, q AdminIn
 func (h *AdminHandler) ReadAdminInsightsTitles(ctx context.Context, q AdminInsightsTitlesQuery, refresh bool) (*AdminInsightsTitles, error) {
 	if h.InsightsSource != nil {
 		if refresh {
-			h.InsightsSource.Invalidate()
+			ctx = h.InsightsSource.Refresh(ctx)
 		}
 		return h.InsightsSource.Titles(ctx, q)
 	}
@@ -701,7 +705,7 @@ func (h *AdminHandler) ReadAdminInsightsTitles(ctx context.Context, q AdminInsig
 func (h *AdminHandler) ReadAdminInsightsLibrary(ctx context.Context, q AdminInsightsWindowQuery, refresh bool) (*AdminInsightsLibrary, error) {
 	if h.InsightsSource != nil {
 		if refresh {
-			h.InsightsSource.Invalidate()
+			ctx = h.InsightsSource.Refresh(ctx)
 		}
 		return h.InsightsSource.Library(ctx, q)
 	}

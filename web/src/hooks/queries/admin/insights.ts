@@ -38,9 +38,10 @@ let authorityGeneration = 0;
 let refreshWindowUntil = 0;
 
 /**
- * Marks the next few seconds of Insights queries as user-triggered refreshes so
- * they pass `refresh=true` to bypass the server's 60s cache without changing
- * the React Query cache key.
+ * Marks the next few seconds of Insights queries, on the Insights page and the
+ * dashboard's Insights widgets, as user-triggered refreshes so they pass
+ * `refresh=true`, which drops the server's cached Insights and reads fresh
+ * data, without changing the React Query cache key.
  */
 export function markAdminInsightsRefresh(): void {
   refreshWindowUntil = Date.now() + 5_000;
@@ -121,12 +122,16 @@ export function dashboardInsightsWindow(range: WidgetRange) {
 }
 
 export function useDashboardInsightsActivity(range: WidgetRange) {
-  const query = dashboardInsightsWindow(range);
+  const query: AdminInsightsActivityQuery = dashboardInsightsWindow(range);
   const interval = dashboardInsightsInterval(range);
   return useAdminInsightQuery(
     adminKeys.insightsActivity(query),
     (profileContext, signal) =>
-      v2("GET /api/v2/admin/insights/activity", { query, profileContext, signal }),
+      v2("GET /api/v2/admin/insights/activity", {
+        query: withRefreshFlag(query),
+        profileContext,
+        signal,
+      }),
     true,
     interval,
     interval,
@@ -134,12 +139,20 @@ export function useDashboardInsightsActivity(range: WidgetRange) {
 }
 
 export function useDashboardInsightsTitles(range: WidgetRange, limit: number) {
-  const query = { ...dashboardInsightsWindow(range), sort: "plays" as const, limit };
+  const query: AdminInsightsTitlesQuery = {
+    ...dashboardInsightsWindow(range),
+    sort: "plays" as const,
+    limit,
+  };
   const interval = dashboardInsightsInterval(range);
   return useAdminInsightQuery(
     adminKeys.insightsTitles(query),
     (profileContext, signal) =>
-      v2("GET /api/v2/admin/insights/titles", { query, profileContext, signal }),
+      v2("GET /api/v2/admin/insights/titles", {
+        query: withRefreshFlag(query),
+        profileContext,
+        signal,
+      }),
     true,
     interval,
     interval,
@@ -147,12 +160,16 @@ export function useDashboardInsightsTitles(range: WidgetRange, limit: number) {
 }
 
 export function useDashboardInsightsLibrary(range: WidgetRange) {
-  const query = dashboardInsightsWindow(range);
+  const query: AdminInsightsLibraryQuery = dashboardInsightsWindow(range);
   const interval = dashboardInsightsInterval(range);
   return useAdminInsightQuery(
     adminKeys.insightsLibrary(query),
     (profileContext, signal) =>
-      v2("GET /api/v2/admin/insights/library", { query, profileContext, signal }),
+      v2("GET /api/v2/admin/insights/library", {
+        query: withRefreshFlag(query),
+        profileContext,
+        signal,
+      }),
     true,
     interval,
     interval,
@@ -161,12 +178,16 @@ export function useDashboardInsightsLibrary(range: WidgetRange) {
 
 /** People with one account row: the widget reads only `top_profiles`. */
 export function useDashboardInsightsPeople(range: WidgetRange) {
-  const query = { ...dashboardInsightsWindow(range), limit: 1 };
+  const query: AdminInsightsPeopleQuery = { ...dashboardInsightsWindow(range), limit: 1 };
   const interval = dashboardInsightsInterval(range);
   return useAdminInsightQuery(
     adminKeys.insightsPeople(query),
     (profileContext, signal) =>
-      v2("GET /api/v2/admin/insights/people", { query, profileContext, signal }),
+      v2("GET /api/v2/admin/insights/people", {
+        query: withRefreshFlag(query),
+        profileContext,
+        signal,
+      }),
     true,
     interval,
     interval,
