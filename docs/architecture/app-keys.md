@@ -429,7 +429,17 @@ waits instead, and can, because it takes only a key-share lock on the account.
 
 Two cases have nothing to check again: a request that named no profile (the
 administrator with one unprotected profile), and a server whose profiles are
-stored outside Postgres, where this transaction can't read them.
+stored outside Postgres (`userdb.backend=sqlite`), where this transaction
+can't read them.
+
+What remains on the SQLite store is known and accepted. The handler's check
+still runs there, so a secondary profile and an unproven PIN are refused as
+everywhere. What is not caught is a change to the main profile (its PIN, or
+which profile is the main one) that commits after the handler's check and
+before the operation's own commit, which is the time the operation waits for
+the account row plus its own short transaction. One request that was already
+past the check goes through; the next one is checked against the new state.
+The profile set and personal API keys are not offered on that store at all.
 
 The key list, its deletes, the pending list and deny keep no profile rule:
 any profile of the account may review and remove devices.
