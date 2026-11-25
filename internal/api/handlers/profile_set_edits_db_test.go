@@ -938,10 +938,14 @@ func TestProfileSetRefusalOrderDB(t *testing.T) {
 		}
 	})
 	t.Run("the same set with the latest edits is refused for its names", func(t *testing.T) {
+		before := f.state(t)
 		_, err := f.applySeen(t, setDoc(t, 2, main, kid, guest), f.held(t).EditsToken)
 		var field *ProfileSetFieldError
 		if !errors.As(err, &field) || field.Code != "name_conflict" {
 			t.Fatalf("err = %v, want name_conflict", err)
+		}
+		if f.state(t) != before {
+			t.Fatal("a set refused for its names wrote")
 		}
 	})
 }

@@ -127,15 +127,6 @@ func (r *profileSetRun) attempt(ctx context.Context) error {
 	}
 	r.edits = edits.forItems(r.doc, plan)
 	r.pinOverrides = r.edits.pinOverridden()
-	for i, row := range plan.rowOf {
-		// An upload stored before hashes were kept gets its label now, so a
-		// set built from this server's own answer matches it.
-		if isUploadedAvatarRef(row.Avatar) && row.AvatarSourceSHA256 == "" && r.doc.Items[i].Picture != "" {
-			if _, err := r.h.profileSetPicture(ctx, r.store, &row.Profile); err != nil {
-				return err
-			}
-		}
-	}
 	if r.pinMatches, err = r.comparePINs(ctx, plan, r.repeat); err != nil {
 		return err
 	}
@@ -144,6 +135,17 @@ func (r *profileSetRun) attempt(ctx context.Context) error {
 	}
 	if plan.refusal != nil {
 		return plan.refusal
+	}
+	// Only a set that will write reads storage: a refused set or a repeat
+	// must not fail, or wait, on an upload it will never use.
+	for i, row := range plan.rowOf {
+		// An upload stored before hashes were kept gets its label now, so a
+		// set built from this server's own answer matches it.
+		if isUploadedAvatarRef(row.Avatar) && row.AvatarSourceSHA256 == "" && r.doc.Items[i].Picture != "" {
+			if _, err := r.h.profileSetPicture(ctx, r.store, &row.Profile); err != nil {
+				return err
+			}
+		}
 	}
 	if err := r.hashPINs(ctx, plan); err != nil {
 		return err
