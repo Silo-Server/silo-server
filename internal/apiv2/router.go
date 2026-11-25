@@ -467,6 +467,10 @@ type Dependencies struct {
 	PersonalAPIKeys         PersonalAPIKeyService
 	// AppKeys stores app keys; nil reports the capability not_configured.
 	AppKeys AppKeyService
+	// AdminAppKeys lists and revokes another account's app keys; nil leaves
+	// those operations not configured and the account capability app_keys
+	// false.
+	AdminAppKeys AdminAppKeyService
 	// ProfileSet applies and reads profile sets; nil reports the capability
 	// not_configured.
 	ProfileSet       ProfileSetService

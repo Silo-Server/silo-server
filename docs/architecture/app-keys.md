@@ -453,6 +453,29 @@ The profile set and personal API keys are not offered on that store at all.
 The key list, its deletes, the pending list and deny keep no profile rule:
 any profile of the account may review and remove devices.
 
+**Administrators.** An administrator reviews and removes another account's
+keys on the Users page through `/admin/users/{user_id}/keys`: list, revoke a
+device key, revoke the person key, deny a waiting key. These routes don't read
+`opened_via` or the acting profile, and answer while the switch is off. Any
+acting administrator lists any account. A change locks the acting
+administrator, the target account and the request's audit actors in id order
+(`lockAdminActorAndTarget`, shared with revoking login sessions and device
+sign-ins approved in advance) and applies `CheckOwnerTarget`: an administrator
+acts on an ordinary account and on their own, only the Owner on another
+administrator or on the Owner. Then the key rows, then the sessions, the order
+every key path takes, with one more account row in front; no key path locks two
+accounts, so there is no cycle. No administrator route approves a waiting key:
+approval is the person's, from one of their own sessions. The Owner may deny
+another administrator's waiting key.
+
+The administrator's list shows what the person's list hides: a provider-bound
+key whose identity is gone from the account, marked `identity_gone`. It is
+dead (revoked at its next use) but still occupies the person's device, so the
+administrator sees why it no longer signs in. It shows how each key was
+enrolled and, for a key a grant enrolled, the account whose person key allowed
+it; nothing records which session or administrator vouched for a key beyond
+that.
+
 ## The origin rule and the sealed reply
 
 The payload names the address the device is talking to. The server refuses it
@@ -527,8 +550,12 @@ TLS connection covers all of it.
 
 ## What revokes keys
 
-- **Revoking a device key** (the person's devices list) ends its sessions at
-  once, as above.
+- **Revoking a device key** (the person's devices list, or an administrator on
+  the Users page) ends its sessions at once, as above.
+- **Revoking the person key** (an administrator on the Users page) stops it
+  introducing devices and denies the devices it introduced that are still
+  waiting, as replacing it does. Devices already enrolled keep their keys and
+  sessions. The person sets up a new person key from a signed-in device.
 - **Replacing the person key** revokes the old one: new devices need the new
   key, devices already enrolled keep theirs. A device the old key introduced
   that is still waiting for approval is refused with it (`denied`): replacing

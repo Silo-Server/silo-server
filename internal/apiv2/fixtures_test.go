@@ -1798,6 +1798,7 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, devicePreapprovalFixtureCases()...)
 	cases = append(cases, appKeyFixtureCases()...)
 	cases = append(cases, profileSetFixtureCases()...)
+	cases = append(cases, adminAppKeyFixtureCases()...)
 	return cases
 }
 
@@ -2196,6 +2197,7 @@ func fixtureDeps() Dependencies {
 	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
 	deps.AppKeys = fixtureAppKeys()
 	deps.ProfileSet = fixtureProfileSets{}
+	deps.AdminAppKeys = fixtureAdminAppKeys()
 	deps.AdminPluginProvisionStatus = func(context.Context) ([]plugins.ProvisionStatus, error) {
 		return []plugins.ProvisionStatus{{PluginID: "silo.auth.oidc", Version: "0.1.2", State: "pending"}}, nil
 	}

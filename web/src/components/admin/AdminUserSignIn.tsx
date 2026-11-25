@@ -35,6 +35,8 @@ import {
   type AdminUserIdentity,
 } from "@/hooks/queries/admin/externalSignIn";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
+import { useAdminAppKeys } from "@/hooks/queries/admin/appKeys";
+import { useAdminUserCapabilities } from "@/hooks/queries/admin/users";
 import { useAdminSettingValue } from "@/hooks/queries/admin/settings";
 import { formatDateTime } from "@/lib/datetime";
 import {
@@ -437,6 +439,17 @@ export function AdminUserSignIn({
   const identitiesServed = caps?.admin_identities === true;
   const identities = useAdminUserIdentities(user.id, identitiesServed);
   const unlink = useUnlinkAdminUserIdentity();
+  const accountCaps = useAdminUserCapabilities();
+  const appKeysRead = accountCaps.data?.app_keys === true && identitiesServed;
+  const appKeys = useAdminAppKeys(user.id, appKeysRead).keys;
+  // Unlinking revokes only the keys bound to that provider account. Unlink
+  // waits until the capability and the key list have each answered; a list
+  // that failed gets a sentence that holds whether or not keys exist.
+  const keysSettling = accountCaps.isPending || (appKeysRead && appKeys.isPending);
+  const keysBoundTo = (identityId: string) =>
+    [appKeys.data?.person_key, ...(appKeys.data?.devices ?? [])].some(
+      (key) => key?.identity_id === identityId && !key.identity_gone,
+    );
   const updateSignIn = useUpdateAdminUserSignIn();
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [linkOpen, setLinkOpen] = useState(false);
@@ -673,10 +686,17 @@ export function AdminUserSignIn({
               })
             : t("web.admin.common.adminUserSignIn.unlinkConfirm.titleUnknownProvider")
         }
-        description={t("web.admin.common.adminUserSignIn.unlinkConfirm.description", {
+        description={t("web.admin.common.adminUserSignIn.unlinkConfirm.text", {
           username: user.username,
           last_way: lastWay ? "yes" : "no",
+          keys:
+            appKeysRead && appKeys.isError
+              ? "unknown"
+              : unlinking && keysBoundTo(String(unlinking.id))
+                ? "yes"
+                : "no",
         })}
+        confirmDisabled={keysSettling}
         confirmLabel={t("web.admin.common.adminUserSignIn.unlink")}
         className={TOUCH_TARGETS}
         variant="destructive"

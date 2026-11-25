@@ -215,6 +215,12 @@
       "value": "⟦Ţĥåţ’š åļŕéåđý ļîñķéđ ţö ţĥîš åççöûñţ.~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "error.app_code_invalid": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš çöđé îš ûñķñöŵñ, ûšéđ öŕ éẋþîŕéđ. Ĝéţ å ñéŵ öñé ƒŕöɱ ţĥé šéŕṽéŕ’š þåĝé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "error.authentication_required": [
     {
       "type": 0,
@@ -25763,6 +25769,95 @@
     {
       "type": 0,
       "value": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.adminUserSignIn.unlinkConfirm.text": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "last_way",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " çåñ ñö ļöñĝéŕ šîĝñ îñ ŵîţĥ ţĥîš þŕöṽîđéŕ åççöûñţ. "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " ŵöñ’ţ ƀé åƀļé ţö šîĝñ îñ ûñţîļ ýöû šéţ å þåššŵöŕđ öŕ çöññéçţ å þŕöṽîđéŕ åĝåîñ."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": " çåñ ñö ļöñĝéŕ šîĝñ îñ ŵîţĥ ţĥîš þŕöṽîđéŕ åççöûñţ."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "keys",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 0,
+              "value": " "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "’š Šîļö åþþ ķéýš ţîéđ ţö ţĥîš þŕöṽîđéŕ åççöûñţ åŕé ŕéɱöṽéđ, åñđ ţĥöšé đéṽîçéš åŕé šîĝñéđ öûţ."
+            }
+          ]
+        },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Åñý öƒ "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "’š Šîļö åþþ ķéýš ţîéđ ţö ţĥîš þŕöṽîđéŕ åççöûñţ åŕé ŕéɱöṽéđ, åñđ ţĥöšé đéṽîçéš åŕé šîĝñéđ öûţ."
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.common.adminUserSignIn.unlinkConfirm.title": [
@@ -93417,6 +93512,394 @@
       "value": "~~~~⟧"
     }
   ],
+  "web.admin.users.detail.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ’ţ ɱåķé ţĥåţ çĥåñĝé. Ţŕý åĝåîñ.~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "⟦Đéñý đéṽîçé~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " çåñ’ţ šîĝñ îñ ţö "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’š åççöûñţ. Îƒ îţ ŵåš ţĥéîŕš, ţĥéý åđđ îţ åĝåîñ îñ ţĥé Šîļö åþþ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "⟦Đéñý "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKey": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱöṽé ķéý~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyDescription": [
+    {
+      "type": 0,
+      "value": "⟦Đéṽîçéš åļŕéåđý šîĝñéđ îñ ķééþ ŵöŕķîñĝ ûñţîļ ýöû ŕéɱöṽé ţĥéɱ. Ñö ñéŵ đéṽîçé çåñ ƀé åđđéđ ŵîţĥ ţĥîš ķéý, åñđ đéṽîçéš îţ åđđéđ ţĥåţ åŕé šţîļļ ŵåîţîñĝ åŕé đéñîéđ. "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’š Šîļö åþþ šéţš ûþ å ñéŵ ķéý ţĥé ñéẋţ ţîɱé ţĥéý åđđ å đéṽîçé ŵĥîļé šîĝñéđ îñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.personKeyTitle": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱöṽé "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’š åççöûñţ ķéý?~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱöṽé đéṽîçé~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " îš šîĝñéđ öûţ öƒ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’š åççöûñţ ñöŵ åñđ çåñ’ţ šîĝñ îñ ŵîţĥ îţš ķéý åĝåîñ. Ţö ûšé îţ åĝåîñ, "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " åđđš îţ åĝåîñ îñ ţĥé Šîļö åþþ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱöṽé "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "⟦Ŵîţĥđŕåŵ åþþŕöṽåļ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " çåñ’ţ ûšé ţĥîš åþþŕöṽåļ ţö šîĝñ îñ ţö "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’š åççöûñţ.~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "⟦Ŵîţĥđŕåŵ ţĥé åþþŕöṽåļ ƒöŕ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "⟦Šåṽîñĝ…~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " đéñîéđ~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.description": [
+    {
+      "type": 0,
+      "value": "⟦Đéṽîçéš åñđ åþþš ţĥåţ šîĝñ îñ ţö "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’š åççöûñţ ŵîţĥ ţĥé Šîļö åþþ, ŵîţĥöûţ å þåššŵöŕđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "⟦Đéṽîçéš~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö đéṽîçéš ûšé ţĥé Šîļö åþþ öñ ţĥîš åççöûñţ.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱöṽîñĝ å đéṽîçé šîĝñš îţ öûţ åñđ šţöþš îţš ķéý ŵöŕķîñĝ. Šîĝñîñĝ öûţ å šéššîöñ đöéšñ’ţ ŕéɱöṽé ţĥé đéṽîçé: îţ šîĝñš ƀåçķ îñ ŵîţĥ îţš ķéý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ’ţ ļöåđ đéṽîçéš.~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "⟦Ļöåđîñĝ đéṽîçéš…~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.off": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö åþþ šîĝñ-îñ îš öƒƒ öñ ţĥîš šéŕṽéŕ, šö ţĥéšé đéṽîçéš çåñ’ţ šîĝñ îñ. Ýöû çåñ šţîļļ ŕéɱöṽé ţĥéɱ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.ownerOnly": [
+    {
+      "type": 0,
+      "value": "⟦Öñļý ţĥé šéŕṽéŕ öŵñéŕ çåñ çĥåñĝé åñöţĥéŕ åđɱîñ’š öŕ ţĥé öŵñéŕ’š đéṽîçéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé Šîļö åþþ ûšéš ţĥîš ķéý ţö åđđ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’š ñéŵ đéṽîçéš. Šéţ ûþ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "⟦Ñö åççöûñţ ķéý. "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’š Šîļö åþþ šéţš öñé ûþ ţĥé ñéẋţ ţîɱé ţĥéý åđđ å đéṽîçé ŵĥîļé šîĝñéđ îñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.remove": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱöṽé åççöûñţ ķéý~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "⟦Åççöûñţ ķéý~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.personKeyRemoved": [
+    {
+      "type": 0,
+      "value": "⟦Åççöûñţ ķéý ŕéɱöṽéđ~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "⟦Šîĝñ-îñš "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " åþþŕöṽéđ ƒöŕ å đéṽîçé ţĥåţ ĥåšñ’ţ çöññéçţéđ ýéţ.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ’ţ ļöåđ ţĥé šîĝñ-îñš åþþŕöṽéđ îñ åđṽåñçé.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "⟦Åþþŕöṽéđ îñ åđṽåñçé~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéƒŕéšĥ Šîļö åþþ đéṽîçéš~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " ŕéɱöṽéđ~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.title": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö åþþ đéṽîçéš~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö åþþ šîĝñ-îñ îšñ’ţ åṽåîļåƀļé öñ ţĥîš šéŕṽéŕ, šö ţĥéšé đéṽîçéš çåñ’ţ šîĝñ îñ. Ýöû çåñ šţîļļ ŕéɱöṽé ţĥéɱ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "⟦Å ñéŵ đéṽîçé öñ åñ åđɱîñ åççöûñţ ŵåîţš ûñţîļ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " åþþŕöṽéš îţ ƒŕöɱ å đéṽîçé ţĥéý’ŕé šîĝñéđ îñ öñ. Ýöû çåñ đéñý îţ ĥéŕé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåîţîñĝ ƒöŕ åþþŕöṽåļ~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "⟦Åþþŕöṽåļ ŵîţĥđŕåŵñ~~~~~~~~⟧"
+    }
+  ],
   "web.admin.users.detail.common.allProfiles": [
     {
       "type": 0,
@@ -100885,6 +101368,54 @@
       "value": "⟦Åþþŕöṽé šîĝñ-îñ~~~~~~⟧"
     }
   ],
+  "web.auth.appCode.expired": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš çöđé ĥåš éẋþîŕéđ.~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.appCode.failed": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö çöûļđñ’ţ ɱåķé å çöđé. Ţŕý åĝåîñ.~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.appCode.instructions": [
+    {
+      "type": 0,
+      "value": "⟦Þŕéšš Öþéñ Šîļö ţö çöñţîñûé îñ ţĥé Šîļö åþþ öñ ţĥîš đéṽîçé. Îƒ ţĥé åþþ îšñ’ţ îñšţåļļéđ, îñšţåļļ îţ, çöɱé ƀåçķ ţö ţĥîš ţåƀ åñđ þŕéšš Öþéñ Šîļö åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.appCode.open": [
+    {
+      "type": 0,
+      "value": "⟦Öþéñ Šîļö~~~~⟧"
+    }
+  ],
+  "web.auth.appCode.renew": [
+    {
+      "type": 0,
+      "value": "⟦Ĝéţ å ñéŵ çöđé~~~~~~⟧"
+    }
+  ],
+  "web.auth.appCode.singleUse": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš çöđé ŵöŕķš öñçé åñđ éẋþîŕéš åƒţéŕ å ƒéŵ ɱîñûţéš.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.appCode.title": [
+    {
+      "type": 0,
+      "value": "⟦Öþéñ Šîļö~~~~⟧"
+    }
+  ],
+  "web.auth.appCode.webLink": [
+    {
+      "type": 0,
+      "value": "⟦Öþéñ ŵîţĥ ţĥé šîļöšéŕṽéŕ.öŕĝ ļîñķ îñšţéåđ~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.auth.card.rememberedIt": [
     {
       "type": 0,
@@ -101099,10 +101630,50 @@
       "value": "~~~~~~~~~~~~⟧"
     }
   ],
+  "web.auth.invite.appAccountEmail": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ åççöûñţ ŵîļļ ûšé "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.invite.appContinue": [
+    {
+      "type": 0,
+      "value": "⟦Çöñţîñûé~~~~⟧"
+    }
+  ],
+  "web.auth.invite.appEmailHint": [
+    {
+      "type": 0,
+      "value": "⟦Ŵîţĥ åñ éɱåîļ åđđŕéšš, ţĥîš šéŕṽéŕ çåñ šéñđ ýöû å šîĝñ-îñ ļîñķ îƒ ýöû ļöšé ýöûŕ đéṽîçéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.auth.invite.appMissing": [
     {
       "type": 0,
       "value": "⟦Ñöţĥîñĝ ĥåþþéñš? Ţĥé åþþ îšñ'ţ îñšţåļļéđ — ĵûšţ çöñţîñûé ƀéļöŵ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.invite.appProviderOnly": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " åđđš þéöþļé ţĥŕöûĝĥ îţš šîĝñ-îñ þŕöṽîđéŕ. Šîĝñ îñ ŵîţĥ îţ öñ ţĥîš šîţé, ţĥéñ öþéñ Šîļö ƒŕöɱ ýöûŕ åççöûñţ šéţţîñĝš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.invite.created": [
@@ -101131,6 +101702,18 @@
       "value": "⟦Éñţéŕ ýöûŕ éɱåîļ åđđŕéšš åñđ çĥööšé å þåššŵöŕđ. Ýöû'ļļ šîĝñ îñ ŵîţĥ ýöûŕ éɱåîļ åđđŕéšš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.auth.invite.descriptionWithApp": [
+    {
+      "type": 0,
+      "value": "⟦Ĵöîñ ŵîţĥ ţĥé Šîļö åþþ öñ ýöûŕ þĥöñé öŕ ţåƀļéţ, öŕ çĥööšé å þåššŵöŕđ ţö šîĝñ îñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.invite.emailOptional": [
+    {
+      "type": 0,
+      "value": "⟦Éɱåîļ (öþţîöñåļ)~~~~~~~⟧"
+    }
+  ],
   "web.auth.invite.emailPlaceholder": [
     {
       "type": 0,
@@ -101155,6 +101738,18 @@
     {
       "type": 0,
       "value": "~~~~~⟧"
+    }
+  ],
+  "web.auth.invite.joinWithApp": [
+    {
+      "type": 0,
+      "value": "⟦Ĵöîñ ŵîţĥ ţĥé Šîļö åþþ~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.invite.joinWithAppInstead": [
+    {
+      "type": 0,
+      "value": "⟦Ĵöîñ ŵîţĥ ţĥé Šîļö åþþ îñšţéåđ~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.invite.loadFailed": [
@@ -101263,6 +101858,24 @@
     {
       "type": 0,
       "value": "⟦Îñṽîţåţîöñ ûñåṽåîļåƀļé~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.invite.usePassword": [
+    {
+      "type": 0,
+      "value": "⟦Ûšé å þåššŵöŕđ îñšţéåđ~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.invite.usernameRequired": [
+    {
+      "type": 0,
+      "value": "⟦Çĥööšé å ûšéŕñåɱé.~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.invite.usernameTaken": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥåţ ûšéŕñåɱé öŕ éɱåîļ åđđŕéšš îš åļŕéåđý îñ ûšé. Çĥööšé åñöţĥéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.auth.languagePicker.label": [
@@ -145895,6 +146508,170 @@
       "value": "⟦Ĥöŵ ţö ûšé ţĥîš ķéý~~~~~~~~⟧"
     }
   ],
+  "web.settings.appKeys.row.allowedBy": [
+    {
+      "type": 0,
+      "value": "⟦Åļļöŵéđ ƀý "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.deny": [
+    {
+      "type": 0,
+      "value": "⟦Đéñý~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.denyLabel": [
+    {
+      "type": 0,
+      "value": "⟦Đéñý "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.identityGone": [
+    {
+      "type": 0,
+      "value": "⟦Çåñ’ţ šîĝñ îñ: îţš šîĝñ-îñ þŕöṽîđéŕ åççöûñţ îš ñö ļöñĝéŕ ļîñķéđ~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.kindApp": [
+    {
+      "type": 0,
+      "value": "⟦Öţĥéŕ åþþ~~~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.kindDevice": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö åþþ~~~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.lastUsed": [
+    {
+      "type": 0,
+      "value": "⟦Ļåšţ šîĝñéđ îñ "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.notUsed": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ šîĝñéđ îñ ŵîţĥ îţš ķéý ýéţ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.preapproval": [
+    {
+      "type": 0,
+      "value": "⟦Åþþŕöṽéđ îñ åđṽåñçé · éẋþîŕéš "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.provider": [
+    {
+      "type": 0,
+      "value": "⟦Çĥéçķéđ ŵîţĥ ţĥé šîĝñ-îñ þŕöṽîđéŕ~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.remove": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱöṽé~~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.removeLabel": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱöṽé "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "~~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.viaAppCode": [
+    {
+      "type": 0,
+      "value": "⟦Åđđéđ ŵîţĥ å öñé-ţîɱé çöđé ƒŕöɱ ţĥé šéŕṽéŕ’š ŵéƀ þåĝé~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.viaPersonKey": [
+    {
+      "type": 0,
+      "value": "⟦Åđđéđ ƀý ţĥé Šîļö åþþ öñ åñöţĥéŕ đéṽîçé~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.viaSession": [
+    {
+      "type": 0,
+      "value": "⟦Åđđéđ ŵĥîļé šîĝñéđ îñ~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.waitingUntil": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåîţîñĝ ƒöŕ åþþŕöṽåļ ûñţîļ "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.withdraw": [
+    {
+      "type": 0,
+      "value": "⟦Ŵîţĥđŕåŵ~~~~⟧"
+    }
+  ],
+  "web.settings.appKeys.row.withdrawLabel": [
+    {
+      "type": 0,
+      "value": "⟦Ŵîţĥđŕåŵ ţĥé åþþŕöṽåļ ƒöŕ "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~⟧"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
@@ -151233,6 +152010,30 @@
       "value": "⟦Ýöû'ŕé öƒƒļîñé, šö ţĥîš çĥåñĝé ŵåšñ'ţ šåṽéđ~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.settings.openInSilo.action": [
+    {
+      "type": 0,
+      "value": "⟦Öþéñ îñ Šîļö~~~~~⟧"
+    }
+  ],
+  "web.settings.openInSilo.description": [
+    {
+      "type": 0,
+      "value": "⟦Šîĝñ ţĥé Šîļö åþþ öñ ýöûŕ þĥöñé öŕ ţåƀļéţ îñ ţö ţĥîš åççöûñţ, ŵîţĥöûţ å þåššŵöŕđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "⟦Öñļý ţĥé ĥöûšéĥöļđ’š ɱåîñ þŕöƒîļé çåñ öþéñ Šîļö ƒöŕ ţĥîš åççöûñţ. Šŵîţçĥ ţö îţ åñđ ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.openInSilo.title": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö åþþ~~~~⟧"
+    }
+  ],
   "web.settings.overlays.accent.amber": [
     {
       "type": 0,
@@ -154399,6 +155200,24 @@
     {
       "type": 0,
       "value": "⟦Šéţţîñĝš~~~~⟧"
+    }
+  ],
+  "web.settings.signInAgain.action": [
+    {
+      "type": 0,
+      "value": "⟦Šîĝñ îñ åĝåîñ~~~~~~⟧"
+    }
+  ],
+  "web.settings.signInAgain.manageDevices": [
+    {
+      "type": 0,
+      "value": "⟦Šîĝñ îñ åĝåîñ ţö ɱåñåĝé ýöûŕ đéṽîçéš~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.signInAgain.useApp": [
+    {
+      "type": 0,
+      "value": "⟦Ṁåñåĝé ýöûŕ đéṽîçéš îñ ţĥé Šîļö åþþ.~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.settings.signedInSessions.loadFailed": [

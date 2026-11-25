@@ -398,36 +398,7 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 		_ = tx.Rollback(cleanupCtx)
 	}()
 	// The audit row's accounts, an impersonator included, join that id order.
-	rows, err := tx.Query(ctx, `SELECT id, role, enabled, is_owner FROM users
-		WHERE id = ANY($1) ORDER BY id FOR UPDATE`, append([]int{actorID, userID}, auditmutation.ActorIDs(ctx)...))
-	if err != nil {
-		return 0, err
-	}
-	var actor, target *models.User
-	for rows.Next() {
-		var user models.User
-		if err := rows.Scan(&user.ID, &user.Role, &user.Enabled, &user.IsOwner); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		if user.ID == actorID {
-			actor = &user
-		}
-		if user.ID == userID {
-			target = &user
-		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	if target == nil {
-		return 0, ErrNotFound
-	}
-	if actor == nil || actor.Role != models.RoleAdmin || !actor.Enabled {
-		return 0, ErrAdminProtected
-	}
-	if err := CheckOwnerTarget(OwnerActor{ID: actor.ID, IsOwner: actor.IsOwner}, target); err != nil {
+	if err := lockAdminActorAndTarget(ctx, tx, actorID, userID); err != nil {
 		return 0, err
 	}
 	query := `UPDATE auth_sessions SET revoked_at = NOW()
