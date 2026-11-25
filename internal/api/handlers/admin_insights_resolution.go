@@ -2,13 +2,9 @@ package handlers
 
 import (
 	"cmp"
-	"context"
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
-
-	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -93,78 +89,37 @@ func insightsResolutionLines(label string) (int, bool) {
 	return n, true
 }
 
-// queryInsightsResolutions fills the source and delivered resolution
-// breakdowns and the downscale pairs. It pre-groups sessions by file before
-// probing media_files so each unique file's video_tracks dimensions are read
-// once, then classifies the grouped facts here so the classifier stays the
-// scanner's.
-func queryInsightsResolutions(ctx context.Context, tx pgx.Tx, libraryID int, whereSQL string, whereArgs []any, out *AdminInsightsDevices) error {
-	rows, err := tx.Query(ctx, `
-		WITH h_grouped AS (
-			SELECT
-				COALESCE(h.effective_media_file_id, h.media_file_id) AS file_id,
-				LOWER(BTRIM(h.play_method)) AS play_method,
-				LOWER(BTRIM(COALESCE(h.video_decision, ''))) AS video_decision,
-				LOWER(BTRIM(COALESCE(h.target_video_codec, ''))) AS target_video_codec,
-				COALESCE(h.target_resolution, '') AS target_resolution,
-				h.route_facts_recorded,
-				COUNT(*)::bigint AS sessions
-			FROM admin_playback_history h `+insightsLibraryJoinSQL(libraryID)+`
-			WHERE `+whereSQL+`
-			GROUP BY 1, 2, 3, 4, 5, 6
-		),
-		files AS (
-			SELECT
-				mf.id,
-				COALESCE(mf.resolution, '') AS resolution,
-				CASE WHEN vt.w ~ '^[0-9]{1,5}$' THEN vt.w::int ELSE 0 END AS width,
-				CASE WHEN vt.h ~ '^[0-9]{1,5}$' THEN vt.h::int ELSE 0 END AS height
-			FROM (SELECT DISTINCT file_id FROM h_grouped WHERE file_id IS NOT NULL) f
-			JOIN media_files mf ON mf.id = f.file_id
-			CROSS JOIN LATERAL (SELECT mf.video_tracks->0 AS t) v0
-			CROSS JOIN LATERAL (SELECT v0.t->>'width' AS w, v0.t->>'height' AS h) vt
-		)
-		SELECT
-			COALESCE(f.resolution, ''),
-			COALESCE(f.width, 0),
-			COALESCE(f.height, 0),
-			g.play_method, g.video_decision, g.target_video_codec, g.target_resolution,
-			g.route_facts_recorded,
-			SUM(g.sessions)::bigint
-		FROM h_grouped g
-		LEFT JOIN files f ON f.id = g.file_id
-		GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
-	`, whereArgs...)
-	if err != nil {
-		return fmt.Errorf("querying insights resolutions: %w", err)
+type insightsResolutionChangeKey struct{ from, to string }
+
+// insightsResolutionTally fills the source and delivered resolution
+// breakdowns and the downscale pairs from sessions grouped by their raw facts,
+// classifying them here so the classifier stays the scanner's.
+type insightsResolutionTally struct {
+	source, delivered map[string]int64
+	changes           map[insightsResolutionChangeKey]int64
+}
+
+func newInsightsResolutionTally() *insightsResolutionTally {
+	return &insightsResolutionTally{
+		source: make(map[string]int64), delivered: make(map[string]int64),
+		changes: make(map[insightsResolutionChangeKey]int64),
 	}
-	defer rows.Close()
-	source := make(map[string]int64)
-	delivered := make(map[string]int64)
-	type change struct{ from, to string }
-	changes := make(map[change]int64)
-	for rows.Next() {
-		var label, method, videoDecision, targetCodec, target string
-		var width, height int
-		var routeFacts bool
-		var sessions int64
-		if err := rows.Scan(&label, &width, &height, &method, &videoDecision, &targetCodec, &target, &routeFacts, &sessions); err != nil {
-			return fmt.Errorf("scanning insights resolutions: %w", err)
-		}
-		src := insightsSourceResolutionClass(label, width, height)
-		dst := insightsDeliveredResolutionClass(method, videoDecision, targetCodec, target, routeFacts, src, width, height)
-		source[src] += sessions
-		delivered[dst] += sessions
-		if srcRank, dstRank := insightsResolutionClassRank[src], insightsResolutionClassRank[dst]; srcRank > 0 && dstRank > 0 && dstRank < srcRank {
-			changes[change{src, dst}] += sessions
-		}
+}
+
+func (r *insightsResolutionTally) add(label string, width, height int, method, videoDecision, targetCodec, target string, routeFacts bool, sessions int64) {
+	src := insightsSourceResolutionClass(label, width, height)
+	dst := insightsDeliveredResolutionClass(method, videoDecision, targetCodec, target, routeFacts, src, width, height)
+	r.source[src] += sessions
+	r.delivered[dst] += sessions
+	if srcRank, dstRank := insightsResolutionClassRank[src], insightsResolutionClassRank[dst]; srcRank > 0 && dstRank > 0 && dstRank < srcRank {
+		r.changes[insightsResolutionChangeKey{src, dst}] += sessions
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	out.SourceResolutions = sortedResolutionCounts(source)
-	out.DeliveredResolutions = sortedResolutionCounts(delivered)
-	for c, n := range changes {
+}
+
+func (r *insightsResolutionTally) finish(out *AdminInsightsDevices) {
+	out.SourceResolutions = sortedResolutionCounts(r.source)
+	out.DeliveredResolutions = sortedResolutionCounts(r.delivered)
+	for c, n := range r.changes {
 		out.ResolutionChanges = append(out.ResolutionChanges, AdminInsightsResolutionChange{From: c.from, To: c.to, Sessions: n})
 	}
 	slices.SortFunc(out.ResolutionChanges, func(a, b AdminInsightsResolutionChange) int {
@@ -176,7 +131,6 @@ func queryInsightsResolutions(ctx context.Context, tx pgx.Tx, libraryID int, whe
 		}
 		return cmp.Compare(insightsResolutionClassRank[b.To], insightsResolutionClassRank[a.To])
 	})
-	return nil
 }
 
 // sortedResolutionCounts orders classes from highest to lowest resolution,

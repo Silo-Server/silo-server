@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -33,7 +34,7 @@ func queryAdminInsightsDevices(ctx context.Context, pool *pgxpool.Pool, q AdminI
 	if err := validateInsightsScope(q.AdminInsightsWindowQuery); err != nil {
 		return nil, err
 	}
-	ctx, tx, done, err := beginAdminHistoryRead(ctx, pool, "")
+	ctx, tx, done, err := beginAdminHistoryRead(ctx, pool, insightsReadWorkMem)
 	if err != nil {
 		return nil, fmt.Errorf("beginning insights devices read: %w", err)
 	}
@@ -67,28 +68,13 @@ func queryAdminInsightsDevices(ctx context.Context, pool *pgxpool.Pool, q AdminI
 		ProtocolBuckets: make([]AdminInsightsProtocolBucket, 0),
 	}
 
-	if err := queryInsightsDevicesSummaryAndBreakdowns(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
+	if err := queryInsightsDevicesSessions(ctx, tx, win, q.LibraryID, whereSQL, whereArgs, out); err != nil {
 		return nil, err
 	}
-	if err := queryInsightsClientCodecMatrix(ctx, tx, q.LibraryID, whereSQL, whereArgs, clampInsightsMinSessions(q.MinSessions), out); err != nil {
-		return nil, err
-	}
-	if err := queryInsightsAdaptationReasons(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
-		return nil, err
-	}
-	if err := queryInsightsResolutions(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
+	if err := queryInsightsDevicesFiles(ctx, tx, q.LibraryID, whereSQL, whereArgs, clampInsightsMinSessions(q.MinSessions), out); err != nil {
 		return nil, err
 	}
 	if err := queryInsightsClientVersions(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
-		return nil, err
-	}
-	if err := queryInsightsProtocolBuckets(ctx, tx, win, q.LibraryID, whereSQL, whereArgs, out); err != nil {
-		return nil, err
-	}
-	if err := queryInsightsSubtitleUsage(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
-		return nil, err
-	}
-	if err := queryInsightsAudioUsage(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -97,68 +83,146 @@ func queryAdminInsightsDevices(ctx context.Context, pool *pgxpool.Pool, q AdminI
 	return out, nil
 }
 
-// queryInsightsDevicesSummaryAndBreakdowns reads the Devices summary KPIs and
-// the HW-accel, tone-map, and subtitle burn-in codec breakdowns in one scan of
-// admin_playback_history.
-func queryInsightsDevicesSummaryAndBreakdowns(ctx context.Context, tx pgx.Tx, libraryID int, whereSQL string, whereArgs []any, out *AdminInsightsDevices) error {
-	rows, err := tx.Query(ctx, `
-		SELECT
-			CASE WHEN `+insightsPlayTranscodeSQL+` AND h.route_facts_recorded THEN COALESCE(h.transcode_hw_accel, '') END,
-			NULLIF(LOWER(BTRIM(COALESCE(h.tone_map_mode, ''))), ''),
-			CASE WHEN h.subtitle->>'delivery' = 'burn_in' THEN COALESCE(NULLIF(LOWER(BTRIM(h.subtitle->>'codec')), ''), 'unknown') END,
-			COUNT(*)::bigint,
-			COUNT(*) FILTER (WHERE h.measured)::bigint,
-			COUNT(*) FILTER (WHERE h.route_facts_recorded)::bigint,
-			COUNT(*) FILTER (WHERE `+insightsPlayDirectSQL+`)::bigint,
-			COUNT(*) FILTER (WHERE `+insightsPlayRemuxSQL+`)::bigint,
-			COUNT(*) FILTER (WHERE `+insightsPlayTranscodeSQL+`)::bigint
-		FROM admin_playback_history h `+insightsLibraryJoinSQL(libraryID)+`
-		WHERE `+whereSQL+`
-		GROUP BY 1, 2, 3
-	`, whereArgs...)
+// The grouping sets of queryInsightsDevicesSessions, as GROUPING(k_hw,
+// k_bucket, k_sub_rf, k_reasons) reports them: one bit per key, set when the
+// row's set leaves that key out.
+const (
+	insightsDevicesSetSummary   = 0b0111
+	insightsDevicesSetProtocol  = 0b1011
+	insightsDevicesSetSubtitles = 0b1101
+	insightsDevicesSetReasons   = 0b1110
+)
+
+// queryInsightsDevicesSessions reads, in one scan of the window's sessions,
+// the summary KPIs with the HW-accel, tone-map and burn-in breakdowns, the
+// adaptation reasons, the native/Jellyfin protocol buckets and subtitle
+// usage, each from its own grouping set. The Jellyfin client check runs once
+// per bucket and client name instead of once per session.
+func queryInsightsDevicesSessions(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, libraryID int, whereSQL string, whereArgs []any, out *AdminInsightsDevices) error {
+	args := append(append([]any{}, whereArgs...), jellyfinClientTokens, win.BucketUnit, win.TZ)
+	tokensParam, unitParam, tzParam := len(args)-2, len(args)-1, len(args)
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		WITH g AS (
+			SELECT GROUPING(k_hw, k_bucket, k_sub_rf, k_reasons) AS grp,
+				k_hw, k_tm, k_burn, k_bucket, k_compat, k_client,
+				k_sub_rf, k_has_sub, k_forced, k_hi, k_lang, k_delivery, k_reasons,
+				COUNT(*)::bigint AS total,
+				COUNT(*) FILTER (WHERE measured)::bigint AS measured,
+				COUNT(*) FILTER (WHERE route_facts)::bigint AS route_facts,
+				COUNT(*) FILTER (WHERE direct)::bigint AS direct,
+				COUNT(*) FILTER (WHERE remux)::bigint AS remux,
+				COUNT(*) FILTER (WHERE transcode)::bigint AS transcode
+			FROM (
+				SELECT h.measured, h.route_facts_recorded AS route_facts,
+					%[1]s AS direct, %[2]s AS remux, %[3]s AS transcode,
+					CASE WHEN %[3]s AND h.route_facts_recorded THEN COALESCE(h.transcode_hw_accel, '') END AS k_hw,
+					NULLIF(LOWER(BTRIM(COALESCE(h.tone_map_mode, ''))), '') AS k_tm,
+					CASE WHEN h.subtitle->>'delivery' = 'burn_in' THEN COALESCE(NULLIF(LOWER(BTRIM(h.subtitle->>'codec')), ''), 'unknown') END AS k_burn,
+					date_trunc($%[6]d, h.started_at AT TIME ZONE $%[7]d) AS k_bucket,
+					COALESCE(h.compat_origin, FALSE) AS k_compat,
+					LOWER(COALESCE(h.client_name, '')) AS k_client,
+					-- Subtitle usage counts only sessions with route facts: an
+					-- older row may predate subtitle recording.
+					h.route_facts_recorded AS k_sub_rf,
+					CASE WHEN h.route_facts_recorded THEN h.subtitle IS NOT NULL END AS k_has_sub,
+					CASE WHEN h.route_facts_recorded THEN COALESCE((h.subtitle->>'forced')::boolean, FALSE) END AS k_forced,
+					CASE WHEN h.route_facts_recorded THEN COALESCE((h.subtitle->>'hearing_impaired')::boolean, FALSE) END AS k_hi,
+					CASE WHEN h.route_facts_recorded THEN COALESCE(h.subtitle->>'language', '') END AS k_lang,
+					CASE WHEN h.route_facts_recorded THEN COALESCE(NULLIF(LOWER(BTRIM(h.subtitle->>'delivery')), ''), '%[9]s') END AS k_delivery,
+					CASE WHEN NOT (%[1]s) THEN h.adaptation_reasons END AS k_reasons
+				FROM admin_playback_history h %[4]s
+				WHERE %[5]s
+			) s
+			GROUP BY GROUPING SETS ((k_hw, k_tm, k_burn), (k_bucket, k_compat, k_client),
+				(k_sub_rf, k_has_sub, k_forced, k_hi, k_lang, k_delivery), (k_reasons))
+		)
+		SELECT grp, k_hw, k_tm, k_burn, k_bucket AT TIME ZONE $%[7]d, to_char(k_bucket, 'YYYY-MM-DD'),
+			CASE WHEN grp = %[10]d THEN k_compat OR EXISTS (
+				SELECT 1 FROM unnest($%[8]d::text[]) AS tok WHERE strpos(k_client, tok) > 0) END,
+			k_sub_rf, k_has_sub, k_forced, k_hi, k_lang, k_delivery, k_reasons,
+			total, measured, route_facts, direct, remux, transcode
+		FROM g
+	`, insightsPlayDirectSQL, insightsPlayRemuxSQL, insightsPlayTranscodeSQL, insightsLibraryJoinSQL(libraryID), whereSQL,
+		unitParam, tzParam, tokensParam, insightsUnknownKey, insightsDevicesSetProtocol), args...)
 	if err != nil {
-		return fmt.Errorf("querying insights devices summary and breakdowns: %w", err)
+		return fmt.Errorf("querying insights devices sessions: %w", err)
 	}
 	defer rows.Close()
 	hwAccel := make(map[string]int64)
 	toneMap := make(map[string]int64)
 	burnIn := make(map[string]int64)
+	reasons := make(map[string]int64)
+	buckets := make(map[string]*AdminInsightsProtocolBucket)
+	subtitles := newInsightsSubtitleTally(&out.Subtitles)
 	for rows.Next() {
-		var hw, tm, burn *string
+		var grp int
+		var hw, tm, burn, bucketLabel, lang, delivery *string
+		var bucketStart *time.Time
+		var jellyfin, subRF, hasSub, forced, hearingImpaired *bool
+		var reasonList []string
 		var total, measured, routeFacts, direct, remux, transcode int64
-		if err := rows.Scan(&hw, &tm, &burn, &total, &measured, &routeFacts, &direct, &remux, &transcode); err != nil {
-			return fmt.Errorf("scanning insights devices summary and breakdowns: %w", err)
+		if err := rows.Scan(&grp, &hw, &tm, &burn, &bucketStart, &bucketLabel, &jellyfin,
+			&subRF, &hasSub, &forced, &hearingImpaired, &lang, &delivery, &reasonList,
+			&total, &measured, &routeFacts, &direct, &remux, &transcode); err != nil {
+			return fmt.Errorf("scanning insights devices sessions: %w", err)
 		}
-		out.Summary.TotalSessions += total
-		out.Coverage.MeasuredSessions += measured
-		out.Summary.RouteFactsSessions += routeFacts
-		out.Summary.DirectSessions += direct
-		out.Summary.RemuxSessions += remux
-		out.Summary.TranscodeSessions += transcode
-		if hw != nil {
-			k := normalizeHWAccelKey(*hw)
-			hwAccel[k] += total
-			switch k {
-			case insightsHWSoftwareKey:
-				out.Summary.SWTranscodeSessions += total
-			case insightsUnknownKey:
-			default:
-				out.Summary.HWTranscodeSessions += total
+		switch grp {
+		case insightsDevicesSetSummary:
+			out.Summary.TotalSessions += total
+			out.Coverage.MeasuredSessions += measured
+			out.Summary.RouteFactsSessions += routeFacts
+			out.Summary.DirectSessions += direct
+			out.Summary.RemuxSessions += remux
+			out.Summary.TranscodeSessions += transcode
+			if hw != nil {
+				k := normalizeHWAccelKey(*hw)
+				hwAccel[k] += total
+				switch k {
+				case insightsHWSoftwareKey:
+					out.Summary.SWTranscodeSessions += total
+				case insightsUnknownKey:
+				default:
+					out.Summary.HWTranscodeSessions += total
+				}
 			}
-		}
-		if tm != nil {
-			toneMap[*tm] += total
-			out.Summary.HDRToneMapSessions += total
-			switch *tm {
-			case "hardware":
-				out.Summary.HDRToneMapHWSessions += total
-			case "software":
-				out.Summary.HDRToneMapSWSessions += total
+			if tm != nil {
+				toneMap[*tm] += total
+				out.Summary.HDRToneMapSessions += total
+				switch *tm {
+				case "hardware":
+					out.Summary.HDRToneMapHWSessions += total
+				case "software":
+					out.Summary.HDRToneMapSWSessions += total
+				}
 			}
-		}
-		if burn != nil {
-			burnIn[*burn] += total
-			out.Summary.SubtitleBurnInSessions += total
+			if burn != nil {
+				burnIn[*burn] += total
+				out.Summary.SubtitleBurnInSessions += total
+			}
+		case insightsDevicesSetProtocol:
+			if bucketStart == nil || bucketLabel == nil {
+				continue
+			}
+			b := buckets[*bucketLabel]
+			if b == nil {
+				b = &AdminInsightsProtocolBucket{BucketStart: bucketStart.UTC(), LabelDate: *bucketLabel}
+				buckets[*bucketLabel] = b
+			}
+			if jellyfin != nil && *jellyfin {
+				b.JellyfinSessions += total
+			} else {
+				b.NativeSessions += total
+			}
+		case insightsDevicesSetSubtitles:
+			if subRF != nil && *subRF {
+				subtitles.add(*hasSub, *forced, *hearingImpaired, *lang, *delivery, total)
+			}
+		case insightsDevicesSetReasons:
+			for _, reason := range reasonList {
+				if norm := playback.NormalizeAdaptationReasons([]string{reason}); len(norm) > 0 {
+					reasons[norm[0]] += total
+				}
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -170,6 +234,26 @@ func queryInsightsDevicesSummaryAndBreakdowns(ctx context.Context, tx pgx.Tx, li
 	out.HWAccelBreakdown = sortedLabeledCounts(hwAccel)
 	out.ToneMapBreakdown = sortedLabeledCounts(toneMap)
 	out.SubtitleBurnInCodecs = sortedLabeledCounts(burnIn)
+	adaptedTotal := out.Summary.RemuxSessions + out.Summary.TranscodeSessions
+	for reason, count := range reasons {
+		out.AdaptationReasons = append(out.AdaptationReasons, AdminInsightsAdaptationReason{
+			Reason: reason, Sessions: count, ShareOfAdapted: roundInsightsRate(count, adaptedTotal),
+		})
+	}
+	slices.SortFunc(out.AdaptationReasons, func(a, b AdminInsightsAdaptationReason) int {
+		if c := cmp.Compare(b.Sessions, a.Sessions); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Reason, b.Reason)
+	})
+	for _, b := range buckets {
+		out.ProtocolBuckets = append(out.ProtocolBuckets, *b)
+	}
+	// YYYY-MM-DD labels sort as the buckets do.
+	slices.SortFunc(out.ProtocolBuckets, func(a, b AdminInsightsProtocolBucket) int {
+		return cmp.Compare(a.LabelDate, b.LabelDate)
+	})
+	subtitles.finish()
 	return nil
 }
 
@@ -179,49 +263,93 @@ func queryInsightsDevicesSummaryAndBreakdowns(ctx context.Context, tx pgx.Tx, li
 // read's memory and response bounded however many identities history holds.
 const insightsMatrixMaxRows = 200
 
-func insightsClientCodecMatrixSQL(libraryID int, whereSQL string, whereArgs []any, minSessions int) (string, []any) {
+// The grouping sets of queryInsightsDevicesFiles, as GROUPING(client_key,
+// resolution, language) reports them.
+const (
+	insightsDevicesFileSetMatrix     = 0b011
+	insightsDevicesFileSetResolution = 0b101
+	insightsDevicesFileSetAudio      = 0b110
+)
+
+// queryInsightsDevicesFiles reads the client codec matrix, the resolution
+// breakdowns and audio usage: the Devices reads that need each session's media
+// file. One scan of the window's sessions feeds all three, and each file the
+// window played is looked up once. Only the matrix's rows (over the
+// threshold, within the cap) and the top transcoders (whatever their size)
+// leave the database.
+func queryInsightsDevicesFiles(ctx context.Context, tx pgx.Tx, libraryID int, whereSQL string, whereArgs []any, minSessions int, out *AdminInsightsDevices) error {
 	args := append(append([]any{}, whereArgs...), minSessions, insightsMatrixMaxRows, insightsTopTranscodersLimit)
 	minParam, capParam, topParam := len(args)-2, len(args)-1, len(args)
-	// Pre-group sessions by file before probing media_files so each unique file
-	// is looked up once, and return only matrix rows (over the threshold, within
-	// the cap) and top transcoders.
-	query := fmt.Sprintf(`
-		WITH per_file AS (
-			SELECT
-				COALESCE(h.effective_media_file_id, h.media_file_id) AS file_id,
-				LOWER(COALESCE(NULLIF(BTRIM(h.client_name), ''), 'unknown')) AS client_key,
-				LOWER(COALESCE(NULLIF(BTRIM(h.device_platform), ''), 'unknown')) AS platform_key,
-				MIN(NULLIF(BTRIM(h.client_name), '')) AS client_name,
-				MIN(NULLIF(BTRIM(h.device_platform), '')) AS device_platform,
-				BOOL_OR(COALESCE(h.compat_origin, FALSE)) AS compat_origin,
+	// A library filter already joins each session's file as mf; reuse it.
+	fileJoin, fileAlias := insightsLibraryJoinSQL(libraryID), "mf"
+	if libraryID <= 0 {
+		fileJoin, fileAlias = "LEFT JOIN media_files fm ON fm.id = COALESCE(h.effective_media_file_id, h.media_file_id)", "fm"
+	}
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		WITH g AS (
+			-- One pass over the window's sessions joined to their files, one
+			-- grouping set per read: the matrix's cells, the resolution facts,
+			-- and audio. No CTE sits under it, so the scan and the file join
+			-- can run in parallel.
+			SELECT GROUPING(client_key, resolution, language) AS grp,
+				client_key, platform_key, source_codec,
+				MIN(client_name) AS client_name, MIN(device_platform) AS device_platform,
+				BOOL_OR(compat_origin) AS compat_origin,
+				resolution, width, height, play_method, video_decision, target_video_codec, target_resolution, route_facts,
+				language, audio_decision, delivered,
 				COUNT(*)::bigint AS sessions,
-				COUNT(*) FILTER (WHERE %[1]s)::bigint AS direct_sessions,
-				COUNT(*) FILTER (WHERE %[2]s)::bigint AS remux_sessions,
-				COUNT(*) FILTER (WHERE %[3]s)::bigint AS transcode_sessions
-			FROM admin_playback_history h %[8]s
-			WHERE %[4]s
-			GROUP BY 1, 2, 3
-		),
-		files AS (
-			SELECT mf.id, LOWER(COALESCE(NULLIF(BTRIM(mf.codec_video), ''), 'unknown')) AS source_codec
-			FROM (SELECT DISTINCT file_id FROM per_file WHERE file_id IS NOT NULL) f
-			JOIN media_files mf ON mf.id = f.file_id
+				COUNT(*) FILTER (WHERE direct)::bigint AS direct_sessions,
+				COUNT(*) FILTER (WHERE remux)::bigint AS remux_sessions,
+				COUNT(*) FILTER (WHERE transcode)::bigint AS transcode_sessions
+			FROM (
+				SELECT
+					LOWER(COALESCE(NULLIF(BTRIM(h.client_name), ''), 'unknown')) AS client_key,
+					LOWER(COALESCE(NULLIF(BTRIM(h.device_platform), ''), 'unknown')) AS platform_key,
+					NULLIF(BTRIM(h.client_name), '') AS client_name,
+					NULLIF(BTRIM(h.device_platform), '') AS device_platform,
+					COALESCE(h.compat_origin, FALSE) AS compat_origin,
+					LOWER(COALESCE(NULLIF(BTRIM(%[13]s.codec_video), ''), 'unknown')) AS source_codec,
+					%[1]s AS direct, %[2]s AS remux, %[3]s AS transcode,
+					COALESCE(%[13]s.resolution, '') AS resolution,
+					CASE WHEN %[13]s.video_tracks->0->>'width' ~ '^[0-9]{1,5}$' THEN (%[13]s.video_tracks->0->>'width')::int ELSE 0 END AS width,
+					CASE WHEN %[13]s.video_tracks->0->>'height' ~ '^[0-9]{1,5}$' THEN (%[13]s.video_tracks->0->>'height')::int ELSE 0 END AS height,
+					LOWER(BTRIM(h.play_method)) AS play_method,
+					LOWER(BTRIM(COALESCE(h.video_decision, ''))) AS video_decision,
+					LOWER(BTRIM(COALESCE(h.target_video_codec, ''))) AS target_video_codec,
+					COALESCE(h.target_resolution, '') AS target_resolution,
+					h.route_facts_recorded AS route_facts,
+					-- Audio usage counts only sessions with route facts.
+					CASE WHEN h.route_facts_recorded THEN COALESCE(a.track->>'language', '') END AS language,
+					CASE WHEN h.route_facts_recorded THEN a.decision END AS audio_decision,
+					CASE WHEN NOT h.route_facts_recorded THEN NULL
+						WHEN a.decision = 'transcode' AND h.target_audio_channels > 0 THEN h.target_audio_channels
+						ELSE COALESCE(NULLIF(a.track->>'channels', '')::int, %[13]s.audio_channels) END AS delivered
+				FROM admin_playback_history h %[8]s
+				CROSS JOIN LATERAL (
+					-- The track a session played: its recorded index into the
+					-- file's audio_tracks, else the file's default track, else
+					-- its first (pickAdminAudioTrack's order).
+					SELECT CASE WHEN h.route_facts_recorded THEN COALESCE(
+						CASE WHEN h.audio_track_index IS NOT NULL THEN %[13]s.audio_tracks -> h.audio_track_index END,
+						(SELECT t FROM jsonb_array_elements(CASE WHEN jsonb_typeof(%[13]s.audio_tracks) = 'array' THEN %[13]s.audio_tracks ELSE '[]'::jsonb END) AS t
+							WHERE (t->>'default')::boolean LIMIT 1),
+						CASE WHEN jsonb_typeof(%[13]s.audio_tracks) = 'array' THEN %[13]s.audio_tracks -> 0 END) END AS track,
+						COALESCE(NULLIF(LOWER(BTRIM(h.audio_decision)), ''), '%[9]s') AS decision
+					OFFSET 0
+				) a
+				WHERE %[4]s
+			) s
+			GROUP BY GROUPING SETS (
+				(client_key, platform_key, source_codec),
+				(resolution, width, height, play_method, video_decision, target_video_codec, target_resolution, route_facts),
+				(language, audio_decision, delivered, route_facts))
 		),
 		cells AS (
-			SELECT
-				pf.client_key,
-				pf.platform_key,
-				COALESCE(MIN(pf.client_name), 'Unknown') AS client_name,
-				COALESCE(MIN(pf.device_platform), 'Unknown') AS device_platform,
-				COALESCE(f.source_codec, 'unknown') AS source_codec,
-				BOOL_OR(pf.compat_origin) AS compat_origin,
-				SUM(pf.sessions)::bigint AS sessions,
-				SUM(pf.direct_sessions)::bigint AS direct_sessions,
-				SUM(pf.remux_sessions)::bigint AS remux_sessions,
-				SUM(pf.transcode_sessions)::bigint AS transcode_sessions
-			FROM per_file pf
-			LEFT JOIN files f ON f.id = pf.file_id
-			GROUP BY 1, 2, 5
+			SELECT client_key, platform_key,
+				COALESCE(client_name, 'Unknown') AS client_name,
+				COALESCE(device_platform, 'Unknown') AS device_platform,
+				source_codec, compat_origin, sessions, direct_sessions, remux_sessions, transcode_sessions
+			FROM g WHERE grp = %[10]d
 		),
 		pairs AS (
 			SELECT client_key, platform_key,
@@ -237,63 +365,104 @@ func insightsClientCodecMatrixSQL(libraryID int, whereSQL string, whereArgs []an
 					ORDER BY transcodes DESC, total DESC, client_key, platform_key) <= $%[7]d) AS top_transcoder
 			FROM pairs
 		)
-		SELECT c.client_name, c.device_platform, c.source_codec, c.compat_origin,
-			c.sessions, c.direct_sessions, c.remux_sessions, c.transcode_sessions, r.in_matrix
+		SELECT 'matrix', c.client_name, c.device_platform, c.source_codec, '', '', 0, 0, NULL::int,
+			c.compat_origin, r.in_matrix, c.sessions, c.direct_sessions, c.remux_sessions, c.transcode_sessions
 		FROM cells c
 		JOIN ranked r USING (client_key, platform_key)
 		WHERE r.in_matrix OR r.top_transcoder
-	`, insightsPlayDirectSQL, insightsPlayRemuxSQL, insightsPlayTranscodeSQL, whereSQL, minParam, capParam, topParam, insightsLibraryJoinSQL(libraryID))
-	return query, args
-}
-
-func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, libraryID int, whereSQL string, whereArgs []any, minSessions int, out *AdminInsightsDevices) error {
-	query, args := insightsClientCodecMatrixSQL(libraryID, whereSQL, whereArgs, minSessions)
-	rows, err := tx.Query(ctx, query, args...)
+		UNION ALL
+		SELECT 'resolution', resolution, play_method, video_decision, target_video_codec, target_resolution, width, height, NULL,
+			route_facts, FALSE, sessions, 0, 0, 0
+		FROM g WHERE grp = %[11]d
+		UNION ALL
+		SELECT 'audio', language, audio_decision, '', '', '', 0, 0, delivered, FALSE, FALSE, sessions, 0, 0, 0
+		FROM g WHERE grp = %[12]d AND route_facts
+	`, insightsPlayDirectSQL, insightsPlayRemuxSQL, insightsPlayTranscodeSQL, whereSQL, minParam, capParam, topParam,
+		fileJoin, insightsUnknownKey,
+		insightsDevicesFileSetMatrix, insightsDevicesFileSetResolution, insightsDevicesFileSetAudio, fileAlias), args...)
 	if err != nil {
-		return fmt.Errorf("querying insights client codec matrix: %w", err)
+		return fmt.Errorf("querying insights devices files: %w", err)
 	}
 	defer rows.Close()
-
-	type matrixKey struct{ client, platform string }
-	rowMap := make(map[matrixKey]*AdminInsightsClientMatrixRow)
-	inMatrix := make(map[matrixKey]bool)
+	matrix := newInsightsMatrixTally()
+	resolutions := newInsightsResolutionTally()
+	audio := newInsightsAudioTally(&out.Audio)
+	// Each row's columns, by kind (see the SELECT): matrix rows carry client,
+	// platform, codec, compat origin, in-matrix and four session counts;
+	// resolution rows the file's label, play method, video decision, target
+	// codec and resolution, width, height and route facts; audio rows the
+	// language, decision and delivered channels. Sessions are always n1.
 	for rows.Next() {
-		var clientName, platform, codec string
-		var compatOrigin, matrixRow bool
-		var sessions, direct, remux, transcode int64
-		if err := rows.Scan(&clientName, &platform, &codec, &compatOrigin, &sessions, &direct, &remux, &transcode, &matrixRow); err != nil {
-			return fmt.Errorf("scanning insights client codec matrix: %w", err)
+		var kind, t1, t2, t3, t4, t5 string
+		var width, height int
+		var channels *int
+		var b1, b2 bool
+		var n1, n2, n3, n4 int64
+		if err := rows.Scan(&kind, &t1, &t2, &t3, &t4, &t5, &width, &height, &channels, &b1, &b2, &n1, &n2, &n3, &n4); err != nil {
+			return fmt.Errorf("scanning insights devices files: %w", err)
 		}
-		k := matrixKey{client: strings.ToLower(clientName), platform: strings.ToLower(platform)}
-		row := rowMap[k]
-		if row == nil {
-			row = &AdminInsightsClientMatrixRow{
-				ClientName: clientName, DevicePlatform: platform,
-				IsJellyfinClient: compatOrigin || isJellyfinEcosystemClient(clientName, ""),
-				Cells:            make([]AdminInsightsClientCodecCell, 0, 4),
-			}
-			rowMap[k] = row
-		} else {
-			mergeMatrixRowIdentity(row, clientName, platform, compatOrigin)
+		switch kind {
+		case "matrix":
+			matrix.add(t1, t2, t3, b1, b2, n1, n2, n3, n4)
+		case "resolution":
+			resolutions.add(t1, width, height, t2, t3, t4, t5, b1, n1)
+		case "audio":
+			audio.add(t1, t2, channels, n1)
 		}
-		inMatrix[k] = matrixRow
-		row.TotalSessions += sessions
-		row.DirectSessions += direct
-		row.RemuxSessions += remux
-		row.TranscodeSessions += transcode
-		row.Cells = append(row.Cells, AdminInsightsClientCodecCell{
-			SourceVideoCodec: codec, Sessions: sessions, DirectSessions: direct,
-			RemuxSessions: remux, TranscodeSessions: transcode, DirectRate: roundInsightsRate(direct, sessions),
-		})
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	matrix.finish(out)
+	resolutions.finish(out)
+	audio.finish()
+	return nil
+}
 
-	out.TopTranscoders = topInsightsTranscoders(slices.Collect(maps.Values(rowMap)))
+type insightsMatrixKey struct{ client, platform string }
+
+// insightsMatrixTally assembles the client codec matrix from its cells.
+type insightsMatrixTally struct {
+	rows     map[insightsMatrixKey]*AdminInsightsClientMatrixRow
+	inMatrix map[insightsMatrixKey]bool
+}
+
+func newInsightsMatrixTally() *insightsMatrixTally {
+	return &insightsMatrixTally{
+		rows:     make(map[insightsMatrixKey]*AdminInsightsClientMatrixRow),
+		inMatrix: make(map[insightsMatrixKey]bool),
+	}
+}
+
+func (m *insightsMatrixTally) add(clientName, platform, codec string, compatOrigin, matrixRow bool, sessions, direct, remux, transcode int64) {
+	k := insightsMatrixKey{client: strings.ToLower(clientName), platform: strings.ToLower(platform)}
+	row := m.rows[k]
+	if row == nil {
+		row = &AdminInsightsClientMatrixRow{
+			ClientName: clientName, DevicePlatform: platform,
+			IsJellyfinClient: compatOrigin || isJellyfinEcosystemClient(clientName, ""),
+			Cells:            make([]AdminInsightsClientCodecCell, 0, 4),
+		}
+		m.rows[k] = row
+	} else {
+		mergeMatrixRowIdentity(row, clientName, platform, compatOrigin)
+	}
+	m.inMatrix[k] = matrixRow
+	row.TotalSessions += sessions
+	row.DirectSessions += direct
+	row.RemuxSessions += remux
+	row.TranscodeSessions += transcode
+	row.Cells = append(row.Cells, AdminInsightsClientCodecCell{
+		SourceVideoCodec: codec, Sessions: sessions, DirectSessions: direct,
+		RemuxSessions: remux, TranscodeSessions: transcode, DirectRate: roundInsightsRate(direct, sessions),
+	})
+}
+
+func (m *insightsMatrixTally) finish(out *AdminInsightsDevices) {
+	out.TopTranscoders = topInsightsTranscoders(slices.Collect(maps.Values(m.rows)))
 	codecTotals := make(map[string]int64)
-	for k, row := range rowMap {
-		if !inMatrix[k] {
+	for k, row := range m.rows {
+		if !m.inMatrix[k] {
 			continue
 		}
 		row.DirectRate = roundInsightsRate(row.DirectSessions, row.TotalSessions)
@@ -303,7 +472,6 @@ func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, libraryID in
 		out.Matrix = append(out.Matrix, *row)
 	}
 	orderClientCodecMatrix(out, codecTotals)
-	return nil
 }
 
 func mergeMatrixRowIdentity(row *AdminInsightsClientMatrixRow, clientName, platform string, compatOrigin bool) {
@@ -352,50 +520,6 @@ func orderClientCodecMatrix(out *AdminInsightsDevices, codecTotals map[string]in
 			return cmp.Compare(rank[a.SourceVideoCodec], rank[b.SourceVideoCodec])
 		})
 	}
-}
-
-func queryInsightsAdaptationReasons(ctx context.Context, tx pgx.Tx, libraryID int, whereSQL string, whereArgs []any, out *AdminInsightsDevices) error {
-	rows, err := tx.Query(ctx, `
-		SELECT reason, COUNT(*)::bigint
-		FROM admin_playback_history h
-		`+insightsLibraryJoinSQL(libraryID)+`
-		CROSS JOIN LATERAL unnest(h.adaptation_reasons) AS reason
-		WHERE `+whereSQL+`
-		  AND NOT (`+insightsPlayDirectSQL+`)
-		GROUP BY reason
-		ORDER BY 2 DESC, 1 ASC
-	`, whereArgs...)
-	if err != nil {
-		return fmt.Errorf("querying insights adaptation reasons: %w", err)
-	}
-	defer rows.Close()
-	reasonCounts := make(map[string]int64)
-	for rows.Next() {
-		var reason string
-		var count int64
-		if err := rows.Scan(&reason, &count); err != nil {
-			return err
-		}
-		if norm := playback.NormalizeAdaptationReasons([]string{reason}); len(norm) > 0 {
-			reasonCounts[norm[0]] += count
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	adaptedTotal := out.Summary.RemuxSessions + out.Summary.TranscodeSessions
-	for reason, count := range reasonCounts {
-		out.AdaptationReasons = append(out.AdaptationReasons, AdminInsightsAdaptationReason{
-			Reason: reason, Sessions: count, ShareOfAdapted: roundInsightsRate(count, adaptedTotal),
-		})
-	}
-	slices.SortFunc(out.AdaptationReasons, func(a, b AdminInsightsAdaptationReason) int {
-		if c := cmp.Compare(b.Sessions, a.Sessions); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.Reason, b.Reason)
-	})
-	return nil
 }
 
 func queryLabeledCountMap(ctx context.Context, tx pgx.Tx, sql string, args []any, normalize func(string) string) ([]AdminInsightsLabeledCount, error) {
