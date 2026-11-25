@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -737,10 +738,17 @@ func TestRealtimeConfirmedPauseMovesTheLifecycleBeforeTheSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, step := range []struct {
-		name  playback.CommandName
-		state string
-		event string
-	}{{playback.CommandPause, LifecyclePaused, LifecycleEventPaused}, {playback.CommandUnpause, LifecyclePlaying, LifecycleEventResumed}} {
+		name    playback.CommandName
+		state   string
+		event   string
+		already bool
+	}{
+		{name: playback.CommandPause, state: LifecyclePaused, event: LifecycleEventPaused},
+		{name: playback.CommandUnpause, state: LifecyclePlaying, event: LifecycleEventResumed},
+		// Progress another replica accepted paused the lifecycle row but not
+		// this copy's memory: the confirmation still moves the row.
+		{name: playback.CommandUnpause, state: LifecyclePlaying, event: LifecycleEventResumed, already: true},
+	} {
 		log = nil
 		commandID := uuid.NewString()
 		handler.rememberRealtimeCommand(commandID, session.ID, step.name)
@@ -748,8 +756,12 @@ func TestRealtimeConfirmedPauseMovesTheLifecycleBeforeTheSync(t *testing.T) {
 			t.Fatal(err)
 		}
 		waitConfirmedPauseStates(t, handler, session.ID)
-		if len(log) != 2 || log[0] != "lifecycle "+step.state || log[1] != "sync" {
-			t.Fatalf("%s: steps = %v, want the lifecycle %s before the sync", step.name, log, step.state)
+		want := []string{"lifecycle " + step.state, "sync"}
+		if step.already {
+			want = want[:1] // memory did not change, so there is nothing to sync
+		}
+		if !slices.Equal(log, want) {
+			t.Fatalf("%s: steps = %v, want %v", step.name, log, want)
 		}
 		select {
 		case env := <-events:

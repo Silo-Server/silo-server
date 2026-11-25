@@ -511,12 +511,14 @@ func (h *PlaybackHandler) setConfirmedPauseState(sessionID string, paused bool, 
 		}
 		return
 	}
+	// The admin list reads the pause state from the lifecycle row, so it
+	// moves before the sync that cues monitors to re-read the list. It moves
+	// even when this copy already had the state: progress another replica
+	// accepted can have moved the row without reaching this copy.
+	h.sessionPauseConfirmed(context.Background(), sessionID, paused, receivedSequence)
 	if !changed {
 		return
 	}
-	// The admin list reads the pause state from the lifecycle row, so it
-	// moves before the sync that cues monitors to re-read the list.
-	h.sessionPauseConfirmed(context.Background(), sessionID, paused, receivedSequence)
 	syncCtx, cancelSync := context.WithTimeout(context.Background(), 10*time.Second)
 	h.syncSessionsNow(syncCtx, "realtime_pause")
 	cancelSync()

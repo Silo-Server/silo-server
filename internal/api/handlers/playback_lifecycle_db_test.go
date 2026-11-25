@@ -309,9 +309,14 @@ func TestConfirmedPauseLifecycleDB(t *testing.T) {
 		t.Fatal("a repeated confirmation was announced")
 	}
 
-	// Progress the player sent after the confirmation (sequence 2, playing)
-	// holds the attempt row while the confirmation of a pause received at
-	// sequence 1 waits on it: the newer sample decides.
+	if _, ok, err := store.ConfirmLifecyclePause(ctx, native, false, 1); err != nil || !ok || state() != LifecyclePlaying {
+		t.Fatalf("confirmed resume: ok=%v err=%v state=%s", ok, err, state())
+	}
+
+	// Progress the player sent after a pause confirmation was received at
+	// sequence 1 (sequence 2, still playing, so ApplyProgress leaves the
+	// lifecycle row alone) holds the attempt row while that confirmation
+	// waits on it: the newer sample decides.
 	progress, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -319,10 +324,6 @@ func TestConfirmedPauseLifecycleDB(t *testing.T) {
 	defer func() { _ = progress.Rollback(context.Background()) }()
 	if _, err := progress.Exec(ctx, `UPDATE playback_v3_attempts SET last_sequence = 2,
 		last_sample = '{"sequence":2,"position":31,"is_paused":false}' WHERE session_id = $1::uuid`, native); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := progress.Exec(ctx, `UPDATE playback_session_lifecycle SET state = 'playing', seq = nextval('playback_session_lifecycle_seq')
-		WHERE session_id = $1`, native); err != nil {
 		t.Fatal(err)
 	}
 	confirmed := make(chan bool, 1)

@@ -2,7 +2,11 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import type { ProfileRequestContextSnapshot } from "@/api/client";
 import type { AdminSession } from "@/api/types";
-import { adminSessionsKey, applyAdminSessionPauseEvent } from "./adminSessionsCache";
+import {
+  adminSessionsKey,
+  applyAdminSessionPauseEvent,
+  keepNewerPauseStates,
+} from "./adminSessionsCache";
 
 const authority: ProfileRequestContextSnapshot = {
   accessToken: "token",
@@ -20,20 +24,16 @@ function cached(client: QueryClient) {
   return client.getQueryData<AdminSession[]>(adminSessionsKey(authority));
 }
 
-describe("applyAdminSessionPauseEvent", () => {
+describe("admin session pause state", () => {
   it("shows a pause or resume event at once, ordered by lifecycle number", () => {
     const client = new QueryClient();
     client.setQueryData(adminSessionsKey(authority), [row("a", false, 4), row("b", false)]);
 
-    expect(
-      applyAdminSessionPauseEvent(client, authority, { session_id: "a", seq: 7, state: "paused" }),
-    ).toBe(true);
+    applyAdminSessionPauseEvent(client, authority, { session_id: "a", seq: 7, state: "paused" });
     expect(cached(client)?.[0]).toMatchObject({ is_paused: true, lifecycle_seq: 7 });
 
     // An event older than the row the list already holds changes nothing.
-    expect(
-      applyAdminSessionPauseEvent(client, authority, { session_id: "a", seq: 5, state: "playing" }),
-    ).toBe(false);
+    applyAdminSessionPauseEvent(client, authority, { session_id: "a", seq: 5, state: "playing" });
     expect(cached(client)?.[0]).toMatchObject({ is_paused: true, lifecycle_seq: 7 });
 
     // A row read before lifecycle numbers existed takes any event.
@@ -41,10 +41,17 @@ describe("applyAdminSessionPauseEvent", () => {
     expect(cached(client)?.[1]).toMatchObject({ is_paused: true, lifecycle_seq: 2 });
 
     // A session the list does not hold, or a malformed frame, is left to the re-read.
-    expect(
-      applyAdminSessionPauseEvent(client, authority, { session_id: "c", seq: 9, state: "paused" }),
-    ).toBe(false);
-    expect(applyAdminSessionPauseEvent(client, authority, null)).toBe(false);
-    expect(cached(client)).toHaveLength(2);
+    applyAdminSessionPauseEvent(client, authority, { session_id: "c", seq: 9, state: "paused" });
+    applyAdminSessionPauseEvent(client, authority, null);
+    expect(cached(client)).toEqual([row("a", true, 7), row("b", true, 2)]);
+  });
+
+  it("keeps an event's state over a list read that started before it", () => {
+    const fetched = [row("a", false, 4), row("b", true, 9), row("c", false)];
+    expect(keepNewerPauseStates([row("a", true, 7), row("b", false, 8)], fetched)).toEqual([
+      row("a", true, 7),
+      row("b", true, 9),
+      row("c", false),
+    ]);
   });
 });
