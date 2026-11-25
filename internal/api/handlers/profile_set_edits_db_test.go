@@ -98,6 +98,14 @@ func (f *editsFixture) edits(t *testing.T) []profileedits.Edit {
 	return rows
 }
 
+// mustPutSetting writes a setting through the store's pool-level upsert.
+func (f *editsFixture) mustPutSetting(t *testing.T, ctx context.Context, id userstore.SettingIdentity, value string) {
+	t.Helper()
+	if _, err := f.store.UpsertSettingValue(ctx, id, json.RawMessage(value)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // applySeen sends a signed set carrying edits_seen.
 func (f *editsFixture) applySeen(t *testing.T, set json.RawMessage, seen string) (ProfileSetResult, error) {
 	t.Helper()
@@ -256,9 +264,7 @@ func recorderCases(f *editsFixture, main, kid setItem, kidID, localID string) []
 			f.update(t, f.admin(), localID, ProfileUpdateRequest{Name: new("Local 2")}, true)
 		}, nil},
 		{"a server_local setting records nothing", func(t *testing.T) {
-			if _, err := f.store.UpsertSettingValue(f.account(), setting(settingskeys.UiDisabledLibraryIds), json.RawMessage(`["1"]`)); err != nil {
-				t.Fatal(err)
-			}
+			f.mustPutSetting(t, f.account(), setting(settingskeys.UiDisabledLibraryIds), `["1"]`)
 		}, nil},
 		{"a device-scope setting records nothing", func(t *testing.T) {
 			if _, err := f.store.UpsertSettingValue(f.account(), userstore.SettingIdentity{
@@ -273,11 +279,8 @@ func recorderCases(f *editsFixture, main, kid setItem, kidID, localID string) []
 			}
 		}, nil},
 		{"writing a setting's stored value again records nothing", func(t *testing.T) {
-			if _, err := f.store.UpsertSettingValue(profileedits.WithoutRecording(f.account()), setting(settingskeys.PlaybackAudioLanguage), json.RawMessage(`"fr"`)); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := f.store.UpsertSettingValue(f.account(), setting(settingskeys.PlaybackAudioLanguage), json.RawMessage(`"fr"`)); err != nil {
-				t.Fatal(err)
+			for _, ctx := range []context.Context{profileedits.WithoutRecording(f.account()), f.account()} {
+				f.mustPutSetting(t, ctx, setting(settingskeys.PlaybackAudioLanguage), `"fr"`)
 			}
 		}, nil},
 		{"resetting a stored setting is an edit", func(t *testing.T) {
@@ -286,23 +289,7 @@ func recorderCases(f *editsFixture, main, kid setItem, kidID, localID string) []
 			}
 		}, []string{fmt.Sprintf("account:settings.%s:%d", settingskeys.PlaybackAudioLanguage, f.userID)}},
 		{"the account's change of one half of a mirrored pair takes both from the owner", func(t *testing.T) {
-			mode, skip := setting(settingskeys.PlaybackIntroSkipMode), setting(settingskeys.PlaybackAutoSkipIntro)
-			for _, w := range []struct {
-				ctx   context.Context
-				id    userstore.SettingIdentity
-				value string
-			}{
-				{profileedits.WithoutRecording(f.account()), mode, `"always"`},
-				{profileedits.WithoutRecording(f.account()), skip, `true`},
-				{f.admin(), mode, `"never"`},
-				{f.admin(), skip, `false`},
-				{f.account(), mode, `"ask"`},
-				{f.account(), skip, `false`},
-			} {
-				if _, err := f.store.UpsertSettingValue(w.ctx, w.id, json.RawMessage(w.value)); err != nil {
-					t.Fatal(err)
-				}
-			}
+			writeMirroredPair(t, f, kidID)
 		}, []string{
 			fmt.Sprintf("account:settings.%s:%d", settingskeys.PlaybackAutoSkipIntro, f.userID),
 			fmt.Sprintf("account:settings.%s:%d", settingskeys.PlaybackIntroSkipMode, f.userID),
@@ -339,6 +326,25 @@ func recorderCases(f *editsFixture, main, kid setItem, kidID, localID string) []
 			}
 		}, []string{fmt.Sprintf("account::%d", f.userID)}},
 	}
+}
+
+// writeMirroredPair stores the intro-skip pair, lets the owner change both
+// halves, then the account change the mode only: its mirror keeps the
+// owner's value.
+func writeMirroredPair(t *testing.T, f *editsFixture, kidID string) {
+	t.Helper()
+	mode := userstore.SettingIdentity{Key: settingskeys.PlaybackIntroSkipMode, Scope: "profile", ProfileID: kidID}
+	skip := userstore.SettingIdentity{Key: settingskeys.PlaybackAutoSkipIntro, Scope: "profile", ProfileID: kidID}
+	write := func(ctx context.Context, id userstore.SettingIdentity, value string) {
+		t.Helper()
+		f.mustPutSetting(t, ctx, id, value)
+	}
+	write(profileedits.WithoutRecording(f.account()), mode, `"always"`)
+	write(profileedits.WithoutRecording(f.account()), skip, `true`)
+	write(f.admin(), mode, `"never"`)
+	write(f.admin(), skip, `false`)
+	write(f.account(), mode, `"ask"`)
+	write(f.account(), skip, `false`)
 }
 
 // TestProfileSetOwnerOverridesDB: the owner's edits on this server outlast
@@ -543,14 +549,7 @@ func TestProfileSetEditsRaceSetDB(t *testing.T) {
 	}
 
 	t.Run("no edit is lost to a set racing it", func(t *testing.T) {
-		race(t, 15, nil, func(racer string, err error) bool {
-			// A set built before an edit is stale; one whose household kept
-			// changing gives up after its retries. The set removes Extra, so
-			// deleting it can find it gone.
-			var apiErr *APIError
-			return isStale(err) || (errors.As(err, &apiErr) && (apiErr.Code == "conflict" ||
-				(racer == "profile delete" && apiErr.Status == http.StatusNotFound)))
-		})
+		race(t, 15, nil, allowedRacingSets)
 		// The set gives the kid profile its item's values. A value it does
 		// not hold now was edited after the last set accepted, so its edit
 		// is recorded: a mark the set never saw, or an override.
@@ -578,29 +577,7 @@ func TestProfileSetEditsRaceSetDB(t *testing.T) {
 		}
 	})
 	t.Run("an account deleted during the race leaves no edit row", func(t *testing.T) {
-		race(t, 10, func() error { return auth.NewUserRepository(f.pool).Delete(t.Context(), f.userID) }, func(racer string, err error) bool {
-			// Once the account is gone: the set finds no account; the
-			// profile service finds no account or profile (404), no main
-			// profile to manage the household as (403 profile_management),
-			// or, for the admin edit that passed its account check first, a
-			// profile gone by the time its write ran (500 whose cause is the
-			// store's "profile <id> not found"); the store finds no profile;
-			// a setting insert has no account to refer to (23503).
-			var apiErr *APIError
-			var pgErr *pgconn.PgError
-			if errors.As(err, &apiErr) {
-				switch {
-				case apiErr.Status == http.StatusNotFound, apiErr.Code == "conflict",
-					racer == "web edit" && apiErr.Code == "profile_management":
-					return true
-				case racer == "admin edit" && apiErr.Code == "internal_error":
-					return storeProfileNotFound(errors.Unwrap(apiErr))
-				}
-				return false
-			}
-			return isStale(err) || errors.Is(err, userstore.ErrProfileSetAccountGone) ||
-				(errors.As(err, &pgErr) && pgErr.Code == "23503") || storeProfileNotFound(err)
-		})
+		race(t, 10, func() error { return auth.NewUserRepository(f.pool).Delete(t.Context(), f.userID) }, allowedAfterAccountDelete)
 		var left int
 		if err := f.pool.QueryRow(t.Context(), `SELECT count(*) FROM profile_set_edits WHERE user_id = $1`, f.userID).Scan(&left); err != nil {
 			t.Fatal(err)
@@ -661,6 +638,42 @@ func raceRacers(t *testing.T, f *editsFixture, main, kid setItem, kidID, extraID
 				ActiveProfileID: f.primary, VerifyProfile: noProfileVerification})
 		},
 	}
+}
+
+// allowedRacingSets is what a racer may answer while sets race the edits.
+func allowedRacingSets(racer string, err error) bool {
+	// A set built before an edit is stale; one whose household kept
+	// changing gives up after its retries. The set removes Extra, so
+	// deleting it can find it gone.
+	var apiErr *APIError
+	return isStale(err) || (errors.As(err, &apiErr) && (apiErr.Code == "conflict" ||
+		(racer == "profile delete" && apiErr.Status == http.StatusNotFound)))
+}
+
+// allowedAfterAccountDelete is what a racer may answer while the account is
+// deleted under it.
+func allowedAfterAccountDelete(racer string, err error) bool {
+	// Once the account is gone: the set finds no account; the
+	// profile service finds no account or profile (404), no main
+	// profile to manage the household as (403 profile_management),
+	// or, for the admin edit that passed its account check first, a
+	// profile gone by the time its write ran (500 whose cause is the
+	// store's "profile <id> not found"); the store finds no profile;
+	// a setting insert has no account to refer to (23503).
+	var apiErr *APIError
+	var pgErr *pgconn.PgError
+	if errors.As(err, &apiErr) {
+		switch {
+		case apiErr.Status == http.StatusNotFound, apiErr.Code == "conflict",
+			racer == "web edit" && apiErr.Code == "profile_management":
+			return true
+		case racer == "admin edit" && apiErr.Code == "internal_error":
+			return storeProfileNotFound(errors.Unwrap(apiErr))
+		}
+		return false
+	}
+	return isStale(err) || errors.Is(err, userstore.ErrProfileSetAccountGone) ||
+		(errors.As(err, &pgErr) && pgErr.Code == "23503") || storeProfileNotFound(err)
 }
 
 // storeProfileNotFound reports the store's answer for a profile that is
