@@ -275,7 +275,8 @@ func (reg *Registry) enrollAppKeys(ctx context.Context, in *EnrollAppKeysInput) 
 	if err != nil {
 		return nil, err
 	}
-	if err := reg.requireVerifiedMainProfile(ctx, svc); err != nil {
+	acting, err := reg.requireVerifiedMainProfile(ctx, svc)
+	if err != nil {
 		return nil, err
 	}
 	claims := claimsFrom(ctx)
@@ -287,7 +288,7 @@ func (reg *Registry) enrollAppKeys(ctx context.Context, in *EnrollAppKeysInput) 
 	if err != nil {
 		return nil, err
 	}
-	answer, err := svc.EnrollAppKeys(withClientDevice(ctx), auth.KeyEnrollRequest{KeyRequest: req, PersonKey: personKey, Claims: claims})
+	answer, err := svc.EnrollAppKeys(withClientDevice(ctx), auth.KeyEnrollRequest{KeyRequest: req, PersonKey: personKey, Claims: claims, Acting: acting})
 	if err != nil {
 		return nil, appKeyProblemAt(err, enrollPayloadLocation)
 	}
@@ -413,6 +414,9 @@ func appKeyProblemAt(err error, payloadLocation string) error {
 	}
 	if errors.Is(err, auth.ErrProviderCheckIncomplete) {
 		return NewProblem(TypeDependencyUnavailable, "The sign-in provider's answer could not be applied; try again later.")
+	}
+	if errors.Is(err, auth.ErrActingProfileChanged) {
+		return mainProfileChangedProblem()
 	}
 	var retry *auth.KeyRetryError
 	if errors.As(err, &retry) {

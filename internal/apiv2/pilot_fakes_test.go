@@ -1209,15 +1209,25 @@ const fakePreapprovalID = "6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"
 // per-account cap.
 const fakePreapprovalLimitName = "Twenty-first TV"
 
+// fakePreapprovalChangedName is a device name the fake refuses as approved
+// by a main profile that changed, once the route handed it that profile.
+const fakePreapprovalChangedName = "Changed profile TV"
+
 // ActsAsVerifiedMainProfile runs the real main-profile rule over the fake
 // households.
-func (f fakeDevices) ActsAsVerifiedMainProfile(ctx context.Context, userID int, profileID string, verify func(*userstore.Profile) error) (bool, error) {
+func (f fakeDevices) ActsAsVerifiedMainProfile(ctx context.Context, userID int, profileID string, verify func(*userstore.Profile) error) (bool, auth.ActingProfile, error) {
 	rule := handlers.NewAuthHandler(nil, nil, nil)
-	rule.SetHouseholdStores(fakeHouseholds{})
+	rule.SetHouseholdStores(fakeHouseholds{}, false)
 	return rule.ActsAsVerifiedMainProfile(ctx, userID, profileID, verify)
 }
 
 func (f fakeDevices) PreapproveDeviceLogin(_ context.Context, in auth.DevicePreapprovalInput, _ int) (*auth.DevicePreapprovalResult, error) {
+	if in.DeviceName == fakePreapprovalChangedName {
+		if in.Acting.ID == "" {
+			return nil, errors.New("the route handed over no profile")
+		}
+		return nil, auth.ErrActingProfileChanged
+	}
 	if in.DeviceName == fakePreapprovalLimitName {
 		return nil, &handlers.APIError{Status: 409, Code: "preapproval_limit", Message: "This account already has the most waiting sign-ins approved in advance; revoke one first"}
 	}

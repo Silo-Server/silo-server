@@ -40,16 +40,18 @@ type fakeAppKeys struct {
 	calls      int
 	// households backs the real main-profile rule; nil uses fakeHouseholds.
 	households userstore.UserStoreProvider
+	// acting is the checked profile the last key-creating call carried.
+	acting auth.ActingProfile
 }
 
 // ActsAsVerifiedMainProfile runs the production rule against the fake
 // households, so the route tests exercise it, not a stand-in.
-func (f *fakeAppKeys) ActsAsVerifiedMainProfile(ctx context.Context, userID int, profileID string, verify func(*userstore.Profile) error) (bool, error) {
+func (f *fakeAppKeys) ActsAsVerifiedMainProfile(ctx context.Context, userID int, profileID string, verify func(*userstore.Profile) error) (bool, auth.ActingProfile, error) {
 	rule := handlers.NewAuthHandler(nil, nil, nil)
 	if f.households != nil {
-		rule.SetHouseholdStores(f.households)
+		rule.SetHouseholdStores(f.households, false)
 	} else {
-		rule.SetHouseholdStores(fakeHouseholds{})
+		rule.SetHouseholdStores(fakeHouseholds{}, false)
 	}
 	return rule.ActsAsVerifiedMainProfile(ctx, userID, profileID, verify)
 }
@@ -59,7 +61,8 @@ func (f *fakeAppKeys) ListPendingAppKeys(context.Context, *auth.Claims) ([]*mode
 	return f.pending, f.pendingErr
 }
 
-func (f *fakeAppKeys) ApprovePendingAppKey(context.Context, *auth.Claims, string) error {
+func (f *fakeAppKeys) ApprovePendingAppKey(_ context.Context, _ *auth.Claims, _ string, acting auth.ActingProfile) error {
+	f.acting = acting
 	f.calls++
 	return f.pendingErr
 }
@@ -92,7 +95,8 @@ func (f *fakeAppKeys) SignInWithAppKey(context.Context, auth.KeyRequest) (*handl
 	return f.signed()
 }
 
-func (f *fakeAppKeys) EnrollAppKeys(context.Context, auth.KeyEnrollRequest) (*handlers.AppKeyAnswer, error) {
+func (f *fakeAppKeys) EnrollAppKeys(_ context.Context, req auth.KeyEnrollRequest) (*handlers.AppKeyAnswer, error) {
+	f.acting = req.Acting
 	return f.signed()
 }
 
@@ -114,7 +118,8 @@ func (f *fakeAppKeys) RevokeOwnDeviceKey(context.Context, *auth.Claims, string) 
 	return f.err
 }
 
-func (f *fakeAppKeys) ReplacePersonKey(context.Context, *auth.Claims, appkeys.PublicKey) error {
+func (f *fakeAppKeys) ReplacePersonKey(_ context.Context, _ *auth.Claims, _ appkeys.PublicKey, acting auth.ActingProfile) error {
+	f.acting = acting
 	f.calls++
 	return f.err
 }

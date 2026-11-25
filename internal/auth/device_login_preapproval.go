@@ -66,6 +66,9 @@ type DevicePreapprovalInput struct {
 	DevicePlatform string
 	// Binding is the device's fingerprint, as for a bound start.
 	Binding string
+	// Acting is the main profile the route checked, checked again under
+	// the account lock.
+	Acting ActingProfile
 }
 
 // DevicePreapprovalResult is what the approver hands to the device.
@@ -129,6 +132,9 @@ func (s *DeviceLoginService) Preapprove(ctx context.Context, input DevicePreappr
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		chain, err := s.approvingProviderChain(ctx, tx, approverUserID)
 		if err != nil {
+			return err
+		}
+		if err := recheckActingProfile(ctx, tx, approverUserID, input.Acting); err != nil {
 			return err
 		}
 		// A sign-in approved in advance outlives the session that made it,

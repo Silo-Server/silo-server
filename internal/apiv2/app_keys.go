@@ -26,13 +26,13 @@ type AppKeyService interface {
 	RedeemAppKeyGrant(context.Context, auth.KeyRequest) (*handlers.AppKeyAnswer, error)
 	ListOwnAppKeys(context.Context, *auth.Claims) (auth.OwnAppKeys, error)
 	RevokeOwnDeviceKey(ctx context.Context, claims *auth.Claims, id string) error
-	ReplacePersonKey(context.Context, *auth.Claims, appkeys.PublicKey) error
+	ReplacePersonKey(context.Context, *auth.Claims, appkeys.PublicKey, auth.ActingProfile) error
 	ListPendingAppKeys(context.Context, *auth.Claims) ([]*models.AppDeviceKey, error)
-	ApprovePendingAppKey(ctx context.Context, claims *auth.Claims, id string) error
+	ApprovePendingAppKey(ctx context.Context, claims *auth.Claims, id string, acting auth.ActingProfile) error
 	DenyPendingAppKey(ctx context.Context, claims *auth.Claims, id string) error
 	// ActsAsVerifiedMainProfile is the main-profile rule of the operations
 	// that create lasting access (requireVerifiedMainProfile).
-	ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, error)
+	ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, auth.ActingProfile, error)
 	// SessionMayIssueCredential answers auth.ErrSessionNotAllowed for a
 	// session another app opened with a grant, which must not be handed a
 	// personal API key or a linked sign-in.

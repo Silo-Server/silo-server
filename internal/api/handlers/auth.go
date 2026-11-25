@@ -31,6 +31,9 @@ type AuthHandler struct {
 	// householdStores opens an account's profiles for the main-profile rule
 	// (ActsAsVerifiedMainProfile); nil refuses everyone.
 	householdStores userstore.UserStoreProvider
+	// profilesOutsidePostgres is set when those profiles are not Postgres
+	// rows (SetHouseholdStores).
+	profilesOutsidePostgres bool
 }
 
 type accountPasswordService interface {

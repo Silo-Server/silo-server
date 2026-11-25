@@ -405,6 +405,26 @@ personal API key apply (`canManageHouseholdAs`):
   approving a waiting device is only ever done by an administrator, so that
   rule would let any profile on the device skip the PIN.
 
+The handler checks the profile before the operation's transaction starts, and
+that transaction may wait for the account's row. So the handler passes the
+profile it checked and its PIN revision (`auth.ActingProfile`) to the
+operation, and each of the four checks it again right after it locks the
+account (`recheckActingProfile`): the row must still exist, still be the
+primary profile, and still be at that PIN revision, or the operation ends with
+`ErrActingProfileChanged` (403 `profile_verification_required`) and changes
+nothing. The check holds a share lock on the profile row until the transaction
+ends, so a PIN change waits for it.
+
+The check never waits for the profile row (`FOR SHARE NOWAIT`); a row another
+write holds counts as changed. A profile write can hold its row and then touch
+the account row (a foreign key insert, the access policy revision), which this
+transaction has locked, so waiting could deadlock. Creating a personal API key
+waits instead, and can, because it takes only a key-share lock on the account.
+
+Two cases have nothing to check again: a request that named no profile (the
+administrator with one unprotected profile), and a server whose profiles are
+stored outside Postgres, where this transaction can't read them.
+
 The key list, its deletes, the pending list and deny keep no profile rule:
 any profile of the account may review and remove devices.
 

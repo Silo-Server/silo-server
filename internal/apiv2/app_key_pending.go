@@ -51,7 +51,7 @@ func mainProfileOnly(op Operation) Operation {
 // (handlers.AuthHandler.ActsAsVerifiedMainProfile); the app key service and
 // the device login service both carry it.
 type mainProfileChecker interface {
-	ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, error)
+	ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, auth.ActingProfile, error)
 }
 
 // requireVerifiedMainProfile refuses a request that does not act as the
@@ -60,22 +60,30 @@ type mainProfileChecker interface {
 // replacing app keys, approving a waiting device, approving a device sign-in
 // in advance) calls it after its own session checks, and is registered with
 // mainProfileOnly.
-func (reg *Registry) requireVerifiedMainProfile(ctx context.Context, svc mainProfileChecker) error {
+func (reg *Registry) requireVerifiedMainProfile(ctx context.Context, svc mainProfileChecker) (auth.ActingProfile, error) {
+	none := auth.ActingProfile{}
 	claims := claimsFrom(ctx)
 	if !claims.IsOwnLoginSession() {
-		return appKeyProblem(auth.ErrSessionNotAllowed)
+		return none, appKeyProblem(auth.ErrSessionNotAllowed)
 	}
-	allowed, err := svc.ActsAsVerifiedMainProfile(ctx, claims.UserID, profileFrom(ctx), verifyHouseholdProfile(ctx))
+	acted, acting, err := svc.ActsAsVerifiedMainProfile(ctx, claims.UserID, profileFrom(ctx), verifyHouseholdProfile(ctx))
 	if errors.Is(err, access.ErrProfileUnverified) {
-		return NewProblem(TypeProfileVerificationRequired, "This change requires verifying the main profile's PIN.")
+		return none, NewProblem(TypeProfileVerificationRequired, "This change requires verifying the main profile's PIN.")
 	}
 	if err != nil {
-		return serviceProblem(err)
+		return none, serviceProblem(err)
 	}
-	if !allowed {
-		return NewProblem(TypePermissionDenied, "This change requires the household's main profile.")
+	if !acted {
+		return none, NewProblem(TypePermissionDenied, "This change requires the household's main profile.")
 	}
-	return nil
+	return acting, nil
+}
+
+// mainProfileChangedProblem answers auth.ErrActingProfileChanged: the main
+// profile's PIN or standing changed between the check above and the
+// operation's own check under the account lock.
+func mainProfileChangedProblem() *Problem {
+	return NewProblem(TypeProfileVerificationRequired, "The main profile changed while this request ran. Verify it again and repeat the request.")
 }
 
 func registerAppKeyPending(reg *Registry) {
@@ -128,10 +136,11 @@ func (reg *Registry) approvePendingAppKey(ctx context.Context, in *PendingAppKey
 	if err != nil {
 		return nil, err
 	}
-	if err := reg.requireVerifiedMainProfile(ctx, svc); err != nil {
+	acting, err := reg.requireVerifiedMainProfile(ctx, svc)
+	if err != nil {
 		return nil, err
 	}
-	if err := svc.ApprovePendingAppKey(ctx, claimsFrom(ctx), in.ID); err != nil {
+	if err := svc.ApprovePendingAppKey(ctx, claimsFrom(ctx), in.ID, acting); err != nil {
 		return nil, appKeyProblem(err)
 	}
 	return nil, nil

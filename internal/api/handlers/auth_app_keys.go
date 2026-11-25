@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -77,8 +78,8 @@ func (h *AuthHandler) SessionMayIssueCredential(ctx context.Context, claims *aut
 }
 
 // ReplacePersonKey replaces the caller's person key.
-func (h *AuthHandler) ReplacePersonKey(ctx context.Context, claims *auth.Claims, key appkeys.PublicKey) error {
-	return h.appKeys.ReplacePersonKey(ctx, claims, key)
+func (h *AuthHandler) ReplacePersonKey(ctx context.Context, claims *auth.Claims, key appkeys.PublicKey, acting auth.ActingProfile) error {
+	return h.appKeys.ReplacePersonKey(ctx, claims, key, acting)
 }
 
 // ListPendingAppKeys lists the caller's device keys waiting for approval.
@@ -87,8 +88,8 @@ func (h *AuthHandler) ListPendingAppKeys(ctx context.Context, claims *auth.Claim
 }
 
 // ApprovePendingAppKey approves one of the caller's waiting device keys.
-func (h *AuthHandler) ApprovePendingAppKey(ctx context.Context, claims *auth.Claims, id string) error {
-	return h.appKeys.ApprovePendingKey(ctx, claims, id)
+func (h *AuthHandler) ApprovePendingAppKey(ctx context.Context, claims *auth.Claims, id string, acting auth.ActingProfile) error {
+	return h.appKeys.ApprovePendingKey(ctx, claims, id, acting)
 }
 
 // DenyPendingAppKey refuses one of the caller's waiting device keys.
@@ -97,9 +98,12 @@ func (h *AuthHandler) DenyPendingAppKey(ctx context.Context, claims *auth.Claims
 }
 
 // SetHouseholdStores wires the profile stores ActsAsVerifiedMainProfile
-// reads. Without them it refuses every caller.
-func (h *AuthHandler) SetHouseholdStores(stores userstore.UserStoreProvider) {
+// reads. Without them it refuses every caller. outsidePostgres is set when
+// the profile store is not the Postgres one: a key transaction can't read
+// those profiles, so the acting profile isn't checked again there.
+func (h *AuthHandler) SetHouseholdStores(stores userstore.UserStoreProvider, outsidePostgres bool) {
 	h.householdStores = stores
+	h.profilesOutsidePostgres = outsidePostgres
 }
 
 // ActsAsVerifiedMainProfile reports whether the request acts as the
@@ -107,7 +111,7 @@ func (h *AuthHandler) SetHouseholdStores(stores userstore.UserStoreProvider) {
 // It is the rule for every operation that creates lasting access to the
 // shared account (enrolling or replacing app keys, approving a waiting
 // device), and it is the household manager rule that disconnecting a sign-in
-// and creating a personal API key already apply (canManageHouseholdAs): a
+// and creating a personal API key already apply (householdManagerAs): a
 // named profile must be the primary one and pass verify; a request that names
 // none passes only from an administrator account that has at most one
 // profile, with no PIN and no maturity or library limit: there the request
@@ -115,20 +119,40 @@ func (h *AuthHandler) SetHouseholdStores(stores userstore.UserStoreProvider) {
 // profiles, or a PIN, names the main profile like anyone else's. verify
 // returns access.ErrProfileUnverified for a PIN-locked main profile the
 // request did not verify.
-func (h *AuthHandler) ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, error) {
-	allowed, err := mayManageHouseholdOf(ctx, h.householdStores, userID, activeProfileID, verify)
-	if err != nil || !allowed || activeProfileID != "" {
-		return allowed, err
+//
+// It also returns the profile the request acted as, for the operation to
+// check again under the account lock (auth.ActingProfile): the zero value
+// when the request named none.
+func (h *AuthHandler) ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, auth.ActingProfile, error) {
+	none := auth.ActingProfile{}
+	if h.householdStores == nil {
+		return false, none, nil
 	}
 	store, err := h.householdStores.ForUser(ctx, userID)
 	if err != nil {
-		return false, fmt.Errorf("opening user store: %w", err)
+		return false, none, fmt.Errorf("opening user store: %w", err)
 	}
-	profiles, err := store.ListProfiles(ctx)
-	if err != nil {
-		return false, fmt.Errorf("listing household profiles: %w", err)
+	if store == nil {
+		return false, none, nil
 	}
-	return len(profiles) <= 1, nil
+	if verify == nil {
+		verify = func(*userstore.Profile) error { return access.ErrProfileUnverified }
+	}
+	allowed, active, err := householdManagerAs(ctx, store, activeProfileID, verify)
+	if err != nil || !allowed {
+		return false, none, err
+	}
+	if active == nil {
+		profiles, err := store.ListProfiles(ctx)
+		if err != nil {
+			return false, none, fmt.Errorf("listing household profiles: %w", err)
+		}
+		return len(profiles) <= 1, none, nil
+	}
+	if h.profilesOutsidePostgres {
+		return true, none, nil
+	}
+	return true, auth.ActingProfile{ID: active.ID, PINRevision: active.PINRevision}, nil
 }
 
 // appKeyAnswer adds the token view a signed-in result carries. Errors pass

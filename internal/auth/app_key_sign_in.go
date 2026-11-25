@@ -70,6 +70,9 @@ type KeyEnrollRequest struct {
 	KeyRequest
 	PersonKey appkeys.PublicKey
 	Claims    *Claims
+	// Acting is the main profile the route checked, checked again under
+	// the account lock.
+	Acting ActingProfile
 }
 
 // KeySignInResult is the answer a route seals to the request's reply key.
@@ -447,6 +450,9 @@ func (a *AppKeySignIn) Enroll(ctx context.Context, req KeyEnrollRequest) (*KeySi
 	err = a.inTx(ctx, func(tx pgx.Tx) error {
 		user, err := lockEnabledUser(ctx, tx, req.Claims.UserID)
 		if err != nil {
+			return err
+		}
+		if err := recheckActingProfile(ctx, tx, user.ID, req.Acting); err != nil {
 			return err
 		}
 		locked, err := lockChain(ctx, tx, user, enrolling.binding())

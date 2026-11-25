@@ -147,14 +147,15 @@ func (reg *Registry) replacePersonKey(ctx context.Context, in *ReplacePersonKeyI
 	if err != nil {
 		return nil, err
 	}
-	if err := reg.requireVerifiedMainProfile(ctx, svc); err != nil {
+	acting, err := reg.requireVerifiedMainProfile(ctx, svc)
+	if err != nil {
 		return nil, err
 	}
 	key, err := appkeys.ParsePublicKey(in.Body.PersonKey)
 	if err != nil {
 		return nil, validationProblem(locationBody+".person_key", codeInvalid, "person_key is not a P-256 public key.")
 	}
-	if err := svc.ReplacePersonKey(ctx, claimsFrom(ctx), key); err != nil {
+	if err := svc.ReplacePersonKey(ctx, claimsFrom(ctx), key, acting); err != nil {
 		return nil, appKeyProblem(err)
 	}
 	return &PersonKeyReplacedOutput{Body: PersonKeyReplaced{PersonKeyID: key.KeyID()}}, nil

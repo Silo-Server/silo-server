@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -126,12 +127,16 @@ func (reg *Registry) preapproveDeviceLogin(ctx context.Context, in *PreapproveDe
 	// A sign-in approved in advance is lasting access to the account every
 	// profile shares, so it takes the household's main profile, as enrolling
 	// a key does. Approving a sign-in that is waiting now keeps no such rule.
-	if err := reg.requireVerifiedMainProfile(ctx, reg.deps.Devices); err != nil {
+	acting, err := reg.requireVerifiedMainProfile(ctx, reg.deps.Devices)
+	if err != nil {
 		return nil, err
 	}
 	result, err := reg.deps.Devices.PreapproveDeviceLogin(ctx, auth.DevicePreapprovalInput{
-		DeviceName: in.Body.DeviceName, DevicePlatform: in.Body.DevicePlatform, Binding: in.Body.Binding,
+		DeviceName: in.Body.DeviceName, DevicePlatform: in.Body.DevicePlatform, Binding: in.Body.Binding, Acting: acting,
 	}, claims.UserID)
+	if errors.Is(err, auth.ErrActingProfileChanged) {
+		return nil, mainProfileChangedProblem()
+	}
 	if err != nil {
 		return nil, deviceProblem(err)
 	}

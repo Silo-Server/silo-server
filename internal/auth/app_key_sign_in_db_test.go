@@ -474,7 +474,7 @@ func TestKeyEnrollRulesDB(t *testing.T) {
 	}); !errors.Is(err, ErrSessionNotAllowed) {
 		t.Fatalf("enroll from device sign-in = %v", err)
 	}
-	if err := env.signIn.ReplacePersonKey(ctx, tv, newTestKey(t).pub); !errors.Is(err, ErrSessionNotAllowed) {
+	if err := env.signIn.ReplacePersonKey(ctx, tv, newTestKey(t).pub, ActingProfile{}); !errors.Is(err, ErrSessionNotAllowed) {
 		t.Fatalf("replace from device sign-in = %v", err)
 	}
 	browser := env.loginSession(t, user, models.SessionOpenedPassword, nil)
@@ -495,7 +495,7 @@ func TestKeyEnrollRulesDB(t *testing.T) {
 		t.Fatalf("an introduce envelope at enroll = %v", err)
 	}
 	replacement := newTestKey(t)
-	if err := env.signIn.ReplacePersonKey(ctx, browser, replacement.pub); err != nil {
+	if err := env.signIn.ReplacePersonKey(ctx, browser, replacement.pub, ActingProfile{}); err != nil {
 		t.Fatal(err)
 	}
 	keys, err := env.signIn.ListOwnKeys(ctx, browser)
@@ -515,7 +515,7 @@ func TestKeyEnrollRulesDB(t *testing.T) {
 	if _, err := env.pool.Exec(ctx, `UPDATE auth_sessions SET provider_since = NOW() WHERE id = $1`, gone.SessionID); err != nil {
 		t.Fatal(err)
 	}
-	if err := env.signIn.ReplacePersonKey(ctx, gone, newTestKey(t).pub); !errors.Is(err, ErrProviderSignInRequired) {
+	if err := env.signIn.ReplacePersonKey(ctx, gone, newTestKey(t).pub, ActingProfile{}); !errors.Is(err, ErrProviderSignInRequired) {
 		t.Fatalf("replace from a session whose identity is gone = %v", err)
 	}
 }

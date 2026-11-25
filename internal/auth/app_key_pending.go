@@ -82,8 +82,9 @@ func (a *AppKeySignIn) ListPendingKeys(ctx context.Context, claims *Claims) ([]*
 // account is still an enabled administrator, the key is still waiting inside
 // its lifetime, and the session is still live. Approving an active key
 // changes nothing; a key that is unknown, denied, revoked or past its
-// lifetime is ErrAppKeyNotFound.
-func (a *AppKeySignIn) ApprovePendingKey(ctx context.Context, claims *Claims, id string) error {
+// lifetime is ErrAppKeyNotFound. acting is the main profile the route
+// checked, checked again under the account lock.
+func (a *AppKeySignIn) ApprovePendingKey(ctx context.Context, claims *Claims, id string, acting ActingProfile) error {
 	if err := a.pendingDecisionAllowed(ctx, claims, ActionManageKeys, id); err != nil {
 		return err
 	}
@@ -91,6 +92,9 @@ func (a *AppKeySignIn) ApprovePendingKey(ctx context.Context, claims *Claims, id
 	err := a.inTx(ctx, func(tx pgx.Tx) error {
 		user, err := lockEnabledUser(ctx, tx, claims.UserID)
 		if err != nil {
+			return err
+		}
+		if err := recheckActingProfile(ctx, tx, user.ID, acting); err != nil {
 			return err
 		}
 		if user.Role != models.RoleAdmin {

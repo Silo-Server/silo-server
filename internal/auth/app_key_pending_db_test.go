@@ -56,7 +56,7 @@ func TestPendingKeyApproveDB(t *testing.T) {
 	}
 	auditCtx, _ := audittest.Context(t, env.pool, audittest.Request{Method: http.MethodPost,
 		Pattern: "/api/v2/auth/keys/pending/{id}/approve", Path: "/api/v2/auth/keys/pending/" + id + "/approve", UserID: &admin.ID, OptIn: true})
-	if err := env.signIn.ApprovePendingKey(auditCtx, ownDevice, id); err != nil {
+	if err := env.signIn.ApprovePendingKey(auditCtx, ownDevice, id, ActingProfile{}); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	row := audittest.One(t, env.pool, auditmutation.ActionDeviceKeyApproved, auditmutation.TargetUser, strconv.Itoa(admin.ID))
@@ -70,10 +70,10 @@ func TestPendingKeyApproveDB(t *testing.T) {
 	if got := env.pendingIDs(t, ownDevice); len(got) != 1 || got[0] != first {
 		t.Fatalf("waiting keys after approval = %v", got)
 	}
-	if err := env.signIn.ApprovePendingKey(ctx, ownDevice, id); err != nil {
+	if err := env.signIn.ApprovePendingKey(ctx, ownDevice, id, ActingProfile{}); err != nil {
 		t.Fatalf("approving an active key again: %v", err)
 	}
-	if err := env.signIn.ApprovePendingKey(ctx, ownDevice, enrolled.DeviceID); !errors.Is(err, ErrSessionNotAllowed) {
+	if err := env.signIn.ApprovePendingKey(ctx, ownDevice, enrolled.DeviceID, ActingProfile{}); !errors.Is(err, ErrSessionNotAllowed) {
 		t.Fatalf("a session approving its own key = %v", err)
 	}
 }
@@ -89,10 +89,10 @@ func TestReplacingPersonKeyDeniesItsWaitingDevicesDB(t *testing.T) {
 	person, _, enrolled := env.enroll(t, admin)
 	claims := env.loginSession(t, admin, models.SessionOpenedPassword, nil)
 	id, device := env.introduceWaiting(t, person)
-	if err := env.signIn.ReplacePersonKey(ctx, claims, newTestKey(t).pub); err != nil {
+	if err := env.signIn.ReplacePersonKey(ctx, claims, newTestKey(t).pub, ActingProfile{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := env.signIn.ApprovePendingKey(ctx, claims, id); !errors.Is(err, ErrAppKeyNotFound) {
+	if err := env.signIn.ApprovePendingKey(ctx, claims, id, ActingProfile{}); !errors.Is(err, ErrAppKeyNotFound) {
 		t.Fatalf("approving a device the replaced key introduced = %v", err)
 	}
 	if _, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: device})); !errors.Is(err, ErrAppKeyDenied) {
@@ -136,7 +136,7 @@ func TestPendingKeyDenyDB(t *testing.T) {
 	if err := env.signIn.DenyPendingKey(ctx, claims, id); err != nil {
 		t.Fatalf("denying again: %v", err)
 	}
-	if err := env.signIn.ApprovePendingKey(ctx, claims, id); !errors.Is(err, ErrAppKeyNotFound) {
+	if err := env.signIn.ApprovePendingKey(ctx, claims, id, ActingProfile{}); !errors.Is(err, ErrAppKeyNotFound) {
 		t.Fatalf("approving a denied key = %v", err)
 	}
 }
@@ -158,7 +158,7 @@ func TestPendingKeyRefusalsDB(t *testing.T) {
 		if _, err := env.pool.Exec(ctx, `UPDATE auth_device_keys SET created_at = NOW() - INTERVAL '25 hours' WHERE id = $1`, id); err != nil {
 			t.Fatal(err)
 		}
-		if err := env.signIn.ApprovePendingKey(ctx, claims, id); !errors.Is(err, ErrAppKeyNotFound) {
+		if err := env.signIn.ApprovePendingKey(ctx, claims, id, ActingProfile{}); !errors.Is(err, ErrAppKeyNotFound) {
 			t.Fatalf("approve = %v", err)
 		}
 		for _, waiting := range env.pendingIDs(t, claims) {
@@ -173,7 +173,7 @@ func TestPendingKeyRefusalsDB(t *testing.T) {
 		if got := env.pendingIDs(t, stranger); len(got) != 0 {
 			t.Fatalf("another account sees %v", got)
 		}
-		if err := env.signIn.ApprovePendingKey(ctx, stranger, id); !errors.Is(err, ErrAppKeyNotFound) {
+		if err := env.signIn.ApprovePendingKey(ctx, stranger, id, ActingProfile{}); !errors.Is(err, ErrAppKeyNotFound) {
 			t.Fatalf("approve = %v", err)
 		}
 		if err := env.signIn.DenyPendingKey(ctx, stranger, id); !errors.Is(err, ErrAppKeyNotFound) {
@@ -187,7 +187,7 @@ func TestPendingKeyRefusalsDB(t *testing.T) {
 			if _, err := env.signIn.ListPendingKeys(ctx, session); !errors.Is(err, ErrSessionNotAllowed) {
 				t.Fatalf("%s: list = %v", name, err)
 			}
-			if err := env.signIn.ApprovePendingKey(ctx, session, id); !errors.Is(err, ErrSessionNotAllowed) {
+			if err := env.signIn.ApprovePendingKey(ctx, session, id, ActingProfile{}); !errors.Is(err, ErrSessionNotAllowed) {
 				t.Fatalf("%s: approve = %v", name, err)
 			}
 			if err := env.signIn.DenyPendingKey(ctx, session, id); !errors.Is(err, ErrSessionNotAllowed) {
@@ -201,7 +201,7 @@ func TestPendingKeyRefusalsDB(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _, _ = env.pool.Exec(ctx, `UPDATE users SET role = 'admin' WHERE id = $1`, admin.ID) })
-		if err := env.signIn.ApprovePendingKey(ctx, claims, id); !errors.Is(err, ErrApproverNotAdmin) {
+		if err := env.signIn.ApprovePendingKey(ctx, claims, id, ActingProfile{}); !errors.Is(err, ErrApproverNotAdmin) {
 			t.Fatalf("approve = %v", err)
 		}
 	})

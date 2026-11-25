@@ -867,6 +867,14 @@ with several profiles, or a PIN, names its main profile and sends its token
 like any other account. Otherwise the request is 403 `permission_denied`, also
 for a one-profile account that isn't an administrator. The other key routes have no profile rule.
 
+Each of the four checks the named profile a second time once it holds the
+account, and answers 403 `profile_verification_required` if the profile's PIN
+changed in between, the profile is no longer the main one, or another write to
+the profile is in progress. Nothing was changed: get a new `X-Profile-Token`
+and send the request again. A profile without a PIN can get this answer too,
+when a PIN was added or the profile was being written at that moment; there
+the same request is sent again.
+
 **Switch.** While `auth.app_key_sign_in` is off the challenge, `introduce`,
 `sign-in`, `enroll`, `POST /auth/grants/redeem`, `PUT /auth/keys/person` and
 `pending/{id}/approve` answer 409 `capability_disabled`. The capability,

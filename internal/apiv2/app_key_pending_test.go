@@ -39,6 +39,17 @@ func (h twoProfileAdminHouseholds) ForUser(ctx context.Context, userID int) (use
 
 const pendingKeyPath = "/auth/keys/pending/0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11"
 
+// keyCreatingRoutes are the app key routes that need the verified main
+// profile.
+func keyCreatingRoutes() []struct{ method, path, body string } {
+	enrollBody := `{"person_key":"` + testPersonKey + `","message":{"kid":"zT321tSgcB7emUH9k0B0oA","payload":"eyJ9","sig":"c2ln","device_sig":"c2ln"}}`
+	return []struct{ method, path, body string }{
+		{method: http.MethodPost, path: "/auth/keys/enroll", body: enrollBody},
+		{method: http.MethodPut, path: "/auth/keys/person", body: `{"person_key":"` + testPersonKey + `"}`},
+		{method: http.MethodPost, path: pendingKeyPath + "/approve", body: `{}`},
+	}
+}
+
 // Enrolling keys, replacing the person key and approving a waiting device
 // give lasting access to the account every profile of the household shares,
 // so only the household's main profile, verified with its PIN when it has
@@ -47,12 +58,7 @@ const pendingKeyPath = "/auth/keys/pending/0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11"
 // an administrator account with a single unprotected profile; with several
 // profiles, or a PIN, an administrator names the main profile like anyone.
 func TestKeyCreatingRoutesNeedVerifiedMainProfile(t *testing.T) {
-	enrollBody := `{"person_key":"` + testPersonKey + `","message":{"kid":"zT321tSgcB7emUH9k0B0oA","payload":"eyJ9","sig":"c2ln","device_sig":"c2ln"}}`
-	routes := []struct{ method, path, body string }{
-		{method: http.MethodPost, path: "/auth/keys/enroll", body: enrollBody},
-		{method: http.MethodPut, path: "/auth/keys/person", body: `{"person_key":"` + testPersonKey + `"}`},
-		{method: http.MethodPost, path: pendingKeyPath + "/approve", body: `{}`},
-	}
+	routes := keyCreatingRoutes()
 	locked := with(bearer(householdToken), "X-Profile-Id", "p-primary-locked")
 	for _, tc := range []struct {
 		name       string
@@ -86,6 +92,29 @@ func TestKeyCreatingRoutesNeedVerifiedMainProfile(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// The route checks the main profile before the operation's transaction, so
+// it hands the operation the profile it checked, to be checked again under
+// the account lock. A request that named no profile hands over none. An
+// operation that finds the profile changed answers
+// profile_verification_required, and the app verifies the profile again.
+func TestKeyCreatingRoutesPassTheCheckedProfile(t *testing.T) {
+	verified := with(with(bearer(householdToken), "X-Profile-Id", "p-primary-locked"), "X-Profile-Token", "ptok")
+	for _, route := range keyCreatingRoutes() {
+		t.Run(route.path, func(t *testing.T) {
+			keys := &fakeAppKeys{enabled: true, err: auth.ErrActingProfileChanged, pendingErr: auth.ErrActingProfileChanged}
+			requireProblem(t, do(t, NewHandler(appKeyDeps(keys)), route.method, Prefix+route.path, route.body, verified), TypeProfileVerificationRequired)
+			if keys.acting.ID != "p-primary-locked" {
+				t.Fatalf("the operation got profile %q, want the one the route checked", keys.acting.ID)
+			}
+			keys = &fakeAppKeys{enabled: true, acting: auth.ActingProfile{ID: "unset"}}
+			do(t, NewHandler(appKeyDeps(keys)), route.method, Prefix+route.path, route.body, bearer(adminToken))
+			if keys.calls != 1 || keys.acting != (auth.ActingProfile{}) {
+				t.Fatalf("with no profile named: calls %d, profile %+v", keys.calls, keys.acting)
+			}
+		})
 	}
 }
 

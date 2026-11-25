@@ -428,6 +428,10 @@ func TestDevicePreapprovalOperations(t *testing.T) {
 	if rec := do(t, demo, http.MethodGet, "/api/v2/auth/device/capability", "", nil); rec.Code != http.StatusOK || !contains(rec.Body.String(), `"preapprove":false`) {
 		t.Fatalf("demo capability: %d %s", rec.Code, rec.Body.String())
 	}
+	// The route hands the operation the profile it checked, and a profile
+	// that changed before the operation locked the account is verified again.
+	changed := `{"device_name":"` + fakePreapprovalChangedName + `","binding":"` + fakeBinding + `"}`
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/preapprove", changed, mainProfile(memberToken)), TypeProfileVerificationRequired)
 	// The account's own session as the main profile: created, listed, revoked.
 	rec := do(t, h, http.MethodPost, "/api/v2/auth/device/preapprove", create, mainProfile(memberToken))
 	if rec.Code != http.StatusCreated || !contains(rec.Body.String(), `"device_code":"dev-preapproved"`) {

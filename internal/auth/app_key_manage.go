@@ -82,8 +82,9 @@ func (a *AppKeySignIn) RevokeOwnDeviceKey(ctx context.Context, claims *Claims, i
 // ReplacePersonKey makes key the account's person key, from the account's
 // own login session, and revokes the one it replaces. Device keys already
 // enrolled keep working; new devices need the new key. Replacing the key
-// with itself changes nothing.
-func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key appkeys.PublicKey) error {
+// with itself changes nothing. acting is the main profile the route checked,
+// checked again under the account lock.
+func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key appkeys.PublicKey, acting ActingProfile) error {
 	if err := SessionAllows(ctx, a.pool, claims, ActionManageKeys); err != nil {
 		return err
 	}
@@ -94,6 +95,9 @@ func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key
 	return a.inTx(ctx, func(tx pgx.Tx) error {
 		user, err := lockEnabledUser(ctx, tx, claims.UserID)
 		if err != nil {
+			return err
+		}
+		if err := recheckActingProfile(ctx, tx, user.ID, acting); err != nil {
 			return err
 		}
 		// The identity the new key records is locked before the session

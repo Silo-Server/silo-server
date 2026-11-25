@@ -338,6 +338,7 @@
 ./internal/auth TestReplacingPersonKeyDeniesItsWaitingDevicesDB
 ./internal/auth TestPendingKeyRefusalsDB
 ./internal/auth TestPendingKeyCapDB
+./internal/auth TestKeyOperationsRecheckActingProfileDB
 ./internal/auth TestExpiredPendingKeySweepDB
 ./internal/apiv2 TestKeyListRefusesDeviceSignInSessionDB
 ./internal/auth TestRevokeOwnDeviceKeyRulesDB
