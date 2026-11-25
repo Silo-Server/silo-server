@@ -515,8 +515,8 @@ func (h *PlaybackHandler) setConfirmedPauseState(sessionID string, paused bool, 
 	// moves before the sync that cues monitors to re-read the list. It moves
 	// even when this copy already had the state: progress another replica
 	// accepted can have moved the row without reaching this copy. A moved
-	// row still needs the sync, which is the re-read cue for monitors that
-	// miss the lifecycle event.
+	// row is synced too: SetPaused adopted that sample's position above, and
+	// the sync announces sessions.replaced when the snapshot it writes changed.
 	rowChanged := h.sessionPauseConfirmed(context.Background(), sessionID, paused, receivedSequence)
 	if !changed && !rowChanged {
 		return

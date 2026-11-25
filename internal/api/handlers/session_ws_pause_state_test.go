@@ -699,14 +699,19 @@ func TestRealtimeStopRetriesTransientStoreErrors(t *testing.T) {
 }
 
 // orderedLifecycleStore records each confirmed pause it is asked to commit
-// into the log the syncer below also writes to.
+// into the log the syncer below also writes to. With rowUnchanged set, the
+// row already holds the state and the commit changes nothing.
 type orderedLifecycleStore struct {
 	lifecycleTestStore
-	log *[]string
+	log          *[]string
+	rowUnchanged bool
 }
 
 func (s *orderedLifecycleStore) ConfirmLifecyclePause(ctx context.Context, id string, paused bool, received int64) (LifecycleTransition, bool, error) {
 	*s.log = append(*s.log, "lifecycle "+lifecycleState(paused))
+	if s.rowUnchanged {
+		return LifecycleTransition{}, false, nil
+	}
 	return s.lifecycleTestStore.ConfirmLifecyclePause(ctx, id, paused, received)
 }
 
@@ -730,7 +735,8 @@ func TestRealtimeConfirmedPauseMovesTheLifecycleBeforeTheSync(t *testing.T) {
 	hub := evt.NewHub("test", nil)
 	events, unsubscribe := hub.Subscribe()
 	defer unsubscribe()
-	handler.AdminStore = &orderedLifecycleStore{log: &log}
+	store := &orderedLifecycleStore{log: &log}
+	handler.AdminStore = store
 	handler.SessionSyncer = orderedSyncer{log: &log}
 	handler.EventsHub, handler.LifecycleViews, handler.LifecycleEncoder = hub, lifecycleTestViews{}, lifecycleTestEncoder{}
 	session, err := sessionMgr.StartSession(1, "profile-1", file.ID, playback.PlayDirect, false)
@@ -740,7 +746,7 @@ func TestRealtimeConfirmedPauseMovesTheLifecycleBeforeTheSync(t *testing.T) {
 	for _, step := range []struct {
 		name  playback.CommandName
 		state string
-		event string
+		event string // empty when nothing changed, so nothing is announced or synced
 	}{
 		{name: playback.CommandPause, state: LifecyclePaused, event: LifecycleEventPaused},
 		{name: playback.CommandUnpause, state: LifecyclePlaying, event: LifecycleEventResumed},
@@ -748,16 +754,26 @@ func TestRealtimeConfirmedPauseMovesTheLifecycleBeforeTheSync(t *testing.T) {
 		// this copy's memory: the confirmation still moves the row, and the
 		// sync still cues monitors to re-read the list.
 		{name: playback.CommandUnpause, state: LifecyclePlaying, event: LifecycleEventResumed},
+		// A repeated confirmation finds the row and this copy already playing.
+		{name: playback.CommandUnpause, state: LifecyclePlaying},
 	} {
 		log = nil
+		store.rowUnchanged = step.event == ""
 		commandID := uuid.NewString()
 		handler.rememberRealtimeCommand(commandID, session.ID, step.name)
 		if err := handler.handleRealtimeClientMessage(session.ID, realtimeResultMessage(t, session.ID, commandID, playback.RealtimeResultStatusCompleted)); err != nil {
 			t.Fatal(err)
 		}
 		waitConfirmedPauseStates(t, handler, session.ID)
-		if want := []string{"lifecycle " + step.state, "sync"}; !slices.Equal(log, want) {
+		want := []string{"lifecycle " + step.state, "sync"}
+		if step.event == "" {
+			want = want[:1]
+		}
+		if !slices.Equal(log, want) {
 			t.Fatalf("%s: steps = %v, want %v", step.name, log, want)
+		}
+		if step.event == "" {
+			continue
 		}
 		select {
 		case env := <-events:

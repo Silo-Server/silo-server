@@ -57,13 +57,13 @@ transition.
 - A pause or resume the player confirms over its control socket moves the row at
   once, before the sync that cues monitors to re-read the list
   (`ConfirmLifecyclePause`). It holds a share lock on the attempt row and applies only
-  while the attempt is live and has accepted no progress since the confirmation
-  arrived, so progress accepted after that receipt is never overwritten: that sample
-  set its own state. The receipt is ordered by the server, not the player: a sample
-  the player sent before it applied the command, but that the server accepts after
-  the confirmation, still sets its older state, and the player's next sample sets it
-  back. A moved row is synced even when this server's copy already had the state, so
-  monitors that miss the event still get the cue to re-read.
+  while the attempt is live and has accepted no progress since the server read the
+  attempt on receipt, so progress accepted after that read is never overwritten: that
+  sample set its own state. The receipt is ordered by the server, not the player: a
+  sample the player sent before it applied the command, but that the server accepts
+  after that read, still sets its older state, and the player's next sample sets it
+  back. A moved row is synced even when this server's copy already had the state; the
+  sync announces `sessions.replaced` when it changes the session's synced row.
 - Jellyfin and Audiobookshelf reports carry no sequence. Their pause state
   follows database arrival order and writes only when it changes.
 - `stopped` is final.

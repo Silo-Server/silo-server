@@ -366,23 +366,29 @@ func TestConfirmedPauseLifecycleDB(t *testing.T) {
 	}, LifecycleFrontendNative); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, _ := store.ConfirmLifecyclePause(ctx, native, false, 2); ok || state() != LifecycleStopped {
-		t.Fatalf("a stopped session resumed: ok=%v state=%s", ok, state())
+	if _, ok, err := store.ConfirmLifecyclePause(ctx, native, false, 2); err != nil || ok || state() != LifecycleStopped {
+		t.Fatalf("a stopped session resumed: ok=%v err=%v state=%s", ok, err, state())
 	}
 }
 
 // requireExpiredAttemptIgnoresConfirmation expires the paused session's
 // attempt and checks a resume confirmation leaves the row paused: an attempt
 // past its lease accepts no progress, and no confirmation either, since the
-// sweep is about to end it.
+// sweep is about to end it. It renews the lease afterwards, so later checks
+// exercise their own guard.
 func requireExpiredAttemptIgnoresConfirmation(t *testing.T, ctx context.Context, pool *pgxpool.Pool, store *PGPlaybackAdminStore, sessionID string, state func() string) {
 	t.Helper()
-	if _, err := pool.Exec(ctx, `UPDATE playback_v3_attempts SET expires_at = NOW() - interval '1 second' WHERE session_id = $1::uuid`, sessionID); err != nil {
-		t.Fatal(err)
+	setExpiry := func(interval string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `UPDATE playback_v3_attempts SET expires_at = NOW() + $2::interval WHERE session_id = $1::uuid`, sessionID, interval); err != nil {
+			t.Fatal(err)
+		}
 	}
+	setExpiry("-1 second")
 	if _, ok, err := store.ConfirmLifecyclePause(ctx, sessionID, false, 2); err != nil || ok || state() != LifecyclePaused {
 		t.Fatalf("an expired attempt resumed: ok=%v err=%v state=%s", ok, err, state())
 	}
+	setExpiry("1 hour")
 }
 
 // TestLifecycleSweepSelectsWhatItCanEndDB pins that sessions still active
