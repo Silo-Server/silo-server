@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 30,
+  "revision": 31,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -1254,6 +1254,7 @@
       "category": "appearance",
       "label": "Poster badges",
       "description": "Which badges appear on poster cards, and where.",
+      "server_local": true,
       "notes": "Registered from the legacy unprefixed key card_overlays, which reached the server only through the unknown-key extension bag — stored as an arbitrary string with no validation. null means the user has expressed no preference, which is what lets the server-wide admin default in the overlay-config endpoint apply; writing a resolved-but-unchosen value would silently pin them. The server-wide default configuration stays in server_settings and is not a user setting. This key describes which badges to show, not whether to show them — that is ui.card_overlays_enabled. Revision 13 adds the advisory_age overlay id; a server below revision 13 rejects a value that contains it, so a client offers that badge only when manifest_revision is at least 13. Revision 15 adds the request_status overlay id (a watchlist title's request status on its poster) under the same rule: a client offers it only when manifest_revision is at least 15. Revision 25 reserves the top-right corner for the watch-status indicator, which every client always draws and no setting controls, and adds the left-edge and right-edge positions, the plate and band presets, style, and the per-badge image and valueImages references to uploaded images; a server below revision 25 rejects a value that uses any of them, so a client writes them only when manifest_revision is at least 25. top-right stays valid so stored values keep validating, but from revision 25 a client draws a badge stored there on the right edge and writes right-edge instead. Revision 26 adds the resolution_hdr_audio overlay id (one badge combining resolution, dynamic range and audio codec); a server below revision 26 rejects a value that contains it, so a client offers that badge only when manifest_revision is at least 26. Revision 29 adds the availability overlay id (complete seasons on a series poster, episodes in the library on a season poster) under the same rule: a client offers it only when manifest_revision is at least 29."
     },
     {
@@ -1428,6 +1429,7 @@
       "category": "navigation",
       "label": "Navigation shortcuts",
       "description": "Libraries, sections, and collections pinned for use across navigation surfaces.",
+      "server_local": true,
       "notes": "Profile-wide catalog; individual client families decide which shortcuts to place in their primary menu. Semantic destination identities are unique even when labels differ. The profile_client migration keeps ui.sidebar_pins unchanged and seeds this key from convertible legacy web pins only when this key has no authored row."
     },
     {
@@ -1464,6 +1466,7 @@
       "category": "navigation",
       "label": "Pinned sidebar items",
       "description": "Sections and collections pinned into the sidebar.",
+      "server_local": true,
       "notes": "Registered from the legacy unprefixed key sidebar_pins. Navigation state rather than an authored preference, so it has no control; it is written by the pin affordances themselves."
     },
     {
@@ -1481,6 +1484,7 @@
       "category": "navigation",
       "label": "Hidden libraries",
       "description": "Libraries you have hidden from your own browsing.",
+      "server_local": true,
       "notes": "Registered from the legacy unprefixed key disabled_library_ids. This is the user hiding a library from themselves — it is not an access control. Library visibility enforcement lives in internal/access and internal/policy, and nothing here may be read as a permission. Profile scope rather than profile_device because hiding a library is a statement about what you want to see, not about one screen."
     },
     {
@@ -1498,6 +1502,7 @@
       "category": "navigation",
       "label": "Library order",
       "description": "The order your libraries appear in.",
+      "server_local": true,
       "notes": "Registered from the legacy unprefixed key library_order. Shares library-id-list.json with ui.disabled_library_ids: both are normalized by the same normalizeLibraryIDs in web/src/hooks/queries/libraries.ts, which drops non-integers and duplicates. A library id absent from the list sorts after the ones present, so a stale id for a deleted library is inert and needs no cleanup hook."
     },
     {

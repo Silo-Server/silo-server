@@ -14508,6 +14508,11 @@ export interface components {
        */
       last_seen_at: string | null;
       name: string;
+      /**
+       * Format: uuid
+       * @description The profile's shared ID: a lower-case UUID that is the same for this profile on every server its person uses; null when the profile has none
+       */
+      sync_id: string | null;
     };
     AdminAccountSettingsOutputBody: {
       /** @description The page's items; empty, never null */
@@ -34475,6 +34480,12 @@ export interface components {
        */
       subtitle_mode: string;
       /**
+       * Format: uuid
+       * @description The profile's shared ID: a lower-case UUID that is the same for this profile on every server its person uses, so apps can line up one person's profiles across servers. null when the profile has none
+       * @example 0f8fad5b-d9cb-469f-a165-70867728950e
+       */
+      sync_id: string | null;
+      /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
        * @example 2026-01-02T03:04:05.000Z
@@ -34487,6 +34498,8 @@ export interface components {
        * @description The image; resized server-side to the avatar variants
        */
       avatar: string;
+      /** @description SHA-256 of the picture's file as it was first uploaded, on this server or another, as 64 lower-case hexadecimal characters. A device copying a profile's picture from another server sends it so both servers name the picture by the same hash. Without it the server stores the hash of the bytes it received */
+      source_sha256?: string;
     };
     ProfileCollection: {
       /**

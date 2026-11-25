@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 30
+const Revision = 31
 
 // Setting keys, one constant per definition.
 const (
@@ -264,4 +264,15 @@ var Deprecated = []string{
 	UiCustomCss,
 	UiCustomThemeVars,
 	UiTheme,
+}
+
+// ServerLocal lists keys whose value names something on one server: a
+// library, section, collection or uploaded image. A client must not carry such
+// a value from one server to another.
+var ServerLocal = []string{
+	NavShortcuts,
+	UiCardOverlays,
+	UiDisabledLibraryIds,
+	UiLibraryOrder,
+	UiSidebarPins,
 }

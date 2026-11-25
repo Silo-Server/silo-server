@@ -186,7 +186,10 @@ type ProfileView struct {
 	// RequireAdvisoryAge hides titles with no advisory age. v2-only (json:"-").
 	RequireAdvisoryAge bool `json:"-"`
 	// RequestsBlocked keeps the profile out of requests. v2-only (json:"-").
-	RequestsBlocked            bool   `json:"-"`
+	RequestsBlocked bool `json:"-"`
+	// SyncID is the profile's ID in its account's profile set, "" for none.
+	// v2-only (json:"-").
+	SyncID                     string `json:"-"`
 	QualityPreference          string `json:"quality_preference,omitempty"`
 	Language                   string `json:"language,omitempty"`
 	PreferredMetadataLanguage  string `json:"preferred_metadata_language,omitempty"`
@@ -1087,6 +1090,7 @@ func (h *ProfileHandler) profileResponseWith(
 	}
 	return ProfileView{
 		ID:                         p.ID,
+		SyncID:                     p.SyncID,
 		Name:                       p.Name,
 		Avatar:                     p.Avatar,
 		AvatarURL:                  avatarURL,

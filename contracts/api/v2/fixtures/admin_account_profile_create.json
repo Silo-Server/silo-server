@@ -1,5 +1,6 @@
 {
   "id": "p-new",
+  "sync_id": null,
   "name": "Guest",
   "avatar": "preset:fox",
   "avatar_url": "/avatars/presets/fox.png",

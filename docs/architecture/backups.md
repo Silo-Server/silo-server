@@ -1340,7 +1340,10 @@ access resolver (`internal/access/resolver.go`) reads to decide access:
 `is_child`, `max_content_rating`, `max_advisory_age`, `require_advisory_age`,
 `requests_blocked`, `library_restrictions_enabled`, the allowed libraries
 (`user_profile_allowed_libraries`), and `max_playback_quality`. The PIN
-revision is not carried; a restored profile starts its own. A profile restored
+revision is not carried; a restored profile starts its own. The shared
+profile ID is not carried either: a restored profile has no `sync_id` and
+none of the columns that go with it, and an uploaded avatar's hash is not
+restored. A full database restore carries all of it. A profile restored
 as the account's primary drops its library limit, since the primary profile
 inherits its account's libraries (`access.ProfileLibraryLimit`); credential
 carry reads a primary profile's stored limit the same way.

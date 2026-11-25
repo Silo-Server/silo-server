@@ -712,6 +712,16 @@ func (s *interestTrackingStore) DeleteProfileAudited(ctx context.Context, id str
 	return collectionIDs, err
 }
 
+// RecordProfileAvatarSourceSHA256 forwards to the wrapped store; a backend
+// that keeps no avatar hashes records nothing.
+func (s *interestTrackingStore) RecordProfileAvatarSourceSHA256(ctx context.Context, id, avatar, sha string) (bool, error) {
+	recorder, ok := s.UserStore.(userstore.ProfileAvatarHashRecorder)
+	if !ok {
+		return false, nil
+	}
+	return recorder.RecordProfileAvatarSourceSHA256(ctx, id, avatar, sha)
+}
+
 // Preserve the optional device settings capability without claiming support
 // on backends that cannot page or atomically clear devices. Keep the existing
 // concrete decorator so its other optional capabilities survive as well.
