@@ -506,6 +506,15 @@ type ItemRefreshExecutor struct {
 	// itemStatuses lets a complete refresh wait out a series match that
 	// another worker is still running; see SetItemStatusReader.
 	itemStatuses itemRefreshItemStatusReader
+	// seriesRoots wakes the backed-off series roots of a complete refresh's
+	// scope; see SetSeriesRootWaker.
+	seriesRoots itemRefreshSeriesRootWaker
+}
+
+// itemRefreshSeriesRootWaker returns a scope's backed-off series root queue
+// rows to pending.
+type itemRefreshSeriesRootWaker interface {
+	WakeInScope(ctx context.Context, folderID int, scopePath string) error
 }
 
 // A complete refresh resolves the rebuilt item from the files its scope links
@@ -589,6 +598,13 @@ func (e *ItemRefreshExecutor) SetAudiobookEnricher(enricher ItemRefreshAudiobook
 	e.audiobooks = enricher
 }
 
+// SetSeriesRootWaker lets a complete refresh of a series, season or episode
+// match its series root at once, although an earlier failure backed the root
+// off in the TV match queue.
+func (e *ItemRefreshExecutor) SetSeriesRootWaker(waker itemRefreshSeriesRootWaker) {
+	e.seriesRoots = waker
+}
+
 // SetItemStatusReader lets a complete refresh of a series, season or episode
 // tell a series that another worker is still matching from the rebuilt one.
 func (e *ItemRefreshExecutor) SetItemStatusReader(reader itemRefreshItemStatusReader) {
@@ -642,6 +658,16 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 		}
 		if err := e.prepareCompleteRefresh(ctx, folder, req); err != nil {
 			return nil, fmt.Errorf("prepare complete refresh: %w", err)
+		}
+		// The scan below queues the scope's series root again, but a root an
+		// earlier failure backed off keeps its later available_at, so its
+		// match would not run before the refresh gives up. A hand-matched
+		// folder that no provider finds on its own then left both the library
+		// and Unmatched Items until the back-off ended (#5337).
+		if isSeriesTarget(req.RequestedType) && e.seriesRoots != nil {
+			if err := e.seriesRoots.WakeInScope(ctx, req.ScanFolderID, req.ScanPath); err != nil {
+				return nil, fmt.Errorf("prepare complete refresh: %w", err)
+			}
 		}
 	}
 
