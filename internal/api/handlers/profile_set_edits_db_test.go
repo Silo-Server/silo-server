@@ -284,6 +284,28 @@ func recorderCases(f *editsFixture, main, kid setItem, kidID, localID string) []
 				t.Fatal(err)
 			}
 		}, []string{fmt.Sprintf("account:settings.%s:%d", settingskeys.PlaybackAudioLanguage, f.userID)}},
+		{"the account's change of one half of a mirrored pair takes both from the owner", func(t *testing.T) {
+			mode, skip := setting(settingskeys.PlaybackIntroSkipMode), setting(settingskeys.PlaybackAutoSkipIntro)
+			for _, w := range []struct {
+				ctx   context.Context
+				id    userstore.SettingIdentity
+				value string
+			}{
+				{profileedits.WithoutRecording(f.account()), mode, `"always"`},
+				{profileedits.WithoutRecording(f.account()), skip, `true`},
+				{f.admin(), mode, `"never"`},
+				{f.admin(), skip, `false`},
+				{f.account(), mode, `"ask"`},
+				{f.account(), skip, `false`},
+			} {
+				if _, err := f.store.UpsertSettingValue(w.ctx, w.id, json.RawMessage(w.value)); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}, []string{
+			fmt.Sprintf("account:settings.%s:%d", settingskeys.PlaybackAutoSkipIntro, f.userID),
+			fmt.Sprintf("account:settings.%s:%d", settingskeys.PlaybackIntroSkipMode, f.userID),
+		}},
 		{"a save carrying unchanged preference members records nothing, as the account", func(t *testing.T) {
 			f.update(t, f.account(), kidID, ProfileUpdateRequest{AutoSkipIntro: new(false), Language: new("")}, false)
 		}, nil},
@@ -736,6 +758,22 @@ func TestProfileSetNamesWithOwnerRenamesDB(t *testing.T) {
 		var field *ProfileSetFieldError
 		if !errors.As(err, &field) || field.Location != "set.items[1].name" || field.Code != "name_conflict" {
 			t.Fatalf("err = %v, want name_conflict at set.items[1].name", err)
+		}
+		if f.state(t) != before {
+			t.Fatal("a refused set wrote")
+		}
+	})
+	t.Run("the main profile's owner name equal to a local profile's name", func(t *testing.T) {
+		f.update(t, f.admin(), f.primary, ProfileUpdateRequest{Name: new("Owner")}, true)
+		owner := "Owner"
+		if err := f.store.UpdateProfile(t.Context(), localID, userstore.UpdateProfileInput{Name: &owner}); err != nil {
+			t.Fatal(err)
+		}
+		before := f.state(t)
+		_, err := f.apply(t, setDoc(t, 4, main.with("name", "Sam"), kid.with("name", "Other")))
+		var field *ProfileSetFieldError
+		if !errors.As(err, &field) || field.Location != "set.items[0].name" || field.Code != "name_conflict" {
+			t.Fatalf("err = %v, want name_conflict at set.items[0].name", err)
 		}
 		if f.state(t) != before {
 			t.Fatal("a refused set wrote")
