@@ -186,11 +186,6 @@ type TokenStore interface {
 	TouchToken(ctx context.Context, jti string) error
 }
 
-// DemoSettingsReader reads one server setting.
-type DemoSettingsReader interface {
-	Get(ctx context.Context, key string) (string, error)
-}
-
 // ABSToken is the in-memory representation of a persisted JTI row.
 type ABSToken struct {
 	ID        string
@@ -395,11 +390,8 @@ type Dependencies struct {
 	// NativeSessionSyncer flushes native session-manager state into the shared
 	// admin live-session table after ABS play/sync/close events.
 	NativeSessionSyncer PlaybackSessionSyncer
-	// DemoSettings reads the demo.enabled server setting; nil means demo
-	// mode cannot be on. Demo visitors share one account, so while it is on
-	// signing out ends only the presented token of an account that is not
-	// an administrator (AccountIsAdmin; nil counts every account as not
-	// one).
+	// DemoSettings and AccountIsAdmin decide sign-out in demo mode
+	// (demoRestricted); a nil DemoSettings means demo mode cannot be on.
 	DemoSettings   DemoSettingsReader
 	AccountIsAdmin func(ctx context.Context, userID string) (bool, error)
 	// CoverResolver translates a raw silo poster path (e.g.

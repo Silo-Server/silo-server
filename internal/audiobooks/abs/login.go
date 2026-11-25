@@ -775,7 +775,14 @@ func (h *Handler) revokeLogoutPrincipal(r *http.Request) {
 	slog.DebugContext(r.Context(), "abs logout: revoked principal tokens", "component", "audiobooks", "jti", claims.JTI, "user", claims.UserID)
 }
 
+// DemoSettingsReader reads one server setting (demo.enabled).
+type DemoSettingsReader interface {
+	Get(ctx context.Context, key string) (string, error)
+}
+
 // demoRestricted reports whether demo mode is on and userID is not an
+// administrator; demo visitors share one account, so its sign-out ends only
+// the presented token. A nil AccountIsAdmin counts every account as not an
 // administrator. An error means it could not be told; the caller restricts.
 func (h *Handler) demoRestricted(ctx context.Context, userID string) (bool, error) {
 	if h.deps.DemoSettings == nil {
