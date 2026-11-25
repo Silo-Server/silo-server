@@ -26,7 +26,9 @@ CREATE TABLE public.auth_person_keys (
     provider_bound boolean NOT NULL DEFAULT false,
     enrolled_via text NOT NULL CHECK (enrolled_via IN ('session', 'app_code')),
     created_at timestamptz NOT NULL DEFAULT now(),
-    revoked_at timestamptz
+    revoked_at timestamptz,
+    -- The target of auth_device_keys' account-checked reference.
+    CONSTRAINT auth_person_keys_id_user_id_key UNIQUE (id, user_id)
 );
 CREATE UNIQUE INDEX auth_person_keys_one_live_per_user
     ON public.auth_person_keys (user_id) WHERE revoked_at IS NULL;
@@ -48,13 +50,19 @@ CREATE TABLE public.auth_device_keys (
     -- pending and denied hold a key waiting for, or refused, an approval.
     status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'denied')),
     enrolled_via text NOT NULL CHECK (enrolled_via IN ('introduce', 'session', 'app_code', 'grant')),
-    -- The person key that signed the introduction or the grant.
-    person_key_id uuid REFERENCES public.auth_person_keys(id) ON DELETE SET NULL,
+    -- The person key that signed the introduction or the grant. The
+    -- reference includes the account, so a device key can only name a person
+    -- key of its own account.
+    person_key_id uuid,
     identity_id bigint REFERENCES public.plugin_auth_identities(id) ON DELETE SET NULL,
     provider_bound boolean NOT NULL DEFAULT false,
     created_at timestamptz NOT NULL DEFAULT now(),
     last_used_at timestamptz,
-    revoked_at timestamptz
+    revoked_at timestamptz,
+    -- The target of auth_sessions' account-checked reference.
+    CONSTRAINT auth_device_keys_id_user_id_key UNIQUE (id, user_id),
+    CONSTRAINT auth_device_keys_person_key_fkey FOREIGN KEY (person_key_id, user_id)
+        REFERENCES public.auth_person_keys (id, user_id) ON DELETE SET NULL (person_key_id)
 );
 CREATE INDEX auth_device_keys_user_id_idx ON public.auth_device_keys (user_id);
 CREATE INDEX auth_device_keys_person_key_id_idx
@@ -63,8 +71,12 @@ CREATE INDEX auth_device_keys_identity_id_idx
     ON public.auth_device_keys (identity_id) WHERE identity_id IS NOT NULL;
 
 -- The device key that opened a login session; NULL for every other sign-in.
+-- The reference includes the account, so a session can only name a device
+-- key of its own account.
 ALTER TABLE public.auth_sessions
-    ADD COLUMN device_key_id uuid REFERENCES public.auth_device_keys(id) ON DELETE CASCADE;
+    ADD COLUMN device_key_id uuid,
+    ADD CONSTRAINT auth_sessions_device_key_fkey FOREIGN KEY (device_key_id, user_id)
+        REFERENCES public.auth_device_keys (id, user_id) ON DELETE CASCADE;
 CREATE INDEX auth_sessions_device_key_id_idx
     ON public.auth_sessions (device_key_id) WHERE device_key_id IS NOT NULL;
 -- +goose StatementEnd

@@ -18,6 +18,8 @@ func TestParsePublicKey(t *testing.T) {
 	valid := priv.PublicKey().Bytes()
 	offCurve := append([]byte(nil), valid...)
 	offCurve[PublicKeySize-1] ^= 0x01
+	compressedPrefix := append([]byte(nil), valid...)
+	compressedPrefix[0] = 0x02
 	enc := base64.RawURLEncoding.EncodeToString
 	for _, tc := range []struct {
 		name    string
@@ -27,6 +29,8 @@ func TestParsePublicKey(t *testing.T) {
 		{name: "valid point", encoded: enc(valid), ok: true},
 		{name: "point not on the curve", encoded: enc(offCurve)},
 		{name: "compressed length", encoded: enc(valid[:33])},
+		{name: "full length under a compressed prefix", encoded: enc(compressedPrefix)},
+		{name: "all zero bytes", encoded: enc(make([]byte, PublicKeySize))},
 		{name: "one byte too long", encoded: enc(append(append([]byte(nil), valid...), 0))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

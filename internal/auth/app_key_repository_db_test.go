@@ -83,3 +83,59 @@ func TestDeviceKeyRevocationEndsItsSessionsDB(t *testing.T) {
 		t.Fatalf("enrolling a device key as a person key: err = %v", err)
 	}
 }
+
+// The rules the sign-in code relies on when it enrolls and revokes for a
+// whole account: an account holds one live person key, a device key can only
+// be vouched for by a live person key of its own account, and revoking the
+// account's keys ends every session they opened.
+func TestAccountKeyRulesDB(t *testing.T) {
+	f := newSignInFixture(t)
+	ctx := t.Context()
+	keys := NewAppKeyRepository(f.pool)
+	user, other := f.account(models.RoleUser), f.account(models.RoleUser)
+
+	person, err := keys.InsertPersonKey(ctx, NewPersonKey{UserID: user, PublicKey: newAppPublicKey(t), EnrolledVia: models.AppKeyEnrolledSession})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := keys.InsertPersonKey(ctx, NewPersonKey{
+		UserID: user, PublicKey: newAppPublicKey(t), EnrolledVia: models.AppKeyEnrolledSession,
+	}); !errors.Is(err, ErrPersonKeyExists) {
+		t.Fatalf("second live person key: err = %v", err)
+	}
+	vouched := func(account int) NewDeviceKey {
+		return NewDeviceKey{
+			UserID: account, PublicKey: newAppPublicKey(t), Kind: models.DeviceKeyKindDevice, Name: "Phone",
+			EnrolledVia: models.AppKeyEnrolledIntroduce, PersonKeyID: &person.ID,
+		}
+	}
+	if _, err := keys.InsertDeviceKey(ctx, vouched(other)); !errors.Is(err, ErrAppKeyNotFound) {
+		t.Fatalf("device key vouched for by another account's person key: err = %v", err)
+	}
+	device, err := keys.InsertDeviceKey(ctx, vouched(user))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.sessions.Create(ctx, models.AuthSession{
+		UserID: other, DeviceName: "Phone", ExpiresAt: time.Now().Add(time.Hour), DeviceKeyID: &device.ID,
+	}); err == nil {
+		t.Fatal("a session of one account took another account's device key")
+	}
+
+	keySession := uuid.NewString()
+	if err := f.sessions.Create(ctx, models.AuthSession{
+		ID: keySession, UserID: user, DeviceName: "Phone", ExpiresAt: time.Now().Add(time.Hour), DeviceKeyID: &device.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.owners[keySession] = user
+	if err := keys.RevokeAccountKeys(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	if f.active(keySession) {
+		t.Fatal("revoking the account's keys left a key session active")
+	}
+	if _, err := keys.InsertDeviceKey(ctx, vouched(user)); !errors.Is(err, ErrAppKeyRevoked) {
+		t.Fatalf("device key vouched for by a revoked person key: err = %v", err)
+	}
+}

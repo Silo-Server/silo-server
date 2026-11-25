@@ -28,6 +28,12 @@ var (
 	// ErrPersonKeyExists is returned when the account already holds a person
 	// key that is not revoked.
 	ErrPersonKeyExists = errors.New("account already has a person key")
+	// ErrAppKeyRevoked is returned when a revoked person key is named to
+	// vouch for a new device key.
+	ErrAppKeyRevoked = errors.New("app key revoked")
+	// ErrAppKeyInvalid is returned for a key whose kind, status or way of
+	// enrolling is not one its table takes.
+	ErrAppKeyInvalid = errors.New("invalid app key")
 )
 
 const personKeyColumns = `id::text, user_id, public_key, key_id, identity_id, provider_bound, enrolled_via, created_at, revoked_at`
@@ -180,6 +186,9 @@ func claimPublicKey(ctx context.Context, tx pgx.Tx, key appkeys.PublicKey) error
 // insertPersonKeyTx enrolls a person key in tx, which holds the account row
 // lock (lockUser).
 func insertPersonKeyTx(ctx context.Context, tx pgx.Tx, k NewPersonKey) (*models.AppPersonKey, error) {
+	if k.EnrolledVia != models.AppKeyEnrolledSession && k.EnrolledVia != models.AppKeyEnrolledAppCode {
+		return nil, ErrAppKeyInvalid
+	}
 	if err := claimPublicKey(ctx, tx, k.PublicKey); err != nil {
 		return nil, err
 	}
@@ -191,15 +200,50 @@ func insertPersonKeyTx(ctx context.Context, tx pgx.Tx, k NewPersonKey) (*models.
 	return row, appKeyInsertError(err)
 }
 
-// insertDeviceKeyTx enrolls a device key in tx, which holds the account row
-// lock (lockUser) and, when PersonKeyID is set, that person key's row.
-func insertDeviceKeyTx(ctx context.Context, tx pgx.Tx, k NewDeviceKey) (*models.AppDeviceKey, error) {
-	if err := claimPublicKey(ctx, tx, k.PublicKey); err != nil {
-		return nil, err
+// validDeviceKey reports whether k's kind, status and way of enrolling are
+// ones auth_device_keys takes.
+func validDeviceKey(k NewDeviceKey, status string) bool {
+	kind := k.Kind == models.DeviceKeyKindDevice || k.Kind == models.DeviceKeyKindApp
+	state := status == models.DeviceKeyStatusActive || status == models.DeviceKeyStatusPending || status == models.DeviceKeyStatusDenied
+	switch k.EnrolledVia {
+	case models.AppKeyEnrolledIntroduce, models.AppKeyEnrolledSession, models.AppKeyEnrolledAppCode, models.AppKeyEnrolledGrant:
+		return kind && state
 	}
+	return false
+}
+
+// lockPersonKey locks one of the account's person keys in tx, which already
+// holds the account row lock. A key of another account is not found.
+func lockPersonKey(ctx context.Context, tx pgx.Tx, userID int, id string) (*models.AppPersonKey, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, ErrAppKeyNotFound
+	}
+	return scanPersonKey(tx.QueryRow(ctx, `SELECT `+personKeyColumns+` FROM auth_person_keys
+		WHERE id = $1 AND user_id = $2 FOR UPDATE`, id, userID))
+}
+
+// insertDeviceKeyTx enrolls a device key in tx, which holds the account row
+// lock (lockUser). A PersonKeyID must name a person key of the same account
+// that is not revoked; its row is locked here, before any device key row.
+func insertDeviceKeyTx(ctx context.Context, tx pgx.Tx, k NewDeviceKey) (*models.AppDeviceKey, error) {
 	status := k.Status
 	if status == "" {
 		status = models.DeviceKeyStatusActive
+	}
+	if !validDeviceKey(k, status) {
+		return nil, ErrAppKeyInvalid
+	}
+	if k.PersonKeyID != nil {
+		person, err := lockPersonKey(ctx, tx, k.UserID, *k.PersonKeyID)
+		if err != nil {
+			return nil, err
+		}
+		if person.RevokedAt != nil {
+			return nil, ErrAppKeyRevoked
+		}
+	}
+	if err := claimPublicKey(ctx, tx, k.PublicKey); err != nil {
+		return nil, err
 	}
 	row, err := scanDeviceKey(tx.QueryRow(ctx, `INSERT INTO auth_device_keys
 		(id, user_id, public_key, key_id, kind, name, platform, status, enrolled_via, person_key_id, identity_id, provider_bound)

@@ -84,6 +84,11 @@ credential: a restore that brought keys back would reopen sign-ins that were
 revoked after the backup was taken. A restored server has no keys, so each
 device enrolls again.
 
+The rule that a public key is enrolled once holds for as long as its row
+does. A restore empties both tables, revoked rows included, so a key that was
+revoked before the restore can be enrolled again by a caller the server
+allows to enroll.
+
 ## Cloned databases
 
 A cloned database carries the server ID (see
