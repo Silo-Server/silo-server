@@ -13,13 +13,13 @@ import (
 )
 
 // AdminInsightsProvider caches standard preset Insights reads in memory for
-// 60 seconds and clears local entries on admin/playback bus events (the same
-// channels the sibling admin_stats_* providers subscribe to). Title detail is
-// read on demand and not cached. Misses for one key fill once per generation:
-// concurrent requests share the read, and the read is canceled once every
-// request waiting on it has left. The generation counter,
-// compared and published under publishMu, keeps a fill whose DB snapshot
-// predates an invalidation from repopulating the cache with stale results.
+// 60 seconds and clears local entries on relevant admin/playback bus events
+// while ignoring unrelated realtime and operational chatter on those channels.
+// Title detail is read on demand and not cached. Misses for one key fill once
+// per generation: concurrent requests share the read, and the read is canceled
+// once every request waiting on it has left. The generation counter, compared
+// and published under publishMu, keeps a fill whose DB snapshot predates an
+// invalidation from repopulating the cache with stale results.
 type AdminInsightsProvider struct {
 	pool      *pgxpool.Pool
 	activity  *cache.TTLCache[*AdminInsightsActivity]
@@ -52,16 +52,61 @@ func NewAdminInsightsProvider(ctx context.Context, pool *pgxpool.Pool, bus cache
 	if bus == nil || ctx == nil {
 		return p, nil
 	}
-	handler := func(cache.Event) {
-		p.Invalidate()
-	}
-	for _, channel := range []string{cache.ChannelAdmin, cache.ChannelPlayback} {
-		if err := bus.Subscribe(ctx, channel, handler); err != nil {
+	for _, sub := range []struct {
+		channel string
+		handler cache.EventHandler
+	}{
+		{channel: cache.ChannelAdmin, handler: p.handleAdminEvent},
+		{channel: cache.ChannelPlayback, handler: p.handlePlaybackEvent},
+	} {
+		if err := bus.Subscribe(ctx, sub.channel, sub.handler); err != nil {
 			p.Close()
-			return nil, fmt.Errorf("subscribing admin insights provider to %s: %w", channel, err)
+			return nil, fmt.Errorf("subscribing admin insights provider to %s: %w", sub.channel, err)
 		}
 	}
 	return p, nil
+}
+
+func (p *AdminInsightsProvider) handleAdminEvent(event cache.Event) {
+	if shouldInvalidateInsightsOnAdminEvent(event) {
+		p.Invalidate()
+	}
+}
+
+func (p *AdminInsightsProvider) handlePlaybackEvent(event cache.Event) {
+	if shouldInvalidateInsightsOnPlaybackEvent(event) {
+		p.Invalidate()
+	}
+}
+
+// shouldInvalidateInsightsOnAdminEvent reports whether a cache.ChannelAdmin
+// event can change data shown by the Insights tabs. Unrelated admin chatter
+// (node reachability/drain, settings, policies, plugins, auth/marker config)
+// is ignored so it does not wipe cached tabs or discard in-flight fills.
+func shouldInvalidateInsightsOnAdminEvent(event cache.Event) bool {
+	switch event.Type {
+	case cache.EventAdminStatsInvalidated,
+		cache.EventUserDisabled,
+		cache.EventUserDeleted,
+		cache.EventNodePoolChanged,
+		cache.EventItemUpdated,
+		// Sign-in revocation follows account changes the People tab shows,
+		// such as a provider role change or a username edit with a new
+		// password; those paths publish no stats event of their own.
+		cache.EventUserSessionsRevoked:
+		return true
+	default:
+		return false
+	}
+}
+
+// shouldInvalidateInsightsOnPlaybackEvent reports whether a
+// cache.ChannelPlayback event can change data shown by the Insights tabs.
+// ChannelPlayback also carries realtime coordination traffic (Watch Together
+// room state and suggestions, subtitle ready/timing/sync, marker updates and
+// thumbnails) that does not alter playback history or active session stats.
+func shouldInvalidateInsightsOnPlaybackEvent(event cache.Event) bool {
+	return event.Type == cache.EventPlaybackSessionsChanged
 }
 
 // Invalidate drops all cached Insights entries across every tab and advances
