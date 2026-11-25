@@ -53,6 +53,7 @@ rests on classifying every change:
 | Add a key, widen `allowed_scopes`, add an enum member, widen a numeric range | Yes — revision bump; the new sub-element carries its own `introduced_in` |
 | Change a default | Yes — revision bump plus explicit release notes |
 | Deprecate a key | Yes — `deprecated: true`; the definition stays published |
+| Mark a key `server_local` | Yes — revision bump |
 | Narrow scopes, tighten a range, remove an enum member | No — new key plus a migration of previously valid stored values |
 | Change value type, persistence class, or meaning | No — new key |
 
@@ -80,6 +81,29 @@ Every definition declares one persistence class:
   must never be shown as a production setting, sent to any Silo API, or
   expected to roam. Promoting one to a production feature means adding it to
   the contract first.
+
+### Values that stay on one server
+
+A `remote` definition with the `profile` scope can carry `server_local: true`.
+The mark says the value names something that exists only on the server that
+stores it: a library, a section, a collection, or an image an administrator
+uploaded there. The same value on another server names something else or
+nothing. At revision 31 five keys carry it: `ui.disabled_library_ids`,
+`ui.library_order`, `ui.sidebar_pins`, `nav.shortcuts` and `ui.card_overlays`.
+
+- A client must not carry a `server_local` value from one server to another,
+  whether it copies a profile's settings itself or sends them in a profile set.
+- A profile set does not carry these keys. The server ignores a `server_local`
+  key in a set's settings, as it ignores a key it does not know, and leaves the
+  profile's value on this server as it was.
+- On the server that stores it, the value resolves like any other remote
+  setting; the mark changes nothing about resolution.
+
+The contract loader refuses the mark on a `client_local` definition or one
+without the `profile` scope. The generated bindings list the marked keys
+(`ServerLocal` in Go, `serverLocal` on each TypeScript definition,
+`SERVER_LOCAL` in Kotlin, `serverLocal` in Swift) so a client filters them
+without reading the manifest.
 
 ## Resolution
 

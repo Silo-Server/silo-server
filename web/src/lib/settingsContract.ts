@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 30;
+export const SETTINGS_REVISION = 31;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -374,6 +374,9 @@ export interface SettingDefinition {
   /** The server administrator may replace defaultValue for the whole server,
    * so a value with source "default" can differ from it. */
   adminDefault?: boolean;
+  /** The value names something on one server (a library, section,
+   * collection or uploaded image); never carry it to another server. */
+  serverLocal?: boolean;
   label: string;
   description: string;
   category: string;
@@ -586,6 +589,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [5],
     resolutionOrder: ["profile", "default"],
     defaultValue: { items: [] },
+    serverLocal: true,
     label: "Navigation shortcuts",
     description: "Libraries, sections, and collections pinned for use across navigation surfaces.",
     category: "navigation",
@@ -1397,6 +1401,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [1],
     resolutionOrder: ["profile", "default"],
     defaultValue: null,
+    serverLocal: true,
     label: "Poster badges",
     description: "Which badges appear on poster cards, and where.",
     category: "appearance",
@@ -1536,6 +1541,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [1],
     resolutionOrder: ["profile", "default"],
     defaultValue: null,
+    serverLocal: true,
     label: "Hidden libraries",
     description: "Libraries you have hidden from your own browsing.",
     category: "navigation",
@@ -1566,6 +1572,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [1],
     resolutionOrder: ["profile", "default"],
     defaultValue: null,
+    serverLocal: true,
     label: "Library order",
     description: "The order your libraries appear in.",
     category: "navigation",
@@ -1648,6 +1655,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [1],
     resolutionOrder: ["profile", "default"],
     defaultValue: null,
+    serverLocal: true,
     label: "Pinned sidebar items",
     description: "Sections and collections pinned into the sidebar.",
     category: "navigation",

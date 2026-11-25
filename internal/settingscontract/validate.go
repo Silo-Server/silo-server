@@ -129,6 +129,11 @@ func (d *Definition) validate(manifestRevision int, objectSchemas map[string]*js
 		// through server resolution, which a client_local setting never has.
 		errs = append(errs, errors.New("admin_default requires remote persistence"))
 	}
+	if d.ServerLocal && (!d.IsRemote() || !d.AllowsScope(ScopeProfile)) {
+		// The mark tells what stays behind when a profile's settings move
+		// between servers, which only remote profile-scope values do.
+		errs = append(errs, errors.New("server_local requires remote persistence and the profile scope"))
+	}
 
 	return errors.Join(errs...)
 }

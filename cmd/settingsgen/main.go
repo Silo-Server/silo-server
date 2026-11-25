@@ -154,9 +154,25 @@ func generateGo(contract *settingscontract.Manifest, pkg string) ([]byte, error)
 			fmt.Fprintf(&out, "\t%s,\n", identifierFor(def.Key))
 		}
 	}
+	out.WriteString("}\n\n")
+
+	out.WriteString(serverLocalListDoc)
+	out.WriteString("var ServerLocal = []string{\n")
+	for _, def := range sortedDefinitions(contract) {
+		if def.ServerLocal {
+			fmt.Fprintf(&out, "\t%s,\n", identifierFor(def.Key))
+		}
+	}
 	out.WriteString("}\n")
 	return out.Bytes(), nil
 }
+
+// serverLocalListDoc explains the generated ServerLocal list, which every
+// generator emits under its own spelling.
+const serverLocalListDoc = `// ServerLocal lists keys whose value names something on one server: a
+// library, section, collection or uploaded image. A client must not carry such
+// a value from one server to another, and a profile set does not carry it.
+`
 
 // deprecatedListDoc explains the generated Deprecated list. Every generator
 // emits the same list under its own spelling, because "this key was superseded"
@@ -237,6 +253,9 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 	out.WriteString("  /** The server administrator may replace defaultValue for the whole server,\n")
 	out.WriteString("   * so a value with source \"default\" can differ from it. */\n")
 	out.WriteString("  adminDefault?: boolean;\n")
+	out.WriteString("  /** The value names something on one server (a library, section,\n")
+	out.WriteString("   * collection or uploaded image); never carry it to another server. */\n")
+	out.WriteString("  serverLocal?: boolean;\n")
 	out.WriteString("  label: string;\n")
 	out.WriteString("  description: string;\n")
 	out.WriteString("  category: string;\n")
@@ -284,6 +303,9 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 		fmt.Fprintf(&out, "    defaultValue: %s,\n", defaultLiteral(def))
 		if def.AdminDefault {
 			out.WriteString("    adminDefault: true,\n")
+		}
+		if def.ServerLocal {
+			out.WriteString("    serverLocal: true,\n")
 		}
 		fmt.Fprintf(&out, "    label: %s,\n", jsString(def.Label))
 		fmt.Fprintf(&out, "    description: %s,\n", jsString(def.Description))
@@ -400,6 +422,16 @@ func generateKotlin(contract *settingscontract.Manifest, pkg string) ([]byte, er
 	out.WriteString("    val DEPRECATED: Set<String> = setOf(\n")
 	for _, def := range sortedDefinitions(contract) {
 		if def.Deprecated {
+			fmt.Fprintf(&out, "        %s,\n", screamingCase(def.Key))
+		}
+	}
+	out.WriteString("    )\n\n")
+
+	out.WriteString("    /** Keys whose value names something on one server (a library, section,\n")
+	out.WriteString("     * collection or uploaded image). Never carry one to another server. */\n")
+	out.WriteString("    val SERVER_LOCAL: Set<String> = setOf(\n")
+	for _, def := range sortedDefinitions(contract) {
+		if def.ServerLocal {
 			fmt.Fprintf(&out, "        %s,\n", screamingCase(def.Key))
 		}
 	}
@@ -531,6 +563,16 @@ func generateSwift(contract *settingscontract.Manifest) ([]byte, error) {
 	out.WriteString("    static let deprecated: Set<SettingKey> = [\n")
 	for _, def := range sortedDefinitions(contract) {
 		if def.Deprecated {
+			fmt.Fprintf(&out, "        .%s,\n", lowerFirst(identifierFor(def.Key)))
+		}
+	}
+	out.WriteString("    ]\n\n")
+
+	out.WriteString("    /// Keys whose value names something on one server (a library, section,\n")
+	out.WriteString("    /// collection or uploaded image). Never carry one to another server.\n")
+	out.WriteString("    static let serverLocal: Set<SettingKey> = [\n")
+	for _, def := range sortedDefinitions(contract) {
+		if def.ServerLocal {
 			fmt.Fprintf(&out, "        .%s,\n", lowerFirst(identifierFor(def.Key)))
 		}
 	}

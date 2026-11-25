@@ -337,6 +337,11 @@
           "description": "The server administrator may replace default_value for the whole server. A viewer with no stored value at any allowed scope inherits the administrator's value, still reported with source \"default\". Remote settings only.",
           "type": "boolean"
         },
+        "server_local": {
+          "description": "The value names something on one server (a library, section, collection or uploaded image). It stays on that server: a client never carries it to another server, and a profile set does not carry it. Remote settings with the profile scope only.",
+          "type": "boolean",
+          "default": false
+        },
         "deprecated": { "type": "boolean", "default": false },
         "notes": {
           "description": "Maintainer commentary. Not served in the public manifest.",

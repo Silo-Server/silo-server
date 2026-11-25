@@ -913,6 +913,11 @@ func TestValidateRejectsMalformedManifests(t *testing.T) {
 			d.ResolutionOrder = []Scope{ScopeClientLocal, ScopeDefault}
 			d.AdminDefault = true
 		},
+		"server_local on a setting with no profile scope": func(d *Definition) {
+			d.AllowedScopes = []ScopeEntry{{Scope: ScopeProfileDevice}}
+			d.ResolutionOrder = []Scope{ScopeProfileDevice, ScopeDefault}
+			d.ServerLocal = true
+		},
 	}
 
 	for name, mutate := range cases {

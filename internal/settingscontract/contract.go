@@ -158,7 +158,13 @@ type Definition struct {
 	// built with settingsresolve's WithAdminDefaults read it, so every server
 	// path that resolves such a key must build its resolver that way.
 	AdminDefault bool `json:"admin_default,omitempty"`
-	Deprecated   bool `json:"deprecated,omitempty"`
+	// ServerLocal marks a value that names something on one server (a
+	// library, section, collection or uploaded image). It only means
+	// something there, so a client never carries it from one server to
+	// another and a profile set does not carry it. Remote, profile-scope
+	// settings only.
+	ServerLocal bool `json:"server_local,omitempty"`
+	Deprecated  bool `json:"deprecated,omitempty"`
 	// Notes is maintainer commentary. It is stripped from the public manifest.
 	Notes string `json:"notes,omitempty"`
 }
