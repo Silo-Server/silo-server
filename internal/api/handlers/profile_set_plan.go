@@ -159,14 +159,17 @@ func planProfileSetRow(
 // item's name, or the name the owner gave its profile here): a profile of
 // the set named like a profile outside it, or two profiles of the set named
 // alike, which only an owner's rename can cause, since the items' own names
-// are unique. The later item of a clash is refused at its name. Duplicates
-// among the profiles outside the set are not the set's to judge.
+// are unique. Of two items that clash, the one refused at its name is the one
+// whose name comes from the set, since renaming the item the owner renamed
+// changes nothing; the later one when both do. Duplicates among the profiles
+// outside the set are not the set's to judge.
 func checkProfileSetNames(doc *profileSetDoc, plan *profileSetPlan, final []string) error {
 	held := slices.Concat(slices.Collect(maps.Keys(plan.rowOf)), plan.create)
 	slices.Sort(held)
 	clash := func(i int, message string) error {
 		return &ProfileSetFieldError{Location: fmt.Sprintf("set.items[%d].name", i), Code: "name_conflict", Message: message}
 	}
+	fromSet := func(i int) bool { return sameProfileName(final[i], doc.Items[i].Name) }
 	for n, i := range held {
 		for _, local := range plan.localOnly {
 			if sameProfileName(local.Name, final[i]) {
@@ -175,7 +178,11 @@ func checkProfileSetNames(doc *profileSetDoc, plan *profileSetPlan, final []stri
 		}
 		for _, j := range held[:n] {
 			if sameProfileName(final[i], final[j]) {
-				return clash(i, "The owner of this server gave another profile in the set this name; rename this one.")
+				at := i
+				if !fromSet(i) && fromSet(j) {
+					at = j
+				}
+				return clash(at, "The owner of this server gave another profile in the set this name; rename this one.")
 			}
 		}
 	}

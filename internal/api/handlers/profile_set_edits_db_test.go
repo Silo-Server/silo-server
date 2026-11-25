@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -450,6 +451,14 @@ func TestProfileSetOwnerEditsFollowTheProfileDB(t *testing.T) {
 		if f.state(t) != before {
 			t.Fatal("a refused set wrote")
 		}
+		// An earlier item taking that name is the one to rename: the owner's
+		// name stays on the later item whatever the set calls it.
+		buddy := maps.Clone(main)
+		buddy["name"] = "Buddy"
+		_, err = f.applySeen(t, setDoc(t, 5, buddy, kid, guest), f.held(t).EditsToken)
+		if !errors.As(err, &field) || field.Location != "set.items[0].name" || field.Code != "name_conflict" {
+			t.Fatalf("err = %v, want name_conflict at set.items[0].name", err)
+		}
 	})
 	t.Run("a new sync_id on the main profile keeps the owner's values", func(t *testing.T) {
 		f.update(t, f.admin(), f.primary, ProfileUpdateRequest{PIN: new("4321"), MaxContentRating: new("PG")}, true)
@@ -850,6 +859,10 @@ func TestProfileEditPoolSettingWaitsForPairingDB(t *testing.T) {
 		f.userID, localID); err != nil {
 		t.Fatal(err)
 	}
+	var pairingPID int
+	if err := pairing.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pairingPID); err != nil {
+		t.Fatal(err)
+	}
 
 	wrote := make(chan error, 1)
 	go func() {
@@ -870,7 +883,7 @@ func TestProfileEditPoolSettingWaitsForPairingDB(t *testing.T) {
 		case <-ticker.C:
 			var n int
 			if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
-				WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> pg_backend_pid()`).Scan(&n); err != nil {
+				WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))`, pairingPID).Scan(&n); err != nil {
 				t.Fatal(err)
 			}
 			waiting = n > 0

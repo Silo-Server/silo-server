@@ -682,8 +682,8 @@ set is validated after its signature verifies, so a 422 for it has already
 spent the challenge: correct the set, get a new challenge, and sign again. A new item named like a profile outside
 the set is 422 at its name with code `name_conflict`, and so is an item whose
 name the owner already gave another of the set's profiles on this server (a
-profile keeps a name the owner set, whatever its item says); the later item of
-the two is named. An item 0 whose `sync_id` the owner removed on this server
+profile keeps a name the owner set, whatever its item says); the item named is
+the one whose name comes from the set, the later one when both do. An item 0 whose `sync_id` the owner removed on this server
 (see `hidden_by_owner`) is 422 at `body.set.items[0].sync_id`.
 
 **Answer.**
