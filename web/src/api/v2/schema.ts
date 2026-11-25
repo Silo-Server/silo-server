@@ -6507,6 +6507,86 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/users/{user_id}/keys": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List an account's Silo app keys: its person key, its devices and the devices waiting for approval.
+     * @description Shows what the person's own listAppKeys shows, plus how each key signs in and the keys whose sign-in provider account is gone. Any administrator may list any account. Answers while auth.app_key_sign_in is off.
+     */
+    get: operations["listAdminUserAppKeys"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/users/{user_id}/keys/devices/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Revoke one of an account's device keys and end the sessions it opened.
+     * @description The device is signed out and its key can't sign in again. Revoking a revoked key changes nothing; a key of another account is 404 not_found. Audited as user.device_key_revoked. Any administrator may act on an ordinary account and on their own; only the server Owner may act on another administrator or on the Owner (403 permission_denied). Answers while auth.app_key_sign_in is off.
+     */
+    delete: operations["revokeAdminUserDeviceKey"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/users/{user_id}/keys/pending/{id}/deny": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Deny one of an account's device keys waiting for approval.
+     * @description The key's next sign-in answers 403 key_denied and neither list shows it. Denying a denied key changes nothing; an active, revoked or unknown key is 404 not_found. No administrator operation approves a waiting key: only the person does, from one of their own sessions (approvePendingAppKey). Audited as user.device_key_denied. Any administrator may act on an ordinary account and on their own; only the server Owner may act on another administrator or on the Owner (403 permission_denied). Answers while auth.app_key_sign_in is off.
+     */
+    post: operations["denyAdminUserPendingKey"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/users/{user_id}/keys/person": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Revoke an account's person key.
+     * @description No new device can be introduced with it, and the devices it introduced that are still waiting for approval are denied. Devices already enrolled keep their keys and sessions. The person sets up a new person key from a signed-in device (replacePersonKey). An account with no person key, as straight after a first call, changes nothing and records nothing (204); an unknown account is 404 not_found. The request names no key, so it acts on the person key the account holds when it arrives: read listAdminUserAppKeys before repeating it, since a repeat after the person has set up a new key revokes that one. Audited as user.person_key_revoked. Any administrator may act on an ordinary account and on their own; only the server Owner may act on another administrator or on the Owner (403 permission_denied). Answers while auth.app_key_sign_in is off.
+     */
+    delete: operations["revokeAdminUserPersonKey"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/users/{user_id}/login-sessions": {
     parameters: {
       query?: never;
@@ -14721,6 +14801,8 @@ export interface components {
       account_downloads: boolean;
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description Whether listAdminUserAppKeys, revokeAdminUserDeviceKey, revokeAdminUserPersonKey and denyAdminUserPendingKey are served. Read the app key capability (getAppKeyCapability) for whether keys sign in now */
+      app_keys: boolean;
       available: boolean;
       default_profile: boolean;
       exact_identity_filter: boolean;
@@ -15157,6 +15239,109 @@ export interface components {
     AdminAPIKeyTierInputBody: {
       /** @enum {string} */
       rate_tier: "standard" | "elevated";
+    };
+    AdminAppDeviceKey: {
+      /**
+       * @description For a key a grant enrolled, the name of the account whose person key signed the grant; null otherwise
+       * @example sam
+       */
+      allowed_by: string | null;
+      /**
+       * Format: date-time
+       * @description When the key was enrolled
+       */
+      enrolled_at: string;
+      /**
+       * @description How the key was enrolled: introduced by the person key, from a signed-in session, with an app code, or through a grant
+       * @example introduce
+       * @enum {string}
+       */
+      enrolled_by: "introduce" | "session" | "app-code" | "grant";
+      /**
+       * Format: uuid
+       * @description The server's ID for the device key
+       * @example 0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11
+       */
+      id: string;
+      /** @description Provider-bound and its provider account is no longer linked to the account: it can't sign in again and is revoked at its next try. The person's own list leaves such a key out */
+      identity_gone: boolean;
+      /**
+       * @description The provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key is bound to none. Unlinking that provider account revokes the key. With identity_gone true the ID is historical: that provider account is no longer linked and the identities list does not have it
+       * @example 4
+       */
+      identity_id: string | null;
+      /**
+       * @description The device key's ID
+       * @example zT321tSgcB7emUH9k0B0oA
+       */
+      kid: string;
+      /**
+       * @description device: an install of the person's own app; app: another app the person allowed
+       * @example device
+       * @enum {string}
+       */
+      kind: "device" | "app";
+      /**
+       * Format: date-time
+       * @description When the key last opened a login session. enroll and an introduce that signs in open one, so a key not used since shows enrolled_at; null for a key that has never opened one: a key waiting for approval, and a key approved since that has not signed in yet. status, not this member, says whether a key is waiting
+       */
+      last_used_at: string | null;
+      /**
+       * @description The name the device gave itself
+       * @example Sam's iPhone
+       */
+      name: string;
+      /**
+       * @description The platform the device named; empty when it named none
+       * @example ios
+       */
+      platform: string;
+      /** @description Bound to a sign-in provider account of this account, from enrollment, from the person key that introduced it, or since that account was linked. The server checks that the account is still linked at each sign-in and asks the provider again when its recheck is due, not every time */
+      provider_bound: boolean;
+      /**
+       * @description active, or pending while an administrator's device waits for approval. A waiting key older than 24 hours is left out of the list without anyone denying or revoking it
+       * @example active
+       * @enum {string}
+       */
+      status: "active" | "pending";
+      /**
+       * Format: date-time
+       * @description For a key with status pending, when it stops waiting for approval (24 hours after it asked); null otherwise
+       */
+      waiting_until: string | null;
+    };
+    AdminAppKeyList: {
+      /** @description Active keys, keys waiting for approval inside their 24 hours, and keys whose provider account is gone, newest first; revoked and denied keys are left out */
+      devices: components["schemas"]["AdminAppDeviceKey"][];
+      /** @description The account's person key; absent when it has none */
+      person_key?: components["schemas"]["AdminAppPersonKey"];
+    };
+    AdminAppPersonKey: {
+      /**
+       * Format: date-time
+       * @description When the key was enrolled
+       */
+      enrolled_at: string;
+      /**
+       * @description How the key was enrolled: from a signed-in session or with an app code
+       * @example session
+       * @enum {string}
+       */
+      enrolled_by: "session" | "app-code";
+      /** @description Provider-bound and its provider account is no longer linked to the account: it can't introduce a device again */
+      identity_gone: boolean;
+      /**
+       * @description The provider account the key is bound to, as listAdminUserIdentities identifies it; null when the key is bound to none. Unlinking that provider account revokes the key. With identity_gone true the ID is historical: that provider account is no longer linked and the identities list does not have it
+       * @example 4
+       */
+      identity_id: string | null;
+      /**
+       * @description The person key's ID
+       * @example PgujdSfBbNNyXngLWCsOgw
+       */
+      kid: string;
+      /** @description Bound to a sign-in provider account of this account, from enrollment or since that account was linked: it vouches for a device only while that provider account is linked. It says what the key is tied to, not that the provider was asked just now */
+      provider_bound: boolean;
     };
     AdminArtworkStorageStatus: {
       backend?: string;
@@ -21052,6 +21237,7 @@ export interface components {
        */
       delivery: "email" | "link";
     };
+    AdminPendingAppKeyInputBody: Record<string, never>;
     AdminPersonUpdate: {
       bio?: string | null;
       /** @description Calendar date, YYYY-MM-DD; empty clears; null or omission preserves. */
@@ -25241,7 +25427,7 @@ export interface components {
       kind: "device" | "app";
       /**
        * Format: date-time
-       * @description When the key last opened a login session. enroll and an introduce that signs in open one, so a key not used since shows enrolled_at; null for a key waiting for approval, which has never opened one
+       * @description When the key last opened a login session. enroll and an introduce that signs in open one, so a key not used since shows enrolled_at; null for a key that has never opened one: a key waiting for approval, and a key approved since that has not signed in yet. status, not this member, says whether a key is waiting
        */
       last_used_at: string | null;
       /**
@@ -31441,6 +31627,12 @@ export interface components {
        */
       device_id?: string;
       /**
+       * Format: uuid
+       * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
+       * @example 0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11
+       */
+      device_key_id: string | null;
+      /**
        * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device
        * @example Living Room Apple TV
        */
@@ -31505,6 +31697,12 @@ export interface components {
          * @example 8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50
          */
         device_id?: string;
+        /**
+         * Format: uuid
+         * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
+         * @example 0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11
+         */
+        device_key_id: string | null;
         /**
          * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device
          * @example Living Room Apple TV
@@ -98885,6 +99083,471 @@ export interface operations {
       path: {
         /** @description The waiting sign-in */
         id: string;
+        /** @description Opaque identifier */
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminUserAppKeys: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminAppKeyList"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  revokeAdminUserDeviceKey: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The device key's id from listAdminUserAppKeys */
+        id: string;
+        /** @description Opaque identifier */
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  denyAdminUserPendingKey: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The waiting device key's id from listAdminUserAppKeys */
+        id: string;
+        /** @description Opaque identifier */
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminPendingAppKeyInputBody"];
+      };
+    };
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  revokeAdminUserPersonKey: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
         /** @description Opaque identifier */
         user_id: string;
       };

@@ -151,10 +151,8 @@ func retirePersonKeyTx(ctx context.Context, tx pgx.Tx, userID int, id string) er
 	if _, err := tx.Exec(ctx, `UPDATE auth_person_keys SET revoked_at = NOW() WHERE id = $1`, id); err != nil {
 		return fmt.Errorf("revoking person key: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE auth_device_keys SET status = $3
-		WHERE user_id = $1 AND person_key_id = $2 AND status = $4 AND revoked_at IS NULL`,
-		userID, id, models.DeviceKeyStatusDenied, models.DeviceKeyStatusPending); err != nil {
-		return fmt.Errorf("refusing the replaced person key's waiting devices: %w", err)
+	if _, err := denyIntroducedWaitingKeysTx(ctx, tx, userID, id); err != nil {
+		return err
 	}
 	return nil
 }
