@@ -713,7 +713,8 @@ the same set answers the same lists.
 | 401 `signature_invalid`, `challenge_invalid` | The signed form, as on the other signed routes. A payload naming another account is `signature_invalid`. A replayed envelope is `challenge_invalid`. |
 | 401 `authentication_required` | The session form without a login session. An API key carries no login session, so it gets this too. |
 | 401 `session_expired` | The account was deleted while the set was applied. |
-| 403 `permission_denied` | The signed form for an administrator's account; a session opened by device sign-in, by another app's key, or by an administrator acting as the account, a remote-playback handoff, a session older than the record of how sessions open; a session form not acting as the main profile; either form from a non-administrator in demo mode. |
+| 403 `permission_denied` | The signed form for an administrator's account; a session opened by device sign-in, by another app's key, or by an administrator acting as the account, a remote-playback handoff, a session older than the record of how sessions open; either form from a non-administrator in demo mode. |
+| 403 `main_profile_required` | The session form from a request that isn't acting as the main profile, or names no profile. |
 | 403 `profile_verification_required` | The main profile has a PIN and the request did not prove it. |
 | 429 `rate_limited` | The per-address `profile_set` budget, 20 a minute with a burst of 10 by default (`ratelimit.auth.profile_set.*`). Also, on a repeat of the held version, a profile whose PIN is locked after too many wrong PINs, with `Retry-After`, as `verifyProfilePIN` answers it. |
 
@@ -1026,13 +1027,25 @@ call them. Approving a device sign-in that is waiting now keeps no profile
 rule. `X-Profile-Id` must
 name the account's primary profile, with `X-Profile-Token` when it has a PIN
 (without it, 403 `profile_verification_required`); naming any other profile is
-403 `permission_denied`, on an administrator's account too, and an
+403 `main_profile_required`, on an administrator's account too, and an
 `X-Profile-Id` that names no profile of the account is 404 `not_found`. A request without
 `X-Profile-Id` is accepted only from an administrator account that has at most
 one profile, with no PIN, maturity or library limit. An administrator's account
 with several profiles, or a PIN, names its main profile and sends its token
-like any other account. Otherwise the request is 403 `permission_denied`, also
+like any other account. Otherwise the request is 403 `main_profile_required`, also
 for a one-profile account that isn't an administrator. The other key routes have no profile rule.
+
+The three 403 answers on these routes have three remedies, and an app tells
+them apart by the problem type, never by the detail text:
+
+| Problem | Meaning | What the app does |
+| --- | --- | --- |
+| `permission_denied` | This session may not do this, whatever profile it names: a TV's session, another app's, an API key, or one opened before the server recorded how sessions open. The session is checked before the profile, so such a session never gets one of the other two. On approve it is also the answer for an account that is not an administrator, which is checked last and can follow a correct profile. | Sign in again on this device. |
+| `main_profile_required` | The request names a profile that isn't the main one, or names none where one is needed. | Switch to the main profile and send it again. |
+| `profile_verification_required` | The main profile has a PIN the request didn't prove, or the profile changed while the request ran. | Verify the PIN (`verifyProfilePIN`) and send it again. |
+
+`main_profile_required` is also what the session form of `PUT /profiles/set`
+answers for a request that isn't acting as the main profile.
 
 Each of the four checks the named profile a second time once it holds the
 account, and answers 403 `profile_verification_required` if the profile's PIN
@@ -1042,7 +1055,7 @@ again. For `enroll` that means a new challenge and a newly signed envelope:
 the first challenge is spent once its signature verifies. The other three are
 sent again as they were. If the second try gets `profile_verification_required`
 too, verify the profile's PIN again for a new `X-Profile-Token`; if it gets
-`permission_denied`, the profile is no longer the main one. A profile without
+`main_profile_required`, the profile is no longer the main one. A profile without
 a PIN can get the first answer too, when a PIN was added or the profile was
 being written at that moment.
 

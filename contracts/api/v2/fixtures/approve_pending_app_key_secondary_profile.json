@@ -1,6 +1,6 @@
 {
-  "type": "https://siloserver.org/docs/api/v2/problems/permission_denied",
-  "title": "Permission denied",
+  "type": "https://siloserver.org/docs/api/v2/problems/main_profile_required",
+  "title": "Main profile required",
   "status": 403,
   "detail": "This change requires the household's main profile.",
   "instance": "urn:silo:request:00000000000000000000034c"

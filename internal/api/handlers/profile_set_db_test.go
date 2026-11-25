@@ -519,7 +519,18 @@ func TestProfileSetSessionPINProofDB(t *testing.T) {
 	}
 	stale := scope
 	stale.ProfilePINRevision--
+	// Another profile, and no profile, are not the main one.
+	second := uuid.NewString()
+	if err := f.store.CreateProfile(ctx, userstore.Profile{ID: second, Name: "Second"}); err != nil {
+		t.Fatal(err)
+	}
 	before := f.state(t)
+	for _, active := range []string{second, ""} {
+		_, err := f.handler.ApplyProfileSet(ctx, ProfileSetCommand{UserID: f.userID, Set: setDoc(t, 1, newSetItem("Parent")), ActiveProfileID: active, VerifyProfile: scope.CheckProfileVerification})
+		if !errors.Is(err, ErrProfileSetNotMainProfile) {
+			t.Fatalf("session form as profile %q: err = %v, want ErrProfileSetNotMainProfile", active, err)
+		}
+	}
 	if err := session(setDoc(t, 1, newSetItem("Parent")), stale); !errors.Is(err, access.ErrProfileUnverified) {
 		t.Fatalf("stale token: err = %v", err)
 	}

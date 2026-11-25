@@ -42,6 +42,8 @@ type fakeAppKeys struct {
 	households userstore.UserStoreProvider
 	// acting is the checked profile the last key-creating call carried.
 	acting auth.ActingProfile
+	// manageErr answers SessionMayManageKeys.
+	manageErr error
 }
 
 // ActsAsVerifiedMainProfile runs the production rule against the fake
@@ -461,4 +463,4 @@ func (f *fakeAppKeys) VerifyProfileSet(context.Context, auth.KeyRequest) (*auth.
 	return nil, f.err
 }
 
-func (f *fakeAppKeys) ProfileSetSessionAllowed(context.Context, *auth.Claims) error { return nil }
+func (f *fakeAppKeys) SessionMayManageKeys(context.Context, *auth.Claims) error { return f.manageErr }
