@@ -57,6 +57,59 @@ func TestAuthEndpointHandlerUsesGlobalIPAndEndpointBudgets(t *testing.T) {
 	}
 }
 
+// An endpoint keyed by account: every device of a household shares an
+// address, so the address only spends a budget ten times the endpoint's in
+// the gate, its forwarding peer the same, and each account spends the
+// endpoint's own from its handler. It catches a household behind one address
+// sharing one account's allowance, and the peer's budget growing a hundredfold.
+func TestEndpointKeyedByAccount(t *testing.T) {
+	perKey := &recordingLimiter{denied: map[string]bool{}}
+	mw := NewMiddleware(perKey, &recordingLimiter{}, nil, true)
+	mw.cfg = DefaultConfig()
+	mw.KeyEndpointByAccount("profile_set")
+	configured := endpointRate(mw.cfg.AuthEndpoints["profile_set"])
+	rateOf := func(key string) Rate {
+		t.Helper()
+		i := slices.Index(perKey.keys, key)
+		if i < 0 {
+			t.Fatalf("budget %q was not spent; spent %v", key, perKey.keys)
+		}
+		return perKey.rates[i]
+	}
+
+	handler := mw.AuthEndpointHandler("profile_set")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	// The client address came from a forwarding peer, which has a budget
+	// of its own that every client behind it shares.
+	req := httptest.NewRequest(http.MethodPut, "/profiles/set", nil)
+	req = req.WithContext(clientip.SetPeerContext(clientip.SetContext(req.Context(), "203.0.113.10"), "10.0.0.5:40000"))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("gate = %d", rec.Code)
+	}
+	if got := rateOf("authip:203.0.113.10:profile_set"); got != authPeerRate(configured) {
+		t.Fatalf("the address's budget = %+v, want ten times the endpoint's %+v", got, configured)
+	}
+	// The two are the same size, not multiplied: a client that rotates its
+	// forwarded address gets no more than ten times one account's budget.
+	if got := rateOf("authpeer:10.0.0.5:profile_set"); got != authPeerRate(configured) {
+		t.Fatalf("the forwarding peer's budget = %+v, want ten times the endpoint's %+v", got, configured)
+	}
+
+	if !mw.AllowEndpointAccount(t.Context(), "profile_set", 7).Allowed {
+		t.Fatal("an account with budget left was refused")
+	}
+	if got := rateOf("authaccount:7:profile_set"); got != configured {
+		t.Fatalf("the account's budget = %+v, want the endpoint's %+v", got, configured)
+	}
+	perKey.denied["authaccount:7:profile_set"] = true
+	if mw.AllowEndpointAccount(t.Context(), "profile_set", 7).Allowed || !mw.AllowEndpointAccount(t.Context(), "profile_set", 8).Allowed {
+		t.Fatal("one account's spent budget must refuse that account and no other")
+	}
+}
+
 // A client over its own per-IP limit must not drain the shared global budget:
 // with a two-request global burst and a one-request per-IP burst, client A's
 // rejected retries used to spend the global tokens and get client B rejected.

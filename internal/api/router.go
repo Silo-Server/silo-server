@@ -4094,6 +4094,10 @@ func v2Dependencies(
 	if deps.RateLimitMW != nil {
 		out.RateLimit = deps.RateLimitMW.Handler
 		out.BucketRateLimit = deps.RateLimitMW.AuthEndpointHandler
+		// A profile set is limited by account: the address a household or
+		// a reverse proxy shares only gets the looser budget.
+		deps.RateLimitMW.KeyEndpointByAccount("profile_set")
+		out.AccountRateLimit = deps.RateLimitMW.AllowEndpointAccount
 	}
 	if deps.Config != nil {
 		out.CursorSecret = []byte(deps.Config.Auth.JWTSecret)
