@@ -733,7 +733,14 @@ the one whose name comes from the set, the later one when both do. An item 0 who
 The answer describes the account as it stands after the call, so a repeat of
 the same set answers the same lists.
 
-**Refusals.**
+**Refusals.** They come in one order. A malformed set is 422 first: its
+shape needs nothing from the server. Then a set that is older, other content
+at the held version, or newer without the person's latest edits (`edits_seen`)
+is `profile_set_stale`. Then the household must map the set (`pairs`, the
+main profile). The held version again is then compared and answered as a
+no-op; it is never refused for something only a write would do. Last, a set
+that will write is refused for what it would do: `name_conflict`, or item 0
+taking a `sync_id` the owner removed.
 
 | Problem | When |
 | --- | --- |
@@ -860,16 +867,19 @@ In `GET /profiles/set`:
   what the profile holds now, encoded as a set item encodes it: `pin` is
   `"set"` or `"clear"`, never a PIN; `max_advisory_age` is a number or
   `null`; a setting the owner reset has no `value` member, because the
-  profile has no value of its own (`null` is a value).
+  profile has no value of its own (`null` is a value). A `picture` naming an
+  upload this server kept no hash for has no `value` member in the `PUT`
+  answer, which never reads an upload.
 - `hidden_by_owner`: the `sync_id`s the owner deleted here.
 - `deleted_here` and `hidden_by_owner` list every removal on record, including
   `sync_id`s the set has since dropped. The `PUT` answer's `hidden_by_owner`
   lists only that set's items. An app that doesn't find one of these
   `sync_id`s in its own set ignores it; the server is not out of step.
 - `edits_token`: names the marks (`by: "account"` entries of `changed_here`
-  and `deleted_here`); `""` when there are none. It changes whenever the
-  marks change, including an edit that puts a field back as it was. An
-  owner's edit is not a mark and need not change it.
+  and `deleted_here`); `""` when there are none. It changes when a mark is
+  added (an edit that puts a field back as it was included), settled, or
+  replaced by an owner's edit of the same field. Any other owner's edit is
+  not a mark and leaves it as it is.
 
 While `edits_token` is not empty, a newer set must carry it as `edits_seen`,
 or it is `profile_set_stale` with nothing written: read the set, merge the
@@ -877,7 +887,9 @@ marks, and send again. An accepted newer set settles exactly the marks its
 `edits_seen` named and they leave `changed_here` and `deleted_here`; a mark
 recorded after the read stays. A repeat of the held version settles nothing.
 An override stays until the person edits that field on this server, or the
-profile is deleted here. An override belongs to its profile: a set that drops
+profile is deleted here. Two settings the settings contract keeps as one
+preference under two keys are recorded together, so the person's edit of
+either ends the override on both. An override belongs to its profile: a set that drops
 the profile removes what the owner recorded for it, and an item under a new
 `sync_id` is a new profile with none of the old one's overrides. A profile an
 administrator deleted stays hidden on this server: no operation clears that

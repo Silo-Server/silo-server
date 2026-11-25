@@ -699,7 +699,8 @@ by a set built elsewhere.
   that `sync_id` here and reports it in `hidden_by_owner`. The later edit of a
   field replaces the row, whoever makes it, so an override is not a lock: the
   person's edit of an overridden field on this server makes it a mark, with
-  `replaced_owner` set. Until an owner can clear an override directly, a
+  `replaced_owner` set. An edit of either key of a pair the settings contract
+  mirrors records both keys, so it ends the override on both. Until an owner can clear an override directly, a
   profile delete clears its overrides, and a profile an administrator deleted
   stays hidden. An override decides which value wins for a field of a profile
   both sides still hold; it does not lock the household. A set that drops the
@@ -725,8 +726,9 @@ by a set built elsewhere.
   SHA-256 over each open mark's `sync_id`, field and revision, sorted. The
   revision comes from a sequence on every write of a row, so an edit that puts
   a field back still moves the token; a timestamp could repeat. Owner rows are
-  left out: the person's app cannot settle them, so an owner's edit need not
-  move the token.
+  left out: the person's app cannot settle them. So the token names the
+  account's open marks and changes when a mark is added, settled, or replaced
+  by an owner's edit of the same field; an owner's other edits leave it.
 - *What `sync_applied` holds.* The set's value of every field it carries, an
   overridden field included, as if it had been written. A repeat of the held
   version does not compare a PIN the owner overrides, so a retry is not stale
