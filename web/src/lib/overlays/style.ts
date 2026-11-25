@@ -14,6 +14,20 @@ const FONT_WEIGHTS: Record<OverlayFontWeight, number> = {
   extrabold: 800,
 };
 
+// A badge's weight as CSS, through the theme's weight variables where one
+// matches, so the Bolder text weight moves badges up a step as it does the
+// weight classes. The inline weight would otherwise hold them at Default.
+const THEME_WEIGHT_VARS: Record<number, string> = {
+  400: "var(--font-weight-normal)",
+  500: "var(--font-weight-medium)",
+  600: "var(--font-weight-semibold)",
+  700: "var(--font-weight-bold)",
+};
+
+export function badgeFontWeight(weight: number): number | string {
+  return THEME_WEIGHT_VARS[weight] ?? weight;
+}
+
 const SHAPE_RADIUS: Record<OverlayShape, number | "full"> = {
   pill: "full",
   rounded: 6,

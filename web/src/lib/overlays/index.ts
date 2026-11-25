@@ -44,7 +44,7 @@ export {
 } from "./schema";
 export type { OverlayServerSupport } from "./schema";
 export { OVERLAY_PRESETS, PRESET_IDS, getPreset, ACCENT_PALETTE } from "./presets";
-export { applyOverlayStyle, overlayImageUrl, readableTextOn } from "./style";
+export { applyOverlayStyle, badgeFontWeight, overlayImageUrl, readableTextOn } from "./style";
 export { POSITION_OPTIONS, CATEGORY_GROUPS, CATEGORY_META } from "./ui-constants";
 export { OverlayIcon } from "./icons";
 export {

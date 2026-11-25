@@ -5,6 +5,7 @@ import {
   OverlayIcon,
   WORDMARK_TEXT,
   applyOverlayStyle,
+  badgeFontWeight,
   getPreset,
   orderedOverlaysForPosition,
   overlayImageUrl,
@@ -273,7 +274,7 @@ function Badge({ badge, preset, scalingMode, rail }: BadgeProps) {
     // The inline size beats the preset's rem class, so it carries the
     // text size itself: browser default and in-app scale (#1796).
     fontSize: `calc(${length(preset.fontSize, POSTER_VARS.fontSize)} * var(--ui-root-text-ratio, 1))`,
-    fontWeight: preset.fontWeight,
+    fontWeight: badgeFontWeight(preset.fontWeight),
     textTransform: preset.uppercase ? "uppercase" : "none",
   };
   if (rail) {
