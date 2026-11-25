@@ -262,6 +262,9 @@ is one function, `auth.SessionAllows`:
 - `DELETE /auth/keys/devices/{id}` follows the same rule, except that a
   grant-enrolled app may revoke its own key. A device may revoke its own key,
   which ends the session asking.
+- `GET /profiles/set` and the session form of `PUT /profiles/set` follow the
+  same rule as `enroll` (see [The profile set](#the-profile-set)): a set can
+  delete profiles and change their PINs and limits.
 
 ## The origin rule and the sealed reply
 
@@ -356,12 +359,156 @@ TLS connection covers all of it.
 - **A provider that can't re-check** bounds key sign-in by age (above) without
   revoking anything.
 
+## The profile set
+
+A profile set is the account's household as one versioned document. The
+person's app keeps it and sends it to each server the person uses, so the
+same profiles, names, pictures, PINs, limits and settings exist on all of
+them. `PUT /api/v2/profiles/set` makes the household match a set;
+`GET /api/v2/profiles/set` reads it back as the server holds it. The
+operation contract is in [auth-api.md](../auth-api.md#the-profile-set); the
+service is `ProfileHandler.ApplyProfileSet` and the store's
+`WithProfileSetTransaction`.
+
+**What the set is on a server.** Each profile in the set carries `sync_id`
+(`user_profiles.sync_id`), its ID on every server, and `sync_position`, its
+place in the set. The account keeps the version and a content hash of the
+last set it accepted (`users.profile_set_version`, `profile_set_sha256`,
+`profile_set_accepted_at`). `user_profiles.sync_applied` records what the set
+last wrote to each profile, including whether a profile created from `keep`
+still waits for its PIN. A profile with no `sync_id` is outside the set.
+
+**Who may send it.** Two forms:
+
+- A `profile-set` message signed by the account's person key, verified on a
+  challenge that it spends, so each signed set applies once. Its payload names
+  `account_id`; a set addressed to another account is refused as a bad
+  signature. The key must still be good for signing in: the provider and local
+  password rules of a key sign-in run, and a provider-bound key whose identity
+  is gone is revoked at this use. The signed form is refused for an
+  administrator's account, so a person key alone never changes an admin's
+  household, and while `auth.app_key_sign_in` is off. A key revoked while a
+  verified set is being applied does not stop that set: the key is checked
+  before the set's transaction, not inside it.
+- The set from the account's own login session acting as the household's main
+  profile, proved with its PIN token when it has a PIN (checked again inside
+  the transaction against the profile's PIN revision). The session must pass
+  the rule in [Who decides](#who-decides). Naming no profile never passes, on
+  an admin account too. This form works with app keys off and for
+  administrators' accounts.
+
+`GET /profiles/set` takes the session rule without the PIN, so the person's
+app reads the set in the background.
+
+**The version rule.** Only a newer version changes anything. An older version
+is `profile_set_stale`. The held version again never changes anything: with
+other content it is stale; with the same content, each `set` PIN is compared
+with the stored PIN and each `clear` with whether a PIN exists, and any
+difference is stale. Otherwise it answers 200 and writes nothing. So a PIN
+changes only with a higher version, and a retried or replayed old set cannot
+undo a PIN changed since. These checks run on a first read and again under the
+set's locks.
+
+The content hash is SHA-256 over a canonical JSON document of the version and
+each item as sent, members the server doesn't know included, keys sorted,
+numbers read as doubles, and each `pin` reduced to its kind (`set`, `keep`,
+`clear`). PIN digits stay out of it: a plain hash of a one-profile set would
+give a four-digit PIN up faster than its bcrypt hash would. A `set` PIN is
+compared with the stored bcrypt hash instead. `pairs` and `edits_seen` are not
+content.
+
+**Compared with what is stored now.** A newer set makes each profile equal its
+item, except for settings marked `server_local`. Every field, PIN and setting
+is compared with what the server stores at that moment, never with the last
+set it accepted, and written only where it differs. An identical set writes
+nothing: no row, no revision, no `pin_revision`, no access-policy revision.
+`keep` never touches a PIN, including a longer PIN set on this server.
+
+**Edits the sender hasn't seen.** `GET /profiles/set` answers `edits_token`,
+which names the person's own edits on this server that no accepted set has
+settled. A set sends it back as `edits_seen`. When the server holds such
+edits, a newer set whose `edits_seen` is not the current token is stale and
+writes nothing, so a set built before an edit can't silently undo it; with
+none, `edits_seen` is not looked at. A repeat of the held version stays a
+no-op whatever it says. The server records no such edits yet, so the token is
+always empty today (`profileSetEditsToken`).
+
+**Mapping.** The first item is always the main profile, which the set never
+creates, deletes or swaps; a set naming the main profile's `sync_id` anywhere
+else is refused. Other items match a profile by `sync_id`, then by `pairs`
+(for the first use, naming a profile with no `sync_id`), and are otherwise
+new. A profile with no `sync_id` that `pairs` doesn't name is left exactly as
+it is and listed in `local_only`.
+
+**Over the limit.** New items are created in the set's order while the
+household is under its profile limit; the rest are reported in `left_off`.
+Profiles outside the set count toward the limit, and nothing is deleted to make
+room.
+
+**Names.** Names are unique in the set, compared trimmed and without case as
+everywhere else. The check runs on the household as the set leaves it, so a
+rename chain applies; an item named like a profile outside the set refuses the
+whole set (`name_conflict`). There is no unique index on names: the set
+transaction holds every profile row and the account's preference lock, which
+every other profile writer takes first.
+
+**What a new profile starts with.** The item's fields and settings, no picture
+unless the item names a preset this server knows, and no PIN unless the item
+sends `set`. A profile created from `keep` is reported in `awaiting_pins`
+until it gets a PIN. A child profile starts with library limits on and no
+libraries: which libraries a profile sees is chosen per server, and is
+reported in `awaiting_libraries` until someone picks them.
+
+**Pictures.** `preset:<id>` sets a preset this server knows; an unknown preset
+keeps the current picture and reports the item in `awaiting_pictures`.
+`sha256:<hex>` is matched against the label of the profile's own upload only,
+never against bytes and never across profiles. A hash the profile doesn't
+carry keeps the current picture until the app uploads it with that
+`source_sha256`. An upload from before the label was kept gets the hash of
+the server's stored copy (a re-encoded file) the first time it is needed. A
+label can be stale if a node from an older release replaced an upload during
+a rolling upgrade; it is not repaired.
+
+**Settings that stay on one server.** Keys the settings contract marks
+`server_local` (they name a library, section, collection or uploaded image)
+are ignored on write and left out of `GET`. Unknown keys and keys not stored
+per profile are ignored. A known key whose value this server refuses is
+skipped, the server's value kept, and listed in `skipped_settings`. `null` is a
+value; `settings_reset` removes the profile's own value so it inherits again.
+The four preferences the profile object still serves from columns
+(`auto_skip_intro`, `auto_skip_credits`, `auto_skip_recap`,
+`auto_play_next_preview`) are written with their settings.
+
+**What removal deletes.** A profile holding a `sync_id` the set no longer has
+is deleted as `deleteProfile` deletes one: its rows in every profile table,
+its collections, its Jellyfin-compatible sessions, in the set's transaction,
+then the same clean-ups after the commit (uploaded avatar, collection
+artwork, devices, notification state, and the purges other services run).
+Only profiles with a `sync_id` are ever removed, never the main profile. The
+app confirms deletions with the person before it sends such a set.
+
+**Locks.** The set's transaction takes the account's preference-settings and
+section-override locks, the audit actors, the collections of the profiles it
+removes in ID order, every profile row of the account in ID order, and the
+account row last. That is a profile delete's order extended, and a profile
+save locks its profile row before the account row, so neither deadlocks with
+a set. Deleting the account locks the account row before its profiles, the
+opposite order: a set and an account deletion running together can abort one
+of the two with a retryable error.
+
+**SQLite.** The SQLite user store keeps profiles in a per-account file while
+other profile data lives in PostgreSQL, so a set can't be one transaction
+there. `getAppKeyCapability` reports `profile_set` `false` and both routes
+answer `capability_unsupported`.
+
 ## Rate limits
 
 `createAppKeyChallenge` spends the per-address `key_challenge` budget;
 `introduce`, `sign-in` and `enroll` spend `key_sign_in`. Both default to 60 a
 minute with a burst of 20, enough for a few waiting devices behind one address
-(each asks every five seconds). Neither budget can be spent per key before the
+(each asks every five seconds). `PUT /profiles/set` spends its own
+`profile_set` budget, 20 a minute with a burst of 10; its signed form also
+spends a challenge. Neither budget can be spent per key before the
 signature verifies; the challenge is what makes each signed request single
 use.
 
@@ -379,8 +526,9 @@ rate limiter's backend (cluster-wide with Redis).
 `auth.app_key_sign_in` (default on) turns app key sign-in on or off
 server-wide. It is read from `server_settings` on each request, so a change on
 any node applies at once. While it is off, `getAppKeyCapability` reports
-`disabled`, and the challenge, `introduce`, `sign-in`, `enroll` and
-`PUT /auth/keys/person` answer `capability_disabled`. A person's own key list
+`disabled`, and the challenge, `introduce`, `sign-in`, `enroll`,
+`PUT /auth/keys/person` and the signed form of `PUT /profiles/set` answer
+`capability_disabled`. A person's own key list
 and its deletes stay open, so keys can be reviewed and revoked; sessions keys
 opened before are not ended by the switch. Backups classify it as an access setting: a restore keeps the
 stricter of the live and the backed-up value.
@@ -393,6 +541,10 @@ secret, but a key is a
 credential: a restore that brought keys back would reopen sign-ins that were
 revoked after the backup was taken. A restored server has no keys, so each
 device enrolls again.
+
+A restore of selected accounts does not carry the profile set: restored
+profiles have no `sync_id`, so they are outside the set and the app pairs them
+again. A full database restore carries everything.
 
 The rule that a public key is enrolled once holds for as long as its row
 does. A restore empties both tables, revoked rows included, so a key that was
