@@ -129,7 +129,7 @@ func registerAppKeySignIn(reg *Registry) {
 
 	introduce := humaOp(http.MethodPost, Prefix+"/auth/keys/introduce", "introduceAppKey", "app-keys",
 		"Enroll this device's key with the account's person key and open a login session.")
-	introduce.Description = "The body is an introduce envelope signed with the account's person key, with device_sig from the device key in the payload. The device key is enrolled and opens the session. For an administrator's account it is stored waiting for approval, and the device repeats signInWithAppKey until it is approved. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + sealedReplyDescription + providerAnswersDescription
+	introduce.Description = "The body is an introduce envelope signed with the account's person key, with device_sig from the device key in the payload. The device key is enrolled and opens the session. For an administrator's account it is stored waiting for approval, and the device repeats signInWithAppKey until it is approved. An account holds at most 10 waiting keys inside their 24 hours; an introduce that would add an eleventh is 409 conflict, after its challenge is spent. A waiting key past its 24 hours does not count, and a retention task later revokes it. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + sealedReplyDescription + providerAnswersDescription
 	introduce.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
 	introduceOp := Operation{Operation: introduce, RetrySafety: RetrySafetyNonRetryable,
 		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
@@ -137,7 +137,7 @@ func registerAppKeySignIn(reg *Registry) {
 
 	signIn := humaOp(http.MethodPost, Prefix+"/auth/keys/sign-in", "signInWithAppKey", "app-keys",
 		"Open a login session with an enrolled device key.")
-	signIn.Description = "The body is a sign-in envelope signed with the device key, with no device_sig. A key waiting for an administrator's approval answers approval_required, sealed, at most once every five seconds (sooner is 429 rate_limited with Retry-After) and for 24 hours; after that, or once denied, it is 403 key_denied." + pendingRetryNote + " A key whose provider binding changed during the request also answers 429 with a one-second Retry-After; asking again succeeds. Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + sealedReplyDescription + providerAnswersDescription
+	signIn.Description = "The body is a sign-in envelope signed with the device key, with no device_sig. A key waiting for an administrator's approval answers approval_required, sealed, at most once every five seconds (sooner is 429 rate_limited with Retry-After) and for 24 hours; after that, or once denied, it is 403 key_denied." + pendingRetryNote + " A key whose provider binding changed during the request also answers 429 with a one-second Retry-After: wait, get a fresh challenge and sign a new envelope. That attempt goes through every sign-in check again, so it can still be refused (for example 409 provider_sign_in_required or 503). Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + sealedReplyDescription + providerAnswersDescription
 	signIn.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
 	signInOp := Operation{Operation: signIn, RetrySafety: RetrySafetyNonRetryable,
 		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
@@ -145,10 +145,10 @@ func registerAppKeySignIn(reg *Registry) {
 
 	enroll := humaOp(http.MethodPost, Prefix+"/auth/keys/enroll", "enrollAppKeys", "app-keys",
 		"Enroll a person key and a device key on the signed-in account and open a session bound to the device key.")
-	enroll.Description = "Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. When the account has no person key, person_key is registered and takes the provider identity of the session that enrolls it. When person_key is the account's person key already, it is reused as it is, binding unchanged. A different person key on the account is 409 conflict, and so is a device key already enrolled on this server. The new device key takes the session's provider identity. The sealed plaintext adds person_key_id; the client drops the session it called with. Keys enrolled here start active, also on an administrator's account, so enroll never answers approval_required. A malformed payload field is 422 at body.message.payload." + appKeySignedBodyNote + sealedReplyDescriptionSignedIn + providerAnswersDescription
+	enroll.Description = "Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. When the account has no person key, person_key is registered and takes the provider identity of the session that enrolls it. When person_key is the account's person key already, it is reused as it is, binding unchanged. A different person key on the account is 409 conflict, and so is a device key already enrolled on this server. The new device key takes the session's provider identity. The sealed plaintext adds person_key_id; the client drops the session it called with. Keys enrolled here start active, also on an administrator's account, so enroll never answers approval_required. A malformed payload field is 422 at body.message.payload." + mainProfileRule + appKeySignedBodyNote + sealedReplyDescriptionSignedIn + providerAnswersDescription
 	enroll.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
-	enrollOp := Operation{Operation: enroll, RetrySafety: RetrySafetyNonRetryable,
-		Class: ClassAuthenticated, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
+	enrollOp := mainProfileOnly(Operation{Operation: enroll, RetrySafety: RetrySafetyNonRetryable,
+		ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10})
 	Register(reg, enrollOp, reg.enrollAppKeys)
 
 	redeem := humaOp(http.MethodPost, Prefix+"/auth/grants/redeem", "redeemAppKeyGrant", "app-keys",
@@ -159,12 +159,13 @@ func registerAppKeySignIn(reg *Registry) {
 		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
 	Register(reg, redeemOp, reg.redeemAppKeyGrant)
 
-	declareRetryAfter(reg, challengeOp, introduceOp, signInOp, enrollOp, redeemOp)
+	declareRetryAfter(reg, "Seconds to wait before repeating the empty POST.", challengeOp)
+	declareRetryAfter(reg, "Seconds to wait before asking again, on a fresh challenge.", introduceOp, signInOp, enrollOp, redeemOp)
 }
 
 // declareRetryAfter documents the Retry-After header the app key routes send
 // with a 429 and a 503, as other operations that send it declare it.
-func declareRetryAfter(reg *Registry, ops ...Operation) {
+func declareRetryAfter(reg *Registry, description string, ops ...Operation) {
 	for _, op := range ops {
 		registered := registeredOperation(reg.api.OpenAPI(), op)
 		if registered == nil {
@@ -179,7 +180,7 @@ func declareRetryAfter(reg *Registry, ops ...Operation) {
 				response.Headers = map[string]*huma.Header{}
 			}
 			response.Headers["Retry-After"] = &huma.Header{Schema: &huma.Schema{Type: huma.TypeString},
-				Description: "Seconds to wait before asking again, on a fresh challenge."}
+				Description: description}
 		}
 	}
 }
@@ -274,10 +275,11 @@ func (reg *Registry) enrollAppKeys(ctx context.Context, in *EnrollAppKeysInput) 
 	if err != nil {
 		return nil, err
 	}
-	claims := claimsFrom(ctx)
-	if !claims.IsOwnLoginSession() {
-		return nil, appKeyProblem(auth.ErrSessionNotAllowed)
+	acting, err := reg.requireVerifiedMainProfile(ctx, svc)
+	if err != nil {
+		return nil, err
 	}
+	claims := claimsFrom(ctx)
 	personKey, env, err := appkeys.ParseKeyBody(in.RawBody, appkeys.PurposeEnroll)
 	if err != nil {
 		return nil, appKeyProblemAt(err, enrollPayloadLocation)
@@ -286,7 +288,7 @@ func (reg *Registry) enrollAppKeys(ctx context.Context, in *EnrollAppKeysInput) 
 	if err != nil {
 		return nil, err
 	}
-	answer, err := svc.EnrollAppKeys(withClientDevice(ctx), auth.KeyEnrollRequest{KeyRequest: req, PersonKey: personKey, Claims: claims})
+	answer, err := svc.EnrollAppKeys(withClientDevice(ctx), auth.KeyEnrollRequest{KeyRequest: req, PersonKey: personKey, Claims: claims, Acting: acting})
 	if err != nil {
 		return nil, appKeyProblemAt(err, enrollPayloadLocation)
 	}
@@ -413,6 +415,9 @@ func appKeyProblemAt(err error, payloadLocation string) error {
 	if errors.Is(err, auth.ErrProviderCheckIncomplete) {
 		return NewProblem(TypeDependencyUnavailable, "The sign-in provider's answer could not be applied; try again later.")
 	}
+	if errors.Is(err, auth.ErrActingProfileChanged) {
+		return mainProfileChangedProblem()
+	}
 	var retry *auth.KeyRetryError
 	if errors.As(err, &retry) {
 		detail := "This device is waiting for approval; ask again later."
@@ -466,6 +471,8 @@ var appKeyProblems = []struct {
 	{auth.ErrAppKeyAlreadyEnrolled, TypeConflict, "That public key is already enrolled on this server."},
 	{auth.ErrPersonKeyConflict, TypeConflict, "The account already has a different person key."},
 	{auth.ErrPersonKeyExists, TypeConflict, "The account already has a different person key."},
+	{auth.ErrPendingKeyLimit, TypeConflict, "This account already has the most devices waiting for approval; approve or deny one first."},
+	{auth.ErrApproverNotAdmin, TypePermissionDenied, "Only an administrator account approves a waiting device."},
 	{auth.ErrAppKeyNotFound, TypeNotFound, "No such device key on this account."},
 	{auth.ErrSessionNotAllowed, TypePermissionDenied, "This sign-in cannot manage app keys."},
 	{auth.ErrSessionRevoked, TypeSessionExpired, "The login session is no longer valid."},

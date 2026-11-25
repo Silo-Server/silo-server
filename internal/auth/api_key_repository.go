@@ -200,10 +200,12 @@ var (
 // APIKeyActingProfile is the profile whose PIN proof authorized a personal
 // key, at the PIN revision that proof was checked against. The zero value
 // names no profile: a request that acted without one.
-type APIKeyActingProfile struct {
-	ID          string
-	PINRevision int64
-}
+//
+// CreatePersonal checks it again its own way, not with recheckActingProfile:
+// any profile may ask for its own key, so it doesn't require the main one,
+// and it holds only a key-share lock on the account, so it can wait for the
+// profile row where the key operations can't.
+type APIKeyActingProfile = ActingProfile
 
 // UserAPIKeysEnabled reads config.AuthUserAPIKeysSettingKey.
 func (r *APIKeyRepository) UserAPIKeysEnabled(ctx context.Context) (bool, error) {

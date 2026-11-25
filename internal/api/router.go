@@ -2863,6 +2863,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if deps.DB != nil && authHandler != nil && authService != nil {
 		authHandler.SetAppKeySignIn(auth.NewAppKeySignIn(deps.DB, authService))
+		authHandler.SetHouseholdStores(deps.UserStoreProvider, profilesOutsidePostgres(deps.Config))
 		v2deps.AppKeys = authHandler
 	}
 	if markersHandler != nil {
@@ -4119,8 +4120,14 @@ func profileNamesByUser(stores userstore.UserStoreProvider) downloads.ProfileNam
 func newPersonalAPIKeyHandler(repo *auth.APIKeyRepository, stores userstore.UserStoreProvider, cfg *config.Config) *handlers.APIKeyHandler {
 	h := handlers.NewAPIKeyHandler(repo)
 	h.Stores = stores
-	h.ProfilesOutsidePostgres = cfg != nil && cfg.UserDB.Backend == "sqlite"
+	h.ProfilesOutsidePostgres = profilesOutsidePostgres(cfg)
 	return h
+}
+
+// profilesOutsidePostgres reports whether household profiles live in the
+// per-user SQLite store, where a Postgres transaction can't read them.
+func profilesOutsidePostgres(cfg *config.Config) bool {
+	return cfg != nil && cfg.UserDB.Backend == "sqlite"
 }
 
 func newDiscordNotificationsHandler(deps Dependencies) *handlers.DiscordNotificationsHandler {

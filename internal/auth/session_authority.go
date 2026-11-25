@@ -27,6 +27,11 @@ const (
 	// ActionApproveDeviceSignIn: approving a device sign-in that is waiting
 	// now.
 	ActionApproveDeviceSignIn
+	// ActionReadKeys: reading the account's key list or its waiting devices,
+	// and denying a waiting device. The list names every device the person
+	// signed in, which a TV or another app has no business seeing, and a TV
+	// must not refuse the administrator's new phone.
+	ActionReadKeys
 	// ActionIssueCredential: handing the account a credential that outlives
 	// the session asking for it, by a route older than app keys: a personal
 	// API key, or linking a sign-in provider account.
@@ -75,10 +80,13 @@ func ReadSessionOrigin(ctx context.Context, db rowQuerier, claims *Claims) (Sess
 //
 // Every action refuses a session from a grant-enrolled app key: the app's
 // access ends when its key is revoked, so it must not mint access that would
-// outlive that. ActionManageKeys also refuses a session opened by device
-// sign-in (a TV or shared device holds it, not the person's own app), by an
-// administrator acting as the account, and one with no record of how it was
-// opened.
+// outlive that, nor read the person's devices. ActionManageKeys and
+// ActionReadKeys also refuse a session opened by device sign-in (a TV or
+// shared device holds it, not the person's own app), and one with no record
+// of how it was opened: only a session the person opened by password, by a
+// sign-in provider or with their own device key passes. SessionAllows
+// refuses an administrator acting as the account, an API key and a
+// remote-playback session before this runs.
 func (o SessionOrigin) Allows(action SessionAction) bool {
 	if o.GrantKey {
 		return false
@@ -119,15 +127,22 @@ func SessionMayIssueCredential(ctx context.Context, db rowQuerier, claims *Claim
 // way that may make it (SessionOrigin.Allows). It is the one rule the
 // operations that hand out lasting access call.
 func SessionAllows(ctx context.Context, db rowQuerier, claims *Claims, action SessionAction) error {
+	_, err := allowedSessionOrigin(ctx, db, claims, action)
+	return err
+}
+
+// allowedSessionOrigin is SessionAllows that also answers how the session
+// was opened, for a caller with one more thing to check about it.
+func allowedSessionOrigin(ctx context.Context, db rowQuerier, claims *Claims, action SessionAction) (SessionOrigin, error) {
 	if !claims.IsOwnLoginSession() {
-		return ErrSessionNotAllowed
+		return SessionOrigin{}, ErrSessionNotAllowed
 	}
 	origin, err := ReadSessionOrigin(ctx, db, claims)
 	if err != nil {
-		return err
+		return SessionOrigin{}, err
 	}
 	if !origin.Allows(action) {
-		return ErrSessionNotAllowed
+		return SessionOrigin{}, ErrSessionNotAllowed
 	}
-	return nil
+	return origin, nil
 }

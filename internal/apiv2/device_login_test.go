@@ -403,8 +403,37 @@ func TestDevicePreapprovalOperations(t *testing.T) {
 			})
 		}
 	}
-	// The account's own session: created, listed, revoked.
-	rec := do(t, h, http.MethodPost, "/api/v2/auth/device/preapprove", create, bearer(memberToken))
+	// Approving in advance is lasting access to the shared account, so it
+	// takes the household's main profile, verified when it has a PIN, as
+	// enrolling a key does. Listing and revoking keep no profile rule.
+	for _, caller := range []struct {
+		name string
+		hdr  map[string]string
+		want ProblemType
+	}{
+		{"no profile named", bearer(memberToken), TypePermissionDenied},
+		{"secondary profile", with(bearer(householdToken), "X-Profile-Id", "p-kid"), TypePermissionDenied},
+		{"main profile with a PIN, unverified", with(bearer(householdToken), "X-Profile-Id", "p-primary-locked"), TypeProfileVerificationRequired},
+	} {
+		t.Run(caller.name, func(t *testing.T) {
+			requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/preapprove", create, caller.hdr), caller.want)
+		})
+	}
+	// A demo server's visitors share one account: none leaves a 30-day
+	// sign-in on it, and the capability says so.
+	demoDeps := pilotDeps(nil, nil)
+	demoDeps.DemoSettings = fakeSettings{demo: true}
+	demo := newTestHandler(t, demoDeps)
+	requireProblem(t, do(t, demo, http.MethodPost, "/api/v2/auth/device/preapprove", create, mainProfile(memberToken)), TypePermissionDenied)
+	if rec := do(t, demo, http.MethodGet, "/api/v2/auth/device/capability", "", nil); rec.Code != http.StatusOK || !contains(rec.Body.String(), `"preapprove":false`) {
+		t.Fatalf("demo capability: %d %s", rec.Code, rec.Body.String())
+	}
+	// The route hands the operation the profile it checked, and a profile
+	// that changed before the operation locked the account is verified again.
+	changed := `{"device_name":"` + fakePreapprovalChangedName + `","binding":"` + fakeBinding + `"}`
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/preapprove", changed, mainProfile(memberToken)), TypeProfileVerificationRequired)
+	// The account's own session as the main profile: created, listed, revoked.
+	rec := do(t, h, http.MethodPost, "/api/v2/auth/device/preapprove", create, mainProfile(memberToken))
 	if rec.Code != http.StatusCreated || !contains(rec.Body.String(), `"device_code":"dev-preapproved"`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
@@ -417,9 +446,9 @@ func TestDevicePreapprovalOperations(t *testing.T) {
 	}
 	// Over the per-account cap.
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/preapprove",
-		`{"device_name":"`+fakePreapprovalLimitName+`","binding":"`+fakeBinding+`"}`, bearer(memberToken)), TypeConflict)
+		`{"device_name":"`+fakePreapprovalLimitName+`","binding":"`+fakeBinding+`"}`, mainProfile(memberToken)), TypeConflict)
 	// No binding, no pre-approval.
-	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/preapprove", `{"device_name":"TV"}`, bearer(memberToken)), TypeValidationFailed)
+	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/preapprove", `{"device_name":"TV"}`, mainProfile(memberToken)), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.binding" {
 		t.Fatalf("errors = %+v", p.Errors)
 	}

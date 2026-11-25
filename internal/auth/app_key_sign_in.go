@@ -70,6 +70,9 @@ type KeyEnrollRequest struct {
 	KeyRequest
 	PersonKey appkeys.PublicKey
 	Claims    *Claims
+	// Acting is the main profile the route checked, checked again under
+	// the account lock.
+	Acting ActingProfile
 }
 
 // KeySignInResult is the answer a route seals to the request's reply key.
@@ -256,6 +259,9 @@ func (a *AppKeySignIn) Introduce(ctx context.Context, req KeyRequest) (*KeySignI
 		status := models.DeviceKeyStatusActive
 		if user.Role == models.RoleAdmin {
 			status = models.DeviceKeyStatusPending
+			if err := checkPendingKeyRoom(ctx, tx, user.ID); err != nil {
+				return err
+			}
 		}
 		key, err := insertDeviceKeyTx(ctx, tx, NewDeviceKey{
 			UserID: user.ID, PublicKey: *payload.DeviceKey, Kind: models.DeviceKeyKindDevice,
@@ -306,7 +312,7 @@ func (a *AppKeySignIn) SignIn(ctx context.Context, req KeyRequest) (*KeySignInRe
 		return nil, err
 	}
 	device, err := a.keys.DeviceKeyByKeyID(ctx, req.Envelope.KeyID)
-	if errors.Is(err, ErrAppKeyNotFound) || (err == nil && device.RevokedAt != nil) {
+	if errors.Is(err, ErrAppKeyNotFound) || (err == nil && device.RevokedAt != nil && !sweptPendingKey(device)) {
 		return nil, unknownKey(req.Envelope, appkeys.PurposeSignIn)
 	}
 	if err != nil {
@@ -345,7 +351,9 @@ func (a *AppKeySignIn) SignIn(ctx context.Context, req KeyRequest) (*KeySignInRe
 			return err
 		}
 		key, err := lockDeviceKey(ctx, tx, user.ID, device.ID)
-		if errors.Is(err, ErrAppKeyNotFound) || (err == nil && key.RevokedAt != nil) {
+		// A waiting key the cleanup revoked since the read above still
+		// answers key_denied below, as one it revoked earlier does.
+		if errors.Is(err, ErrAppKeyNotFound) || (err == nil && key.RevokedAt != nil && !sweptPendingKey(key)) {
 			return ErrKeySignatureInvalid
 		}
 		if err != nil {
@@ -377,6 +385,15 @@ func (a *AppKeySignIn) SignIn(ctx context.Context, req KeyRequest) (*KeySignInRe
 		return nil, ErrKeySignatureInvalid
 	}
 	return a.signedIn(ctx, out), nil
+}
+
+// sweptPendingKey reports a waiting key the retention step revoked once it
+// outlived appkeys.PendingKeyLifetime. Its signature is still checked, and it
+// answers ErrAppKeyDenied (keyStatusAllows) as it did before the sweep, so
+// the device learns it was not approved rather than that its key is unknown.
+func sweptPendingKey(key *models.AppDeviceKey) bool {
+	return key.Status == models.DeviceKeyStatusPending && key.RevokedAt != nil &&
+		key.RevokedAt.Sub(key.CreatedAt) >= appkeys.PendingKeyLifetime
 }
 
 // keyStatusAllows refuses a denied key, and a waiting key past its lifetime
@@ -435,6 +452,9 @@ func (a *AppKeySignIn) Enroll(ctx context.Context, req KeyEnrollRequest) (*KeySi
 	err = a.inTx(ctx, func(tx pgx.Tx) error {
 		user, err := lockEnabledUser(ctx, tx, req.Claims.UserID)
 		if err != nil {
+			return err
+		}
+		if err := recheckActingProfile(ctx, tx, user.ID, req.Acting); err != nil {
 			return err
 		}
 		locked, err := lockChain(ctx, tx, user, enrolling.binding())

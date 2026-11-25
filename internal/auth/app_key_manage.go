@@ -29,11 +29,11 @@ func (a *AppKeySignIn) SessionMayIssueCredential(ctx context.Context, claims *Cl
 	return SessionMayIssueCredential(ctx, a.pool, claims)
 }
 
-// ListOwnKeys lists the keys of the claims' account, for the account's own
-// login session.
+// ListOwnKeys lists the keys of the claims' account, for a session the
+// person opened themselves (ActionReadKeys).
 func (a *AppKeySignIn) ListOwnKeys(ctx context.Context, claims *Claims) (OwnAppKeys, error) {
-	if !claims.IsOwnLoginSession() {
-		return OwnAppKeys{}, ErrSessionNotAllowed
+	if err := SessionAllows(ctx, a.pool, claims, ActionReadKeys); err != nil {
+		return OwnAppKeys{}, err
 	}
 	keys, err := a.keys.ListAccountKeys(ctx, claims.UserID)
 	if err != nil {
@@ -82,8 +82,9 @@ func (a *AppKeySignIn) RevokeOwnDeviceKey(ctx context.Context, claims *Claims, i
 // ReplacePersonKey makes key the account's person key, from the account's
 // own login session, and revokes the one it replaces. Device keys already
 // enrolled keep working; new devices need the new key. Replacing the key
-// with itself changes nothing.
-func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key appkeys.PublicKey) error {
+// with itself changes nothing. acting is the main profile the route checked,
+// checked again under the account lock.
+func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key appkeys.PublicKey, acting ActingProfile) error {
 	if err := SessionAllows(ctx, a.pool, claims, ActionManageKeys); err != nil {
 		return err
 	}
@@ -94,6 +95,9 @@ func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key
 	return a.inTx(ctx, func(tx pgx.Tx) error {
 		user, err := lockEnabledUser(ctx, tx, claims.UserID)
 		if err != nil {
+			return err
+		}
+		if err := recheckActingProfile(ctx, tx, user.ID, acting); err != nil {
 			return err
 		}
 		// The identity the new key records is locked before the session
@@ -116,6 +120,15 @@ func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key
 			}
 			if _, err := tx.Exec(ctx, `UPDATE auth_person_keys SET revoked_at = NOW() WHERE id = $1`, current.ID); err != nil {
 				return fmt.Errorf("revoking person key: %w", err)
+			}
+			// Replacing the key is how the person cuts off a copy of it, and
+			// a device still waiting for approval may be the copy's work: it
+			// is refused with the key that vouched for it. Devices already
+			// approved keep their keys.
+			if _, err := tx.Exec(ctx, `UPDATE auth_device_keys SET status = $3
+				WHERE user_id = $1 AND person_key_id = $2 AND status = $4 AND revoked_at IS NULL`,
+				user.ID, current.ID, models.DeviceKeyStatusDenied, models.DeviceKeyStatusPending); err != nil {
+				return fmt.Errorf("refusing the replaced person key's waiting devices: %w", err)
 			}
 		}
 		binding := unlocked.binding()

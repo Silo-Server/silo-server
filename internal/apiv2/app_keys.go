@@ -8,6 +8,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // AppKeyService signs devices in with app keys and manages a person's own
@@ -24,7 +26,13 @@ type AppKeyService interface {
 	RedeemAppKeyGrant(context.Context, auth.KeyRequest) (*handlers.AppKeyAnswer, error)
 	ListOwnAppKeys(context.Context, *auth.Claims) (auth.OwnAppKeys, error)
 	RevokeOwnDeviceKey(ctx context.Context, claims *auth.Claims, id string) error
-	ReplacePersonKey(context.Context, *auth.Claims, appkeys.PublicKey) error
+	ReplacePersonKey(context.Context, *auth.Claims, appkeys.PublicKey, auth.ActingProfile) error
+	ListPendingAppKeys(context.Context, *auth.Claims) ([]*models.AppDeviceKey, error)
+	ApprovePendingAppKey(ctx context.Context, claims *auth.Claims, id string, acting auth.ActingProfile) error
+	DenyPendingAppKey(ctx context.Context, claims *auth.Claims, id string) error
+	// ActsAsVerifiedMainProfile is the main-profile rule of the operations
+	// that create lasting access (requireVerifiedMainProfile).
+	ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, auth.ActingProfile, error)
 	// SessionMayIssueCredential answers auth.ErrSessionNotAllowed for a
 	// session another app opened with a grant, which must not be handed a
 	// personal API key or a linked sign-in.
@@ -95,16 +103,17 @@ type AppKeyCapabilityOutput struct {
 func registerAppKeys(reg *Registry) {
 	op := humaOp(http.MethodGet, Prefix+"/auth/keys/capability", "getAppKeyCapability", "app-keys",
 		"Describe app key sign-in support.")
-	op.Description = "Public, so an app can ask before it signs in. state is available while the auth.app_key_sign_in server setting is on and disabled while it is off. Each feature field turns true once this server supports that operation."
+	op.Description = "Public, so an app can ask before it signs in. state is available while the auth.app_key_sign_in server setting is on and disabled while it is off; it is always disabled on a server in demo mode, where every visitor shares one account. Each feature field turns true once this server supports that operation."
 	Register(reg, Operation{Operation: op, Class: ClassPublic, ServiceBacked: true}, reg.getAppKeyCapability)
 	registerAppKeySignIn(reg)
 	registerAppKeyManagement(reg)
+	registerAppKeyPending(reg)
 }
 
 func (reg *Registry) getAppKeyCapability(ctx context.Context, _ *CapabilityInput) (*AppKeyCapabilityOutput, error) {
 	state := StateNotConfigured
 	if svc := reg.deps.AppKeys; svc != nil {
-		enabled, err := svc.AppKeySignInEnabled(ctx)
+		enabled, err := reg.appKeySwitch(ctx, svc)
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
@@ -129,15 +138,29 @@ func (reg *Registry) getAppKeyCapability(ctx context.Context, _ *CapabilityInput
 	}, nil
 }
 
+// appKeySwitch reports whether app key sign-in is on: the
+// auth.app_key_sign_in server setting, and never in demo mode. A demo
+// server's visitors share one account, and a key any of them enrolled would
+// be a lasting credential on an account that isn't theirs, so there the
+// capability says disabled and no key is enrolled or signs in, for
+// administrators too.
+func (reg *Registry) appKeySwitch(ctx context.Context, svc AppKeyService) (bool, error) {
+	if demo, err := demoMode(ctx, reg.deps.DemoSettings); err != nil || demo {
+		return false, err
+	}
+	return svc.AppKeySignInEnabled(ctx)
+}
+
 // appKeysOn answers the service while the switch is on, and the
 // capability problem otherwise: not_configured without the service,
-// capability_disabled while auth.app_key_sign_in is off.
+// capability_disabled while auth.app_key_sign_in is off or the server is in
+// demo mode.
 func (reg *Registry) appKeysOn(ctx context.Context) (AppKeyService, error) {
 	svc, err := reg.appKeysWired()
 	if err != nil {
 		return nil, err
 	}
-	enabled, err := svc.AppKeySignInEnabled(ctx)
+	enabled, err := reg.appKeySwitch(ctx, svc)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

@@ -575,6 +575,9 @@ POST /api/v2/auth/keys/challenge	non-media
 DELETE /api/v2/auth/keys/devices/{id}	non-media
 POST /api/v2/auth/keys/enroll	non-media
 POST /api/v2/auth/keys/introduce	non-media
+GET /api/v2/auth/keys/pending	non-media
+POST /api/v2/auth/keys/pending/{id}/approve	non-media
+POST /api/v2/auth/keys/pending/{id}/deny	non-media
 PUT /api/v2/auth/keys/person	non-media
 POST /api/v2/auth/keys/sign-in	non-media
 POST /api/v2/auth/login	non-media
@@ -1674,6 +1677,9 @@ POST /api/v2/auth/keys/challenge	non-media
 DELETE /api/v2/auth/keys/devices/{id}	non-media
 POST /api/v2/auth/keys/enroll	non-media
 POST /api/v2/auth/keys/introduce	non-media
+GET /api/v2/auth/keys/pending	non-media
+POST /api/v2/auth/keys/pending/{id}/approve	non-media
+POST /api/v2/auth/keys/pending/{id}/deny	non-media
 PUT /api/v2/auth/keys/person	non-media
 POST /api/v2/auth/keys/sign-in	non-media
 POST /api/v2/auth/login	non-media
