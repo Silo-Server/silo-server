@@ -17,10 +17,11 @@ export interface SecretFieldProps {
   configured: boolean;
   onChange: (value: string) => void;
   /**
-   * Called when the input is emptied while a saved value exists, so a
-   * settings-form parent can revert the staged draft (`form.resetValue`)
-   * instead of staging `""` — a dirty `""` would clear the secret on save.
-   * Draft-based parents that already skip empty values may omit it.
+   * Called when the input is emptied, so a settings-form parent can revert the
+   * staged draft (`form.resetValue`) instead of staging `""`: a dirty `""`
+   * would clear a saved secret on save, and with none saved it would leave an
+   * empty change behind. Draft-based parents that already skip empty values
+   * may omit it.
    */
   onKeep?: () => void;
   /**
@@ -39,8 +40,12 @@ export interface SecretFieldProps {
   hint?: string;
   /** Extra line under the description, e.g. a save error for this field. */
   status?: ReactNode;
+  /** Marks the row as holding an unsaved change, as `SettingField` does. */
+  dirty?: boolean;
   disabled?: boolean;
   restartRequired?: boolean;
+  /** The environment variable that sets this secret; disables the control. */
+  managedByEnv?: string;
 }
 
 /**
@@ -65,10 +70,13 @@ export function SecretField({
   cleared = false,
   hint,
   status,
-  disabled = false,
+  dirty,
+  disabled: disabledProp = false,
   restartRequired = false,
+  managedByEnv,
 }: SecretFieldProps) {
   const t = useT();
+  const disabled = disabledProp || managedByEnv != null;
   const controlId = useId();
   const hintId = useId();
 
@@ -77,10 +85,14 @@ export function SecretField({
   const clearStaged = cleared && value === "";
   const showAction = onClear != null && configured && !disabled && value === "";
 
-  // While a clear is staged its description replaces `hint`.
+  // While a clear is staged its description replaces `hint`. A secret the
+  // environment sets can't be replaced here, so it gets no editing hint.
   const description = clearStaged
     ? t("web.settings.secretField.clearedDescription")
-    : (hint ?? (configured ? t("web.settings.secretField.configuredDescription") : undefined));
+    : (hint ??
+      (configured && managedByEnv == null
+        ? t("web.settings.secretField.configuredDescription")
+        : undefined));
 
   function keepSaved() {
     if (onKeep) onKeep();
@@ -88,8 +100,9 @@ export function SecretField({
   }
 
   function handleChange(next: string) {
-    if (next === "" && configured) {
-      // Emptying the field means "keep the saved secret", never "clear it".
+    if (next === "") {
+      // Emptying the field goes back to what is saved: it keeps a saved
+      // secret, never clears it, and with none saved it leaves nothing staged.
       keepSaved();
       return;
     }
@@ -100,10 +113,12 @@ export function SecretField({
     <SettingFieldRow
       label={label}
       htmlFor={controlId}
+      dirty={dirty}
       description={description}
       descriptionId={hintId}
       status={status}
       restartRequired={restartRequired}
+      managedByEnv={managedByEnv}
     >
       {/* The action sits ahead of the input, as in LimitField: the row's unit
           slot is to the right of the control edge, so anything between the

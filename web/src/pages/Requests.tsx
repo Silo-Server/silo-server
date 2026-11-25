@@ -180,7 +180,7 @@ function RequestsTabs() {
             <TabsTrigger value="yours" className="flex-none px-3">
               {t("web.requests.hub.yours")}
               {totalMine > 0 && (
-                <span className="bg-muted/80 text-muted-foreground ms-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums">
+                <span className="bg-muted/80 text-muted-foreground ms-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[0.625rem] font-semibold tabular-nums">
                   {totalMine}
                 </span>
               )}
@@ -221,7 +221,7 @@ function DiscoverTab() {
         <button
           type="button"
           onClick={() => void discovery.refetch()}
-          className="text-primary hover:text-primary/80 inline-flex items-center gap-2 text-sm font-medium"
+          className="text-primary inline-flex items-center gap-2 text-sm font-medium hover:underline"
         >
           <RefreshCw className="h-4 w-4" />
           {t("common.retry")}
@@ -341,7 +341,7 @@ function YoursTab({
         <button
           type="button"
           onClick={onRetry}
-          className="text-primary hover:text-primary/80 inline-flex items-center gap-2 text-sm font-medium"
+          className="text-primary inline-flex items-center gap-2 text-sm font-medium hover:underline"
         >
           <RefreshCw className="h-4 w-4" />
           {t("common.retry")}
@@ -502,12 +502,16 @@ function RequestRow({
             {linkTitle ? (
               <ViewTransitionLink
                 to={href}
-                className="text-foreground min-w-0 truncate text-sm font-semibold hover:underline"
+                dir="auto"
+                className="bidi-text text-foreground min-w-0 truncate text-sm font-semibold hover:underline"
               >
                 {request.title}
               </ViewTransitionLink>
             ) : (
-              <span className="text-foreground min-w-0 truncate text-sm font-semibold">
+              <span
+                dir="auto"
+                className="bidi-text text-foreground min-w-0 truncate text-sm font-semibold"
+              >
                 {request.title}
               </span>
             )}

@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useReducer, useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
+import { useShowThenSave } from "@/hooks/queries/settingWriteOffline";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { appearanceCache, storage } from "@/utils/storage";
 import type { StorageKey } from "@/utils/storage";
@@ -113,10 +114,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // that must stay distinguishable from an explicit choice so the local warm
   // start keeps its layering, so those values are dropped here rather than
   // treated as the profile's preference.
-  const { data: effectiveSettings } = useEffectiveSettings({
+  const settingsRead = useEffectiveSettings({
     keys: APPEARANCE_KEYS,
     enabled: loadApi,
   });
+  const { data: effectiveSettings } = settingsRead;
   const storedValue = (key: (typeof APPEARANCE_KEYS)[number]): unknown => {
     const setting = effectiveSettings?.[key];
     return setting !== undefined && setting.source !== "default" ? setting.value : undefined;
@@ -142,6 +144,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const highContrast = loadApi
     ? (apiHighContrast ?? highContrastPreference)
     : highContrastPreference;
+
+  // A setter shows its value before saving it. When the save fails in a way
+  // that may have stored it, the settings re-read can come back unchanged, so
+  // the effects below would leave that value shown and cached; bumping this
+  // re-runs them on what the server holds.
+  const [reconciles, reconcile] = useReducer((count: number) => count + 1, 0);
 
   // Mirror the server's values into this identity's namespace so the next cold
   // start paints them before the settings request resolves. Without this the
@@ -194,19 +202,27 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (cleared.textScale) setTextScalePreference(parseTextScale(undefined));
     if (cleared.textWeight) setTextWeightPreference(parseTextWeight(undefined));
     if (cleared.highContrast) setHighContrastPreference(parseHighContrast(undefined));
-  }, [loadApi, effectiveSettings, apiTextScale, apiTextWeight, apiHighContrast, cacheOwner]);
+  }, [
+    loadApi,
+    effectiveSettings,
+    apiTextScale,
+    apiTextWeight,
+    apiHighContrast,
+    cacheOwner,
+    reconciles,
+  ]);
 
   useEffect(() => {
     applyTextScaleToDOM(textScale);
-  }, [textScale]);
+  }, [textScale, reconciles]);
 
   useEffect(() => {
     applyTextWeightToDOM(textWeight);
-  }, [textWeight]);
+  }, [textWeight, reconciles]);
 
   useEffect(() => {
     applyHighContrastToDOM(highContrast);
-  }, [highContrast]);
+  }, [highContrast, reconciles]);
 
   // With no stored choice, high contrast follows the system setting, so follow
   // it while the app is open too. Re-parsing the cache keeps a stored choice
@@ -227,34 +243,57 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => query.removeEventListener("change", onChange);
   }, [cacheOwner]);
 
+  const showThenSave = useShowThenSave(cacheOwner, settingsRead);
+
   const setTextScale = useCallback(
-    (value: TextScale) => {
-      setTextScalePreference(value);
-      applyTextScaleToDOM(value);
-      appearanceCache.set(storage.KEYS.UI_TEXT_SCALE, value, cacheOwner);
-      void saveProfileDefault(SETTING_KEYS.UI_TEXT_SCALE, value);
-    },
-    [saveProfileDefault, cacheOwner],
+    (value: TextScale) =>
+      showThenSave({
+        key: SETTING_KEYS.UI_TEXT_SCALE,
+        cacheKey: storage.KEYS.UI_TEXT_SCALE,
+        value,
+        previous: textScale,
+        show: (v) => {
+          setTextScalePreference(v);
+          applyTextScaleToDOM(v);
+        },
+        save: (v) => saveProfileDefault(SETTING_KEYS.UI_TEXT_SCALE, v),
+        reconcile,
+      }),
+    [reconcile, saveProfileDefault, showThenSave, textScale],
   );
 
   const setTextWeight = useCallback(
-    (value: TextWeight) => {
-      setTextWeightPreference(value);
-      applyTextWeightToDOM(value);
-      appearanceCache.set(storage.KEYS.UI_TEXT_WEIGHT, value, cacheOwner);
-      void saveProfileDefault(SETTING_KEYS.UI_TEXT_WEIGHT, value);
-    },
-    [saveProfileDefault, cacheOwner],
+    (value: TextWeight) =>
+      showThenSave({
+        key: SETTING_KEYS.UI_TEXT_WEIGHT,
+        cacheKey: storage.KEYS.UI_TEXT_WEIGHT,
+        value,
+        previous: textWeight,
+        show: (v) => {
+          setTextWeightPreference(v);
+          applyTextWeightToDOM(v);
+        },
+        save: (v) => saveProfileDefault(SETTING_KEYS.UI_TEXT_WEIGHT, v),
+        reconcile,
+      }),
+    [reconcile, saveProfileDefault, showThenSave, textWeight],
   );
 
   const setHighContrast = useCallback(
-    (value: boolean) => {
-      setHighContrastPreference(value);
-      applyHighContrastToDOM(value);
-      appearanceCache.set(storage.KEYS.UI_HIGH_CONTRAST, String(value), cacheOwner);
-      void saveProfileDefault(SETTING_KEYS.UI_HIGH_CONTRAST, value);
-    },
-    [saveProfileDefault, cacheOwner],
+    (value: boolean) =>
+      showThenSave({
+        key: SETTING_KEYS.UI_HIGH_CONTRAST,
+        cacheKey: storage.KEYS.UI_HIGH_CONTRAST,
+        value,
+        previous: highContrast,
+        show: (v) => {
+          setHighContrastPreference(v);
+          applyHighContrastToDOM(v);
+        },
+        save: (v) => saveProfileDefault(SETTING_KEYS.UI_HIGH_CONTRAST, v),
+        reconcile,
+      }),
+    [reconcile, saveProfileDefault, showThenSave, highContrast],
   );
 
   return (

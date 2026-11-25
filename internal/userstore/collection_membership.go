@@ -9,4 +9,9 @@ type CollectionMembershipReader interface {
 	// ManualCollectionsHolding returns the ids of creatorProfileID's own
 	// manual collections that hold mediaItemID, in no particular order.
 	ManualCollectionsHolding(ctx context.Context, creatorProfileID, mediaItemID string) ([]string, error)
+	// CollectionsHolding returns the ids of every collection on the account
+	// that stores mediaItemID, whichever profile made it, in no particular
+	// order. Smart collections store no titles and are never returned. The
+	// caller still checks which of them the acting profile may see.
+	CollectionsHolding(ctx context.Context, mediaItemID string) ([]string, error)
 }

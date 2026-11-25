@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Link } from "react-router";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { useAdminTimeseries } from "@/hooks/queries/admin/dashboardInsights";
@@ -23,6 +24,7 @@ import { TimeseriesChartBody } from "./timeseriesChart";
 import { buildTimeseriesPoints } from "./timeseriesSeries";
 import { formatLocale } from "@/lib/appLocale";
 import { useAppLanguage, useT } from "@/i18n";
+import { widgetRangeToInsightsRange } from "@/pages/admin-insights/insightsHelpers";
 
 /**
  * Concurrent playback sessions over the chosen window, one point per bucket the
@@ -72,7 +74,7 @@ export function ConcurrentStreamsWidget() {
       <WidgetHeader
         title={rangeTitle(t("web.admin.dashboard.widgets.concurrentStreams.title"), range)}
       >
-        <span className="text-muted-foreground text-[11px] whitespace-nowrap tabular-nums">
+        <span className="text-muted-foreground text-[0.6875rem] whitespace-nowrap tabular-nums">
           {t("web.admin.dashboard.widgets.concurrentStreams.peak", {
             value: peak.toLocaleString(formatLocale()),
           })}
@@ -102,6 +104,12 @@ export function ConcurrentStreamsWidget() {
           ]}
           onChange={setView}
         />
+        <Link
+          to={`/admin/insights?tab=playback&range=${widgetRangeToInsightsRange(range)}`}
+          className="text-muted-foreground hover:text-primary hidden text-[0.6875rem] whitespace-nowrap transition-colors @lg/card-header:inline"
+        >
+          {t("web.admin.dashboard.widgets.openInsights")}
+        </Link>
         <WidgetRangePicker />
       </WidgetHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">

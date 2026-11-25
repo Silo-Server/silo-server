@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
 	"strings"
 )
 
@@ -19,32 +18,14 @@ const (
 	// SettingTrustedProxies is the server_settings key holding the
 	// comma-separated CIDR list of trusted reverse proxies.
 	SettingTrustedProxies = "clientip.trusted_proxies"
-	// EnvTrustedProxies overrides SettingTrustedProxies at startup when set.
-	EnvTrustedProxies = "SILO_TRUSTED_PROXIES"
 	// DefaultTrustedProxies: RFC 1918 private ranges + loopback.
 	DefaultTrustedProxies = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128"
 )
 
-// SeedDefaults ensures the trusted proxy setting exists. When the
-// SILO_TRUSTED_PROXIES environment variable is set it wins: the value is
-// validated and persisted so the admin UI shows the effective config (and is
-// re-applied on every startup while the variable remains set). Otherwise the
-// default list is written only if the setting is unset.
+// SeedDefaults writes the default trusted proxy list when the setting is
+// unset. SILO_TRUSTED_PROXIES, when set, is stored before this runs (see
+// config.ReadEnvSettings), so it is never replaced here.
 func SeedDefaults(ctx context.Context, store SettingsStore) error {
-	if env := strings.TrimSpace(os.Getenv(EnvTrustedProxies)); env != "" {
-		normalized, err := NormalizeCIDRList(env)
-		if err != nil {
-			return fmt.Errorf("invalid %s: %w", EnvTrustedProxies, err)
-		}
-		existing, err := store.Get(ctx, SettingTrustedProxies)
-		if err != nil {
-			return fmt.Errorf("seed clientip defaults: %w", err)
-		}
-		if existing == normalized {
-			return nil
-		}
-		return store.Set(ctx, SettingTrustedProxies, normalized)
-	}
 	existing, err := store.Get(ctx, SettingTrustedProxies)
 	if err != nil {
 		return fmt.Errorf("seed clientip defaults: %w", err)

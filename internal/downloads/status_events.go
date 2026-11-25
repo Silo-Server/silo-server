@@ -92,7 +92,12 @@ func (r *Repository) ReportStatus(ctx context.Context, userID int, profileID, de
 	if event.Status == StatusCompleted {
 		completedAt = &event.UpdatedAt
 	}
-	updated, err := scanDownload(tx.QueryRow(ctx, `UPDATE downloads SET status=$2,completed_at=$3,status_event_at=$4,updated_at=now() WHERE id=$1 RETURNING `+downloadColumns, id, event.Status, completedAt, event.UpdatedAt))
+	// The report is the device speaking, so it also records where the device
+	// is now. A request without a usable address keeps the recorded one.
+	updated, err := scanDownload(tx.QueryRow(ctx, `UPDATE downloads SET status=$2,completed_at=$3,status_event_at=$4,updated_at=now(),
+		last_client_ip=COALESCE($5::inet, last_client_ip),
+		last_client_ip_at=CASE WHEN $5::inet IS NULL THEN last_client_ip_at ELSE now() END
+		WHERE id=$1 RETURNING `+downloadColumns, id, event.Status, completedAt, event.UpdatedAt, nilIfEmpty(clientAddress(ctx))))
 	if err != nil {
 		return nil, fmt.Errorf("recording download status event: %w", err)
 	}

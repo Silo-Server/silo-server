@@ -7,10 +7,6 @@ Silo's scan API lets external tools trigger media library scans on demand. Use i
 with download managers like Sonarr and Radarr, or with relay tools like Autoscan that notify your
 server when new media arrives.
 
-This page is the integration guide. The contract itself — authority, retry safety, and what an
-accepted scan does and does not promise — is in
-[the scan control API](scan-control-api.md).
-
 ## Prerequisites
 
 - Silo must be running in **integrated** or **api** mode. In `proxy` and `transcode` modes the
@@ -20,7 +16,8 @@ accepted scan does and does not promise — is in
 
 ## Authentication
 
-Every scan operation requires an acting administrator, authenticated with either a **JWT access
+Every scan operation requires an acting administrator, with the same acting-administrator and
+profile-verification gates as library administration. Authenticate with either a **JWT access
 token** or an **API key** in the `Authorization` header:
 
 ```
@@ -66,7 +63,8 @@ POST /api/v2/scan
 ```
 
 Accepts a library ID, a filesystem path, or both. The server picks the scan mode and runs the
-scan asynchronously.
+scan asynchronously, through the same target resolution, dispatch, and cancellation as the
+administration UI's scans; this operation adds no scheduler of its own.
 
 | Field        | Type   | Required | Description |
 | ------------ | ------ | -------- | ----------- |
@@ -126,7 +124,10 @@ execution survives a restart. A request that overlaps a scan already running for
 still answers `202`; it is coalesced or waits its turn (see [Deduplication](#deduplication)).
 
 This operation is **non-retryable**. Do not replay it automatically after an uncertain response;
-observe the library's scan state and make a new explicit decision.
+observe the library's scan state and make a new explicit decision. The web client's library page,
+dashboard widget, and autoscan activity view call it, and the cancel operation, with mutation and
+authentication retries off, and capture the selected library and administrator/profile authority
+at submission; a result that arrives after that authority was replaced shows nothing.
 
 #### Errors
 
@@ -165,10 +166,16 @@ Cancels the library's currently queued and local scans.
 }
 ```
 
-`cancelled` preserves the queue and local-ingester result. It does not assert that every cluster
-worker has stopped or that cleanup has finished. This operation is **non-retryable**: repeating
-it may cancel scans created after the original dispatch, so it is not an idempotent cancellation
-of a stable scan identity.
+`cancelled` counts the scans the queue and the local ingester cancelled. It does not assert that
+every cluster worker has stopped or that cleanup has finished. This operation is
+**non-retryable**: repeating it may cancel scans created after the original dispatch, so it is
+not an idempotent cancellation of a stable scan identity. Neither scan operation provides
+scheduling, leases, durable cancellation receipts, or cross-replica replay guarantees.
+
+Errors follow the trigger table above: `422 validation_failed` at `body.library_id` for a
+missing or non-canonical ID, `403` for a caller that is not an acting administrator or is
+refused by the demo guard, and `503 dependency_unavailable` when the scanner is not
+initialized.
 
 ## Examples
 

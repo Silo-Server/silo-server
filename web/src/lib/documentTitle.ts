@@ -92,6 +92,7 @@ const ADMIN_TITLES: Record<string, AdminTitle> = {
   downloads: adminPage("downloads"),
   history: adminPage("history"),
   "history-import": adminPage("historyImport"),
+  insights: adminPage("insights"),
   "marker-history": adminPage("markerHistory"),
   libraries: adminPage("libraries"),
   logs: adminPage("logs"),

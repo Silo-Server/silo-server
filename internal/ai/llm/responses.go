@@ -198,16 +198,16 @@ func readResponseStream(data io.Reader) (string, error) {
 				code = event.Response.Error.Code
 			}
 			if code == "subscription_sharing_usage_unavailable" {
-				return &HTTPError{StatusCode: http.StatusServiceUnavailable, message: "ChatGPT usage is temporarily unavailable"}
+				return &HTTPError{StatusCode: http.StatusServiceUnavailable, InResponse: true, message: "ChatGPT usage is temporarily unavailable"}
 			}
 			if code == "subscription_sharing_user_unavailable" {
-				return &HTTPError{StatusCode: http.StatusServiceUnavailable, message: "ChatGPT subscriber information is temporarily unavailable"}
+				return &HTTPError{StatusCode: http.StatusServiceUnavailable, InResponse: true, message: "ChatGPT subscriber information is temporarily unavailable"}
 			}
 			if code == responseServerError {
-				return &HTTPError{StatusCode: http.StatusServiceUnavailable, message: "ChatGPT is temporarily unavailable"}
+				return &HTTPError{StatusCode: http.StatusServiceUnavailable, InResponse: true, message: "ChatGPT is temporarily unavailable"}
 			}
 			if code == responseRateLimitExceeded {
-				return &HTTPError{StatusCode: http.StatusTooManyRequests, Code: code, message: "ChatGPT is rate limiting requests"}
+				return &HTTPError{StatusCode: http.StatusTooManyRequests, InResponse: true, Code: code, message: "ChatGPT is rate limiting requests"}
 			}
 			if code == subscriptionUsageLimitExceeded {
 				return &permanentError{ErrQuotaExhausted}
@@ -218,9 +218,9 @@ func readResponseStream(data io.Reader) (string, error) {
 			if code == subscriptionInvalidUser {
 				// A streamed subscriber rejection uses the same refresh-once path
 				// as an HTTP 401, without retrying the rejected token first.
-				return &permanentError{&HTTPError{StatusCode: http.StatusUnauthorized, Code: code, message: "ChatGPT subscriber credentials were rejected"}}
+				return &permanentError{&HTTPError{StatusCode: http.StatusUnauthorized, InResponse: true, Code: code, message: "ChatGPT subscriber credentials were rejected"}}
 			}
-			return &permanentError{&HTTPError{StatusCode: http.StatusBadRequest, Code: code, message: "ChatGPT request failed; check the account and ChatGPT usage settings"}}
+			return &permanentError{&HTTPError{StatusCode: http.StatusBadRequest, InResponse: true, Code: code, message: "ChatGPT request failed; check the account and ChatGPT usage settings"}}
 		case "response.incomplete":
 			return &permanentError{unusable("ChatGPT returned an incomplete response")}
 		}

@@ -138,6 +138,11 @@ export const collectionKeys = {
   items: (collectionId: string) => ["collections", "items", collectionId] as const,
   /** The list, each own manual collection marked with whether it holds the title. */
   containing: (contentId: string) => ["collections", "containing", contentId] as const,
+  /** Every title page's collections row. */
+  onTitles: () => ["collections", "on-title"] as const,
+  /** The collections row on one title's page. */
+  onTitle: (contentId: string, libraryId: number | undefined) =>
+    ["collections", "on-title", contentId, libraryId ?? ""] as const,
   preview: (scope: "user" | "admin", fingerprint: string) =>
     ["collections", "preview", scope, fingerprint] as const,
   templates: () => ["collections", "templates"] as const,
@@ -272,6 +277,8 @@ export const notificationKeys = {
   discordPreferences: () => ["notifications", "discord-preferences"] as const,
   capability: () => ["notifications", "capability"] as const,
   webhooks: () => ["notifications", "webhooks"] as const,
+  pluginChannels: () => ["notifications", "plugin-channels"] as const,
+  pluginDestinations: () => ["notifications", "plugin-destinations"] as const,
   webPushSubscriptions: () => ["notifications", "web-push-subscriptions"] as const,
 };
 
@@ -498,13 +505,24 @@ export const adminKeys = {
   invitations: () => ["admin", "invitations"] as const,
   apiKeys: () => ["admin", "apiKeys"] as const,
   rateLimitConfig: () => ["admin", "rateLimitConfig"] as const,
-  playbackHistory: (params: {
-    userId?: number;
-    profileId?: string;
-    mediaItemId?: string;
-    completed?: string;
-    limit?: number;
-  }) => ["admin", "playbackHistory", params] as const,
+  playbackHistory: (params: Record<string, unknown>) =>
+    ["admin", "playbackHistory", params] as const,
+  playbackHistoryDetail: (sessionId: string) =>
+    ["admin", "playbackHistory", "detail", sessionId] as const,
+  insightsRoot: () => ["admin", "insights"] as const,
+  insightsCapabilities: () => ["admin", "insights", "capabilities"] as const,
+  insightsActivity: (params: Record<string, unknown>) =>
+    ["admin", "insights", "activity", params] as const,
+  insightsPeople: (params: Record<string, unknown>) =>
+    ["admin", "insights", "people", params] as const,
+  insightsDevices: (params: Record<string, unknown>) =>
+    ["admin", "insights", "devices", params] as const,
+  insightsBandwidth: (params: Record<string, unknown>) =>
+    ["admin", "insights", "bandwidth", params] as const,
+  insightsTitles: (params: Record<string, unknown>) =>
+    ["admin", "insights", "titles", params] as const,
+  insightsTitle: (contentId: string, params: Record<string, unknown>) =>
+    ["admin", "insights", "title", contentId, params] as const,
   userIPs: (userId: number, days?: number) => ["admin", "users", userId, "ips", days] as const,
   ipUsers: (ip: string, days?: number) => ["admin", "ips", ip, days] as const,
   operationalLogsRoot: () => ["admin", "logs", "app"] as const,
@@ -565,6 +583,7 @@ export const adminKeys = {
   pluginRepositories: () => ["admin", "plugins", "repositories"] as const,
   pluginCatalog: () => ["admin", "plugins", "catalog"] as const,
   pluginCatalogSettings: () => ["admin", "plugins", "catalogSettings"] as const,
+  pluginProvisioningStatus: () => ["admin", "plugins", "provisioning-status"] as const,
   pluginInstallations: () => ["admin", "plugins", "installations"] as const,
   unmatchedItems: (search?: string, ignored = false) =>
     search === undefined

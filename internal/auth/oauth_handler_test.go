@@ -133,11 +133,11 @@ func newOAuthRig(t *testing.T) *oauthTestRig {
 	rig.h = NewOAuthHandler(OAuthHandlerDeps{
 		Store:       rig.store,
 		StateSecret: []byte("test-secret"),
-		ResolveClient: func(_ context.Context, id int) (OAuthClient, string, error) {
+		ResolveClient: func(_ context.Context, id int) (OAuthClient, string, string, error) {
 			if id != 42 {
-				return nil, "", ErrUnknownAuthInstallation
+				return nil, "", "", ErrUnknownAuthInstallation
 			}
-			return rig.client, "oidc", nil
+			return rig.client, "oidc", "", nil
 		},
 		LoginCompleter:       rig.comp,
 		HostBaseURL:          "https://silo.test",
@@ -821,8 +821,8 @@ func TestOAuthLinkTickets(t *testing.T) {
 		t.Fatalf("unknown installation: %v", err)
 	}
 	resolve := rig.h.deps.ResolveClient
-	rig.h.deps.ResolveClient = func(context.Context, int) (OAuthClient, string, error) {
-		return nil, "", errors.New("plugin is not running")
+	rig.h.deps.ResolveClient = func(context.Context, int) (OAuthClient, string, string, error) {
+		return nil, "", "", errors.New("plugin is not running")
 	}
 	if _, err := rig.h.IssueLinkTicket(ctx, 7, 42, "right password"); !errors.Is(err, ErrProviderUnavailable) {
 		t.Fatalf("unreachable plugin: %v", err)
@@ -1108,11 +1108,11 @@ func TestOAuthRoutesRefuseCredentialsInstallations(t *testing.T) {
 	}
 
 	rig := newOAuthRig(t)
-	rig.h.deps.ResolveClient = func(_ context.Context, id int) (OAuthClient, string, error) {
+	rig.h.deps.ResolveClient = func(_ context.Context, id int) (OAuthClient, string, string, error) {
 		if svc.FindOAuthInstallation(id) == nil {
-			return nil, "", ErrUnknownAuthInstallation
+			return nil, "", "", ErrUnknownAuthInstallation
 		}
-		return rig.client, "oidc", nil
+		return rig.client, "oidc", "", nil
 	}
 	if _, err := rig.h.IssueLinkTicket(context.Background(), 7, 5, "right password"); !errors.Is(err, ErrUnknownAuthInstallation) {
 		t.Fatalf("link ticket for a credentials installation: %v", err)

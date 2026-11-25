@@ -98,3 +98,27 @@ func TestWatchTimeObserve(t *testing.T) {
 		})
 	}
 }
+
+// TestWatchTimeJSONCarriesOn covers a measurement saved by one server and
+// restored by another: the restored copy must judge the next sample exactly
+// as the original would, including a confirmed pause no sample has reached.
+func TestWatchTimeJSONCarriesOn(t *testing.T) {
+	start := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+	var original WatchTime
+	original.Observe(100, false, start)
+	original.Observe(110, false, start.Add(10*time.Second))
+	original.Pause(start.Add(12 * time.Second))
+
+	var restored WatchTime
+	if err := restored.UnmarshalJSON(WatchTimeJSON(original)); err != nil {
+		t.Fatal(err)
+	}
+	original.Observe(112, true, start.Add(40*time.Second))
+	restored.Observe(112, true, start.Add(40*time.Second))
+	if restored != original {
+		t.Fatalf("restored = %+v, want %+v", restored, original)
+	}
+	if WatchTimeJSON(WatchTime{}) != nil {
+		t.Fatal("an unmeasured play saved a measurement")
+	}
+}

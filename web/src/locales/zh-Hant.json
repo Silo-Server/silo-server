@@ -281,10 +281,28 @@
       "value": "此登入代碼已過期。請重新開始。"
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "此帳號用於直接連線的裝置數量已達上限。"
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "另一部裝置已在使用此連線金鑰。請再試一次。"
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
       "value": "此電子郵件地址已有人使用。"
+    }
+  ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "此值已有人使用。"
     }
   ],
   "error.field.invalid": [
@@ -327,6 +345,18 @@
     {
       "type": 0,
       "value": "無法讀取此請求。"
+    }
+  ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "此項目由環境設定。請在該處變更，然後重新啟動受影響的服務。"
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "缺少此值。"
     }
   ],
   "error.field.out_of_range": [
@@ -437,6 +467,12 @@
       "value": "請透過你網路的登入方式登入以繼續。"
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "此節點由伺服器的部署設定指定。請在該處移除，然後重新啟動 API 伺服器，即可在此管理。"
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -483,6 +519,18 @@
     {
       "type": 0,
       "value": "此播放工作階段已結束。請重新開始播放。"
+    }
+  ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "播放因暫停過久而停止。請重新開始播放。"
+    }
+  ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "此串流已被取代。播放會在目前的串流上繼續。"
     }
   ],
   "error.precondition_failed": [
@@ -1261,6 +1309,18 @@
       "value": "人氣影集"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "為你推薦的電影"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "為你推薦的影集"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -1990,6 +2050,74 @@
     {
       "type": 0,
       "value": "App 語言"
+    }
+  ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "結束時"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "結束前 "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " 分鐘"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "結束前 "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " 秒"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "顯示接下來"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "關閉"
     }
   ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
@@ -3503,7 +3631,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "立即播放"
+      "value": "播放接下來的內容"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -12865,7 +12993,7 @@
             },
             {
               "type": 0,
-              "value": " 個無法還原——還原會放寬存取權限，因此此伺服器保留較嚴格的值"
+              "value": " 個無法還原——還原會放寬存取權限，因此此伺服器保留自身較嚴格的值"
             }
           ]
         }
@@ -12932,6 +13060,28 @@
             {
               "type": 0,
               "value": " 個無法還原——此處已有其他帳號使用該使用者名稱或電子郵件登入"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個無法還原——不同的設定項目或其連線的一部分由此伺服器的環境設定"
             }
           ]
         }
@@ -13296,6 +13446,28 @@
       "value": "某項服務的位址已變更，但備份中沒有其憑證，因此還原時會清除此處的憑證並關閉該服務，直到重新輸入為止。"
     }
   ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個設定項目保留目前的值，因為這些項目或其連線的一部分由此伺服器的環境設定。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.caveat.filesMissing": [
     {
       "type": 6,
@@ -13644,8 +13816,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "隱藏"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -13762,8 +13960,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "顯示"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -14420,9 +14644,41 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "也已選擇你所選項目需要的 "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "。"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "也已選擇你所選項目需要的 "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "。"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -14439,16 +14695,46 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "也已取消選擇 "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "，因為此項目需要你取消選擇的內容。"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "也已取消選擇 "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "，因為這些項目需要你取消選擇的內容。"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -14465,9 +14751,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -15666,6 +15950,12 @@
       "value": "此處已有其他帳號使用其使用者名稱或電子郵件登入。"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "不同的設定項目或其連線的一部分由此伺服器的環境設定，因此此伺服器保留目前的值。"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16114,6 +16404,142 @@
     {
       "type": 0,
       "value": "。"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "背景圖"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個合輯項目"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "已取代合輯"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "設定"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "說明"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "已啟用"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "精選"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "項目數量上限"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "項目排序"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "媒體庫"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "位置"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "海報"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "排列順序"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "來源"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "同步排程"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "標題"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "標題翻譯"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "類型"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "可見度"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "僅限網頁版"
     }
   ],
   "web.admin.backups.restore.rows.changes": [
@@ -16624,6 +17050,16 @@
     {
       "type": 0,
       "value": "（保留：較嚴格）"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "（保留：環境）"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -17598,6 +18034,20 @@
       "value": "使用伺服器的時區。"
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "以伺服器的時區為準。在你的時區是 "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -18466,9 +18916,25 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "無法讀取其資料"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "無法讀取其資料"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18477,9 +18943,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -18510,20 +18974,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "隱藏帳號"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏帳號"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏帳號"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏帳號"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "隱藏檔案"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏檔案"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏檔案"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏檔案"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "隱藏檔案"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏檔案"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏檔案"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "隱藏檔案"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -18566,6 +19108,226 @@
     {
       "type": 0,
       "value": "資料庫中參照了這些檔案，但在儲存空間中找不到；還原時會略過它們。"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個品牌素材"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個合輯背景圖"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個合輯海報"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個已下載的字幕"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個媒體庫海報"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個疊加圖片"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個個人合輯海報"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個個人檔案大頭貼"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個上傳的圖片檔案"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個上傳的字幕"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -18752,9 +19514,33 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "無法讀取其 "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "無法讀取其 "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18767,9 +19553,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -18784,8 +19568,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "顯示帳號"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示帳號"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示帳號"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示帳號"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -18816,21 +19626,89 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "顯示檔案"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示檔案"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示檔案"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示檔案"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "顯示檔案"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示檔案"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示檔案"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示檔案"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "其資料過大，無法放入還原集"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "其資料過大，無法放入還原集"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18839,9 +19717,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -21014,6 +21890,16 @@
       "value": "。"
     }
   ],
+  "web.admin.common.catalogImportSource.exportJob": [
+    {
+      "type": 0,
+      "value": "匯出作業 "
+    },
+    {
+      "type": 1,
+      "value": "id"
+    }
+  ],
   "web.admin.common.connectionCheck.check": [
     {
       "type": 0,
@@ -21284,6 +22170,12 @@
       "value": "語音轉文字提供者暫時無法使用。請稍後再試一次。"
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "文字 AI 提供者沒有可用額度，或已達到使用量或消費上限。請檢查你在提供者的餘額與限制，或 ChatGPT 使用量設定。"
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -21294,6 +22186,80 @@
     {
       "type": 0,
       "value": "文字 AI 連線失敗。請檢查模型、推理等級、服務層級、帳號連線，以及提供者的使用量限制。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "文字 AI 存取遭拒。請確認此 API 金鑰或 ChatGPT 帳號可以使用這個模型。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "無法使用文字 AI 端點或模型。請檢查提供者的基本 URL 與模型。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "已連結的 ChatGPT 帳號無法共用其方案使用量。請檢查 ChatGPT 使用量設定，或連結其他帳號。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "文字 AI 提供者正在限制請求頻率。請稍後再試一次。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "文字 AI 提供者拒絕了檢查請求。請檢查模型、推理等級，以及帳號的使用量設定。伺服器記錄中有提供者傳回的錯誤。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "文字 AI 提供者拒絕了檢查請求（狀態 "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "）。請檢查模型、推理等級與服務層級。伺服器記錄中有提供者傳回的錯誤。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "文字 AI 連線檢查逾時。請檢查提供者是否可用，然後再試一次。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "文字 AI 提供者拒絕了憑證。請更換提供者的 API 金鑰，或重新使用 ChatGPT 登入。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "文字 AI 提供者暫時無法使用。請稍後再試一次。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo 無法連線至文字 AI 提供者。請檢查提供者的基本 URL，並確認此伺服器可以連線至該提供者。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "文字模型傳回了 Silo 無法使用的回應。請選擇其他模型。"
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -21374,6 +22340,12 @@
     {
       "type": 0,
       "value": "清除限制"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "直接"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -25916,6 +26888,12 @@
       "value": "失敗"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "任務失敗。請查看管理員診斷資訊以了解詳情。"
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -25998,6 +26976,12 @@
     {
       "type": 0,
       "value": "記錄匯入"
+    }
+  ],
+  "web.admin.common.title.header.insights": [
+    {
+      "type": 0,
+      "value": "深入分析"
     }
   ],
   "web.admin.common.title.header.libraries": [
@@ -26190,6 +27174,12 @@
     {
       "type": 0,
       "value": "管理：記錄匯入"
+    }
+  ],
+  "web.admin.common.title.tab.insights": [
+    {
+      "type": 0,
+      "value": "管理深入分析"
     }
   ],
   "web.admin.common.title.tab.libraries": [
@@ -27451,6 +28441,12 @@
       "value": "現在"
     }
   ],
+  "web.admin.dashboard.range.edgeStart.all": [
+    {
+      "type": 0,
+      "value": "最早記錄"
+    }
+  ],
   "web.admin.dashboard.range.edgeStart.day": [
     {
       "type": 0,
@@ -27469,10 +28465,28 @@
       "value": "30 天前"
     }
   ],
+  "web.admin.dashboard.range.edgeStart.quarter": [
+    {
+      "type": 0,
+      "value": "90 天前"
+    }
+  ],
   "web.admin.dashboard.range.edgeStart.week": [
     {
       "type": 0,
       "value": "7 天前"
+    }
+  ],
+  "web.admin.dashboard.range.edgeStart.year": [
+    {
+      "type": 0,
+      "value": "1 年前"
+    }
+  ],
+  "web.admin.dashboard.range.label.all": [
+    {
+      "type": 0,
+      "value": "全部"
     }
   ],
   "web.admin.dashboard.range.label.day": [
@@ -27493,10 +28507,28 @@
       "value": "30 天"
     }
   ],
+  "web.admin.dashboard.range.label.quarter": [
+    {
+      "type": 0,
+      "value": "90 天"
+    }
+  ],
   "web.admin.dashboard.range.label.week": [
     {
       "type": 0,
       "value": "7 天"
+    }
+  ],
+  "web.admin.dashboard.range.label.year": [
+    {
+      "type": 0,
+      "value": "1 年"
+    }
+  ],
+  "web.admin.dashboard.range.phrase.all": [
+    {
+      "type": 0,
+      "value": "有記錄以來"
     }
   ],
   "web.admin.dashboard.range.phrase.day": [
@@ -27517,10 +28549,32 @@
       "value": "過去 30 天"
     }
   ],
+  "web.admin.dashboard.range.phrase.quarter": [
+    {
+      "type": 0,
+      "value": "過去 90 天"
+    }
+  ],
   "web.admin.dashboard.range.phrase.week": [
     {
       "type": 0,
       "value": "過去 7 天"
+    }
+  ],
+  "web.admin.dashboard.range.phrase.year": [
+    {
+      "type": 0,
+      "value": "過去 365 天"
+    }
+  ],
+  "web.admin.dashboard.range.title.all": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · 所有時間"
     }
   ],
   "web.admin.dashboard.range.title.day": [
@@ -27553,6 +28607,16 @@
       "value": " · 過去 30 天"
     }
   ],
+  "web.admin.dashboard.range.title.quarter": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · 過去 90 天"
+    }
+  ],
   "web.admin.dashboard.range.title.week": [
     {
       "type": 1,
@@ -27561,6 +28625,22 @@
     {
       "type": 0,
       "value": " · 過去 7 天"
+    }
+  ],
+  "web.admin.dashboard.range.title.year": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · 過去 365 天"
+    }
+  ],
+  "web.admin.dashboard.rangePicker.show.all": [
+    {
+      "type": 0,
+      "value": "顯示所有歷史記錄"
     }
   ],
   "web.admin.dashboard.rangePicker.show.day": [
@@ -27581,10 +28661,22 @@
       "value": "顯示過去 30 天"
     }
   ],
+  "web.admin.dashboard.rangePicker.show.quarter": [
+    {
+      "type": 0,
+      "value": "顯示過去 90 天"
+    }
+  ],
   "web.admin.dashboard.rangePicker.show.week": [
     {
       "type": 0,
       "value": "顯示過去 7 天"
+    }
+  ],
+  "web.admin.dashboard.rangePicker.show.year": [
+    {
+      "type": 0,
+      "value": "顯示過去 365 天"
     }
   ],
   "web.admin.dashboard.widgetCatalog.apiClients.description": [
@@ -27647,6 +28739,78 @@
       "value": "伺服器健康狀態"
     }
   ],
+  "web.admin.dashboard.widgetCatalog.insightsActivePeople.description": [
+    {
+      "type": 0,
+      "value": "每日、每週或每月有觀看內容的個人檔案與帳號"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsActivePeople.title": [
+    {
+      "type": 0,
+      "value": "活躍人數"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsHourOfDay.description": [
+    {
+      "type": 0,
+      "value": "一天中播放次數最多的時段"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsHourOfDay.title": [
+    {
+      "type": 0,
+      "value": "依時段的播放次數"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsLibraryCoverage.description": [
+    {
+      "type": 0,
+      "value": "所選期間內各電影與影集媒體庫的內容播放比例"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsLibraryCoverage.title": [
+    {
+      "type": 0,
+      "value": "媒體庫涵蓋率"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsPlays.description": [
+    {
+      "type": 0,
+      "value": "依播放方式或媒體類型統計的每日、每週或每月播放次數，可追溯至最早的歷史記錄"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsPlays.title": [
+    {
+      "type": 0,
+      "value": "播放趨勢"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsViewingHours.description": [
+    {
+      "type": 0,
+      "value": "依星期與時段顯示開始觀看的時間"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsViewingHours.title": [
+    {
+      "type": 0,
+      "value": "觀看時段"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsWeekday.description": [
+    {
+      "type": 0,
+      "value": "一週中播放次數最多的日子"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsWeekday.title": [
+    {
+      "type": 0,
+      "value": "依星期的播放次數"
+    }
+  ],
   "web.admin.dashboard.widgetCatalog.libraries.description": [
     {
       "type": 0,
@@ -27698,7 +28862,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "最近開始的播放工作階段動態"
+      "value": "所有帳號最近的播放紀錄"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -28636,6 +29800,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.dashboard.widgets.insights.loadFailed": [
+    {
+      "type": 0,
+      "value": "無法載入 Insights。"
+    }
+  ],
   "web.admin.dashboard.widgets.libraries.disabled": [
     {
       "type": 0,
@@ -28934,6 +30104,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.dashboard.widgets.openInsights": [
+    {
+      "type": 0,
+      "value": "深入分析 ›"
+    }
+  ],
   "web.admin.dashboard.widgets.playbackActivity.chartLabelDaily": [
     {
       "type": 1,
@@ -29144,6 +30320,72 @@
     {
       "type": 0,
       "value": "無法載入活動。"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " 播放了 "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " 播放了 "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -37863,6 +39105,12 @@
       "value": "觀看記錄頁面無效。請重新載入頁面。"
     }
   ],
+  "web.admin.history.column.client": [
+    {
+      "type": 0,
+      "value": "用戶端"
+    }
+  ],
   "web.admin.history.column.ended": [
     {
       "type": 0,
@@ -37872,7 +39120,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "記錄"
+      "value": "動作"
     }
   ],
   "web.admin.history.column.media": [
@@ -37902,13 +39150,271 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "使用者"
+      "value": "帳號"
     }
   ],
   "web.admin.history.column.watchTime": [
     {
       "type": 0,
       "value": "觀看時間"
+    }
+  ],
+  "web.admin.history.detail.action.ffmpegLogs": [
+    {
+      "type": 0,
+      "value": "FFmpeg 記錄"
+    }
+  ],
+  "web.admin.history.detail.action.openMedia": [
+    {
+      "type": 0,
+      "value": "開啟作品"
+    }
+  ],
+  "web.admin.history.detail.action.sessionLogs": [
+    {
+      "type": 0,
+      "value": "工作階段記錄"
+    }
+  ],
+  "web.admin.history.detail.column.delivered": [
+    {
+      "type": 0,
+      "value": "傳送"
+    }
+  ],
+  "web.admin.history.detail.column.source": [
+    {
+      "type": 0,
+      "value": "來源"
+    }
+  ],
+  "web.admin.history.detail.column.stream": [
+    {
+      "type": 0,
+      "value": "項目"
+    }
+  ],
+  "web.admin.history.detail.field.account": [
+    {
+      "type": 0,
+      "value": "帳號"
+    }
+  ],
+  "web.admin.history.detail.field.client": [
+    {
+      "type": 0,
+      "value": "用戶端"
+    }
+  ],
+  "web.admin.history.detail.field.clientIp": [
+    {
+      "type": 0,
+      "value": "用戶端 IP"
+    }
+  ],
+  "web.admin.history.detail.field.endPosition": [
+    {
+      "type": 0,
+      "value": "停止位置"
+    }
+  ],
+  "web.admin.history.detail.field.endReason": [
+    {
+      "type": 0,
+      "value": "結束方式"
+    }
+  ],
+  "web.admin.history.detail.field.ended": [
+    {
+      "type": 0,
+      "value": "結束時間"
+    }
+  ],
+  "web.admin.history.detail.field.library": [
+    {
+      "type": 0,
+      "value": "媒體庫"
+    }
+  ],
+  "web.admin.history.detail.field.network": [
+    {
+      "type": 0,
+      "value": "網路"
+    }
+  ],
+  "web.admin.history.detail.field.paused": [
+    {
+      "type": 0,
+      "value": "暫停時間"
+    }
+  ],
+  "web.admin.history.detail.field.platform": [
+    {
+      "type": 0,
+      "value": "平台"
+    }
+  ],
+  "web.admin.history.detail.field.profile": [
+    {
+      "type": 0,
+      "value": "個人檔案"
+    }
+  ],
+  "web.admin.history.detail.field.route": [
+    {
+      "type": 0,
+      "value": "路由"
+    }
+  ],
+  "web.admin.history.detail.field.sessionId": [
+    {
+      "type": 0,
+      "value": "工作階段 ID"
+    }
+  ],
+  "web.admin.history.detail.field.started": [
+    {
+      "type": 0,
+      "value": "開始時間"
+    }
+  ],
+  "web.admin.history.detail.field.watched": [
+    {
+      "type": 0,
+      "value": "觀看時間"
+    }
+  ],
+  "web.admin.history.detail.keyboardHint": [
+    {
+      "type": 0,
+      "value": "使用 ↑ 和 ↓ 切換工作階段"
+    }
+  ],
+  "web.admin.history.detail.loadFailed": [
+    {
+      "type": 0,
+      "value": "無法載入工作階段詳細資料。"
+    }
+  ],
+  "web.admin.history.detail.loading": [
+    {
+      "type": 0,
+      "value": "正在載入工作階段詳細資料……"
+    }
+  ],
+  "web.admin.history.detail.nextSession": [
+    {
+      "type": 0,
+      "value": "下一個工作階段"
+    }
+  ],
+  "web.admin.history.detail.notFound": [
+    {
+      "type": 0,
+      "value": "找不到此播放工作階段。"
+    }
+  ],
+  "web.admin.history.detail.preUpgradeNotice": [
+    {
+      "type": 0,
+      "value": "此記錄建立於開始追蹤詳細播放資訊之前。此工作階段沒有檔案詳細資料與伺服器路由。"
+    }
+  ],
+  "web.admin.history.detail.previousSession": [
+    {
+      "type": 0,
+      "value": "上一個工作階段"
+    }
+  ],
+  "web.admin.history.detail.row.audio": [
+    {
+      "type": 0,
+      "value": "音訊"
+    }
+  ],
+  "web.admin.history.detail.row.bitrate": [
+    {
+      "type": 0,
+      "value": "位元速率"
+    }
+  ],
+  "web.admin.history.detail.row.container": [
+    {
+      "type": 0,
+      "value": "容器"
+    }
+  ],
+  "web.admin.history.detail.row.subtitles": [
+    {
+      "type": 0,
+      "value": "字幕"
+    }
+  ],
+  "web.admin.history.detail.row.video": [
+    {
+      "type": 0,
+      "value": "影片"
+    }
+  ],
+  "web.admin.history.detail.section.clientRoute": [
+    {
+      "type": 0,
+      "value": "帳號、裝置與路由"
+    }
+  ],
+  "web.admin.history.detail.section.reasons": [
+    {
+      "type": 0,
+      "value": "未直接播放的原因"
+    }
+  ],
+  "web.admin.history.detail.section.streams": [
+    {
+      "type": 0,
+      "value": "來源與傳送比較"
+    }
+  ],
+  "web.admin.history.detail.section.timing": [
+    {
+      "type": 0,
+      "value": "時間與觀看進度"
+    }
+  ],
+  "web.admin.history.detail.subtitlesBurnIn": [
+    {
+      "type": 0,
+      "value": "已燒錄"
+    }
+  ],
+  "web.admin.history.detail.subtitlesEmbedded": [
+    {
+      "type": 0,
+      "value": "內嵌"
+    }
+  ],
+  "web.admin.history.detail.subtitlesHls": [
+    {
+      "type": 0,
+      "value": "串流（HLS）"
+    }
+  ],
+  "web.admin.history.detail.subtitlesNone": [
+    {
+      "type": 0,
+      "value": "無"
+    }
+  ],
+  "web.admin.history.detail.subtitlesSidecar": [
+    {
+      "type": 0,
+      "value": "外部檔案"
+    }
+  ],
+  "web.admin.history.detail.title": [
+    {
+      "type": 0,
+      "value": "工作階段詳細資料"
     }
   ],
   "web.admin.history.duration.hoursMinutes": [
@@ -37966,7 +39472,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "沒有符合目前篩選條件的播放記錄。請試著調整使用者、個人檔案或完成狀態篩選條件。"
+      "value": "沒有符合這些篩選條件的工作階段。請試著清除或調整篩選條件。"
     }
   ],
   "web.admin.history.empty.title": [
@@ -37975,10 +39481,144 @@
       "value": "沒有播放記錄"
     }
   ],
+  "web.admin.history.endReason.aborted": [
+    {
+      "type": 0,
+      "value": "由伺服器結束"
+    }
+  ],
+  "web.admin.history.endReason.expired": [
+    {
+      "type": 0,
+      "value": "已逾時"
+    }
+  ],
+  "web.admin.history.endReason.replaced": [
+    {
+      "type": 0,
+      "value": "已切換串流"
+    }
+  ],
+  "web.admin.history.endReason.stopped": [
+    {
+      "type": 0,
+      "value": "已停止"
+    }
+  ],
+  "web.admin.history.endReason.terminated": [
+    {
+      "type": 0,
+      "value": "由管理員停止"
+    }
+  ],
+  "web.admin.history.filter.activeChip.client": [
+    {
+      "type": 0,
+      "value": "用戶端："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.history.filter.activeChip.codec": [
+    {
+      "type": 0,
+      "value": "編解碼器："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.history.filter.activeChip.dateRange": [
+    {
+      "type": 0,
+      "value": "日期："
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "web.admin.history.filter.activeChip.fromDate": [
+    {
+      "type": 0,
+      "value": "自 "
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": " 起"
+    }
+  ],
+  "web.admin.history.filter.activeChip.platform": [
+    {
+      "type": 0,
+      "value": "平台："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.history.filter.activeChip.reason": [
+    {
+      "type": 0,
+      "value": "原因："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.history.filter.activeChip.toDate": [
+    {
+      "type": 0,
+      "value": "至 "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    },
+    {
+      "type": 0,
+      "value": " 止"
+    }
+  ],
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "所有播放"
+      "value": "所有狀態"
+    }
+  ],
+  "web.admin.history.filter.allLibraries": [
+    {
+      "type": 0,
+      "value": "所有媒體庫"
+    }
+  ],
+  "web.admin.history.filter.allLocations": [
+    {
+      "type": 0,
+      "value": "所有網路"
+    }
+  ],
+  "web.admin.history.filter.allMethods": [
+    {
+      "type": 0,
+      "value": "所有方式"
     }
   ],
   "web.admin.history.filter.allProfiles": [
@@ -37990,13 +39630,19 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "所有使用者"
+      "value": "所有帳號"
+    }
+  ],
+  "web.admin.history.filter.burnInOnly": [
+    {
+      "type": 0,
+      "value": "字幕燒錄"
     }
   ],
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "請先選擇使用者"
+      "value": "請先選擇帳號"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -38005,10 +39651,36 @@
       "value": "已完成"
     }
   ],
+  "web.admin.history.filter.locationLocal": [
+    {
+      "type": 0,
+      "value": "區域"
+    }
+  ],
+  "web.admin.history.filter.locationRemote": [
+    {
+      "type": 0,
+      "value": "遠端"
+    }
+  ],
   "web.admin.history.filter.partial": [
     {
       "type": 0,
       "value": "部分觀看"
+    }
+  ],
+  "web.admin.history.filter.removeChip": [
+    {
+      "type": 0,
+      "value": "移除「"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "」篩選條件"
     }
   ],
   "web.admin.history.filter.reset": [
@@ -38017,10 +39689,16 @@
       "value": "重設"
     }
   ],
+  "web.admin.history.filter.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "搜尋作品、帳號、用戶端或工作階段 ID……"
+    }
+  ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "已套用項目篩選"
+      "value": "作品："
     }
   ],
   "web.admin.history.loadError": [
@@ -38051,6 +39729,12 @@
     {
       "type": 0,
       "value": "未知"
+    }
+  ],
+  "web.admin.history.pagination.firstPage": [
+    {
+      "type": 0,
+      "value": "第一頁"
     }
   ],
   "web.admin.history.pagination.next": [
@@ -38116,6 +39800,32 @@
       "value": " 筆"
     }
   ],
+  "web.admin.history.pagination.summary": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "顯示 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 列"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.recent.autoRefreshing": [
     {
       "type": 0,
@@ -38147,7 +39857,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "估計值：記錄於開始測量觀看時間之前"
+      "value": "估計值（記錄於開始追蹤確切觀看時間之前）"
     }
   ],
   "web.admin.history.row.meta": [
@@ -38205,13 +39915,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "顯示的列數"
+      "value": "已顯示"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "所有使用者和個人檔案已結束的播放記錄。"
+      "value": "所有帳號和個人檔案過去的播放工作階段。"
     }
   ],
   "web.admin.history.title": [
@@ -40232,6 +41942,2380 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "記錄"
+    }
+  ],
+  "web.admin.insights.action.liveActivity": [
+    {
+      "type": 0,
+      "value": "即時活動"
+    }
+  ],
+  "web.admin.insights.activity.activePeople.subtitle": [
+    {
+      "type": 0,
+      "value": "每個時段開始觀看的個人檔案和帳號"
+    }
+  ],
+  "web.admin.insights.activity.activePeople.title": [
+    {
+      "type": 0,
+      "value": "活躍人數"
+    }
+  ],
+  "web.admin.insights.activity.endReasons.subtitle": [
+    {
+      "type": 0,
+      "value": "此時段內的工作階段，依結束原因分類。逾時次數多可能表示 App 正在當機或失去連線。"
+    }
+  ],
+  "web.admin.insights.activity.endReasons.title": [
+    {
+      "type": 0,
+      "value": "工作階段結束方式"
+    }
+  ],
+  "web.admin.insights.activity.endReasons.unknown": [
+    {
+      "type": 0,
+      "value": "未記錄"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.cellTooltip": [
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "hour"
+    },
+    {
+      "type": 0,
+      "value": "："
+    },
+    {
+      "type": 1,
+      "value": "plays"
+    },
+    {
+      "type": 0,
+      "value": "（"
+    },
+    {
+      "type": 1,
+      "value": "watch_time"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有觀看活動"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.less": [
+    {
+      "type": 0,
+      "value": "較少"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.more": [
+    {
+      "type": 0,
+      "value": "較多"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.subtitle": [
+    {
+      "type": 0,
+      "value": "開始觀看的時間（"
+    },
+    {
+      "type": 1,
+      "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.title": [
+    {
+      "type": 0,
+      "value": "觀看時段"
+    }
+  ],
+  "web.admin.insights.activity.hour.title": [
+    {
+      "type": 0,
+      "value": "依一天中各小時的播放次數"
+    }
+  ],
+  "web.admin.insights.activity.kpi.completionDetail": [
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " 次中有 "
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " 次看完"
+    }
+  ],
+  "web.admin.insights.activity.kpi.completionRate": [
+    {
+      "type": 0,
+      "value": "完成率"
+    }
+  ],
+  "web.admin.insights.activity.kpi.peakStreams": [
+    {
+      "type": 0,
+      "value": "尖峰同時串流數"
+    }
+  ],
+  "web.admin.insights.activity.kpi.peakStreamsAt": [
+    {
+      "type": 0,
+      "value": "於 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.insights.activity.kpi.peakStreamsNone": [
+    {
+      "type": 0,
+      "value": "尚無串流資料"
+    }
+  ],
+  "web.admin.insights.activity.kpi.plays": [
+    {
+      "type": 0,
+      "value": "播放次數"
+    }
+  ],
+  "web.admin.insights.activity.kpi.playsBreakdown": [
+    {
+      "type": 6,
+      "value": "movie_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "movies"
+            },
+            {
+              "type": 0,
+              "value": " 部電影"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 6,
+      "value": "episode_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "episodes"
+            },
+            {
+              "type": 0,
+              "value": " 集"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.activity.kpi.watchTime": [
+    {
+      "type": 0,
+      "value": "觀看時間"
+    }
+  ],
+  "web.admin.insights.activity.kpi.watchTimeMeasured": [
+    {
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " 個工作階段中有 "
+            },
+            {
+              "type": 1,
+              "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": " 個為確切值"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.activity.peak.chartLabel": [
+    {
+      "type": 0,
+      "value": "每日尖峰同時串流數"
+    }
+  ],
+  "web.admin.insights.activity.peak.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有串流資料"
+    }
+  ],
+  "web.admin.insights.activity.peak.scopeNotice": [
+    {
+      "type": 0,
+      "value": "一律顯示整個伺服器的資料，帳號和媒體庫篩選條件不適用於此。"
+    }
+  ],
+  "web.admin.insights.activity.peak.subtitle": [
+    {
+      "type": 0,
+      "value": "每日同時播放的最多串流數（整個伺服器，UTC）"
+    }
+  ],
+  "web.admin.insights.activity.peak.title": [
+    {
+      "type": 0,
+      "value": "尖峰同時串流數"
+    }
+  ],
+  "web.admin.insights.activity.volume.chartLabel": [
+    {
+      "type": 0,
+      "value": "播放趨勢"
+    }
+  ],
+  "web.admin.insights.activity.volume.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有播放"
+    }
+  ],
+  "web.admin.insights.activity.volume.metricPlays": [
+    {
+      "type": 0,
+      "value": "播放次數"
+    }
+  ],
+  "web.admin.insights.activity.volume.metricWatchTime": [
+    {
+      "type": 0,
+      "value": "觀看時間"
+    }
+  ],
+  "web.admin.insights.activity.volume.seriesEpisodes": [
+    {
+      "type": 0,
+      "value": "單集"
+    }
+  ],
+  "web.admin.insights.activity.volume.seriesMovies": [
+    {
+      "type": 0,
+      "value": "電影"
+    }
+  ],
+  "web.admin.insights.activity.volume.seriesOther": [
+    {
+      "type": 0,
+      "value": "其他"
+    }
+  ],
+  "web.admin.insights.activity.volume.splitMediaType": [
+    {
+      "type": 0,
+      "value": "媒體類型"
+    }
+  ],
+  "web.admin.insights.activity.volume.splitMethod": [
+    {
+      "type": 0,
+      "value": "播放方式"
+    }
+  ],
+  "web.admin.insights.activity.volume.subtitle": [
+    {
+      "type": 0,
+      "value": "暫停後繼續播放只計為一次播放。未看完且不到 30 秒就停止的不計入。"
+    }
+  ],
+  "web.admin.insights.activity.volume.title": [
+    {
+      "type": 0,
+      "value": "播放趨勢"
+    }
+  ],
+  "web.admin.insights.activity.weekday.title": [
+    {
+      "type": 0,
+      "value": "依一週中各日的播放次數"
+    }
+  ],
+  "web.admin.insights.addToDashboard.add": [
+    {
+      "type": 0,
+      "value": "新增至儀表板"
+    }
+  ],
+  "web.admin.insights.addToDashboard.addLabel": [
+    {
+      "type": 0,
+      "value": "將 "
+    },
+    {
+      "type": 1,
+      "value": "chart"
+    },
+    {
+      "type": 0,
+      "value": " 新增至你的儀表板"
+    }
+  ],
+  "web.admin.insights.addToDashboard.added": [
+    {
+      "type": 0,
+      "value": "已將 "
+    },
+    {
+      "type": 1,
+      "value": "chart"
+    },
+    {
+      "type": 0,
+      "value": " 新增至你的儀表板"
+    }
+  ],
+  "web.admin.insights.addToDashboard.hint": [
+    {
+      "type": 0,
+      "value": "為整個伺服器新增此圖表。媒體庫和帳號篩選條件不會一併套用。"
+    }
+  ],
+  "web.admin.insights.addToDashboard.onDashboard": [
+    {
+      "type": 0,
+      "value": "已在儀表板上"
+    }
+  ],
+  "web.admin.insights.addToDashboard.onDashboardLabel": [
+    {
+      "type": 1,
+      "value": "chart"
+    },
+    {
+      "type": 0,
+      "value": " 已在你的儀表板上。開啟儀表板。"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.apiServer": [
+    {
+      "type": 0,
+      "value": "API 伺服器"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有頻寬資料"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.metricPeak": [
+    {
+      "type": 0,
+      "value": "尖峰速率"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.metricVolume": [
+    {
+      "type": 0,
+      "value": "傳送資料量"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.peakLabel": [
+    {
+      "type": 0,
+      "value": "每日尖峰頻寬"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.subtitle": [
+    {
+      "type": 0,
+      "value": "整個伺服器每日的傳送資料量與尖峰速率（UTC）。"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.title": [
+    {
+      "type": 0,
+      "value": "頻寬趨勢"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.viewNodes": [
+    {
+      "type": 0,
+      "value": "依節點"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.viewTotal": [
+    {
+      "type": 0,
+      "value": "總計"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.volumeLabel": [
+    {
+      "type": 0,
+      "value": "每日傳送資料量"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.dailyAverage": [
+    {
+      "type": 0,
+      "value": "每日平均"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.dailyAverageSub": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "共 "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " 個活躍日"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.egressSplit": [
+    {
+      "type": 0,
+      "value": "播放 "
+    },
+    {
+      "type": 1,
+      "value": "playback"
+    },
+    {
+      "type": 0,
+      "value": " · 下載 "
+    },
+    {
+      "type": 1,
+      "value": "downloads"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.nodeSplit": [
+    {
+      "type": 0,
+      "value": "API 伺服器 "
+    },
+    {
+      "type": 1,
+      "value": "api"
+    },
+    {
+      "type": 0,
+      "value": " · 串流節點 "
+    },
+    {
+      "type": 1,
+      "value": "nodes"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.peakEgress": [
+    {
+      "type": 0,
+      "value": "尖峰速率"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.peakEgressAt": [
+    {
+      "type": 0,
+      "value": "於 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.remoteShare": [
+    {
+      "type": 0,
+      "value": "遠端觀看"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
+    {
+      "type": 0,
+      "value": "遠端 "
+    },
+    {
+      "type": 1,
+      "value": "remote"
+    },
+    {
+      "type": 0,
+      "value": " · 本機 "
+    },
+    {
+      "type": 1,
+      "value": "local"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
+    {
+      "type": 0,
+      "value": "尚無網路資訊"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.totalEgress": [
+    {
+      "type": 0,
+      "value": "傳送資料總量"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.column.node": [
+    {
+      "type": 0,
+      "value": "節點"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.column.peak": [
+    {
+      "type": 0,
+      "value": "尖峰速率"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.column.share": [
+    {
+      "type": 0,
+      "value": "占比"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.column.total": [
+    {
+      "type": 0,
+      "value": "傳送資料量"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有遠端節點流量"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.title": [
+    {
+      "type": 0,
+      "value": "各節點頻寬"
+    }
+  ],
+  "web.admin.insights.coverage.metricsStart": [
+    {
+      "type": 0,
+      "value": "頻寬記錄自 "
+    },
+    {
+      "type": 1,
+      "value": "since"
+    },
+    {
+      "type": 0,
+      "value": " 起。"
+    }
+  ],
+  "web.admin.insights.coverage.routeFactsNone": [
+    {
+      "type": 0,
+      "value": "這些較舊的工作階段沒有詳細播放資訊。新的工作階段會自動記錄。"
+    }
+  ],
+  "web.admin.insights.coverage.routeFactsPartial": [
+    {
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " 個工作階段中有 "
+            },
+            {
+              "type": 1,
+              "value": "recorded"
+            },
+            {
+              "type": 0,
+              "value": " 個有詳細播放資訊（自 "
+            },
+            {
+              "type": 1,
+              "value": "since"
+            },
+            {
+              "type": 0,
+              "value": " 起追蹤）。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.coverage.watchTimePartial": [
+    {
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " 個工作階段中有 "
+            },
+            {
+              "type": 1,
+              "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": " 個有確切觀看時間；較舊的工作階段為估計值。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.detail.action.history": [
+    {
+      "type": 0,
+      "value": "檢視記錄"
+    }
+  ],
+  "web.admin.insights.detail.noPlays": [
+    {
+      "type": 0,
+      "value": "此時段內沒有播放"
+    }
+  ],
+  "web.admin.insights.detail.playsOverTime": [
+    {
+      "type": 0,
+      "value": "播放次數趨勢"
+    }
+  ],
+  "web.admin.insights.detail.viewers": [
+    {
+      "type": 0,
+      "value": "觀眾"
+    }
+  ],
+  "web.admin.insights.detail.window": [
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "web.admin.insights.devices.audio.channels.mono": [
+    {
+      "type": 0,
+      "value": "單聲道"
+    }
+  ],
+  "web.admin.insights.devices.audio.channels.stereo": [
+    {
+      "type": 0,
+      "value": "立體聲"
+    }
+  ],
+  "web.admin.insights.devices.audio.channels.surround": [
+    {
+      "type": 0,
+      "value": "環繞音效"
+    }
+  ],
+  "web.admin.insights.devices.audio.channelsTitle": [
+    {
+      "type": 0,
+      "value": "聲道"
+    }
+  ],
+  "web.admin.insights.devices.audio.decision.direct": [
+    {
+      "type": 0,
+      "value": "原始檔案"
+    }
+  ],
+  "web.admin.insights.devices.audio.decision.remux": [
+    {
+      "type": 0,
+      "value": "已複製"
+    }
+  ],
+  "web.admin.insights.devices.audio.decision.transcode": [
+    {
+      "type": 0,
+      "value": "已轉換"
+    }
+  ],
+  "web.admin.insights.devices.audio.decisionTitle": [
+    {
+      "type": 0,
+      "value": "處理方式"
+    }
+  ],
+  "web.admin.insights.devices.audio.subtitle": [
+    {
+      "type": 0,
+      "value": "每個工作階段播放的音軌、傳送至 App 的方式及其聲道"
+    }
+  ],
+  "web.admin.insights.devices.audio.title": [
+    {
+      "type": 0,
+      "value": "音訊"
+    }
+  ],
+  "web.admin.insights.devices.burnInCodecs.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有燒錄字幕"
+    }
+  ],
+  "web.admin.insights.devices.burnInCodecs.title": [
+    {
+      "type": 0,
+      "value": "燒錄字幕格式"
+    }
+  ],
+  "web.admin.insights.devices.hwAccel.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有影片轉碼"
+    }
+  ],
+  "web.admin.insights.devices.hwAccel.software": [
+    {
+      "type": 0,
+      "value": "軟體（CPU）"
+    }
+  ],
+  "web.admin.insights.devices.hwAccel.title": [
+    {
+      "type": 0,
+      "value": "硬體加速"
+    }
+  ],
+  "web.admin.insights.devices.hwAccel.unknown": [
+    {
+      "type": 0,
+      "value": "不明"
+    }
+  ],
+  "web.admin.insights.devices.kpi.directPlayDetail": [
+    {
+      "type": 0,
+      "value": "直接播放 "
+    },
+    {
+      "type": 1,
+      "value": "direct"
+    },
+    {
+      "type": 0,
+      "value": " · 直接串流 "
+    },
+    {
+      "type": 1,
+      "value": "remux"
+    },
+    {
+      "type": 0,
+      "value": " · 轉碼 "
+    },
+    {
+      "type": 1,
+      "value": "transcode"
+    }
+  ],
+  "web.admin.insights.devices.kpi.directPlayRate": [
+    {
+      "type": 0,
+      "value": "直接播放比例"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hdrToneMap": [
+    {
+      "type": 0,
+      "value": "HDR 色調對應"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hdrToneMapDetail": [
+    {
+      "type": 0,
+      "value": "硬體 "
+    },
+    {
+      "type": 1,
+      "value": "hw"
+    },
+    {
+      "type": 0,
+      "value": " · CPU "
+    },
+    {
+      "type": 1,
+      "value": "sw"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hwSplit": [
+    {
+      "type": 0,
+      "value": "硬體轉碼"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hwSplitDetail": [
+    {
+      "type": 0,
+      "value": "硬體 "
+    },
+    {
+      "type": 1,
+      "value": "hw"
+    },
+    {
+      "type": 0,
+      "value": " · CPU "
+    },
+    {
+      "type": 1,
+      "value": "sw"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hwSplitNone": [
+    {
+      "type": 0,
+      "value": "沒有轉碼"
+    }
+  ],
+  "web.admin.insights.devices.kpi.subtitleBurnIn": [
+    {
+      "type": 0,
+      "value": "字幕燒錄"
+    }
+  ],
+  "web.admin.insights.devices.kpi.subtitleBurnInDetail": [
+    {
+      "type": 0,
+      "value": "占轉碼的 "
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.admin.insights.devices.languages": [
+    {
+      "type": 0,
+      "value": "語言"
+    }
+  ],
+  "web.admin.insights.devices.matrix.allSamples": [
+    {
+      "type": 0,
+      "value": "全部"
+    }
+  ],
+  "web.admin.insights.devices.matrix.cellTooltip": [
+    {
+      "type": 6,
+      "value": "transcode_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "client"
+            },
+            {
+              "type": 0,
+              "value": " · "
+            },
+            {
+              "type": 1,
+              "value": "codec"
+            },
+            {
+              "type": 0,
+              "value": "："
+            },
+            {
+              "type": 1,
+              "value": "direct_rate"
+            },
+            {
+              "type": 0,
+              "value": "% 直接播放（"
+            },
+            {
+              "type": 1,
+              "value": "sessions"
+            },
+            {
+              "type": 0,
+              "value": "；"
+            },
+            {
+              "type": 1,
+              "value": "transcodes"
+            },
+            {
+              "type": 0,
+              "value": " 次轉碼）"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.devices.matrix.clientColumn": [
+    {
+      "type": 0,
+      "value": "用戶端／平台"
+    }
+  ],
+  "web.admin.insights.devices.matrix.empty": [
+    {
+      "type": 0,
+      "value": "工作階段數量還不夠。請切換至「全部」或擴大日期範圍。"
+    }
+  ],
+  "web.admin.insights.devices.matrix.minSessions": [
+    {
+      "type": 0,
+      "value": "5 個以上工作階段"
+    }
+  ],
+  "web.admin.insights.devices.matrix.subtitle": [
+    {
+      "type": 0,
+      "value": "各 App 不經轉換直接播放各影片格式的頻率。點選儲存格即可查看這些工作階段。"
+    }
+  ],
+  "web.admin.insights.devices.matrix.title": [
+    {
+      "type": 0,
+      "value": "依 App 與影片格式的直接播放"
+    }
+  ],
+  "web.admin.insights.devices.matrix.totalColumn": [
+    {
+      "type": 0,
+      "value": "總計"
+    }
+  ],
+  "web.admin.insights.devices.protocol.jellyfin": [
+    {
+      "type": 0,
+      "value": "Jellyfin App"
+    }
+  ],
+  "web.admin.insights.devices.protocol.silo": [
+    {
+      "type": 0,
+      "value": "Silo App"
+    }
+  ],
+  "web.admin.insights.devices.protocol.subtitle": [
+    {
+      "type": 0,
+      "value": "來自 Silo 自家 App 以及透過 Jellyfin 相容性連線之 App 的工作階段"
+    }
+  ],
+  "web.admin.insights.devices.protocol.title": [
+    {
+      "type": 0,
+      "value": "Silo App 與 Jellyfin App"
+    }
+  ],
+  "web.admin.insights.devices.protocol.total": [
+    {
+      "type": 0,
+      "value": "工作階段"
+    }
+  ],
+  "web.admin.insights.devices.reasons.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有記錄到轉換原因"
+    }
+  ],
+  "web.admin.insights.devices.reasons.subtitle": [
+    {
+      "type": 0,
+      "value": "點選原因即可查看相符的工作階段。"
+    }
+  ],
+  "web.admin.insights.devices.reasons.title": [
+    {
+      "type": 0,
+      "value": "串流未直接播放的原因"
+    }
+  ],
+  "web.admin.insights.devices.resolution.change": [
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": " → "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "web.admin.insights.devices.resolution.delivered": [
+    {
+      "type": 0,
+      "value": "輸出解析度"
+    }
+  ],
+  "web.admin.insights.devices.resolution.downscaled": [
+    {
+      "type": 0,
+      "value": "已降低解析度"
+    }
+  ],
+  "web.admin.insights.devices.resolution.downscaledEmpty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有降低解析度的串流"
+    }
+  ],
+  "web.admin.insights.devices.resolution.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有工作階段"
+    }
+  ],
+  "web.admin.insights.devices.resolution.fuhd": [
+    {
+      "type": 0,
+      "value": "8K"
+    }
+  ],
+  "web.admin.insights.devices.resolution.sd": [
+    {
+      "type": 0,
+      "value": "SD"
+    }
+  ],
+  "web.admin.insights.devices.resolution.source": [
+    {
+      "type": 0,
+      "value": "來源"
+    }
+  ],
+  "web.admin.insights.devices.resolution.subtitle": [
+    {
+      "type": 0,
+      "value": "原始影片解析度與實際串流解析度比較。"
+    }
+  ],
+  "web.admin.insights.devices.resolution.title": [
+    {
+      "type": 0,
+      "value": "解析度"
+    }
+  ],
+  "web.admin.insights.devices.resolution.uhd": [
+    {
+      "type": 0,
+      "value": "4K"
+    }
+  ],
+  "web.admin.insights.devices.resolution.unknown": [
+    {
+      "type": 0,
+      "value": "未知"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.delivery.burnIn": [
+    {
+      "type": 0,
+      "value": "已燒錄"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.delivery.embedded": [
+    {
+      "type": 0,
+      "value": "串流內的音軌"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.delivery.hlsRendition": [
+    {
+      "type": 0,
+      "value": "串流字幕軌"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.delivery.sidecar": [
+    {
+      "type": 0,
+      "value": "獨立檔案"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.deliveryTitle": [
+    {
+      "type": 0,
+      "value": "顯示方式"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有顯示字幕"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.flags": [
+    {
+      "type": 0,
+      "value": "強制字幕 "
+    },
+    {
+      "type": 1,
+      "value": "forced"
+    },
+    {
+      "type": 0,
+      "value": " · 聽障字幕 "
+    },
+    {
+      "type": 1,
+      "value": "hearing_impaired"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.noFacts": [
+    {
+      "type": 0,
+      "value": "此時段內尚無具詳細播放資訊的工作階段。"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.summary": [
+    {
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "percent"
+            },
+            {
+              "type": 0,
+              "value": "% 的工作階段顯示了字幕（"
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " 個具詳細播放資訊的工作階段中有 "
+            },
+            {
+              "type": 1,
+              "value": "subtitled"
+            },
+            {
+              "type": 0,
+              "value": " 個）"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.title": [
+    {
+      "type": 0,
+      "value": "字幕"
+    }
+  ],
+  "web.admin.insights.devices.topTranscoders.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有轉碼"
+    }
+  ],
+  "web.admin.insights.devices.topTranscoders.title": [
+    {
+      "type": 0,
+      "value": "最常轉碼的用戶端"
+    }
+  ],
+  "web.admin.insights.devices.topTranscoders.transcodeShare": [
+    {
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " 個工作階段中有 "
+            },
+            {
+              "type": 1,
+              "value": "transcodes"
+            },
+            {
+              "type": 0,
+              "value": " 個"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.devices.unknownClient": [
+    {
+      "type": 0,
+      "value": "未知的用戶端"
+    }
+  ],
+  "web.admin.insights.devices.versions.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有 App 回報版本"
+    }
+  ],
+  "web.admin.insights.devices.versions.lastSeenColumn": [
+    {
+      "type": 0,
+      "value": "上次活動"
+    }
+  ],
+  "web.admin.insights.devices.versions.sessionsColumn": [
+    {
+      "type": 0,
+      "value": "工作階段"
+    }
+  ],
+  "web.admin.insights.devices.versions.subtitle": [
+    {
+      "type": 0,
+      "value": "此時段內 App 回報的版本，依工作階段數由多至少排列"
+    }
+  ],
+  "web.admin.insights.devices.versions.title": [
+    {
+      "type": 0,
+      "value": "App 版本"
+    }
+  ],
+  "web.admin.insights.devices.versions.versionColumn": [
+    {
+      "type": 0,
+      "value": "版本"
+    }
+  ],
+  "web.admin.insights.episodeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 集"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.filter.allAccounts": [
+    {
+      "type": 0,
+      "value": "所有帳號"
+    }
+  ],
+  "web.admin.insights.filter.allLibraries": [
+    {
+      "type": 0,
+      "value": "所有媒體庫"
+    }
+  ],
+  "web.admin.insights.filter.fromDate": [
+    {
+      "type": 0,
+      "value": "開始日期"
+    }
+  ],
+  "web.admin.insights.filter.rangeLabel": [
+    {
+      "type": 0,
+      "value": "時間範圍"
+    }
+  ],
+  "web.admin.insights.filter.refresh": [
+    {
+      "type": 0,
+      "value": "重新整理"
+    }
+  ],
+  "web.admin.insights.filter.refreshing": [
+    {
+      "type": 0,
+      "value": "正在重新整理"
+    }
+  ],
+  "web.admin.insights.filter.reset": [
+    {
+      "type": 0,
+      "value": "重設"
+    }
+  ],
+  "web.admin.insights.filter.timezone": [
+    {
+      "type": 0,
+      "value": "時區"
+    }
+  ],
+  "web.admin.insights.filter.timezoneBrowser": [
+    {
+      "type": 1,
+      "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": "（本地）"
+    }
+  ],
+  "web.admin.insights.filter.timezoneUtc": [
+    {
+      "type": 0,
+      "value": "UTC"
+    }
+  ],
+  "web.admin.insights.filter.toDate": [
+    {
+      "type": 0,
+      "value": "結束日期"
+    }
+  ],
+  "web.admin.insights.library.coverage.detail": [
+    {
+      "type": 6,
+      "value": "titles_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "titles"
+            },
+            {
+              "type": 0,
+              "value": " 部作品中已播放 "
+            },
+            {
+              "type": 1,
+              "value": "played"
+            },
+            {
+              "type": 0,
+              "value": " 部 · "
+            },
+            {
+              "type": 1,
+              "value": "never"
+            },
+            {
+              "type": 0,
+              "value": " 部從未開始"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.library.coverage.empty": [
+    {
+      "type": 0,
+      "value": "尚無電影或影集媒體庫"
+    }
+  ],
+  "web.admin.insights.library.coverage.playedShare": [
+    {
+      "type": 0,
+      "value": "已播放 "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.admin.insights.library.coverage.subtitle": [
+    {
+      "type": 0,
+      "value": "此時段內各媒體庫中已播放的電影與影集比例。影集只要有任一集播放過即計入。"
+    }
+  ],
+  "web.admin.insights.library.coverage.title": [
+    {
+      "type": 0,
+      "value": "媒體庫覆蓋率"
+    }
+  ],
+  "web.admin.insights.library.decades.label": [
+    {
+      "type": 1,
+      "value": "year"
+    },
+    {
+      "type": 0,
+      "value": " 年代"
+    }
+  ],
+  "web.admin.insights.library.decades.title": [
+    {
+      "type": 0,
+      "value": "依發行年代的播放次數"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.day": [
+    {
+      "type": 0,
+      "value": "一天內"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有新增作品"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.later": [
+    {
+      "type": 0,
+      "value": "更久之後"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.month": [
+    {
+      "type": 0,
+      "value": "一個月內"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.notYet": [
+    {
+      "type": 0,
+      "value": "尚未播放"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.subtitle": [
+    {
+      "type": 0,
+      "value": "此時段新增的作品，依等待有人播放的時間長短分類"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.title": [
+    {
+      "type": 0,
+      "value": "首次播放等待時間"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.week": [
+    {
+      "type": 0,
+      "value": "一週內"
+    }
+  ],
+  "web.admin.insights.library.genres.subtitle": [
+    {
+      "type": 0,
+      "value": "具有多個類型的作品會計入每個類型，因此加總會超過總數。"
+    }
+  ],
+  "web.admin.insights.library.genres.title": [
+    {
+      "type": 0,
+      "value": "依類型的播放次數"
+    }
+  ],
+  "web.admin.insights.library.kpi.added": [
+    {
+      "type": 0,
+      "value": "此時段新增"
+    }
+  ],
+  "web.admin.insights.library.kpi.addedDetail": [
+    {
+      "type": 0,
+      "value": "目前已播放 "
+    },
+    {
+      "type": 1,
+      "value": "played"
+    },
+    {
+      "type": 0,
+      "value": " 部"
+    }
+  ],
+  "web.admin.insights.library.kpi.firstPlay": [
+    {
+      "type": 0,
+      "value": "首次播放等待時間"
+    }
+  ],
+  "web.admin.insights.library.kpi.firstPlayDays": [
+    {
+      "type": 1,
+      "value": "days"
+    },
+    {
+      "type": 0,
+      "value": " 天"
+    }
+  ],
+  "web.admin.insights.library.kpi.firstPlayDetail": [
+    {
+      "type": 0,
+      "value": "中位數，以此時段新增的作品計算"
+    }
+  ],
+  "web.admin.insights.library.kpi.neverStarted": [
+    {
+      "type": 0,
+      "value": "從未開始播放"
+    }
+  ],
+  "web.admin.insights.library.kpi.neverStartedSince": [
+    {
+      "type": 0,
+      "value": "自 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " 開始記錄以來"
+    }
+  ],
+  "web.admin.insights.library.kpi.played": [
+    {
+      "type": 0,
+      "value": "已播放作品"
+    }
+  ],
+  "web.admin.insights.library.kpi.playedDetail": [
+    {
+      "type": 6,
+      "value": "titles_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "titles"
+            },
+            {
+              "type": 0,
+              "value": " 部作品中已播放 "
+            },
+            {
+              "type": 1,
+              "value": "played"
+            },
+            {
+              "type": 0,
+              "value": " 部"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.library.ratings.title": [
+    {
+      "type": 0,
+      "value": "依分級的播放次數"
+    }
+  ],
+  "web.admin.insights.library.titleCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 部作品"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.library.unknown": [
+    {
+      "type": 0,
+      "value": "未知"
+    }
+  ],
+  "web.admin.insights.library.unplayed.added": [
+    {
+      "type": 1,
+      "value": "library"
+    },
+    {
+      "type": 0,
+      "value": " · 於 "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " 新增"
+    }
+  ],
+  "web.admin.insights.library.unplayed.empty": [
+    {
+      "type": 0,
+      "value": "此時段新增的所有作品都已播放"
+    }
+  ],
+  "web.admin.insights.library.unplayed.subtitle": [
+    {
+      "type": 0,
+      "value": "此時段新增、尚無人播放的最新作品"
+    }
+  ],
+  "web.admin.insights.library.unplayed.title": [
+    {
+      "type": 0,
+      "value": "已新增但尚未播放"
+    }
+  ],
+  "web.admin.insights.loadError": [
+    {
+      "type": 0,
+      "value": "無法載入洞察資料。"
+    }
+  ],
+  "web.admin.insights.openHistory": [
+    {
+      "type": 0,
+      "value": "記錄 ›"
+    }
+  ],
+  "web.admin.insights.people.action.details": [
+    {
+      "type": 0,
+      "value": "詳細資料"
+    }
+  ],
+  "web.admin.insights.people.action.detailsFor": [
+    {
+      "type": 0,
+      "value": "顯示 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 的洞察資料"
+    }
+  ],
+  "web.admin.insights.people.collapseProfiles": [
+    {
+      "type": 0,
+      "value": "隱藏 "
+    },
+    {
+      "type": 1,
+      "value": "account"
+    },
+    {
+      "type": 0,
+      "value": " 的家庭個人檔案"
+    }
+  ],
+  "web.admin.insights.people.column.account": [
+    {
+      "type": 0,
+      "value": "帳號"
+    }
+  ],
+  "web.admin.insights.people.column.actions": [
+    {
+      "type": 0,
+      "value": "動作"
+    }
+  ],
+  "web.admin.insights.people.column.completionRate": [
+    {
+      "type": 0,
+      "value": "完成率"
+    }
+  ],
+  "web.admin.insights.people.column.directRate": [
+    {
+      "type": 0,
+      "value": "直接播放"
+    }
+  ],
+  "web.admin.insights.people.column.lastSeen": [
+    {
+      "type": 0,
+      "value": "上次活動"
+    }
+  ],
+  "web.admin.insights.people.column.plays": [
+    {
+      "type": 0,
+      "value": "播放次數"
+    }
+  ],
+  "web.admin.insights.people.column.watchTime": [
+    {
+      "type": 0,
+      "value": "觀看時間"
+    }
+  ],
+  "web.admin.insights.people.empty": [
+    {
+      "type": 0,
+      "value": "沒有符合這些篩選條件的觀看活動"
+    }
+  ],
+  "web.admin.insights.people.expandProfiles": [
+    {
+      "type": 0,
+      "value": "顯示 "
+    },
+    {
+      "type": 1,
+      "value": "account"
+    },
+    {
+      "type": 0,
+      "value": " 的家庭個人檔案"
+    }
+  ],
+  "web.admin.insights.people.kpi.activeAccounts": [
+    {
+      "type": 0,
+      "value": "活躍帳號"
+    }
+  ],
+  "web.admin.insights.people.kpi.activeProfiles": [
+    {
+      "type": 0,
+      "value": "活躍個人檔案"
+    }
+  ],
+  "web.admin.insights.people.kpi.totalWatchTime": [
+    {
+      "type": 0,
+      "value": "總觀看時間"
+    }
+  ],
+  "web.admin.insights.people.liveBadge": [
+    {
+      "type": 0,
+      "value": "播放中"
+    }
+  ],
+  "web.admin.insights.people.loadMore": [
+    {
+      "type": 0,
+      "value": "顯示更多帳號"
+    }
+  ],
+  "web.admin.insights.people.profilesCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " 個個人檔案"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.people.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "搜尋帳號或個人檔案……"
+    }
+  ],
+  "web.admin.insights.people.unnamedProfile": [
+    {
+      "type": 0,
+      "value": "個人檔案 "
+    },
+    {
+      "type": 1,
+      "value": "id"
+    }
+  ],
+  "web.admin.insights.percent": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.admin.insights.personDetail.action.openAccount": [
+    {
+      "type": 0,
+      "value": "開啟帳號"
+    }
+  ],
+  "web.admin.insights.personDetail.allProfiles": [
+    {
+      "type": 0,
+      "value": "所有個人檔案"
+    }
+  ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "% 直接播放"
+    }
+  ],
+  "web.admin.insights.personDetail.clients": [
+    {
+      "type": 0,
+      "value": "用戶端"
+    }
+  ],
+  "web.admin.insights.personDetail.clientsEmpty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有活動"
+    }
+  ],
+  "web.admin.insights.personDetail.profileLabel": [
+    {
+      "type": 0,
+      "value": "個人檔案"
+    }
+  ],
+  "web.admin.insights.personDetail.topTitles": [
+    {
+      "type": 0,
+      "value": "熱門作品"
+    }
+  ],
+  "web.admin.insights.playCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 次播放"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.range.1y": [
+    {
+      "type": 0,
+      "value": "1 年"
+    }
+  ],
+  "web.admin.insights.range.30d": [
+    {
+      "type": 0,
+      "value": "30 天"
+    }
+  ],
+  "web.admin.insights.range.7d": [
+    {
+      "type": 0,
+      "value": "7 天"
+    }
+  ],
+  "web.admin.insights.range.90d": [
+    {
+      "type": 0,
+      "value": "90 天"
+    }
+  ],
+  "web.admin.insights.range.all": [
+    {
+      "type": 0,
+      "value": "全部時間"
+    }
+  ],
+  "web.admin.insights.range.custom": [
+    {
+      "type": 0,
+      "value": "自訂"
+    }
+  ],
+  "web.admin.insights.retry": [
+    {
+      "type": 0,
+      "value": "重試"
+    }
+  ],
+  "web.admin.insights.sessionCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個工作階段"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.subtitle": [
+    {
+      "type": 0,
+      "value": "觀看趨勢、熱門作品、家庭活動、裝置播放情形與頻寬。"
+    }
+  ],
+  "web.admin.insights.tabs.activity": [
+    {
+      "type": 0,
+      "value": "播放"
+    }
+  ],
+  "web.admin.insights.tabs.bandwidth": [
+    {
+      "type": 0,
+      "value": "頻寬"
+    }
+  ],
+  "web.admin.insights.tabs.devices": [
+    {
+      "type": 0,
+      "value": "裝置與畫質"
+    }
+  ],
+  "web.admin.insights.tabs.library": [
+    {
+      "type": 0,
+      "value": "媒體庫"
+    }
+  ],
+  "web.admin.insights.tabs.people": [
+    {
+      "type": 0,
+      "value": "使用者"
+    }
+  ],
+  "web.admin.insights.tabs.titles": [
+    {
+      "type": 0,
+      "value": "作品"
+    }
+  ],
+  "web.admin.insights.title": [
+    {
+      "type": 0,
+      "value": "洞察"
+    }
+  ],
+  "web.admin.insights.titleDetail.episodes.title": [
+    {
+      "type": 0,
+      "value": "集數"
+    }
+  ],
+  "web.admin.insights.titleDetail.episodes.truncated": [
+    {
+      "type": 0,
+      "value": "僅顯示前 500 集。"
+    }
+  ],
+  "web.admin.insights.titleDetail.kind.movie": [
+    {
+      "type": 0,
+      "value": "電影"
+    }
+  ],
+  "web.admin.insights.titleDetail.kind.series": [
+    {
+      "type": 0,
+      "value": "影集"
+    }
+  ],
+  "web.admin.insights.titleDetail.notFound": [
+    {
+      "type": 0,
+      "value": "此作品已不在你的媒體庫中。"
+    }
+  ],
+  "web.admin.insights.titleDetail.scopedToPerson": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 的播放記錄"
+    }
+  ],
+  "web.admin.insights.titleDetail.showEveryone": [
+    {
+      "type": 0,
+      "value": "顯示所有人"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.furthest": [
+    {
+      "type": 0,
+      "value": "已看到 "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "／"
+    },
+    {
+      "type": 1,
+      "value": "duration"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.furthestNoDuration": [
+    {
+      "type": 0,
+      "value": "已看到 "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.lastEpisode": [
+    {
+      "type": 0,
+      "value": "最近："
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.title": [
+    {
+      "type": 0,
+      "value": "觀看者"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.truncated": [
+    {
+      "type": 0,
+      "value": "僅顯示最近的 100 位觀看者。"
+    }
+  ],
+  "web.admin.insights.titles.leastFinished.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有播放 3 次以上卻未看完的作品"
+    }
+  ],
+  "web.admin.insights.titles.leastFinished.subtitle": [
+    {
+      "type": 0,
+      "value": "至少播放 3 次的作品，依未看完的播放比例排列"
+    }
+  ],
+  "web.admin.insights.titles.leastFinished.title": [
+    {
+      "type": 0,
+      "value": "最少看完"
+    }
+  ],
+  "web.admin.insights.titles.leastFinished.unfinishedShare": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "% 未看完"
+    }
+  ],
+  "web.admin.insights.titles.libraries.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有媒體庫活動"
+    }
+  ],
+  "web.admin.insights.titles.libraries.title": [
+    {
+      "type": 0,
+      "value": "熱門媒體庫"
+    }
+  ],
+  "web.admin.insights.titles.movies.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有觀看任何電影"
+    }
+  ],
+  "web.admin.insights.titles.movies.title": [
+    {
+      "type": 0,
+      "value": "熱門電影"
+    }
+  ],
+  "web.admin.insights.titles.shows.empty": [
+    {
+      "type": 0,
+      "value": "此時段內沒有觀看任何影集"
+    }
+  ],
+  "web.admin.insights.titles.shows.title": [
+    {
+      "type": 0,
+      "value": "熱門影集"
+    }
+  ],
+  "web.admin.insights.titles.sort.plays": [
+    {
+      "type": 0,
+      "value": "播放次數"
+    }
+  ],
+  "web.admin.insights.titles.sort.viewers": [
+    {
+      "type": 0,
+      "value": "觀看者"
+    }
+  ],
+  "web.admin.insights.titles.sort.watchTime": [
+    {
+      "type": 0,
+      "value": "觀看時間"
+    }
+  ],
+  "web.admin.insights.titles.sortLabel": [
+    {
+      "type": 0,
+      "value": "排名依據"
+    }
+  ],
+  "web.admin.insights.titles.titleWithYear": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "（"
+    },
+    {
+      "type": 1,
+      "value": "year"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.insights.titles.unknownTitle": [
+    {
+      "type": 0,
+      "value": "已移除的作品"
+    }
+  ],
+  "web.admin.insights.viewerCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 位觀看者"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.libraries.activeWork.cancelRefresh": [
     {
       "type": 0,
@@ -40286,6 +44370,99 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "掃描與中繼資料重新整理執行時會顯示在這裡。"
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "沒有進行中的掃描或重新整理"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "全部（"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "隱藏佇列"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ 其他 "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " 個媒體庫"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "中繼資料重新整理"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "正在重新整理中繼資料"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "檢視佇列"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "高"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "低"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "中"
     }
   ],
   "web.admin.libraries.ambiguousRoots.description": [
@@ -40654,6 +44831,30 @@
       "value": "確認清理空的根目錄"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "檢查"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "中繼資料比對佇列中沒有等待處理的項目。"
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "沒有已略過的根目錄記錄。"
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "沒有過時的外部 ID 記錄。"
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -40690,6 +44891,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "編輯"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "尚未設定任何媒體庫。"
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -40731,6 +44944,12 @@
       "value": "隱藏路徑"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "閒置"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 1,
@@ -40765,6 +44984,12 @@
       "value": "部分掃描"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "補齊缺少的中繼資料或全部取代"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -40777,6 +45002,12 @@
       "value": "無法存取根目錄"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "掃描"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -40787,6 +45018,12 @@
     {
       "type": 0,
       "value": "顯示路徑"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "停止"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -40805,6 +45042,26 @@
     {
       "type": 0,
       "value": "驗證掛載點"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "檢查是否能存取所有媒體庫資料夾"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "檢視 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 進行中的掃描"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -40908,7 +45165,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "管理媒體庫根目錄與掃描。目錄匯入／匯出現已移至「維護」。"
+      "value": "管理媒體資料夾、監控掃描並解決比對問題。"
     }
   ],
   "web.admin.libraries.page.title": [
@@ -41317,6 +45574,45 @@
     {
       "type": 0,
       "value": "過時的外部 ID"
+    }
+  ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " 個進行中"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "掃描活動"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "目錄健康狀態"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "媒體庫"
     }
   ],
   "web.admin.libraries.toast.cancelJobFailed": [
@@ -41737,6 +46033,24 @@
     {
       "type": 0,
       "value": "依標題、媒體庫或類型搜尋已忽略項目……"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "不明確"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "待處理"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "未比對"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -43504,6 +47818,12 @@
       "value": " 轉譯路徑，因此裝置選擇器不適用於它。留空會沿用叢集層級的裝置設定，而該設定本身必須是 CUDA 識別碼，NVENC 才能使用——若叢集設定的是轉譯路徑，請在此設定。"
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "此項目由此節點的環境設定。請在該處變更，然後重新啟動節點。"
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -44214,6 +48534,12 @@
     {
       "type": 0,
       "value": "請輸入伺服器位址以完成設定。"
+    }
+  ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "金鑰由伺服器的部署設定指定"
     }
   ],
   "web.admin.nodes.key.dialogTitle": [
@@ -45132,6 +49458,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "此項目由伺服器的部署設定指定。請在該處移除，然後重新啟動 API 伺服器，才能在此刪除。"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -46738,6 +51070,68 @@
       "value": "外掛程式"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "已套用"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "已暫緩"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "無法載入外掛程式佈建狀態。"
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "由環境管理"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "待處理"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "已拒絕"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "部署環境控管套件來源與移除。"
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "佈建狀態"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "部署環境將此外掛程式固定在 "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": " 版。"
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -47033,7 +51427,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "任務會在伺服器啟動時註冊，因此開啟或關閉任務要在重新啟動後才會生效。任務建立後，請在該任務的頁面變更排程。"
+      "value": "開啟或關閉任務不需重新啟動即可生效，但其他伺服器可能需要一點時間才會套用。任務開啟後，請在該任務的頁面變更排程。"
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -47450,6 +51844,224 @@
       "value": "模型"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "已達單次執行的上限，下次執行時會繼續。"
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "已查詢的作品："
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · 已嵌入："
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDB 請求："
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "已關閉。執行時只會清除舊作品。"
+    }
+  ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "已停止產生推薦。在伺服器重新啟動之前，已儲存的推薦仍會顯示在探索中。"
+    }
+  ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "正在為個人檔案排名（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "正在擷取 TMDB 清單（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "正在查詢並嵌入作品（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "已清除 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 部過期作品"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "已建立 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 列"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "建立探索推薦之前，請先解決下方的嵌入鎖定衝突。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "請先執行嵌入向量作業，讓 Silo 有媒體庫向量可供比對。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "建立探索推薦之前，請先在 AI 服務中連接嵌入提供者。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "目前還沒有任何個人檔案擁有品味檔案。有人觀看或評分作品後，請執行品味檔案作業。"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 部可供推薦的作品"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "未嵌入任何內容："
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -47492,6 +52104,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "探索推薦"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -47716,6 +52334,12 @@
       "value": "無法啟動嵌入向量作業"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "無法觸發探索推薦"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -47834,6 +52458,44 @@
       "value": "。"
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "嵌入已重設：已刪除 "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": "、"
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " 和 "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": "，並清除 "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -47848,6 +52510,50 @@
             {
               "type": 0,
               "value": " 個嵌入向量"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個探索嵌入"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個探索列"
             }
           ]
         }
@@ -48486,6 +53192,30 @@
       "value": "："
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "為每位觀眾推薦的影集"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "為每位觀眾推薦的電影"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -48534,6 +53264,18 @@
     {
       "type": 0,
       "value": "電視網卡片，點選即可開啟該電視網的影集。"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "推薦"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "尚未加入媒體庫的作品，依每位觀眾的觀看內容挑選。"
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -48776,6 +53518,38 @@
     {
       "type": 0,
       "value": "請選擇串流服務所在的地區。"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "在「管理 → 推薦」中開啟探索推薦之前，此列會保持空白。"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "管理 → 推薦"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中開啟探索推薦之前，推薦列會保持空白。"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "已在推薦中關閉"
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -50094,6 +54868,12 @@
       "value": "清單即時預覽"
     }
   ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "預覽你自己的推薦內容"
+    }
+  ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
     {
       "type": 0,
@@ -50149,6 +54929,12 @@
       "value": "新列會加入探索頁面底部"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "開啟推薦設定"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -50161,6 +54947,12 @@
       "value": "MDBList 的資料來源不包含清單頁面上儲存的排序方式。請選擇清單頁面顯示的排序。"
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "你的個人檔案還沒有探索推薦。請執行探索推薦作業，或觀看並評分幾部作品，即可預覽此列。"
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -50171,6 +54963,12 @@
     {
       "type": 0,
       "value": "選擇清單或貼上清單連結，以查看其中的作品。"
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "請在「管理 → 推薦」中開啟探索推薦，即可預覽此列。"
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -50937,6 +55735,12 @@
     {
       "type": 0,
       "value": "已傳送訊息"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "播放器未確認收到訊息。訊息可能會延遲顯示，或完全不會顯示。"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -53748,6 +58552,12 @@
       "value": "連線檢查失敗。"
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "無法檢查伺服器的環境是否已設定此項目。請重新載入頁面以進行編輯。"
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -53758,6 +58568,20 @@
     {
       "type": 0,
       "value": "正在載入設定"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "由伺服器環境中的 "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " 設定。"
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [
@@ -53894,12 +58718,6 @@
     {
       "type": 0,
       "value": "信任的 Proxy"
-    }
-  ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "由 SILO_TRUSTED_PROXIES 管理。"
     }
   ],
   "web.admin.settings.general.title": [
@@ -54278,6 +59096,30 @@
     {
       "type": 0,
       "value": "無法更新頻道"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "重新載入以查看目前的值。如果此頁面上有設定項目已被變更，或你編輯了已儲存的密碼或金鑰，你的所有編輯都會復原；否則會保留。"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "重新載入"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "無法重新載入設定。請再試一次。"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "設定已在其他地方變更"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -56250,6 +61092,612 @@
       "value": "同步線上標記"
     }
   ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "演算法："
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "請求 "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "；使用中 "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "允許值："
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "壅塞控制："
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "帳號"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "開始使用此路徑"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "裝置"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "沒有直接連線的裝置。"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "對等端點"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "已連線的裝置"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "至連接埠 "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "預設值："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "檢查此伺服器是否已準備好進行直接連線。"
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "生效值："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "啟用直接連線"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "NET_ADMIN 權能"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "直接連線引擎"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "NAT 迴流"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "NAT 對應"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "PMTU 備援"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "可連線性"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "Socket 接收緩衝區"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "Socket 傳送緩衝區"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "主機調校"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "ACK 抽減"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "BBR 封包遺失策略"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "UDP 分段卸載"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "用戶端接收視窗"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "直接連線 UDP 連接埠"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "TCP 壅塞控制"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "TCP 傳送緩衝區"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "上次檢查於 "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "代理伺服器"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "監聽器"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "觀察到的公開位址："
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "檢查路由器是否支援 UPnP、NAT-PMP 或 PCP。"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "連接埠對應"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "就緒檢查不會開始直接播放。"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "已由管理員停用"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "已停用"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "無法啟動直接連線引擎"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "無法增加緩衝區"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "路由器不支援連接埠對應"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "緩衝區小於請求的大小"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "無法使用網路調校輔助程式"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "值無效；改為關閉"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "系統無法套用或讀取此設定"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "此核心不支援"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "已達主機緩衝區上限"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "無法讀取主機緩衝區上限"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "公開位址會依目的地而不同"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "無法使用 BBR"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "BBR 未載入或未獲允許"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "有多部 API 伺服器正在執行"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "已放棄 NET_ADMIN 權能"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "缺少 NET_ADMIN 權能"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "找不到路由器"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "缺少 NET_ADMIN 權能"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "權限遭拒"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "無法使用"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "尚未測量"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "不需要增加"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "主機原則選擇了其他演算法"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "檢查失敗"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "無法檢查其他 API 伺服器"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "另一部 API 伺服器正在提供直接連線"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "正在等待成為直接連線主機"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "無法使用直接連線狀態"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "無法開啟 UDP 連接埠"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "UDP 連接埠無效"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "此平台不支援"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": "（"
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "請求值："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "請求值："
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "；授予值："
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "執行檢查"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "傳送緩衝區："
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "已受限"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "已降級"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "備援"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "不需要"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "關閉"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "開啟"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "不明"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "以逗號分隔的清單，最多 8 個 host:port 項目。留空即可使用預設值。"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "STUN 伺服器"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "直接連線"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "讓裝置透過直接 UDP 路徑連線至此伺服器。UDP 連接埠由 "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " 設定，在此為唯讀。"
+    }
+  ],
   "web.admin.settings.network.host.apiServer": [
     {
       "type": 0,
@@ -57324,136 +62772,10 @@
       "value": "無法載入通知設定"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "目前未記錄新內容，因此無法傳送任何通知。請在「處理」中重新開啟。"
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "傳送已暫停；新內容會在佇列中等候。請在「處理」中重新開啟。"
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "關閉時會改為傳送每日摘要。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Silo 如何偵測新內容、將其分組為訊息，以及保留訊息的時間。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "找出想收到通知的使用者"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "將每個項目與所有人的偏好設定進行比對。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "分組與流量控制"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "處理"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "內容最長時效"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "較舊的項目會被捨棄，不會以過時消息送達。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "每部影集的訊息上限"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "超過此數量的項目會在該批次中略過。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "偵測新內容"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "在媒體庫掃描期間記錄新項目。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "處理流程"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "已讀通知"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "保留期限"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "傳送記錄"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Silo 已發出通知的項目記錄。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "等候時間"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "一起完成掃描的項目會合併為一則通知。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "未讀通知"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -58324,18 +63646,6 @@
       "value": "通知"
     }
   ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "天"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "小時"
-    }
-  ],
   "web.admin.settings.notifications.unit.seconds": [
     {
       "type": 0,
@@ -58866,6 +64176,24 @@
       "value": "儲存到媒體庫"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "暫停的播放"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "暫停超過此時間即結束播放"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 到 1440。在 Silo App 中暫停達此時間的影片會結束播放，以釋放其串流及任何轉碼；再次播放時會從同一位置繼續。一起看、投放和有聲書不受影響。設為 0 即可關閉此功能。"
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -59306,6 +64634,12 @@
       "value": "天"
     }
   ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "分鐘"
+    }
+  ],
   "web.admin.settings.playback.unitSeconds": [
     {
       "type": 0,
@@ -59322,6 +64656,12 @@
     {
       "type": 0,
       "value": "標記為已觀看的進度"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "具有片尾字幕標記的作品，播放到片尾字幕時也會視為已觀看。"
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -59790,6 +65130,92 @@
       "value": "改用其他模型需要重設嵌入，這會刪除所有嵌入。若改由其他提供者提供相同模型，則會在重新啟動後套用。"
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "新增至探索"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "無法將推薦列新增至探索頁面。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "已將推薦列新增至探索頁面。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "啟用探索推薦"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "在請求的探索頁面新增個人化列，顯示尚未加入媒體庫的作品。會使用嵌入提供者和 TMDB。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "可供推薦的作品數量上限"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "伺服器保留多少部不在媒體庫中的作品以供推薦。每部作品都會在 TMDB 上查詢並建立嵌入。建立嵌入通常成本不高，但數量越多，視你的嵌入提供者而定，可能花費更多或耗時更久，也會占用更多儲存空間。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "你的探索頁面目前尚未顯示任何推薦列。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "請開啟上方的「啟用推薦」並重新啟動伺服器，探索推薦才能執行。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "請求功能目前已關閉。請在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "請求設定"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中開啟，讓觀眾能看到探索頁面。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "開啟探索頁面"
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "探索推薦"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -59818,6 +65244,12 @@
     {
       "type": 0,
       "value": "嵌入 Cron"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "探索推薦 Cron"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -59862,12 +65294,6 @@
       "value": "使用 Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "由 REDIS_URL 設定"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -59884,12 +65310,6 @@
     {
       "type": 0,
       "value": "連線 URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "值由 REDIS_URL 提供"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -64775,20 +70195,6 @@
       "value": "伺服器記錄"
     }
   ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "由 "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": " 管理。"
-    }
-  ],
   "web.admin.settings.search.meili.apiKey.hint": [
     {
       "type": 0,
@@ -64906,7 +70312,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "傳送管道、伺服器管道，以及新內容如何轉為通知。"
+      "value": "傳送管道和伺服器管道。"
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -65005,12 +70411,6 @@
       "value": "電子郵件"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "分組與流量控制"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -65029,28 +70429,10 @@
       "value": "讓使用者選擇每集傳送一封電子郵件"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "內容時效上限"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "每部影集的訊息數上限"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "在 Discord 上提及請求者"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "偵測新內容"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -65059,46 +70441,16 @@
       "value": "個人 Webhook"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "處理"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "已讀通知"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "中繼網址"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "保留期限"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "傳送記錄"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "伺服器管道"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "穩定等待時間"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -65113,12 +70465,6 @@
       "value": "Silo 推播中繼"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "未讀通知"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -65129,12 +70475,6 @@
     {
       "type": 0,
       "value": "每人 Webhook 數量"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "判斷誰想收到"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -65209,6 +70549,12 @@
       "value": "啟用軟體 HDR 色調對應"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "暫停超過此時間即結束播放（分鐘）"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -65267,6 +70613,12 @@
     {
       "type": 0,
       "value": "標記來源"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "暫停的播放"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -66523,10 +71875,22 @@
       "value": "電視登入：開始"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "海報請求"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,
       "value": "登入"
+    }
+  ],
+  "web.admin.settings.security.endpoint.oauthStart": [
+    {
+      "type": 0,
+      "value": "單一登入：開始"
     }
   ],
   "web.admin.settings.security.endpoint.passwordChange": [
@@ -67203,6 +72567,36 @@
     {
       "type": 0,
       "value": "請先開啟登入提供者。若關閉密碼登入且沒有開啟任何提供者，就只有緊急存取管理員能登入。"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "長度須為 8 到 72 個字元。這些規則會在使用者設定或變更密碼時套用；已設定的密碼仍可繼續使用。"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "密碼長度下限"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "任何標點符號或符號，例如 ! 或 #。字母、數字和空格不計入。"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "必須包含特殊字元"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "必須包含大寫字母"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -68958,6 +74352,20 @@
       "value": "）。"
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "環境變數已設定儲存設定（"
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "）時，無法在此移動儲存空間。請先取消設定這些變數，並重新啟動所有 API 伺服器。"
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -69290,6 +74698,18 @@
     {
       "type": 0,
       "value": "記錄匯入"
+    }
+  ],
+  "web.admin.shell.nav.page.insights.description": [
+    {
+      "type": 0,
+      "value": "觀看趨勢、熱門作品、帳號、裝置與頻寬。"
+    }
+  ],
+  "web.admin.shell.nav.page.insights.label": [
+    {
+      "type": 0,
+      "value": "深入分析"
     }
   ],
   "web.admin.shell.nav.page.libraries.description": [
@@ -70040,6 +75460,26 @@
       "value": " 次"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "此排程來自備份設定。請在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "伺服器 › 備份"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中變更。"
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -70330,10 +75770,66 @@
       "value": "最近的錯誤"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "重新整理失敗。請查看管理員診斷資訊以了解詳情。"
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "檢視目前排程"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -70766,6 +76262,18 @@
     {
       "type": 0,
       "value": "Autoscan Webhook 重試"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "重新讀取 Silo 開始將內嵌字型排除於位元速率之外以前所掃描、含 ASS 字幕的 MKV 檔案標頭，避免這些檔案因串流時不會用到的位元速率而被轉碼。"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "修正含內嵌字型檔案的位元速率"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -78275,6 +83783,20 @@
       "value": "正在設定……"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "請自行將密碼提供給 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -79471,25 +84993,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "無法讓電視登入。請再試一次。"
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "確認你的 App 顯示的是"
+      "value": "無法核准登入。請再試一次。"
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "確認你的電視顯示的是"
+      "value": "請確認此代碼相符"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "輸入電視或 App 上的代碼"
+      "value": "輸入你的裝置上顯示的代碼"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -79501,13 +85017,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "使用你的帳號登入電視或其他裝置。"
+      "value": "登入電視、App 或其他裝置。"
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "登入電視"
+      "value": "核准登入"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -79527,13 +85043,13 @@
     },
     {
       "type": 0,
-      "value": " 的身分檢視，才能核准電視。只有該帳號本身能讓電視登入。"
+      "value": " 的身分檢視，才能核准這次登入。只有該帳號本身能核准裝置。"
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "請停止以這位使用者的身分檢視，才能核准電視。只有該帳號本身能讓電視登入。"
+      "value": "請停止以這位使用者的身分檢視，才能核准這次登入。只有該帳號本身能核准裝置。"
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -79551,39 +85067,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "找不到這組代碼。請檢查電視上的代碼。"
+      "value": "找不到該代碼。請檢查代碼後再試一次。"
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "暫時不要"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "舊版電視 App 會改為顯示 "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "。"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "只核准目前就在你面前的裝置。"
+      "value": "拒絕"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "只核准目前就在你面前的電視。"
+      "value": "只有在登入是你本人發起時才核准。"
     }
   ],
   "web.auth.activate.playOn": [
@@ -79609,7 +85105,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "使用這台電視的任何人都能從你的個人檔案中選擇。設有 PIN 的個人檔案會保持鎖定。"
+      "value": "這會讓該裝置存取你的個人檔案。設有 PIN 的個人檔案會保持鎖定。"
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -79656,6 +85152,16 @@
       "value": " 請求"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "請求時間："
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -79669,7 +85175,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "這台電視已停止等待。請在電視上重新開始。"
+      "value": "此裝置已停止等待。請在該裝置上重新開始登入。"
     }
   ],
   "web.auth.activate.result.declined": [
@@ -79678,10 +85184,34 @@
       "value": "這次登入已被拒絕。"
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "完成。"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 正在登入。"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " 已登入。"
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "這組代碼已過期。你的電視正顯示新的代碼，請改用該代碼。"
+      "value": "此代碼已過期。請在裝置上取得新代碼，然後再試一次。"
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -79715,7 +85245,7 @@
   "web.auth.activate.result.quickConnectDoneUnknown": [
     {
       "type": 0,
-      "value": "完成。這部裝置正以 "
+      "value": "完成。此裝置正以 "
     },
     {
       "type": 1,
@@ -79765,25 +85295,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "該電視已登入。"
+      "value": "此裝置已登入。"
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "這台電視已獲核准，正在完成登入。"
+      "value": "此裝置已獲核准，正在完成登入。"
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "完成。你的電視正在登入。"
+      "value": "完成。你的裝置正在登入。"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "你的電視已登入。"
+      "value": "你的裝置已登入。"
     }
   ],
   "web.auth.activate.signInAs": [
@@ -79827,7 +85357,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "要讓 "
+      "value": "要允許 "
     },
     {
       "type": 1,
@@ -79841,7 +85371,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "要讓這部裝置登入嗎？"
+      "value": "要允許此裝置登入嗎？"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -79861,13 +85391,13 @@
     },
     {
       "type": 0,
-      "value": " 以核准這台電視。"
+      "value": " 以核准這次登入。"
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "登入電視"
+      "value": "核准登入"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -80600,10 +86130,48 @@
       "value": " 不允許此裝置登入此伺服器。"
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "至少 "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " 個字元。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "密碼不一致。"
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "請至少包含一個特殊字元，例如 ! 或 #。"
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "請至少包含一個大寫字母。"
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -80616,6 +86184,32 @@
     {
       "type": 0,
       "value": "請使用至少 8 個字元。"
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "請使用至少 "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " 個字元。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -80921,7 +86515,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "無法登入裝置。請再試一次。"
+      "value": "無法核准登入。請再試一次。"
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -87131,6 +92725,12 @@
       "value": "你的媒體庫"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "無法取得數量"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -89025,6 +94625,24 @@
       "value": "新增"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "無法檢查是否可以新增作品。"
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "重新載入"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "正在檢查是否可以新增作品……"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -89041,6 +94659,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "合輯只載入了一部分時，這部伺服器無法安全地新增作品。你仍可移除作品及編輯合輯。"
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "請先重新載入作品，再新增更多作品。"
     }
   ],
   "web.collections.manual.addTitle": [
@@ -89061,6 +94691,12 @@
     {
       "type": 0,
       "value": " 新增作品"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "正在載入作品，之後才能新增更多……"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -91987,6 +97623,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [
@@ -96840,6 +102490,108 @@
       "value": "type"
     }
   ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "清除"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "你的評分"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "你的影集評分"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "未評分"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "評分"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "為此評分"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "為影集評分"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "已移除評分"
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "復原"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 0,
+      "value": "5 顆星中的 "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " 顆"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "你"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "你的評分：5 顆星中的 "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " 顆"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "你的影集評分：5 顆星中的 "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " 顆"
+    }
+  ],
   "web.detail.request.cancelRequest": [
     {
       "type": 0,
@@ -97150,6 +102902,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "也收錄於"
     }
   ],
   "web.detail.sections.cast": [
@@ -99979,6 +105737,12 @@
       "value": "顯示內容"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "由此伺服器管理。無法在這裡變更它顯示的內容；若要自行選擇顯示的內容，請新增一列你自己的列。"
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -100297,6 +106061,12 @@
       "value": "正在翻譯……"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "隱藏此匯出檔建立後新增的伺服器列："
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -100315,6 +106085,12 @@
     {
       "type": 0,
       "value": "，並取代你先前在此新增的區塊。你對此伺服器區塊所做的變更會保留。"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "此檔案匯出後，此伺服器的列已有變更，請在下方選擇要隱藏的列。"
     }
   ],
   "web.home.layout.checking": [
@@ -100365,6 +106141,26 @@
     {
       "type": 0,
       "value": "開啟「隱藏已觀看的項目」。"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "在以下頁面隱藏所選的列："
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "，不會變更你在這些頁面的其他列。"
     }
   ],
   "web.home.layout.import": [
@@ -100469,6 +106265,24 @@
     {
       "type": 0,
       "value": "。"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": "（"
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "）"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -100670,6 +106484,12 @@
     {
       "type": 0,
       "value": "未命名區塊"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "隱藏此檔案中沒有的伺服器列："
     }
   ],
   "web.home.page.customize": [
@@ -102911,13 +108731,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "合輯與規則"
+      "value": "合輯與智慧列"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "你的合輯，或依規則建立的列"
+      "value": "你的合輯，或依規則建立的智慧列"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -103031,7 +108851,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "依規則（例如類型和年代）建立列。"
+      "value": "類似智慧合輯，但只是一列。依類型和年代等規則挑選作品。"
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -103241,7 +109061,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "符合規則的作品"
+      "value": "智慧列"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -103450,6 +109270,12 @@
     {
       "type": 0,
       "value": "主視覺橫幅 · 僅限網頁版"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "伺服器"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -108642,6 +114468,12 @@
       "value": " 天前"
     }
   ],
+  "web.notifications.inbox.destinationStopped": [
+    {
+      "type": 0,
+      "value": "有一個通知目的地已停止運作"
+    }
+  ],
   "web.notifications.inbox.emptyAll": [
     {
       "type": 0,
@@ -108772,6 +114604,12 @@
     {
       "type": 0,
       "value": "）"
+    }
+  ],
+  "web.notifications.inbox.fixInSettings": [
+    {
+      "type": 0,
+      "value": "開啟通知設定以修正問題。"
     }
   ],
   "web.notifications.inbox.followedMovieAvailable": [
@@ -109038,6 +114876,12 @@
     {
       "type": 0,
       "value": "你待看清單中的作品現已上架"
+    }
+  ],
+  "web.notifications.inbox.webhookStopped": [
+    {
+      "type": 0,
+      "value": "有一個 Webhook 已停止運作"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -111468,7 +117312,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "立即播放"
+      "value": "播放接下來的內容"
     }
   ],
   "web.player.nextEpisode.regionLabel": [
@@ -112245,6 +118089,12 @@
     {
       "type": 0,
       "value": "管理員已結束此播放工作階段。"
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "播放因暫停過久而停止。"
     }
   ],
   "web.player.shuffle.scopeWithParent": [
@@ -115525,6 +121375,34 @@
       "value": " 的請求"
     }
   ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "類似 "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "類似 "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " 和 "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
   "web.requests.discoverSection.empty": [
     {
       "type": 0,
@@ -116309,6 +122187,20 @@
       "value": "回到第 1 頁"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "前往第 "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " 頁"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -116407,6 +122299,20 @@
     {
       "type": 0,
       "value": "請求新增頁面"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "第 "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " 頁已超出這些結果的範圍。"
     }
   ],
   "web.requests.toAdd.series": [
@@ -117872,6 +123778,12 @@
     {
       "type": 0,
       "value": "即時讀取個人檔案收到的通知，並將其標示為已讀。"
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "查看個人檔案目前正在播放的內容；若金鑰未指定個人檔案，則查看帳號中每個個人檔案的播放內容：作品、播放位置、暫停狀態、裝置和播放方式。不包含播放控制或網路詳細資訊。"
     }
   ],
   "web.settings.apiKeys.scope.requests": [
@@ -121550,6 +127462,282 @@
       "value": "不感興趣"
     }
   ],
+  "web.settings.notifications.destinations.add": [
+    {
+      "type": 0,
+      "value": "新增目的地"
+    }
+  ],
+  "web.settings.notifications.destinations.addSubmit": [
+    {
+      "type": 0,
+      "value": "新增"
+    }
+  ],
+  "web.settings.notifications.destinations.addTitle": [
+    {
+      "type": 0,
+      "value": "新增通知目的地"
+    }
+  ],
+  "web.settings.notifications.destinations.added": [
+    {
+      "type": 0,
+      "value": "已新增「"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "」"
+    }
+  ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "清除已儲存的機密"
+    }
+  ],
+  "web.settings.notifications.destinations.createInProgress": [
+    {
+      "type": 0,
+      "value": "已在建立目的地。"
+    }
+  ],
+  "web.settings.notifications.destinations.deleteDescription": [
+    {
+      "type": 0,
+      "value": "通知將不再傳送至此目的地。此動作無法復原。"
+    }
+  ],
+  "web.settings.notifications.destinations.deleteFailed": [
+    {
+      "type": 0,
+      "value": "無法刪除目的地"
+    }
+  ],
+  "web.settings.notifications.destinations.deleted": [
+    {
+      "type": 0,
+      "value": "已刪除目的地"
+    }
+  ],
+  "web.settings.notifications.destinations.description": [
+    {
+      "type": 0,
+      "value": "將此個人檔案的通知傳送至你伺服器的外掛程式支援的服務。"
+    }
+  ],
+  "web.settings.notifications.destinations.dialogDescription": [
+    {
+      "type": 0,
+      "value": "選擇此個人檔案的通知要傳送到哪裡。"
+    }
+  ],
+  "web.settings.notifications.destinations.empty": [
+    {
+      "type": 0,
+      "value": "尚無目的地。"
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "保留已儲存的機密"
+    }
+  ],
+  "web.settings.notifications.destinations.kind": [
+    {
+      "type": 0,
+      "value": "類型"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailure": [
+    {
+      "type": 0,
+      "value": "上次失敗："
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAt": [
+    {
+      "type": 0,
+      "value": "上次失敗於 "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "："
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAtUnknown": [
+    {
+      "type": 0,
+      "value": "上次失敗於 "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "：外掛程式無法傳送"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureUnknown": [
+    {
+      "type": 0,
+      "value": "上次失敗：外掛程式無法傳送"
+    }
+  ],
+  "web.settings.notifications.destinations.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "已達 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " 個目的地的上限"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeDelete": [
+    {
+      "type": 0,
+      "value": "請先重新載入目的地清單，再刪除此目的地。"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeEdit": [
+    {
+      "type": 0,
+      "value": "請先重新載入目的地清單，再編輯此目的地。"
+    }
+  ],
+  "web.settings.notifications.destinations.saveFailed": [
+    {
+      "type": 0,
+      "value": "無法儲存目的地"
+    }
+  ],
+  "web.settings.notifications.destinations.secretsKept": [
+    {
+      "type": 0,
+      "value": "保留空白的機密欄位會沿用已儲存的值。"
+    }
+  ],
+  "web.settings.notifications.destinations.testInProgress": [
+    {
+      "type": 0,
+      "value": "已在傳送測試訊息。"
+    }
+  ],
+  "web.settings.notifications.destinations.testResult": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "已傳送測試"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "測試失敗"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.testResultDetail": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "已傳送測試："
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "測試失敗："
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.title": [
+    {
+      "type": 0,
+      "value": "其他目的地"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailable": [
+    {
+      "type": 0,
+      "value": "無法使用"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailableNote": [
+    {
+      "type": 0,
+      "value": "提供此目的地的外掛程式已關閉或移除，因此不會傳送任何內容。"
+    }
+  ],
+  "web.settings.notifications.destinations.updateFailed": [
+    {
+      "type": 0,
+      "value": "無法更新"
+    }
+  ],
   "web.settings.notifications.discord.description": [
     {
       "type": 0,
@@ -122474,6 +128662,12 @@
     {
       "type": 0,
       "value": "必須輸入 Webhook URL"
+    }
+  ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "你目前處於離線狀態，因此這項變更未儲存"
     }
   ],
   "web.settings.overlays.accent.amber": [
@@ -129221,12 +135415,6 @@
       "value": "信任的代理伺服器"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "由環境變數 SILO_TRUSTED_PROXIES 設定。"
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -129477,12 +135665,6 @@
     {
       "type": 0,
       "value": "資料庫編號"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "由 REDIS_URL 設定"
     }
   ],
   "web.setup.storage.redisDescription": [

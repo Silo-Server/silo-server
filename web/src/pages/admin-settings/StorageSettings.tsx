@@ -271,11 +271,18 @@ function S3Group({
 
   // Everything that reaches the bucket is shown. Only public storage has an
   // Advanced tier: the CDN address and the Cloudflare token settings, which
-  // exist only for the link modes that use them.
-  const advancedCount =
-    scope === "public"
-      ? (urlAuth !== "presigned" ? 1 : 0) + (urlAuth === "cloudflare_token" ? 3 : 0)
-      : 0;
+  // exist only for the link modes that use them. A row the selected mode
+  // doesn't use stays, marked as changed, while it holds an unsaved edit, so
+  // Save never writes a value the admin can't see.
+  const linkModeUses = (advancedKey: string) =>
+    advancedKey === "s3.public_read_endpoint"
+      ? urlAuth !== "presigned"
+      : urlAuth === "cloudflare_token";
+  const keptForEdit = (advancedKey: string) =>
+    !linkModeUses(advancedKey) && form.isDirty(advancedKey);
+  const showsAdvanced = (advancedKey: string) =>
+    scope === "public" && (linkModeUses(advancedKey) || form.isDirty(advancedKey));
+  const advancedCount = PUBLIC_S3_ADVANCED_KEYS.filter(showsAdvanced).length;
   const advancedChanged = countDirty(form, PUBLIC_S3_ADVANCED_KEYS);
 
   async function handleCheckConnection() {
@@ -301,10 +308,12 @@ function S3Group({
         label={t("web.admin.settings.storage.s3.endpoint")}
         // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
         hint="https://s3.us-east-1.amazonaws.com"
+        dir="ltr"
         value={form.getValue(key("endpoint"))}
         onChange={(v) => form.setValue(key("endpoint"), v)}
         disabled={secrets.disabled || locationFieldsDisabled}
         restartRequired={restartKeys.has(key("endpoint"))}
+        managedByEnv={form.envVar(key("endpoint"))}
       />
       <SettingField
         label={t("web.admin.settings.storage.s3.bucket")}
@@ -312,6 +321,7 @@ function S3Group({
         onChange={(v) => form.setValue(key("bucket"), v)}
         disabled={secrets.disabled || locationFieldsDisabled}
         restartRequired={restartKeys.has(key("bucket"))}
+        managedByEnv={form.envVar(key("bucket"))}
       />
       <SettingField
         label={t("web.admin.settings.storage.s3.keyPrefix")}
@@ -320,13 +330,14 @@ function S3Group({
         onChange={(v) => form.setValue(key("key_prefix"), v)}
         disabled={secrets.disabled || locationFieldsDisabled}
         restartRequired={restartKeys.has(key("key_prefix"))}
+        managedByEnv={form.envVar(key("key_prefix"))}
       />
       {(scope === "public" ? PUBLIC_S3_IDENTITY_KEYS : PRIVATE_S3_IDENTITY_KEYS).some((k) =>
         form.isDirty(k),
       ) && (
         <div className="settings-field-note my-3 flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-          <div className="text-[13px] leading-relaxed">
+          <div className="text-[0.8125rem] leading-relaxed">
             <p className="font-medium text-amber-500">
               {t("web.admin.settings.storage.s3.locationChange")}
             </p>
@@ -356,6 +367,7 @@ function S3Group({
         value={form.getValue(key("region"))}
         onChange={(v) => form.setValue(key("region"), v)}
         restartRequired={restartKeys.has(key("region"))}
+        managedByEnv={form.envVar(key("region"))}
       />
       <SettingField
         label={t("web.admin.settings.storage.s3.pathStyle")}
@@ -364,6 +376,7 @@ function S3Group({
         value={form.getValue(key("path_style"))}
         onChange={(v) => form.setValue(key("path_style"), v)}
         restartRequired={restartKeys.has(key("path_style"))}
+        managedByEnv={form.envVar(key("path_style"))}
       />
       {/*
         The access and secret keys must stay configured together, so clearing
@@ -381,6 +394,7 @@ function S3Group({
         onChange={(v) => secrets.setSecret(key("access_key"), v)}
         disabled={secrets.disabled}
         restartRequired={restartKeys.has(key("access_key"))}
+        managedByEnv={form.envVar(key("access_key"))}
       />
       <SecretField
         label={t("web.admin.settings.storage.s3.secretKey")}
@@ -392,6 +406,7 @@ function S3Group({
         onChange={(v) => secrets.setSecret(key("secret_key"), v)}
         disabled={secrets.disabled}
         restartRequired={restartKeys.has(key("secret_key"))}
+        managedByEnv={form.envVar(key("secret_key"))}
       />
       <ConnectionCheckAction
         onClick={handleCheckConnection}
@@ -416,6 +431,7 @@ function S3Group({
               },
             ]}
             restartRequired={restartKeys.has("s3.public_url_auth")}
+            managedByEnv={form.envVar("s3.public_url_auth")}
           />
           {advancedCount > 0 && (
             <AdvancedSection
@@ -423,49 +439,62 @@ function S3Group({
               count={advancedCount}
               forceOpen={advancedChanged > 0}
             >
-              <SettingField
-                label={t("web.admin.settings.storage.s3.readEndpoint")}
-                // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
-                hint="https://cdn.example.com"
-                value={form.getValue("s3.public_read_endpoint")}
-                onChange={(v) => form.setValue("s3.public_read_endpoint", v)}
-                restartRequired={restartKeys.has("s3.public_read_endpoint")}
-              />
-              {urlAuth === "cloudflare_token" && (
-                <>
-                  {/*
-                    Cloudflare token auth requires this secret, so a clear only
-                    saves alongside a switch back to another mode — the one
-                    order that works, since the field is hidden in those modes.
-                  */}
-                  <SecretField
-                    label={t("web.admin.settings.storage.s3.tokenSecret")}
-                    value={form.getValue("s3.public_token_secret")}
-                    configured={form.sensitiveConfigured.includes("s3.public_token_secret")}
-                    onKeep={() => secrets.keepSaved("s3.public_token_secret")}
-                    onClear={() => secrets.clearSaved("s3.public_token_secret")}
-                    cleared={form.isClearStaged("s3.public_token_secret")}
-                    onChange={(v) => secrets.setSecret("s3.public_token_secret", v)}
-                    hint={t("web.admin.settings.storage.s3.tokenSecretHint")}
-                    disabled={secrets.disabled}
-                    restartRequired={restartKeys.has("s3.public_token_secret")}
-                  />
-                  <SettingField
-                    label={t("web.admin.settings.storage.s3.tokenParam")}
-                    description={t("web.admin.settings.storage.s3.tokenParamDescription")}
-                    value={form.getValue("s3.public_token_param") || "verify"}
-                    onChange={(v) => form.setValue("s3.public_token_param", v)}
-                    restartRequired={restartKeys.has("s3.public_token_param")}
-                  />
-                  <SettingField
-                    label={t("web.admin.settings.storage.s3.tokenTtl")}
-                    type="number"
-                    unit={t("web.admin.settings.storage.unitSeconds")}
-                    value={form.getValue("s3.public_token_ttl") || "10800"}
-                    onChange={(v) => form.setValue("s3.public_token_ttl", v)}
-                    restartRequired={restartKeys.has("s3.public_token_ttl")}
-                  />
-                </>
+              {showsAdvanced("s3.public_read_endpoint") && (
+                <SettingField
+                  label={t("web.admin.settings.storage.s3.readEndpoint")}
+                  dirty={keptForEdit("s3.public_read_endpoint")}
+                  // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
+                  hint="https://cdn.example.com"
+                  dir="ltr"
+                  value={form.getValue("s3.public_read_endpoint")}
+                  onChange={(v) => form.setValue("s3.public_read_endpoint", v)}
+                  restartRequired={restartKeys.has("s3.public_read_endpoint")}
+                  managedByEnv={form.envVar("s3.public_read_endpoint")}
+                />
+              )}
+              {/*
+                Cloudflare token auth requires this secret, so a clear only
+                saves alongside a switch back to another mode. The staged clear
+                keeps the row in view after that switch.
+              */}
+              {showsAdvanced("s3.public_token_secret") && (
+                <SecretField
+                  label={t("web.admin.settings.storage.s3.tokenSecret")}
+                  dirty={keptForEdit("s3.public_token_secret")}
+                  value={form.getValue("s3.public_token_secret")}
+                  configured={form.sensitiveConfigured.includes("s3.public_token_secret")}
+                  onKeep={() => secrets.keepSaved("s3.public_token_secret")}
+                  onClear={() => secrets.clearSaved("s3.public_token_secret")}
+                  cleared={form.isClearStaged("s3.public_token_secret")}
+                  onChange={(v) => secrets.setSecret("s3.public_token_secret", v)}
+                  hint={t("web.admin.settings.storage.s3.tokenSecretHint")}
+                  disabled={secrets.disabled}
+                  restartRequired={restartKeys.has("s3.public_token_secret")}
+                  managedByEnv={form.envVar("s3.public_token_secret")}
+                />
+              )}
+              {showsAdvanced("s3.public_token_param") && (
+                <SettingField
+                  label={t("web.admin.settings.storage.s3.tokenParam")}
+                  dirty={keptForEdit("s3.public_token_param")}
+                  description={t("web.admin.settings.storage.s3.tokenParamDescription")}
+                  value={form.getValue("s3.public_token_param")}
+                  onChange={(v) => form.setValue("s3.public_token_param", v)}
+                  restartRequired={restartKeys.has("s3.public_token_param")}
+                  managedByEnv={form.envVar("s3.public_token_param")}
+                />
+              )}
+              {showsAdvanced("s3.public_token_ttl") && (
+                <SettingField
+                  label={t("web.admin.settings.storage.s3.tokenTtl")}
+                  dirty={keptForEdit("s3.public_token_ttl")}
+                  type="number"
+                  unit={t("web.admin.settings.storage.unitSeconds")}
+                  value={form.getValue("s3.public_token_ttl")}
+                  onChange={(v) => form.setValue("s3.public_token_ttl", v)}
+                  restartRequired={restartKeys.has("s3.public_token_ttl")}
+                  managedByEnv={form.envVar("s3.public_token_ttl")}
+                />
               )}
             </AdvancedSection>
           )}
@@ -900,10 +929,12 @@ export default function StorageSettings() {
                 : t("web.admin.settings.storage.backendDescription")
             }
             restartRequired={restartKeys.has("artwork.storage_backend")}
+            managedByEnv={form.envVar("artwork.storage_backend")}
           />
           <SettingField
             label={t("web.admin.settings.storage.localPath")}
             hint={LOCAL_PATH_EXAMPLE}
+            dir="ltr"
             value={form.getValue("artwork.local_path")}
             onChange={(value) => form.setValue("artwork.local_path", value)}
             disabled={
@@ -920,6 +951,7 @@ export default function StorageSettings() {
                 : t("web.admin.settings.storage.localPathDescription")
             }
             restartRequired={restartKeys.has("artwork.local_path")}
+            managedByEnv={form.envVar("artwork.local_path")}
           />
           <SettingField
             label={t("web.admin.settings.storage.cacheImages")}
@@ -1176,6 +1208,7 @@ export default function StorageSettings() {
                   </label>
                   <Input
                     id="storage-transition-local-path"
+                    dir="ltr"
                     value={transitionLocalPath}
                     onChange={(event) => setTransitionLocalPath(event.target.value)}
                     placeholder={LOCAL_PATH_EXAMPLE}

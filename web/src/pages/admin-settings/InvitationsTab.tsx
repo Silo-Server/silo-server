@@ -298,7 +298,7 @@ function InvitationManager() {
       {publicURLMissing && (
         <div className="flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
-          <p className="text-[13px] leading-relaxed">
+          <p className="text-[0.8125rem] leading-relaxed">
             {t("web.admin.settings.invitations.publicUrlMissing", {
               link: (chunks) => <SettingsLink to="/admin/settings/general">{chunks}</SettingsLink>,
             })}

@@ -37,15 +37,21 @@ func binaryRelease(t *testing.T, version string, binary []byte) (*pluginv1.Plugi
 	return manifest, manifestBytes, archiveBytes
 }
 
-func TestArchiveCacheRejectsForeignBinaryOnCacheHit(t *testing.T) {
-	// Use an ELF architecture different from the running test so the cache
-	// represents a volume moved from another proxy platform.
+// foreignELF returns an ELF header for another platform than the running
+// test's: linux/arm64, or linux/amd64 on an arm64 host.
+func foreignELF() []byte {
 	binaryData := make([]byte, 64)
 	copy(binaryData, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1})
 	binaryData[16], binaryData[18], binaryData[20], binaryData[52] = 2, 0xB7, 1, 64
-	if runtime.GOARCH == "arm64" {
+	if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
 		binaryData[18] = 0x3E // EM_X86_64
 	}
+	return binaryData
+}
+
+func TestArchiveCacheRejectsForeignBinaryOnCacheHit(t *testing.T) {
+	// The cache represents a volume moved from another proxy platform.
+	binaryData := foreignELF()
 	manifest, manifestBytes, _ := binaryRelease(t, "0.0.19", binaryData)
 	installation := &Installation{ID: 42, PluginID: manifest.PluginId, Version: manifest.Version, InstallPath: "/api/plugins/install-cached/plugin"}
 	cache := NewArchiveCacheAt(&legacyArchiveStore{}, t.TempDir())
@@ -287,9 +293,9 @@ func (s *legacyArchiveStore) SaveArchive(
 
 // A cache with its own root (a proxy node's) never touches the install path
 // the API server recorded: it rehydrates under <root>/<plugin>/<version>/
-// <release>/plugin, reuses that copy on the next Ensure, and drops the
-// previous release once a replacement is in place.
-func TestArchiveCacheAtOwnRootRehydratesUnderItAndPrunesOldReleases(t *testing.T) {
+// <release>/plugin, reuses that copy on the next Ensure, and removes only
+// the observed previous release when the host reconciles a replacement.
+func TestArchiveCacheAtOwnRootRehydratesAndRetiresObservedRelease(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "proxy-cache")
 	apiInstallRoot := filepath.Join(t.TempDir(), "api-machine", "plugins", "silo.metadb")
@@ -339,6 +345,10 @@ func TestArchiveCacheAtOwnRootRehydratesUnderItAndPrunesOldReleases(t *testing.T
 	}
 
 	second, secondStore := release("0.0.20", "install-bbbb", "#!/bin/sh\nexit 1\n")
+	staged := filepath.Join(root, "silo.metadb", "0.0.20", "install-staged")
+	if err := os.MkdirAll(staged, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	cache = NewArchiveCacheAt(secondStore, root)
 	if _, err := cache.Ensure(ctx, second); err != nil {
 		t.Fatalf("Ensure(second) returned error: %v", err)
@@ -347,8 +357,239 @@ func TestArchiveCacheAtOwnRootRehydratesUnderItAndPrunesOldReleases(t *testing.T
 	if _, err := os.Stat(wantSecond); err != nil {
 		t.Fatalf("second release was not rehydrated: %v", err)
 	}
+	if err := cache.retire(first, second); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := os.Stat(filepath.Dir(wantFirst)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("previous release still present after the replacement: %v", err)
+	}
+	if _, err := os.Stat(staged); err != nil {
+		t.Fatalf("retiring a release removed a staged package: %v", err)
+	}
+	if _, err := cache.Ensure(ctx, first); !errors.Is(err, ErrInstallationChanged) {
+		t.Fatalf("stale cache read returned %v, want ErrInstallationChanged", err)
+	}
+}
+
+func TestArchiveCacheReusesRestoredPathAndRejectsEarlierRead(t *testing.T) {
+	ctx := t.Context()
+	oldManifest, oldJSON, oldZip := binaryRelease(t, "1.0.0", []byte("#!/bin/sh\nexit 1\n"))
+	wantBinary := []byte("#!/bin/sh\nexit 0\n")
+	restoredManifest, restoredJSON, restoredZip := binaryRelease(t, "1.0.0", wantBinary)
+	oldArchive := &InstallationArchive{InstallationID: 42, ManifestJSON: oldJSON, Checksum: oldManifest.Checksum, Bytes: oldZip}
+	restoredArchive := &InstallationArchive{InstallationID: 42, ManifestJSON: restoredJSON, Checksum: restoredManifest.Checksum, Bytes: restoredZip}
+	installation := &Installation{ID: 42, PluginID: restoredManifest.PluginId, Version: restoredManifest.Version, InstallPath: "/api/plugins/install-old/plugin"}
+	replacement := *installation
+	replacement.InstallPath = "/api/plugins/install-new/plugin"
+
+	// The first load has read the old archive but cannot put it on disk yet.
+	// A later guarded read sees either the replacement or the restored row.
+	entered := make(chan struct{})
+	resume := make(chan struct{})
+	release := sync.OnceFunc(func() { close(resume) })
+	defer release()
+	var calls atomic.Int32
+	var current atomic.Pointer[Installation]
+	current.Store(installation)
+	store := &releaseArchiveFixture{initial: installation, read: func(_ context.Context, want *Installation) (*InstallationArchive, error) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-resume
+			return oldArchive, nil
+		}
+		if row := current.Load(); row.ID != want.ID || row.Version != want.Version || row.InstallPath != want.InstallPath {
+			return nil, ErrInstallationChanged
+		}
+		return restoredArchive, nil
+	}}
+	cache := NewArchiveCacheAt(store, t.TempDir())
+	oldRead := make(chan error, 1)
+	go func() {
+		_, err := cache.Ensure(ctx, installation)
+		oldRead <- err
+	}()
+	waitForLifecycleTestSignal(t, entered)
+	current.Store(&replacement)
+	if err := cache.retire(installation, &replacement); err != nil {
+		t.Fatal(err)
+	}
+	// A poll that already read this row can arrive after retirement. Its
+	// snapshot alone cannot make the retired archive usable.
+	cache.retryRetirements(ctx, map[int]*Installation{installation.ID: installation})
+	if _, err := cache.Manifest(ctx, installation); !errors.Is(err, ErrInstallationChanged) {
+		t.Fatalf("lookup of a superseded path returned %v, want ErrInstallationChanged", err)
+	}
+	current.Store(installation)
+	// The restore can become usable even before the next follower poll. A
+	// fresh read must also be independent of the old read's singleflight.
+	restoredRead := make(chan error, 1)
+	go func() {
+		_, err := cache.Ensure(ctx, installation)
+		restoredRead <- err
+	}()
+	select {
+	case err := <-restoredRead:
+		if err != nil {
+			t.Fatalf("valid restored path is unavailable: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a restored path waited for an earlier read of the retired archive")
+	}
+	release()
+	if err := <-oldRead; !errors.Is(err, ErrInstallationChanged) {
+		t.Fatalf("read begun before retirement returned %v, want ErrInstallationChanged", err)
+	}
+	path := requireLocalInstallPath(t, cache, installation)
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, wantBinary) {
+		t.Fatalf("cached restored binary = %q, err = %v", got, err)
+	}
+}
+
+// The release check models the store's query that matches the archive to the
+// requested installation ID, version and path in one database snapshot.
+type releaseArchiveFixture struct {
+	legacyArchiveStore
+	initial *Installation
+	read    func(context.Context, *Installation) (*InstallationArchive, error)
+}
+
+func (s *releaseArchiveFixture) GetArchive(ctx context.Context, _ int) (*InstallationArchive, error) {
+	return s.read(ctx, s.initial)
+}
+
+func (s *releaseArchiveFixture) archiveForRelease(ctx context.Context, installation *Installation) (*InstallationArchive, error) {
+	return s.read(ctx, installation)
+}
+
+func TestFollowerProtectsRestoredPathFromPendingCleanup(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	oldBinary := []byte("#!/bin/sh\nexit 1\n")
+	wantBinary := []byte("#!/bin/sh\nexit 0\n")
+	_, oldJSON, _ := binaryRelease(t, "1.0.0", oldBinary)
+	manifest, raw, zip := binaryRelease(t, "1.0.0", wantBinary)
+	installation := &Installation{ID: 1, PluginID: manifest.PluginId, Version: manifest.Version, Enabled: true,
+		InstallPath: filepath.Join(root, manifest.PluginId, manifest.Version, "plugin"),
+	}
+	unblock := blockLegacyFileRemoval(t, installation)
+	rows := newFakeServiceInstallationStore(installation)
+	archive := &InstallationArchive{InstallationID: installation.ID, ManifestJSON: raw, Checksum: manifest.Checksum, Bytes: zip}
+	store := &releaseArchiveFixture{initial: installation, read: func(ctx context.Context, want *Installation) (*InstallationArchive, error) {
+		row, err := rows.GetByID(ctx, want.ID)
+		if err != nil || row.InstallPath != want.InstallPath || row.Version != want.Version {
+			return nil, ErrInstallationChanged
+		}
+		return archive, nil
+	}}
+	cache := NewArchiveCacheAt(store, root)
+	follower := &Service{installations: rows, archiveCache: cache}
+	follower.reconcileLifecycle(ctx, false)
+	if err := rows.Delete(ctx, installation.ID); err != nil {
+		t.Fatal(err)
+	}
+	follower.reconcileLifecycle(ctx, false)
+
+	// The path returned as current. Leave a valid-looking old cache copy
+	// there as if the prior cleanup had not finished removing the files.
+	path := requireLocalInstallPath(t, cache, installation)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, oldBinary, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(InstalledManifestPath(path), oldJSON, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rows.Create(ctx, CreateInstallationInput{
+		PluginID: installation.PluginID, Version: installation.Version, InstallPath: installation.InstallPath, Enabled: installation.Enabled,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unblock()
+	follower.reconcileLifecycle(ctx, false)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("pending retirement removed the path observed as current: %v", err)
+	}
+
+	if _, err := cache.Ensure(ctx, installation); err != nil {
+		t.Fatal(err)
+	}
+	// A delayed snapshot that still misses the restored row cannot replay
+	// the obsolete cleanup after the guarded read restored the package.
+	cache.retryRetirements(ctx, nil)
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, wantBinary) {
+		t.Fatalf("cached restored binary = %q, err = %v", got, err)
+	}
+}
+
+func TestArchiveCacheRejectsSupersededSameVersionDB(t *testing.T) {
+	ctx := t.Context()
+	store := NewInstallationStore(builtinGuardTestPool(t))
+	archive := func(script string) ArchiveInput {
+		t.Helper()
+		binary := []byte(script)
+		manifest := testPluginManifest(t, "silo.archive.release-race", "1.0.0")
+		manifest.Checksum = sha256Hex(binary)
+		raw, err := protojson.Marshal(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := buildBinaryPluginArchive(raw, binary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ArchiveInput{ManifestJSON: raw, Checksum: manifest.Checksum, Bytes: data}
+	}
+	initial := archive("#!/bin/sh\nexit 0\n")
+	replacement := archive("#!/bin/sh\nexit 1\n")
+	writer := t.TempDir()
+	old, err := store.Create(ctx, CreateInstallationInput{
+		PluginID: "silo.archive.release-race", Version: "1.0.0",
+		InstallPath: filepath.Join(writer, "install-old", "plugin"), Archive: initial,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.Delete(context.Background(), old.ID); err != nil {
+			t.Error(err)
+		}
+	})
+	original, err := store.GetArchive(ctx, old.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installer := NewInstaller(store, InstallerOptions{BaseDir: t.TempDir()})
+	follower := NewService(nil, store, nil, nil, installer, nil)
+	cache := follower.archiveCache
+	follower.reconcileLifecycle(ctx, false)
+	nextPath := filepath.Join(writer, "install-new", "plugin")
+	if err := store.Update(ctx, old.ID, UpdateInstallationInput{InstallPath: &nextPath, Archive: &replacement}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.Ensure(ctx, old); !errors.Is(err, ErrInstallationChanged) {
+		t.Fatalf("Ensure on a superseded package returned %v, want ErrInstallationChanged", err)
+	}
+	if err := store.repairArchive(ctx, original, initial.Bytes); err != nil {
+		t.Fatal(err)
+	}
+	current, err := store.GetByID(ctx, old.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest, err := cache.Ensure(ctx, current); err != nil || manifest.GetChecksum() != replacement.Checksum {
+		t.Fatalf("rehydrate committed replacement after late repair: %v", err)
+	}
+	follower.reconcileLifecycle(ctx, false)
+
+	// A restore can return the exact earlier installation path and archive.
+	// The existing follower must read the restored package before its next poll.
+	if err := store.Update(ctx, old.ID, UpdateInstallationInput{InstallPath: &old.InstallPath, Archive: &initial}); err != nil {
+		t.Fatal(err)
+	}
+	if manifest, err := cache.Ensure(ctx, old); err != nil || manifest.GetChecksum() != initial.Checksum {
+		t.Fatalf("rehydrate retired path from restored row: %v", err)
 	}
 }
 
@@ -610,4 +851,277 @@ func requireLocalInstallPath(t *testing.T, cache *ArchiveCache, installation *In
 		t.Fatal(err)
 	}
 	return path
+}
+
+// platformTestStore is an installation's stored archive, holding another
+// platform's build, and the builds stored for other platforms.
+type platformTestStore struct {
+	mu     sync.Mutex
+	stored *InstallationArchive
+	builds map[string]*PlatformArchive
+	// replaced makes every save find the installation replaced, and saveErr
+	// makes every save fail.
+	replaced bool
+	saveErr  error
+	// reads counts reads of the stored archive.
+	reads atomic.Int32
+}
+
+func (s *platformTestStore) GetArchive(context.Context, int) (*InstallationArchive, error) {
+	s.reads.Add(1)
+	return s.stored, nil
+}
+
+func (s *platformTestStore) SaveArchive(context.Context, int, []byte, string, []byte) error {
+	return nil
+}
+
+func (s *platformTestStore) GetPlatformArchive(_ context.Context, _ int, goos, goarch, baseChecksum string) (*PlatformArchive, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if archive, ok := s.builds[goos+"/"+goarch+"@"+baseChecksum]; ok {
+		return archive, nil
+	}
+	return nil, ErrArchiveNotFound
+}
+
+func (s *platformTestStore) SavePlatformArchive(_ context.Context, in SavePlatformArchiveInput) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.saveErr != nil {
+		return false, s.saveErr
+	}
+	if s.replaced {
+		return false, nil
+	}
+	if s.builds == nil {
+		s.builds = map[string]*PlatformArchive{}
+	}
+	s.builds[in.OS+"/"+in.Arch+"@"+in.BaseChecksum] = &PlatformArchive{Archive: in.Archive, Signature: in.Signature}
+	return true, nil
+}
+
+// platformBuildFixture is an installation from a catalog whose stored
+// archive holds another platform's build, on a cache without its own root as
+// an API server has, and a catalog that serves this platform's build.
+type platformBuildFixture struct {
+	store        *platformTestStore
+	installation *Installation
+	// root, when set, is the cache's own root, as an API server can have.
+	root       string
+	hostBinary []byte
+	// signature is the fetched build's release signature check.
+	signature Signature
+	fetches   atomic.Int32
+	// mutate, when set, changes the fetched build's manifest.
+	mutate func(*pluginv1.PluginManifest)
+}
+
+func newPlatformBuildFixture(t *testing.T) *platformBuildFixture {
+	t.Helper()
+	foreign := foreignELF()
+	manifest, manifestBytes, archive := binaryRelease(t, "1.0.0", foreign)
+	repositoryID := 1
+	return &platformBuildFixture{
+		store: &platformTestStore{stored: &InstallationArchive{
+			InstallationID: 7, ManifestJSON: manifestBytes, Checksum: manifest.GetChecksum(), Bytes: archive,
+		}},
+		installation: &Installation{
+			ID: 7, RepositoryID: &repositoryID, PluginID: manifest.GetPluginId(), Version: manifest.GetVersion(),
+			InstallPath: filepath.Join(t.TempDir(), "install-1", "plugin"),
+		},
+		// Not an executable format binaryPlatform knows, so it passes as
+		// this platform's.
+		hostBinary: []byte("#!/bin/sh\n# this platform's build\n"),
+	}
+}
+
+func (f *platformBuildFixture) cache(t *testing.T) *ArchiveCache {
+	cache := NewArchiveCache(f.store)
+	if f.root != "" {
+		cache = NewArchiveCacheAt(f.store, f.root)
+	}
+	cache.platforms = &platformArchives{store: f.store, fetch: func(context.Context, *Installation) (*downloadedBinary, error) {
+		f.fetches.Add(1)
+		manifest := testPluginManifest(t, f.installation.PluginID, f.installation.Version)
+		manifest.Checksum = sha256Hex(f.hostBinary)
+		if f.mutate != nil {
+			f.mutate(manifest)
+		}
+		manifestJSON, err := protojson.Marshal(manifest)
+		if err != nil {
+			return nil, err
+		}
+		return &downloadedBinary{data: f.hostBinary, checksum: manifest.Checksum, manifest: manifest, manifestJSON: manifestJSON, signature: f.signature}, nil
+	}}
+	return cache
+}
+
+// binaryPath is where the fixture's caches install the binary.
+func (f *platformBuildFixture) binaryPath(t *testing.T) string {
+	t.Helper()
+	return requireLocalInstallPath(t, f.cache(t), f.installation)
+}
+
+func (f *platformBuildFixture) installedBinary(t *testing.T) []byte {
+	t.Helper()
+	data, err := os.ReadFile(f.binaryPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// A server on another platform than the one that installed a plugin used to
+// run the stored build and fail with exec format error. It fetches the same
+// version's build for its own platform once, stores it, and every server on
+// that platform then rehydrates from the stored one.
+func TestArchiveCacheFetchesThisPlatformsBuildOfAForeignStoredArchive(t *testing.T) {
+	// An API server's cache may also have its own root, as a proxy node's
+	// does; it still fetches rather than refusing, and only before running.
+	for _, withRoot := range []bool{false, true} {
+		t.Run(map[bool]string{false: "recorded install path", true: "own cache root"}[withRoot], func(t *testing.T) {
+			testFetchesThisPlatformsBuild(t, withRoot)
+		})
+	}
+}
+
+func testFetchesThisPlatformsBuild(t *testing.T, withRoot bool) {
+	ctx := context.Background()
+	f := newPlatformBuildFixture(t)
+	if withRoot {
+		f.root = t.TempDir()
+	}
+	// A build stored for an earlier release whose package had the same
+	// checksum is not this release's and is fetched again.
+	staleManifest, staleManifestJSON, staleArchive := binaryRelease(t, "0.9.0", []byte("an earlier release"))
+	f.store.builds = map[string]*PlatformArchive{
+		runtime.GOOS + "/" + runtime.GOARCH + "@" + f.store.stored.Checksum: {Archive: &InstallationArchive{
+			ManifestJSON: staleManifestJSON, Checksum: staleManifest.GetChecksum(), Bytes: staleArchive,
+		}},
+	}
+
+	// A manifest read runs nothing and takes the stored build as it is,
+	// leaving it on disk as the reported servers had it.
+	if _, err := f.cache(t).Manifest(ctx, f.installation); err != nil {
+		t.Fatalf("Manifest() = %v", err)
+	}
+	if f.fetches.Load() != 0 || !bytes.Equal(f.installedBinary(t), foreignELF()) {
+		t.Fatalf("a manifest read fetched %d builds; want the stored build on disk and no fetch", f.fetches.Load())
+	}
+
+	// Running it replaces that build with this platform's, fetched once.
+	manifest, err := f.cache(t).Ensure(ctx, f.installation)
+	if err != nil {
+		t.Fatalf("Ensure() = %v", err)
+	}
+	if f.fetches.Load() != 1 || !bytes.Equal(f.installedBinary(t), f.hostBinary) || manifest.GetChecksum() != sha256Hex(f.hostBinary) {
+		t.Fatalf("Ensure() fetched %d builds and installed checksum %s; want this platform's build, fetched once", f.fetches.Load(), manifest.GetChecksum())
+	}
+
+	// Another server on this platform, with an empty cache, uses the stored
+	// build.
+	if err := os.RemoveAll(filepath.Dir(f.binaryPath(t))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.cache(t).Ensure(ctx, f.installation); err != nil {
+		t.Fatalf("Ensure() on a second server = %v", err)
+	}
+	if f.fetches.Load() != 1 || !bytes.Equal(f.installedBinary(t), f.hostBinary) {
+		t.Fatalf("a second server fetched again (%d fetches) or installed another build", f.fetches.Load())
+	}
+}
+
+// A build Silo can't fetch, or one it can't trust as the installed
+// release for this platform, fails before anything runs, nothing is stored,
+// and starts within the retry delay neither fetch it again nor read and
+// extract the stored build again.
+func TestArchiveCacheRefusesAPlatformBuildItCannotTrust(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		setup       func(*platformBuildFixture)
+		wantFetches int32
+		// wantReads is how often the stored archive is read; 1 unless set.
+		wantReads int32
+	}{
+		{name: "plugin without a catalog", setup: func(f *platformBuildFixture) { f.installation.RepositoryID = nil }},
+		{name: "build declaring another manifest", wantFetches: 1, setup: func(f *platformBuildFixture) {
+			f.mutate = func(m *pluginv1.PluginManifest) { m.Capabilities = m.Capabilities[:0] }
+		}},
+		{name: "build for another platform", wantFetches: 1, setup: func(f *platformBuildFixture) { f.hostBinary = foreignELF() }},
+		{name: "build with a weaker signature than the installed one", wantFetches: 1, setup: func(f *platformBuildFixture) {
+			repo := "https://github.com/Silo-Server/silo-plugin-example"
+			f.installation.Signature = Signature{State: SignatureStateVerified, SourceRepo: &repo}
+		}},
+		// The fetched build is for a release no longer installed, so it
+		// isn't run; the next start fetches for the current one.
+		{name: "installation replaced during the fetch", wantFetches: 2, wantReads: 2, setup: func(f *platformBuildFixture) { f.store.replaced = true }},
+		// Nothing shows the installation is still the one fetched for, and
+		// the next start waits out the retry delay like a failed fetch.
+		{name: "storing the build fails", wantFetches: 1, setup: func(f *platformBuildFixture) { f.store.saveErr = errors.New("database unavailable") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPlatformBuildFixture(t)
+			tc.setup(f)
+			cache := f.cache(t)
+			for range 2 {
+				if _, err := cache.Ensure(context.Background(), f.installation); err == nil {
+					t.Fatal("Ensure() succeeded, want an error naming the platform")
+				}
+			}
+			if f.fetches.Load() != tc.wantFetches || len(f.store.builds) != 0 {
+				t.Fatalf("fetched %d builds and stored %d; want %d fetched and none stored", f.fetches.Load(), len(f.store.builds), tc.wantFetches)
+			}
+			if want := max(tc.wantReads, 1); f.store.reads.Load() != want {
+				t.Fatalf("read the stored archive %d times; want %d", f.store.reads.Load(), want)
+			}
+			if _, err := os.Stat(f.binaryPath(t)); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("a binary was left to run at the install path: %v", err)
+			}
+		})
+	}
+}
+
+// A build stored with a weaker signature than the installation now has, as
+// after a verified reinstall of the same package, is fetched again rather
+// than run.
+func TestArchiveCacheRefetchesAStoredBuildSignedWithLess(t *testing.T) {
+	f := newPlatformBuildFixture(t)
+	repo := "https://github.com/Silo-Server/silo-plugin-example"
+	f.installation.Signature = Signature{State: SignatureStateVerified, SourceRepo: &repo}
+	f.signature = f.installation.Signature
+	unsigned := f.hostBinary
+	manifest, manifestJSON, archive := binaryRelease(t, f.installation.Version, unsigned)
+	f.store.builds = map[string]*PlatformArchive{
+		runtime.GOOS + "/" + runtime.GOARCH + "@" + f.store.stored.Checksum: {
+			Archive:   &InstallationArchive{ManifestJSON: manifestJSON, Checksum: manifest.GetChecksum(), Bytes: archive},
+			Signature: Signature{State: SignatureStateUnsigned},
+		},
+	}
+	if _, err := f.cache(t).Ensure(context.Background(), f.installation); err != nil {
+		t.Fatalf("Ensure() = %v", err)
+	}
+	stored := f.store.builds[runtime.GOOS+"/"+runtime.GOARCH+"@"+f.store.stored.Checksum]
+	if f.fetches.Load() != 1 || stored.Signature.State != SignatureStateVerified {
+		t.Fatalf("fetched %d builds and stored one signed %q; want the unsigned build replaced by a verified fetch", f.fetches.Load(), stored.Signature.State)
+	}
+}
+
+// Preload runs before the API listens, so it leaves fetching this platform's
+// build of a foreign stored archive to the plugin's first launch.
+func TestPreloadLeavesThePlatformBuildFetchToTheFirstLaunch(t *testing.T) {
+	ctx := context.Background()
+	f := newPlatformBuildFixture(t)
+	f.installation.Enabled = true
+	cache := f.cache(t)
+	svc := &Service{installations: newFakeServiceInstallationStore(f.installation), archiveCache: cache}
+	if err := svc.PreloadEnabled(ctx); err != nil {
+		t.Fatalf("PreloadEnabled() = %v", err)
+	}
+	if f.fetches.Load() != 0 {
+		t.Fatalf("preload fetched %d builds; want none before the server listens", f.fetches.Load())
+	}
+	if _, err := cache.Ensure(ctx, f.installation); err != nil || f.fetches.Load() != 1 {
+		t.Fatalf("Ensure() after preload = %v with %d fetches; want this platform's build, fetched once", err, f.fetches.Load())
+	}
 }

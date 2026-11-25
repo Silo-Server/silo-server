@@ -150,6 +150,7 @@ func TestPlaybackV2ProblemMapping(t *testing.T) {
 		{&handlers.PlaybackOperationError{Status: http.StatusConflict, Code: "playback_attempt_reused", Message: "different request"}, TypeIdempotencyConflict},
 		{&handlers.PlaybackOperationError{Status: http.StatusConflict, Code: "progress_conflict", Message: "same sequence, different sample"}, TypePlaybackProgressConflict},
 		{&handlers.PlaybackOperationError{Status: http.StatusNotFound, Code: "session_not_found", Message: "gone"}, TypeNotFound},
+		{&handlers.PlaybackOperationError{Status: http.StatusGone, Code: "playback_session_paused_timeout", Message: "paused too long"}, TypePlaybackSessionPausedTimeout},
 		{&handlers.PlaybackOperationError{Status: http.StatusTooManyRequests, Code: "event_rate_limited", Message: "drop"}, TypeRateLimited},
 		{&handlers.PlaybackOperationError{Status: http.StatusBadRequest, Code: "bad_request", Message: "invalid"}, TypeValidationFailed},
 		{&handlers.PlaybackOperationError{Status: http.StatusUpgradeRequired, Code: "protocol_version_unsupported", Message: "v3 only"}, TypeValidationFailed},

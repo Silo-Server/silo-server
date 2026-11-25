@@ -31,6 +31,8 @@ export function ModelField({
   onChange,
   onCommit,
   placeholder,
+  managedByEnv,
+  dirty,
 }: {
   label: string;
   description?: ReactNode;
@@ -41,15 +43,22 @@ export function ModelField({
   /** Called when focus leaves the field, for pages that save each field. */
   onCommit?: (value: string) => void;
   placeholder?: string;
+  /** The variable that sets this model on the server; disables the field. */
+  managedByEnv?: string;
+  /** Marks the row as holding an unsaved edit. */
+  dirty?: boolean;
 }) {
   const t = useT();
   const inputID = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const pickerOpen = useRef(false);
-  const models = useAIProviderModels(providerID);
+  // A model the environment sets can't be picked here, so its provider's
+  // models aren't fetched.
+  const listedProviderID = managedByEnv != null ? "" : providerID;
+  const models = useAIProviderModels(listedProviderID);
   const suggestions = (models.data?.models ?? []).filter((model) => model.kind === kind);
   const status =
-    providerID === "" ? undefined : models.isError ? (
+    listedProviderID === "" ? undefined : models.isError ? (
       <span className="text-muted-foreground text-xs">
         {t("web.admin.settings.ai.modelField.loadFailed")}
       </span>
@@ -62,7 +71,14 @@ export function ModelField({
       </span>
     ) : undefined;
   return (
-    <SettingFieldRow label={label} htmlFor={inputID} description={description} status={status}>
+    <SettingFieldRow
+      label={label}
+      htmlFor={inputID}
+      dirty={dirty}
+      description={description}
+      status={status}
+      managedByEnv={managedByEnv}
+    >
       <div
         className={cn(SETTINGS_CONTROL_WIDTH, "flex min-w-0 items-center gap-1")}
         onBlur={(event) => {
@@ -79,7 +95,8 @@ export function ModelField({
           placeholder={placeholder}
           autoComplete="off"
           spellCheck={false}
-          className="font-mono text-[13px]"
+          disabled={managedByEnv != null}
+          className="font-mono text-[0.8125rem]"
         />
         {suggestions.length > 0 && (
           <Select

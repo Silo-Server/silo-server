@@ -83,7 +83,9 @@ function ServerLocationInfo({
           <dt className="text-muted-foreground text-xs">
             {t("web.admin.downloads.location.directory")}
           </dt>
-          <dd className="font-mono text-xs break-all">{location.dir}</dd>
+          <dd className="font-mono text-xs break-all">
+            <span dir="ltr">{location.dir}</span>
+          </dd>
         </div>
         <div>
           <dt className="text-muted-foreground text-xs">
@@ -199,6 +201,8 @@ function NodeLocationFields({
   const t = useT();
   const update = useUpdateNode();
   const dirId = useId();
+  const dirHelpId = useId();
+  const dirErrorId = useId();
   const budgetId = useId();
   const currentDir = node.download_artifact_dir_override ?? "";
   const currentBudget = node.download_artifact_max_bytes_override ?? null;
@@ -260,14 +264,23 @@ function NodeLocationFields({
           <Label htmlFor={dirId}>{t("web.admin.downloads.location.directory")}</Label>
           <Input
             id={dirId}
+            // The field only ever holds a path, which reads left to right.
+            dir="ltr"
             value={dir}
             onChange={(event) => setDir(event.target.value)}
-            placeholder={clusterDir ?? t("web.admin.downloads.location.dirPlaceholder")}
+            // No sentence as a placeholder: an input can't wrap it, so longer
+            // translations clip on a phone. The help text below says it instead.
+            placeholder={clusterDir}
             className="font-mono text-xs"
             aria-invalid={dirError ? true : undefined}
+            aria-describedby={dirError ? `${dirErrorId} ${dirHelpId}` : dirHelpId}
           />
-          {dirError ? <p className="text-destructive text-xs">{dirError}</p> : null}
-          <p className="text-muted-foreground text-xs">
+          {dirError ? (
+            <p id={dirErrorId} className="text-destructive text-xs">
+              {dirError}
+            </p>
+          ) : null}
+          <p id={dirHelpId} className="text-muted-foreground text-xs">
             {clusterDir
               ? t("web.admin.downloads.location.dirHelpCluster", { dir: clusterDir, code })
               : t("web.admin.downloads.location.dirHelpDefault", { code })}

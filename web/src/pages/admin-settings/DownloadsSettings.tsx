@@ -148,6 +148,7 @@ export default function DownloadsSettings() {
             value={form.getValue("download.artifact_dir")}
             onChange={(v) => form.setValue("download.artifact_dir", v)}
             restartRequired={restartKeys.has("download.artifact_dir")}
+            managedByEnv={form.envVar("download.artifact_dir")}
           />
           {/* Stored as raw bytes (download.artifact_max_bytes); typed in GB
               because nobody sizes a disk budget in bytes. Unlimited stays
@@ -160,6 +161,7 @@ export default function DownloadsSettings() {
             value={form.getValue("download.artifact_max_bytes")}
             onChange={(v) => form.setValue("download.artifact_max_bytes", v)}
             restartRequired={restartKeys.has("download.artifact_max_bytes")}
+            managedByEnv={form.envVar("download.artifact_max_bytes")}
           />
           <SettingField
             label={t("web.admin.settings.downloads.diskCeiling.label")}

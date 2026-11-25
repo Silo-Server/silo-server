@@ -120,9 +120,10 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 	// Monitoring reads only. Operations that carry paths, node addresses,
 	// storage keys, setting values or credentials stay off this list (item
 	// files, storage, settings, logs, API keys, audit, per-device setting
-	// values, node sessions), and node rows are read through their summary.
-	// Host resources and download preparations withhold paths and failure
-	// text from scoped keys in their handlers.
+	// values, node sessions, request integrations, settings and routes), and
+	// node rows are read through their summary. Host resources, download
+	// preparations and media requests withhold paths and failure text from
+	// scoped keys in their handlers.
 	auth.ScopeAdminMonitorRead: {
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions/capabilities$`)},
@@ -133,6 +134,9 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 		{http.MethodPost, regexp.MustCompile(`^/api/v2/events/ws-ticket$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/playback-history$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/playback-history/capabilities$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/playback-history/[^/]+$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/insights/(capabilities|activity|people|devices|bandwidth|titles)$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/insights/titles/[^/]+$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/stats/(timeseries|playback-activity|top-activity|downloads)$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users/capabilities$`)},
@@ -141,13 +145,16 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/devices$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/devices/capabilities$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/ips$`)},
-		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/downloads/(entries|devices|preparations|preparations/capabilities)$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/downloads/(entries|devices|storage/capabilities|preparations|preparations/capabilities)$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/system/resources$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/system/resources/capabilities$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/nodes/summary$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/nodes/capabilities$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/server/status$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/catalog/(items|capabilities)$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/requests$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/requests/(counts|capabilities)$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/requests/[^/]+/(events|poster)$`)},
 	},
 	// The catalog listing with file paths, which the listing handler gives
 	// only to unscoped callers and keys holding this scope.

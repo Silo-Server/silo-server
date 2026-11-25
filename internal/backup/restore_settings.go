@@ -277,6 +277,9 @@ func classifySetting(key string) (settingRule, bool) {
 // that edits it. Keys another section restores (branding assets) and keys
 // with no page are not offered.
 func RestorableSetting(key string) (settingRule, bool) {
+	if retiredSettings[key] {
+		return settingRule{}, false
+	}
 	if kind, ok := SettingKindOf(key); !ok || kind == SettingKindServerSpecific {
 		return settingRule{}, false
 	}
@@ -285,6 +288,21 @@ func RestorableSetting(key string) (settingRule, bool) {
 		return settingRule{}, false
 	}
 	return rule, true
+}
+
+// retiredSettings are keys a migration deleted because nothing reads them
+// any more. A backup from before that migration can still hold them; a
+// selective restore skips them instead of bringing back a dead row.
+var retiredSettings = map[string]bool{
+	// Notification processing settings, fixed in code since
+	// 20261119184931_remove_notification_processing_settings.
+	"notifications.release_events_enabled":     true,
+	"notifications.fanout_enabled":             true,
+	"notifications.fanout.settle_seconds":      true,
+	"notifications.fanout.max_event_age_hours": true,
+	"notifications.retention.read_days":        true,
+	"notifications.retention.unread_days":      true,
+	"notifications.retention.event_days":       true,
 }
 
 // SettingsPages lists the pages in display order.

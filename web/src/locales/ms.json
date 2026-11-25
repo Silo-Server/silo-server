@@ -281,10 +281,28 @@
       "value": "Kod log masuk ini telah tamat tempoh. Mulakan semula."
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "Akaun ini telah mencapai had peranti untuk sambungan terus."
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "Peranti lain sudah menggunakan kunci sambungan ini. Cuba lagi."
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
       "value": "Alamat e-mel itu sudah digunakan."
+    }
+  ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Ini sudah digunakan."
     }
   ],
   "error.field.invalid": [
@@ -327,6 +345,18 @@
     {
       "type": 0,
       "value": "Permintaan tidak dapat dibaca."
+    }
+  ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Ditetapkan oleh persekitaran. Ubah di sana dan mulakan semula perkhidmatan yang terjejas."
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "Nilai ini tiada."
     }
   ],
   "error.field.out_of_range": [
@@ -437,6 +467,12 @@
       "value": "Log masuk melalui log masuk rangkaian anda untuk meneruskan."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Nod ini ditetapkan oleh konfigurasi penggunaan pelayan. Alih keluar nod itu di sana dan mulakan semula pelayan API untuk mengurusnya di sini."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -483,6 +519,18 @@
     {
       "type": 0,
       "value": "Sesi main balik ini telah tamat. Mulakan main semula."
+    }
+  ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Main balik dihentikan kerana dijeda terlalu lama. Mulakan main semula."
+    }
+  ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Strim ini telah diganti. Main balik diteruskan pada strim semasa."
     }
   ],
   "error.precondition_failed": [
@@ -1261,6 +1309,18 @@
       "value": "Siri popular"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Filem disyorkan untuk anda"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Siri disyorkan untuk anda"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -1990,6 +2050,66 @@
     {
       "type": 0,
       "value": "Bahasa apl"
+    }
+  ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Pada penghujung"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minit sebelum tamat"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " saat sebelum tamat"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Tunjukkan episod seterusnya"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Mati"
     }
   ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
@@ -3499,7 +3619,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "Main sekarang"
+      "value": "Main episod seterusnya"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -12613,7 +12733,7 @@
             },
             {
               "type": 0,
-              "value": " tidak boleh dipulihkan — koleksi yang dipaparkan tiada di sini atau dalam sandaran"
+              "value": " tidak boleh dipulihkan — koleksi yang dipaparkannya tiada di sini atau dalam sandaran"
             }
           ]
         }
@@ -12767,7 +12887,7 @@
             },
             {
               "type": 0,
-              "value": " tidak boleh dipulihkan — judulnya tiada dalam katalog pelayan ini"
+              "value": " tidak boleh dipulihkan — tajuknya tiada dalam katalog pelayan ini"
             }
           ]
         }
@@ -12864,6 +12984,28 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tidak boleh dipulihkan — persekitaran pelayan ini menetapkan tetapan yang berbeza, atau sebahagian sambungannya"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -12921,7 +13063,7 @@
             },
             {
               "type": 0,
-              "value": " tidak boleh dipulihkan — profil utamanya mesti dipulihkan bersama"
+              "value": " tidak boleh dipulihkan — profil utamanya mesti dipulihkan bersamanya"
             }
           ]
         }
@@ -13031,7 +13173,7 @@
             },
             {
               "type": 0,
-              "value": " tidak boleh dipulihkan — pelayan ini akan memberikan akses lebih luas berbanding sandaran"
+              "value": " tidak boleh dipulihkan — pelayan ini akan memberikannya akses lebih luas berbanding sandaran"
             }
           ]
         }
@@ -13218,6 +13360,28 @@
     {
       "type": 0,
       "value": "Alamat satu perkhidmatan berubah tanpa bukti kelayakannya dalam sandaran, jadi pemulihan mengosongkan bukti kelayakan itu di sini dan mematikan perkhidmatan tersebut sehingga dimasukkan semula."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tetapan mengekalkan nilai semasa kerana persekitaran pelayan ini menetapkannya, atau sebahagian sambungannya."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -13556,8 +13720,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Sembunyikan"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -13670,8 +13860,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Tunjukkan"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tunjukkan"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tunjukkan"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tunjukkan"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -14276,9 +14492,41 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Turut memilih "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", yang diperlukan oleh pilihan anda."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Turut memilih "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", yang diperlukan oleh pilihan anda."
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -14295,16 +14543,46 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Turut menyahpilih "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", yang memerlukan item yang anda nyahpilih."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Turut menyahpilih "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", yang memerlukan item yang anda nyahpilih."
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -14321,9 +14599,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -15482,6 +15758,12 @@
       "value": "Akaun lain di sini log masuk dengan nama pengguna atau e-mel akaun ini."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Persekitaran pelayan ini menetapkan tetapan yang berbeza, atau sebahagian sambungannya, jadi pelayan ini mengekalkan nilai semasanya."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -15926,6 +16208,142 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "Imej latar"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " item koleksi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "Koleksi digantikan"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "Konfigurasi"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "Penerangan"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "Didayakan"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "Ditampilkan"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "Had item"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "Isihan item"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "Pustaka"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "Kedudukan"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "Poster"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "Tertib isihan"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "Sumber"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "Jadual penyegerakan"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "Tajuk"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "Terjemahan tajuk"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "Jenis"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "Keterlihatan"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Web sahaja"
     }
   ],
   "web.admin.backups.restore.rows.changes": [
@@ -16416,6 +16834,16 @@
     {
       "type": 0,
       "value": " (dikekalkan: lebih ketat)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (dikekalkan: persekitaran)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -17390,6 +17818,20 @@
       "value": "Dalam zon waktu pelayan."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Dalam zon waktu pelayan. Bersamaan pukul "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " di tempat anda."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -18242,9 +18684,25 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "data akaun ini tidak dapat dibaca"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "data akaun ini tidak dapat dibaca"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18253,9 +18711,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -18286,20 +18742,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Sembunyikan akaun"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan akaun"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan akaun"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan akaun"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Sembunyikan fail"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan fail"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan fail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan fail"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Sembunyikan fail"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan fail"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan fail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan fail"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -18338,6 +18872,226 @@
     {
       "type": 0,
       "value": "Fail ini dirujuk dalam pangkalan data tetapi tidak ditemui dalam storan; pemulihan tidak menyertakannya."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " aset penjenamaan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " latar belakang koleksi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " poster koleksi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sari kata yang dimuat turun"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " poster pustaka"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " imej tindanan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " poster koleksi peribadi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatar profil"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fail karya seni yang dimuat naik"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sari kata yang dimuat naik"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -18504,9 +19258,33 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " akaun ini tidak dapat dibaca"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " akaun ini tidak dapat dibaca"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18519,9 +19297,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -18536,8 +19312,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Tunjukkan akaun"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tunjukkan akaun"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tunjukkan akaun"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tunjukkan akaun"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -18564,21 +19366,89 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Tunjukkan fail"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tunjukkan fail"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tunjukkan fail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tunjukkan fail"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Tunjukkan fail"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tunjukkan fail"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tunjukkan fail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tunjukkan fail"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "data akaun ini terlalu besar untuk set pemulihan"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "data akaun ini terlalu besar untuk set pemulihan"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18587,9 +19457,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -20746,6 +21614,16 @@
       "value": "."
     }
   ],
+  "web.admin.common.catalogImportSource.exportJob": [
+    {
+      "type": 0,
+      "value": "Kerja eksport "
+    },
+    {
+      "type": 1,
+      "value": "id"
+    }
+  ],
   "web.admin.common.connectionCheck.check": [
     {
       "type": 0,
@@ -21016,6 +21894,12 @@
       "value": "Pembekal pertuturan ke teks tidak tersedia buat sementara waktu. Cuba lagi kemudian."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Pembekal AI teks tiada kredit yang tersedia, atau had penggunaan atau perbelanjaan telah dicapai. Semak baki dan had pembekal, atau tetapan penggunaan ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -21026,6 +21910,80 @@
     {
       "type": 0,
       "value": "Sambungan AI teks gagal. Semak model, tahap penaakulan, peringkat perkhidmatan, sambungan akaun dan had penggunaan pembekal."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Akses AI teks ditolak. Pastikan kunci API atau akaun ChatGPT dibenarkan menggunakan model ini."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Titik akhir atau model AI teks tidak tersedia. Semak URL asas pembekal dan model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Akaun ChatGPT yang disambungkan tidak boleh berkongsi penggunaan pelannya. Semak tetapan penggunaan ChatGPT, atau sambungkan akaun lain."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Pembekal AI teks sedang mengehadkan kadar permintaan. Cuba lagi kemudian."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Pembekal AI teks menolak permintaan semakan. Semak model, tahap penaakulan dan tetapan penggunaan akaun. Log pelayan mengandungi ralat daripada pembekal."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Pembekal AI teks menolak permintaan semakan (status "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Semak model, tahap penaakulan dan peringkat perkhidmatan. Log pelayan mengandungi ralat daripada pembekal."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Semakan sambungan AI teks tamat masa. Semak ketersediaan pembekal dan cuba lagi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Pembekal AI teks menolak bukti kelayakan. Gantikan kunci API pembekal, atau log masuk dengan ChatGPT sekali lagi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Pembekal AI teks tidak tersedia buat sementara waktu. Cuba lagi kemudian."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo tidak dapat mencapai pembekal AI teks. Semak URL asas pembekal dan pastikan pelayan ini boleh menyambung kepadanya."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Model teks mengembalikan respons yang tidak boleh digunakan oleh Silo. Pilih model lain."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -21102,6 +22060,12 @@
     {
       "type": 0,
       "value": "Alih keluar had"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "Terus"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -25598,6 +26562,12 @@
       "value": "gagal"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Tugas gagal. Periksa diagnostik pentadbir untuk butiran."
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -25680,6 +26650,12 @@
     {
       "type": 0,
       "value": "Import Sejarah"
+    }
+  ],
+  "web.admin.common.title.header.insights": [
+    {
+      "type": 0,
+      "value": "Cerapan"
     }
   ],
   "web.admin.common.title.header.libraries": [
@@ -25872,6 +26848,12 @@
     {
       "type": 0,
       "value": "Import Sejarah Pentadbir"
+    }
+  ],
+  "web.admin.common.title.tab.insights": [
+    {
+      "type": 0,
+      "value": "Cerapan Pentadbir"
     }
   ],
   "web.admin.common.title.tab.libraries": [
@@ -27125,6 +28107,12 @@
       "value": "kini"
     }
   ],
+  "web.admin.dashboard.range.edgeStart.all": [
+    {
+      "type": 0,
+      "value": "Rekod pertama"
+    }
+  ],
   "web.admin.dashboard.range.edgeStart.day": [
     {
       "type": 0,
@@ -27143,10 +28131,28 @@
       "value": "30 hari lalu"
     }
   ],
+  "web.admin.dashboard.range.edgeStart.quarter": [
+    {
+      "type": 0,
+      "value": "90 hari lalu"
+    }
+  ],
   "web.admin.dashboard.range.edgeStart.week": [
     {
       "type": 0,
       "value": "7 hari lalu"
+    }
+  ],
+  "web.admin.dashboard.range.edgeStart.year": [
+    {
+      "type": 0,
+      "value": "1 tahun lalu"
+    }
+  ],
+  "web.admin.dashboard.range.label.all": [
+    {
+      "type": 0,
+      "value": "Semua"
     }
   ],
   "web.admin.dashboard.range.label.day": [
@@ -27167,10 +28173,28 @@
       "value": "30 hari"
     }
   ],
+  "web.admin.dashboard.range.label.quarter": [
+    {
+      "type": 0,
+      "value": "90 hari"
+    }
+  ],
   "web.admin.dashboard.range.label.week": [
     {
       "type": 0,
       "value": "7 hari"
+    }
+  ],
+  "web.admin.dashboard.range.label.year": [
+    {
+      "type": 0,
+      "value": "1 tahun"
+    }
+  ],
+  "web.admin.dashboard.range.phrase.all": [
+    {
+      "type": 0,
+      "value": "semua sejarah yang direkodkan"
     }
   ],
   "web.admin.dashboard.range.phrase.day": [
@@ -27191,10 +28215,32 @@
       "value": "30 hari yang lalu"
     }
   ],
+  "web.admin.dashboard.range.phrase.quarter": [
+    {
+      "type": 0,
+      "value": "90 hari yang lalu"
+    }
+  ],
   "web.admin.dashboard.range.phrase.week": [
     {
       "type": 0,
       "value": "7 hari yang lalu"
+    }
+  ],
+  "web.admin.dashboard.range.phrase.year": [
+    {
+      "type": 0,
+      "value": "365 hari yang lalu"
+    }
+  ],
+  "web.admin.dashboard.range.title.all": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · sepanjang masa"
     }
   ],
   "web.admin.dashboard.range.title.day": [
@@ -27227,6 +28273,16 @@
       "value": " · 30 hari terakhir"
     }
   ],
+  "web.admin.dashboard.range.title.quarter": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · 90 hari terakhir"
+    }
+  ],
   "web.admin.dashboard.range.title.week": [
     {
       "type": 1,
@@ -27235,6 +28291,22 @@
     {
       "type": 0,
       "value": " · 7 hari terakhir"
+    }
+  ],
+  "web.admin.dashboard.range.title.year": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · 365 hari terakhir"
+    }
+  ],
+  "web.admin.dashboard.rangePicker.show.all": [
+    {
+      "type": 0,
+      "value": "Tunjukkan semua sejarah yang direkodkan"
     }
   ],
   "web.admin.dashboard.rangePicker.show.day": [
@@ -27255,10 +28327,22 @@
       "value": "Tunjukkan 30 hari terakhir"
     }
   ],
+  "web.admin.dashboard.rangePicker.show.quarter": [
+    {
+      "type": 0,
+      "value": "Tunjukkan 90 hari terakhir"
+    }
+  ],
   "web.admin.dashboard.rangePicker.show.week": [
     {
       "type": 0,
       "value": "Tunjukkan 7 hari terakhir"
+    }
+  ],
+  "web.admin.dashboard.rangePicker.show.year": [
+    {
+      "type": 0,
+      "value": "Tunjukkan 365 hari terakhir"
     }
   ],
   "web.admin.dashboard.widgetCatalog.apiClients.description": [
@@ -27321,6 +28405,78 @@
       "value": "Kesihatan pelayan"
     }
   ],
+  "web.admin.dashboard.widgetCatalog.insightsActivePeople.description": [
+    {
+      "type": 0,
+      "value": "Profil dan akaun yang menonton setiap hari, minggu atau bulan"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsActivePeople.title": [
+    {
+      "type": 0,
+      "value": "Penonton aktif"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsHourOfDay.description": [
+    {
+      "type": 0,
+      "value": "Jam dalam sehari dengan paling banyak main balik"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsHourOfDay.title": [
+    {
+      "type": 0,
+      "value": "Main balik mengikut jam dalam sehari"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsLibraryCoverage.description": [
+    {
+      "type": 0,
+      "value": "Berapa banyak setiap pustaka filem dan siri dimainkan dalam tempoh yang dipilih"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsLibraryCoverage.title": [
+    {
+      "type": 0,
+      "value": "Liputan pustaka"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsPlays.description": [
+    {
+      "type": 0,
+      "value": "Main balik setiap hari, minggu atau bulan mengikut kaedah main atau jenis media, sejauh mana sejarah direkodkan"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsPlays.title": [
+    {
+      "type": 0,
+      "value": "Main balik mengikut masa"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsViewingHours.description": [
+    {
+      "type": 0,
+      "value": "Bila orang mula menonton, mengikut hari dalam minggu dan jam"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsViewingHours.title": [
+    {
+      "type": 0,
+      "value": "Jam tontonan"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsWeekday.description": [
+    {
+      "type": 0,
+      "value": "Hari dalam minggu dengan paling banyak main balik"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsWeekday.title": [
+    {
+      "type": 0,
+      "value": "Main balik mengikut hari dalam minggu"
+    }
+  ],
   "web.admin.dashboard.widgetCatalog.libraries.description": [
     {
       "type": 0,
@@ -27372,7 +28528,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Suapan sesi main balik yang baru dimulakan"
+      "value": "Main balik terkini merentas semua akaun"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -28314,6 +29470,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.dashboard.widgets.insights.loadFailed": [
+    {
+      "type": 0,
+      "value": "Gagal memuatkan Insights."
+    }
+  ],
   "web.admin.dashboard.widgets.libraries.disabled": [
     {
       "type": 0,
@@ -28612,6 +29774,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.dashboard.widgets.openInsights": [
+    {
+      "type": 0,
+      "value": "Cerapan ›"
+    }
+  ],
   "web.admin.dashboard.widgets.playbackActivity.chartLabelDaily": [
     {
       "type": 0,
@@ -28830,6 +29998,72 @@
     {
       "type": 0,
       "value": "Tidak dapat memuatkan aktiviti."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " memainkan "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " memainkan "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -37449,6 +38683,12 @@
       "value": "Halaman sejarah tontonan tidak sah. Muat semula halaman."
     }
   ],
+  "web.admin.history.column.client": [
+    {
+      "type": 0,
+      "value": "Klien"
+    }
+  ],
   "web.admin.history.column.ended": [
     {
       "type": 0,
@@ -37458,7 +38698,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "Log"
+      "value": "Tindakan"
     }
   ],
   "web.admin.history.column.media": [
@@ -37488,13 +38728,271 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "Pengguna"
+      "value": "Akaun"
     }
   ],
   "web.admin.history.column.watchTime": [
     {
       "type": 0,
       "value": "Masa tontonan"
+    }
+  ],
+  "web.admin.history.detail.action.ffmpegLogs": [
+    {
+      "type": 0,
+      "value": "Log FFmpeg"
+    }
+  ],
+  "web.admin.history.detail.action.openMedia": [
+    {
+      "type": 0,
+      "value": "Buka tajuk"
+    }
+  ],
+  "web.admin.history.detail.action.sessionLogs": [
+    {
+      "type": 0,
+      "value": "Log sesi"
+    }
+  ],
+  "web.admin.history.detail.column.delivered": [
+    {
+      "type": 0,
+      "value": "Dihantar"
+    }
+  ],
+  "web.admin.history.detail.column.source": [
+    {
+      "type": 0,
+      "value": "Sumber"
+    }
+  ],
+  "web.admin.history.detail.column.stream": [
+    {
+      "type": 0,
+      "value": "Butiran"
+    }
+  ],
+  "web.admin.history.detail.field.account": [
+    {
+      "type": 0,
+      "value": "Akaun"
+    }
+  ],
+  "web.admin.history.detail.field.client": [
+    {
+      "type": 0,
+      "value": "Klien"
+    }
+  ],
+  "web.admin.history.detail.field.clientIp": [
+    {
+      "type": 0,
+      "value": "IP klien"
+    }
+  ],
+  "web.admin.history.detail.field.endPosition": [
+    {
+      "type": 0,
+      "value": "Dihentikan pada"
+    }
+  ],
+  "web.admin.history.detail.field.endReason": [
+    {
+      "type": 0,
+      "value": "Cara tamat"
+    }
+  ],
+  "web.admin.history.detail.field.ended": [
+    {
+      "type": 0,
+      "value": "Tamat"
+    }
+  ],
+  "web.admin.history.detail.field.library": [
+    {
+      "type": 0,
+      "value": "Pustaka"
+    }
+  ],
+  "web.admin.history.detail.field.network": [
+    {
+      "type": 0,
+      "value": "Rangkaian"
+    }
+  ],
+  "web.admin.history.detail.field.paused": [
+    {
+      "type": 0,
+      "value": "Dijeda"
+    }
+  ],
+  "web.admin.history.detail.field.platform": [
+    {
+      "type": 0,
+      "value": "Platform"
+    }
+  ],
+  "web.admin.history.detail.field.profile": [
+    {
+      "type": 0,
+      "value": "Profil"
+    }
+  ],
+  "web.admin.history.detail.field.route": [
+    {
+      "type": 0,
+      "value": "Laluan"
+    }
+  ],
+  "web.admin.history.detail.field.sessionId": [
+    {
+      "type": 0,
+      "value": "ID sesi"
+    }
+  ],
+  "web.admin.history.detail.field.started": [
+    {
+      "type": 0,
+      "value": "Dimulakan"
+    }
+  ],
+  "web.admin.history.detail.field.watched": [
+    {
+      "type": 0,
+      "value": "Masa tontonan"
+    }
+  ],
+  "web.admin.history.detail.keyboardHint": [
+    {
+      "type": 0,
+      "value": "Gunakan ↑ dan ↓ untuk beralih antara sesi"
+    }
+  ],
+  "web.admin.history.detail.loadFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuatkan butiran sesi."
+    }
+  ],
+  "web.admin.history.detail.loading": [
+    {
+      "type": 0,
+      "value": "Memuatkan butiran sesi…"
+    }
+  ],
+  "web.admin.history.detail.nextSession": [
+    {
+      "type": 0,
+      "value": "Sesi seterusnya"
+    }
+  ],
+  "web.admin.history.detail.notFound": [
+    {
+      "type": 0,
+      "value": "Sesi main balik ini tidak dapat ditemui."
+    }
+  ],
+  "web.admin.history.detail.preUpgradeNotice": [
+    {
+      "type": 0,
+      "value": "Direkodkan sebelum maklumat main balik terperinci dijejaki. Butiran fail dan laluan pelayan tidak tersedia untuk sesi ini."
+    }
+  ],
+  "web.admin.history.detail.previousSession": [
+    {
+      "type": 0,
+      "value": "Sesi sebelumnya"
+    }
+  ],
+  "web.admin.history.detail.row.audio": [
+    {
+      "type": 0,
+      "value": "Audio"
+    }
+  ],
+  "web.admin.history.detail.row.bitrate": [
+    {
+      "type": 0,
+      "value": "Kadar bit"
+    }
+  ],
+  "web.admin.history.detail.row.container": [
+    {
+      "type": 0,
+      "value": "Bekas"
+    }
+  ],
+  "web.admin.history.detail.row.subtitles": [
+    {
+      "type": 0,
+      "value": "Sari kata"
+    }
+  ],
+  "web.admin.history.detail.row.video": [
+    {
+      "type": 0,
+      "value": "Video"
+    }
+  ],
+  "web.admin.history.detail.section.clientRoute": [
+    {
+      "type": 0,
+      "value": "Akaun, peranti & laluan"
+    }
+  ],
+  "web.admin.history.detail.section.reasons": [
+    {
+      "type": 0,
+      "value": "Sebab tidak main terus"
+    }
+  ],
+  "web.admin.history.detail.section.streams": [
+    {
+      "type": 0,
+      "value": "Sumber berbanding dihantar"
+    }
+  ],
+  "web.admin.history.detail.section.timing": [
+    {
+      "type": 0,
+      "value": "Masa & kemajuan tontonan"
+    }
+  ],
+  "web.admin.history.detail.subtitlesBurnIn": [
+    {
+      "type": 0,
+      "value": "Dibakar"
+    }
+  ],
+  "web.admin.history.detail.subtitlesEmbedded": [
+    {
+      "type": 0,
+      "value": "Terbenam"
+    }
+  ],
+  "web.admin.history.detail.subtitlesHls": [
+    {
+      "type": 0,
+      "value": "Distrim (HLS)"
+    }
+  ],
+  "web.admin.history.detail.subtitlesNone": [
+    {
+      "type": 0,
+      "value": "Tiada"
+    }
+  ],
+  "web.admin.history.detail.subtitlesSidecar": [
+    {
+      "type": 0,
+      "value": "Fail luaran"
+    }
+  ],
+  "web.admin.history.detail.title": [
+    {
+      "type": 0,
+      "value": "Butiran sesi"
     }
   ],
   "web.admin.history.duration.hoursMinutes": [
@@ -37552,7 +39050,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "Tiada sejarah main balik yang sepadan dengan penapis semasa. Cuba laraskan penapis pengguna, profil atau penyelesaian."
+      "value": "Tiada sesi yang sepadan dengan penapis ini. Cuba kosongkan atau laraskan penapis."
     }
   ],
   "web.admin.history.empty.title": [
@@ -37561,10 +39059,136 @@
       "value": "Tiada sejarah main balik"
     }
   ],
+  "web.admin.history.endReason.aborted": [
+    {
+      "type": 0,
+      "value": "Ditamatkan oleh pelayan"
+    }
+  ],
+  "web.admin.history.endReason.expired": [
+    {
+      "type": 0,
+      "value": "Tamat masa"
+    }
+  ],
+  "web.admin.history.endReason.replaced": [
+    {
+      "type": 0,
+      "value": "Strim ditukar"
+    }
+  ],
+  "web.admin.history.endReason.stopped": [
+    {
+      "type": 0,
+      "value": "Dihentikan"
+    }
+  ],
+  "web.admin.history.endReason.terminated": [
+    {
+      "type": 0,
+      "value": "Dihentikan oleh pentadbir"
+    }
+  ],
+  "web.admin.history.filter.activeChip.client": [
+    {
+      "type": 0,
+      "value": "Klien: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.history.filter.activeChip.codec": [
+    {
+      "type": 0,
+      "value": "Kodek: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.history.filter.activeChip.dateRange": [
+    {
+      "type": 0,
+      "value": "Tarikh: "
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "web.admin.history.filter.activeChip.fromDate": [
+    {
+      "type": 0,
+      "value": "Dari "
+    },
+    {
+      "type": 1,
+      "value": "from"
+    }
+  ],
+  "web.admin.history.filter.activeChip.platform": [
+    {
+      "type": 0,
+      "value": "Platform: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.history.filter.activeChip.reason": [
+    {
+      "type": 0,
+      "value": "Sebab: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.history.filter.activeChip.toDate": [
+    {
+      "type": 0,
+      "value": "Hingga "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "Semua percubaan"
+      "value": "Semua status"
+    }
+  ],
+  "web.admin.history.filter.allLibraries": [
+    {
+      "type": 0,
+      "value": "Semua pustaka"
+    }
+  ],
+  "web.admin.history.filter.allLocations": [
+    {
+      "type": 0,
+      "value": "Semua rangkaian"
+    }
+  ],
+  "web.admin.history.filter.allMethods": [
+    {
+      "type": 0,
+      "value": "Semua kaedah"
     }
   ],
   "web.admin.history.filter.allProfiles": [
@@ -37576,13 +39200,19 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "Semua pengguna"
+      "value": "Semua akaun"
+    }
+  ],
+  "web.admin.history.filter.burnInOnly": [
+    {
+      "type": 0,
+      "value": "Sari kata dibakar"
     }
   ],
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "Pilih pengguna dahulu"
+      "value": "Pilih akaun dahulu"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -37591,10 +39221,32 @@
       "value": "Selesai"
     }
   ],
+  "web.admin.history.filter.locationLocal": [
+    {
+      "type": 0,
+      "value": "Setempat"
+    }
+  ],
+  "web.admin.history.filter.locationRemote": [
+    {
+      "type": 0,
+      "value": "Jauh"
+    }
+  ],
   "web.admin.history.filter.partial": [
     {
       "type": 0,
       "value": "Separa"
+    }
+  ],
+  "web.admin.history.filter.removeChip": [
+    {
+      "type": 0,
+      "value": "Alih keluar penapis "
+    },
+    {
+      "type": 1,
+      "value": "label"
     }
   ],
   "web.admin.history.filter.reset": [
@@ -37603,10 +39255,16 @@
       "value": "Tetapkan semula"
     }
   ],
+  "web.admin.history.filter.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "Cari tajuk, akaun, klien atau ID sesi…"
+    }
+  ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "Penapis item aktif"
+      "value": "Tajuk:"
     }
   ],
   "web.admin.history.loadError": [
@@ -37637,6 +39295,12 @@
     {
       "type": 0,
       "value": "tidak diketahui"
+    }
+  ],
+  "web.admin.history.pagination.firstPage": [
+    {
+      "type": 0,
+      "value": "Halaman pertama"
     }
   ],
   "web.admin.history.pagination.next": [
@@ -37698,6 +39362,32 @@
       "value": "total"
     }
   ],
+  "web.admin.history.pagination.summary": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Menunjukkan "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " baris"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.recent.autoRefreshing": [
     {
       "type": 0,
@@ -37729,7 +39419,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "Anggaran: direkodkan sebelum masa tontonan diukur"
+      "value": "Anggaran (direkodkan sebelum masa tontonan tepat dijejaki)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -37787,13 +39477,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "Baris kelihatan"
+      "value": "Ditunjukkan"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "Percubaan main balik yang dimuktamadkan merentas semua pengguna dan profil."
+      "value": "Sesi main balik lalu merentasi semua akaun dan profil."
     }
   ],
   "web.admin.history.title": [
@@ -39762,6 +41452,2356 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "Sejarah"
+    }
+  ],
+  "web.admin.insights.action.liveActivity": [
+    {
+      "type": 0,
+      "value": "Aktiviti masa nyata"
+    }
+  ],
+  "web.admin.insights.activity.activePeople.subtitle": [
+    {
+      "type": 0,
+      "value": "Profil dan akaun yang mula menonton dalam setiap tempoh"
+    }
+  ],
+  "web.admin.insights.activity.activePeople.title": [
+    {
+      "type": 0,
+      "value": "Penonton aktif"
+    }
+  ],
+  "web.admin.insights.activity.endReasons.subtitle": [
+    {
+      "type": 0,
+      "value": "Sesi dalam tempoh ini mengikut sebab sesi berakhir. Tamat masa yang banyak boleh bermakna aplikasi ranap atau terputus sambungan."
+    }
+  ],
+  "web.admin.insights.activity.endReasons.title": [
+    {
+      "type": 0,
+      "value": "Cara sesi berakhir"
+    }
+  ],
+  "web.admin.insights.activity.endReasons.unknown": [
+    {
+      "type": 0,
+      "value": "Tidak direkodkan"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.cellTooltip": [
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": " pada "
+    },
+    {
+      "type": 1,
+      "value": "hour"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "plays"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "watch_time"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.empty": [
+    {
+      "type": 0,
+      "value": "Tiada aktiviti tontonan dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.less": [
+    {
+      "type": 0,
+      "value": "Kurang"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.more": [
+    {
+      "type": 0,
+      "value": "Lebih"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.subtitle": [
+    {
+      "type": 0,
+      "value": "Masa orang mula menonton ("
+    },
+    {
+      "type": 1,
+      "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.title": [
+    {
+      "type": 0,
+      "value": "Jam tontonan"
+    }
+  ],
+  "web.admin.insights.activity.hour.title": [
+    {
+      "type": 0,
+      "value": "Tontonan mengikut jam dalam sehari"
+    }
+  ],
+  "web.admin.insights.activity.kpi.completionDetail": [
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": " daripada "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " selesai"
+    }
+  ],
+  "web.admin.insights.activity.kpi.completionRate": [
+    {
+      "type": 0,
+      "value": "Kadar selesai"
+    }
+  ],
+  "web.admin.insights.activity.kpi.peakStreams": [
+    {
+      "type": 0,
+      "value": "Strim serentak puncak"
+    }
+  ],
+  "web.admin.insights.activity.kpi.peakStreamsAt": [
+    {
+      "type": 0,
+      "value": "pada "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.insights.activity.kpi.peakStreamsNone": [
+    {
+      "type": 0,
+      "value": "Belum ada data strim"
+    }
+  ],
+  "web.admin.insights.activity.kpi.plays": [
+    {
+      "type": 0,
+      "value": "Tontonan"
+    }
+  ],
+  "web.admin.insights.activity.kpi.playsBreakdown": [
+    {
+      "type": 6,
+      "value": "movie_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "movies"
+            },
+            {
+              "type": 0,
+              "value": " filem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 6,
+      "value": "episode_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "episodes"
+            },
+            {
+              "type": 0,
+              "value": " episod"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.activity.kpi.watchTime": [
+    {
+      "type": 0,
+      "value": "Masa tontonan"
+    }
+  ],
+  "web.admin.insights.activity.kpi.watchTimeMeasured": [
+    {
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tepat untuk "
+            },
+            {
+              "type": 1,
+              "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": " daripada "
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " sesi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.activity.peak.chartLabel": [
+    {
+      "type": 0,
+      "value": "Strim serentak puncak setiap hari"
+    }
+  ],
+  "web.admin.insights.activity.peak.empty": [
+    {
+      "type": 0,
+      "value": "Tiada data strim dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.activity.peak.scopeNotice": [
+    {
+      "type": 0,
+      "value": "Sentiasa menunjukkan seluruh pelayan — penapis akaun dan pustaka tidak digunakan di sini."
+    }
+  ],
+  "web.admin.insights.activity.peak.subtitle": [
+    {
+      "type": 0,
+      "value": "Bilangan strim tertinggi yang dimainkan serentak setiap hari (seluruh pelayan, UTC)"
+    }
+  ],
+  "web.admin.insights.activity.peak.title": [
+    {
+      "type": 0,
+      "value": "Strim serentak puncak"
+    }
+  ],
+  "web.admin.insights.activity.volume.chartLabel": [
+    {
+      "type": 0,
+      "value": "Main balik mengikut masa"
+    }
+  ],
+  "web.admin.insights.activity.volume.empty": [
+    {
+      "type": 0,
+      "value": "Tiada main balik dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.activity.volume.metricPlays": [
+    {
+      "type": 0,
+      "value": "Tontonan"
+    }
+  ],
+  "web.admin.insights.activity.volume.metricWatchTime": [
+    {
+      "type": 0,
+      "value": "Masa tontonan"
+    }
+  ],
+  "web.admin.insights.activity.volume.seriesEpisodes": [
+    {
+      "type": 0,
+      "value": "Episod"
+    }
+  ],
+  "web.admin.insights.activity.volume.seriesMovies": [
+    {
+      "type": 0,
+      "value": "Filem"
+    }
+  ],
+  "web.admin.insights.activity.volume.seriesOther": [
+    {
+      "type": 0,
+      "value": "Lain-lain"
+    }
+  ],
+  "web.admin.insights.activity.volume.splitMediaType": [
+    {
+      "type": 0,
+      "value": "Jenis media"
+    }
+  ],
+  "web.admin.insights.activity.volume.splitMethod": [
+    {
+      "type": 0,
+      "value": "Kaedah main"
+    }
+  ],
+  "web.admin.insights.activity.volume.subtitle": [
+    {
+      "type": 0,
+      "value": "Menjeda dan menyambung semula dikira sebagai satu tontonan. Hentian tidak selesai di bawah 30 saat tidak dikira."
+    }
+  ],
+  "web.admin.insights.activity.volume.title": [
+    {
+      "type": 0,
+      "value": "Main balik mengikut masa"
+    }
+  ],
+  "web.admin.insights.activity.weekday.title": [
+    {
+      "type": 0,
+      "value": "Tontonan mengikut hari dalam seminggu"
+    }
+  ],
+  "web.admin.insights.addToDashboard.add": [
+    {
+      "type": 0,
+      "value": "Tambah ke papan pemuka"
+    }
+  ],
+  "web.admin.insights.addToDashboard.addLabel": [
+    {
+      "type": 0,
+      "value": "Tambah "
+    },
+    {
+      "type": 1,
+      "value": "chart"
+    },
+    {
+      "type": 0,
+      "value": " ke papan pemuka anda"
+    }
+  ],
+  "web.admin.insights.addToDashboard.added": [
+    {
+      "type": 1,
+      "value": "chart"
+    },
+    {
+      "type": 0,
+      "value": " ditambah ke papan pemuka anda"
+    }
+  ],
+  "web.admin.insights.addToDashboard.hint": [
+    {
+      "type": 0,
+      "value": "Menambah carta ini untuk seluruh pelayan. Penapis pustaka dan akaun tidak dibawa bersama."
+    }
+  ],
+  "web.admin.insights.addToDashboard.onDashboard": [
+    {
+      "type": 0,
+      "value": "Di papan pemuka"
+    }
+  ],
+  "web.admin.insights.addToDashboard.onDashboardLabel": [
+    {
+      "type": 1,
+      "value": "chart"
+    },
+    {
+      "type": 0,
+      "value": " ada di papan pemuka anda. Buka papan pemuka."
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.apiServer": [
+    {
+      "type": 0,
+      "value": "Pelayan API"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.empty": [
+    {
+      "type": 0,
+      "value": "Tiada data lebar jalur dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.metricPeak": [
+    {
+      "type": 0,
+      "value": "Kelajuan puncak"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.metricVolume": [
+    {
+      "type": 0,
+      "value": "Data dihantar"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.peakLabel": [
+    {
+      "type": 0,
+      "value": "Lebar jalur puncak harian"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.subtitle": [
+    {
+      "type": 0,
+      "value": "Data dihantar harian dan kelajuan puncak merentasi seluruh pelayan (UTC)."
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.title": [
+    {
+      "type": 0,
+      "value": "Lebar jalur mengikut masa"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.viewNodes": [
+    {
+      "type": 0,
+      "value": "Mengikut nod"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.viewTotal": [
+    {
+      "type": 0,
+      "value": "Jumlah"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.volumeLabel": [
+    {
+      "type": 0,
+      "value": "Data dihantar harian"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.dailyAverage": [
+    {
+      "type": 0,
+      "value": "Purata harian"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.dailyAverageSub": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "merentasi "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hari aktif"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.egressSplit": [
+    {
+      "type": 1,
+      "value": "playback"
+    },
+    {
+      "type": 0,
+      "value": " main balik · "
+    },
+    {
+      "type": 1,
+      "value": "downloads"
+    },
+    {
+      "type": 0,
+      "value": " muat turun"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.nodeSplit": [
+    {
+      "type": 1,
+      "value": "api"
+    },
+    {
+      "type": 0,
+      "value": " pelayan API · "
+    },
+    {
+      "type": 1,
+      "value": "nodes"
+    },
+    {
+      "type": 0,
+      "value": " nod strim"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.peakEgress": [
+    {
+      "type": 0,
+      "value": "Kelajuan puncak"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.peakEgressAt": [
+    {
+      "type": 0,
+      "value": "pada "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.remoteShare": [
+    {
+      "type": 0,
+      "value": "Tontonan jauh"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
+    {
+      "type": 1,
+      "value": "remote"
+    },
+    {
+      "type": 0,
+      "value": " jauh · "
+    },
+    {
+      "type": 1,
+      "value": "local"
+    },
+    {
+      "type": 0,
+      "value": " tempatan"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
+    {
+      "type": 0,
+      "value": "Belum ada maklumat rangkaian"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.totalEgress": [
+    {
+      "type": 0,
+      "value": "Jumlah data dihantar"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.column.node": [
+    {
+      "type": 0,
+      "value": "Nod"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.column.peak": [
+    {
+      "type": 0,
+      "value": "Kelajuan puncak"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.column.share": [
+    {
+      "type": 0,
+      "value": "Bahagian"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.column.total": [
+    {
+      "type": 0,
+      "value": "Data dihantar"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.empty": [
+    {
+      "type": 0,
+      "value": "Tiada trafik nod jauh dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.title": [
+    {
+      "type": 0,
+      "value": "Lebar jalur mengikut nod"
+    }
+  ],
+  "web.admin.insights.coverage.metricsStart": [
+    {
+      "type": 0,
+      "value": "Sejarah lebar jalur bermula pada "
+    },
+    {
+      "type": 1,
+      "value": "since"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.insights.coverage.routeFactsNone": [
+    {
+      "type": 0,
+      "value": "Maklumat main balik terperinci tidak tersedia untuk sesi lama ini. Sesi baharu merekodkannya secara automatik."
+    }
+  ],
+  "web.admin.insights.coverage.routeFactsPartial": [
+    {
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Maklumat main balik terperinci tersedia untuk "
+            },
+            {
+              "type": 1,
+              "value": "recorded"
+            },
+            {
+              "type": 0,
+              "value": " daripada "
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " sesi (dijejaki sejak "
+            },
+            {
+              "type": 1,
+              "value": "since"
+            },
+            {
+              "type": 0,
+              "value": ")."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.coverage.watchTimePartial": [
+    {
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Masa tontonan tepat tersedia untuk "
+            },
+            {
+              "type": 1,
+              "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": " daripada "
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " sesi; sesi lama dianggarkan."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.detail.action.history": [
+    {
+      "type": 0,
+      "value": "Lihat sejarah"
+    }
+  ],
+  "web.admin.insights.detail.noPlays": [
+    {
+      "type": 0,
+      "value": "Tiada tontonan dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.detail.playsOverTime": [
+    {
+      "type": 0,
+      "value": "Tontonan mengikut masa"
+    }
+  ],
+  "web.admin.insights.detail.viewers": [
+    {
+      "type": 0,
+      "value": "Penonton"
+    }
+  ],
+  "web.admin.insights.detail.window": [
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "web.admin.insights.devices.audio.channels.mono": [
+    {
+      "type": 0,
+      "value": "Mono"
+    }
+  ],
+  "web.admin.insights.devices.audio.channels.stereo": [
+    {
+      "type": 0,
+      "value": "Stereo"
+    }
+  ],
+  "web.admin.insights.devices.audio.channels.surround": [
+    {
+      "type": 0,
+      "value": "Bunyi keliling"
+    }
+  ],
+  "web.admin.insights.devices.audio.channelsTitle": [
+    {
+      "type": 0,
+      "value": "Saluran"
+    }
+  ],
+  "web.admin.insights.devices.audio.decision.direct": [
+    {
+      "type": 0,
+      "value": "Fail asal"
+    }
+  ],
+  "web.admin.insights.devices.audio.decision.remux": [
+    {
+      "type": 0,
+      "value": "Disalin"
+    }
+  ],
+  "web.admin.insights.devices.audio.decision.transcode": [
+    {
+      "type": 0,
+      "value": "Ditukar"
+    }
+  ],
+  "web.admin.insights.devices.audio.decisionTitle": [
+    {
+      "type": 0,
+      "value": "Pengendalian"
+    }
+  ],
+  "web.admin.insights.devices.audio.subtitle": [
+    {
+      "type": 0,
+      "value": "Trek audio yang dimainkan oleh setiap sesi, cara trek itu sampai ke aplikasi dan salurannya"
+    }
+  ],
+  "web.admin.insights.devices.audio.title": [
+    {
+      "type": 0,
+      "value": "Audio"
+    }
+  ],
+  "web.admin.insights.devices.burnInCodecs.empty": [
+    {
+      "type": 0,
+      "value": "Tiada sari kata dibakar dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.devices.burnInCodecs.title": [
+    {
+      "type": 0,
+      "value": "Format sari kata dibakar"
+    }
+  ],
+  "web.admin.insights.devices.hwAccel.empty": [
+    {
+      "type": 0,
+      "value": "Tiada transkod video dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.devices.hwAccel.software": [
+    {
+      "type": 0,
+      "value": "Perisian (CPU)"
+    }
+  ],
+  "web.admin.insights.devices.hwAccel.title": [
+    {
+      "type": 0,
+      "value": "Pecutan perkakasan"
+    }
+  ],
+  "web.admin.insights.devices.hwAccel.unknown": [
+    {
+      "type": 0,
+      "value": "Tidak diketahui"
+    }
+  ],
+  "web.admin.insights.devices.kpi.directPlayDetail": [
+    {
+      "type": 1,
+      "value": "direct"
+    },
+    {
+      "type": 0,
+      "value": " main terus · "
+    },
+    {
+      "type": 1,
+      "value": "remux"
+    },
+    {
+      "type": 0,
+      "value": " strim terus · "
+    },
+    {
+      "type": 1,
+      "value": "transcode"
+    },
+    {
+      "type": 0,
+      "value": " transkod"
+    }
+  ],
+  "web.admin.insights.devices.kpi.directPlayRate": [
+    {
+      "type": 0,
+      "value": "Kadar main terus"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hdrToneMap": [
+    {
+      "type": 0,
+      "value": "Pemetaan tona HDR"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hdrToneMapDetail": [
+    {
+      "type": 1,
+      "value": "hw"
+    },
+    {
+      "type": 0,
+      "value": " perkakasan · "
+    },
+    {
+      "type": 1,
+      "value": "sw"
+    },
+    {
+      "type": 0,
+      "value": " CPU"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hwSplit": [
+    {
+      "type": 0,
+      "value": "Transkod perkakasan"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hwSplitDetail": [
+    {
+      "type": 1,
+      "value": "hw"
+    },
+    {
+      "type": 0,
+      "value": " perkakasan · "
+    },
+    {
+      "type": 1,
+      "value": "sw"
+    },
+    {
+      "type": 0,
+      "value": " CPU"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hwSplitNone": [
+    {
+      "type": 0,
+      "value": "Tiada transkod"
+    }
+  ],
+  "web.admin.insights.devices.kpi.subtitleBurnIn": [
+    {
+      "type": 0,
+      "value": "Sari kata dibakar"
+    }
+  ],
+  "web.admin.insights.devices.kpi.subtitleBurnInDetail": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "% daripada transkod"
+    }
+  ],
+  "web.admin.insights.devices.languages": [
+    {
+      "type": 0,
+      "value": "Bahasa"
+    }
+  ],
+  "web.admin.insights.devices.matrix.allSamples": [
+    {
+      "type": 0,
+      "value": "Semua"
+    }
+  ],
+  "web.admin.insights.devices.matrix.cellTooltip": [
+    {
+      "type": 6,
+      "value": "transcode_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "client"
+            },
+            {
+              "type": 0,
+              "value": " · "
+            },
+            {
+              "type": 1,
+              "value": "codec"
+            },
+            {
+              "type": 0,
+              "value": ": "
+            },
+            {
+              "type": 1,
+              "value": "direct_rate"
+            },
+            {
+              "type": 0,
+              "value": "% main terus ("
+            },
+            {
+              "type": 1,
+              "value": "sessions"
+            },
+            {
+              "type": 0,
+              "value": "; "
+            },
+            {
+              "type": 1,
+              "value": "transcodes"
+            },
+            {
+              "type": 0,
+              "value": " transkod)"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.devices.matrix.clientColumn": [
+    {
+      "type": 0,
+      "value": "Klien / Platform"
+    }
+  ],
+  "web.admin.insights.devices.matrix.empty": [
+    {
+      "type": 0,
+      "value": "Belum cukup sesi. Tukar ke “Semua” atau luaskan julat tarikh."
+    }
+  ],
+  "web.admin.insights.devices.matrix.minSessions": [
+    {
+      "type": 0,
+      "value": "5+ sesi"
+    }
+  ],
+  "web.admin.insights.devices.matrix.subtitle": [
+    {
+      "type": 0,
+      "value": "Kekerapan setiap aplikasi memainkan format video tanpa penukaran. Klik sel untuk melihat sesi tersebut."
+    }
+  ],
+  "web.admin.insights.devices.matrix.title": [
+    {
+      "type": 0,
+      "value": "Main terus mengikut aplikasi & format video"
+    }
+  ],
+  "web.admin.insights.devices.matrix.totalColumn": [
+    {
+      "type": 0,
+      "value": "Jumlah"
+    }
+  ],
+  "web.admin.insights.devices.protocol.jellyfin": [
+    {
+      "type": 0,
+      "value": "Aplikasi Jellyfin"
+    }
+  ],
+  "web.admin.insights.devices.protocol.silo": [
+    {
+      "type": 0,
+      "value": "Aplikasi Silo"
+    }
+  ],
+  "web.admin.insights.devices.protocol.subtitle": [
+    {
+      "type": 0,
+      "value": "Sesi daripada aplikasi Silo sendiri dan daripada aplikasi yang menyambung melalui keserasian Jellyfin"
+    }
+  ],
+  "web.admin.insights.devices.protocol.title": [
+    {
+      "type": 0,
+      "value": "Aplikasi Silo berbanding aplikasi Jellyfin"
+    }
+  ],
+  "web.admin.insights.devices.protocol.total": [
+    {
+      "type": 0,
+      "value": "Sesi"
+    }
+  ],
+  "web.admin.insights.devices.reasons.empty": [
+    {
+      "type": 0,
+      "value": "Tiada sebab penukaran direkodkan dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.devices.reasons.subtitle": [
+    {
+      "type": 0,
+      "value": "Klik sebab untuk melihat sesi yang sepadan."
+    }
+  ],
+  "web.admin.insights.devices.reasons.title": [
+    {
+      "type": 0,
+      "value": "Sebab strim tidak main terus"
+    }
+  ],
+  "web.admin.insights.devices.resolution.change": [
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": " → "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "web.admin.insights.devices.resolution.delivered": [
+    {
+      "type": 0,
+      "value": "Dihantar"
+    }
+  ],
+  "web.admin.insights.devices.resolution.downscaled": [
+    {
+      "type": 0,
+      "value": "Diturunkan skala"
+    }
+  ],
+  "web.admin.insights.devices.resolution.downscaledEmpty": [
+    {
+      "type": 0,
+      "value": "Tiada apa-apa yang diturunkan skala dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.devices.resolution.empty": [
+    {
+      "type": 0,
+      "value": "Tiada sesi dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.devices.resolution.fuhd": [
+    {
+      "type": 0,
+      "value": "8K"
+    }
+  ],
+  "web.admin.insights.devices.resolution.sd": [
+    {
+      "type": 0,
+      "value": "SD"
+    }
+  ],
+  "web.admin.insights.devices.resolution.source": [
+    {
+      "type": 0,
+      "value": "Sumber"
+    }
+  ],
+  "web.admin.insights.devices.resolution.subtitle": [
+    {
+      "type": 0,
+      "value": "Resolusi video asal berbanding apa yang distrim."
+    }
+  ],
+  "web.admin.insights.devices.resolution.title": [
+    {
+      "type": 0,
+      "value": "Resolusi"
+    }
+  ],
+  "web.admin.insights.devices.resolution.uhd": [
+    {
+      "type": 0,
+      "value": "4K"
+    }
+  ],
+  "web.admin.insights.devices.resolution.unknown": [
+    {
+      "type": 0,
+      "value": "Tidak diketahui"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.delivery.burnIn": [
+    {
+      "type": 0,
+      "value": "Dibakar"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.delivery.embedded": [
+    {
+      "type": 0,
+      "value": "Dalam strim"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.delivery.hlsRendition": [
+    {
+      "type": 0,
+      "value": "Trek penstriman"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.delivery.sidecar": [
+    {
+      "type": 0,
+      "value": "Fail berasingan"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.deliveryTitle": [
+    {
+      "type": 0,
+      "value": "Cara sari kata dipaparkan"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.empty": [
+    {
+      "type": 0,
+      "value": "Tiada sari kata dipaparkan dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.flags": [
+    {
+      "type": 1,
+      "value": "forced"
+    },
+    {
+      "type": 0,
+      "value": " paksa · "
+    },
+    {
+      "type": 1,
+      "value": "hearing_impaired"
+    },
+    {
+      "type": 0,
+      "value": " untuk golongan pekak dan kurang pendengaran"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.noFacts": [
+    {
+      "type": 0,
+      "value": "Belum ada sesi dengan maklumat main balik terperinci dalam tempoh ini."
+    }
+  ],
+  "web.admin.insights.devices.subtitles.summary": [
+    {
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "percent"
+            },
+            {
+              "type": 0,
+              "value": "% sesi memaparkan sari kata ("
+            },
+            {
+              "type": 1,
+              "value": "subtitled"
+            },
+            {
+              "type": 0,
+              "value": " daripada "
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " sesi dengan maklumat main balik terperinci)"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.title": [
+    {
+      "type": 0,
+      "value": "Sari kata"
+    }
+  ],
+  "web.admin.insights.devices.topTranscoders.empty": [
+    {
+      "type": 0,
+      "value": "Tiada transkod dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.devices.topTranscoders.title": [
+    {
+      "type": 0,
+      "value": "Klien paling banyak mentranskod"
+    }
+  ],
+  "web.admin.insights.devices.topTranscoders.transcodeShare": [
+    {
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "transcodes"
+            },
+            {
+              "type": 0,
+              "value": " daripada "
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " sesi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.devices.unknownClient": [
+    {
+      "type": 0,
+      "value": "Klien tidak diketahui"
+    }
+  ],
+  "web.admin.insights.devices.versions.empty": [
+    {
+      "type": 0,
+      "value": "Tiada aplikasi melaporkan versi dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.devices.versions.lastSeenColumn": [
+    {
+      "type": 0,
+      "value": "Kali terakhir dilihat"
+    }
+  ],
+  "web.admin.insights.devices.versions.sessionsColumn": [
+    {
+      "type": 0,
+      "value": "Sesi"
+    }
+  ],
+  "web.admin.insights.devices.versions.subtitle": [
+    {
+      "type": 0,
+      "value": "Versi yang dilaporkan oleh aplikasi dalam tempoh ini, sesi terbanyak dahulu"
+    }
+  ],
+  "web.admin.insights.devices.versions.title": [
+    {
+      "type": 0,
+      "value": "Versi aplikasi"
+    }
+  ],
+  "web.admin.insights.devices.versions.versionColumn": [
+    {
+      "type": 0,
+      "value": "Versi"
+    }
+  ],
+  "web.admin.insights.episodeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " episod"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.filter.allAccounts": [
+    {
+      "type": 0,
+      "value": "Semua akaun"
+    }
+  ],
+  "web.admin.insights.filter.allLibraries": [
+    {
+      "type": 0,
+      "value": "Semua pustaka"
+    }
+  ],
+  "web.admin.insights.filter.fromDate": [
+    {
+      "type": 0,
+      "value": "Dari tarikh"
+    }
+  ],
+  "web.admin.insights.filter.rangeLabel": [
+    {
+      "type": 0,
+      "value": "Julat masa"
+    }
+  ],
+  "web.admin.insights.filter.refresh": [
+    {
+      "type": 0,
+      "value": "Muat semula"
+    }
+  ],
+  "web.admin.insights.filter.refreshing": [
+    {
+      "type": 0,
+      "value": "Memuatkan semula…"
+    }
+  ],
+  "web.admin.insights.filter.reset": [
+    {
+      "type": 0,
+      "value": "Tetapkan semula"
+    }
+  ],
+  "web.admin.insights.filter.timezone": [
+    {
+      "type": 0,
+      "value": "Zon waktu"
+    }
+  ],
+  "web.admin.insights.filter.timezoneBrowser": [
+    {
+      "type": 1,
+      "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": " (tempatan)"
+    }
+  ],
+  "web.admin.insights.filter.timezoneUtc": [
+    {
+      "type": 0,
+      "value": "UTC"
+    }
+  ],
+  "web.admin.insights.filter.toDate": [
+    {
+      "type": 0,
+      "value": "Hingga tarikh"
+    }
+  ],
+  "web.admin.insights.library.coverage.detail": [
+    {
+      "type": 6,
+      "value": "titles_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "played"
+            },
+            {
+              "type": 0,
+              "value": " daripada "
+            },
+            {
+              "type": 1,
+              "value": "titles"
+            },
+            {
+              "type": 0,
+              "value": " judul · "
+            },
+            {
+              "type": 1,
+              "value": "never"
+            },
+            {
+              "type": 0,
+              "value": " tidak pernah dimulakan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.library.coverage.empty": [
+    {
+      "type": 0,
+      "value": "Belum ada pustaka filem atau TV"
+    }
+  ],
+  "web.admin.insights.library.coverage.playedShare": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "% dimainkan"
+    }
+  ],
+  "web.admin.insights.library.coverage.subtitle": [
+    {
+      "type": 0,
+      "value": "Bahagian filem dan siri dalam setiap pustaka yang dimainkan dalam tempoh ini. Siri dikira apabila mana-mana episodnya dimainkan."
+    }
+  ],
+  "web.admin.insights.library.coverage.title": [
+    {
+      "type": 0,
+      "value": "Liputan pustaka"
+    }
+  ],
+  "web.admin.insights.library.decades.label": [
+    {
+      "type": 0,
+      "value": "Dekad "
+    },
+    {
+      "type": 1,
+      "value": "year"
+    }
+  ],
+  "web.admin.insights.library.decades.title": [
+    {
+      "type": 0,
+      "value": "Tontonan mengikut dekad tayangan"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.day": [
+    {
+      "type": 0,
+      "value": "Dalam sehari"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.empty": [
+    {
+      "type": 0,
+      "value": "Tiada judul ditambah dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.later": [
+    {
+      "type": 0,
+      "value": "Kemudian"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.month": [
+    {
+      "type": 0,
+      "value": "Dalam sebulan"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.notYet": [
+    {
+      "type": 0,
+      "value": "Belum dimainkan"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.subtitle": [
+    {
+      "type": 0,
+      "value": "Judul yang ditambah dalam tempoh ini, mengikut berapa lama judul itu menunggu untuk dimainkan"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.title": [
+    {
+      "type": 0,
+      "value": "Masa hingga tontonan pertama"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.week": [
+    {
+      "type": 0,
+      "value": "Dalam seminggu"
+    }
+  ],
+  "web.admin.insights.library.genres.subtitle": [
+    {
+      "type": 0,
+      "value": "Judul dengan beberapa genre dikira dalam setiap genre, jadi jumlah semuanya melebihi jumlah keseluruhan."
+    }
+  ],
+  "web.admin.insights.library.genres.title": [
+    {
+      "type": 0,
+      "value": "Tontonan mengikut genre"
+    }
+  ],
+  "web.admin.insights.library.kpi.added": [
+    {
+      "type": 0,
+      "value": "Ditambah dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.library.kpi.addedDetail": [
+    {
+      "type": 1,
+      "value": "played"
+    },
+    {
+      "type": 0,
+      "value": " sudah dimainkan setakat ini"
+    }
+  ],
+  "web.admin.insights.library.kpi.firstPlay": [
+    {
+      "type": 0,
+      "value": "Tempoh menunggu tontonan pertama"
+    }
+  ],
+  "web.admin.insights.library.kpi.firstPlayDays": [
+    {
+      "type": 1,
+      "value": "days"
+    },
+    {
+      "type": 0,
+      "value": " hari"
+    }
+  ],
+  "web.admin.insights.library.kpi.firstPlayDetail": [
+    {
+      "type": 0,
+      "value": "Median, untuk judul yang ditambah dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.library.kpi.neverStarted": [
+    {
+      "type": 0,
+      "value": "Tidak pernah dimulakan"
+    }
+  ],
+  "web.admin.insights.library.kpi.neverStartedSince": [
+    {
+      "type": 0,
+      "value": "Sejak sejarah bermula pada "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.insights.library.kpi.played": [
+    {
+      "type": 0,
+      "value": "Judul dimainkan"
+    }
+  ],
+  "web.admin.insights.library.kpi.playedDetail": [
+    {
+      "type": 6,
+      "value": "titles_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "played"
+            },
+            {
+              "type": 0,
+              "value": " daripada "
+            },
+            {
+              "type": 1,
+              "value": "titles"
+            },
+            {
+              "type": 0,
+              "value": " judul"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.library.ratings.title": [
+    {
+      "type": 0,
+      "value": "Tontonan mengikut penarafan umur"
+    }
+  ],
+  "web.admin.insights.library.titleCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " judul"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.library.unknown": [
+    {
+      "type": 0,
+      "value": "Tidak diketahui"
+    }
+  ],
+  "web.admin.insights.library.unplayed.added": [
+    {
+      "type": 1,
+      "value": "library"
+    },
+    {
+      "type": 0,
+      "value": " · ditambah "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.insights.library.unplayed.empty": [
+    {
+      "type": 0,
+      "value": "Semua yang ditambah dalam tempoh ini telah dimainkan"
+    }
+  ],
+  "web.admin.insights.library.unplayed.subtitle": [
+    {
+      "type": 0,
+      "value": "Judul terbaharu yang ditambah dalam tempoh ini dan belum dimainkan oleh sesiapa"
+    }
+  ],
+  "web.admin.insights.library.unplayed.title": [
+    {
+      "type": 0,
+      "value": "Ditambah dan belum dimainkan"
+    }
+  ],
+  "web.admin.insights.loadError": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuatkan cerapan."
+    }
+  ],
+  "web.admin.insights.openHistory": [
+    {
+      "type": 0,
+      "value": "Sejarah ›"
+    }
+  ],
+  "web.admin.insights.people.action.details": [
+    {
+      "type": 0,
+      "value": "Butiran"
+    }
+  ],
+  "web.admin.insights.people.action.detailsFor": [
+    {
+      "type": 0,
+      "value": "Tunjukkan cerapan untuk "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.insights.people.collapseProfiles": [
+    {
+      "type": 0,
+      "value": "Sembunyikan profil isi rumah untuk "
+    },
+    {
+      "type": 1,
+      "value": "account"
+    }
+  ],
+  "web.admin.insights.people.column.account": [
+    {
+      "type": 0,
+      "value": "Akaun"
+    }
+  ],
+  "web.admin.insights.people.column.actions": [
+    {
+      "type": 0,
+      "value": "Tindakan"
+    }
+  ],
+  "web.admin.insights.people.column.completionRate": [
+    {
+      "type": 0,
+      "value": "Kadar selesai"
+    }
+  ],
+  "web.admin.insights.people.column.directRate": [
+    {
+      "type": 0,
+      "value": "Main terus"
+    }
+  ],
+  "web.admin.insights.people.column.lastSeen": [
+    {
+      "type": 0,
+      "value": "Kali terakhir dilihat"
+    }
+  ],
+  "web.admin.insights.people.column.plays": [
+    {
+      "type": 0,
+      "value": "Kali main"
+    }
+  ],
+  "web.admin.insights.people.column.watchTime": [
+    {
+      "type": 0,
+      "value": "Masa tontonan"
+    }
+  ],
+  "web.admin.insights.people.empty": [
+    {
+      "type": 0,
+      "value": "Tiada aktiviti tontonan yang sepadan dengan penapis ini"
+    }
+  ],
+  "web.admin.insights.people.expandProfiles": [
+    {
+      "type": 0,
+      "value": "Tunjukkan profil isi rumah untuk "
+    },
+    {
+      "type": 1,
+      "value": "account"
+    }
+  ],
+  "web.admin.insights.people.kpi.activeAccounts": [
+    {
+      "type": 0,
+      "value": "Akaun aktif"
+    }
+  ],
+  "web.admin.insights.people.kpi.activeProfiles": [
+    {
+      "type": 0,
+      "value": "Profil aktif"
+    }
+  ],
+  "web.admin.insights.people.kpi.totalWatchTime": [
+    {
+      "type": 0,
+      "value": "Jumlah masa tontonan"
+    }
+  ],
+  "web.admin.insights.people.liveBadge": [
+    {
+      "type": 0,
+      "value": "Aktif"
+    }
+  ],
+  "web.admin.insights.people.loadMore": [
+    {
+      "type": 0,
+      "value": "Tunjukkan lebih banyak akaun"
+    }
+  ],
+  "web.admin.insights.people.profilesCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " profil"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.people.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "Cari akaun atau profil…"
+    }
+  ],
+  "web.admin.insights.people.unnamedProfile": [
+    {
+      "type": 0,
+      "value": "Profil "
+    },
+    {
+      "type": 1,
+      "value": "id"
+    }
+  ],
+  "web.admin.insights.percent": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.admin.insights.personDetail.action.openAccount": [
+    {
+      "type": 0,
+      "value": "Buka akaun"
+    }
+  ],
+  "web.admin.insights.personDetail.allProfiles": [
+    {
+      "type": 0,
+      "value": "Semua profil"
+    }
+  ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "% main terus"
+    }
+  ],
+  "web.admin.insights.personDetail.clients": [
+    {
+      "type": 0,
+      "value": "Klien"
+    }
+  ],
+  "web.admin.insights.personDetail.clientsEmpty": [
+    {
+      "type": 0,
+      "value": "Tiada aktiviti dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.personDetail.profileLabel": [
+    {
+      "type": 0,
+      "value": "Profil"
+    }
+  ],
+  "web.admin.insights.personDetail.topTitles": [
+    {
+      "type": 0,
+      "value": "Tajuk teratas"
+    }
+  ],
+  "web.admin.insights.playCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kali main"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.range.1y": [
+    {
+      "type": 0,
+      "value": "1 tahun"
+    }
+  ],
+  "web.admin.insights.range.30d": [
+    {
+      "type": 0,
+      "value": "30 hari"
+    }
+  ],
+  "web.admin.insights.range.7d": [
+    {
+      "type": 0,
+      "value": "7 hari"
+    }
+  ],
+  "web.admin.insights.range.90d": [
+    {
+      "type": 0,
+      "value": "90 hari"
+    }
+  ],
+  "web.admin.insights.range.all": [
+    {
+      "type": 0,
+      "value": "Sepanjang masa"
+    }
+  ],
+  "web.admin.insights.range.custom": [
+    {
+      "type": 0,
+      "value": "Tersuai"
+    }
+  ],
+  "web.admin.insights.retry": [
+    {
+      "type": 0,
+      "value": "Cuba lagi"
+    }
+  ],
+  "web.admin.insights.sessionCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sesi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.subtitle": [
+    {
+      "type": 0,
+      "value": "Trend tontonan, tajuk popular, aktiviti isi rumah, main balik peranti dan lebar jalur."
+    }
+  ],
+  "web.admin.insights.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Main balik"
+    }
+  ],
+  "web.admin.insights.tabs.bandwidth": [
+    {
+      "type": 0,
+      "value": "Lebar jalur"
+    }
+  ],
+  "web.admin.insights.tabs.devices": [
+    {
+      "type": 0,
+      "value": "Peranti & Kualiti"
+    }
+  ],
+  "web.admin.insights.tabs.library": [
+    {
+      "type": 0,
+      "value": "Pustaka"
+    }
+  ],
+  "web.admin.insights.tabs.people": [
+    {
+      "type": 0,
+      "value": "Pengguna"
+    }
+  ],
+  "web.admin.insights.tabs.titles": [
+    {
+      "type": 0,
+      "value": "Tajuk"
+    }
+  ],
+  "web.admin.insights.title": [
+    {
+      "type": 0,
+      "value": "Cerapan"
+    }
+  ],
+  "web.admin.insights.titleDetail.episodes.title": [
+    {
+      "type": 0,
+      "value": "Episod"
+    }
+  ],
+  "web.admin.insights.titleDetail.episodes.truncated": [
+    {
+      "type": 0,
+      "value": "Memaparkan 500 episod pertama."
+    }
+  ],
+  "web.admin.insights.titleDetail.kind.movie": [
+    {
+      "type": 0,
+      "value": "Filem"
+    }
+  ],
+  "web.admin.insights.titleDetail.kind.series": [
+    {
+      "type": 0,
+      "value": "Siri"
+    }
+  ],
+  "web.admin.insights.titleDetail.notFound": [
+    {
+      "type": 0,
+      "value": "Tajuk ini tiada lagi dalam pustaka anda."
+    }
+  ],
+  "web.admin.insights.titleDetail.scopedToPerson": [
+    {
+      "type": 0,
+      "value": "Dimainkan oleh "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.insights.titleDetail.showEveryone": [
+    {
+      "type": 0,
+      "value": "Tunjukkan semua penonton"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.furthest": [
+    {
+      "type": 0,
+      "value": "Mencapai "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " daripada "
+    },
+    {
+      "type": 1,
+      "value": "duration"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.furthestNoDuration": [
+    {
+      "type": 0,
+      "value": "Mencapai "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.lastEpisode": [
+    {
+      "type": 0,
+      "value": "Terakhir: "
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.title": [
+    {
+      "type": 0,
+      "value": "Siapa yang menonton"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.truncated": [
+    {
+      "type": 0,
+      "value": "Memaparkan 100 penonton terkini."
+    }
+  ],
+  "web.admin.insights.titles.leastFinished.empty": [
+    {
+      "type": 0,
+      "value": "Tiada judul dengan 3 tontonan atau lebih yang dibiarkan tidak selesai dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.titles.leastFinished.subtitle": [
+    {
+      "type": 0,
+      "value": "Judul dengan sekurang-kurangnya 3 tontonan, mengikut bahagian tontonan yang tidak selesai"
+    }
+  ],
+  "web.admin.insights.titles.leastFinished.title": [
+    {
+      "type": 0,
+      "value": "Paling kurang diselesaikan"
+    }
+  ],
+  "web.admin.insights.titles.leastFinished.unfinishedShare": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "% tidak selesai"
+    }
+  ],
+  "web.admin.insights.titles.libraries.empty": [
+    {
+      "type": 0,
+      "value": "Tiada aktiviti pustaka dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.titles.libraries.title": [
+    {
+      "type": 0,
+      "value": "Pustaka teratas"
+    }
+  ],
+  "web.admin.insights.titles.movies.empty": [
+    {
+      "type": 0,
+      "value": "Tiada filem ditonton dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.titles.movies.title": [
+    {
+      "type": 0,
+      "value": "Filem teratas"
+    }
+  ],
+  "web.admin.insights.titles.shows.empty": [
+    {
+      "type": 0,
+      "value": "Tiada siri ditonton dalam tempoh ini"
+    }
+  ],
+  "web.admin.insights.titles.shows.title": [
+    {
+      "type": 0,
+      "value": "Siri teratas"
+    }
+  ],
+  "web.admin.insights.titles.sort.plays": [
+    {
+      "type": 0,
+      "value": "Kali main"
+    }
+  ],
+  "web.admin.insights.titles.sort.viewers": [
+    {
+      "type": 0,
+      "value": "Penonton"
+    }
+  ],
+  "web.admin.insights.titles.sort.watchTime": [
+    {
+      "type": 0,
+      "value": "Masa tontonan"
+    }
+  ],
+  "web.admin.insights.titles.sortLabel": [
+    {
+      "type": 0,
+      "value": "Susun mengikut"
+    }
+  ],
+  "web.admin.insights.titles.titleWithYear": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "year"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.insights.titles.unknownTitle": [
+    {
+      "type": 0,
+      "value": "Tajuk dialih keluar"
+    }
+  ],
+  "web.admin.insights.viewerCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " penonton"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.libraries.activeWork.cancelRefresh": [
     {
       "type": 0,
@@ -39812,6 +43852,99 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Imbasan dan muat semula metadata dipaparkan di sini semasa sedang berjalan."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Tiada imbasan atau muat semula aktif"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Semua ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Sembunyikan baris gilir"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pustaka lain"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Muat semula metadata"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Memuat semula metadata…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Lihat baris gilir"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Tinggi"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Rendah"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Sederhana"
     }
   ],
   "web.admin.libraries.ambiguousRoots.description": [
@@ -40180,6 +44313,30 @@
       "value": "Sahkan pembersihan akar kosong"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Periksa"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Tiada item yang menunggu dalam baris gilir pemadan metadata."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Tiada akar dilangkau direkodkan."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Tiada ID luaran lapuk direkodkan."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -40216,6 +44373,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Edit"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Belum ada pustaka dikonfigurasikan."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -40257,6 +44426,12 @@
       "value": "Sembunyikan laluan"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Melahu"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -40291,6 +44466,12 @@
       "value": "Imbasan separa"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Isi metadata yang tiada atau ganti semua metadata"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -40303,6 +44484,12 @@
       "value": "Akar tidak dapat dicapai"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Imbas"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -40313,6 +44500,12 @@
     {
       "type": 0,
       "value": "Tunjukkan laluan"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Hentikan"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -40331,6 +44524,22 @@
     {
       "type": 0,
       "value": "Sahkan lekapan"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Semak bahawa semua folder pustaka boleh dicapai"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Lihat imbasan aktif untuk pustaka "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -40434,7 +44643,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Urus akar dan imbasan pustaka. Import/eksport katalog kini terletak di bawah Penyelenggaraan."
+      "value": "Urus folder media, pantau imbasan dan selesaikan masalah pemadanan."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -40835,6 +45044,45 @@
     {
       "type": 0,
       "value": "ID luaran lapuk"
+    }
+  ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktif"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Aktiviti imbasan"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Kesihatan katalog"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Pustaka"
     }
   ],
   "web.admin.libraries.toast.cancelJobFailed": [
@@ -41255,6 +45503,24 @@
     {
       "type": 0,
       "value": "Cari item diabaikan mengikut tajuk, pustaka atau jenis…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Tidak jelas"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Belum selesai"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Tidak dipadankan"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -43002,6 +47268,12 @@
       "value": ", jadi pemilih peranti tidak terpakai padanya. Jika medan ini dibiarkan kosong, tetapan peranti seluruh kluster diwarisi, dan tetapan itu sendiri mesti identiti CUDA untuk digunakan oleh NVENC — tetapkan satu di sini apabila kluster dikonfigurasikan dengan laluan render."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Ditetapkan oleh persekitaran nod ini. Ubah di sana dan mulakan semula nod."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -43716,6 +47988,12 @@
     {
       "type": 0,
       "value": "Masukkan alamat pelayan untuk melengkapkan tetapan."
+    }
+  ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Kunci ditetapkan oleh konfigurasi penggunaan pelayan"
     }
   ],
   "web.admin.nodes.key.dialogTitle": [
@@ -44614,6 +48892,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ditetapkan oleh konfigurasi penggunaan pelayan. Alih keluar nod itu di sana dan mulakan semula pelayan API untuk memadamnya di sini."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -46216,6 +50500,68 @@
       "value": "Pemalam"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Digunakan"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Ditahan"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuatkan status peruntukan pemalam."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Diurus oleh persekitaran"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Belum selesai"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Ditolak"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Penggunaan mengawal sumber pakej dan pengalihan keluarnya."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Status peruntukan"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Penggunaan menetapkan pemalam ini pada versi "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -46515,7 +50861,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Tugas didaftarkan semasa pelayan bermula, jadi menghidupkan atau mematikan tugas berkuat kuasa selepas dimulakan semula. Setelah tugas wujud, tukar jadualnya di halaman tugas itu."
+      "value": "Menghidupkan atau mematikan tugas berkuat kuasa tanpa perlu dimulakan semula, walaupun pelayan lain mungkin mengambil sedikit masa untuk menerimanya. Setelah tugas dihidupkan, tukar jadualnya di halaman tugas itu."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -46932,6 +51278,216 @@
       "value": "Model"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Had untuk satu larian telah dicapai; larian seterusnya akan menyambungnya."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Tajuk dicari: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Embedding disimpan: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · Permintaan TMDB: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Mati. Larian hanya mengosongkan tajuk lama."
+    }
+  ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Penjanaan telah dihentikan. Cadangan yang disimpan kekal kelihatan dalam Teroka sehingga pelayan dimulakan semula."
+    }
+  ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Menyusun kedudukan profil ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Mengambil senarai TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Mencari dan membenamkan tajuk ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tajuk tamat tempoh dikosongkan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " baris dibina"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Selesaikan konflik kunci pembenaman di bawah sebelum membina cadangan Teroka."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Jalankan kerja Pembenaman dahulu supaya Silo mempunyai vektor pustaka untuk dibandingkan."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Sambungkan pembekal pembenaman dalam Perkhidmatan AI sebelum membina cadangan Teroka."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Belum ada profil yang mempunyai profil citarasa. Jalankan Profil citarasa setelah seseorang menonton atau memberi penarafan kepada tajuk."
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tajuk untuk dicadangkan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Tiada embedding disimpan: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -46974,6 +51530,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Cadangan Teroka"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -47198,6 +51760,12 @@
       "value": "Tidak dapat memulakan pembenaman"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Gagal mencetuskan cadangan Teroka"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -47316,6 +51884,44 @@
       "value": " dikosongkan."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Embedding ditetapkan semula: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " dan "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": " dipadam, dan "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": " dikosongkan."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -47330,6 +51936,50 @@
             {
               "type": 0,
               "value": " pembenaman"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " embedding Teroka"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " baris Teroka"
             }
           ]
         }
@@ -47952,6 +52602,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Siri disyorkan untuk setiap penonton"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Filem disyorkan untuk setiap penonton"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -48000,6 +52674,18 @@
     {
       "type": 0,
       "value": "Kad rangkaian, setiap satu membuka siri rangkaian itu."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Cadangan"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Tajuk yang belum ada dalam pustaka, dipilih untuk setiap penonton berdasarkan apa yang mereka tonton."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -48234,6 +52920,38 @@
     {
       "type": 0,
       "value": "Pilih rantau perkhidmatan penstriman itu."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Kekal kosong sehingga cadangan Teroka dihidupkan dalam Pentadbir → Cadangan."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Baris cadangan kekal kosong sehingga Cadangan Teroka dihidupkan dalam "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Pentadbir → Cadangan"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Mati dalam Cadangan"
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -49540,6 +54258,12 @@
       "value": "Pratonton masa nyata senarai"
     }
   ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Pratonton cadangan anda sendiri"
+    }
+  ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
     {
       "type": 0,
@@ -49591,6 +54315,12 @@
       "value": "Baris baharu diletakkan di bahagian bawah Teroka"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Buka tetapan Cadangan"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -49603,6 +54333,12 @@
       "value": "Suapan MDBList tidak membawa isihan yang disimpan pada halaman senarai. Pilih isihan yang dipaparkannya."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Profil anda belum mempunyai cadangan Teroka. Jalankan Cadangan Teroka atau tonton dan beri penarafan kepada beberapa tajuk untuk melihat pratonton baris ini."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -49613,6 +54349,12 @@
     {
       "type": 0,
       "value": "Pilih senarai atau tampal pautannya untuk melihat tajuknya."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Hidupkan Cadangan Teroka dalam Pentadbir → Cadangan untuk melihat pratonton baris ini."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -50331,6 +55073,12 @@
     {
       "type": 0,
       "value": "Mesej dihantar"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Pemain tidak mengesahkan mesej itu. Mesej itu mungkin dipaparkan lewat atau tidak dipaparkan sama sekali."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -53126,6 +57874,12 @@
       "value": "Semakan sambungan gagal."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menyemak sama ada persekitaran pelayan menetapkan tetapan ini. Muat semula halaman untuk mengeditnya."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -53136,6 +57890,20 @@
     {
       "type": 0,
       "value": "Memuatkan tetapan…"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Ditetapkan oleh "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " dalam persekitaran pelayan."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [
@@ -53272,12 +58040,6 @@
     {
       "type": 0,
       "value": "Proksi dipercayai"
-    }
-  ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Diurus oleh SILO_TRUSTED_PROXIES."
     }
   ],
   "web.admin.settings.general.title": [
@@ -53656,6 +58418,30 @@
     {
       "type": 0,
       "value": "Gagal mengemas kini saluran"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Muat semula untuk melihat nilai semasa. Jika sesuatu di halaman ini telah berubah, atau anda menyunting kata laluan atau kunci yang disimpan, semua suntingan anda dibatalkan; jika tidak, suntingan anda dikekalkan."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Muat semula"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuat semula tetapan. Sila cuba lagi."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Tetapan diubah di tempat lain"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -55612,6 +60398,612 @@
       "value": "Segerakkan penanda dalam talian"
     }
   ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "Algoritma: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "diminta "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; aktif "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "Dibenarkan: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "Kawalan kesesakan: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "Akaun"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "Pada laluan ini sejak"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "Peranti"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "Tiada peranti disambungkan secara terus."
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "Titik akhir rakan setara"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "Peranti yang disambungkan"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "ke port "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "Lalai: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "Semak kesediaan pelayan ini untuk sambungan terus."
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "Berkuat kuasa: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "Dayakan sambungan terus"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Keupayaan NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "Enjin sambungan terus"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "Hairpin NAT"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "Pemetaan NAT"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "Alternatif PMTU"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "Kebolehcapaian"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "Penimbal terima soket"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "Penimbal hantar soket"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "Penalaan hos"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "Penipisan ACK"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "Dasar kehilangan BBR"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "Nyahbeban segmentasi UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "Tetingkap terima klien"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "Port UDP sambungan terus"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "Kawalan kesesakan TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "Penimbal hantar TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "Kali terakhir disemak "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "Proksi"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "Pendengar"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "Alamat awam yang dikesan: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "Semak sokongan UPnP, NAT-PMP atau PCP pada penghala."
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "Pemetaan port"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "Semakan kesediaan tidak memulakan main terus."
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "Dilumpuhkan oleh pentadbir"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "Dilumpuhkan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "Enjin sambungan terus tidak dapat dimulakan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menambah saiz penimbal"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "Penghala tidak menyokong pemetaan port"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "Penimbal lebih kecil daripada yang diminta"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "Pembantu penalaan rangkaian tidak tersedia"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "Nilai tidak sah; menggunakan mati"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "Sistem tidak dapat menggunakan atau membaca tetapan ini"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "Tidak disokong oleh kernel ini"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "Had penimbal hos dicapai"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "Tidak dapat membaca had penimbal hos"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "Alamat awam berbeza mengikut destinasi"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "BBR tidak tersedia"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "BBR tidak dimuatkan atau tidak dibenarkan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "Lebih daripada satu pelayan API sedang berjalan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "Keupayaan NET_ADMIN dilepaskan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Keupayaan NET_ADMIN tiada"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "Tiada penghala ditemukan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "Keupayaan NET_ADMIN tiada"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "Kebenaran ditolak"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "Tidak tersedia"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "Belum diukur"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "Tidak perlu ditambah"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "Dasar hos memilih algoritma lain"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "Semakan gagal"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menyemak pelayan API lain"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "Pelayan API lain mengehoskan sambungan terus"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "Menunggu untuk menjadi hos sambungan terus"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "Keadaan sambungan terus tidak tersedia"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat membuka port UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "Port UDP tidak sah"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "Tidak disokong pada platform ini"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "Diminta: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "Diminta: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; diberikan: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "Jalankan semakan"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "Penimbal hantar: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "Dihadkan"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "Merosot"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "Alternatif"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "Tidak diperlukan"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "Mati"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "Hidup"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "Tidak diketahui"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "Senarai sehingga lapan entri host:port yang dipisahkan dengan koma. Biarkan kosong untuk menggunakan nilai lalai."
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "Pelayan STUN"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "Sambungan terus"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "Benarkan peranti mencapai pelayan ini melalui laluan UDP terus. Port UDP ditetapkan oleh "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " dan hanya boleh dibaca di sini."
+    }
+  ],
   "web.admin.settings.network.host.apiServer": [
     {
       "type": 0,
@@ -56682,136 +62074,10 @@
       "value": "Tidak dapat memuatkan tetapan pemberitahuan"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Kandungan baharu tidak direkodkan, jadi tiada apa-apa boleh dihantar. Hidupkannya semula di bawah Pemprosesan."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Penghantaran dijeda; kandungan baharu menunggu dalam baris gilir. Hidupkannya semula di bawah Pemprosesan."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Jika dimatikan, ringkasan harian dihantar kepada mereka."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Cara Silo mengesan kandungan baharu, mengumpulkannya ke dalam mesej, dan berapa lama mesej itu disimpan."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Tentukan siapa yang mahukannya"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Padankan setiap item dengan keutamaan semua pengguna."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Pengumpulan dan kawalan limpahan"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Pemprosesan"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Usia kandungan maksimum"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Item yang lebih lama digugurkan dan tidak dihantar sebagai berita lapuk."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Mesej maksimum bagi setiap siri"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Apa-apa yang melebihi had ini dilangkau untuk kelompok itu."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Kesan kandungan baharu"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Rekodkan item baharu semasa imbasan pustaka."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Saluran paip"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Pemberitahuan yang dibaca"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Penyimpanan"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Sejarah penghantaran"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Rekod perkara yang telah diberitahu oleh Silo."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Tempoh penstabilan"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Item yang selesai diimbas bersama-sama dihantar sebagai satu pemberitahuan."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Pemberitahuan yang belum dibaca"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -57694,18 +62960,6 @@
       "value": "Pemberitahuan"
     }
   ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "hari"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "jam"
-    }
-  ],
   "web.admin.settings.notifications.unit.seconds": [
     {
       "type": 0,
@@ -58220,6 +63474,24 @@
       "value": "Simpan ke pustaka"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Main balik dijeda"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Tamatkan main balik dijeda selepas"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 hingga 1440. Menamatkan video yang dijeda selama ini dalam apl Silo, lalu membebaskan strim dan sebarang transkod video itu; memainkannya semula akan bersambung dari kedudukan yang sama. Tonton bersama, penghantaran ke peranti lain dan buku audio tidak terjejas. 0 mematikan pilihan ini."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -58660,6 +63932,12 @@
       "value": "hari"
     }
   ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minit"
+    }
+  ],
   "web.admin.settings.playback.unitSeconds": [
     {
       "type": 0,
@@ -58676,6 +63954,12 @@
     {
       "type": 0,
       "value": "Tandakan ditonton pada"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Tajuk yang mempunyai penanda kredit juga dikira sebagai ditonton sebaik sahaja main balik sampai ke kredit."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -59144,6 +64428,92 @@
       "value": "Beralih kepada model lain memerlukan penetapan semula pembenaman, yang memadam kesemuanya. Pembekal lain yang menyediakan model yang sama berkuat kuasa selepas dimulakan semula."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Tambah ke Teroka"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menambah baris cadangan ke halaman Teroka."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Baris cadangan ditambah ke halaman Teroka."
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Dayakan Cadangan Teroka"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Menambah baris peribadi pada Teroka Permintaan dengan tajuk yang belum ada dalam pustaka. Menggunakan pembekal embedding dan TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Bilangan maksimum tajuk untuk dicadangkan"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Bilangan tajuk yang belum ada dalam pustaka yang disimpan oleh pelayan untuk dicadangkan. Setiap tajuk dicari di TMDB dan dijadikan embedding. Embedding biasanya murah, tetapi bilangan yang lebih tinggi boleh menelan kos lebih tinggi atau mengambil masa lebih lama bergantung pada pembekal embedding anda, dan menggunakan lebih banyak storan."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Halaman Teroka anda belum memaparkan sebarang baris Cadangan."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Hidupkan “Dayakan cadangan” di atas dan mulakan semula pelayan sebelum Cadangan Teroka boleh dijalankan."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Permintaan kini dimatikan. Hidupkannya dalam "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Tetapan permintaan"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " supaya penonton boleh melihat halaman Teroka."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Buka halaman Teroka"
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Cadangan Teroka"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -59172,6 +64542,12 @@
     {
       "type": 0,
       "value": "Cron pembenaman"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron Cadangan Teroka"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -59216,12 +64592,6 @@
       "value": "Gunakan Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Ditetapkan oleh REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -59238,12 +64608,6 @@
     {
       "type": 0,
       "value": "URL sambungan"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Nilai dibekalkan oleh REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -64045,20 +69409,6 @@
       "value": "Log pelayan"
     }
   ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Diurus oleh "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
   "web.admin.settings.search.meili.apiKey.hint": [
     {
       "type": 0,
@@ -64176,7 +69526,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Saluran penghantaran, saluran pelayan, dan cara kandungan baharu menjadi pemberitahuan."
+      "value": "Saluran penghantaran dan saluran pelayan."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -64275,12 +69625,6 @@
       "value": "E-mel"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Pengumpulan dan kawalan limpahan"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -64299,28 +69643,10 @@
       "value": "Benarkan pengguna memilih e-mel bagi setiap episod"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Usia kandungan maksimum"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Mesej maksimum bagi setiap siri"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Sebut peminta di Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Kesan kandungan baharu"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -64329,46 +69655,16 @@
       "value": "Webhook Peribadi"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Pemprosesan"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Pemberitahuan yang dibaca"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "URL geganti"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Penyimpanan"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Sejarah dihantar"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Saluran Pelayan"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Tempoh tenang"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -64383,12 +69679,6 @@
       "value": "Geganti Tolakan Silo"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Pemberitahuan belum dibaca"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -64399,12 +69689,6 @@
     {
       "type": 0,
       "value": "Webhook bagi setiap orang"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Tentukan siapa yang mahukannya"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -64479,6 +69763,12 @@
       "value": "Dayakan Pemetaan Ton HDR Perisian"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Tamatkan main balik dijeda selepas (minit)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -64537,6 +69827,12 @@
     {
       "type": 0,
       "value": "Sumber penanda"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Main balik dijeda"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -65793,10 +71089,22 @@
       "value": "Log masuk TV: mula"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Permintaan poster"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,
       "value": "Log masuk"
+    }
+  ],
+  "web.admin.settings.security.endpoint.oauthStart": [
+    {
+      "type": 0,
+      "value": "Log masuk tunggal: mula"
     }
   ],
   "web.admin.settings.security.endpoint.passwordChange": [
@@ -66477,6 +71785,36 @@
     {
       "type": 0,
       "value": "Hidupkan pembekal log masuk dahulu. Dengan log masuk kata laluan dimatikan dan tiada pembekal dihidupkan, hanya pentadbir kecemasan boleh log masuk."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Antara 8 hingga 72 aksara. Peraturan ini terpakai apabila seseorang memilih atau menukar kata laluan; kata laluan yang sudah ditetapkan terus berfungsi."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Panjang minimum kata laluan"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Mana-mana tanda baca atau simbol, seperti ! atau #. Huruf, digit dan ruang tidak dikira."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Wajibkan aksara khas"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Wajibkan huruf besar"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -68224,6 +73562,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Storan tidak boleh dipindahkan ke sini semasa persekitaran menetapkan tetapan storan ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Nyahtetapkan pemboleh ubah itu dan mulakan semula setiap pelayan API dahulu."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -68552,6 +73904,18 @@
     {
       "type": 0,
       "value": "Import sejarah"
+    }
+  ],
+  "web.admin.shell.nav.page.insights.description": [
+    {
+      "type": 0,
+      "value": "Trend tontonan, tajuk popular, akaun, peranti dan lebar jalur."
+    }
+  ],
+  "web.admin.shell.nav.page.insights.label": [
+    {
+      "type": 0,
+      "value": "Cerapan"
     }
   ],
   "web.admin.shell.nav.page.libraries.description": [
@@ -69290,6 +74654,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Jadual ini datang daripada tetapan sandaran. Ubah jadual ini di "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Pelayan › Sandaran"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -69576,10 +74960,66 @@
       "value": "Ralat terkini"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Muat semula gagal. Periksa diagnostik pentadbir untuk butiran."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Semak jadual semasa"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -70024,6 +75464,18 @@
     {
       "type": 0,
       "value": "Cuba semula webhook Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Membaca semula pengepala fail MKV yang mempunyai sari kata ASS dan diimbas sebelum Silo mengecualikan fon terbenam daripada kadar bit, supaya fail itu tidak ditranskod untuk kadar bit yang sebenarnya tidak distrim."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Betulkan kadar bit fail yang mempunyai fon terbenam"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -77437,6 +82889,20 @@
       "value": "Menetapkan…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Kongsikan kata laluan ini sendiri dengan "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -78613,25 +84079,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Tidak dapat log masuk pada TV. Sila cuba lagi."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Pastikan apl anda memaparkan"
+      "value": "Tidak dapat meluluskan log masuk. Sila cuba lagi."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Pastikan TV anda memaparkan"
+      "value": "Pastikan kod ini sepadan"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Masukkan kod pada TV atau apl anda"
+      "value": "Masukkan kod yang dipaparkan pada peranti anda"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -78643,13 +84103,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Log masuk pada TV atau peranti lain dengan akaun anda."
+      "value": "Log masuk TV, apl atau peranti lain."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Log masuk pada TV"
+      "value": "Luluskan log masuk"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -78669,13 +84129,13 @@
     },
     {
       "type": 0,
-      "value": " untuk meluluskan TV. Hanya akaun itu sendiri boleh log masuk pada TV."
+      "value": " untuk meluluskan log masuk ini. Hanya akaun itu sendiri boleh meluluskan peranti."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Berhenti melihat sebagai pengguna ini untuk meluluskan TV. Hanya akaun itu sendiri boleh log masuk pada TV."
+      "value": "Berhenti melihat sebagai pengguna ini untuk meluluskan log masuk ini. Hanya akaun itu sendiri boleh meluluskan peranti."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -78693,39 +84153,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Kod itu tidak ditemui. Semak kod pada TV anda."
+      "value": "Kod itu tidak ditemui. Semak kod dan cuba lagi."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Bukan sekarang"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Apl TV versi lama memaparkan "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " sebagai gantinya."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Luluskan hanya peranti yang berada di hadapan anda sekarang."
+      "value": "Tolak"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Luluskan hanya TV yang berada di hadapan anda sekarang."
+      "value": "Luluskan ini hanya jika anda sendiri yang memulakan log masuk."
     }
   ],
   "web.auth.activate.playOn": [
@@ -78751,7 +84191,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Sesiapa yang menggunakan TV ini boleh memilih daripada profil anda. Profil dengan PIN kekal berkunci."
+      "value": "Ini memberikan peranti itu akses kepada profil anda. Profil dengan PIN kekal dikunci."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -78798,6 +84238,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Diminta "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -78811,7 +84261,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "TV ini berhenti menunggu. Mulakan semula pada TV."
+      "value": "Peranti ini berhenti menunggu. Mulakan log masuk semula pada peranti itu."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -78820,10 +84270,34 @@
       "value": "Log masuk ini telah ditolak."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Selesai. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sedang log masuk."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " telah log masuk."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Kod ini telah tamat tempoh. TV anda kini memaparkan kod baharu. Gunakan kod itu."
+      "value": "Kod ini telah tamat tempoh. Dapatkan kod baharu pada peranti itu dan cuba lagi."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -78907,25 +84381,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "TV itu sudah log masuk."
+      "value": "Peranti ini sudah log masuk."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "TV ini telah diluluskan dan sedang menyelesaikan log masuk."
+      "value": "Peranti ini telah diluluskan dan sedang menyelesaikan log masuk."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Selesai. TV anda sedang log masuk."
+      "value": "Selesai. Peranti anda sedang log masuk."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "TV anda sudah log masuk."
+      "value": "Peranti anda telah log masuk."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -79003,13 +84477,13 @@
     },
     {
       "type": 0,
-      "value": " untuk meluluskan TV ini."
+      "value": " untuk meluluskan log masuk ini."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Log masuk TV"
+      "value": "Luluskan log masuk"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -79734,10 +85208,48 @@
       "value": " tidak membenarkan peranti ini log masuk ke pelayan ini."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sekurang-kurangnya "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " aksara."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Kata laluan tidak sepadan."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Sertakan sekurang-kurangnya satu aksara khas, seperti ! atau #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Sertakan sekurang-kurangnya satu huruf besar."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -79750,6 +85262,32 @@
     {
       "type": 0,
       "value": "Gunakan sekurang-kurangnya 8 aksara."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gunakan sekurang-kurangnya "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " aksara."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -80055,7 +85593,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Tidak dapat log masuk peranti. Sila cuba lagi."
+      "value": "Tidak dapat meluluskan log masuk. Sila cuba lagi."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -86091,6 +91629,12 @@
       "value": "pustaka anda"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Bilangan tidak tersedia"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -88027,6 +93571,24 @@
       "value": "Tambah"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menyemak sama ada tajuk boleh ditambah."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Cuba muatkan lagi"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Menyemak sama ada tajuk boleh ditambah…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -88045,6 +93607,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Pelayan ini tidak dapat menambah tajuk dengan selamat semasa hanya sebahagian koleksi dimuatkan. Anda masih boleh mengalih keluar tajuk dan mengedit koleksi."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Muatkan tajuk sekali lagi sebelum menambah lebih banyak."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -88059,6 +93633,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Memuatkan tajuk sebelum menambah lebih banyak…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -90937,6 +96517,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [
@@ -95734,6 +101328,104 @@
       "value": "type"
     }
   ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "Kosongkan"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "Penarafan anda"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "Penarafan siri anda"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "Tiada penarafan"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "Nilai"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "Nilai tajuk ini"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "Nilai siri ini"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "Penarafan dialih keluar"
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "Buat asal"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " daripada 5"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "Anda"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "Penarafan anda, "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " daripada 5"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "Penarafan siri anda, "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " daripada 5"
+    }
+  ],
   "web.detail.request.cancelRequest": [
     {
       "type": 0,
@@ -96024,6 +101716,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Juga dalam"
     }
   ],
   "web.detail.sections.cast": [
@@ -98791,6 +104489,12 @@
       "value": "Memaparkan"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Diurus oleh pelayan ini. Kandungan baris ini tidak boleh diubah di sini; tambah baris anda sendiri untuk memilih kandungan yang dipaparkan."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -99097,6 +104801,12 @@
       "value": "Menterjemah…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sembunyikan baris pelayan yang ditambah sejak eksport ini:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -99115,6 +104825,12 @@
     {
       "type": 0,
       "value": ", menggantikan bahagian yang anda tambah di sini sebelum ini. Perubahan anda pada bahagian pelayan ini kekal."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Baris pelayan ini telah berubah sejak fail ini dieksport, jadi pilih baris yang mahu disembunyikan di bawah."
     }
   ],
   "web.home.layout.checking": [
@@ -99165,6 +104881,26 @@
     {
       "type": 0,
       "value": "Menghidupkan Sembunyikan item yang telah ditonton."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Menyembunyikan baris yang dipilih pada: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " tanpa mengubah baris anda yang lain di sana."
     }
   ],
   "web.home.layout.import": [
@@ -99269,6 +105005,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -99466,6 +105220,12 @@
     {
       "type": 0,
       "value": "Bahagian tanpa tajuk"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sembunyikan baris pelayan yang tiada dalam fail ini:"
     }
   ],
   "web.home.page.customize": [
@@ -101651,13 +107411,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Koleksi & peraturan"
+      "value": "Koleksi & baris pintar"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Koleksi anda, atau baris yang dibina daripada peraturan"
+      "value": "Koleksi anda, atau baris pintar yang dibina daripada peraturan"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -101771,7 +107531,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Bina baris daripada peraturan, seperti genre dan dekad."
+      "value": "Seperti koleksi pintar, tetapi hanya sebagai baris. Pilih judul dengan peraturan seperti genre dan dekad."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -101981,7 +107741,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Judul yang memenuhi peraturan"
+      "value": "Baris pintar"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -102190,6 +107950,12 @@
     {
       "type": 0,
       "value": "Sepanduk utama · Web sahaja"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Pelayan"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -107306,6 +113072,12 @@
       "value": " hari lalu"
     }
   ],
+  "web.notifications.inbox.destinationStopped": [
+    {
+      "type": 0,
+      "value": "Destinasi pemberitahuan berhenti berfungsi"
+    }
+  ],
   "web.notifications.inbox.emptyAll": [
     {
       "type": 0,
@@ -107436,6 +113208,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.notifications.inbox.fixInSettings": [
+    {
+      "type": 0,
+      "value": "Buka tetapan pemberitahuan untuk membetulkannya."
     }
   ],
   "web.notifications.inbox.followedMovieAvailable": [
@@ -107702,6 +113480,12 @@
     {
       "type": 0,
       "value": "Judul dalam senarai tontonan anda kini tersedia"
+    }
+  ],
+  "web.notifications.inbox.webhookStopped": [
+    {
+      "type": 0,
+      "value": "Webhook berhenti berfungsi"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -110112,7 +115896,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "Main sekarang"
+      "value": "Main episod seterusnya"
     }
   ],
   "web.player.nextEpisode.regionLabel": [
@@ -110889,6 +116673,12 @@
     {
       "type": 0,
       "value": "Pentadbir telah menamatkan sesi main balik ini."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Main balik dihentikan kerana dijeda terlalu lama."
     }
   ],
   "web.player.shuffle.scopeWithParent": [
@@ -114149,6 +119939,34 @@
       "value": "title"
     }
   ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Serupa dengan "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Serupa dengan "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " dan "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
   "web.requests.discoverSection.empty": [
     {
       "type": 0,
@@ -114925,6 +120743,16 @@
       "value": "Kembali ke halaman 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Pergi ke halaman "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -115015,6 +120843,20 @@
     {
       "type": 0,
       "value": "Halaman minta untuk ditambah"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Halaman "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " melepasi penghujung hasil ini."
     }
   ],
   "web.requests.toAdd.series": [
@@ -116464,6 +122306,12 @@
     {
       "type": 0,
       "value": "Baca pemberitahuan profil apabila tiba dan tandakannya sebagai dibaca."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Lihat perkara yang sedang dimainkan sekarang pada profil, atau pada setiap profil akaun apabila kunci tidak menamakan sebarang profil: tajuk, kedudukan main, status jeda, peranti dan kaedah main. Tiada kawalan main balik atau butiran rangkaian."
     }
   ],
   "web.settings.apiKeys.scope.requests": [
@@ -120118,6 +125966,282 @@
       "value": "Tidak berminat"
     }
   ],
+  "web.settings.notifications.destinations.add": [
+    {
+      "type": 0,
+      "value": "Tambah destinasi"
+    }
+  ],
+  "web.settings.notifications.destinations.addSubmit": [
+    {
+      "type": 0,
+      "value": "Tambah"
+    }
+  ],
+  "web.settings.notifications.destinations.addTitle": [
+    {
+      "type": 0,
+      "value": "Tambah destinasi pemberitahuan"
+    }
+  ],
+  "web.settings.notifications.destinations.added": [
+    {
+      "type": 0,
+      "value": "“"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "” ditambah"
+    }
+  ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Kosongkan rahsia yang disimpan"
+    }
+  ],
+  "web.settings.notifications.destinations.createInProgress": [
+    {
+      "type": 0,
+      "value": "Penciptaan destinasi sudah sedang berjalan."
+    }
+  ],
+  "web.settings.notifications.destinations.deleteDescription": [
+    {
+      "type": 0,
+      "value": "Pemberitahuan tidak akan dihantar lagi ke destinasi ini. Tindakan ini tidak boleh dibuat asal."
+    }
+  ],
+  "web.settings.notifications.destinations.deleteFailed": [
+    {
+      "type": 0,
+      "value": "Gagal memadam destinasi"
+    }
+  ],
+  "web.settings.notifications.destinations.deleted": [
+    {
+      "type": 0,
+      "value": "Destinasi dipadam"
+    }
+  ],
+  "web.settings.notifications.destinations.description": [
+    {
+      "type": 0,
+      "value": "Hantar pemberitahuan profil ini ke perkhidmatan yang disokong oleh pemalam pelayan anda."
+    }
+  ],
+  "web.settings.notifications.destinations.dialogDescription": [
+    {
+      "type": 0,
+      "value": "Pilih destinasi pemberitahuan profil ini."
+    }
+  ],
+  "web.settings.notifications.destinations.empty": [
+    {
+      "type": 0,
+      "value": "Belum ada destinasi."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Kekalkan rahsia yang disimpan"
+    }
+  ],
+  "web.settings.notifications.destinations.kind": [
+    {
+      "type": 0,
+      "value": "Jenis"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailure": [
+    {
+      "type": 0,
+      "value": "Kegagalan terakhir: "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAt": [
+    {
+      "type": 0,
+      "value": "Kegagalan terakhir "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAtUnknown": [
+    {
+      "type": 0,
+      "value": "Kegagalan terakhir "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": pemalam tidak dapat menghantar"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureUnknown": [
+    {
+      "type": 0,
+      "value": "Kegagalan terakhir: pemalam tidak dapat menghantar"
+    }
+  ],
+  "web.settings.notifications.destinations.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Had "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " destinasi telah dicapai"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeDelete": [
+    {
+      "type": 0,
+      "value": "Muat semula senarai destinasi sebelum memadam destinasi ini."
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeEdit": [
+    {
+      "type": 0,
+      "value": "Muat semula senarai destinasi sebelum mengedit destinasi ini."
+    }
+  ],
+  "web.settings.notifications.destinations.saveFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menyimpan destinasi"
+    }
+  ],
+  "web.settings.notifications.destinations.secretsKept": [
+    {
+      "type": 0,
+      "value": "Medan rahsia yang dibiarkan kosong akan mengekalkan nilai yang telah disimpan."
+    }
+  ],
+  "web.settings.notifications.destinations.testInProgress": [
+    {
+      "type": 0,
+      "value": "Mesej ujian sedang dihantar."
+    }
+  ],
+  "web.settings.notifications.destinations.testResult": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ujian dihantar"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ujian gagal"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.testResultDetail": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ujian dihantar: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ujian gagal: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.title": [
+    {
+      "type": 0,
+      "value": "Destinasi lain"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailable": [
+    {
+      "type": 0,
+      "value": "Tidak tersedia"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailableNote": [
+    {
+      "type": 0,
+      "value": "Pemalam yang menyediakan destinasi ini dimatikan atau dialih keluar, jadi tiada apa-apa dihantar."
+    }
+  ],
+  "web.settings.notifications.destinations.updateFailed": [
+    {
+      "type": 0,
+      "value": "Gagal mengemas kini"
+    }
+  ],
   "web.settings.notifications.discord.description": [
     {
       "type": 0,
@@ -121050,6 +127174,12 @@
     {
       "type": 0,
       "value": "URL webhook diperlukan"
+    }
+  ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Anda di luar talian, jadi perubahan ini tidak disimpan"
     }
   ],
   "web.settings.overlays.accent.amber": [
@@ -127773,12 +133903,6 @@
       "value": "Proksi dipercayai"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Ditetapkan oleh SILO_TRUSTED_PROXIES dalam persekitaran."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -128029,12 +134153,6 @@
     {
       "type": 0,
       "value": "Nombor pangkalan data"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Ditetapkan oleh REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

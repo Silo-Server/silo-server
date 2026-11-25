@@ -16,12 +16,14 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/bookid"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalog/reattribute"
 	"github.com/Silo-Server/silo-server/internal/contentid"
 	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/lang"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/metadata/showstatus"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
@@ -239,6 +241,8 @@ type metadataEpisodeLocalizationRepo interface {
 // for looking up per-library settings like metadata language.
 type metadataFolderRepo interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFolder, error)
+	// ListByIDs returns the enabled folders among ids.
+	ListByIDs(ctx context.Context, ids []int) ([]*models.MediaFolder, error)
 }
 
 // metadataVideoRepo persists remote provider videos. The concrete
@@ -678,6 +682,11 @@ func (s *MetadataService) SetImageResolver(r interface {
 // Provider chains are determined by admin configuration and change rarely, so
 // caching avoids repeated DB queries when processing batches of files.
 func (s *MetadataService) resolveChainCached(ctx context.Context, folderID int, contentLevel string) ([]Provider, error) {
+	if folderID <= 0 {
+		if folderIDs := itemChainScopeFolders(ctx); len(folderIDs) > 0 {
+			return s.resolveLibrariesChain(ctx, folderIDs, contentLevel)
+		}
+	}
 	key := fmt.Sprintf("%d:%s", folderID, contentLevel)
 
 	s.chainCacheMu.RLock()
@@ -733,6 +742,10 @@ func (s *MetadataService) Process(ctx context.Context, req ProcessRequest) (*Pro
 	}
 
 	folderID := parseProcessFolderID(req.FolderID)
+	ctx, err = s.withItemChainScope(ctx, req.ContentID, folderID)
+	if err != nil {
+		return nil, err
+	}
 	languages, err := s.resolveProcessLanguages(ctx, req, folderID)
 	if err != nil {
 		return nil, err
@@ -1978,7 +1991,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			if searchErr != nil {
 				// A provider whose search failed may never get the ID it
 				// answers metadata by, so it fails a reset like a failed lookup.
-				if failure := resetProviderFailure(req.resetToProvider, p, "search", searchErr); failure != nil {
+				if failure := req.unansweredLookup(p, "search", searchErr); failure != nil {
 					return nil, failure
 				}
 				if handleProvider404(provider404s, accumulatedIDs, p.Slug(), searchErr,
@@ -2086,7 +2099,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			localMetadataUnreadable |= localArtworkItem
 		}
 		if err != nil {
-			if failure := resetProviderFailure(req.resetToProvider, p, "metadata", err); failure != nil {
+			if failure := req.unansweredLookup(p, "metadata", err); failure != nil {
 				return nil, failure
 			}
 			if handleProvider404(provider404s, accumulatedIDs, p.Slug(), err,
@@ -2562,6 +2575,13 @@ func hasTransientMatchError(errs []error) bool {
 // the lists it supplies are not extended by later results (localListFields).
 func foldProviderResult(accumulator, result *MetadataResult, language, providerSlug string, isIdentityHinter bool, quarantined map[string]struct{}) {
 	result.ProviderIDs = sanitizeCandidateProviderIDs(result.ProviderIDs)
+	// A book answer whose edition ids contradict the item's names another
+	// edition, so its work ids do not describe this item. Its claims are
+	// dropped whole, so it neither stores a claim nor clears its capability's
+	// earlier ones. Only book answers carry claims (splitPluginWorkClaims).
+	if len(result.WorkClaims) > 0 && contradictsProviderIDs(accumulator.ProviderIDs, result.ProviderIDs) {
+		result.WorkClaims = nil
+	}
 	if isIdentityHinter {
 		result.ProviderIDs = nil
 		accumulator.localLists.record(result)
@@ -2810,6 +2830,9 @@ func (s *MetadataService) mergeAndPersist(
 	// it doesn't follow a merge onto another row, whose edits and locks are
 	// that row's own: the merged row gets an ordinary refresh.
 	resetsRow := req.resetToProvider
+	// The refresh that ends a Complete Refresh empties the row's stored values
+	// the same way, keeping its locks, and doesn't follow a merge either.
+	rebuildsRow := req.rebuildMatch
 	// Identity repairs (rebinding, local-ID promotion) belong to matching and
 	// refreshes, never to an enrichment write.
 	if !req.writesFieldsOnly() && !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
@@ -2821,6 +2844,7 @@ func (s *MetadataService) mergeAndPersist(
 			contentID = reboundTo
 			replacesShow = false
 			resetsRow = false
+			rebuildsRow = false
 			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
 			if err != nil {
 				return nil, fmt.Errorf("loading rebound item: %w", err)
@@ -2849,6 +2873,7 @@ func (s *MetadataService) mergeAndPersist(
 			contentID = canonical
 			replacesShow = replacesShow && renamed
 			resetsRow = resetsRow && renamed
+			rebuildsRow = rebuildsRow && renamed
 			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
 			if err != nil {
 				return nil, fmt.Errorf("loading canonicalized item: %w", err)
@@ -2879,6 +2904,7 @@ func (s *MetadataService) mergeAndPersist(
 			contentID = reanchored
 			replacesShow = replacesShow && renamed
 			resetsRow = resetsRow && renamed
+			rebuildsRow = rebuildsRow && renamed
 			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
 			if err != nil {
 				return nil, fmt.Errorf("loading reanchored item: %w", err)
@@ -2934,13 +2960,13 @@ func (s *MetadataService) mergeAndPersist(
 	// localization tables like any other non-canonical refresh.
 	canonicalLanguage, isCanonicalWrite := canonicalMetadataLanguage(req, existingItem, locked)
 	// Read once, so artwork and text in this write follow the same setting.
-	fallbackLanguage := s.configuredFallbackLanguage()
+	fallbackLanguage := s.FallbackLanguage()
 	switch {
 	case isCanonicalWrite:
 		// Fallback text belongs to the provider IDs it was fetched with, so it
 		// applies after persistence moved the item to another content ID too.
 		keepStoredTitle := req.Mode != ModeInitialMatch || existingItem == nil || !isSkeletonLikeStatus(existingItem.Status)
-		if corrected || resetsRow {
+		if corrected || resetsRow || rebuildsRow {
 			req.fallback.ignoreStoredText()
 		}
 		req.fallback.applyToItem(accumulator, req.Language, existingItem, keepStoredTitle)
@@ -3013,9 +3039,9 @@ func (s *MetadataService) mergeAndPersist(
 			}
 		}
 		// A correction's stored values describe another title, and a reset's
-		// are what the admin asked to replace: either way a value the
-		// providers lack must not stay behind.
-		if corrected || resetsRow {
+		// or a Complete Refresh's are what the admin asked to replace: either
+		// way a value the providers lack must not stay behind.
+		if corrected || resetsRow || rebuildsRow {
 			sortTitle, overview, tagline := existingResult.SortTitle, existingResult.Overview, existingResult.Tagline
 			clearPreviousMatch(existingResult, mergeLocked)
 			// A reset in another language fetched that language's text for
@@ -3150,6 +3176,11 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 	item.ContentID = contentID
+	// A book's work ids came from the match a reset or a correction replaces.
+	// corrected compares only TMDB, TVDB and IMDb ids, which books lack, so an
+	// Identify of a book, the admin naming the book, counts as one too; the
+	// answers it fetches supply the claims again.
+	clearsWorkClaims := resetsRow || corrected || (req.Mode == ModeIdentify && bookid.HasWorkIDs(item.Type))
 	if corrected {
 		if err := s.clearPreviousMatchRows(ctx, contentID, item, locked, mergeLocked); err != nil {
 			return nil, err
@@ -3167,7 +3198,9 @@ func (s *MetadataService) mergeAndPersist(
 			identityChosen:  req.Mode == ModeIdentify,
 			clearChildEdits: replacesShow,
 			resetLocks:      resetsRow,
-			clearCredits:    resetsRow && creditsUnlisted(item, mergeLocked),
+			clearCredits:    (resetsRow || rebuildsRow) && creditsUnlisted(item, mergeLocked),
+			clearWorkClaims: clearsWorkClaims,
+			workClaims:      accumulator.WorkClaims,
 		},
 	)
 	if err != nil {
@@ -3295,7 +3328,7 @@ func (s *MetadataService) mergeAndPersist(
 		replace := mergeMode == MergeReplaceUnlocked || (req.Mode == ModeScheduledRefresh && !req.enrichmentOnly)
 		var err error
 		switch {
-		case req.Mode == ModeIdentify || corrected || resetsRow:
+		case req.Mode == ModeIdentify || corrected || resetsRow || rebuildsRow:
 			err = s.ratingSourceRepo.Replace(ctx, contentID, sources)
 		case len(sources) > 0:
 			err = s.ratingSourceRepo.Upsert(ctx, contentID, sources, replace)
@@ -3377,13 +3410,16 @@ func (s *MetadataService) clearUnlistedCredits(ctx context.Context, contentID st
 
 // itemWriteSteps are the extra writes that commit with an item's identity
 // write: an Identify's choice, clearing a replaced show's season and episode
-// edits, and a Reset to Provider dropping the item's locks and the credits its
-// providers no longer list.
+// edits, a Reset to Provider dropping the item's locks and the credits its
+// providers no longer list, a reset, an identity correction or a book's
+// Identify dropping its work ids, and the work ids the providers' answers claim.
 type itemWriteSteps struct {
 	identityChosen  bool
 	clearChildEdits bool
 	resetLocks      bool
 	clearCredits    bool
+	clearWorkClaims bool
+	workClaims      []bookid.WorkClaims
 }
 
 // forRetry is the steps for the write retried after conflict recovery. A row
@@ -3393,6 +3429,7 @@ func (w itemWriteSteps) forRetry(sameRow bool) itemWriteSteps {
 	w.clearChildEdits = w.clearChildEdits && sameRow
 	w.resetLocks = w.resetLocks && sameRow
 	w.clearCredits = w.clearCredits && sameRow
+	w.clearWorkClaims = w.clearWorkClaims && sameRow
 	return w
 }
 
@@ -3514,6 +3551,14 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 			return err
 		}
 	}
+	if steps.clearWorkClaims {
+		if err := catalog.DeleteWorkClaimsTx(ctx, tx, item.ContentID); err != nil {
+			return err
+		}
+	}
+	if err := catalog.ApplyWorkClaimsTx(ctx, tx, item.ContentID, item.Type, steps.workClaims); err != nil {
+		return err
+	}
 	// An Identify's choice commits with the identity it chose
 	// (identify_sticky.go).
 	if steps.identityChosen {
@@ -3586,12 +3631,26 @@ func (s *MetadataService) RefreshItem(ctx context.Context, contentID string) err
 }
 
 func (s *MetadataService) refreshItemTarget(ctx context.Context, contentID string, folderID int, mode RefreshMode, incrementDebtAttempt, reset bool) error {
-	result, err := s.Process(ctx, ProcessRequest{
+	return s.refreshItem(ctx, ProcessRequest{
 		ContentID:       contentID,
 		FolderID:        formatFolderID(folderID),
 		Mode:            mode,
 		resetToProvider: reset,
-	})
+	}, incrementDebtAttempt)
+}
+
+func (s *MetadataService) refreshItem(ctx context.Context, req ProcessRequest, incrementDebtAttempt bool) error {
+	contentID, reset := req.ContentID, req.resetToProvider
+	result, err := s.Process(ctx, req)
+	if req.rebuildMatch && errors.As(err, new(unansweredLookupError)) {
+		// The item keeps the values that provider would have confirmed or
+		// replaced; an ordinary refresh still applies what the others sent.
+		slog.WarnContext(ctx, "metadata: a provider did not answer, so the complete refresh keeps stored values",
+			"component", "metadata", "content_id", contentID,
+			"error", logredact.RedactSecretAssignments(logredact.SanitizeURLError(err).Error()))
+		req.rebuildMatch = false
+		result, err = s.Process(ctx, req)
+	}
 	if err != nil {
 		s.recordRefreshFailure(ctx, contentID, err, incrementDebtAttempt)
 		return err
@@ -4727,6 +4786,10 @@ func (s *MetadataService) refreshSeriesChildTarget(
 	} else if ignored {
 		return ErrMetadataNotFound
 	}
+	ctx, err = s.withItemChainScope(ctx, seriesID, folderID)
+	if err != nil {
+		return err
+	}
 
 	languages, err := s.resolveProcessLanguages(ctx, ProcessRequest{
 		ContentID: seriesID,
@@ -4805,7 +4868,7 @@ func (s *MetadataService) refreshSeriesChildTarget(
 			if err := s.fillTargetChildText(ctx, series, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx, seasons, episodes, mode, mergeMode, reset); err != nil {
 				return err
 			}
-		} else if s.configuredFallbackLanguage() != "" {
+		} else if s.FallbackLanguage() != "" {
 			// Text a provider marked as another language is no translation.
 			dropForeignChildText(seasons, episodes, language)
 		}
@@ -9010,6 +9073,20 @@ func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toC
 					  AND other.provider = src.provider
 					  AND other.provider_id = src.provider_id
 					  AND other.item_type = (SELECT type FROM media_items WHERE content_id = $2)
+				  )
+			`,
+			args: []any{fromContentID, toContentID},
+		},
+		{
+			name: "move work ids",
+			sql: `
+				UPDATE media_item_work_ids src
+				SET content_id = $2,
+					updated_at = NOW()
+				WHERE src.content_id = $1
+				  AND NOT EXISTS (
+					SELECT 1 FROM media_item_work_ids dest
+					WHERE dest.content_id = $2 AND dest.provider = src.provider
 				  )
 			`,
 			args: []any{fromContentID, toContentID},

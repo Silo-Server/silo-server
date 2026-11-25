@@ -35,6 +35,7 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		MediaFileID:             s.MediaFileID,
 		RequestedMediaFileID:    s.RequestedMediaFileID,
 		PlayMethod:              string(s.PlayMethod),
+		PlanID:                  s.PlanID,
 		ReportingNode:           reportingNode,
 		ClientIP:                s.ClientIP,
 		StreamLocation:          s.StreamLocation,
@@ -59,6 +60,7 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		TranscodeHWAccel:        s.TranscodeHWAccel,
 		ToneMapMode:             string(s.ToneMapMode),
 		AdaptationReasons:       s.AdaptationReasons,
+		Subtitle:                s.Subtitle,
 		RoutingNetworkProvider:  s.RoutingNetworkProvider,
 		RoutingWorkload:         s.RoutingWorkload,
 		RoutingExecution:        s.RoutingExecution,
@@ -74,5 +76,6 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		IsPaused:                s.IsPaused,
 		HasWebSocket:            s.HasWebSocket,
 		IsJellyfinCompat:        s.IsJellyfinCompat,
+		Watch:                   playback.WatchTimeJSON(s.Watch),
 	}
 }

@@ -192,8 +192,10 @@ const (
 // not stricterFlags, each with why the backup's value is the one to keep.
 var restoredFlagColumns = map[string]string{
 	"access_groups.is_default":                                "which group new accounts join; the invitation carry compares the policy it grants",
+	"admin_playback_history.compat_origin":                    whyHistory,
 	"admin_playback_history.completed":                        whyHistory,
 	"admin_playback_history.measured":                         whyHistory,
+	"admin_playback_history.route_facts_recorded":             whyHistory,
 	"autoscan_settings.id":                                    whyKey,
 	"download_artifacts.progress_unavailable":                 whyFacts,
 	"download_artifacts.tone_map_dv_bl_compat_id_present":     whyFacts,
@@ -300,32 +302,34 @@ func readStricterFlags(ctx context.Context, tx pgx.Tx) ([]liveFlags, error) {
 }
 
 // keepStricterFlags sets, in the restored database, each flag of a row
-// that is also live at its stricter value, and returns what it kept.
-func keepStricterFlags(ctx context.Context, tx pgx.Tx, live []liveFlags) ([]string, error) {
-	var kept []string
+// that is also live at its stricter value, and records what it kept.
+func keepStricterFlags(ctx context.Context, tx pgx.Tx, live []liveFlags, result *CarriedCredentials) error {
 	for i, f := range stricterFlags {
 		// A backup taken before the column existed has nothing to keep;
 		// the restored server adds it with its default when it migrates,
 		// unless the flag adds it here to keep a live restriction.
 		has, err := columnExists(ctx, tx, f.table, f.column)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if !has {
 			if f.addMissing == "" || live[i].stricter == "[]" {
 				continue
 			}
 			if _, err := tx.Exec(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s`, f.table, f.column, f.addMissing)); err != nil {
-				return nil, fmt.Errorf("%s.%s: %w", f.table, f.column, err)
+				return fmt.Errorf("%s.%s: %w", f.table, f.column, err)
 			}
 		}
 		sql := fmt.Sprintf(`UPDATE %[1]s t SET %[2]s = $2 FROM json_to_recordset($1::json) AS l(id text, key text)
 			WHERE %[5]s = l.id AND %[3]s = l.key AND t.%[2]s IS DISTINCT FROM $2 RETURNING %[4]s`, f.table, f.column, f.key, f.describe, f.idOf())
 		names, err := collectKept(ctx, tx, sql, live[i].stricter, f.stricter)
 		if err != nil {
-			return nil, fmt.Errorf("%s.%s: %w", f.table, f.column, err)
+			return fmt.Errorf("%s.%s: %w", f.table, f.column, err)
 		}
-		kept = append(kept, names...)
+		result.Stricter = append(result.Stricter, names...)
+		if f.table == "plugin_installations" && len(names) > 0 {
+			result.pluginProvisionRestricted = true
+		}
 		if !f.absentOff {
 			continue
 		}
@@ -333,11 +337,14 @@ func keepStricterFlags(ctx context.Context, tx pgx.Tx, live []liveFlags) ([]stri
 			SELECT 1 FROM json_to_recordset($1::json) AS l(id text, key text) WHERE %[5]s = l.id AND %[3]s = l.key) RETURNING %[4]s`,
 			f.table, f.column, f.key, f.describeAbsent, f.idOf())
 		if names, err = collectKept(ctx, tx, sql, live[i].present, f.stricter); err != nil {
-			return nil, fmt.Errorf("%s.%s: %w", f.table, f.column, err)
+			return fmt.Errorf("%s.%s: %w", f.table, f.column, err)
 		}
-		kept = append(kept, names...)
+		result.Stricter = append(result.Stricter, names...)
+		if f.table == "plugin_installations" && len(names) > 0 {
+			result.pluginProvisionRestricted = true
+		}
 	}
-	return kept, nil
+	return nil
 }
 
 // collectKept runs an UPDATE … RETURNING a description of each row.

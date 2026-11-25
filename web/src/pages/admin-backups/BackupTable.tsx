@@ -203,7 +203,7 @@ function DownloadDialogBody({
         </DialogDescription>
       </DialogHeader>
       {backup.encrypted ? (
-        <p className="bg-muted/40 rounded-lg border px-3 py-2 text-[13px] leading-relaxed">
+        <p className="bg-muted/40 rounded-lg border px-3 py-2 text-[0.8125rem] leading-relaxed">
           {t(
             otherKey
               ? backup.key_check
@@ -361,7 +361,7 @@ export function BackupTable({
   return (
     <div className="space-y-3">
       {deleteBlocker ? (
-        <p id={deleteBlockerId} className="text-muted-foreground text-[13px]">
+        <p id={deleteBlockerId} className="text-muted-foreground text-[0.8125rem]">
           {t("web.admin.backups.table.deleteBlocked", { reason: deleteBlocker })}
         </p>
       ) : null}

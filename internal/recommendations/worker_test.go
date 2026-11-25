@@ -472,3 +472,39 @@ func TestRefreshProfileDefersToAnotherServersRefresh(t *testing.T) {
 		t.Fatal("different profiles share a refresh lock")
 	}
 }
+
+// An embeddings job that ends with a catch-up still asked for starts it at
+// once, unless its last pass failed: a provider error or a timeout would only
+// fail again, so the request waits for the catch-up tick. Other jobs never
+// start one.
+func TestReleaseJobStartsAnAskedCatchUpOnlyAfterAPassThatSucceeded(t *testing.T) {
+	tests := []struct {
+		name   string
+		job    JobName
+		asked  bool
+		failed bool
+		want   bool
+	}{
+		{name: "asked after a successful pass", job: JobEmbeddings, asked: true, want: true},
+		{name: "asked after a failed pass", job: JobEmbeddings, asked: true, failed: true},
+		{name: "not asked", job: JobEmbeddings},
+		{name: "another job", job: JobTasteProfiles, asked: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newJobTestWorker(&fakeLocker{}, nil)
+			w.running[tt.job] = true
+			w.embedMissingAgain = tt.asked
+			w.embedPassFailed = tt.failed
+			if got := w.releaseJob(tt.job); got != tt.want {
+				t.Fatalf("releaseJob = %v, want %v", got, tt.want)
+			}
+			if w.running[tt.job] {
+				t.Fatal("the job is still marked running")
+			}
+			if tt.job == JobEmbeddings && w.embedMissingAgain {
+				t.Fatal("the catch-up request outlived the job")
+			}
+		})
+	}
+}

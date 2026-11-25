@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -101,7 +102,7 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 	if req.BackupID != "" {
 		pinned[req.BackupID] = true
 	}
-	result, err := s.backupWith(work, held, KindBeforeRestore, "", nil, pinned, nil)
+	result, err := s.backupWith(work, held, KindBeforeRestore, "", time.Time{}, nil, pinned, nil)
 	if err != nil {
 		return fail(fmt.Errorf("%w: %w", errBeforeRestoreBackup, err))
 	}
@@ -754,7 +755,9 @@ func (a *applier) applyPlugin(ctx context.Context, tx pgx.Tx, id string) (applie
 	if err != nil {
 		return applied{}, err
 	}
+	onlyManaged := len(res.Rejected) > 0
 	for _, r := range res.Rejected {
+		onlyManaged = onlyManaged && r.Managed
 		item.Notes = append(item.Notes, fmt.Sprintf("Configuration %q was not restored: %s.", r.Key, r.Reason))
 	}
 	switch {
@@ -763,6 +766,8 @@ func (a *applier) applyPlugin(ctx context.Context, tx pgx.Tx, id string) (applie
 		item.Message = fmt.Sprintf("Settings only: version %s is installed here.", res.InstalledHere)
 	case len(res.Written) > 0:
 		item.Outcome, item.Message = OutcomeRestored, "Configuration restored."
+	case onlyManaged:
+		return unchanged(item), nil
 	case len(res.Rejected) > 0:
 		return leftOut(item, ReasonNeedsAnotherKey, "None of its configuration could be restored."), nil
 	default:

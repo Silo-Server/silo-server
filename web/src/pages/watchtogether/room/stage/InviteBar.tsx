@@ -26,7 +26,7 @@ export function InviteBar({
   const guestsCanPause = room.guest_control_policy === "guest_play_pause";
   return (
     <div className="surface-panel-subtle flex flex-wrap items-center gap-3 rounded-xl px-4 py-3">
-      <span className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+      <span className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
         {t("web.watchTogether.inviteBar.label")}
       </span>
       {inviteUrl ? (

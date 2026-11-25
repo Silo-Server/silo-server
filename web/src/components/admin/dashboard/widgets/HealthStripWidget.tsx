@@ -48,7 +48,11 @@ export function HealthStripWidget() {
   const healthyNodes = enabledNodes.filter((node) => node.healthy).length;
 
   if (statusQuery.isLoading) {
-    return <Skeleton className="h-full min-h-[92px] rounded-2xl" />;
+    // Content-sized rows (narrow screens) need a minimum height. It is in rem
+    // and below the grid's fixed row (--admin-row-h in app.css), so it fits one
+    // row at any browser font size; a px minimum overflows the row when a small
+    // default font shrinks it.
+    return <Skeleton className="h-full min-h-23 rounded-2xl" />;
   }
 
   if (statusQuery.error || !status) {
@@ -193,24 +197,30 @@ function HealthCell({
   tone?: "warn" | "error";
   to?: string;
 }) {
+  // Text sizes are rem, like the dashboard row and the cell padding: a smaller
+  // browser font shrinks those, and px text would then outgrow the row. A long
+  // label truncates like the value rather than wrapping, which would make the
+  // cell taller than the one-row card, and the icon keeps its size.
   const body = (
     <>
-      <div className="text-muted-foreground flex items-center gap-1.5 text-[11px] font-medium">
-        <Icon className="h-3.5 w-3.5" />
-        {label}
+      <div className="text-muted-foreground flex items-center gap-1.5 text-[0.6875rem] font-medium">
+        <Icon className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate" title={label}>
+          {label}
+        </span>
       </div>
       <div
         className={cn(
-          "mt-1 truncate text-[15px] leading-tight font-bold tabular-nums",
-          tone === "error" && "text-destructive",
-          tone === "warn" && "text-amber-500",
+          "mt-1 truncate text-[0.9375rem] leading-tight font-bold tabular-nums",
+          tone === "error" && "text-destructive-label",
+          tone === "warn" && "text-warning-label",
         )}
         title={value}
       >
         {value}
       </div>
       {detail ? (
-        <div className="text-muted-foreground mt-1 truncate text-[10px]">{detail}</div>
+        <div className="text-muted-foreground mt-1 truncate text-[0.625rem]">{detail}</div>
       ) : null}
     </>
   );

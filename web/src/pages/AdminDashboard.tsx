@@ -1,5 +1,5 @@
 import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { AdminSectionCommandDialog } from "@/components/AdminSectionCommandDialog";
 import { DashboardGrid } from "@/components/admin/dashboard/DashboardGrid";
 import { useDashboardLayout } from "@/components/admin/dashboard/useDashboardLayout";
@@ -16,7 +16,7 @@ import { useAdminLibraries, useScanAllLibraries } from "@/hooks/queries/admin/li
 import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { LayoutDashboard, Plus, RefreshCw, ScanLine, TriangleAlert } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { adminKeys } from "@/hooks/queries/keys";
 import { usePageActivity } from "@/hooks/usePageActivity";
 import { buildAdminCommandNavSections } from "@/lib/adminNavigation";
@@ -41,6 +41,23 @@ const DASHBOARD_WIDGET_QUERY_PREFIXES = [
   adminKeys.autoscanScansRoot(),
   adminKeys.operationalLogsRoot(),
 ];
+
+// Refreshes can overlap (a slow automatic one, then a resume or a Refresh
+// click, possibly from a dashboard opened again after leaving it), and their
+// stats can answer out of order. Each refresh takes a number when it starts,
+// and its stats apply only if no later-started refresh has applied its own.
+// The numbers live with the query client because that is the cache every
+// dashboard mount writes to.
+const dashboardRefreshOrders = new WeakMap<QueryClient, { started: number; applied: number }>();
+
+function dashboardRefreshOrder(queryClient: QueryClient) {
+  let order = dashboardRefreshOrders.get(queryClient);
+  if (!order) {
+    order = { started: 0, applied: 0 };
+    dashboardRefreshOrders.set(queryClient, order);
+  }
+  return order;
+}
 
 const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
 const DASHBOARD_AUTO_REFRESH_MS = 60_000;
@@ -118,6 +135,8 @@ export default function AdminDashboard() {
     async ({ manual }: { manual: boolean }) => {
       const profileContext = captureProfileRequestContext();
       if (!profileContext) return;
+      const order = dashboardRefreshOrder(queryClient);
+      const sequence = ++order.started;
       if (manual) {
         manualRefreshStartedAtRef.current = Date.now();
         setIsManualRefreshPending(true);
@@ -138,6 +157,8 @@ export default function AdminDashboard() {
         ]);
         const nextStats = await fetchAdminStats({ refresh: true, profileContext });
         if (!isCapturedProfileAuthorityActive(profileContext)) return;
+        if (sequence < order.applied) return;
+        order.applied = sequence;
         queryClient.setQueryData(adminStatsKey(profileContext), nextStats);
         await Promise.all([refetchSessions(), refetchLibraries(), refetchUsers()]);
         const refreshedAt = Date.now();
@@ -161,14 +182,11 @@ export default function AdminDashboard() {
     [queryClient, refetchLibraries, refetchSessions, refetchUsers],
   );
 
-  useEffect(() => {
-    if (!pageActivity.canPollDashboard) {
-      wasDashboardPollingPausedRef.current = true;
-      return;
-    }
-    if (isManualRefreshPending) {
-      return;
-    }
+  // Reads data freshness without making it a dependency of the polling effect.
+  // During playback the realtime sessions channel refetches after every
+  // reconciler sync that moves a position, and restarting the interval on each
+  // arrival kept it from ever firing.
+  const catchUpDashboard = useEffectEvent(() => {
     const resumedPolling = wasDashboardPollingPausedRef.current;
     wasDashboardPollingPausedRef.current = false;
     if (
@@ -188,6 +206,24 @@ export default function AdminDashboard() {
     ) {
       void refreshDashboard({ manual: false });
     }
+  });
+
+  // Changes once, when the first data timestamp lands, so the catch-up also
+  // runs then: returning to the page with cached data older than the cadence
+  // refreshes right away.
+  const hasLastDashboardUpdate = lastDashboardUpdatedAt !== null;
+
+  useEffect(() => {
+    if (!pageActivity.canPollDashboard) {
+      wasDashboardPollingPausedRef.current = true;
+      return;
+    }
+    if (isManualRefreshPending) {
+      return;
+    }
+    // A manual refresh started here sets isManualRefreshPending, so this
+    // interval is cleared at once and restarts when that refresh settles.
+    catchUpDashboard();
 
     const interval = window.setInterval(() => {
       void refreshDashboard({ manual: false });
@@ -197,10 +233,8 @@ export default function AdminDashboard() {
       window.clearInterval(interval);
     };
   }, [
-    hasDashboardData,
-    hasStaleDashboardData,
+    hasLastDashboardUpdate,
     isManualRefreshPending,
-    lastDashboardUpdatedAt,
     pageActivity.canPollDashboard,
     refreshDashboard,
   ]);

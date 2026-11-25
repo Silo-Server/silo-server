@@ -197,16 +197,16 @@ function DeviceSettingRow({
               </span>
             ) : null}
           </div>
-          <p className="text-muted-foreground text-[13px] leading-relaxed">
+          <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
             {settingDescription(definition)}
           </p>
           {constrained ? (
-            <p className="text-[13px] leading-relaxed text-amber-300/90">
+            <p className="text-[0.8125rem] leading-relaxed text-amber-300/90">
               {constraintExplanation(t, effective)}
             </p>
           ) : null}
           {profileWide ? (
-            <p className="text-muted-foreground text-[13px] leading-relaxed">
+            <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
               {retainedHere
                 ? t("web.settings.deviceSettingGroups.profileWideRetained", {
                     value: retainedValueLabel(settingKey, storedOnDevice?.[settingKey]),
@@ -221,7 +221,7 @@ function DeviceSettingRow({
               type="button"
               onClick={() => onReset(settingKey)}
               disabled={disabled}
-              className="text-muted-foreground hover:text-foreground inline-flex min-h-11 items-center gap-1 text-[13px] transition-colors disabled:opacity-50 sm:min-h-0 sm:pt-0.5 sm:text-xs"
+              className="text-muted-foreground hover:text-foreground inline-flex min-h-11 items-center gap-1 text-[0.8125rem] transition-colors disabled:opacity-50 sm:min-h-0 sm:pt-0.5 sm:text-xs"
             >
               <RotateCcw className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
               {t("web.settings.deviceSettingGroups.useOwnerSetting", ownerValues(owner))}

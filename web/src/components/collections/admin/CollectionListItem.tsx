@@ -16,12 +16,13 @@ import { formatRelativeTime } from "@/lib/date";
 import { rowTag, showOnTabsLabel } from "@/lib/collections/adminList";
 import { hiddenFromTab, hiddenTag, onHome, pinnedTag } from "@/lib/collections/copy";
 import { collectionKindLabel, collectionKindOf } from "@/lib/collections/types";
+import { hasArabicScript } from "@/lib/direction";
 import { cn } from "@/lib/utils";
 import { useAppLanguage, useT } from "@/i18n";
 import { formatLocale, joinList } from "@/lib/appLocale";
 
 const TAG =
-  "inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full px-2 text-[11.5px] font-semibold";
+  "inline-flex min-h-[22px] shrink-0 items-center gap-1 rounded-full px-2 text-[0.71875rem] font-semibold";
 
 function Tag({ collection, visible }: { collection: LibraryCollection; visible: boolean }) {
   useAppLanguage();
@@ -123,6 +124,7 @@ function ListItem({
       id={collection.id}
       selection={selection}
       title={collection.title}
+      titleDir="auto"
       collapsed={false}
       collapsedText={null}
       art={
@@ -234,8 +236,14 @@ function CompactItem({
         )}
       />
       <div className={cn("min-w-0 cursor-pointer", !visible && "opacity-60")} onClick={onOpen}>
-        <p className="truncate text-[14px] font-semibold tracking-[-0.01em]">{collection.title}</p>
-        <p className="text-muted-foreground truncate text-[12.5px]">
+        <p
+          dir="auto"
+          className="bidi-text truncate text-[0.875rem] font-semibold tracking-[-0.01em]"
+          data-cursive={hasArabicScript(collection.title) || undefined}
+        >
+          {collection.title}
+        </p>
+        <p className="text-muted-foreground truncate text-[0.78125rem]">
           {collectionKindLabel(collectionKindOf(collection.collection_type))}
           <MetaDot />
           {t("web.collections.metaLine.titleCount", {
@@ -272,7 +280,7 @@ export function CollectionListItem(props: ListItemProps | CompactItemProps) {
 export function CollectionColumnHeader({ count }: { count: number }) {
   const t = useT();
   return (
-    <div className="text-muted-foreground flex items-center justify-between px-4 pt-1 pb-2 text-[12.5px]">
+    <div className="text-muted-foreground flex items-center justify-between px-4 pt-1 pb-2 text-[0.78125rem]">
       <span role="status">{t("web.collections.shelves.count", { count, count_text: count })}</span>
       <span aria-hidden className="pe-14 max-lg:pe-16">
         {t("web.collections.admin.onCollectionsTab")}

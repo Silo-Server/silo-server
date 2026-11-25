@@ -7,14 +7,18 @@ import { isJellyfinSession } from "@/pages/adminActivityPresentation";
  * surface (server-identified via is_jellyfin_client). Renders nothing for
  * native sessions, so callers can drop it into any badge row unconditionally.
  */
-export function JellyfinSessionPill({ session }: { session: AdminSession }) {
+export function JellyfinSessionPill({
+  session,
+}: {
+  session: Pick<AdminSession, "is_jellyfin_client">;
+}) {
   const t = useT();
   if (!isJellyfinSession(session)) {
     return null;
   }
   return (
     <span
-      className="inline-flex flex-shrink-0 rounded border border-[#AA5CC3]/30 bg-[#AA5CC3]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[#AA5CC3]"
+      className="inline-flex flex-shrink-0 rounded border border-[#AA5CC3]/30 bg-[#AA5CC3]/15 px-1.5 py-0.5 text-[0.5625rem] font-semibold text-[#AA5CC3]"
       title={t("web.player.jellyfinSession.title")}
     >
       {t("web.player.jellyfinSession.label")}

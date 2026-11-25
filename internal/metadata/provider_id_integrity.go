@@ -437,9 +437,9 @@ func (s *MetadataService) canonicalizeProviderIDDuplicate(
 	return canonicalizeProviderIDDuplicate(ctx, s.dbPool, s.recsStaler, leftContentID, rightContentID, allowMatchedSource, markIdentity)
 }
 
-// clearProvisionalProviderIDsLocked removes provider ID rows for an item only
-// after re-confirming, under a row-level lock, that the item is still in a
-// provisional ownership status. Without the lock, a parallel goroutine could
+// clearProvisionalProviderIDsLocked removes provider ID rows and work id claims
+// for an item only after re-confirming, under a row-level lock, that the item is
+// still in a provisional ownership status. Without the lock, a parallel goroutine could
 // promote the item to matched between the caller's status check and our
 // delete, silently wiping a confirmed item's provider IDs.
 func clearProvisionalProviderIDsLocked(ctx context.Context, pool *pgxpool.Pool, contentID string) error {
@@ -475,6 +475,10 @@ func clearProvisionalProviderIDsLocked(ctx context.Context, pool *pgxpool.Pool, 
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM media_item_provider_ids WHERE content_id = $1`, contentID); err != nil {
 		return fmt.Errorf("clearing provisional provider IDs from %s: %w", contentID, err)
+	}
+	// A book's work id claims came with the provider IDs and go with them.
+	if err := catalog.DeleteWorkClaimsTx(ctx, tx, contentID); err != nil {
+		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit provisional provider-id clear: %w", err)
@@ -760,6 +764,14 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			WHERE content_id = $1
 			  AND provider NOT IN (SELECT provider FROM media_item_provider_ids WHERE content_id = $2)`},
 	{"drop source provider ids", `DELETE FROM media_item_provider_ids WHERE content_id = $1`},
+	// Work id claims are not unique across items; move those for works the
+	// canonical item claims nothing for, as with provider IDs.
+	{"merge work ids", `
+			UPDATE media_item_work_ids
+			SET content_id = $2, updated_at = NOW()
+			WHERE content_id = $1
+			  AND provider NOT IN (SELECT provider FROM media_item_work_ids WHERE content_id = $2)`},
+	{"drop source work ids", `DELETE FROM media_item_work_ids WHERE content_id = $1`},
 	{"merge legacy provider columns", `
 			UPDATE media_items dest
 			SET imdb_id = COALESCE(NULLIF(dest.imdb_id, ''), src.imdb_id),

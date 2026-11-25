@@ -635,7 +635,7 @@ func audioEligibilityV3(source SourceDescriptorV3, request StartRequestV3) (copy
 		}
 	}
 	if containsFoldV3(request.Capabilities.CodecsAudio, source.AudioCodec) {
-		claim.Reason = "client_decode_supported"
+		claim.Reason = audioClaimClientDecodeV3
 		return true, false, claim
 	}
 	if passthroughCaps != nil && containsFoldV3(passthroughCaps.PassthroughCodecs, source.AudioCodec) {
@@ -674,6 +674,12 @@ func SourceVideoKbps(fileKbps, videoTrackKbps int) int {
 		return normalizeBitrateKbpsV3(videoTrackKbps)
 	}
 	return normalizeBitrateKbpsV3(fileKbps)
+}
+
+// NormalizeBitrateKbps converts legacy bps values stored in media_files.bitrate
+// (> 10_000_000) to kbps while passing kbps values through unchanged.
+func NormalizeBitrateKbps(value int) int {
+	return normalizeBitrateKbpsV3(value)
 }
 
 func normalizeBitrateKbpsV3(value int) int {

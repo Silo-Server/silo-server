@@ -2807,11 +2807,14 @@ export interface AdminSession {
   profile_name?: string;
   media_file_id: number;
   requested_media_file_id: number;
-  content_id?: string;
+  /** Catalog content id of what is playing: the episode for an episode. */
+  media_item_id?: string;
+  /** Episode or item title, as admin playback history names it. */
   media_title: string;
+  /** `episode`, or the catalog item type. */
   media_type: string;
-  series_name?: string;
-  episode_name?: string;
+  /** Series title for an episode; absent otherwise. */
+  series_title?: string;
   season_number?: number | null;
   episode_number?: number | null;
   poster_url?: string;
@@ -3094,7 +3097,9 @@ export type EventChannel =
   | "settings"
   | "notifications"
   // Admin-only changes to the offline-download preparation queue.
-  | "download_preparations";
+  | "download_preparations"
+  // Admin-only download.changed for managed device downloads.
+  | "downloads";
 
 export interface NotificationReasonFlags {
   // episode.available reasons
@@ -3385,6 +3390,17 @@ export type AdminLogStreamMessage =
   | AdminLogAppendMessage
   | AdminLogErrorMessage;
 
+export interface AdminPlaybackHistorySubtitle {
+  track_id: string;
+  language: string | null;
+  codec: string | null;
+  format: string | null;
+  source: "embedded" | "external" | "downloaded";
+  delivery: "burn_in" | "embedded" | "hls_rendition" | "sidecar";
+  forced: boolean;
+  hearing_impaired: boolean;
+}
+
 export interface AdminPlaybackHistoryItem {
   session_id: string;
   user_id: number;
@@ -3399,14 +3415,59 @@ export interface AdminPlaybackHistoryItem {
   started_at: string;
   ended_at: string;
   /** Where the play ended, not how long it was watched. */
-  watched_seconds: number;
+  end_position_seconds: number;
   duration_seconds: number | null;
   completed: boolean;
   /** Measured watch time; null for a play recorded before it was measured. */
   played_seconds: number | null;
+  measured?: boolean;
+  start_position_seconds?: number | null;
+  paused_seconds?: number | null;
+  measured_since?: string | null;
+  measured_until?: string | null;
+  client_ip?: string | null;
+  device_id?: string | null;
+  device_platform?: string | null;
+  client_name?: string | null;
+  client_version?: string | null;
+  video_decision?: "direct" | "remux" | "transcode" | null;
+  audio_decision?: "direct" | "remux" | "transcode" | null;
+  end_reason?: "stopped" | "terminated" | "expired" | "aborted" | "replaced" | null;
   series_title: string;
   season_number: number | null;
   episode_number: number | null;
+  subtitle?: AdminPlaybackHistorySubtitle | null;
+  target_video_codec?: string | null;
+  target_resolution?: string | null;
+  target_audio_codec?: string | null;
+  target_audio_channels?: number | null;
+  output_container?: string | null;
+  output_protocol?: string | null;
+  target_bitrate_kbps?: number | null;
+  transcode_hw_accel?: string | null;
+  tone_map_mode?: string | null;
+  adaptation_reasons?: string[];
+  reporting_node?: string | null;
+  stream_location?: "local" | "remote" | null;
+  compat_origin?: boolean | null;
+  is_jellyfin_client?: boolean;
+  routing_execution?: string | null;
+  routing_execution_node_id?: number | null;
+  routing_execution_node_name?: string | null;
+  routing_egress?: string | null;
+  routing_egress_node_id?: number | null;
+  routing_egress_node_name?: string | null;
+  route_facts_recorded?: boolean;
+  source_video_codec?: string | null;
+  source_resolution?: string | null;
+  source_audio_codec?: string | null;
+  source_audio_channels?: number | null;
+  source_container?: string | null;
+  source_bitrate_kbps?: number | null;
+  source_hdr?: boolean | null;
+  source_video_range_type?: string | null;
+  library_id?: number | null;
+  library_name?: string | null;
 }
 
 export interface AdminUserProfile {
@@ -3974,6 +4035,7 @@ export interface PluginAdminFormField {
 }
 
 export interface PluginCapability {
+  env_managed?: string[];
   type: string;
   id: string;
   display_name: string;
@@ -3987,6 +4049,8 @@ export interface PluginCapability {
   callback_url?: string;
   /** An installation's OAuth sign-in capability: the post-logout redirect URI to register. */
   post_logout_redirect_url?: string;
+  /** A scheduled_task.v1 capability: its manifest default schedule, when the server can run it. */
+  default_schedule?: TriggerConfig;
   /** A request_router.v1 capability: the request server fields its plugin can do without. */
   request_router?: { api_key_optional: boolean; base_url_optional: boolean };
 }
@@ -4016,6 +4080,9 @@ export interface PluginConfigValue {
 }
 
 export interface PluginAuthBinding {
+  env_managed?: string[];
+  callback_mode?: "installation" | "stable";
+  callback_pending?: boolean;
   capability_id: string;
   enabled: boolean;
   display_order: number;
@@ -4105,7 +4172,10 @@ export interface PluginUpdateFailure {
 
 export type PluginSignature = V2Components["schemas"]["AdminPluginSignature"];
 
+export type PluginProvisionOwnership = V2Components["schemas"]["AdminPluginProvisionOwnership"];
+
 export interface PluginInstallation {
+  env_managed?: PluginProvisionOwnership;
   id: number;
   repository_id?: number | null;
   plugin_id: string;
@@ -4133,6 +4203,8 @@ export interface PluginInstallation {
   update_failure?: PluginUpdateFailure | null;
   /** The release signature check of the installed package. */
   signature: PluginSignature;
+  /** Whether the config test endpoint has a connection check to run for this plugin. */
+  connection_check_supported: boolean;
   legacy_metadata_import_types?: string[];
   created_at?: string;
   updated_at?: string;
@@ -4481,11 +4553,23 @@ export interface StreamNode {
    */
   key_issued?: boolean;
   /**
+   * The API servers' deployment configuration lists this transcode node and
+   * supplies its key, so the key is not issued and the node is not deleted
+   * here. Absent on older servers.
+   */
+  deployment_managed?: boolean;
+  /**
    * How this transcode node reads source media: through its own library
    * mount, or over HTTP from the API servers. Absent on proxies and on older
    * servers.
    */
   source_access?: NodeSourceAccess;
+  /**
+   * Update-body field names the node declares from its own environment. The
+   * server refuses a change to any of them, so the editor shows them
+   * read-only. Absent on servers that predate node declarations.
+   */
+  env_managed?: string[];
 }
 
 /** How a transcode node reads source media. */

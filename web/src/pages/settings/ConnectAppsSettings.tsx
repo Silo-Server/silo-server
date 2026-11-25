@@ -36,6 +36,7 @@ import {
   jellyfinUsernameIssue,
   resolveSiloSignIn,
 } from "./connectApps";
+import { getInitial } from "@/lib/text";
 
 type AppKind = "silo" | "jellyfin";
 
@@ -95,7 +96,7 @@ function FieldRow({ label, icon: Icon, kind, hint, children, copyValue }: FieldR
         {label}
       </div>
       <div className="mt-1.5 flex items-center gap-2">
-        <div className="min-w-0 flex-1 text-[15px] break-all">{children}</div>
+        <div className="min-w-0 flex-1 text-[0.9375rem] break-all">{children}</div>
         {copyValue ? (
           <Button
             size="icon-sm"
@@ -179,7 +180,7 @@ function ProfilePicker({
               <Avatar className="h-6 w-6">
                 {profile.avatar_url ? <AvatarImage src={profile.avatar_url} alt="" /> : null}
                 <AvatarFallback className="text-xs font-semibold">
-                  {profile.name.charAt(0).toUpperCase()}
+                  {getInitial(profile.name)}
                 </AvatarFallback>
               </Avatar>
               {profile.name}
@@ -497,7 +498,7 @@ export default function ConnectAppsSettings() {
                     login_url: `${siloURL}/login?local=1`,
                     activate_url: `${siloURL}/activate`,
                     url: (chunks) => (
-                      <span className="text-foreground font-mono break-all">{chunks}</span>
+                      <code className="text-foreground font-mono break-all">{chunks}</code>
                     ),
                   })
                 : t("web.settings.connectApps.noSiloSignIn.body")}
@@ -570,7 +571,7 @@ export default function ConnectAppsSettings() {
                   {t("web.settings.connectApps.provider.tvCode", {
                     activate_url: `${siloURL}/activate`,
                     url: (chunks) => (
-                      <span className="text-foreground font-mono break-all">{chunks}</span>
+                      <code className="text-foreground font-mono break-all">{chunks}</code>
                     ),
                   })}
                 </span>

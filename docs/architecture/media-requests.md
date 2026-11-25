@@ -639,7 +639,10 @@ written for the admin who fixes the submission: it can name a server or a
 routing rule, or pass on a plugin's own error text. A requester still sees the
 request's state and `outcome_reason`, and each target's quality, status and
 `download`. An admin sees every field, on those operations and on the
-`/api/v2/admin/requests` operations.
+`/api/v2/admin/requests` operations, except that an API key with scopes (the
+`admin:monitor:read` monitoring scope) reads the admin request list without
+any `last_error`, target `instance_name` or target `route_name`, and the
+request events without their `message`.
 
 On these profile routes, "admin" means the acting admin
 (`apimw.ActingAdmin`, see [api-contract.md](api-contract.md)): an admin account
@@ -663,6 +666,14 @@ history is its `media_request_events` rows. Target updates record the
 request's status or outcome only when it changes, so neither a reconcile pass
 nor a second target repeats an entry. The queue shows a request with source
 `watchlist` as "via watchlist".
+
+A request keeps `poster_path` and `backdrop_path` only as TMDB image paths
+(one file name under the root, such as `/abc.jpg`). Create drops a value in any
+other shape, and the TMDB detail read fills it. Admin request reads add
+`poster_url`, a stable path to `getAdminRequestPoster`, which serves the TMDB
+poster through the server so a monitoring tool never loads TMDB itself. It reads
+the stored row only, so it answers while requests are turned off. See
+[admin request posters](../images-api.md#admin-request-posters).
 
 ## Who can request
 

@@ -558,6 +558,7 @@ func registerAll(reg *Registry) {
 	registerEmailVerification(reg)
 	registerEventsCapability(reg)
 	registerNetworkAccess(reg)
+	registerDirectConnections(reg)
 	registerEventsSocket(reg)
 	registerAdminLogsSocket(reg)
 	registerPlaybackControlSocket(reg)
@@ -588,6 +589,7 @@ func registerAll(reg *Registry) {
 	registerNotificationEmailLinks(reg)
 	registerNotificationDiscordLinks(reg)
 	registerNotificationDestinations(reg)
+	registerNotificationPluginDestinations(reg)
 	registerNotificationDestinationTests(reg)
 	registerNotificationDestinationCreate(reg)
 	registerAdminUserAPIKeys(reg)
@@ -622,6 +624,7 @@ func registerAll(reg *Registry) {
 	registerAdminPluginRepositoryUpdate(reg)
 	registerAdminPluginRepositoryDelete(reg)
 	registerAdminPluginInventory(reg)
+	registerAdminPluginProvisioning(reg)
 	registerAdminPluginConfiguration(reg)
 	registerAdminPluginLifecycle(reg)
 	registerAdminPluginUploads(reg)
@@ -641,6 +644,7 @@ func registerAll(reg *Registry) {
 	registerAdminDiagnosticReads(reg)
 	registerAdminDiagnosticDelete(reg)
 	registerAdminDashboardInsights(reg)
+	registerAdminInsights(reg)
 	registerAdminAPIClients(reg)
 	registerAdminDashboardCapabilities(reg)
 	registerAdminDashboardLayout(reg)
@@ -764,6 +768,8 @@ func registerAll(reg *Registry) {
 	registerUserLibraries(reg)
 	registerPolicyCapability(reg)
 	registerArtwork(reg)
+	registerItemPosters(reg)
+	registerAdminRequestPoster(reg)
 	registerBranding(reg)
 	registerAdminInviteCodes(reg)
 	registerInvitations(reg)
@@ -787,9 +793,7 @@ func registerAll(reg *Registry) {
 // documents. The migration ledger's reconcile test reads the Guarded set
 // from it.
 func DeclaredOperations() []Declared {
-	reg := &Registry{api: huma.NewAPI(humaConfig(), noopAdapter{})}
-	registerAll(reg)
-	return reg.Declared()
+	return slices.Clone(sharedRuntimeSchemas().declared)
 }
 
 // GenerateOpenAPI renders the contract document from the registries alone:

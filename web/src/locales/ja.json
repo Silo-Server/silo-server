@@ -281,10 +281,28 @@
       "value": "このサインインコードは有効期限が切れました。最初からやり直してください。"
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "このアカウントはダイレクト接続できるデバイス数の上限に達しました。"
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "この接続キーはすでに別のデバイスで使用されています。もう一度お試しください。"
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
       "value": "このメールアドレスはすでに使用されています。"
+    }
+  ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "この値はすでに使用されています。"
     }
   ],
   "error.field.invalid": [
@@ -327,6 +345,18 @@
     {
       "type": 0,
       "value": "リクエストを読み取れませんでした。"
+    }
+  ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "環境で設定されています。環境側で変更してから、影響を受けるサービスを再起動してください。"
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "この値がありません。"
     }
   ],
   "error.field.out_of_range": [
@@ -437,6 +467,12 @@
       "value": "続行するには、ネットワークのサインインからサインインしてください。"
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "このノードはサーバーのデプロイ構成で設定されています。ここで管理するには、デプロイ構成からノードを削除して、APIサーバーを再起動してください。"
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -483,6 +519,18 @@
     {
       "type": 0,
       "value": "この再生セッションは終了しました。もう一度再生してください。"
+    }
+  ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "一時停止の時間が長すぎたため、再生を停止しました。もう一度再生してください。"
+    }
+  ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "このストリームは置き換えられました。現在のストリームで再生を続行しています。"
     }
   ],
   "error.precondition_failed": [
@@ -1261,6 +1309,18 @@
       "value": "人気のシリーズ"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "おすすめの映画"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "おすすめのシリーズ"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -1990,6 +2050,74 @@
     {
       "type": 0,
       "value": "アプリの言語"
+    }
+  ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "終了時"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "終了の"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "分前"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "終了の"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "秒前"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "次のエピソードを表示"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "オフ"
     }
   ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
@@ -3499,7 +3627,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "今すぐ再生"
+      "value": "次のエピソードを再生"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -12916,6 +13044,28 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件は復元できません — 異なる設定、またはその接続の一部がこのサーバーの環境で設定されています"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13127,7 +13277,7 @@
             },
             {
               "type": 0,
-              "value": "件は復元できません — ここですでに同じです"
+              "value": "件は復元できません — このサーバーですでに同じ内容です"
             }
           ]
         }
@@ -13270,6 +13420,28 @@
     {
       "type": 0,
       "value": "サービスのアドレスが変わりますが、バックアップに認証情報が含まれていないため、復元するとここの認証情報がクリアされ、再入力するまでサービスはオフになります。"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件の設定は、設定自体またはその接続の一部がこのサーバーの環境で設定されているため、現在の値を維持します。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -13624,8 +13796,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "非表示にする"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "非表示にする"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "非表示にする"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "非表示にする"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -13746,8 +13944,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "表示する"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "表示する"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "表示する"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "表示する"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -14424,9 +14648,41 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "選択した項目に必要な"
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "も選択しました。"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "選択した項目に必要な"
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "も選択しました。"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -14443,16 +14699,46 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "選択を解除した項目を必要とする"
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "も選択を解除しました。"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "選択を解除した項目を必要とする"
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "も選択を解除しました。"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -14469,9 +14755,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -15646,6 +15930,12 @@
       "value": "このサーバーの別のアカウントが、同じユーザー名またはメールアドレスでサインインしています。"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "異なる設定、またはその接続の一部がこのサーバーの環境で設定されているため、このサーバーは現在の値を維持します。"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16086,6 +16376,142 @@
     {
       "type": 0,
       "value": "を開けません。"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "背景画像"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のコレクションアイテム"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "コレクションの置き換え"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "構成"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "説明"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "有効化"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "注目"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "アイテム数の上限"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "アイテムの並べ替え"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "ライブラリ"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "位置"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "ポスター"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "並び順"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "ソース"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "同期スケジュール"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "タイトル"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "タイトルの翻訳"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "種類"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "公開範囲"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Webのみ"
     }
   ],
   "web.admin.backups.restore.rows.changes": [
@@ -16580,6 +17006,16 @@
     {
       "type": 0,
       "value": "（維持：より厳格）"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "（維持：環境）"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -17546,6 +17982,20 @@
       "value": "サーバーのタイムゾーンで指定します。"
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "サーバーのタイムゾーンの時刻です。お使いのタイムゾーンでは"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "です。"
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -18394,9 +18844,25 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "データを読み取れませんでした"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "データを読み取れませんでした"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18405,9 +18871,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -18438,20 +18902,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "アカウントを非表示"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "アカウントを非表示"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "アカウントを非表示"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "アカウントを非表示"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "ファイルを非表示"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを非表示"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを非表示"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを非表示"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "ファイルを非表示"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを非表示"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを非表示"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを非表示"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -18494,6 +19036,226 @@
     {
       "type": 0,
       "value": "データベースで参照されていますが、ストレージに見つかりませんでした。復元時には除外されます。"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のブランディング素材"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のコレクションの背景画像"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のコレクションのポスター"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のダウンロードした字幕"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のライブラリのポスター"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のオーバーレイ画像"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件の個人のコレクションのポスター"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のプロフィールのアバター"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のアップロードしたアートワークファイル"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のアップロードした字幕"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -18668,9 +19430,33 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": "を読み取れませんでした"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": "を読み取れませんでした"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18683,9 +19469,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -18700,8 +19484,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "アカウントを表示"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "アカウントを表示"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "アカウントを表示"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "アカウントを表示"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -18728,21 +19538,89 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "ファイルを表示"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを表示"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを表示"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを表示"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "ファイルを表示"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを表示"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを表示"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ファイルを表示"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "データが復元セットには大きすぎます"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "データが復元セットには大きすぎます"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18751,9 +19629,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -20878,6 +21754,16 @@
       "value": "まで）。"
     }
   ],
+  "web.admin.common.catalogImportSource.exportJob": [
+    {
+      "type": 0,
+      "value": "エクスポートジョブ"
+    },
+    {
+      "type": 1,
+      "value": "id"
+    }
+  ],
   "web.admin.common.connectionCheck.check": [
     {
       "type": 0,
@@ -21148,6 +22034,12 @@
       "value": "音声認識プロバイダーは一時的に利用できません。しばらくしてからもう一度お試しください。"
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "テキストAIプロバイダーで利用可能なクレジットがないか、利用上限または支出上限に達しました。プロバイダーの残高と上限、またはChatGPTの利用設定を確認してください。"
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -21158,6 +22050,80 @@
     {
       "type": 0,
       "value": "テキストAIに接続できませんでした。モデル、推論レベル、サービスティア、アカウントの連携、プロバイダーの利用上限を確認してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "テキストAIへのアクセスが拒否されました。APIキーまたはChatGPTアカウントでこのモデルを使用できるか確認してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "テキストAIのエンドポイントまたはモデルを利用できません。プロバイダーのベースURLとモデルを確認してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "連携しているChatGPTアカウントでは、プランの利用枠を共有できません。ChatGPTの利用設定を確認するか、別のアカウントを連携してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "テキストAIプロバイダーがリクエストのレートを制限しています。しばらくしてからもう一度お試しください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "テキストAIプロバイダーが確認のリクエストを拒否しました。モデル、推論レベル、アカウントの利用設定を確認してください。プロバイダーのエラーはサーバーログに記録されています。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "テキストAIプロバイダーが確認のリクエストを拒否しました（ステータス"
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "）。モデル、推論レベル、サービスティアを確認してください。プロバイダーのエラーはサーバーログに記録されています。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "テキストAIの接続確認がタイムアウトしました。プロバイダーの稼働状況を確認して、もう一度お試しください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "テキストAIプロバイダーが認証情報を拒否しました。プロバイダーのAPIキーを置き換えるか、ChatGPTに再度サインインしてください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "テキストAIプロバイダーは一時的に利用できません。しばらくしてからもう一度お試しください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "SiloはテキストAIプロバイダーに接続できませんでした。プロバイダーのベースURLと、このサーバーからプロバイダーに接続できるかを確認してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "テキストモデルが、Siloで使用できない応答を返しました。別のモデルを選択してください。"
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -21238,6 +22204,12 @@
     {
       "type": 0,
       "value": "制限をクリア"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "ダイレクト"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -25730,6 +26702,12 @@
       "value": "失敗"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "タスクが失敗しました。詳細は管理者向けの診断情報を確認してください。"
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -25812,6 +26790,12 @@
     {
       "type": 0,
       "value": "履歴のインポート"
+    }
+  ],
+  "web.admin.common.title.header.insights": [
+    {
+      "type": 0,
+      "value": "インサイト"
     }
   ],
   "web.admin.common.title.header.libraries": [
@@ -26004,6 +26988,12 @@
     {
       "type": 0,
       "value": "管理：履歴のインポート"
+    }
+  ],
+  "web.admin.common.title.tab.insights": [
+    {
+      "type": 0,
+      "value": "管理インサイト"
     }
   ],
   "web.admin.common.title.tab.libraries": [
@@ -27261,6 +28251,12 @@
       "value": "現在"
     }
   ],
+  "web.admin.dashboard.range.edgeStart.all": [
+    {
+      "type": 0,
+      "value": "最初の記録"
+    }
+  ],
   "web.admin.dashboard.range.edgeStart.day": [
     {
       "type": 0,
@@ -27279,10 +28275,28 @@
       "value": "30日前"
     }
   ],
+  "web.admin.dashboard.range.edgeStart.quarter": [
+    {
+      "type": 0,
+      "value": "90日前"
+    }
+  ],
   "web.admin.dashboard.range.edgeStart.week": [
     {
       "type": 0,
       "value": "7日前"
+    }
+  ],
+  "web.admin.dashboard.range.edgeStart.year": [
+    {
+      "type": 0,
+      "value": "1年前"
+    }
+  ],
+  "web.admin.dashboard.range.label.all": [
+    {
+      "type": 0,
+      "value": "すべて"
     }
   ],
   "web.admin.dashboard.range.label.day": [
@@ -27303,10 +28317,28 @@
       "value": "30日"
     }
   ],
+  "web.admin.dashboard.range.label.quarter": [
+    {
+      "type": 0,
+      "value": "90日"
+    }
+  ],
   "web.admin.dashboard.range.label.week": [
     {
       "type": 0,
       "value": "7日"
+    }
+  ],
+  "web.admin.dashboard.range.label.year": [
+    {
+      "type": 0,
+      "value": "1年"
+    }
+  ],
+  "web.admin.dashboard.range.phrase.all": [
+    {
+      "type": 0,
+      "value": "記録された全期間"
     }
   ],
   "web.admin.dashboard.range.phrase.day": [
@@ -27327,10 +28359,32 @@
       "value": "過去30日"
     }
   ],
+  "web.admin.dashboard.range.phrase.quarter": [
+    {
+      "type": 0,
+      "value": "過去90日"
+    }
+  ],
   "web.admin.dashboard.range.phrase.week": [
     {
       "type": 0,
       "value": "過去7日"
+    }
+  ],
+  "web.admin.dashboard.range.phrase.year": [
+    {
+      "type": 0,
+      "value": "過去365日"
+    }
+  ],
+  "web.admin.dashboard.range.title.all": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "・全期間"
     }
   ],
   "web.admin.dashboard.range.title.day": [
@@ -27363,6 +28417,16 @@
       "value": "・過去30日"
     }
   ],
+  "web.admin.dashboard.range.title.quarter": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "・過去90日"
+    }
+  ],
   "web.admin.dashboard.range.title.week": [
     {
       "type": 1,
@@ -27371,6 +28435,22 @@
     {
       "type": 0,
       "value": "・過去7日"
+    }
+  ],
+  "web.admin.dashboard.range.title.year": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "・過去365日"
+    }
+  ],
+  "web.admin.dashboard.rangePicker.show.all": [
+    {
+      "type": 0,
+      "value": "記録された全期間を表示"
     }
   ],
   "web.admin.dashboard.rangePicker.show.day": [
@@ -27391,10 +28471,22 @@
       "value": "過去30日を表示"
     }
   ],
+  "web.admin.dashboard.rangePicker.show.quarter": [
+    {
+      "type": 0,
+      "value": "過去90日を表示"
+    }
+  ],
   "web.admin.dashboard.rangePicker.show.week": [
     {
       "type": 0,
       "value": "過去7日を表示"
+    }
+  ],
+  "web.admin.dashboard.rangePicker.show.year": [
+    {
+      "type": 0,
+      "value": "過去365日を表示"
     }
   ],
   "web.admin.dashboard.widgetCatalog.apiClients.description": [
@@ -27457,6 +28549,78 @@
       "value": "サーバーの状態"
     }
   ],
+  "web.admin.dashboard.widgetCatalog.insightsActivePeople.description": [
+    {
+      "type": 0,
+      "value": "日・週・月ごとに視聴したプロフィールとアカウント"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsActivePeople.title": [
+    {
+      "type": 0,
+      "value": "アクティブユーザー"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsHourOfDay.description": [
+    {
+      "type": 0,
+      "value": "1日のうち再生数が最も多い時間帯"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsHourOfDay.title": [
+    {
+      "type": 0,
+      "value": "時間帯別の再生数"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsLibraryCoverage.description": [
+    {
+      "type": 0,
+      "value": "選択した期間に映画とシリーズの各ライブラリが再生された割合"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsLibraryCoverage.title": [
+    {
+      "type": 0,
+      "value": "ライブラリの再生率"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsPlays.description": [
+    {
+      "type": 0,
+      "value": "再生方法またはメディアの種類別の日・週・月ごとの再生数（履歴の最初から）"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsPlays.title": [
+    {
+      "type": 0,
+      "value": "再生数の推移"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsViewingHours.description": [
+    {
+      "type": 0,
+      "value": "曜日と時間帯別の視聴開始のタイミング"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsViewingHours.title": [
+    {
+      "type": 0,
+      "value": "視聴時間帯"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsWeekday.description": [
+    {
+      "type": 0,
+      "value": "再生数が最も多い曜日"
+    }
+  ],
+  "web.admin.dashboard.widgetCatalog.insightsWeekday.title": [
+    {
+      "type": 0,
+      "value": "曜日別の再生数"
+    }
+  ],
   "web.admin.dashboard.widgetCatalog.libraries.description": [
     {
       "type": 0,
@@ -27508,7 +28672,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "最近開始した再生セッションのフィード"
+      "value": "全アカウントの最近の再生"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -28442,6 +29606,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.dashboard.widgets.insights.loadFailed": [
+    {
+      "type": 0,
+      "value": "Insightsを読み込めませんでした。"
+    }
+  ],
   "web.admin.dashboard.widgets.libraries.disabled": [
     {
       "type": 0,
@@ -28736,6 +29906,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.dashboard.widgets.openInsights": [
+    {
+      "type": 0,
+      "value": "インサイト ›"
+    }
+  ],
   "web.admin.dashboard.widgets.playbackActivity.chartLabelDaily": [
     {
       "type": 1,
@@ -28950,6 +30126,80 @@
     {
       "type": 0,
       "value": "アクティビティを読み込めませんでした。"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "が"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "を再生しました"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "が"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "を再生しました"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -37533,6 +38783,12 @@
       "value": "視聴履歴のページが無効です。ページを再読み込みしてください。"
     }
   ],
+  "web.admin.history.column.client": [
+    {
+      "type": 0,
+      "value": "クライアント"
+    }
+  ],
   "web.admin.history.column.ended": [
     {
       "type": 0,
@@ -37542,7 +38798,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "ログ"
+      "value": "操作"
     }
   ],
   "web.admin.history.column.media": [
@@ -37572,13 +38828,271 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "ユーザー"
+      "value": "アカウント"
     }
   ],
   "web.admin.history.column.watchTime": [
     {
       "type": 0,
       "value": "視聴時間"
+    }
+  ],
+  "web.admin.history.detail.action.ffmpegLogs": [
+    {
+      "type": 0,
+      "value": "FFmpegログ"
+    }
+  ],
+  "web.admin.history.detail.action.openMedia": [
+    {
+      "type": 0,
+      "value": "タイトルを開く"
+    }
+  ],
+  "web.admin.history.detail.action.sessionLogs": [
+    {
+      "type": 0,
+      "value": "セッションログ"
+    }
+  ],
+  "web.admin.history.detail.column.delivered": [
+    {
+      "type": 0,
+      "value": "配信"
+    }
+  ],
+  "web.admin.history.detail.column.source": [
+    {
+      "type": 0,
+      "value": "ソース"
+    }
+  ],
+  "web.admin.history.detail.column.stream": [
+    {
+      "type": 0,
+      "value": "項目"
+    }
+  ],
+  "web.admin.history.detail.field.account": [
+    {
+      "type": 0,
+      "value": "アカウント"
+    }
+  ],
+  "web.admin.history.detail.field.client": [
+    {
+      "type": 0,
+      "value": "クライアント"
+    }
+  ],
+  "web.admin.history.detail.field.clientIp": [
+    {
+      "type": 0,
+      "value": "クライアントIP"
+    }
+  ],
+  "web.admin.history.detail.field.endPosition": [
+    {
+      "type": 0,
+      "value": "停止位置"
+    }
+  ],
+  "web.admin.history.detail.field.endReason": [
+    {
+      "type": 0,
+      "value": "終了理由"
+    }
+  ],
+  "web.admin.history.detail.field.ended": [
+    {
+      "type": 0,
+      "value": "終了"
+    }
+  ],
+  "web.admin.history.detail.field.library": [
+    {
+      "type": 0,
+      "value": "ライブラリ"
+    }
+  ],
+  "web.admin.history.detail.field.network": [
+    {
+      "type": 0,
+      "value": "ネットワーク"
+    }
+  ],
+  "web.admin.history.detail.field.paused": [
+    {
+      "type": 0,
+      "value": "一時停止"
+    }
+  ],
+  "web.admin.history.detail.field.platform": [
+    {
+      "type": 0,
+      "value": "プラットフォーム"
+    }
+  ],
+  "web.admin.history.detail.field.profile": [
+    {
+      "type": 0,
+      "value": "プロフィール"
+    }
+  ],
+  "web.admin.history.detail.field.route": [
+    {
+      "type": 0,
+      "value": "経路"
+    }
+  ],
+  "web.admin.history.detail.field.sessionId": [
+    {
+      "type": 0,
+      "value": "セッションID"
+    }
+  ],
+  "web.admin.history.detail.field.started": [
+    {
+      "type": 0,
+      "value": "開始"
+    }
+  ],
+  "web.admin.history.detail.field.watched": [
+    {
+      "type": 0,
+      "value": "視聴時間"
+    }
+  ],
+  "web.admin.history.detail.keyboardHint": [
+    {
+      "type": 0,
+      "value": "↑と↓でセッションを移動できます"
+    }
+  ],
+  "web.admin.history.detail.loadFailed": [
+    {
+      "type": 0,
+      "value": "セッションの詳細を読み込めませんでした。"
+    }
+  ],
+  "web.admin.history.detail.loading": [
+    {
+      "type": 0,
+      "value": "セッションの詳細を読み込み中…"
+    }
+  ],
+  "web.admin.history.detail.nextSession": [
+    {
+      "type": 0,
+      "value": "次のセッション"
+    }
+  ],
+  "web.admin.history.detail.notFound": [
+    {
+      "type": 0,
+      "value": "この再生セッションは見つかりませんでした。"
+    }
+  ],
+  "web.admin.history.detail.preUpgradeNotice": [
+    {
+      "type": 0,
+      "value": "詳細な再生情報の記録が始まる前に記録されたセッションです。このセッションでは、ファイルの詳細とサーバーの経路を表示できません。"
+    }
+  ],
+  "web.admin.history.detail.previousSession": [
+    {
+      "type": 0,
+      "value": "前のセッション"
+    }
+  ],
+  "web.admin.history.detail.row.audio": [
+    {
+      "type": 0,
+      "value": "音声"
+    }
+  ],
+  "web.admin.history.detail.row.bitrate": [
+    {
+      "type": 0,
+      "value": "ビットレート"
+    }
+  ],
+  "web.admin.history.detail.row.container": [
+    {
+      "type": 0,
+      "value": "コンテナ"
+    }
+  ],
+  "web.admin.history.detail.row.subtitles": [
+    {
+      "type": 0,
+      "value": "字幕"
+    }
+  ],
+  "web.admin.history.detail.row.video": [
+    {
+      "type": 0,
+      "value": "映像"
+    }
+  ],
+  "web.admin.history.detail.section.clientRoute": [
+    {
+      "type": 0,
+      "value": "アカウント、デバイス、経路"
+    }
+  ],
+  "web.admin.history.detail.section.reasons": [
+    {
+      "type": 0,
+      "value": "ダイレクト再生されなかった理由"
+    }
+  ],
+  "web.admin.history.detail.section.streams": [
+    {
+      "type": 0,
+      "value": "ソースと配信の比較"
+    }
+  ],
+  "web.admin.history.detail.section.timing": [
+    {
+      "type": 0,
+      "value": "時間と視聴状況"
+    }
+  ],
+  "web.admin.history.detail.subtitlesBurnIn": [
+    {
+      "type": 0,
+      "value": "焼き込み"
+    }
+  ],
+  "web.admin.history.detail.subtitlesEmbedded": [
+    {
+      "type": 0,
+      "value": "埋め込み"
+    }
+  ],
+  "web.admin.history.detail.subtitlesHls": [
+    {
+      "type": 0,
+      "value": "ストリーミング（HLS）"
+    }
+  ],
+  "web.admin.history.detail.subtitlesNone": [
+    {
+      "type": 0,
+      "value": "なし"
+    }
+  ],
+  "web.admin.history.detail.subtitlesSidecar": [
+    {
+      "type": 0,
+      "value": "外部ファイル"
+    }
+  ],
+  "web.admin.history.detail.title": [
+    {
+      "type": 0,
+      "value": "セッションの詳細"
     }
   ],
   "web.admin.history.duration.hoursMinutes": [
@@ -37636,7 +39150,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "現在のフィルターに一致する再生履歴はありません。ユーザー、プロフィール、または完了状態のフィルターを調整してください。"
+      "value": "これらのフィルターに一致するセッションはありません。フィルターをクリアするか調整してください。"
     }
   ],
   "web.admin.history.empty.title": [
@@ -37645,10 +39159,136 @@
       "value": "再生履歴がありません"
     }
   ],
+  "web.admin.history.endReason.aborted": [
+    {
+      "type": 0,
+      "value": "サーバーにより終了"
+    }
+  ],
+  "web.admin.history.endReason.expired": [
+    {
+      "type": 0,
+      "value": "タイムアウト"
+    }
+  ],
+  "web.admin.history.endReason.replaced": [
+    {
+      "type": 0,
+      "value": "ストリームの切り替え"
+    }
+  ],
+  "web.admin.history.endReason.stopped": [
+    {
+      "type": 0,
+      "value": "停止"
+    }
+  ],
+  "web.admin.history.endReason.terminated": [
+    {
+      "type": 0,
+      "value": "管理者により停止"
+    }
+  ],
+  "web.admin.history.filter.activeChip.client": [
+    {
+      "type": 0,
+      "value": "クライアント："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.history.filter.activeChip.codec": [
+    {
+      "type": 0,
+      "value": "コーデック："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.history.filter.activeChip.dateRange": [
+    {
+      "type": 0,
+      "value": "日付："
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": "～"
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "web.admin.history.filter.activeChip.fromDate": [
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": "から"
+    }
+  ],
+  "web.admin.history.filter.activeChip.platform": [
+    {
+      "type": 0,
+      "value": "プラットフォーム："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.history.filter.activeChip.reason": [
+    {
+      "type": 0,
+      "value": "理由："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.history.filter.activeChip.toDate": [
+    {
+      "type": 1,
+      "value": "to"
+    },
+    {
+      "type": 0,
+      "value": "まで"
+    }
+  ],
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "すべての再生"
+      "value": "すべての状態"
+    }
+  ],
+  "web.admin.history.filter.allLibraries": [
+    {
+      "type": 0,
+      "value": "すべてのライブラリ"
+    }
+  ],
+  "web.admin.history.filter.allLocations": [
+    {
+      "type": 0,
+      "value": "すべてのネットワーク"
+    }
+  ],
+  "web.admin.history.filter.allMethods": [
+    {
+      "type": 0,
+      "value": "すべての方式"
     }
   ],
   "web.admin.history.filter.allProfiles": [
@@ -37660,13 +39300,19 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "すべてのユーザー"
+      "value": "すべてのアカウント"
+    }
+  ],
+  "web.admin.history.filter.burnInOnly": [
+    {
+      "type": 0,
+      "value": "字幕の焼き込み"
     }
   ],
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "先にユーザーを選択"
+      "value": "先にアカウントを選択"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -37675,10 +39321,32 @@
       "value": "完了"
     }
   ],
+  "web.admin.history.filter.locationLocal": [
+    {
+      "type": 0,
+      "value": "ローカル"
+    }
+  ],
+  "web.admin.history.filter.locationRemote": [
+    {
+      "type": 0,
+      "value": "リモート"
+    }
+  ],
   "web.admin.history.filter.partial": [
     {
       "type": 0,
       "value": "途中まで"
+    }
+  ],
+  "web.admin.history.filter.removeChip": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "のフィルターを外す"
     }
   ],
   "web.admin.history.filter.reset": [
@@ -37687,10 +39355,16 @@
       "value": "リセット"
     }
   ],
+  "web.admin.history.filter.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "タイトル、アカウント、クライアント、セッションIDを検索…"
+    }
+  ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "アイテムで絞り込み中"
+      "value": "タイトル："
     }
   ],
   "web.admin.history.loadError": [
@@ -37721,6 +39395,12 @@
     {
       "type": 0,
       "value": "不明"
+    }
+  ],
+  "web.admin.history.pagination.firstPage": [
+    {
+      "type": 0,
+      "value": "最初のページ"
     }
   ],
   "web.admin.history.pagination.next": [
@@ -37782,6 +39462,28 @@
       "value": "件を表示"
     }
   ],
+  "web.admin.history.pagination.summary": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "行を表示"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.history.recent.autoRefreshing": [
     {
       "type": 0,
@@ -37813,7 +39515,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "推定値：視聴時間の計測開始前に記録されました"
+      "value": "推定値（正確な視聴時間の記録開始前に記録）"
     }
   ],
   "web.admin.history.row.meta": [
@@ -37871,13 +39573,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "表示中の行"
+      "value": "表示中"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "すべてのユーザーとプロフィールの確定済みの再生記録です。"
+      "value": "すべてのアカウントとプロフィールの過去の再生セッションです。"
     }
   ],
   "web.admin.history.title": [
@@ -39842,6 +41544,2372 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "履歴"
+    }
+  ],
+  "web.admin.insights.action.liveActivity": [
+    {
+      "type": 0,
+      "value": "ライブアクティビティ"
+    }
+  ],
+  "web.admin.insights.activity.activePeople.subtitle": [
+    {
+      "type": 0,
+      "value": "各期間に視聴を開始したプロフィールとアカウント"
+    }
+  ],
+  "web.admin.insights.activity.activePeople.title": [
+    {
+      "type": 0,
+      "value": "アクティブなユーザー"
+    }
+  ],
+  "web.admin.insights.activity.endReasons.subtitle": [
+    {
+      "type": 0,
+      "value": "この期間のセッションを終了理由別に表示します。タイムアウトが多い場合は、アプリがクラッシュしているか接続が切れている可能性があります。"
+    }
+  ],
+  "web.admin.insights.activity.endReasons.title": [
+    {
+      "type": 0,
+      "value": "セッションの終了理由"
+    }
+  ],
+  "web.admin.insights.activity.endReasons.unknown": [
+    {
+      "type": 0,
+      "value": "記録なし"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.cellTooltip": [
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "hour"
+    },
+    {
+      "type": 0,
+      "value": "："
+    },
+    {
+      "type": 1,
+      "value": "plays"
+    },
+    {
+      "type": 0,
+      "value": "（"
+    },
+    {
+      "type": 1,
+      "value": "watch_time"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.empty": [
+    {
+      "type": 0,
+      "value": "この期間の視聴アクティビティはありません"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.less": [
+    {
+      "type": 0,
+      "value": "少"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.more": [
+    {
+      "type": 0,
+      "value": "多"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.subtitle": [
+    {
+      "type": 0,
+      "value": "視聴を開始した時刻（"
+    },
+    {
+      "type": 1,
+      "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.insights.activity.heatmap.title": [
+    {
+      "type": 0,
+      "value": "視聴時間帯"
+    }
+  ],
+  "web.admin.insights.activity.hour.title": [
+    {
+      "type": 0,
+      "value": "時間帯別の再生回数"
+    }
+  ],
+  "web.admin.insights.activity.kpi.completionDetail": [
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "件中"
+    },
+    {
+      "type": 1,
+      "value": "completed"
+    },
+    {
+      "type": 0,
+      "value": "件完了"
+    }
+  ],
+  "web.admin.insights.activity.kpi.completionRate": [
+    {
+      "type": 0,
+      "value": "完了率"
+    }
+  ],
+  "web.admin.insights.activity.kpi.peakStreams": [
+    {
+      "type": 0,
+      "value": "最大同時ストリーム数"
+    }
+  ],
+  "web.admin.insights.activity.kpi.peakStreamsAt": [
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.insights.activity.kpi.peakStreamsNone": [
+    {
+      "type": 0,
+      "value": "ストリームのデータはまだありません"
+    }
+  ],
+  "web.admin.insights.activity.kpi.plays": [
+    {
+      "type": 0,
+      "value": "再生回数"
+    }
+  ],
+  "web.admin.insights.activity.kpi.playsBreakdown": [
+    {
+      "type": 6,
+      "value": "movie_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "映画"
+            },
+            {
+              "type": 1,
+              "value": "movies"
+            },
+            {
+              "type": 0,
+              "value": "件"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 6,
+      "value": "episode_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "エピソード"
+            },
+            {
+              "type": 1,
+              "value": "episodes"
+            },
+            {
+              "type": 0,
+              "value": "件"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.activity.kpi.watchTime": [
+    {
+      "type": 0,
+      "value": "視聴時間"
+    }
+  ],
+  "web.admin.insights.activity.kpi.watchTimeMeasured": [
+    {
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": "セッション中"
+            },
+            {
+              "type": 1,
+              "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": "セッションは正確な値"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.activity.peak.chartLabel": [
+    {
+      "type": 0,
+      "value": "1日あたりの最大同時ストリーム数"
+    }
+  ],
+  "web.admin.insights.activity.peak.empty": [
+    {
+      "type": 0,
+      "value": "この期間のストリームのデータはありません"
+    }
+  ],
+  "web.admin.insights.activity.peak.scopeNotice": [
+    {
+      "type": 0,
+      "value": "常にサーバー全体の値を表示します。アカウントとライブラリのフィルターはここには適用されません。"
+    }
+  ],
+  "web.admin.insights.activity.peak.subtitle": [
+    {
+      "type": 0,
+      "value": "1日に同時に再生されたストリームの最大数（サーバー全体、UTC）"
+    }
+  ],
+  "web.admin.insights.activity.peak.title": [
+    {
+      "type": 0,
+      "value": "最大同時ストリーム数"
+    }
+  ],
+  "web.admin.insights.activity.volume.chartLabel": [
+    {
+      "type": 0,
+      "value": "再生の推移"
+    }
+  ],
+  "web.admin.insights.activity.volume.empty": [
+    {
+      "type": 0,
+      "value": "この期間の再生はありません"
+    }
+  ],
+  "web.admin.insights.activity.volume.metricPlays": [
+    {
+      "type": 0,
+      "value": "再生回数"
+    }
+  ],
+  "web.admin.insights.activity.volume.metricWatchTime": [
+    {
+      "type": 0,
+      "value": "視聴時間"
+    }
+  ],
+  "web.admin.insights.activity.volume.seriesEpisodes": [
+    {
+      "type": 0,
+      "value": "エピソード"
+    }
+  ],
+  "web.admin.insights.activity.volume.seriesMovies": [
+    {
+      "type": 0,
+      "value": "映画"
+    }
+  ],
+  "web.admin.insights.activity.volume.seriesOther": [
+    {
+      "type": 0,
+      "value": "その他"
+    }
+  ],
+  "web.admin.insights.activity.volume.splitMediaType": [
+    {
+      "type": 0,
+      "value": "メディアの種類"
+    }
+  ],
+  "web.admin.insights.activity.volume.splitMethod": [
+    {
+      "type": 0,
+      "value": "再生方法"
+    }
+  ],
+  "web.admin.insights.activity.volume.subtitle": [
+    {
+      "type": 0,
+      "value": "一時停止と再開は1回の再生として数えます。30秒未満で停止した未完了の再生は数えません。"
+    }
+  ],
+  "web.admin.insights.activity.volume.title": [
+    {
+      "type": 0,
+      "value": "再生の推移"
+    }
+  ],
+  "web.admin.insights.activity.weekday.title": [
+    {
+      "type": 0,
+      "value": "曜日別の再生回数"
+    }
+  ],
+  "web.admin.insights.addToDashboard.add": [
+    {
+      "type": 0,
+      "value": "ダッシュボードに追加"
+    }
+  ],
+  "web.admin.insights.addToDashboard.addLabel": [
+    {
+      "type": 1,
+      "value": "chart"
+    },
+    {
+      "type": 0,
+      "value": "をダッシュボードに追加"
+    }
+  ],
+  "web.admin.insights.addToDashboard.added": [
+    {
+      "type": 1,
+      "value": "chart"
+    },
+    {
+      "type": 0,
+      "value": "をダッシュボードに追加しました"
+    }
+  ],
+  "web.admin.insights.addToDashboard.hint": [
+    {
+      "type": 0,
+      "value": "このグラフをサーバー全体の値で追加します。ライブラリとアカウントのフィルターは引き継がれません。"
+    }
+  ],
+  "web.admin.insights.addToDashboard.onDashboard": [
+    {
+      "type": 0,
+      "value": "ダッシュボードに追加済み"
+    }
+  ],
+  "web.admin.insights.addToDashboard.onDashboardLabel": [
+    {
+      "type": 1,
+      "value": "chart"
+    },
+    {
+      "type": 0,
+      "value": "はダッシュボードにあります。ダッシュボードを開きます。"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.apiServer": [
+    {
+      "type": 0,
+      "value": "APIサーバー"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.empty": [
+    {
+      "type": 0,
+      "value": "この期間の帯域幅のデータはありません"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.metricPeak": [
+    {
+      "type": 0,
+      "value": "最大速度"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.metricVolume": [
+    {
+      "type": 0,
+      "value": "送信量"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.peakLabel": [
+    {
+      "type": 0,
+      "value": "1日の最大帯域幅"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.subtitle": [
+    {
+      "type": 0,
+      "value": "サーバー全体の1日の送信量と最大速度（UTC）。"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.title": [
+    {
+      "type": 0,
+      "value": "帯域幅の推移"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.viewNodes": [
+    {
+      "type": 0,
+      "value": "ノード別"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.viewTotal": [
+    {
+      "type": 0,
+      "value": "合計"
+    }
+  ],
+  "web.admin.insights.bandwidth.chart.volumeLabel": [
+    {
+      "type": 0,
+      "value": "1日の送信量"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.dailyAverage": [
+    {
+      "type": 0,
+      "value": "1日の平均"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.dailyAverageSub": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "アクティブな"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "日間の平均"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.egressSplit": [
+    {
+      "type": 0,
+      "value": "再生"
+    },
+    {
+      "type": 1,
+      "value": "playback"
+    },
+    {
+      "type": 0,
+      "value": " · ダウンロード"
+    },
+    {
+      "type": 1,
+      "value": "downloads"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.nodeSplit": [
+    {
+      "type": 0,
+      "value": "APIサーバー"
+    },
+    {
+      "type": 1,
+      "value": "api"
+    },
+    {
+      "type": 0,
+      "value": " · ストリームノード"
+    },
+    {
+      "type": 1,
+      "value": "nodes"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.peakEgress": [
+    {
+      "type": 0,
+      "value": "最大速度"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.peakEgressAt": [
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.remoteShare": [
+    {
+      "type": 0,
+      "value": "リモート視聴"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
+    {
+      "type": 0,
+      "value": "リモート"
+    },
+    {
+      "type": 1,
+      "value": "remote"
+    },
+    {
+      "type": 0,
+      "value": " · ローカル"
+    },
+    {
+      "type": 1,
+      "value": "local"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
+    {
+      "type": 0,
+      "value": "ネットワーク情報はまだありません"
+    }
+  ],
+  "web.admin.insights.bandwidth.kpi.totalEgress": [
+    {
+      "type": 0,
+      "value": "送信量合計"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.column.node": [
+    {
+      "type": 0,
+      "value": "ノード"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.column.peak": [
+    {
+      "type": 0,
+      "value": "最大速度"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.column.share": [
+    {
+      "type": 0,
+      "value": "割合"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.column.total": [
+    {
+      "type": 0,
+      "value": "送信量"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.empty": [
+    {
+      "type": 0,
+      "value": "この期間のリモートノードの通信はありません"
+    }
+  ],
+  "web.admin.insights.bandwidth.nodes.title": [
+    {
+      "type": 0,
+      "value": "ノード別の帯域幅"
+    }
+  ],
+  "web.admin.insights.coverage.metricsStart": [
+    {
+      "type": 0,
+      "value": "帯域幅の履歴は"
+    },
+    {
+      "type": 1,
+      "value": "since"
+    },
+    {
+      "type": 0,
+      "value": "から記録されています。"
+    }
+  ],
+  "web.admin.insights.coverage.routeFactsNone": [
+    {
+      "type": 0,
+      "value": "これらの古いセッションには詳細な再生情報がありません。新しいセッションでは自動的に記録されます。"
+    }
+  ],
+  "web.admin.insights.coverage.routeFactsPartial": [
+    {
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "詳細な再生情報があるのは"
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": "セッション中"
+            },
+            {
+              "type": 1,
+              "value": "recorded"
+            },
+            {
+              "type": 0,
+              "value": "セッションです（"
+            },
+            {
+              "type": 1,
+              "value": "since"
+            },
+            {
+              "type": 0,
+              "value": "から記録）。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.coverage.watchTimePartial": [
+    {
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "正確な視聴時間があるのは"
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": "セッション中"
+            },
+            {
+              "type": 1,
+              "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": "セッションです。古いセッションは推定値です。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.detail.action.history": [
+    {
+      "type": 0,
+      "value": "履歴を表示"
+    }
+  ],
+  "web.admin.insights.detail.noPlays": [
+    {
+      "type": 0,
+      "value": "この期間の再生はありません"
+    }
+  ],
+  "web.admin.insights.detail.playsOverTime": [
+    {
+      "type": 0,
+      "value": "再生回数の推移"
+    }
+  ],
+  "web.admin.insights.detail.viewers": [
+    {
+      "type": 0,
+      "value": "視聴者"
+    }
+  ],
+  "web.admin.insights.detail.window": [
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": "～"
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "web.admin.insights.devices.audio.channels.mono": [
+    {
+      "type": 0,
+      "value": "モノラル"
+    }
+  ],
+  "web.admin.insights.devices.audio.channels.stereo": [
+    {
+      "type": 0,
+      "value": "ステレオ"
+    }
+  ],
+  "web.admin.insights.devices.audio.channels.surround": [
+    {
+      "type": 0,
+      "value": "サラウンド"
+    }
+  ],
+  "web.admin.insights.devices.audio.channelsTitle": [
+    {
+      "type": 0,
+      "value": "チャンネル"
+    }
+  ],
+  "web.admin.insights.devices.audio.decision.direct": [
+    {
+      "type": 0,
+      "value": "元のファイル"
+    }
+  ],
+  "web.admin.insights.devices.audio.decision.remux": [
+    {
+      "type": 0,
+      "value": "コピー"
+    }
+  ],
+  "web.admin.insights.devices.audio.decision.transcode": [
+    {
+      "type": 0,
+      "value": "変換"
+    }
+  ],
+  "web.admin.insights.devices.audio.decisionTitle": [
+    {
+      "type": 0,
+      "value": "処理方法"
+    }
+  ],
+  "web.admin.insights.devices.audio.subtitle": [
+    {
+      "type": 0,
+      "value": "各セッションで再生された音声トラック、アプリへの届け方、チャンネル"
+    }
+  ],
+  "web.admin.insights.devices.audio.title": [
+    {
+      "type": 0,
+      "value": "音声"
+    }
+  ],
+  "web.admin.insights.devices.burnInCodecs.empty": [
+    {
+      "type": 0,
+      "value": "この期間に焼き込まれた字幕はありません"
+    }
+  ],
+  "web.admin.insights.devices.burnInCodecs.title": [
+    {
+      "type": 0,
+      "value": "焼き込まれた字幕の形式"
+    }
+  ],
+  "web.admin.insights.devices.hwAccel.empty": [
+    {
+      "type": 0,
+      "value": "この期間の映像のトランスコードはありません"
+    }
+  ],
+  "web.admin.insights.devices.hwAccel.software": [
+    {
+      "type": 0,
+      "value": "ソフトウェア（CPU）"
+    }
+  ],
+  "web.admin.insights.devices.hwAccel.title": [
+    {
+      "type": 0,
+      "value": "ハードウェアアクセラレーション"
+    }
+  ],
+  "web.admin.insights.devices.hwAccel.unknown": [
+    {
+      "type": 0,
+      "value": "不明"
+    }
+  ],
+  "web.admin.insights.devices.kpi.directPlayDetail": [
+    {
+      "type": 0,
+      "value": "ダイレクト再生"
+    },
+    {
+      "type": 1,
+      "value": "direct"
+    },
+    {
+      "type": 0,
+      "value": " · ダイレクトストリーム"
+    },
+    {
+      "type": 1,
+      "value": "remux"
+    },
+    {
+      "type": 0,
+      "value": " · トランスコード"
+    },
+    {
+      "type": 1,
+      "value": "transcode"
+    }
+  ],
+  "web.admin.insights.devices.kpi.directPlayRate": [
+    {
+      "type": 0,
+      "value": "ダイレクト再生率"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hdrToneMap": [
+    {
+      "type": 0,
+      "value": "HDRトーンマッピング"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hdrToneMapDetail": [
+    {
+      "type": 0,
+      "value": "ハードウェア"
+    },
+    {
+      "type": 1,
+      "value": "hw"
+    },
+    {
+      "type": 0,
+      "value": " · CPU "
+    },
+    {
+      "type": 1,
+      "value": "sw"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hwSplit": [
+    {
+      "type": 0,
+      "value": "ハードウェアトランスコード"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hwSplitDetail": [
+    {
+      "type": 0,
+      "value": "ハードウェア"
+    },
+    {
+      "type": 1,
+      "value": "hw"
+    },
+    {
+      "type": 0,
+      "value": " · CPU "
+    },
+    {
+      "type": 1,
+      "value": "sw"
+    }
+  ],
+  "web.admin.insights.devices.kpi.hwSplitNone": [
+    {
+      "type": 0,
+      "value": "トランスコードなし"
+    }
+  ],
+  "web.admin.insights.devices.kpi.subtitleBurnIn": [
+    {
+      "type": 0,
+      "value": "字幕の焼き込み"
+    }
+  ],
+  "web.admin.insights.devices.kpi.subtitleBurnInDetail": [
+    {
+      "type": 0,
+      "value": "トランスコードの"
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.admin.insights.devices.languages": [
+    {
+      "type": 0,
+      "value": "言語"
+    }
+  ],
+  "web.admin.insights.devices.matrix.allSamples": [
+    {
+      "type": 0,
+      "value": "すべて"
+    }
+  ],
+  "web.admin.insights.devices.matrix.cellTooltip": [
+    {
+      "type": 6,
+      "value": "transcode_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "client"
+            },
+            {
+              "type": 0,
+              "value": " · "
+            },
+            {
+              "type": 1,
+              "value": "codec"
+            },
+            {
+              "type": 0,
+              "value": "：ダイレクト再生"
+            },
+            {
+              "type": 1,
+              "value": "direct_rate"
+            },
+            {
+              "type": 0,
+              "value": "%（"
+            },
+            {
+              "type": 1,
+              "value": "sessions"
+            },
+            {
+              "type": 0,
+              "value": "、トランスコード"
+            },
+            {
+              "type": 1,
+              "value": "transcodes"
+            },
+            {
+              "type": 0,
+              "value": "）"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.devices.matrix.clientColumn": [
+    {
+      "type": 0,
+      "value": "クライアント／プラットフォーム"
+    }
+  ],
+  "web.admin.insights.devices.matrix.empty": [
+    {
+      "type": 0,
+      "value": "セッションがまだ足りません。「すべて」に切り替えるか、期間を広げてください。"
+    }
+  ],
+  "web.admin.insights.devices.matrix.minSessions": [
+    {
+      "type": 0,
+      "value": "5セッション以上"
+    }
+  ],
+  "web.admin.insights.devices.matrix.subtitle": [
+    {
+      "type": 0,
+      "value": "各アプリが映像形式を変換せずに再生した割合です。セルをクリックすると、該当するセッションを表示します。"
+    }
+  ],
+  "web.admin.insights.devices.matrix.title": [
+    {
+      "type": 0,
+      "value": "アプリと映像形式別のダイレクト再生"
+    }
+  ],
+  "web.admin.insights.devices.matrix.totalColumn": [
+    {
+      "type": 0,
+      "value": "合計"
+    }
+  ],
+  "web.admin.insights.devices.protocol.jellyfin": [
+    {
+      "type": 0,
+      "value": "Jellyfinアプリ"
+    }
+  ],
+  "web.admin.insights.devices.protocol.silo": [
+    {
+      "type": 0,
+      "value": "Siloアプリ"
+    }
+  ],
+  "web.admin.insights.devices.protocol.subtitle": [
+    {
+      "type": 0,
+      "value": "Silo純正アプリと、Jellyfin互換機能で接続するアプリのセッション"
+    }
+  ],
+  "web.admin.insights.devices.protocol.title": [
+    {
+      "type": 0,
+      "value": "SiloアプリとJellyfinアプリ"
+    }
+  ],
+  "web.admin.insights.devices.protocol.total": [
+    {
+      "type": 0,
+      "value": "セッション"
+    }
+  ],
+  "web.admin.insights.devices.reasons.empty": [
+    {
+      "type": 0,
+      "value": "この期間に記録された変換理由はありません"
+    }
+  ],
+  "web.admin.insights.devices.reasons.subtitle": [
+    {
+      "type": 0,
+      "value": "理由をクリックすると、該当するセッションを表示します。"
+    }
+  ],
+  "web.admin.insights.devices.reasons.title": [
+    {
+      "type": 0,
+      "value": "ストリームがダイレクト再生されなかった理由"
+    }
+  ],
+  "web.admin.insights.devices.resolution.change": [
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": " → "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "web.admin.insights.devices.resolution.delivered": [
+    {
+      "type": 0,
+      "value": "配信"
+    }
+  ],
+  "web.admin.insights.devices.resolution.downscaled": [
+    {
+      "type": 0,
+      "value": "ダウンスケール"
+    }
+  ],
+  "web.admin.insights.devices.resolution.downscaledEmpty": [
+    {
+      "type": 0,
+      "value": "この期間にダウンスケールされたものはありません"
+    }
+  ],
+  "web.admin.insights.devices.resolution.empty": [
+    {
+      "type": 0,
+      "value": "この期間のセッションはありません"
+    }
+  ],
+  "web.admin.insights.devices.resolution.fuhd": [
+    {
+      "type": 0,
+      "value": "8K"
+    }
+  ],
+  "web.admin.insights.devices.resolution.sd": [
+    {
+      "type": 0,
+      "value": "SD"
+    }
+  ],
+  "web.admin.insights.devices.resolution.source": [
+    {
+      "type": 0,
+      "value": "ソース"
+    }
+  ],
+  "web.admin.insights.devices.resolution.subtitle": [
+    {
+      "type": 0,
+      "value": "元の映像の解像度と配信された解像度の比較。"
+    }
+  ],
+  "web.admin.insights.devices.resolution.title": [
+    {
+      "type": 0,
+      "value": "解像度"
+    }
+  ],
+  "web.admin.insights.devices.resolution.uhd": [
+    {
+      "type": 0,
+      "value": "4K"
+    }
+  ],
+  "web.admin.insights.devices.resolution.unknown": [
+    {
+      "type": 0,
+      "value": "不明"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.delivery.burnIn": [
+    {
+      "type": 0,
+      "value": "焼き込み"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.delivery.embedded": [
+    {
+      "type": 0,
+      "value": "ストリーム内"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.delivery.hlsRendition": [
+    {
+      "type": 0,
+      "value": "ストリーミングトラック"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.delivery.sidecar": [
+    {
+      "type": 0,
+      "value": "別ファイル"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.deliveryTitle": [
+    {
+      "type": 0,
+      "value": "表示方法"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.empty": [
+    {
+      "type": 0,
+      "value": "この期間に表示された字幕はありません"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.flags": [
+    {
+      "type": 0,
+      "value": "強制字幕"
+    },
+    {
+      "type": 1,
+      "value": "forced"
+    },
+    {
+      "type": 0,
+      "value": " · 聴覚障がい者向け"
+    },
+    {
+      "type": 1,
+      "value": "hearing_impaired"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.noFacts": [
+    {
+      "type": 0,
+      "value": "この期間に詳細な再生情報があるセッションはまだありません。"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.summary": [
+    {
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "字幕を表示したセッションは"
+            },
+            {
+              "type": 1,
+              "value": "percent"
+            },
+            {
+              "type": 0,
+              "value": "%です（詳細な再生情報がある"
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": "セッション中"
+            },
+            {
+              "type": 1,
+              "value": "subtitled"
+            },
+            {
+              "type": 0,
+              "value": "セッション）"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.devices.subtitles.title": [
+    {
+      "type": 0,
+      "value": "字幕"
+    }
+  ],
+  "web.admin.insights.devices.topTranscoders.empty": [
+    {
+      "type": 0,
+      "value": "この期間のトランスコードはありません"
+    }
+  ],
+  "web.admin.insights.devices.topTranscoders.title": [
+    {
+      "type": 0,
+      "value": "トランスコードの多いクライアント"
+    }
+  ],
+  "web.admin.insights.devices.topTranscoders.transcodeShare": [
+    {
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": "セッション中"
+            },
+            {
+              "type": 1,
+              "value": "transcodes"
+            },
+            {
+              "type": 0,
+              "value": "件"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.devices.unknownClient": [
+    {
+      "type": 0,
+      "value": "不明なクライアント"
+    }
+  ],
+  "web.admin.insights.devices.versions.empty": [
+    {
+      "type": 0,
+      "value": "この期間にバージョンを報告したアプリはありません"
+    }
+  ],
+  "web.admin.insights.devices.versions.lastSeenColumn": [
+    {
+      "type": 0,
+      "value": "最終使用"
+    }
+  ],
+  "web.admin.insights.devices.versions.sessionsColumn": [
+    {
+      "type": 0,
+      "value": "セッション"
+    }
+  ],
+  "web.admin.insights.devices.versions.subtitle": [
+    {
+      "type": 0,
+      "value": "この期間にアプリが報告したバージョン（セッションの多い順）"
+    }
+  ],
+  "web.admin.insights.devices.versions.title": [
+    {
+      "type": 0,
+      "value": "アプリのバージョン"
+    }
+  ],
+  "web.admin.insights.devices.versions.versionColumn": [
+    {
+      "type": 0,
+      "value": "バージョン"
+    }
+  ],
+  "web.admin.insights.episodeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "エピソード"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.filter.allAccounts": [
+    {
+      "type": 0,
+      "value": "すべてのアカウント"
+    }
+  ],
+  "web.admin.insights.filter.allLibraries": [
+    {
+      "type": 0,
+      "value": "すべてのライブラリ"
+    }
+  ],
+  "web.admin.insights.filter.fromDate": [
+    {
+      "type": 0,
+      "value": "開始日"
+    }
+  ],
+  "web.admin.insights.filter.rangeLabel": [
+    {
+      "type": 0,
+      "value": "期間"
+    }
+  ],
+  "web.admin.insights.filter.refresh": [
+    {
+      "type": 0,
+      "value": "更新"
+    }
+  ],
+  "web.admin.insights.filter.refreshing": [
+    {
+      "type": 0,
+      "value": "更新中"
+    }
+  ],
+  "web.admin.insights.filter.reset": [
+    {
+      "type": 0,
+      "value": "リセット"
+    }
+  ],
+  "web.admin.insights.filter.timezone": [
+    {
+      "type": 0,
+      "value": "タイムゾーン"
+    }
+  ],
+  "web.admin.insights.filter.timezoneBrowser": [
+    {
+      "type": 1,
+      "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": "（ローカル）"
+    }
+  ],
+  "web.admin.insights.filter.timezoneUtc": [
+    {
+      "type": 0,
+      "value": "UTC"
+    }
+  ],
+  "web.admin.insights.filter.toDate": [
+    {
+      "type": 0,
+      "value": "終了日"
+    }
+  ],
+  "web.admin.insights.library.coverage.detail": [
+    {
+      "type": 6,
+      "value": "titles_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "titles"
+            },
+            {
+              "type": 0,
+              "value": "タイトル中"
+            },
+            {
+              "type": 1,
+              "value": "played"
+            },
+            {
+              "type": 0,
+              "value": "タイトル · 未再生"
+            },
+            {
+              "type": 1,
+              "value": "never"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.library.coverage.empty": [
+    {
+      "type": 0,
+      "value": "映画やシリーズのライブラリはまだありません"
+    }
+  ],
+  "web.admin.insights.library.coverage.playedShare": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "%再生済み"
+    }
+  ],
+  "web.admin.insights.library.coverage.subtitle": [
+    {
+      "type": 0,
+      "value": "この期間に再生された各ライブラリの映画とシリーズの割合です。シリーズはいずれかのエピソードが再生されると数えます。"
+    }
+  ],
+  "web.admin.insights.library.coverage.title": [
+    {
+      "type": 0,
+      "value": "ライブラリの再生率"
+    }
+  ],
+  "web.admin.insights.library.decades.label": [
+    {
+      "type": 1,
+      "value": "year"
+    },
+    {
+      "type": 0,
+      "value": "年代"
+    }
+  ],
+  "web.admin.insights.library.decades.title": [
+    {
+      "type": 0,
+      "value": "公開年代別の再生回数"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.day": [
+    {
+      "type": 0,
+      "value": "1日以内"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.empty": [
+    {
+      "type": 0,
+      "value": "この期間に追加されたタイトルはありません"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.later": [
+    {
+      "type": 0,
+      "value": "それ以降"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.month": [
+    {
+      "type": 0,
+      "value": "1か月以内"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.notYet": [
+    {
+      "type": 0,
+      "value": "未再生"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.subtitle": [
+    {
+      "type": 0,
+      "value": "この期間に追加されたタイトルを、初めて再生されるまでの期間別に表示します"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.title": [
+    {
+      "type": 0,
+      "value": "初回再生までの期間"
+    }
+  ],
+  "web.admin.insights.library.firstPlay.week": [
+    {
+      "type": 0,
+      "value": "1週間以内"
+    }
+  ],
+  "web.admin.insights.library.genres.subtitle": [
+    {
+      "type": 0,
+      "value": "複数のジャンルを持つタイトルはそれぞれのジャンルで数えるため、合計より多くなります。"
+    }
+  ],
+  "web.admin.insights.library.genres.title": [
+    {
+      "type": 0,
+      "value": "ジャンル別の再生回数"
+    }
+  ],
+  "web.admin.insights.library.kpi.added": [
+    {
+      "type": 0,
+      "value": "この期間の追加数"
+    }
+  ],
+  "web.admin.insights.library.kpi.addedDetail": [
+    {
+      "type": 0,
+      "value": "これまでに"
+    },
+    {
+      "type": 1,
+      "value": "played"
+    },
+    {
+      "type": 0,
+      "value": "件再生済み"
+    }
+  ],
+  "web.admin.insights.library.kpi.firstPlay": [
+    {
+      "type": 0,
+      "value": "初回再生までの期間"
+    }
+  ],
+  "web.admin.insights.library.kpi.firstPlayDays": [
+    {
+      "type": 1,
+      "value": "days"
+    },
+    {
+      "type": 0,
+      "value": "日"
+    }
+  ],
+  "web.admin.insights.library.kpi.firstPlayDetail": [
+    {
+      "type": 0,
+      "value": "この期間に追加されたタイトルの中央値"
+    }
+  ],
+  "web.admin.insights.library.kpi.neverStarted": [
+    {
+      "type": 0,
+      "value": "未再生"
+    }
+  ],
+  "web.admin.insights.library.kpi.neverStartedSince": [
+    {
+      "type": 0,
+      "value": "履歴の記録開始日（"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "）以降"
+    }
+  ],
+  "web.admin.insights.library.kpi.played": [
+    {
+      "type": 0,
+      "value": "再生されたタイトル"
+    }
+  ],
+  "web.admin.insights.library.kpi.playedDetail": [
+    {
+      "type": 6,
+      "value": "titles_count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "titles"
+            },
+            {
+              "type": 0,
+              "value": "タイトル中"
+            },
+            {
+              "type": 1,
+              "value": "played"
+            },
+            {
+              "type": 0,
+              "value": "タイトル"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.library.ratings.title": [
+    {
+      "type": 0,
+      "value": "年齢制限別の再生回数"
+    }
+  ],
+  "web.admin.insights.library.titleCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "タイトル"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.library.unknown": [
+    {
+      "type": 0,
+      "value": "不明"
+    }
+  ],
+  "web.admin.insights.library.unplayed.added": [
+    {
+      "type": 1,
+      "value": "library"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "に追加"
+    }
+  ],
+  "web.admin.insights.library.unplayed.empty": [
+    {
+      "type": 0,
+      "value": "この期間に追加されたタイトルはすべて再生済みです"
+    }
+  ],
+  "web.admin.insights.library.unplayed.subtitle": [
+    {
+      "type": 0,
+      "value": "この期間に追加され、まだ誰も再生していない最新のタイトル"
+    }
+  ],
+  "web.admin.insights.library.unplayed.title": [
+    {
+      "type": 0,
+      "value": "追加済みで未再生"
+    }
+  ],
+  "web.admin.insights.loadError": [
+    {
+      "type": 0,
+      "value": "インサイトを読み込めませんでした。"
+    }
+  ],
+  "web.admin.insights.openHistory": [
+    {
+      "type": 0,
+      "value": "履歴 ›"
+    }
+  ],
+  "web.admin.insights.people.action.details": [
+    {
+      "type": 0,
+      "value": "詳細"
+    }
+  ],
+  "web.admin.insights.people.action.detailsFor": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "のインサイトを表示"
+    }
+  ],
+  "web.admin.insights.people.collapseProfiles": [
+    {
+      "type": 1,
+      "value": "account"
+    },
+    {
+      "type": 0,
+      "value": "の世帯プロフィールを非表示"
+    }
+  ],
+  "web.admin.insights.people.column.account": [
+    {
+      "type": 0,
+      "value": "アカウント"
+    }
+  ],
+  "web.admin.insights.people.column.actions": [
+    {
+      "type": 0,
+      "value": "操作"
+    }
+  ],
+  "web.admin.insights.people.column.completionRate": [
+    {
+      "type": 0,
+      "value": "完了率"
+    }
+  ],
+  "web.admin.insights.people.column.directRate": [
+    {
+      "type": 0,
+      "value": "ダイレクト再生"
+    }
+  ],
+  "web.admin.insights.people.column.lastSeen": [
+    {
+      "type": 0,
+      "value": "最終視聴"
+    }
+  ],
+  "web.admin.insights.people.column.plays": [
+    {
+      "type": 0,
+      "value": "再生数"
+    }
+  ],
+  "web.admin.insights.people.column.watchTime": [
+    {
+      "type": 0,
+      "value": "視聴時間"
+    }
+  ],
+  "web.admin.insights.people.empty": [
+    {
+      "type": 0,
+      "value": "このフィルターに一致する視聴アクティビティはありません"
+    }
+  ],
+  "web.admin.insights.people.expandProfiles": [
+    {
+      "type": 1,
+      "value": "account"
+    },
+    {
+      "type": 0,
+      "value": "の世帯プロフィールを表示"
+    }
+  ],
+  "web.admin.insights.people.kpi.activeAccounts": [
+    {
+      "type": 0,
+      "value": "アクティブなアカウント"
+    }
+  ],
+  "web.admin.insights.people.kpi.activeProfiles": [
+    {
+      "type": 0,
+      "value": "アクティブなプロフィール"
+    }
+  ],
+  "web.admin.insights.people.kpi.totalWatchTime": [
+    {
+      "type": 0,
+      "value": "合計視聴時間"
+    }
+  ],
+  "web.admin.insights.people.liveBadge": [
+    {
+      "type": 0,
+      "value": "ライブ"
+    }
+  ],
+  "web.admin.insights.people.loadMore": [
+    {
+      "type": 0,
+      "value": "さらにアカウントを表示"
+    }
+  ],
+  "web.admin.insights.people.profilesCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "プロフィール"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.people.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "アカウントまたはプロフィールを検索…"
+    }
+  ],
+  "web.admin.insights.people.unnamedProfile": [
+    {
+      "type": 0,
+      "value": "プロフィール"
+    },
+    {
+      "type": 1,
+      "value": "id"
+    }
+  ],
+  "web.admin.insights.percent": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.admin.insights.personDetail.action.openAccount": [
+    {
+      "type": 0,
+      "value": "アカウントを開く"
+    }
+  ],
+  "web.admin.insights.personDetail.allProfiles": [
+    {
+      "type": 0,
+      "value": "すべてのプロフィール"
+    }
+  ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 0,
+      "value": "ダイレクト再生"
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.admin.insights.personDetail.clients": [
+    {
+      "type": 0,
+      "value": "クライアント"
+    }
+  ],
+  "web.admin.insights.personDetail.clientsEmpty": [
+    {
+      "type": 0,
+      "value": "この期間のアクティビティはありません"
+    }
+  ],
+  "web.admin.insights.personDetail.profileLabel": [
+    {
+      "type": 0,
+      "value": "プロフィール"
+    }
+  ],
+  "web.admin.insights.personDetail.topTitles": [
+    {
+      "type": 0,
+      "value": "よく再生されたタイトル"
+    }
+  ],
+  "web.admin.insights.playCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "回再生"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.range.1y": [
+    {
+      "type": 0,
+      "value": "1年"
+    }
+  ],
+  "web.admin.insights.range.30d": [
+    {
+      "type": 0,
+      "value": "30日"
+    }
+  ],
+  "web.admin.insights.range.7d": [
+    {
+      "type": 0,
+      "value": "7日"
+    }
+  ],
+  "web.admin.insights.range.90d": [
+    {
+      "type": 0,
+      "value": "90日"
+    }
+  ],
+  "web.admin.insights.range.all": [
+    {
+      "type": 0,
+      "value": "全期間"
+    }
+  ],
+  "web.admin.insights.range.custom": [
+    {
+      "type": 0,
+      "value": "カスタム"
+    }
+  ],
+  "web.admin.insights.retry": [
+    {
+      "type": 0,
+      "value": "再試行"
+    }
+  ],
+  "web.admin.insights.sessionCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "セッション"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.subtitle": [
+    {
+      "type": 0,
+      "value": "視聴の傾向、人気のタイトル、世帯のアクティビティ、デバイスでの再生、帯域幅。"
+    }
+  ],
+  "web.admin.insights.tabs.activity": [
+    {
+      "type": 0,
+      "value": "再生"
+    }
+  ],
+  "web.admin.insights.tabs.bandwidth": [
+    {
+      "type": 0,
+      "value": "帯域幅"
+    }
+  ],
+  "web.admin.insights.tabs.devices": [
+    {
+      "type": 0,
+      "value": "デバイスと品質"
+    }
+  ],
+  "web.admin.insights.tabs.library": [
+    {
+      "type": 0,
+      "value": "ライブラリ"
+    }
+  ],
+  "web.admin.insights.tabs.people": [
+    {
+      "type": 0,
+      "value": "ユーザー"
+    }
+  ],
+  "web.admin.insights.tabs.titles": [
+    {
+      "type": 0,
+      "value": "タイトル"
+    }
+  ],
+  "web.admin.insights.title": [
+    {
+      "type": 0,
+      "value": "インサイト"
+    }
+  ],
+  "web.admin.insights.titleDetail.episodes.title": [
+    {
+      "type": 0,
+      "value": "エピソード"
+    }
+  ],
+  "web.admin.insights.titleDetail.episodes.truncated": [
+    {
+      "type": 0,
+      "value": "最初の500エピソードを表示しています。"
+    }
+  ],
+  "web.admin.insights.titleDetail.kind.movie": [
+    {
+      "type": 0,
+      "value": "映画"
+    }
+  ],
+  "web.admin.insights.titleDetail.kind.series": [
+    {
+      "type": 0,
+      "value": "シリーズ"
+    }
+  ],
+  "web.admin.insights.titleDetail.notFound": [
+    {
+      "type": 0,
+      "value": "このタイトルはライブラリにもうありません。"
+    }
+  ],
+  "web.admin.insights.titleDetail.scopedToPerson": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "の再生"
+    }
+  ],
+  "web.admin.insights.titleDetail.showEveryone": [
+    {
+      "type": 0,
+      "value": "全員を表示"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.furthest": [
+    {
+      "type": 1,
+      "value": "duration"
+    },
+    {
+      "type": 0,
+      "value": "中"
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "まで視聴"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.furthestNoDuration": [
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "まで視聴"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.lastEpisode": [
+    {
+      "type": 0,
+      "value": "最終："
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.title": [
+    {
+      "type": 0,
+      "value": "視聴したプロフィール"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.truncated": [
+    {
+      "type": 0,
+      "value": "最近の視聴者100人を表示しています。"
+    }
+  ],
+  "web.admin.insights.titles.leastFinished.empty": [
+    {
+      "type": 0,
+      "value": "この期間に、3回以上再生されたタイトルで未完了のものはありません"
+    }
+  ],
+  "web.admin.insights.titles.leastFinished.subtitle": [
+    {
+      "type": 0,
+      "value": "3回以上再生されたタイトルを、未完了の再生の割合順に表示します"
+    }
+  ],
+  "web.admin.insights.titles.leastFinished.title": [
+    {
+      "type": 0,
+      "value": "完了率の低いタイトル"
+    }
+  ],
+  "web.admin.insights.titles.leastFinished.unfinishedShare": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "%未完了"
+    }
+  ],
+  "web.admin.insights.titles.libraries.empty": [
+    {
+      "type": 0,
+      "value": "この期間のライブラリのアクティビティはありません"
+    }
+  ],
+  "web.admin.insights.titles.libraries.title": [
+    {
+      "type": 0,
+      "value": "人気のライブラリ"
+    }
+  ],
+  "web.admin.insights.titles.movies.empty": [
+    {
+      "type": 0,
+      "value": "この期間に視聴された映画はありません"
+    }
+  ],
+  "web.admin.insights.titles.movies.title": [
+    {
+      "type": 0,
+      "value": "人気の映画"
+    }
+  ],
+  "web.admin.insights.titles.shows.empty": [
+    {
+      "type": 0,
+      "value": "この期間に視聴されたシリーズはありません"
+    }
+  ],
+  "web.admin.insights.titles.shows.title": [
+    {
+      "type": 0,
+      "value": "人気のシリーズ"
+    }
+  ],
+  "web.admin.insights.titles.sort.plays": [
+    {
+      "type": 0,
+      "value": "再生数"
+    }
+  ],
+  "web.admin.insights.titles.sort.viewers": [
+    {
+      "type": 0,
+      "value": "視聴者数"
+    }
+  ],
+  "web.admin.insights.titles.sort.watchTime": [
+    {
+      "type": 0,
+      "value": "視聴時間"
+    }
+  ],
+  "web.admin.insights.titles.sortLabel": [
+    {
+      "type": 0,
+      "value": "ランキング基準"
+    }
+  ],
+  "web.admin.insights.titles.titleWithYear": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "（"
+    },
+    {
+      "type": 1,
+      "value": "year"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.insights.titles.unknownTitle": [
+    {
+      "type": 0,
+      "value": "削除されたタイトル"
+    }
+  ],
+  "web.admin.insights.viewerCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "視聴者"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "人"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.libraries.activeWork.cancelRefresh": [
     {
       "type": 0,
@@ -39896,6 +43964,99 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "実行中のスキャンとメタデータの更新がここに表示されます。"
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "実行中のスキャンや更新はありません"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "すべて（"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "キューを非表示"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "他"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "ライブラリ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "メタデータの更新"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "メタデータを更新中"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "キューを表示"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "高"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "低"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "中"
     }
   ],
   "web.admin.libraries.ambiguousRoots.description": [
@@ -40280,6 +44441,30 @@
       "value": "空のルートのクリーンアップを確認"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "確認"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "メタデータマッチャーのキューで待機中のアイテムはありません。"
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "スキップされたルートの記録はありません。"
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "無効な外部IDの記録はありません。"
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -40316,6 +44501,18 @@
     {
       "type": 0,
       "value": "を編集"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "編集"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "ライブラリはまだ設定されていません。"
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -40357,6 +44554,12 @@
       "value": "パスを非表示"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "待機中"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 1,
@@ -40391,6 +44594,12 @@
       "value": "部分的なスキャン"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "不足しているメタデータを補完、またはすべて置き換え"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -40403,6 +44612,12 @@
       "value": "ルートにアクセス不可"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "スキャン"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -40413,6 +44628,12 @@
     {
       "type": 0,
       "value": "パスを表示"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "停止"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -40431,6 +44652,22 @@
     {
       "type": 0,
       "value": "マウントを確認"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "すべてのライブラリフォルダーにアクセスできるか確認"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "の実行中のスキャンを表示"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -40534,7 +44771,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "ライブラリのルートとスキャンを管理します。カタログのインポート/エクスポートはメンテナンスに移動しました。"
+      "value": "メディアフォルダーの管理、スキャンの監視、照合の問題の解決を行います。"
     }
   ],
   "web.admin.libraries.page.title": [
@@ -40931,6 +45168,45 @@
     {
       "type": 0,
       "value": "無効な外部ID"
+    }
+  ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "件実行中"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "スキャンアクティビティ"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "カタログの状態"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "ライブラリ"
     }
   ],
   "web.admin.libraries.toast.cancelJobFailed": [
@@ -41351,6 +45627,24 @@
     {
       "type": 0,
       "value": "無視済みの項目をタイトル、ライブラリ、種類で検索…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "曖昧"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "照合待ち"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "未照合"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -43098,6 +47392,12 @@
       "value": "のレンダーパスではなくCUDAの識別子で指定するため、デバイスピッカーは適用されません。空欄にするとクラスター全体のデバイス設定を継承しますが、NVENCで使用するにはその設定自体がCUDAの識別子である必要があります。クラスターがレンダーパスで設定されている場合は、ここで指定してください。"
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "このノードの環境で設定されています。そこで変更してから、ノードを再起動してください。"
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -43812,6 +48112,12 @@
     {
       "type": 0,
       "value": "設定を完成させるには、サーバーアドレスを入力してください。"
+    }
+  ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "サーバーのデプロイ構成で設定されたキー"
     }
   ],
   "web.admin.nodes.key.dialogTitle": [
@@ -44702,6 +49008,12 @@
     {
       "type": 0,
       "value": "を削除"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "サーバーのデプロイ構成で設定されています。ここで削除するには、デプロイ構成から削除してAPIサーバーを再起動してください。"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -46296,6 +50608,68 @@
       "value": "プラグイン"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "適用済み"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "保留"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "プラグインのプロビジョニング状況を読み込めませんでした。"
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "環境で管理"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "処理待ち"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "拒否"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "パッケージのソースと削除はデプロイ環境で管理されています。"
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "プロビジョニング状況"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "このプラグインはデプロイ環境でバージョン"
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "に固定されています。"
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -46595,7 +50969,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "タスクはサーバーの起動時に登録されるため、オン/オフの切り替えは再起動後に反映されます。タスクが作成されたら、スケジュールはそのタスクのページで変更してください。"
+      "value": "タスクのオン/オフの切り替えは再起動なしで反映されますが、他のサーバーに反映されるまで少し時間がかかる場合があります。タスクをオンにしたら、スケジュールはそのタスクのページで変更してください。"
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -47000,6 +51374,224 @@
       "value": "モデル"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "1回の実行の上限に達しました。次回の実行で続行します。"
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "検索したタイトル："
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · エンベディング："
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDBリクエスト："
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "オフ。実行時は古いタイトルの削除のみ行います。"
+    }
+  ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "生成は停止しました。保存済みのおすすめは、サーバーが再起動するまでディスカバーに表示されます。"
+    }
+  ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "プロフィールをランク付け中（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "TMDBリストを取得中（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "タイトルを検索してエンベディング中（"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "期限切れのタイトル"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件をクリアしました"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "行を作成済み"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめを作成する前に、下のエンベディングのロックの競合を解決してください。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Siloが比較に使うライブラリのベクトルを用意するため、先に「エンベディング」ジョブを実行してください。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめを作成する前に、AIサービスでエンベディングプロバイダーを接続してください。"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "嗜好プロフィールを持つプロフィールはまだありません。誰かがタイトルを視聴または評価したら、「嗜好プロフィール」を実行してください。"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "おすすめ候補のタイトル"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "エンベディングなし："
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -47042,6 +51634,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめ"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -47298,6 +51896,12 @@
       "value": "エンベディングを開始できませんでした"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめを開始できませんでした"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -47416,6 +52020,44 @@
       "value": "をクリアしました。"
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "エンベディングをリセットしました："
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": "、"
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": "、"
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": "を削除し、"
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "をクリアしました。"
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -47430,6 +52072,58 @@
             {
               "type": 0,
               "value": "件のエンベディング"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ディスカバーのエンベディング"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ディスカバーの"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "行"
             }
           ]
         }
@@ -48044,6 +52738,30 @@
       "value": "："
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "視聴者ごとのおすすめシリーズ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "視聴者ごとのおすすめ映画"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -48092,6 +52810,18 @@
     {
       "type": 0,
       "value": "ネットワークのカード。各カードからそのネットワークのシリーズを開きます。"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "おすすめ"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "ライブラリにまだないタイトルを、視聴内容に基づいて視聴者ごとに選びます。"
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -48338,6 +53068,34 @@
     {
       "type": 0,
       "value": "ストリーミングサービスの地域を選択してください。"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "「管理 → おすすめ」でディスカバーのおすすめをオンにするまで空のままです。"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "管理 → おすすめ"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "でディスカバーのおすすめをオンにするまで、おすすめの行は空のままです。"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "「おすすめ」でオフ"
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -49660,6 +54418,12 @@
       "value": "リストのライブプレビュー"
     }
   ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "自分のおすすめのプレビュー"
+    }
+  ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
     {
       "type": 0,
@@ -49715,6 +54479,12 @@
       "value": "新しい行はディスカバーの最下部に追加されます"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "「おすすめ」の設定を開く"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -49727,6 +54497,12 @@
       "value": "MDBListのフィードには、リストのページで保存された並び順が含まれません。そのページで表示されている並び順を選択してください。"
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "このプロフィールにはまだディスカバーのおすすめがありません。この行をプレビューするには、「ディスカバーのおすすめ」を実行するか、いくつかのタイトルを視聴して評価してください。"
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -49737,6 +54513,12 @@
     {
       "type": 0,
       "value": "リストを選択するかリンクを貼り付けると、タイトルが表示されます。"
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "この行をプレビューするには、「管理 → おすすめ」でディスカバーのおすすめをオンにしてください。"
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -50455,6 +55237,12 @@
     {
       "type": 0,
       "value": "メッセージを送信しました"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "プレーヤーからメッセージの受信確認がありませんでした。メッセージの表示が遅れるか、表示されない可能性があります。"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -53250,6 +58038,12 @@
       "value": "接続を確認できませんでした。"
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "サーバーの環境でこの設定が指定されているかを確認できませんでした。編集するにはページを再読み込みしてください。"
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -53260,6 +58054,20 @@
     {
       "type": 0,
       "value": "設定を読み込み中"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "サーバーの環境で"
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": "によって設定されています。"
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [
@@ -53396,12 +58204,6 @@
     {
       "type": 0,
       "value": "信頼するプロキシ"
-    }
-  ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "SILO_TRUSTED_PROXIESで管理されています。"
     }
   ],
   "web.admin.settings.general.title": [
@@ -53780,6 +58582,30 @@
     {
       "type": 0,
       "value": "チャンネルを更新できませんでした"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "再読み込みすると現在の値が表示されます。このページの設定が変更された場合、または保存済みのパスワードやキーを編集した場合は、すべての編集が取り消されます。それ以外の場合、編集は保持されます。"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "再読み込み"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "設定を再読み込みできませんでした。もう一度お試しください。"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "設定が別の場所で変更されました"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -55732,6 +60558,612 @@
       "value": "オンラインマーカーを同期"
     }
   ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "アルゴリズム："
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "リクエスト："
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "、使用中："
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "使用できる値："
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "輻輳制御："
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "アカウント"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "この経路での接続開始"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "デバイス"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "ダイレクト接続しているデバイスはありません。"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "接続元エンドポイント"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "接続中のデバイス"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "→ポート"
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "既定値："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "このサーバーがダイレクト接続に対応できる状態か確認します。"
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "適用中："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "ダイレクト接続を有効にする"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "NET_ADMINケーパビリティ"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "ダイレクト接続エンジン"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "NATヘアピン"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "NATマッピング"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "PMTUフォールバック"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "到達性"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "ソケット受信バッファー"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "ソケット送信バッファー"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "ホストのチューニング"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "ACK間引き"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "BBRのパケットロス対応"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "UDPセグメンテーションオフロード"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "クライアントの受信ウィンドウ"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "ダイレクト接続のUDPポート"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "TCP輻輳制御"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "TCP送信バッファー"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "最終確認："
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "プロキシ"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "リスナー"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "検出されたパブリックアドレス："
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "ルーターがUPnP、NAT-PMP、PCPに対応しているか確認します。"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "ポートマッピング"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "準備状況の確認ではダイレクト再生は開始されません。"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "管理者により無効化"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "無効"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "ダイレクト接続エンジンを開始できませんでした"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "バッファーを拡大できませんでした"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "ルーターがポートマッピングに対応していません"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "バッファーがリクエストより小さくなっています"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "ネットワークチューニング用ヘルパーを利用できません"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "無効な値のためオフを使用"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "システムがこの設定を適用または読み取れませんでした"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "このカーネルでは非対応"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "ホストのバッファー上限に到達"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "ホストのバッファー上限を読み取れませんでした"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "パブリックアドレスが宛先ごとに異なります"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "BBRを利用できません"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "BBRが読み込まれていないか、許可されていません"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "複数のAPIサーバーが実行中です"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "NET_ADMINケーパビリティが破棄されました"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "NET_ADMINケーパビリティがありません"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "ルーターが見つかりません"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "NET_ADMINケーパビリティがありません"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "権限がありません"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "利用不可"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "未測定"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "拡大不要"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "ホストのポリシーで別のアルゴリズムが選択されました"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "確認に失敗しました"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "ほかのAPIサーバーを確認できませんでした"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "別のAPIサーバーがダイレクト接続をホストしています"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "ダイレクト接続のホストになるのを待機中"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "ダイレクト接続の状態を利用できません"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "UDPポートを開けませんでした"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "UDPポートが無効です"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "このプラットフォームでは非対応"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": "（"
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "リクエスト："
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "リクエスト："
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "、割り当て："
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "確認を実行"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "送信バッファー："
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "制限あり"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "低下"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "フォールバック"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "不要"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "オフ"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "オン"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "不明"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "host:port形式のエントリを最大8件までカンマ区切りで指定します。既定値を使用するには空欄のままにしてください。"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "STUNサーバー"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "ダイレクト接続"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "デバイスがUDPの直接経路でこのサーバーに接続できるようにします。UDPポートは"
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": "で設定され、ここでは変更できません。"
+    }
+  ],
   "web.admin.settings.network.host.apiServer": [
     {
       "type": 0,
@@ -56798,136 +62230,10 @@
       "value": "通知の設定を読み込めませんでした"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "新しいコンテンツが記録されていないため、何も送信できません。「処理」で再びオンにしてください。"
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "送信が一時停止されています。新しいコンテンツはキューで待機しています。「処理」で再びオンにしてください。"
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "オフの場合は、代わりに毎日のまとめを送信します。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Siloが新しいコンテンツを検出してメッセージにまとめる方法と、メッセージを保持する期間です。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "通知対象のユーザーを判定"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "各項目を全員の設定と照合します。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "グループ化と大量送信の制御"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "処理"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "コンテンツの最大経過期間"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "これより古い項目は、古いお知らせとして届く代わりに破棄されます。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "シリーズごとの最大メッセージ数"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "これを超えた分は、そのバッチではスキップされます。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "新しいコンテンツを検出"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "ライブラリのスキャン中に新しい項目を記録します。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "パイプライン"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "既読の通知"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "保持期間"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "送信履歴"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Siloが通知済みの内容の記録です。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "待機時間"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "同時にスキャンが完了した項目は、1件の通知にまとめて届きます。"
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "未読の通知"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -57814,18 +63120,6 @@
       "value": "通知"
     }
   ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "日"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "時間"
-    }
-  ],
   "web.admin.settings.notifications.unit.seconds": [
     {
       "type": 0,
@@ -58352,6 +63646,24 @@
       "value": "ライブラリに保存"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "一時停止中の再生"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "一時停止した再生を終了するまで"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0〜1440。Siloアプリでこの時間一時停止した動画を終了し、そのストリームとトランスコードを解放します。もう一度再生すると同じ位置から続行します。「一緒に見る」、キャスト再生、オーディオブックは対象外です。0でオフになります。"
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -58788,6 +64100,12 @@
       "value": "日"
     }
   ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "分"
+    }
+  ],
   "web.admin.settings.playback.unitSeconds": [
     {
       "type": 0,
@@ -58804,6 +64122,12 @@
     {
       "type": 0,
       "value": "視聴済みにする進行度"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "クレジットのマーカーがあるタイトルは、再生がクレジットに達した時点でも視聴済みになります。"
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -59264,6 +64588,92 @@
       "value": "別のモデルに切り替えるには埋め込みをリセットする必要があり、すべての埋め込みが削除されます。同じモデルを提供する別のプロバイダーへの変更は、再起動後に適用されます。"
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "ディスカバーに追加"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "おすすめの行をディスカバーページに追加できませんでした。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "おすすめの行をディスカバーページに追加しました。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめを有効にする"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "ライブラリにまだないタイトルを含む個人用の行を、リクエストのディスカバーに追加します。エンベディングプロバイダーとTMDBを使用します。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "おすすめ候補の最大タイトル数"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "ライブラリにないタイトルのうち、サーバーがおすすめ候補として保持する数です。各タイトルはTMDBで検索され、エンベディングされます。エンベディングは通常低コストですが、数を増やすとエンベディングプロバイダーによってはコストや時間が増え、ストレージも多く使用します。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "ディスカバーページにはまだおすすめの行が表示されていません。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめを実行するには、上の「おすすめを有効にする」をオンにしてサーバーを再起動してください。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "リクエストは現在オフです。視聴者がディスカバーページを見られるように、"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "リクエストの設定"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "でオンにしてください。"
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "ディスカバーページを開く"
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめ"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -59292,6 +64702,12 @@
     {
       "type": 0,
       "value": "埋め込みのCron"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "ディスカバーのおすすめのCron"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -59336,12 +64752,6 @@
       "value": "Redisを使用"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "REDIS_URLで設定済み"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -59358,12 +64768,6 @@
     {
       "type": 0,
       "value": "接続URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "REDIS_URLで指定された値"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -64209,16 +69613,6 @@
       "value": "サーバーログ"
     }
   ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "で管理されています。"
-    }
-  ],
   "web.admin.settings.search.meili.apiKey.hint": [
     {
       "type": 0,
@@ -64336,7 +69730,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "配信チャンネル、サーバーチャンネル、新しいコンテンツを通知にする方法。"
+      "value": "配信チャンネルとサーバーチャンネル。"
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -64435,12 +69829,6 @@
       "value": "メール"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "グループ化と大量送信の抑制"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -64459,28 +69847,10 @@
       "value": "エピソードごとのメールを選択可能にする"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "コンテンツの最大経過期間"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "シリーズあたりの最大メッセージ数"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Discordでリクエストした人にメンション"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "新しいコンテンツを検出"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -64489,46 +69859,16 @@
       "value": "個人用Webhook"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "処理"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "既読の通知"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "リレーURL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "保持"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "送信履歴"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "サーバーチャンネル"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "待機期間"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -64543,12 +69883,6 @@
       "value": "Siloプッシュリレー"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "未読の通知"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -64559,12 +69893,6 @@
     {
       "type": 0,
       "value": "1人あたりのWebhook数"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "受け取る人を判定"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -64639,6 +69967,12 @@
       "value": "ソフトウェアHDRトーンマッピングを有効化"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "一時停止した再生を終了するまで（分）"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -64697,6 +70031,12 @@
     {
       "type": 0,
       "value": "マーカーのソース"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "一時停止中の再生"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -65953,10 +71293,22 @@
       "value": "テレビのサインイン：開始"
     }
   ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "ポスターのリクエスト"
+    }
+  ],
   "web.admin.settings.security.endpoint.login": [
     {
       "type": 0,
       "value": "サインイン"
+    }
+  ],
+  "web.admin.settings.security.endpoint.oauthStart": [
+    {
+      "type": 0,
+      "value": "シングルサインオン：開始"
     }
   ],
   "web.admin.settings.security.endpoint.passwordChange": [
@@ -66613,6 +71965,36 @@
     {
       "type": 0,
       "value": "先にサインインプロバイダーをオンにしてください。パスワードでのサインインがオフでプロバイダーもオフの場合、緊急用管理者しかサインインできません。"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "8〜72文字。ルールはパスワードを設定または変更するときに適用されます。設定済みのパスワードは引き続き使用できます。"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "パスワードの最小文字数"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "!や#などの記号や句読点。文字、数字、スペースは含まれません。"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "特殊文字を必須にする"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "大文字を必須にする"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -68364,6 +73746,20 @@
       "value": "）。"
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "環境変数でストレージの設定が指定されている間（"
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "）は、ここでストレージを移動できません。先にこれらの変数の設定を解除し、すべてのAPIサーバーを再起動してください。"
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -68692,6 +74088,18 @@
     {
       "type": 0,
       "value": "履歴のインポート"
+    }
+  ],
+  "web.admin.shell.nav.page.insights.description": [
+    {
+      "type": 0,
+      "value": "視聴の傾向、人気のタイトル、アカウント、デバイス、帯域幅。"
+    }
+  ],
+  "web.admin.shell.nav.page.insights.label": [
+    {
+      "type": 0,
+      "value": "インサイト"
     }
   ],
   "web.admin.shell.nav.page.libraries.description": [
@@ -69434,6 +74842,26 @@
       "value": "回"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "このスケジュールはバックアップの設定で決まります。"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "サーバー › バックアップ"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "で変更してください。"
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -69724,10 +75152,66 @@
       "value": "最近のエラー"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "更新に失敗しました。詳細は管理者向けの診断情報を確認してください。"
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "現在のスケジュールを確認"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -70160,6 +75644,18 @@
     {
       "type": 0,
       "value": "AutoscanのWebhook再試行"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Siloが埋め込みフォントをビットレートに含めなくなる前にスキャンされた、ASS字幕を含むMKVファイルのヘッダーを再度読み取り、実際にはストリーミングしないビットレートを理由にトランスコードされないようにします。"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "埋め込みフォントを含むファイルのビットレートを補正"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -77509,6 +83005,16 @@
       "value": "設定中…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "に直接伝えてください。"
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -78729,25 +84235,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "テレビをサインインできませんでした。もう一度お試しください。"
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "アプリに次の表示があることを確認してください"
+      "value": "サインインを承認できませんでした。もう一度お試しください。"
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "テレビに次の表示があることを確認してください"
+      "value": "このコードが一致することを確認してください"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "テレビまたはアプリに表示されたコードを入力"
+      "value": "デバイスに表示されたコードを入力"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -78759,13 +84259,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "アカウントでテレビやその他のデバイスにサインインします。"
+      "value": "テレビ、アプリ、その他のデバイスをサインインします。"
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "テレビにサインイン"
+      "value": "サインインを承認"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -78777,7 +84277,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "テレビを承認するには、"
+      "value": "このサインインを承認するには、"
     },
     {
       "type": 1,
@@ -78785,13 +84285,13 @@
     },
     {
       "type": 0,
-      "value": "としての表示を終了してください。テレビをサインインできるのはそのアカウント本人だけです。"
+      "value": "としての表示を終了してください。デバイスを承認できるのはそのアカウント本人だけです。"
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "テレビを承認するには、このユーザーとしての表示を終了してください。テレビをサインインできるのはそのアカウント本人だけです。"
+      "value": "このサインインを承認するには、このユーザーとしての表示を終了してください。デバイスを承認できるのはそのアカウント本人だけです。"
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -78809,39 +84309,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "そのコードが見つかりませんでした。テレビに表示されたコードを確認してください。"
+      "value": "そのコードが見つかりませんでした。コードを確認して、もう一度お試しください。"
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "今はしない"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "古いテレビアプリでは、代わりに"
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "と表示されます。"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "今目の前にあるデバイスだけを承認してください。"
+      "value": "拒否"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "今目の前にあるテレビだけを承認してください。"
+      "value": "自分でサインインを始めた場合にのみ承認してください。"
     }
   ],
   "web.auth.activate.playOn": [
@@ -78863,7 +84343,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "このテレビを使う人は誰でも、あなたのプロフィールから選択できます。PINが設定されたプロフィールはロックされたままです。"
+      "value": "承認すると、このデバイスからプロフィールにアクセスできるようになります。PINが設定されたプロフィールはロックされたままです。"
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -78910,6 +84390,16 @@
       "value": "にリクエスト"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "リクエスト："
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 1,
@@ -78923,7 +84413,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "このテレビは待機を終了しました。テレビでもう一度始めてください。"
+      "value": "このデバイスは待機を終了しました。デバイスでもう一度サインインを始めてください。"
     }
   ],
   "web.auth.activate.result.declined": [
@@ -78932,10 +84422,34 @@
       "value": "このサインインは拒否されました。"
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "完了しました。"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "がサインインしています。"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "のサインインが完了しました。"
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "このコードは期限切れです。テレビに新しいコードが表示されています。そのコードを使用してください。"
+      "value": "このコードは有効期限が切れました。デバイスで新しいコードを取得して、もう一度お試しください。"
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -79019,25 +84533,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "そのテレビはすでにサインインしています。"
+      "value": "このデバイスはすでにサインインしています。"
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "このテレビは承認され、サインインを完了しています。"
+      "value": "このデバイスは承認済みで、サインインを完了しています。"
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "完了しました。テレビがサインインしています。"
+      "value": "完了しました。デバイスがサインインしています。"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "テレビがサインインしました。"
+      "value": "デバイスのサインインが完了しました。"
     }
   ],
   "web.auth.activate.signInAs": [
@@ -79081,13 +84595,13 @@
     },
     {
       "type": 0,
-      "value": "をサインインしますか？"
+      "value": "のサインインを許可しますか？"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "このデバイスをサインインしますか？"
+      "value": "このデバイスのサインインを許可しますか？"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -79099,7 +84613,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "このテレビを承認するには、"
+      "value": "このサインインを承認するには、"
     },
     {
       "type": 1,
@@ -79113,7 +84627,7 @@
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "テレビをサインイン"
+      "value": "サインインを承認"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -79830,10 +85344,44 @@
       "value": "により、このデバイスからこのサーバーへのサインインは許可されていません。"
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": "文字以上。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "パスワードが一致しません。"
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "!や#などの特殊文字を1文字以上含めてください。"
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "大文字を1文字以上含めてください。"
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -79846,6 +85394,28 @@
     {
       "type": 0,
       "value": "8文字以上で入力してください。"
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": "文字以上にしてください。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -80143,7 +85713,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "デバイスをサインインできませんでした。もう一度お試しください。"
+      "value": "サインインを承認できませんでした。もう一度お試しください。"
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -86127,6 +91697,12 @@
       "value": "ライブラリ"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "件数を取得できません"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -87989,6 +93565,24 @@
       "value": "追加"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "タイトルを追加できるか確認できませんでした。"
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "もう一度読み込む"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "タイトルを追加できるか確認しています…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 1,
@@ -88001,6 +93595,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "このサーバーでは、コレクションの一部しか読み込まれていない状態でタイトルを安全に追加できません。タイトルの削除とコレクションの編集は引き続き行えます。"
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "さらに追加する前に、タイトルをもう一度読み込んでください。"
     }
   ],
   "web.collections.manual.addTitle": [
@@ -88017,6 +93623,12 @@
     {
       "type": 0,
       "value": "からタイトルを追加"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "追加の前にタイトルを読み込んでいます…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -90859,6 +96471,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [
@@ -95636,6 +101262,96 @@
       "value": "type"
     }
   ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "クリア"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "自分の評価"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "シリーズの自分の評価"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "評価なし"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "評価する"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "この作品を評価"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "シリーズを評価"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "評価を削除しました"
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "元に戻す"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 0,
+      "value": "5点中"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "自分"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "自分の評価：5点中"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "シリーズの自分の評価：5点中"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
   "web.detail.request.cancelRequest": [
     {
       "type": 0,
@@ -95946,6 +101662,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "収録コレクション"
     }
   ],
   "web.detail.sections.cast": [
@@ -98597,6 +104319,12 @@
       "value": "表示内容"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "このサーバーが管理しています。表示内容はここでは変更できません。表示内容を選ぶには、独自の行を追加してください。"
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -98907,6 +104635,12 @@
       "value": "翻訳中…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "このエクスポート以降に追加されたサーバーの行を非表示："
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -98925,6 +104659,12 @@
     {
       "type": 0,
       "value": "に追加され、以前ここで追加したセクションは置き換えられます。このサーバーのセクションに加えた変更はそのまま残ります。"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "このファイルのエクスポート後にこのサーバーの行が変更されたため、非表示にする行を下で選択してください。"
     }
   ],
   "web.home.layout.checking": [
@@ -98975,6 +104715,22 @@
     {
       "type": 0,
       "value": "「視聴済みを非表示」をオンにします。"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "で選択した行を非表示にします。そこにあるほかの行は変更されません。"
     }
   ],
   "web.home.layout.import": [
@@ -99079,6 +104835,24 @@
     {
       "type": 0,
       "value": "のレイアウトを置き換えます。"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": "（"
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "）"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -99280,6 +105054,12 @@
     {
       "type": 0,
       "value": "無題のセクション"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "このファイルにないサーバーの行を非表示："
     }
   ],
   "web.home.page.customize": [
@@ -101441,13 +107221,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "コレクションとルール"
+      "value": "コレクションとスマート行"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "コレクション、またはルールで作成した行"
+      "value": "コレクション、またはルールで作成するスマート行"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -101561,7 +107341,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "ジャンルや年代などのルールで行を作成します。"
+      "value": "スマートコレクションに似ていますが、行のみを作成します。ジャンルや年代などのルールでタイトルを選びます。"
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -101771,7 +107551,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "ルールに一致する作品"
+      "value": "スマート行"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -101980,6 +107760,12 @@
     {
       "type": 0,
       "value": "ヒーローバナー・Webのみ"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "サーバー"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -107064,6 +112850,12 @@
       "value": "日前"
     }
   ],
+  "web.notifications.inbox.destinationStopped": [
+    {
+      "type": 0,
+      "value": "通知の送信先が動作しなくなりました"
+    }
+  ],
   "web.notifications.inbox.emptyAll": [
     {
       "type": 0,
@@ -107198,6 +112990,12 @@
     {
       "type": 0,
       "value": "）"
+    }
+  ],
+  "web.notifications.inbox.fixInSettings": [
+    {
+      "type": 0,
+      "value": "通知の設定を開いて修正してください。"
     }
   ],
   "web.notifications.inbox.followedMovieAvailable": [
@@ -107472,6 +113270,12 @@
     {
       "type": 0,
       "value": "ウォッチリストのタイトルが視聴可能になりました"
+    }
+  ],
+  "web.notifications.inbox.webhookStopped": [
+    {
+      "type": 0,
+      "value": "Webhookが動作しなくなりました"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -109850,7 +115654,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "今すぐ再生"
+      "value": "次のエピソードを再生"
     }
   ],
   "web.player.nextEpisode.regionLabel": [
@@ -110619,6 +116423,12 @@
     {
       "type": 0,
       "value": "管理者がこの再生セッションを終了しました。"
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "一時停止の時間が長すぎたため、再生を停止しました。"
     }
   ],
   "web.player.shuffle.scopeWithParent": [
@@ -113863,6 +119673,34 @@
       "value": "のリクエストを送信中"
     }
   ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "に類似"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": "、"
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": "に類似"
+    }
+  ],
   "web.requests.discoverSection.empty": [
     {
       "type": 0,
@@ -114631,6 +120469,16 @@
       "value": "1ページ目に戻る"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "ページに移動"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -114717,6 +120565,16 @@
     {
       "type": 0,
       "value": "追加リクエストのページ"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "ページは検索結果の範囲外です。"
     }
   ],
   "web.requests.toAdd.series": [
@@ -116162,6 +122020,12 @@
     {
       "type": 0,
       "value": "プロフィールの通知を受信時に読み取り、既読にします。"
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "プロフィール（キーでプロフィールを指定していない場合はアカウントのすべてのプロフィール）で現在再生中の内容（タイトル、再生位置、一時停止状態、デバイス、再生方法）を確認します。再生の操作やネットワークの詳細は含まれません。"
     }
   ],
   "web.settings.apiKeys.scope.requests": [
@@ -119780,6 +125644,282 @@
       "value": "興味なし"
     }
   ],
+  "web.settings.notifications.destinations.add": [
+    {
+      "type": 0,
+      "value": "送信先を追加"
+    }
+  ],
+  "web.settings.notifications.destinations.addSubmit": [
+    {
+      "type": 0,
+      "value": "追加"
+    }
+  ],
+  "web.settings.notifications.destinations.addTitle": [
+    {
+      "type": 0,
+      "value": "通知の送信先を追加"
+    }
+  ],
+  "web.settings.notifications.destinations.added": [
+    {
+      "type": 0,
+      "value": "「"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "」を追加しました"
+    }
+  ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "保存済みのシークレットをクリア"
+    }
+  ],
+  "web.settings.notifications.destinations.createInProgress": [
+    {
+      "type": 0,
+      "value": "送信先はすでに作成中です。"
+    }
+  ],
+  "web.settings.notifications.destinations.deleteDescription": [
+    {
+      "type": 0,
+      "value": "この送信先への通知が停止されます。この操作は元に戻せません。"
+    }
+  ],
+  "web.settings.notifications.destinations.deleteFailed": [
+    {
+      "type": 0,
+      "value": "送信先を削除できませんでした"
+    }
+  ],
+  "web.settings.notifications.destinations.deleted": [
+    {
+      "type": 0,
+      "value": "送信先を削除しました"
+    }
+  ],
+  "web.settings.notifications.destinations.description": [
+    {
+      "type": 0,
+      "value": "このプロフィールの通知を、サーバーのプラグインが対応するサービスに送信します。"
+    }
+  ],
+  "web.settings.notifications.destinations.dialogDescription": [
+    {
+      "type": 0,
+      "value": "このプロフィールの通知の送信先を選択してください。"
+    }
+  ],
+  "web.settings.notifications.destinations.empty": [
+    {
+      "type": 0,
+      "value": "送信先はまだありません。"
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "保存済みのシークレットを維持"
+    }
+  ],
+  "web.settings.notifications.destinations.kind": [
+    {
+      "type": 0,
+      "value": "種類"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailure": [
+    {
+      "type": 0,
+      "value": "前回の失敗："
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAt": [
+    {
+      "type": 0,
+      "value": "前回の失敗（"
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "）："
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAtUnknown": [
+    {
+      "type": 0,
+      "value": "前回の失敗（"
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "）：プラグインが送信できませんでした"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureUnknown": [
+    {
+      "type": 0,
+      "value": "前回の失敗：プラグインが送信できませんでした"
+    }
+  ],
+  "web.settings.notifications.destinations.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "送信先の上限（"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件）に達しました"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeDelete": [
+    {
+      "type": 0,
+      "value": "この送信先を削除する前に、送信先の一覧を再読み込みしてください。"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeEdit": [
+    {
+      "type": 0,
+      "value": "この送信先を編集する前に、送信先の一覧を再読み込みしてください。"
+    }
+  ],
+  "web.settings.notifications.destinations.saveFailed": [
+    {
+      "type": 0,
+      "value": "送信先を保存できませんでした"
+    }
+  ],
+  "web.settings.notifications.destinations.secretsKept": [
+    {
+      "type": 0,
+      "value": "空欄のままにしたシークレットの項目は、保存済みの値が維持されます。"
+    }
+  ],
+  "web.settings.notifications.destinations.testInProgress": [
+    {
+      "type": 0,
+      "value": "テストメッセージはすでに送信中です。"
+    }
+  ],
+  "web.settings.notifications.destinations.testResult": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "テストを送信しました"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "テストに失敗しました"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.testResultDetail": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "テストを送信しました："
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "テストに失敗しました："
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.title": [
+    {
+      "type": 0,
+      "value": "その他の送信先"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailable": [
+    {
+      "type": 0,
+      "value": "利用不可"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailableNote": [
+    {
+      "type": 0,
+      "value": "この送信先を提供するプラグインが無効または削除されているため、何も送信されません。"
+    }
+  ],
+  "web.settings.notifications.destinations.updateFailed": [
+    {
+      "type": 0,
+      "value": "更新できませんでした"
+    }
+  ],
   "web.settings.notifications.discord.description": [
     {
       "type": 0,
@@ -120704,6 +126844,12 @@
     {
       "type": 0,
       "value": "Webhook URLは必須です"
+    }
+  ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "オフラインのため、この変更は保存されませんでした"
     }
   ],
   "web.settings.overlays.accent.amber": [
@@ -127355,12 +133501,6 @@
       "value": "信頼するプロキシ"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "環境変数SILO_TRUSTED_PROXIESで設定されています。"
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -127611,12 +133751,6 @@
     {
       "type": 0,
       "value": "データベース番号"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "REDIS_URLで設定"
     }
   ],
   "web.setup.storage.redisDescription": [

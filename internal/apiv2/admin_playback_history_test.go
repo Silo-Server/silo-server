@@ -25,7 +25,7 @@ func (f *fakeAdminPlaybackHistory) ListAdminPlaybackHistoryPage(_ context.Contex
 		return handlers.AdminPlaybackHistoryPage{}, f.err
 	}
 	duration := 5400.5
-	// A play resumed near its end: watched_seconds is the end position, the
+	// A play resumed near its end: end_position_seconds is where it ended, the
 	// measurement is the two minutes actually watched.
 	played, start, paused := 120.0, 3480.0, 15.0
 	since, until := fixedTime().Add(-3*time.Minute), fixedTime().Add(-time.Minute)
@@ -33,7 +33,7 @@ func (f *fakeAdminPlaybackHistory) ListAdminPlaybackHistoryPage(_ context.Contex
 	rows := []handlers.AdminPlaybackHistoryRow{{
 		SessionID: "sess-9007199254740993", UserID: 9007199254740993, Username: "laura", ProfileID: "p-owner", ProfileName: "Laura",
 		MediaItemID: "movie-1", MediaFileID: 42, MediaTitle: "Synthetic Movie", MediaType: "movie", PlayMethod: "direct_play",
-		StartedAt: fixedTime().Add(-time.Hour), EndedAt: fixedTime().Add(123456 * time.Nanosecond), WatchedSeconds: 3600, DurationSeconds: &duration, Completed: true,
+		StartedAt: fixedTime().Add(-time.Hour), EndedAt: fixedTime().Add(123456 * time.Nanosecond), EndPositionSeconds: 3600, DurationSeconds: &duration, Completed: true,
 		PlayedSeconds: &played, Measured: true, StartPositionSeconds: &start, PausedSeconds: &paused,
 		MeasuredSince: &since, MeasuredUntil: &until, ClientIP: &ip, DeviceID: &device, DevicePlatform: &platform,
 		// audio_decision stays null, as on a row recorded before decisions were.
@@ -50,9 +50,44 @@ func (f *fakeAdminPlaybackHistory) ListAdminPlaybackHistoryPage(_ context.Contex
 	return handlers.AdminPlaybackHistoryPage{Items: rows, HasMore: after == nil}, nil
 }
 
+func (f *fakeAdminPlaybackHistory) ReadAdminPlaybackHistoryEntry(ctx context.Context, sessionID string) (*handlers.AdminPlaybackHistoryRow, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if sessionID == "missing" {
+		return nil, nil
+	}
+	page, err := f.ListAdminPlaybackHistoryPage(ctx, handlers.AdminPlaybackHistoryFilter{SessionID: sessionID}, nil, 1)
+	if err != nil || len(page.Items) == 0 {
+		return nil, err
+	}
+	row := page.Items[0]
+	row.SessionID = sessionID
+	row.RouteFactsRecorded = true
+	row.SourceVideoCodec = new("hevc")
+	row.SourceResolution = new("4k")
+	row.SourceAudioCodec = new("eac3")
+	row.SourceAudioChannels = new(6)
+	row.SourceContainer = new("mkv")
+	row.SourceBitrateKbps = new(18500)
+	row.SourceHDR = new(true)
+	row.SourceVideoRangeType = new("HDR10")
+	row.StreamLocation = new("remote")
+	row.ReportingNode = new("api-1")
+	row.LibraryID = new(1)
+	row.LibraryName = new("Movies")
+	return &row, nil
+}
+
 func adminPlaybackHistoryFixtureCases() []fixtureCase {
 	return []fixtureCase{
 		{name: "list_admin_playback_history_ok", operationID: opListAdminPlaybackHistory, method: http.MethodGet, path: Prefix + "/admin/playback-history?limit=1", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminPlaybackHistoryCollection", scenario: "Administrator playback history page carries string IDs, instants, a nullable duration and a scoped cursor."},
 		{name: "get_admin_playback_history_capabilities_ok", operationID: "getAdminPlaybackHistoryCapabilities", method: http.MethodGet, path: Prefix + "/admin/playback-history/capabilities", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/AdminPlaybackHistoryCapabilities", scenario: "Administrator playback history capabilities name the window filter and the entry fields the server records."},
+	}
+}
+
+func adminPlaybackHistoryDetailFixtureCases() []fixtureCase {
+	return []fixtureCase{
+		{name: "get_admin_playback_history_entry_ok", operationID: opGetAdminPlaybackHistoryEntry, method: http.MethodGet, path: Prefix + "/admin/playback-history/sess-9007199254740993", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminPlaybackHistoryEntry", scenario: "Administrator playback history entry returns delivered route facts and source file metadata for one finalized session."},
 	}
 }

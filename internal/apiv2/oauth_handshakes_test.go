@@ -13,17 +13,22 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/plugins"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
 
 type handshakePlugin struct {
 	init      *pluginv1.InitAuthorizeRequest
+	inits     int
 	exchange  *pluginv1.ExchangeCodeRequest
 	exchanges int
 }
 
 func (f *handshakePlugin) InitAuthorize(_ context.Context, in *pluginv1.InitAuthorizeRequest) (*pluginv1.InitAuthorizeResponse, error) {
 	f.init = in
+	f.inits++
 	return &pluginv1.InitAuthorizeResponse{AuthorizeUrl: "https://provider.example/authorize"}, nil
 }
 func (f *handshakePlugin) ExchangeCode(_ context.Context, in *pluginv1.ExchangeCodeRequest) (*pluginv1.AuthenticateResponse, error) {
@@ -57,21 +62,29 @@ func (f *handshakeCompleter) LinkOAuthIdentity(_ context.Context, in auth.OAuthL
 }
 
 type handshakeRig struct {
-	h         http.Handler
-	plugin    *handshakePlugin
-	completer *handshakeCompleter
+	h            http.Handler
+	deps         Dependencies
+	store        *countingOAuthStore
+	plugin       *handshakePlugin
+	completer    *handshakeCompleter
+	callbackMode string
 }
 
 func newHandshakeRig(t *testing.T) *handshakeRig {
 	t.Helper()
-	rig := &handshakeRig{plugin: new(handshakePlugin), completer: new(handshakeCompleter)}
+	return newHandshakeRigOnURL(t, "https://silo.example")
+}
+
+func newHandshakeRigOnURL(t *testing.T, publicURL string) *handshakeRig {
+	t.Helper()
+	rig := &handshakeRig{store: &countingOAuthStore{InMemoryOAuthStore: auth.NewInMemoryOAuthStore()}, plugin: new(handshakePlugin), completer: new(handshakeCompleter)}
 	svc := auth.NewOAuthHandler(auth.OAuthHandlerDeps{
-		Store: auth.NewInMemoryOAuthStore(), StateSecret: []byte("synthetic-state-secret"), HostBaseURL: "https://silo.example",
-		ResolveClient: func(_ context.Context, id int) (auth.OAuthClient, string, error) {
+		Store: rig.store, StateSecret: []byte("synthetic-state-secret"), HostBaseURL: publicURL,
+		ResolveClient: func(_ context.Context, id int) (auth.OAuthClient, string, string, error) {
 			if id != 3 {
-				return nil, "", context.Canceled
+				return nil, "", "", context.Canceled
 			}
-			return rig.plugin, "fixture", nil
+			return rig.plugin, "fixture", rig.callbackMode, nil
 		},
 		LoginCompleter: rig.completer,
 		ServerID:       func(context.Context) (string, error) { return fixtureServerID, nil },
@@ -80,8 +93,42 @@ func newHandshakeRig(t *testing.T) *handshakeRig {
 	deps := pilotDeps(nil, nil)
 	deps.OAuth = svc
 	deps.Accounts = fakeAccounts{users: map[int]handlers.UserView{1: {ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{}}}}
+	rig.deps = deps
 	rig.h = newTestHandler(t, deps)
 	return rig
+}
+
+// countingOAuthStore counts the flow rows a start inserts.
+type countingOAuthStore struct {
+	*auth.InMemoryOAuthStore
+	inserts int
+}
+
+func (s *countingOAuthStore) Insert(ctx context.Context, sess auth.OAuthSession) error {
+	s.inserts++
+	return s.InMemoryOAuthStore.Insert(ctx, sess)
+}
+
+// rateLimitSettings is a rate-limit settings store holding only its keys;
+// every other budget keeps its default.
+type rateLimitSettings map[string]string
+
+func (s rateLimitSettings) Get(_ context.Context, key string) (string, error) { return s[key], nil }
+func (s rateLimitSettings) Set(context.Context, string, string) error         { return nil }
+func (s rateLimitSettings) GetAll(context.Context) (map[string]string, error) {
+	return s, nil
+}
+
+// limitStarts puts the rig behind the production per-endpoint limiter and
+// the API listener's client-IP middleware, with settings over the defaults.
+func (rig *handshakeRig) limitStarts(t *testing.T, settings rateLimitSettings) {
+	t.Helper()
+	limiter := ratelimit.NewMiddleware(ratelimit.NewMemoryLimiter(), ratelimit.NewMemoryLimiter(), settings, true)
+	if err := limiter.Reload(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	rig.deps.BucketRateLimit = limiter.AuthEndpointHandler
+	rig.h = clientip.Middleware(clientip.NewResolver(nil))(newTestHandler(t, rig.deps))
 }
 
 func (rig *handshakeRig) serve(method, target string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
@@ -185,8 +232,7 @@ func TestOAuthStartBouncesToThePublicOrigin(t *testing.T) {
 	// A native start on the app's saved LAN address moves to the public
 	// origin with only a random flow ID, and the app redirect names the LAN
 	// origin as iss.
-	native := "code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256&app_state=abc"
-	rec = rig.serve("GET", "http://192.168.1.20:8080"+Prefix+"/auth/oauth/3/native/start?"+native)
+	rec = rig.serve("GET", "http://192.168.1.20:8080"+Prefix+"/auth/oauth/3/native/start?"+fixtureNativeStartQuery)
 	moved, err := url.Parse(rec.Header().Get("Location"))
 	if err != nil || rec.Code != http.StatusFound || moved.Scheme+"://"+moved.Host+moved.Path != "https://silo.example/api/v2/auth/oauth/3/native/start" ||
 		len(moved.Query()) != 1 || moved.Query().Get("flow") == "" || len(rec.Result().Cookies()) != 0 {
@@ -207,6 +253,77 @@ func TestOAuthStartBouncesToThePublicOrigin(t *testing.T) {
 		if rec := rig.serve("GET", target); rec.Code != http.StatusBadRequest || len(rec.Result().Cookies()) != 0 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") {
 			t.Fatal(target, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+const fixtureNativeStartQuery = "code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256&app_state=abc"
+
+// TestOAuthStartsShareOneRateLimitBudget: the three starts spend one
+// per-address budget, and a refused start is a 429 Problem document that
+// reaches neither the plugin nor the flow store. The callback is unbudgeted.
+func TestOAuthStartsShareOneRateLimitBudget(t *testing.T) {
+	rig := newHandshakeRig(t)
+	rig.limitStarts(t, rateLimitSettings{
+		"ratelimit.auth.oauth_start.requests_per_minute": "3",
+		"ratelimit.auth.oauth_start.burst":               "3",
+	})
+	starts := []struct{ method, target string }{
+		{http.MethodPost, "https://silo.example" + Prefix + "/auth/oauth/3/init"},
+		{http.MethodGet, "https://silo.example" + Prefix + "/auth/oauth/3/start"},
+		{http.MethodGet, "https://silo.example" + Prefix + "/auth/oauth/3/native/start?" + fixtureNativeStartQuery},
+	}
+	for _, start := range starts {
+		if rec := rig.serve(start.method, start.target); rec.Code != http.StatusFound || rec.Header().Get("Location") != "https://provider.example/authorize" {
+			t.Fatal(start.target, rec.Code, rec.Header(), rec.Body.String())
+		}
+	}
+	if rig.plugin.inits != 3 || rig.store.inserts != 3 {
+		t.Fatalf("admitted starts: %d plugin calls, %d flow rows", rig.plugin.inits, rig.store.inserts)
+	}
+	for _, start := range starts {
+		rec := rig.serve(start.method, start.target)
+		if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" || rec.Header().Get("Location") != "" {
+			t.Fatal(start.target, rec.Code, rec.Header())
+		}
+		requireProblem(t, rec, TypeRateLimited)
+	}
+	if rig.plugin.inits != 3 || rig.store.inserts != 3 {
+		t.Fatalf("refused starts reached the flow: %d plugin calls, %d flow rows", rig.plugin.inits, rig.store.inserts)
+	}
+	if rec := rig.serve(http.MethodGet, "https://silo.example"+Prefix+"/auth/oauth/3/callback?state=x&code=pc"); rec.Code == http.StatusTooManyRequests {
+		t.Fatal("callback spent the start budget")
+	}
+}
+
+// TestOAuthTwoHopStartsFitTheDefaultBurst: a form-post start that bounces to
+// the GET start and a native start parked off the public origin each spend
+// the budget twice; ten such sign-ins from one address fit the default burst
+// of 20, and the next start is refused.
+func TestOAuthTwoHopStartsFitTheDefaultBurst(t *testing.T) {
+	rig := newHandshakeRig(t)
+	rig.limitStarts(t, rateLimitSettings{})
+	lan := "http://192.168.1.20:8080" + Prefix + "/auth/oauth/3/"
+	for i := range 5 {
+		rec := rig.serve(http.MethodPost, lan+"init")
+		if rec.Code != http.StatusSeeOther {
+			t.Fatal("web", i, rec.Code, rec.Body.String())
+		}
+		if rec = rig.serve(http.MethodGet, rec.Header().Get("Location")); rec.Code != http.StatusFound || rec.Header().Get("Location") != "https://provider.example/authorize" {
+			t.Fatal("web", i, rec.Code, rec.Body.String())
+		}
+		rec = rig.serve(http.MethodGet, lan+"native/start?"+fixtureNativeStartQuery)
+		if rec.Code != http.StatusFound || !strings.Contains(rec.Header().Get("Location"), "flow=") {
+			t.Fatal("native", i, rec.Code, rec.Header())
+		}
+		if rec = rig.serve(http.MethodGet, rec.Header().Get("Location")); rec.Code != http.StatusFound || rec.Header().Get("Location") != "https://provider.example/authorize" {
+			t.Fatal("native", i, rec.Code, rec.Body.String())
+		}
+	}
+	if rig.plugin.inits != 10 {
+		t.Fatalf("plugin calls = %d, want 10", rig.plugin.inits)
+	}
+	if rec := rig.serve(http.MethodGet, "https://silo.example"+Prefix+"/auth/oauth/3/start"); rec.Code != http.StatusTooManyRequests {
+		t.Fatal("start past the burst", rec.Code)
 	}
 }
 
@@ -321,5 +438,87 @@ func TestLinkingRefusalsShareProblemTypes(t *testing.T) {
 	}
 	if !errors.Is(auth.ErrProviderAccountDisabled, auth.ErrUserDisabled) {
 		t.Fatal("ErrProviderAccountDisabled no longer wraps ErrUserDisabled; the ordering this test guards is moot")
+	}
+}
+
+func TestStableOAuthCallbackThroughStrippedPublicPath(t *testing.T) {
+	const publicPath = "/media"
+	rig := newHandshakeRigOnURL(t, "https://silo.example"+publicPath)
+	rig.callbackMode = plugins.AuthCallbackStable
+	rig.h = http.StripPrefix(publicPath, rig.h)
+	base := "https://silo.example" + publicPath + Prefix + "/auth/oauth/"
+	rec := rig.serve(http.MethodGet, base+"3/start")
+	cookie := binderCookie(t, rec)
+	wantRedirect := base + "callback"
+	if got := rig.plugin.init.GetRedirectUri(); got != wantRedirect {
+		t.Fatalf("redirect URI = %q, want %q", got, wantRedirect)
+	}
+	if cookie.Path != publicPath+Prefix+"/auth/oauth/callback" || !cookie.Secure {
+		t.Fatalf("cookie = %+v", cookie)
+	}
+	query := "?code=provider-code&state=" + url.QueryEscape(rig.plugin.init.GetState())
+	rec = rig.serve(http.MethodGet, base+"3/callback"+query, cookie)
+	if rec.Header().Get("Location") != "/login?error=oauth_failed&reason=state_invalid" || rig.plugin.exchanges != 0 {
+		t.Fatalf("numeric callback: %d %v, exchanges %d", rec.Code, rec.Header(), rig.plugin.exchanges)
+	}
+
+	// Changing the default affects future flows. The outstanding flow still
+	// exchanges on the URI it sent to the provider.
+	rig.callbackMode = plugins.AuthCallbackInstallation
+	rec = rig.serve(http.MethodGet, wantRedirect+query, cookie)
+	if !strings.HasPrefix(rec.Header().Get("Location"), "https://silo.example/media/login/oauth-complete?code=") ||
+		rig.plugin.exchange.GetRedirectUri() != wantRedirect || rig.completer.in.InstallationID != 3 {
+		t.Fatalf("stable callback: %d %v, exchange %v", rec.Code, rec.Header(), rig.plugin.exchange)
+	}
+	var cleared *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == cookie.Name {
+			cleared = c
+			break
+		}
+	}
+	if cleared == nil || cleared.Path != cookie.Path || cleared.MaxAge >= 0 || !cleared.Secure {
+		t.Fatalf("clearing cookie = %+v", cleared)
+	}
+	rec = rig.serve(http.MethodGet, wantRedirect+query, cookie)
+	if rec.Header().Get("Location") != "/login?error=oauth_failed&reason=session_expired" || rig.plugin.exchanges != 1 {
+		t.Fatalf("callback replay: %d %v, exchanges %d", rec.Code, rec.Header(), rig.plugin.exchanges)
+	}
+}
+
+func TestAdminOAuthInstallationReportsBindingCallbackMode(t *testing.T) {
+	reg := &Registry{deps: Dependencies{OAuth: fakeOAuth{}}}
+	installation := handlers.PluginInstallationView{
+		ID: 3, Enabled: true,
+		Capabilities: []handlers.PluginCapabilityView{
+			{Type: "auth_provider.v1", ID: "oidc", AuthModes: []string{"oauth2"}},
+			{Type: "auth_provider.v1", ID: "ldap", AuthModes: []string{"password"}},
+		},
+		AuthBindings: []handlers.PluginAuthBindingView{
+			{CapabilityID: "oidc", Enabled: true, CallbackMode: plugins.AuthCallbackStable},
+			{CapabilityID: "ldap", CallbackMode: plugins.AuthCallbackInstallation},
+		},
+	}
+	out, err := reg.adminPluginInstallationOf(installation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://silo.example.test/api/v2/auth/oauth/callback"
+	if got := out.Capabilities[0].CallbackURL; got == nil || *got != want {
+		t.Fatalf("OAuth capability callback = %v", got)
+	}
+	if got := out.AuthBindings[0]; got.CallbackURL != want || got.CallbackMode != plugins.AuthCallbackStable || got.CallbackPending {
+		t.Fatalf("OAuth binding = %+v", got)
+	}
+	if got := out.AuthBindings[1]; got.CallbackURL != "" || got.CallbackMode != "" {
+		t.Fatalf("password binding = %+v", got)
+	}
+	reg.deps.OAuth = auth.NewOAuthHandler(auth.OAuthHandlerDeps{})
+	out, err = reg.adminPluginInstallationOf(installation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := out.AuthBindings[0]; !got.CallbackPending || got.CallbackURL != "" {
+		t.Fatalf("OAuth binding without public URL = %+v", got)
 	}
 }

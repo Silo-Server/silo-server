@@ -17,6 +17,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { captureProfileRequestContext, StaleApiRequestContextError } from "@/api/client";
+import { v2ErrorText } from "@/api/v2/request";
 import {
   captureNotificationAuthority,
   notificationScope,
@@ -331,9 +332,7 @@ export function useUpdateEmailNotificationPreferences() {
     },
     onError: (error) => {
       if (error instanceof StaleApiRequestContextError) return;
-      toast.error(
-        error instanceof Error ? error.message : t("web.notifications.queries.saveEmailFailed"),
-      );
+      toast.error(v2ErrorText(error, t("web.notifications.queries.saveEmailFailed")));
     },
   });
 }
@@ -449,9 +448,7 @@ export function useClearEmailNotificationAddress() {
         return;
       }
       if (error instanceof StaleApiRequestContextError) return;
-      toast.error(
-        error instanceof Error ? error.message : t("web.notifications.queries.removeAddressFailed"),
-      );
+      toast.error(v2ErrorText(error, t("web.notifications.queries.removeAddressFailed")));
     },
   });
   // Pending mutations can receive new observer options after a rerender.
@@ -492,9 +489,7 @@ export function useUpdateDiscordNotificationPreferences() {
     },
     onError: (error) => {
       if (error instanceof StaleApiRequestContextError) return;
-      toast.error(
-        error instanceof Error ? error.message : t("web.notifications.queries.saveDiscordFailed"),
-      );
+      toast.error(v2ErrorText(error, t("web.notifications.queries.saveDiscordFailed")));
     },
   });
 }
@@ -736,6 +731,18 @@ export function notificationToast(
               : "web.notifications.inbox.requestDeclined",
           ),
       description: approved ? undefined : notification.reason_flags?.reason,
+    };
+  }
+  if (notification.type === "webhook.auto_disabled") {
+    return {
+      title: t("web.notifications.inbox.webhookStopped"),
+      description: t("web.notifications.inbox.fixInSettings"),
+    };
+  }
+  if (notification.type === "plugin_destination.auto_disabled") {
+    return {
+      title: t("web.notifications.inbox.destinationStopped"),
+      description: t("web.notifications.inbox.fixInSettings"),
     };
   }
   return null;

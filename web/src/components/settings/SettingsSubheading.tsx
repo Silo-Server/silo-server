@@ -26,7 +26,7 @@ export function SettingsSubheading({ children, caption }: SettingsSubheadingProp
         {children}
       </h4>
       {caption ? (
-        <p className="text-muted-foreground mt-1 text-[13px] leading-relaxed">{caption}</p>
+        <p className="text-muted-foreground mt-1 text-[0.8125rem] leading-relaxed">{caption}</p>
       ) : null}
     </div>
   );

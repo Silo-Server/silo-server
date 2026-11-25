@@ -58,7 +58,6 @@ func (h *countingHerdHost) Stop(id int) error {
 }
 
 func (h *countingHerdHost) Shutdown(context.Context) error { return nil }
-func (h *countingHerdHost) NextStartSeq() uint64           { return 0 }
 
 func (h *countingHerdHost) startCount() int {
 	h.mu.Lock()
@@ -118,6 +117,7 @@ type ctxCaptureHost struct {
 	mu          sync.Mutex
 	current     map[int]pluginClient
 	startResult pluginClient
+	startErr    error
 	entered     chan struct{}
 	proceed     chan struct{}
 	sawCancel   bool
@@ -142,6 +142,9 @@ func (h *ctxCaptureHost) Start(ctx context.Context, req pluginhost.StartRequest)
 		return nil, ctx.Err()
 	case <-h.proceed:
 	}
+	if h.startErr != nil {
+		return nil, h.startErr
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.current == nil {
@@ -159,7 +162,6 @@ func (h *ctxCaptureHost) Stop(id int) error {
 }
 
 func (h *ctxCaptureHost) Shutdown(context.Context) error { return nil }
-func (h *ctxCaptureHost) NextStartSeq() uint64           { return 0 }
 
 func (h *ctxCaptureHost) canceledDuringLaunch() bool {
 	h.mu.Lock()
@@ -257,7 +259,7 @@ func TestOnlyLazyPluginsAreStartedWithStopWhenIdle(t *testing.T) {
 	residentStore := installedPluginStore(t, 8, resident)
 	residentHost := &fakeServiceHost{}
 	residentService := &Service{installations: residentStore, host: residentHost}
-	if _, err := residentService.start(context.Background(), 8, true); err != nil {
+	if _, err := residentService.Start(t.Context(), 8); err != nil {
 		t.Fatalf("start resident: %v", err)
 	}
 	if len(residentHost.started) != 1 || residentHost.started[0].StopWhenIdle {

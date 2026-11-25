@@ -188,6 +188,9 @@ func otherLine(row DeliveryRow) string {
 		}
 		return watchlistTitleAvailable
 	}
+	if row.Type == DeliveryTypePluginDestinationAutoDisabled {
+		return "A notification destination stopped working — open notification settings to fix it"
+	}
 	return genericNotificationTitle
 }
 

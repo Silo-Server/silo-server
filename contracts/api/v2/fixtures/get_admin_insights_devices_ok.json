@@ -1,0 +1,119 @@
+{
+  "from": "2025-12-04T03:04:05.678Z",
+  "to": "2026-01-02T03:04:05.678Z",
+  "tz": "UTC",
+  "coverage": {
+    "oldest_history_at": "2025-12-04T03:04:05.678Z",
+    "oldest_measured_at": "2025-12-04T03:04:05.678Z",
+    "oldest_route_facts_at": "2025-12-04T03:04:05.678Z",
+    "oldest_metric_at": "2025-12-04T03:04:05.678Z",
+    "total_sessions": 48,
+    "measured_sessions": 46,
+    "route_facts_sessions": 44
+  },
+  "summary": {
+    "total_sessions": 48,
+    "direct_sessions": 34,
+    "remux_sessions": 8,
+    "transcode_sessions": 6,
+    "direct_rate": 0.7083,
+    "route_facts_sessions": 44,
+    "hw_transcode_sessions": 5,
+    "sw_transcode_sessions": 1,
+    "subtitle_burn_in_sessions": 2,
+    "hdr_tonemap_sessions": 2,
+    "hdr_tonemap_hw_sessions": 2,
+    "hdr_tonemap_sw_sessions": 0
+  },
+  "codecs": [
+    "hevc",
+    "h264"
+  ],
+  "matrix": [
+    {
+      "client_name": "Silo Apple",
+      "device_platform": "tvOS",
+      "is_jellyfin_client": false,
+      "total_sessions": 20,
+      "direct_sessions": 18,
+      "remux_sessions": 1,
+      "transcode_sessions": 1,
+      "direct_rate": 0.9,
+      "cells": [
+        {
+          "source_video_codec": "hevc",
+          "sessions": 12,
+          "direct_sessions": 11,
+          "remux_sessions": 1,
+          "transcode_sessions": 0,
+          "direct_rate": 0.9167
+        }
+      ]
+    }
+  ],
+  "adaptation_reasons": [
+    {
+      "reason": "subtitle_burn_in",
+      "sessions": 2,
+      "share_of_adapted": 0.1429
+    }
+  ],
+  "hw_accel_breakdown": [
+    {
+      "key": "vaapi",
+      "sessions": 5
+    },
+    {
+      "key": "software",
+      "sessions": 1
+    }
+  ],
+  "tone_map_breakdown": [
+    {
+      "key": "hardware",
+      "sessions": 2
+    }
+  ],
+  "subtitle_burn_in_codecs": [
+    {
+      "key": "hdmv_pgs_subtitle",
+      "sessions": 2
+    }
+  ],
+  "source_resolutions": [
+    {
+      "key": "2160p",
+      "sessions": 20
+    },
+    {
+      "key": "1080p",
+      "sessions": 26
+    },
+    {
+      "key": "unknown",
+      "sessions": 2
+    }
+  ],
+  "delivered_resolutions": [
+    {
+      "key": "2160p",
+      "sessions": 17
+    },
+    {
+      "key": "1080p",
+      "sessions": 27
+    },
+    {
+      "key": "unknown",
+      "sessions": 4
+    }
+  ],
+  "resolution_changes": [
+    {
+      "from": "2160p",
+      "to": "1080p",
+      "sessions": 3
+    }
+  ],
+  "top_transcoders": []
+}

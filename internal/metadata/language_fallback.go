@@ -36,8 +36,8 @@ func (s *MetadataService) SetFallbackLanguage(language string) {
 	s.fallbackLanguage.Store(baseMetadataLanguage(language))
 }
 
-// configuredFallbackLanguage is metadata.fallback_language, empty when off.
-func (s *MetadataService) configuredFallbackLanguage() string {
+// FallbackLanguage is metadata.fallback_language, empty when off.
+func (s *MetadataService) FallbackLanguage() string {
 	language, _ := s.fallbackLanguage.Load().(string)
 	return language
 }
@@ -45,7 +45,7 @@ func (s *MetadataService) configuredFallbackLanguage() string {
 // fallbackLanguageFor is the language a refresh in requested fetches gaps in,
 // or empty when the fallback is off or is the requested language itself.
 func (s *MetadataService) fallbackLanguageFor(requested string) string {
-	fallback := s.configuredFallbackLanguage()
+	fallback := s.FallbackLanguage()
 	requested = baseMetadataLanguage(requested)
 	if fallback == "" || requested == "" || fallback == requested {
 		return ""
@@ -359,17 +359,17 @@ func (s *MetadataService) fetchFallbackText(
 	defer cancel()
 	var err error
 	if itemGap {
-		if fetched.item, err = fetchFallbackItem(fetchCtx, sources.item, providerIDs, contentType, language, req.resetToProvider); err != nil {
+		if fetched.item, err = fetchFallbackItem(fetchCtx, sources.item, providerIDs, contentType, language, req.clearsUnsentValues()); err != nil {
 			return nil, err
 		}
 	}
 	if seasonGap {
-		if fetched.seasons, err = fetchFallbackSeasons(fetchCtx, sources.season, providerIDs, contentType, language, req.resetToProvider); err != nil {
+		if fetched.seasons, err = fetchFallbackSeasons(fetchCtx, sources.season, providerIDs, contentType, language, req.clearsUnsentValues()); err != nil {
 			return nil, err
 		}
 	}
 	if len(episodeSeasons) > 0 {
-		if fetched.episodes, err = fetchFallbackEpisodes(fetchCtx, sources.episode, providerIDs, language, episodeSeasons, req.resetToProvider); err != nil {
+		if fetched.episodes, err = fetchFallbackEpisodes(fetchCtx, sources.episode, providerIDs, language, episodeSeasons, req.clearsUnsentValues()); err != nil {
 			return nil, err
 		}
 	}

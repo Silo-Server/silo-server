@@ -54,9 +54,10 @@ const SPEECH_AI_KEYS = ["ai.speech_provider_id", "ai.asr_model"] as const;
 const EMBEDDING_KEYS = ["recommendations.embedding_provider_id", "recommendations.embedding_model"];
 /**
  * Pre-`ai.*` keys still read as a fallback, so a server configured before the
- * rename keeps its model and job limit until the modern key is saved.
+ * rename keeps its model until the modern key is saved. The server already
+ * reports the job limit under `ai.max_concurrent_jobs`.
  */
-const LEGACY_AI_KEYS = ["subtitle_ai.chat_model", "subtitle_ai.max_concurrent_jobs"] as const;
+const LEGACY_AI_KEYS = ["subtitle_ai.chat_model"] as const;
 
 const AI_FEATURE_KEYS = [
   "subtitle_ai.enabled",
@@ -85,13 +86,18 @@ const KEYS: string[] = Array.from(
   ]),
 );
 
-/** The text provider select's value for the ChatGPT plan. */
-const CHATGPT_PROVIDER = "chatgpt";
+/**
+ * The text provider select's value for the ChatGPT plan. Like NO_PROVIDER it
+ * holds an underscore, so a provider a deployment declares as "chatgpt" stays
+ * an ordinary choice.
+ */
+const CHATGPT_PROVIDER = "__chatgpt__";
 /**
  * A provider select's value for no provider. Choosing it releases the
- * provider, so it can be removed once no job uses it.
+ * provider, so it can be removed once no job uses it. No provider id can
+ * contain an underscore, so a deployment's chosen ids never collide with it.
  */
-const NO_PROVIDER = "none";
+const NO_PROVIDER = "__none__";
 
 /** Example model ids for the text model field; they read the same in every language. */
 const TEXT_MODEL_PLACEHOLDER = "gpt-6-luna, gemini-2.5-flash, llama3.1";
@@ -238,6 +244,7 @@ function TextModelTile({
   reasoningLevels,
   reasoningAttention,
   serviceTier,
+  savedServiceTier,
   serviceTiers,
   serviceTierDirty,
   chatGPTSupported,
@@ -268,6 +275,8 @@ function TextModelTile({
    */
   reasoningAttention: boolean;
   serviceTier: string;
+  /** The saved tier, which a kept row always offers so the edit can be undone. */
+  savedServiceTier: string;
   serviceTiers: string[];
   serviceTierDirty: boolean;
   chatGPTSupported: boolean;
@@ -296,10 +305,26 @@ function TextModelTile({
       : ready
         ? "connected"
         : "not_connected";
-  const chatGPT = authMode === CHATGPT_PROVIDER;
+  const chatGPT = authMode === "chatgpt";
   const provider = providers.find((candidate) => candidate.id === providerID);
   const selected = chatGPT ? CHATGPT_PROVIDER : providerID;
   const supportsServiceTier = !chatGPT && provider?.type === "openai" && serviceTiers.length > 0;
+  // A tier picked before switching to a provider or plan without tiers stays
+  // in view, marked as changed, so Save never writes a value the admin can't
+  // see.
+  const serviceTierKept = !supportsServiceTier && serviceTierDirty;
+  const showServiceTier = supportsServiceTier || serviceTierKept;
+  // A kept tier may not be one the current model lists, and the list is empty
+  // while capabilities load or after they fail; Default and the saved tier are
+  // always offered so the kept edit can still be set back.
+  const tierOptions = [
+    ...new Set([
+      "default",
+      ...serviceTiers,
+      savedServiceTier || "default",
+      serviceTier || "default",
+    ]),
+  ];
 
   return (
     <ProviderTile
@@ -372,8 +397,8 @@ function TextModelTile({
       )}
       <AdvancedSection
         id="ai.text-model"
-        count={supportsServiceTier ? 2 : 1}
-        forceOpen={reasoningAttention || (supportsServiceTier && serviceTierDirty)}
+        count={showServiceTier ? 2 : 1}
+        forceOpen={reasoningAttention || serviceTierDirty}
       >
         <SettingField
           label={t("web.admin.settings.ai.text.reasoningLevel")}
@@ -404,14 +429,15 @@ function TextModelTile({
               : []),
           ]}
         />
-        {supportsServiceTier && (
+        {showServiceTier && (
           <SettingField
             label={t("web.admin.settings.ai.text.serviceTier")}
+            dirty={serviceTierKept}
             type="select"
             value={serviceTier || "default"}
             description={t("web.admin.settings.ai.text.serviceTierDescription")}
             onChange={(next) => onChange("ai.service_tier", next === "default" ? "" : next)}
-            options={serviceTiers.map((tier) => ({
+            options={tierOptions.map((tier) => ({
               value: tier,
               label: t("web.admin.settings.ai.text.serviceTierOption", { tier }),
             }))}
@@ -666,10 +692,6 @@ export default function AISettings() {
   }
 
   const value = (key: string, fallback = "") => form.getValue(key) || fallback;
-  // Legacy `subtitle_ai.*` values stay authoritative until the modern `ai.*`
-  // key holds something, exactly as the old AI Services tab read them.
-  const effectiveValue = (key: string, legacyKey: string, fallback: string) =>
-    value(key, value(legacyKey, fallback));
 
   const providers = providerList.data?.providers ?? [];
   const providerTypes = providerList.data?.types ?? [];
@@ -720,11 +742,13 @@ export default function AISettings() {
   }
 
   // The ChatGPT plan is chosen by authentication mode; any other choice is an
-  // API-key provider. The provider id is kept while the plan serves text, so
-  // switching back restores it.
+  // API-key provider. The saved provider id is kept while the plan serves
+  // text, so switching back restores it; a staged one is taken back, since the
+  // provider select no longer shows it.
   function selectTextProvider(next: string) {
     if (next === CHATGPT_PROVIDER) {
       setValue("ai.auth_mode", "chatgpt");
+      form.resetValue("ai.text_provider_id");
       return;
     }
     setValue("ai.auth_mode", "api_key");
@@ -796,13 +820,19 @@ export default function AISettings() {
   }
 
   async function save() {
-    const batchSize = parseStrictInteger(value("subtitle_ai.batch_size", "40"));
-    const contextLines = parseStrictInteger(value("subtitle_ai.context_neighbors", "2"));
-    const chunkSeconds = parseStrictInteger(value("subtitle_ai.asr_chunk_seconds", "600"));
-    const quotaJobs = parseStrictInteger(value("subtitle_ai.transcribe_quota_jobs", "0"));
-    const maxConcurrent = parseStrictInteger(
-      effectiveValue("ai.max_concurrent_jobs", "subtitle_ai.max_concurrent_jobs", "2"),
-    );
+    // With no settings loaded there is nothing to save over, and the form's
+    // own save says to reload; checking the fields first would hide that.
+    if (!form.loaded) {
+      await form.save();
+      return;
+    }
+    // Only a value this save sends is checked: an untouched field holds what
+    // the server has.
+    const invalidCount = (key: string, min: number, max = Number.MAX_SAFE_INTEGER) => {
+      if (!form.isDirty(key)) return false;
+      const parsed = parseStrictInteger(value(key));
+      return parsed === null || parsed < min || parsed > max;
+    };
 
     // None releases the text provider; it saves while nothing translates.
     const textCleared = authMode !== "chatgpt" && textProviderID === "";
@@ -825,23 +855,23 @@ export default function AISettings() {
       toast.error(t("web.admin.settings.ai.page.chooseReasoning"));
       return;
     }
-    if (maxConcurrent === null || maxConcurrent < 1) {
+    if (invalidCount("ai.max_concurrent_jobs", 1)) {
       toast.error(t("web.admin.settings.ai.page.maxConcurrentInvalid"));
       return;
     }
-    if (batchSize === null || batchSize < 1) {
+    if (invalidCount("subtitle_ai.batch_size", 1)) {
       toast.error(t("web.admin.settings.ai.page.batchSizeInvalid"));
       return;
     }
-    if (contextLines === null || contextLines < 0) {
+    if (invalidCount("subtitle_ai.context_neighbors", 0)) {
       toast.error(t("web.admin.settings.ai.page.contextLinesInvalid"));
       return;
     }
-    if (chunkSeconds === null || chunkSeconds < 60 || chunkSeconds > 600) {
+    if (invalidCount("subtitle_ai.asr_chunk_seconds", 60, 600)) {
       toast.error(t("web.admin.settings.ai.page.chunkInvalid"));
       return;
     }
-    if (quotaJobs === null || quotaJobs < 0) {
+    if (invalidCount("subtitle_ai.transcribe_quota_jobs", 0)) {
       toast.error(t("web.admin.settings.ai.page.quotaInvalid"));
       return;
     }
@@ -893,6 +923,7 @@ export default function AISettings() {
               reasoningLevels={capabilities.data?.reasoning_levels ?? []}
               reasoningAttention={form.isDirty("ai.reasoning_effort") || reasoningUnsupported}
               serviceTier={value("ai.service_tier")}
+              savedServiceTier={form.getPersistedValue("ai.service_tier")}
               serviceTiers={capabilities.data?.openai_service_tiers ?? []}
               serviceTierDirty={form.isDirty("ai.service_tier")}
               chatGPTSupported={chatGPTSupported}
@@ -1028,11 +1059,7 @@ export default function AISettings() {
             <SettingField
               label={t("web.admin.settings.ai.tuning.jobsAtOnce")}
               type="number"
-              value={effectiveValue(
-                "ai.max_concurrent_jobs",
-                "subtitle_ai.max_concurrent_jobs",
-                "2",
-              )}
+              value={value("ai.max_concurrent_jobs")}
               onChange={(next) => setValue("ai.max_concurrent_jobs", next)}
               // Each server process builds its own dispatch semaphore at start
               // (internal/api/router.go), so a cluster runs this many per process.
@@ -1042,14 +1069,14 @@ export default function AISettings() {
             <SettingField
               label={t("web.admin.settings.ai.tuning.batchSize")}
               type="number"
-              value={value("subtitle_ai.batch_size", "40")}
+              value={value("subtitle_ai.batch_size")}
               onChange={(next) => setValue("subtitle_ai.batch_size", next)}
               restartRequired={restartKeys.has("subtitle_ai.batch_size")}
             />
             <SettingField
               label={t("web.admin.settings.ai.tuning.contextLines")}
               type="number"
-              value={value("subtitle_ai.context_neighbors", "2")}
+              value={value("subtitle_ai.context_neighbors")}
               onChange={(next) => setValue("subtitle_ai.context_neighbors", next)}
               restartRequired={restartKeys.has("subtitle_ai.context_neighbors")}
             />
@@ -1057,7 +1084,7 @@ export default function AISettings() {
               label={t("web.admin.settings.ai.tuning.audioPerRequest")}
               type="number"
               unit={t("web.admin.settings.ai.unit.seconds")}
-              value={value("subtitle_ai.asr_chunk_seconds", "600")}
+              value={value("subtitle_ai.asr_chunk_seconds")}
               onChange={(next) => setValue("subtitle_ai.asr_chunk_seconds", next)}
               description={t("web.admin.settings.ai.tuning.audioPerRequestRange")}
               restartRequired={restartKeys.has("subtitle_ai.asr_chunk_seconds")}
@@ -1069,7 +1096,7 @@ export default function AISettings() {
           >
             <LimitField
               label={t("web.admin.settings.ai.tuning.transcriptions")}
-              value={value("subtitle_ai.transcribe_quota_jobs", "0")}
+              value={value("subtitle_ai.transcribe_quota_jobs")}
               onChange={(next) => setValue("subtitle_ai.transcribe_quota_jobs", next)}
               fallbackValue="10"
               hint={t("web.admin.settings.ai.tuning.transcriptionsHint")}

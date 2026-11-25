@@ -38,7 +38,11 @@ import { useT, type Translate } from "@/i18n";
 import { formatRelativeTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import { CHECKBOX, LoadMoreButton, SearchField } from "./controls";
-import { countValues, formatStorageBytes } from "./downloadStoragePresentation";
+import {
+  countValues,
+  downloadEntryStatus,
+  formatStorageBytes,
+} from "./downloadStoragePresentation";
 
 type Sort = "last_seen" | "size";
 
@@ -299,45 +303,6 @@ function qualityLabel(t: Translate, quality: string) {
   return mbps ? t("web.admin.downloads.deviceCopies.qualityBitrate", { mbps: mbps[1] }) : quality;
 }
 
-function entryStatus(t: Translate, entry: AdminDownloadEntry) {
-  switch (entry.status) {
-    case "completed":
-      return {
-        label: t("web.admin.downloads.deviceCopies.status.finished"),
-        className: "bg-muted text-foreground",
-      };
-    case "queued":
-    case "preparing":
-    case "ready":
-      return {
-        label: t("web.admin.downloads.deviceCopies.status.waiting"),
-        className: "text-foreground bg-chart-1/30",
-      };
-    case "downloading":
-      return {
-        label: t("web.admin.downloads.deviceCopies.status.downloading"),
-        className: "text-foreground bg-chart-1/30",
-      };
-    case "revoked":
-      return {
-        label: t("web.admin.downloads.deviceCopies.status.revoked"),
-        className: "text-warning bg-warning/10",
-      };
-    case "failed":
-      return {
-        label: t("web.admin.downloads.deviceCopies.status.failed"),
-        className: "text-destructive bg-destructive/10",
-      };
-    case "cancelled":
-      return {
-        label: t("web.admin.downloads.deviceCopies.status.cancelled"),
-        className: "bg-muted text-muted-foreground",
-      };
-    default:
-      return { label: entry.status, className: "bg-muted text-muted-foreground" };
-  }
-}
-
 function DeviceEntries({
   device,
   onRevoke,
@@ -373,7 +338,7 @@ function DeviceEntries({
       ) : null}
       <ul className="divide-border/60 divide-y text-sm">
         {rows.map((row) => {
-          const status = entryStatus(t, row);
+          const status = downloadEntryStatus(row.status);
           const title = entryTitle(t, row);
           return (
             <li key={row.id} className="flex flex-wrap items-center gap-3 py-2">

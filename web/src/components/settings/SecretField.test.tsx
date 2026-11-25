@@ -110,7 +110,7 @@ describe("SecretField", () => {
     expect(onChange).toHaveBeenCalledWith("");
   });
 
-  it("does not treat an empty input as a keep while nothing is saved", async () => {
+  it("goes back to nothing staged when an input with nothing saved is emptied", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const onKeep = vi.fn();
@@ -119,8 +119,8 @@ describe("SecretField", () => {
     const input = screen.getByLabelText("Secret key");
     await user.type(input, "x");
     await user.clear(input);
-    expect(onKeep).not.toHaveBeenCalled();
-    expect(onChange).toHaveBeenCalledWith("");
+    expect(onKeep).toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalledWith("");
   });
 
   it("offers no clear action while the field is read-only", () => {

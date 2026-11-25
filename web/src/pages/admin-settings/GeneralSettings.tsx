@@ -51,9 +51,10 @@ export default function GeneralSettings() {
 
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
-  const trustedProxiesManaged = form.sensitiveManagedByEnv.includes(TRUSTED_PROXIES_KEY);
   const [saveInProgress, setSaveInProgress] = useState(false);
   const saveInProgressRef = useRef(false);
+  // Each save and discard ends the Use Redis switch's own choice.
+  const [savesAndDiscards, setSavesAndDiscards] = useState(0);
 
   // The Redis URL is a credential: its editors are frozen while a save is in
   // flight so a late keystroke cannot ride along with it.
@@ -81,6 +82,7 @@ export default function GeneralSettings() {
           ? form.dirtyKeys.filter((key) => !REDIS_KEYS.includes(key))
           : undefined,
       );
+      setSavesAndDiscards((count) => count + 1);
     } finally {
       saveInProgressRef.current = false;
       setSaveInProgress(false);
@@ -90,6 +92,8 @@ export default function GeneralSettings() {
   function handleDiscard() {
     if (saveInProgressRef.current) return;
     form.discard();
+    // Discard clears nothing until the settings have loaded.
+    if (form.loaded) setSavesAndDiscards((count) => count + 1);
   }
 
   // Redis reads whether a URL is saved from the protected-credential status,
@@ -131,6 +135,7 @@ export default function GeneralSettings() {
             value={form.getValue("branding.server_name")}
             onChange={(v) => form.setValue("branding.server_name", v)}
             restartRequired={restartKeys.has("branding.server_name")}
+            managedByEnv={form.envVar("branding.server_name")}
           />
           <SettingField
             label={t("web.admin.settings.general.identity.loginSubtitle.label")}
@@ -154,9 +159,11 @@ export default function GeneralSettings() {
             description={t("web.admin.settings.general.network.publicUrl.description")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="https://silo.example.com"
+            dir="ltr"
             value={form.getValue("server.public_url")}
             onChange={(v) => form.setValue("server.public_url", v)}
             restartRequired={restartKeys.has("server.public_url")}
+            managedByEnv={form.envVar("server.public_url")}
           />
           <SettingField
             label={t("web.admin.settings.general.network.lanDiscovery.label")}
@@ -166,6 +173,7 @@ export default function GeneralSettings() {
             value={form.getValue("server.lan_discovery")}
             onChange={(v) => form.setValue("server.lan_discovery", v)}
             restartRequired={restartKeys.has("server.lan_discovery")}
+            managedByEnv={form.envVar("server.lan_discovery")}
           />
           <SettingField
             label={t("web.admin.settings.general.network.localUrl.label")}
@@ -173,24 +181,23 @@ export default function GeneralSettings() {
             description={t("web.admin.settings.general.network.localUrl.description")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="http://192.168.1.20:8080"
+            dir="ltr"
             value={form.getValue(LOCAL_URL_KEY)}
             onChange={(v) => form.setValue(LOCAL_URL_KEY, v)}
             restartRequired={restartKeys.has(LOCAL_URL_KEY)}
+            managedByEnv={form.envVar(LOCAL_URL_KEY)}
           />
           <SettingField
             label={t("web.admin.settings.general.network.trustedProxies.label")}
             dirty={form.isDirty(TRUSTED_PROXIES_KEY)}
-            description={
-              trustedProxiesManaged
-                ? t("web.admin.settings.general.network.trustedProxies.managed")
-                : t("web.admin.settings.general.network.trustedProxies.description")
-            }
+            description={t("web.admin.settings.general.network.trustedProxies.description")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="172.16.0.0/12, 203.0.113.7/32"
+            dir="ltr"
             value={form.getValue(TRUSTED_PROXIES_KEY)}
             onChange={(v) => form.setValue(TRUSTED_PROXIES_KEY, v)}
-            disabled={trustedProxiesManaged}
             restartRequired={restartKeys.has(TRUSTED_PROXIES_KEY)}
+            managedByEnv={form.envVar(TRUSTED_PROXIES_KEY)}
           />
         </FieldGroup>
 
@@ -207,6 +214,7 @@ export default function GeneralSettings() {
             value={form.getValue("database.max_connections")}
             onChange={(v) => form.setValue("database.max_connections", v)}
             restartRequired={restartKeys.has("database.max_connections")}
+            managedByEnv={form.envVar("database.max_connections")}
           />
         </FieldGroup>
 
@@ -220,13 +228,18 @@ export default function GeneralSettings() {
               <p className="text-sm font-medium">
                 {t("web.admin.settings.redis.unavailable.title")}
               </p>
-              <p className="text-muted-foreground mt-1 text-[13px]">
+              <p className="text-muted-foreground mt-1 text-[0.8125rem]">
                 {t("web.admin.settings.redis.unavailable.description")}
               </p>
             </div>
           </div>
         ) : (
-          <RedisGroup form={form} restartKeys={restartKeys} secrets={redisUrlEditors} />
+          <RedisGroup
+            form={form}
+            restartKeys={restartKeys}
+            secrets={redisUrlEditors}
+            savesAndDiscards={savesAndDiscards}
+          />
         )}
       </div>
 

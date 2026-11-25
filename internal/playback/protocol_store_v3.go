@@ -185,6 +185,12 @@ type AttemptIdentityV3 struct {
 	ProfileID         string
 	// Stopped reports that the attempt has been stopped (StoppedAt is set).
 	Stopped bool
+	// StopID is the stop id the attempt was stopped under; empty while it is
+	// live. See AttemptRecordV3.StopID.
+	StopID string
+	// ClientFeatures are the attempt's durable client features
+	// (NormalizedRequest.ClientFeatures), which say how its end is answered.
+	ClientFeatures []string
 	// LoginSessionID is the login session that started the attempt, or
 	// empty; see AttemptRecordV3.LoginSessionID.
 	LoginSessionID string
@@ -447,7 +453,7 @@ func (s *MemoryPlanStoreV3) GetAttemptIdentity(ctx context.Context, sessionID st
 	if err != nil {
 		return nil, err
 	}
-	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID, Stopped: record.StoppedAt != nil, LoginSessionID: record.LoginSessionID}, nil
+	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID, Stopped: record.StoppedAt != nil, StopID: record.StopID, ClientFeatures: record.NormalizedRequest.ClientFeatures, LoginSessionID: record.LoginSessionID}, nil
 }
 
 func (s *MemoryPlanStoreV3) GetAttemptIdentityByPlaybackAttemptID(ctx context.Context, attemptID string) (*AttemptIdentityV3, error) {
@@ -455,7 +461,7 @@ func (s *MemoryPlanStoreV3) GetAttemptIdentityByPlaybackAttemptID(ctx context.Co
 	if err != nil {
 		return nil, err
 	}
-	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID, Stopped: record.StoppedAt != nil, LoginSessionID: record.LoginSessionID}, nil
+	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID, Stopped: record.StoppedAt != nil, StopID: record.StopID, ClientFeatures: record.NormalizedRequest.ClientFeatures, LoginSessionID: record.LoginSessionID}, nil
 }
 
 func (s *MemoryPlanStoreV3) RecordRouteEvent(_ context.Context, record RouteEventRecordV3) (bool, error) {

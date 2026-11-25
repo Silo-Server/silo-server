@@ -194,3 +194,28 @@ func TestHandlePlaybackInfoMediaSourceOwnerFollowsFileRow(t *testing.T) {
 		t.Fatalf("resolved content ids = %v, want %v", content.requested, want)
 	}
 }
+
+// Infuse echoes a body MediaSourceId cut at its first dash (#4491), so it could
+// only name the version it picked once media-source ids carry no dashes. The
+// dashed form clients stored earlier still selects its version.
+func TestPlaybackInfoBodyMediaSourceIDSelectsVersion(t *testing.T) {
+	handler, _ := newTwoVersionPlaybackInfoHandler(t)
+	itemID := handler.codec.EncodeStringID(EncodedIDItem, "movie-1")
+	rec := servePlaybackInfo(handler, itemID, `{}`)
+	var all playbackInfoResponseDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &all); rec.Code != http.StatusOK || err != nil || len(all.MediaSources) != 2 {
+		t.Fatalf("status = %d, err = %v, body = %s", rec.Code, err, rec.Body.String())
+	}
+	for _, source := range all.MediaSources {
+		if strings.Contains(source.ID, "-") {
+			t.Fatalf("media source id %q has a dash, which Infuse cuts at", source.ID)
+		}
+	}
+	dashed := EncodeNumericID(EncodedIDMediaSource, 43).String()
+	for _, sent := range []string{all.MediaSources[1].ID, dashed} {
+		resp := postPlaybackInfo(t, handler, itemID, `{"MediaSourceId":"`+sent+`"}`)
+		if !mediaSourceIDsEqual(resp.MediaSources[0].ID, dashed) {
+			t.Fatalf("body MediaSourceId %q selected %q, want file 43", sent, resp.MediaSources[0].ID)
+		}
+	}
+}

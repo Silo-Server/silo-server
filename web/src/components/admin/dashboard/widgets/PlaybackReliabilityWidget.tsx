@@ -84,11 +84,11 @@ export function PlaybackReliabilityWidget() {
 function MiniStat({ label, value, detail }: { label: string; value: string; detail?: ReactNode }) {
   return (
     <div className="bg-surface border-border rounded-lg border p-3">
-      <div className="text-[20px] leading-none font-extrabold tracking-tight tabular-nums">
+      <div className="text-[1.25rem] leading-none font-extrabold tracking-tight tabular-nums">
         {value}
       </div>
-      <div className="text-muted-foreground mt-1.5 text-[11px] font-medium">{label}</div>
-      {detail ? <div className="text-muted-foreground mt-0.5 text-[10px]">{detail}</div> : null}
+      <div className="text-muted-foreground mt-1.5 text-[0.6875rem] font-medium">{label}</div>
+      {detail ? <div className="text-muted-foreground mt-0.5 text-[0.625rem]">{detail}</div> : null}
     </div>
   );
 }

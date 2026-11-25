@@ -229,12 +229,37 @@ func runTranscodeStartup(ctx context.Context, pipeline *AutoTranscodePipeline, s
 
 // hardwareDecodeUnsupportedMarkers are FFmpeg startup errors that mean the
 // GPU's decoder cannot take this source at all, so running the same command
-// again fails the same way. NVDEC prints the first one when the card has no
-// decoder for the codec, profile or bit depth (HEVC on a Maxwell GM204, for
-// example) even though NVENC encodes fine.
+// again fails the same way.
+//   - NVDEC prints the first when the card has no decoder for the codec,
+//     profile or bit depth (HEVC on a Maxwell GM204, for example) even though
+//     NVENC encodes fine.
+//   - The second is ffmpegAV1HardwareDecodeUnavailable.
+//   - FFmpeg prints the third when it decoded the source on the CPU because no
+//     hardware decoder took it, and the graph that expects hardware frames
+//     cannot accept system-memory ones. On a GPU-decoded start that is how a
+//     QSV or VAAPI start fails for a codec or profile the GPU lacks.
+//
+// The generic "Failed setup for format" line is left out: FFmpeg prints it
+// when other hardware setup fails too, and goes on to decode in
+// software where the codec has a software decoder.
 var hardwareDecodeUnsupportedMarkers = []string{
 	"Hardware is lacking required capabilities",
+	ffmpegAV1HardwareDecodeUnavailable,
+	"Impossible to convert between the formats supported by the filter",
 }
+
+// ffmpegAV1HardwareDecodeUnavailable is the line FFmpeg's native AV1 decoder
+// prints when the GPU has no AV1 decoder (an Intel Coffee Lake UHD 630, for
+// example). That decoder has no software path, so it rejects every packet,
+// and FFmpeg reads on to the end of the input before it exits. On a large
+// file that outlasts the startup wait, so the process is stopped as soon as
+// the line appears (see ffmpegStderrWriter) and the exit is classified like
+// any other decoder rejection.
+const ffmpegAV1HardwareDecodeUnavailable = "doesn't support hardware accelerated AV1 decoding"
+
+// ffmpegAV1DecoderLogPrefix starts every line the native AV1 decoder logs,
+// such as "[av1 @ 0x5581c2a0] Your platform doesn't support ...".
+const ffmpegAV1DecoderLogPrefix = "[av1 @ "
 
 // ErrHardwareDecodeUnsupported marks an FFmpeg failure whose diagnostics say
 // the hardware decoder cannot decode the source. errors.Is finds it on the

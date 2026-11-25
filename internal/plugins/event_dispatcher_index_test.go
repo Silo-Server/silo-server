@@ -2,14 +2,15 @@ package plugins
 
 import (
 	"context"
-	"encoding/json"
 	"reflect"
 	"slices"
 	"sync"
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/events"
 )
 
 // countingDispatchStore is a taskInstallationStore that counts every read the
@@ -94,7 +95,7 @@ type delivery struct {
 }
 
 // deliveryRecorder resolves every installation to a client that records the
-// call. dispatchBusEvent and dispatchEnvelope wait for their deliveries, so
+// call. dispatchEnvelope waits for its deliveries, so
 // they have finished recording by the time they return.
 type deliveryRecorder struct {
 	mu   sync.Mutex
@@ -145,12 +146,12 @@ func eventConsumer(installationID int, id string, subscriptions ...string) *Capa
 
 // newIndexFixture returns a store with one builtin and three plugin
 // installations, of which only installation 1 subscribes to
-// library.media_added and installation 3 subscribes to a plugin event.
+// catalog.library.changed and installation 3 subscribes to a plugin event.
 func newIndexFixture() *countingDispatchStore {
 	store := &countingDispatchStore{}
 	store.install(&Installation{ID: 1, PluginID: "silo.alpha", Enabled: true},
-		eventConsumer(1, "first", "library.media_added"),
-		eventConsumer(1, "second", "library.media_added", cache.EventScanComplete),
+		eventConsumer(1, "first", "catalog.library.changed"),
+		eventConsumer(1, "second", "catalog.library.changed", "scan.completed"),
 	)
 	store.install(&Installation{ID: 2, PluginID: "silo.metadata", Enabled: true},
 		&Capability{InstallationID: 2, Type: "metadata_provider.v1", ID: "tmdb"},
@@ -162,9 +163,8 @@ func newIndexFixture() *countingDispatchStore {
 	return store
 }
 
-func mediaAdded() cache.Event {
-	body, _ := json.Marshal(map[string]any{"libraryId": "lib-1"})
-	return cache.Event{Type: "library.media_added", Payload: string(body)}
+func mediaAdded() events.Envelope {
+	return catalogEnvelope("catalog.library.changed", `{"library_id":1,"reason":"scan","new":2}`)
 }
 
 // TestDispatcherFollowsPluginsChangedFromAnotherReplica simulates an admin
@@ -186,7 +186,7 @@ func TestDispatcherFollowsPluginsChangedFromAnotherReplica(t *testing.T) {
 
 	publish := func() []int {
 		t.Helper()
-		d.dispatchBusEvent(ctx, mediaAdded())
+		d.dispatchEnvelope(ctx, mediaAdded())
 		var ids []int
 		for _, delivered := range recorder.take() {
 			ids = append(ids, delivered.installationID)
@@ -217,7 +217,7 @@ func TestDispatcherFollowsPluginsChangedFromAnotherReplica(t *testing.T) {
 	// The other replica commits the new installation. Until its notification
 	// arrives this replica keeps dispatching from its index.
 	store.install(&Installation{ID: 5, PluginID: "silo.delta", Enabled: true},
-		eventConsumer(5, "watcher", "library.media_added"),
+		eventConsumer(5, "watcher", "catalog.library.changed"),
 	)
 	if got := publish(); !reflect.DeepEqual(got, []int{1}) {
 		t.Fatalf("deliveries before plugins_changed = %v, want [1]", got)
@@ -254,11 +254,11 @@ func TestDispatcherDeliversOncePerInstallation(t *testing.T) {
 	recorder := &deliveryRecorder{}
 	d := NewEventDispatcher(newFakeBus(), nil, newIndexFixture(), recorder, newMemoryDeliveryStore(), 4)
 
-	d.dispatchBusEvent(ctx, mediaAdded())
-	d.dispatchBusEvent(ctx, cache.Event{Type: cache.EventScanComplete, Payload: "7"})
+	d.dispatchEnvelope(ctx, mediaAdded())
+	d.dispatchEnvelope(ctx, scanCompleted())
 	want := []delivery{
-		{installationID: 1, capabilityID: "first", eventName: "library.media_added"},
-		{installationID: 1, capabilityID: "second", eventName: cache.EventScanComplete},
+		{installationID: 1, capabilityID: "first", eventName: "catalog.library.changed"},
+		{installationID: 1, capabilityID: "second", eventName: "scan.completed"},
 	}
 	if got := recorder.take(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("deliveries = %+v, want %+v", got, want)
@@ -275,7 +275,7 @@ func TestDispatcherIndexNotKeptAfterRacingInvalidation(t *testing.T) {
 	d := NewEventDispatcher(newFakeBus(), nil, store, recorder, newMemoryDeliveryStore(), 4)
 
 	store.onListEnabled = d.invalidateIndex
-	d.dispatchBusEvent(ctx, mediaAdded())
+	d.dispatchEnvelope(ctx, mediaAdded())
 	if got := recorder.take(); len(got) != 1 {
 		t.Fatalf("racing rebuild deliveries = %+v, want one", got)
 	}
@@ -285,12 +285,12 @@ func TestDispatcherIndexNotKeptAfterRacingInvalidation(t *testing.T) {
 
 	store.onListEnabled = nil
 	store.resetReads()
-	d.dispatchBusEvent(ctx, mediaAdded())
+	d.dispatchEnvelope(ctx, mediaAdded())
 	if got := store.reads(); got != 4 {
 		t.Fatalf("store reads after racing rebuild = %d, want 4 (index was not kept)", got)
 	}
 	store.resetReads()
-	d.dispatchBusEvent(ctx, mediaAdded())
+	d.dispatchEnvelope(ctx, mediaAdded())
 	if got := store.reads(); got != 0 {
 		t.Fatalf("store reads once rebuilt = %d, want 0", got)
 	}

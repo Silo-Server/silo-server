@@ -121,6 +121,7 @@ func (h *PlaybackHandler) sweepLifecycle(ctx context.Context, pool *pgxpool.Pool
 		}
 		h.sweepLifecycleCandidate(ctx, pool, c, deliveries[c.sessionID], now)
 	}
+	h.sweepPausedTimeouts(ctx, pool)
 }
 
 func loadLifecycleCandidates(ctx context.Context, pool *pgxpool.Pool, now time.Time) ([]lifecycleCandidate, error) {
@@ -271,7 +272,7 @@ func (h *PlaybackHandler) finishInterruptedNativeEnd(ctx context.Context, sessio
 	if err != nil {
 		return
 	}
-	historyID, err := h.finishStop(ctx, record, sessionID, receipt.Accepted, endReasonForStop(sessionID, receipt.StopID))
+	historyID, err := h.finishStop(ctx, record, sessionID, receipt)
 	if err != nil {
 		// Left unfinalized: the lease lapses and a later sweep retries.
 		slog.WarnContext(ctx, "lifecycle sweep could not finish a session's end", "component", "api", "session", sessionID, "error", err)
@@ -364,26 +365,53 @@ func (h *PlaybackHandler) endReportedPlay(ctx context.Context, pool *pgxpool.Poo
 // endLifecycleWith is endLifecycleFromFacts with the session's facts
 // completed by fill, when it is not nil.
 func (h *PlaybackHandler) endLifecycleWith(ctx context.Context, pool *pgxpool.Pool, sessionID string, reason PlaybackEndReason, now time.Time, fill func(*playback.Session)) {
-	reader, ok := h.AdminStore.(liveSessionReader)
-	if !ok {
-		return
+	var session *playback.Session
+	var fromLiveRow bool
+	var err error
+	if originReader, ok := h.AdminStore.(liveSessionOriginReader); ok {
+		session, fromLiveRow, err = originReader.LiveSessionWithOrigin(ctx, sessionID)
+	} else {
+		reader, ok := h.AdminStore.(liveSessionReader)
+		if !ok {
+			return
+		}
+		session, err = reader.LiveSession(ctx, sessionID)
 	}
-	session, err := reader.LiveSession(ctx, sessionID)
 	if err != nil {
 		if !errors.Is(err, playback.ErrSessionNotFound) {
 			slog.WarnContext(ctx, "lifecycle sweep could not read a session's start", "component", "api", "session", sessionID, "error", err)
 		}
 		return
 	}
+	// Without the attempt, the subtitle is the one the row last synced, and
+	// counts from then, or from the play's start when the row has no sync
+	// time: a finalization that ended later keeps its own.
+	subtitleAt := session.UpdatedAt
+	if subtitleAt.IsZero() {
+		subtitleAt = session.StartedAt
+	}
 	// The attempt's last accepted sample is the play's position, including a
 	// seek back past where the shared row last saw it.
-	if record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && record.LastSample != nil {
-		session.Position = record.LastSample.Position
+	if record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && record != nil {
+		if record.LastSample != nil {
+			session.Position = record.LastSample.Position
+		}
+		// The start row holds the delivery the play began with; the attempt
+		// holds the plan and frozen recipe its last replan committed.
+		if record.CurrentPlanID != "" {
+			applyAttemptPlanFacts(session, record, fromLiveRow)
+			subtitleAt = time.Time{}
+		}
 	}
 	if fill != nil {
 		fill(session)
+	} else if watch, ok := h.savedWatch(ctx, sessionID); ok {
+		// The shared row carries no measurement; the lifecycle row holds
+		// the one the play's last live copy saved. A reported play's fill
+		// credits its own listening instead.
+		session.Watch.Restore(watch)
 	}
-	if err := h.recordAdminStopHistory(ctx, session, reason); err != nil {
+	if err := h.recordAdminEnd(ctx, session, reason, subtitleAt); err != nil {
 		recordLifecycleActivity(ctx, pool, sessionID, now)
 	}
 }

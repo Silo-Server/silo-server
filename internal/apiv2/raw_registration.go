@@ -39,24 +39,33 @@ const (
 
 // mediaCrossOrigin runs outside the authorization gate, so a refusal still
 // reaches the player as a readable status instead of an opaque CORS failure.
-// The native listener answers no OPTIONS preflight. Cast receivers fetch
-// playlists and segments with plain GETs and have not been seen to send one.
+// Only the original-file stream route answers a preflight (playbackMediaCORS).
+// Cast receivers fetch playlists and segments with plain GETs and have not
+// been seen to send one.
 func mediaCrossOrigin(ctx huma.Context, next func(huma.Context)) {
 	ctx.SetHeader("Access-Control-Allow-Origin", "*")
 	ctx.SetHeader("Access-Control-Allow-Headers", mediaCORSAllowHeaders)
 	ctx.SetHeader("Access-Control-Expose-Headers", mediaCORSExposeHeaders)
+	// Lets a player on another origin read which protocol the connection
+	// speaks, so it does not send parallel ranges over HTTP/2 or HTTP/3.
+	ctx.SetHeader("Timing-Allow-Origin", "*")
 	next(ctx)
 }
 
 // RawImpliedStatuses lists only failures of the shared authorization gates.
 // Raw handlers declare their own protocol statuses; JSON negotiation and Huma
-// input validation do not run on byte streams.
-func RawImpliedStatuses(class Class, serviceBacked bool) []int {
+// input validation do not run on byte streams. A public operation naming a
+// rate-limit bucket adds 429, as in ImpliedStatuses.
+func RawImpliedStatuses(class Class, serviceBacked, rateLimited bool) []int {
 	if class == ClassPublic {
-		if serviceBacked {
-			return []int{http.StatusServiceUnavailable}
+		var statuses []int
+		if rateLimited {
+			statuses = append(statuses, http.StatusTooManyRequests)
 		}
-		return nil
+		if serviceBacked {
+			statuses = append(statuses, http.StatusServiceUnavailable)
+		}
+		return statuses
 	}
 	statuses := []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusServiceUnavailable}
 	if resolvesProfile(class) {
@@ -155,10 +164,8 @@ func RegisterRaw(reg *Registry, raw RawOperation, handler http.Handler) {
 			fail("raw path parameter must be explicitly documented: " + name)
 		}
 	}
-	for _, declared := range reg.Declared() {
-		if declared.Method == op.Method && declared.Path == rawRouterPath(op.Path, raw.WildcardParam) {
-			fail("duplicate raw route")
-		}
+	if reg.hasDeclaredRoute(op.Method, rawRouterPath(op.Path, raw.WildcardParam)) {
+		fail("duplicate raw route")
 	}
 	if op.Metadata == nil {
 		op.Metadata = map[string]any{}
@@ -200,7 +207,7 @@ func RegisterRaw(reg *Registry, raw RawOperation, handler http.Handler) {
 	if resolvesProfile(op.Class) {
 		op.Parameters = append(op.Parameters, profileHeaderFor(&op), profileTokenHeaderParam())
 	}
-	for _, status := range RawImpliedStatuses(op.Class, op.ServiceBacked) {
+	for _, status := range RawImpliedStatuses(op.Class, op.ServiceBacked, op.RateLimitBucket != "") {
 		key := strconv.Itoa(status)
 		if _, exists := op.Responses[key]; !exists {
 			op.Responses[key] = &huma.Response{Description: http.StatusText(status), Content: map[string]*huma.MediaType{
@@ -211,9 +218,7 @@ func RegisterRaw(reg *Registry, raw RawOperation, handler http.Handler) {
 	reg.api.OpenAPI().AddOperation(&op.Operation)
 	routeOp := op.Operation
 	routeOp.Path = rawRouterPath(op.Path, raw.WildcardParam)
-	reg.mu.Lock()
-	reg.ops = append(reg.ops, Declared{Method: op.Method, Path: routeOp.Path, OperationID: op.OperationID, Class: op.Class, RetrySafety: op.RetrySafety})
-	reg.mu.Unlock()
+	reg.recordDeclared(Declared{Method: op.Method, Path: routeOp.Path, OperationID: op.OperationID, Class: op.Class, RetrySafety: op.RetrySafety})
 	serve := func(ctx huma.Context) {
 		r, w := humachi.Unwrap(ctx)
 		handler.ServeHTTP(w, r.WithContext(ctx.Context()))

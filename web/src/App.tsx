@@ -34,6 +34,7 @@ import { requestAdminMessages, useT } from "@/i18n";
 import { BrandingProvider } from "@/contexts/BrandingProvider";
 import { UICustomizationProvider } from "@/contexts/UICustomizationProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import { RouteLoading } from "@/components/RouteLoading";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import { loadStoredImpersonationAdminSession } from "@/lib/impersonationSession";
@@ -123,6 +124,7 @@ const AdminHomeRows = lazy(() => import("@/pages/AdminHomeRows"));
 const AdminRequestDiscover = lazy(() => import("@/pages/AdminRequestDiscover"));
 const AdminCollections = lazy(() => import("@/pages/AdminCollections"));
 const AdminPlaybackHistory = lazy(() => import("@/pages/AdminPlaybackHistory"));
+const AdminInsights = lazy(() => import("@/pages/admin-insights/AdminInsights"));
 const AdminMarkerHistory = lazy(() => import("@/pages/AdminMarkerHistory"));
 const AdminMaintenance = lazy(() => import("@/pages/AdminMaintenance"));
 const AdminBackups = lazy(() => import("@/pages/AdminBackups"));
@@ -574,6 +576,7 @@ function AppRoutes() {
                   <Route path="autoscan" element={<AdminAutoscan />} />
                   <Route path="autoscan/activity" element={<AdminAutoscanActivity />} />
                   <Route path="history" element={<AdminPlaybackHistory />} />
+                  <Route path="insights" element={<AdminInsights />} />
                   <Route path="marker-history" element={<AdminMarkerHistory />} />
                   <Route path="history-import" element={<AdminHistoryImport />} />
                   <Route path="users" element={<AdminUsers />} />
@@ -846,10 +849,15 @@ function AdminRealtimeEventChannels() {
   useEventChannel("scans");
   useEventChannel("settings");
   useEventChannel("download_preparations");
+  useEventChannel("downloads");
+  // A background helper on every page: if its chunk fails to load, go without
+  // it rather than take the page down.
   return (
-    <Suspense fallback={null}>
-      <AdminDownloadPreparationsRefresh />
-    </Suspense>
+    <LocalErrorBoundary>
+      <Suspense fallback={null}>
+        <AdminDownloadPreparationsRefresh />
+      </Suspense>
+    </LocalErrorBoundary>
   );
 }
 

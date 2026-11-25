@@ -34,6 +34,7 @@ import {
 import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
 import { toast } from "sonner";
 import { LearnedLimitRow, PlaybackConnection } from "./PlaybackConnection";
+import { NextUpPromptSetting } from "./NextUpPromptSetting";
 
 /**
  * Every preference on this screen is the profile's own choice. A device, a
@@ -49,9 +50,9 @@ import { LearnedLimitRow, PlaybackConnection } from "./PlaybackConnection";
  * surfaces cannot land on different scopes.
  */
 const BASE_PLAYBACK_KEYS: SettingKey[] = [
-  SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
+  SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS,
 ];
 
 const BUFFERING_MODE_SETTING = SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE];
@@ -394,13 +395,13 @@ function LegacyAudiobookImportRow({ prefs }: { prefs: ReturnType<typeof useSeekP
     <div className="border-border/50 grid gap-3 border-t pt-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
       <div className="min-w-0 space-y-1">
         <p className="text-sm font-medium">{t("web.settings.playback.legacy.title")}</p>
-        <p className="text-muted-foreground text-[13px] leading-relaxed">{body}</p>
+        <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">{body}</p>
         {outcome ? (
           <p
             className={
               outcome.failed.length > 0
-                ? "text-destructive text-[13px] leading-relaxed"
-                : "text-muted-foreground text-[13px] leading-relaxed"
+                ? "text-destructive text-[0.8125rem] leading-relaxed"
+                : "text-muted-foreground text-[0.8125rem] leading-relaxed"
             }
             role="status"
           >
@@ -455,7 +456,7 @@ function SeekControls() {
         <h3 className="text-base font-semibold tracking-tight">
           {t("web.settings.playback.seek.title")}
         </h3>
-        <p className="text-muted-foreground max-w-2xl text-[13px] leading-relaxed">
+        <p className="text-muted-foreground max-w-2xl text-[0.8125rem] leading-relaxed">
           {t("web.settings.playback.seek.description")}
         </p>
       </div>
@@ -741,19 +742,10 @@ export default function PlaybackSettings() {
           than on the admin plugin page, which is server-wide. */}
 
       <SettingsGroup title={t("web.settings.playback.nextEpisode.title")}>
-        <SettingRow
-          label={t("web.settings.playback.nextEpisode.previewLabel")}
-          description={t("web.settings.playback.nextEpisode.previewDescription")}
-          control={(id) => (
-            <Switch
-              id={id}
-              checked={read<boolean>(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW)}
-              disabled={pending}
-              onCheckedChange={(checked) =>
-                saveValue(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW, checked)
-              }
-            />
-          )}
+        <NextUpPromptSetting
+          seconds={read<number>(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS)}
+          disabled={pending}
+          onChange={(seconds) => saveValue(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS, seconds)}
         />
 
         <AutoPlayNextSetting />

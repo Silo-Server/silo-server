@@ -160,10 +160,12 @@ func (s *Postgres) GetAttemptIdentityByPlaybackAttemptID(ctx context.Context, at
 func (s *Postgres) getAttemptIdentity(ctx context.Context, predicate string, value any) (*playback.AttemptIdentityV3, error) {
 	var identity playback.AttemptIdentityV3
 	err := s.db.QueryRow(ctx, `
-		SELECT playback_attempt_id, COALESCE(session_id::text, ''), user_id, profile_id, stopped_at IS NOT NULL, login_session_id
+		SELECT playback_attempt_id, COALESCE(session_id::text, ''), user_id, profile_id, stopped_at IS NOT NULL,
+		       COALESCE(stop_receipt->>'stop_id', ''), COALESCE(normalized_request->'client_features', '[]'::jsonb), login_session_id
 		FROM playback_v3_attempts
 		WHERE `+predicate+` AND expires_at > NOW()`, value).Scan(
-		&identity.PlaybackAttemptID, &identity.SessionID, &identity.UserID, &identity.ProfileID, &identity.Stopped, &identity.LoginSessionID,
+		&identity.PlaybackAttemptID, &identity.SessionID, &identity.UserID, &identity.ProfileID, &identity.Stopped,
+		&identity.StopID, &identity.ClientFeatures, &identity.LoginSessionID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, playback.ErrSessionNotFound
@@ -568,6 +570,75 @@ func (s *Postgres) ExpireIdleAttempt(ctx context.Context, sessionID, stopID stri
 		return false, err
 	}
 	return tag.RowsAffected() == 1, nil
+}
+
+// ExpirePausedAttempt stops a live attempt under stopID only while it is
+// paused and has been since before the timeout: its last accepted sample is
+// paused and its native lifecycle row has said paused for at least timeout,
+// by the database's clock. What the sweep selected by is checked again here:
+// the client still reports (it accepted a sample within
+// PausedStreamSlotGrace), it still plays mediaFileID (the file the sweep
+// found is not audio-only), no Cast receiver renders the attempt, and no open
+// Watch Together room lists the session.
+//
+// The attempt is locked first, the lock ApplyProgress takes, so a resume
+// either commits before (and the lock re-reads the row it changed) or waits
+// for this claim. The lifecycle row is read by a second statement, whose
+// snapshot is taken after the lock is held: a single UPDATE joining the
+// lifecycle row would judge it as of the statement's start and could end a
+// session a resume committed while the claim waited.
+func (s *Postgres) ExpirePausedAttempt(ctx context.Context, sessionID, stopID string, mediaFileID int, timeout time.Duration) (bool, error) {
+	if _, err := uuid.Parse(stopID); err != nil {
+		return false, playback.ErrInvalidStopIDV3
+	}
+	if timeout <= 0 {
+		return false, nil
+	}
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var locked bool
+	err = tx.QueryRow(ctx, `
+		SELECT true FROM playback_v3_attempts
+		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL
+		  AND COALESCE((last_sample->>'is_paused')::boolean, false)
+		  AND updated_at >= NOW() - make_interval(secs => $3)
+		  AND effective_media_file_id = $4
+		  AND COALESCE(normalized_request #>> '{client_playback_context,output,current_sink}', '') <> $2
+		FOR UPDATE`, sessionID, playback.CastReceiverSinkV3, playback.PausedStreamSlotGrace.Seconds(), mediaFileID).Scan(&locked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var paused bool
+	err = tx.QueryRow(ctx, `
+		SELECT true FROM playback_session_lifecycle lc
+		WHERE lc.session_id = $1::uuid AND lc.frontend = 'native' AND lc.state = 'paused'
+		  AND lc.updated_at <= NOW() - make_interval(secs => $2)
+		  AND `+playback.NotInOpenWatchTogetherRoomSQL, sessionID, timeout.Seconds()).Scan(&paused)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE playback_v3_attempts
+		SET stopped_at = NOW(),
+		    stop_id = $2::uuid,
+		    stop_receipt = jsonb_strip_nulls(jsonb_build_object('stop_id', $2::uuid::text, 'accepted', last_sample)),
+		    updated_at = NOW()
+		WHERE session_id = $1::uuid`, sessionID, stopID); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Postgres) RecordStopReceipt(ctx context.Context, sessionID string, receipt playback.StopReceiptV3) error {

@@ -37,11 +37,11 @@ const (
 	probeTimeoutSlack            = time.Second
 	// probeEndpointSlack covers what a capability endpoint spends around the
 	// tone-map matrix itself: one bounded hardware detection walk (30s in
-	// playback.hwAccelWalkTimeout), the transformation registry's three 3s
+	// playback.hwAccelWalkTimeout), the transformation registry's five 3s
 	// commands, and response overhead. It cannot be derived from those
 	// constants — playback imports this package, not the other way round — so
 	// it is raised whenever either budget grows.
-	probeEndpointSlack = 45 * time.Second
+	probeEndpointSlack = 51 * time.Second
 	probeRequestSlack  = 5 * time.Second
 )
 

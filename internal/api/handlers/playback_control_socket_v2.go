@@ -72,6 +72,11 @@ var (
 	// ErrPlaybackControlSocketSessionEnded: the session's durable attempt was
 	// stopped, so no later request rebuilds it and the client should stop.
 	ErrPlaybackControlSocketSessionEnded = errors.New("playback session has ended")
+	// ErrPlaybackControlSocketPausedTimeout: the server ended the session
+	// because it stayed paused too long, and its client advertised
+	// paused_timeout_v1, so it is told why. A client that did not gets
+	// ErrPlaybackControlSocketSessionEnded.
+	ErrPlaybackControlSocketPausedTimeout = errors.New("playback session was paused for too long")
 	// ErrPlaybackControlSocketSessionResuming: the attempt is still live but
 	// this replica has no in-memory session for it yet. The player's next media
 	// request rebuilds it, so the client should retry.
@@ -279,6 +284,9 @@ func (h *PlaybackControlSocketV2) missingSessionError(ctx context.Context, ident
 		return playback.ErrSessionNotFound
 	}
 	if attempt.Stopped {
+		if ended, advertised := pausedTimeoutEnd(playbackSessionID, attempt.StopID, attempt.ClientFeatures); ended && advertised {
+			return ErrPlaybackControlSocketPausedTimeout
+		}
 		return ErrPlaybackControlSocketSessionEnded
 	}
 	return ErrPlaybackControlSocketSessionResuming
@@ -358,7 +366,7 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	}
 	validated, claims, err := h.Validate(r.Context(), ticket.Identity)
 	if err != nil {
-		http.Error(w, "realtime authority expired", http.StatusUnauthorized)
+		refuseSocketHandshake(w, err, "realtime authority expired")
 		return
 	}
 	expected := ticket.Binding
@@ -381,8 +389,8 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	if ticket.Identity.AccessExpiresAt.Before(deadline) {
 		deadline = ticket.Identity.AccessExpiresAt
 	}
-	ctx, cancel := context.WithDeadline(validated, deadline)
-	defer cancel()
+	ctx, cancel := socketLifetime(validated, deadline)
+	defer cancel(nil)
 
 	upgrader := websocket.Upgrader{Subprotocols: []string{PlaybackControlSocketProtocol}, EnableCompression: true, CheckOrigin: func(r *http.Request) bool {
 		return socketOriginAllowed(r, h.currentPublicOrigin(), overlayOriginsFrom(h.overlayOrigins.Load()))
@@ -392,6 +400,7 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		slog.ErrorContext(r.Context(), "playback control websocket upgrade failed", "component", "api", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		return
 	}
+	closer := newSocketCloser(conn)
 	realtimeConn := &sessionRealtimeConn{conn: conn}
 	registration := h.Playback.RealtimeHub.Register(sessionID, realtimeConn)
 	if registration == nil {
@@ -415,48 +424,41 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		if h.Playback.RealtimeHub.Unregister(registration) && h.Playback.setRealtimeConnectionState(sessionID, false) {
 			h.Playback.syncSessionsNow(context.Background(), "realtime_disconnect")
 		}
-		_ = conn.Close()
+		closer.close(context.Cause(ctx))
 	}()
 
 	configureWebSocket(conn)
 	readCtx, cancelRead := context.WithCancel(ctx)
 	defer cancelRead()
 	// The read loop takes no context: close the socket when the deadline
-	// passes or a re-check cancels the read.
-	stopClose := context.AfterFunc(readCtx, func() { _ = conn.Close() })
+	// passes or a re-check ends the connection, with the close frame its
+	// cause names.
+	stopClose := closer.closeWhenDone(ctx)
 	defer stopClose()
 	startWebSocketPingLoop(readCtx, realtimeConn.WritePing)
 	// Re-check login authority and session ownership without extending the
-	// deadline; loss of either closes an otherwise healthy socket.
-	go func() {
-		interval := h.checkInterval
-		if interval <= 0 {
-			interval = playbackControlCheckInterval
+	// deadline; loss of either closes an otherwise healthy socket. A lost
+	// session or lane names no close code, so it ends without a close frame.
+	interval := h.checkInterval
+	if interval <= 0 {
+		interval = playbackControlCheckInterval
+	}
+	go recheckSocketAuthority(readCtx, cancel, interval, func(checkCtx context.Context) error {
+		if _, _, err := h.Validate(checkCtx, ticket.Identity); err != nil {
+			return err
 		}
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-readCtx.Done():
-				return
-			case <-ticker.C:
-				checkCtx, stop := context.WithTimeout(readCtx, 2*time.Second)
-				_, _, err := h.Validate(checkCtx, ticket.Identity)
-				if err == nil {
-					_, err = h.admit(checkCtx, ticket.Identity, sessionID, expected.InstallationID, &expected)
-				}
-				stop()
-				if err != nil {
-					cancelRead()
-					return
-				}
-			}
-		}
-	}()
+		_, err := h.admit(checkCtx, ticket.Identity, sessionID, expected.InstallationID, &expected)
+		return err
+	})
 	for {
 		_, data, err := wsconn.ReadMessage(conn, wsMaxClientMessageBytes)
 		if err != nil {
 			return
+		}
+		if ctx.Err() != nil {
+			// The connection is ending: keep reading for the peer's close
+			// reply, but act on nothing more it sends.
+			continue
 		}
 		if !h.owns(sessionID, lane) {
 			// A newer registration for the same owner took the lane; frames

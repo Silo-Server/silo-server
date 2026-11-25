@@ -51,7 +51,7 @@ hand-picked or imported collection's `item_count`, and that it has no title with
 collage, per viewer for up to five minutes. A change to the collection's members or definition, or
 to the viewer's or creator's access, shows on the next read. A catalog change alone, such as a
 title leaving a library, a new rating or newly fetched artwork, can take up to five minutes to
-reach a list. `getCollection` and the `/api/v1` list routes always count live.
+reach a list. `getCollection` always counts live.
 
 Smart rules on watch state, favorites and the watchlist, and display filters, are evaluated for
 the viewer. A shared collection never reveals its creator's activity.
@@ -125,6 +125,11 @@ collections of other profiles on the login, grouped by `creator_profile_id`, eac
 creator's order. Clients split the list with `creator_profile_id` and label shared collections
 with the creator's name from the login's profile list. The web client orders the **Shared with
 me** owners by the login's profile-list order.
+
+`listLibraryUserCollections` and the `user_collections` group of `getLibraryCollections` list
+the collections opted into the library's Collections tab in the same order as
+`listCollections`. The group's `manual` sort mode keeps that order; its other sort modes
+re-sort it.
 
 Each profile has one flat order of its own collections (`sort_order`). `getCollectionOrder`
 returns it with a strong ETag, and `reorderCollections` replaces it under `If-Match`.

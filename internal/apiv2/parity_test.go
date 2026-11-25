@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
@@ -93,7 +94,10 @@ func (f fakeSettings) Get(_ context.Context, key string) (string, error) {
 }
 func (f fakeSettings) Set(context.Context, string, string) error { return nil }
 func (f fakeSettings) GetAll(context.Context) (map[string]string, error) {
-	return map[string]string{"ratelimit.ip.requests_per_second": "1", "ratelimit.ip.requests_per_minute": "1", "ratelimit.ip.burst": "1"}, nil
+	return map[string]string{
+		"ratelimit.ip.requests_per_second": "1", "ratelimit.ip.requests_per_minute": "1", "ratelimit.ip.burst": "1",
+		"ratelimit.auth.item_poster.requests_per_minute": "2", "ratelimit.auth.item_poster.burst": "2",
+	}, nil
 }
 
 const (
@@ -412,6 +416,50 @@ func TestRateLimitExceeded(t *testing.T) {
 	}
 	if last != TypeRateLimited {
 		t.Fatal("limiter never fired")
+	}
+}
+
+// The poster budget admits a burst larger than the ordinary address budget,
+// then returns the v2 problem before looking up the item. Another address
+// still has its own allowance.
+func TestItemPosterAddressBudget(t *testing.T) {
+	perKey, global := ratelimit.NewMemoryLimiter(), ratelimit.NewMemoryLimiter()
+	t.Cleanup(perKey.Close)
+	t.Cleanup(global.Close)
+	mw := ratelimit.NewMiddleware(perKey, global, fakeSettings{}, true)
+	if err := mw.Reload(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	posters := newTestItemPosters(&posterPresignFake{})
+	source := &posterSourceFake{paths: map[string]string{"movie": "tmdb/movies/1/poster.jpg"}}
+	store := blobstoretest.New()
+	if err := store.Put(t.Context(), "tmdb/movies/1/poster.jpg", []byte("\x89PNG\r\n\x1a\nrest")); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(Dependencies{
+		BucketRateLimit: mw.AuthEndpointHandler, ItemPosters: posters, ItemPosterSource: source,
+		ArtworkStore: store,
+	})
+	link := posters.Link("movie", time.Now())
+	get := func(ip string) *httptest.ResponseRecorder {
+		req := httptest.NewRequestWithContext(clientip.SetContext(t.Context(), ip), http.MethodGet, link, nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	const ip = "203.0.113.9"
+	for range 2 {
+		if rec := get(ip); rec.Code != http.StatusOK {
+			t.Fatalf("poster burst: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	limited := get(ip)
+	requireProblem(t, limited, TypeRateLimited)
+	if limited.Header().Get("Retry-After") == "" || source.reads.Load() != 2 {
+		t.Fatalf("refusal: headers %v, catalog reads %d", limited.Header(), source.reads.Load())
+	}
+	if rec := get("203.0.113.10"); rec.Code != http.StatusOK {
+		t.Fatalf("second address: %d %s", rec.Code, rec.Body.String())
 	}
 }
 
