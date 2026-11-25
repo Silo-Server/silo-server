@@ -43,8 +43,8 @@ var (
 // pairs[0].local_id); a signed set reports it at the signed payload instead.
 type ProfileSetFieldError struct {
 	Location string
-	// Code is the validation code: invalid, or name_conflict for a name a
-	// profile outside the set already uses.
+	// Code is the validation code: invalid, required for a member left out,
+	// or name_conflict for a name a profile outside the set already uses.
 	Code    string
 	Message string
 }
@@ -53,6 +53,12 @@ func (e *ProfileSetFieldError) Error() string { return e.Location + ": " + e.Mes
 
 func profileSetFieldError(location, message string) *ProfileSetFieldError {
 	return &ProfileSetFieldError{Location: location, Code: "invalid", Message: message}
+}
+
+// profileSetRequired is the error for a required member an item leaves out.
+// An absent member is never read as false, empty or "no limit".
+func profileSetRequired(at, name string) *ProfileSetFieldError {
+	return &ProfileSetFieldError{Location: at + "." + name, Code: "required", Message: "expected required property " + name + " to be present"}
 }
 
 // profileSetPIN is an item's PIN instruction: its kind, and the four digits
@@ -105,6 +111,15 @@ func (d *profileSetDoc) syncIDs() []string {
 // parseProfileSet reads a set and its optional pairs, the same for the
 // signed and the session form. It refuses a malformed member and ignores an
 // item member it does not know.
+// CheckProfileSet reports whether a set, its pairs and its edits_seen are
+// well formed, with the *ProfileSetFieldError that applying them would
+// answer. The route runs it for both forms of the request before it spends
+// or locks anything.
+func CheckProfileSet(set, pairs json.RawMessage, editsSeen string) error {
+	_, err := parseProfileSet(set, pairs, editsSeen)
+	return err
+}
+
 func parseProfileSet(set, pairs json.RawMessage, editsSeen string) (*profileSetDoc, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(set, &top); err != nil || top == nil {
@@ -118,8 +133,8 @@ func parseProfileSet(set, pairs json.RawMessage, editsSeen string) (*profileSetD
 	if err := json.Unmarshal(top["items"], &rawItems); err != nil || len(rawItems) == 0 || len(rawItems) > maxProfileSetItems {
 		return nil, profileSetFieldError("set.items", fmt.Sprintf("The set must hold 1 to %d items.", maxProfileSetItems))
 	}
-	if utf8.RuneCountInString(editsSeen) > appkeys.MaxEditsSeenLength {
-		return nil, profileSetFieldError("edits_seen", "edits_seen is at most 64 characters.")
+	if utf8.RuneCountInString(editsSeen) > appkeys.MaxEditsSeenLength || hasControlCharacter(editsSeen) {
+		return nil, profileSetFieldError("edits_seen", "edits_seen is at most 64 characters, with no control characters.")
 	}
 	doc := &profileSetDoc{Version: version, EditsSeen: editsSeen}
 	syncIDs := map[string]bool{}
@@ -155,7 +170,10 @@ func parseProfileSetItem(raw json.RawMessage, at string) (profileSetItem, error)
 	}
 	field := func(name string, target any, message string) error {
 		value, ok := item.raw[name]
-		if !ok || !decodeStrict(value, target) {
+		if !ok {
+			return profileSetRequired(at, name)
+		}
+		if !decodeStrict(value, target) {
 			return profileSetFieldError(at+"."+name, message)
 		}
 		return nil
@@ -179,7 +197,11 @@ func parseProfileSetItem(raw json.RawMessage, at string) (profileSetItem, error)
 	if !validProfileSetPicture(item.Picture) {
 		return item, profileSetFieldError(at+".picture", "picture must be empty, preset:<id>, or sha256:<64 lower-case hex>.")
 	}
-	pin, err := parseProfileSetPIN(item.raw["pin"], at+".pin")
+	rawPIN, ok := item.raw["pin"]
+	if !ok {
+		return item, profileSetRequired(at, "pin")
+	}
+	pin, err := parseProfileSetPIN(rawPIN, at+".pin")
 	if err != nil {
 		return item, err
 	}
@@ -245,12 +267,19 @@ func parseProfileSetPIN(raw json.RawMessage, at string) (profileSetPIN, error) {
 	return out, nil
 }
 
+// parseProfileSetSettings reads an item's settings. The member is required,
+// and {} is how an app says it has no setting to apply: a key in settings is
+// set, a key in settings_reset is reset, and a key in neither is left as the
+// server has it. An absent member would mean the same as {}, which is why it
+// is refused: it would let an app that forgot the member pass for one that
+// chose to send nothing. settings_reset is optional and defaults to empty.
 func parseProfileSetSettings(item *profileSetItem, at string) error {
-	item.Settings = map[string]json.RawMessage{}
-	if raw, ok := item.raw["settings"]; ok {
-		if !decodeStrict(raw, &item.Settings) || item.Settings == nil {
-			return profileSetFieldError(at+".settings", "settings must be an object.")
-		}
+	raw, ok := item.raw["settings"]
+	if !ok {
+		return profileSetRequired(at, "settings")
+	}
+	if !decodeStrict(raw, &item.Settings) || item.Settings == nil {
+		return profileSetFieldError(at+".settings", "settings must be an object.")
 	}
 	if raw, ok := item.raw["settings_reset"]; ok {
 		if !decodeStrict(raw, &item.SettingsReset) || item.SettingsReset == nil || len(item.SettingsReset) > maxProfileSetResetKeys {

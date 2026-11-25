@@ -647,13 +647,18 @@ the PostgreSQL user store: elsewhere they answer 501
 | `is_child`, `require_advisory_age`, `requests_blocked` | boolean | |
 | `max_content_rating` | string | Up to 32 characters; `""` for none. |
 | `max_advisory_age` | integer or null | 1 to 21; `null` for none. |
-| `settings` | object | Optional. Settings-contract keys stored per profile, each to its value. |
+| `settings` | object | Settings-contract keys stored per profile, each to its value; `{}` for none. |
 | `settings_reset` | array | Optional. Up to 256 keys whose profile value is removed. A key in both `settings` and `settings_reset` is 422. |
 
-Every member in the table is required in every item, except `settings` and
-`settings_reset`: an item that leaves one out is 422 at that member. A set is
-the whole truth about a profile, and a missing limit must never be read as "no
-limit". This stays so. A member added to the item later is optional and has a
+Every member in the table is required in every item, except
+`settings_reset`: an item that leaves one out is 422 at that member, with code
+`required`. A set is the whole truth about a profile, and a missing limit must
+never be read as "no limit". `settings` is required too, and `{}` is how an
+app says it has no setting to apply: a key in `settings` is set, a key in
+`settings_reset` is reset, and a key in neither is left as the server has it.
+An absent `settings` would mean the same as `{}`, and is refused so that an
+app that forgot the member can't pass for one that chose to send nothing. This
+stays so. A member added to the item later is optional and has a
 stated default, so a set from an older app is still accepted by a newer
 server.
 
@@ -664,9 +669,18 @@ is the `edits_token` the app read from `getProfileSet` when it built the set,
 at most 64 characters; absent means `""`.
 
 A malformed member is 422 `validation_failed` at the member
-(`body.set.items[2].name`, `body.pairs[0].local_id`), or at `body.payload` in
-the signed form. A new item named like a profile outside the set is 422 at its
-name with code `name_conflict`.
+(`body.set.items[2].name`, `body.pairs[0].local_id`, `body.edits_seen`). Both
+forms are held to the same rules and answer the same `errors[]` for the same
+set: the same `location`, `code` and `detail`. In the signed form the set
+travels inside `payload`, and its members are still reported at the locations
+the session form uses (`body.set…`), so an app has one mapping from a location
+to a field. There `body.set` is not a path into the signed request, which has
+no `set` member; it names the same member of the same set. Only a fault in the
+envelope itself (its signature, challenge, `account_id` or times, or a payload
+with no set at all) is reported as the other signed routes report it. A signed
+set is validated after its signature verifies, so a 422 for it has already
+spent the challenge: correct the set, get a new challenge, and sign again. A new item named like a profile outside
+the set is 422 at its name with code `name_conflict`.
 
 **Answer.**
 

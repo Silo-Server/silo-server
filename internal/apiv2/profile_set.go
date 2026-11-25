@@ -100,7 +100,7 @@ type profileSetItemFields struct {
 	MaxAdvisoryAge     *int               `json:"max_advisory_age" nullable:"true" minimum:"1" maximum:"21" doc:"Advisory-age limit; null for none" example:"12"`
 	RequireAdvisoryAge bool               `json:"require_advisory_age" example:"false"`
 	RequestsBlocked    bool               `json:"requests_blocked" example:"false"`
-	Settings           ProfileSetSettings `json:"settings,omitempty"`
+	Settings           ProfileSetSettings `json:"settings"`
 	SettingsReset      []string           `json:"settings_reset,omitempty" maxItems:"256" doc:"Keys whose profile value this server removes, so the profile inherits again. A key in both settings and settings_reset is 422" example:"[\"playback.audio_language\"]"`
 }
 
@@ -268,8 +268,8 @@ const putProfileSetDescription = "Makes the account's household profiles match a
 	"A profile holding a sync_id the set no longer has is deleted with everything that belongs to it; a profile with no sync_id that pairs does not name is left alone. " +
 	"Only a newer version changes anything: an older version, the same version with other content, the same version whose PINs differ from the stored ones, and a set without the person's latest edits (edits_seen) are 409 profile_set_stale; the same version and content again answers 200 and writes nothing. " +
 	"A set that changes the main profile's PIN ends every X-Profile-Token minted for its old PIN, the caller's included. " +
-	"A malformed member is 422 validation_failed at its member (at body.payload in the signed form); a new item named like a profile outside the set is 422 with code name_conflict. " +
-	"Limited per account by the profile_set rate-limit budget (the session's account, or the one a verified signature names), with a per-address budget ten times that spent first; 429 rate_limited with Retry-After from either. The signed form also spends its challenge, and has spent it when the account's limit refuses the set: the next try needs a new challenge and a newly signed envelope. A body over 256 KiB is 413 payload_too_large. " +
+	"A malformed member is 422 validation_failed at its member, the same location, code and detail in both forms (a signed set's members are reported at body.set, as the session form's are); a new item named like a profile outside the set is 422 with code name_conflict. " +
+	"Limited per account by the profile_set rate-limit budget (the session's account, or the one a verified signature names), with a per-address budget ten times that spent first; 429 rate_limited with Retry-After from either. The signed form also spends its challenge, and has spent it when a 422 or the account's limit refuses the set: the next try needs a new challenge and a newly signed envelope. A body over 256 KiB is 413 payload_too_large. " +
 	"501 capability_unsupported where profiles are not kept in PostgreSQL."
 
 func registerProfileSet(reg *Registry) {
@@ -332,6 +332,11 @@ func (reg *Registry) putProfileSet(ctx context.Context, in *ProfileSetPutInput) 
 	if err != nil {
 		return nil, err
 	}
+	// One parser for both forms, before anything is spent or locked: what a
+	// set may hold does not depend on how it arrived.
+	if err := handlers.CheckProfileSet(cmd.Set, cmd.Pairs, cmd.EditsSeen); err != nil {
+		return nil, profileSetProblem(err)
+	}
 	// The account is known for certain now: the session's, or the one a
 	// verified signature names. Its budget is the one a person meets; the
 	// address spent a looser one before any of this ran.
@@ -340,7 +345,7 @@ func (reg *Registry) putProfileSet(ctx context.Context, in *ProfileSetPutInput) 
 	}
 	result, err := sets.ApplyProfileSet(withClientDevice(ctx), cmd)
 	if err != nil {
-		return nil, profileSetProblem(err, signed)
+		return nil, profileSetProblem(err)
 	}
 	return &ProfileSetPutOutput{Body: profileSetAppliedOf(result)}, nil
 }
@@ -376,10 +381,57 @@ func (reg *Registry) signedProfileSet(ctx context.Context, raw []byte) (handlers
 	}
 	authority, err := svc.VerifyProfileSet(ctx, req)
 	if err != nil {
-		return handlers.ProfileSetCommand{}, profileSetProblem(err, true)
+		return handlers.ProfileSetCommand{}, profileSetProblem(err)
+	}
+	if p := reg.validateSignedProfileSet(authority); p != nil {
+		return handlers.ProfileSetCommand{}, p
 	}
 	return handlers.ProfileSetCommand{UserID: authority.UserID, Set: authority.Set, Pairs: authority.Pairs,
 		EditsSeen: authority.EditsSeen, Signed: true}, nil
+}
+
+// validateSignedProfileSet holds a verified signed set to what the session
+// form's body is held to before its handler runs: the request schema, then
+// the rule against null members. The set, pairs and edits_seen of the
+// payload are checked as the session body {set, pairs, edits_seen} they
+// would have been, by the same schema, so the two forms cannot disagree on
+// what a set may hold, and a refusal names the same member with the same
+// code in both: body.set.items[2].name, though in this form the set
+// traveled inside the payload.
+func (reg *Registry) validateSignedProfileSet(authority *auth.ProfileSetAuthority) *Problem {
+	members := map[string]json.RawMessage{"set": authority.Set}
+	if authority.Pairs != nil {
+		members["pairs"] = authority.Pairs
+	}
+	if authority.EditsSeenRaw != nil {
+		members["edits_seen"] = authority.EditsSeenRaw
+	}
+	// A member that is not JSON fails here, in the encoding or the decoding.
+	body, err := json.Marshal(members)
+	var value any
+	if err == nil {
+		err = json.Unmarshal(body, &value)
+	}
+	if err != nil {
+		return validationProblem(locationBody+".set", codeInvalid, "The set is not valid JSON.")
+	}
+	registry := reg.api.OpenAPI().Components.Schemas
+	path := huma.NewPathBuffer([]byte{}, 0)
+	path.Push(locationBody)
+	var result huma.ValidateResult
+	huma.Validate(registry, registry.Schema(reflect.TypeFor[ProfileSetPutBody](), true, ""), path, huma.ModeWriteToServer, value, &result)
+	if len(result.Errors) > 0 {
+		p := NewProblem(TypeValidationFailed, validationSummary)
+		for _, err := range result.Errors {
+			var detail *huma.ErrorDetail
+			if !errors.As(err, &detail) {
+				continue
+			}
+			p.Errors = append(p.Errors, ProblemError{Location: validationLocation(detail), Code: validationCode(detail.Message), Detail: validationDetail(detail.Message)})
+		}
+		return p
+	}
+	return rejectNonNullableNulls(body, nil)
 }
 
 // sessionProfileSet admits the session form: the account's own login
@@ -423,15 +475,13 @@ func (reg *Registry) profileSetSessionAllowed(ctx context.Context, claims *auth.
 }
 
 // profileSetProblem maps a profile set refusal to its problem.
-func profileSetProblem(err error, signed bool) error {
+func profileSetProblem(err error) error {
 	var field *handlers.ProfileSetFieldError
 	switch {
 	case errors.As(err, &field):
-		location := locationBody + "." + field.Location
-		if signed {
-			location = locationBody + ".payload"
-		}
-		return validationProblem(location, field.Code, field.Message)
+		// The same location in both forms: a signed set's members are named
+		// as the session form names them (validateSignedProfileSet).
+		return validationProblem(locationBody+"."+field.Location, field.Code, field.Message)
 	case errors.Is(err, handlers.ErrProfileSetNoPrimary):
 		return NewProblem(TypeConflict, "This account's profiles are in a state the server can't apply a profile set to: it has profiles but no main profile.")
 	case errors.Is(err, handlers.ErrProfileSetStale):
@@ -479,7 +529,7 @@ func (reg *Registry) getProfileSet(ctx context.Context, in *ProfileSetGetInput) 
 	}
 	held, err := sets.HeldProfileSet(ctx, claims.UserID)
 	if err != nil {
-		return nil, profileSetProblem(err, false)
+		return nil, profileSetProblem(err)
 	}
 	body := profileSetHeldOf(held)
 	tag, err := profileSetTag(body)
