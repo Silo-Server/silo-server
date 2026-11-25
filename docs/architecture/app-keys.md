@@ -229,6 +229,14 @@ break-glass account, as a password would, and is refused with 403
 `local_login_disabled` otherwise (`keySignInPolicy`). On such a server the
 person signs in through the provider and enrolls from that session.
 
+**Jellyfin-compatible apps.** An account that signs in only with app keys has
+no password, so a Jellyfin-compatible app signs it in with Quick Connect: the
+app shows a code, and a key session approves it on
+`POST /api/v2/auth/device/approve-handoff` for one of the account's profiles
+(see [jellycompat-api.md](../jellycompat-api.md#quick-connect)). The user that
+app gets reports `HasPassword: false`, and a password sign-in for the account
+fails with the same answer as an unknown name.
+
 **Administrators.** Every key an administrator's `introduce` enrolls is stored
 `pending`, and the sealed answer is `approval_required` with no tokens, so a
 copied person key alone can't open an admin session. Keys from `enroll` start

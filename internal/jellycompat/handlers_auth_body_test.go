@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -127,5 +128,24 @@ func TestHandleAuthenticateByNameSendsJellyfinRequiredFields(t *testing.T) {
 	}
 	if a, b := sessionID("login-1", noDevice), sessionID("login-2", noDevice); a == b {
 		t.Errorf("two sign-ins without a DeviceId share Id %s", a)
+	}
+}
+
+type failingPasswordSignIn struct{}
+
+func (failingPasswordSignIn) PasswordSignInFor(context.Context, int) (auth.PasswordSignIn, error) {
+	return auth.PasswordSignIn{}, errors.New("store unavailable")
+}
+
+// HasPassword only decides whether a client offers a password box. When the
+// account can't be read, the user is still returned, saying it has a
+// password: a sign-in that already opened its session must not fail over it,
+// and a password account must never be told it has none.
+func TestUserDTOKeepsHasPasswordWhenTheAccountCannotBeRead(t *testing.T) {
+	h := NewAuthHandler(func() *config.Config { return &config.Config{} }, nil, nil)
+	h.passwordSignIn = failingPasswordSignIn{}
+	dto, err := h.resolvedUserDTO(t.Context(), &Session{StreamAppUserID: 7, Username: "sam"})
+	if err != nil || !dto.HasPassword || !dto.HasConfiguredPassword {
+		t.Fatalf("user = HasPassword %v, HasConfiguredPassword %v, err %v", dto.HasPassword, dto.HasConfiguredPassword, err)
 	}
 }
