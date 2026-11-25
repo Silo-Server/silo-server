@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -123,7 +123,7 @@ describe("marker settings kept for an unsaved change", () => {
     await userEvent.click(screen.getByRole("option", { name: option }));
   }
 
-  it("keeps on-demand storage in view and takes its lazy playback back with it", async () => {
+  it("keeps on-demand storage in view after online markers are turned off", async () => {
     render(page);
     await pick("Marker source", "Online preferred + server detection");
     await pick("Save online markers", "Fetch when needed");
@@ -132,67 +132,26 @@ describe("marker settings kept for an unsaved change", () => {
     expect(screen.getByRole("combobox", { name: "Save online markers" })).toHaveTextContent(
       "Fetch when needed",
     );
-    // Lazy playback went back with online markers; only the kept storage
-    // choice is staged.
     expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
 
     await pick("Save online markers", "Save to library");
     expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
   });
 
-  it("takes lazy playback back with the storage edit while the source stays edited", async () => {
+  it("leaves Find markers on playback in view and unchanged when on-demand storage is chosen with server detection", async () => {
     settings.current["markers.mode"] = "both";
-    render(page);
-    await pick("Save online markers", "Fetch when needed");
-    await pick("Marker source", "Online providers only");
-    await pick("Save online markers", "Save to library");
-
-    // Only the source change is left.
-    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
-  });
-
-  it("restores the admin's own lazy playback edit when on-demand storage is taken back", async () => {
-    settings.current = {
-      ...settings.current,
-      "markers.mode": "both",
-      "markers.lazy_playback": "true",
-    };
-    render(page);
-    await userEvent.click(screen.getByRole("switch", { name: "Find markers on playback" }));
-    await pick("Save online markers", "Fetch when needed");
-    await pick("Save online markers", "Save to library");
-
-    expect(screen.getByRole("switch", { name: "Find markers on playback" })).not.toBeChecked();
-    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
-  });
-
-  it("keeps lazy playback taken back during a save staged for the next save", async () => {
-    settings.current["markers.mode"] = "both";
-    let finishSave!: (result: { values: Record<string, string> }) => void;
     save.mockReset();
-    save.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          finishSave = resolve;
-        }),
-    );
-    const { rerender } = render(page);
+    save.mockResolvedValue({ values: {} });
+    render(page);
     await pick("Save online markers", "Fetch when needed");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    // The refetch that shows the write lands before the save settles, and the
-    // storage choice is taken back in between.
-    const written = { "markers.online_storage": "on_demand", "markers.lazy_playback": "true" };
-    settings.current = { ...settings.current, ...written };
-    rerender(
-      <MemoryRouter>
-        <PlaybackSettings />
-      </MemoryRouter>,
-    );
-    await pick("Save online markers", "Save to library");
-    await act(async () => finishSave({ values: written }));
 
+    // Lazy playback turns on local detection at playback under this source,
+    // so its row stays and on-demand storage doesn't switch it on.
     expect(screen.getByRole("switch", { name: "Find markers on playback" })).not.toBeChecked();
-    expect(screen.getByText("2 unsaved changes")).toBeInTheDocument();
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(save).toHaveBeenCalledWith({ "markers.online_storage": "on_demand" });
   });
 
   it("keeps an edited detection worker count in view under online-only markers", async () => {
