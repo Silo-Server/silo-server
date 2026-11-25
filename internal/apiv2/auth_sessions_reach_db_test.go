@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -44,7 +45,7 @@ func newReachDB(t *testing.T) *reachDB {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	d := &reachDB{pool: pool, suffix: fmt.Sprint(time.Now().UnixNano()), users: map[int]*models.User{}, claims: map[string]*auth.Claims{}}
+	d := &reachDB{pool: pool, suffix: strconv.FormatInt(time.Now().UnixNano(), 10), users: map[int]*models.User{}, claims: map[string]*auth.Claims{}}
 	t.Cleanup(func() {
 		ctx := context.WithoutCancel(t.Context())
 		_, _ = pool.Exec(ctx, `DELETE FROM auth_sessions WHERE user_id IN (SELECT id FROM users WHERE username LIKE $1)`, "reach-"+d.suffix+"%")
@@ -148,7 +149,7 @@ func itemByID(t *testing.T, page reachPage, id string) map[string]json.RawMessag
 // requireCompleteItem checks an item shows its stored session in full.
 func requireCompleteItem(t *testing.T, label string, item map[string]json.RawMessage, id string, current bool) {
 	t.Helper()
-	want := map[string]string{"device_name": `"Device ` + id + `"`, "ip_address": `"192.0.2.10"`, "device_id": `"device-` + id + `"`, "current": fmt.Sprint(current)}
+	want := map[string]string{"device_name": `"Device ` + id + `"`, "ip_address": `"192.0.2.10"`, "device_id": `"device-` + id + `"`, "current": strconv.FormatBool(current)}
 	for member, value := range want {
 		if string(item[member]) != value {
 			t.Fatalf("%s %s = %s, want %s", label, member, item[member], value)
@@ -285,8 +286,8 @@ func TestLimitedSessionPagesByIDDB(t *testing.T) {
 	base := time.Now().Add(-time.Hour)
 	// Four ids in ascending order, created in the order 3, 1, 4, 2.
 	ids := slices.Sorted(slices.Values([]string{uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()}))
-	for i, minutes := range []time.Duration{2, 4, 1, 3} {
-		d.store(t, account, reachSession{id: ids[i], platform: "web", createdAt: base.Add(minutes * time.Minute)})
+	for i, minutes := range []int{2, 4, 1, 3} {
+		d.store(t, account, reachSession{id: ids[i], platform: "web", createdAt: base.Add(time.Duration(minutes) * time.Minute)})
 	}
 	token := d.store(t, account, reachSession{via: &yes, createdAt: base})
 	want := slices.Sorted(slices.Values(append([]string{d.claims[token].SessionID}, ids...)))

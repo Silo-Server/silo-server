@@ -93,7 +93,7 @@ func TestSessionsRecordDeviceSignInDB(t *testing.T) {
 		return id
 	}
 	viewed, admin := account("user"), account("admin")
-	password, _, err := env.svc.Login(ctx, fmt.Sprintf("reach-user-%s", env.suffix), "synthetic-password", "password", "")
+	password, _, err := env.svc.Login(ctx, "reach-user-"+env.suffix, "synthetic-password", "password", "")
 	if err != nil {
 		t.Fatal(err)
 	}
