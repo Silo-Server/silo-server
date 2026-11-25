@@ -1276,15 +1276,11 @@ function StreamDetailsSheet({
   if (session !== undefined && session !== shown) {
     setShown(session);
   }
+  // Closed again once the panel has finished closing (onCloseAutoFocus), so the
+  // next details start with it closed and it doesn't collapse mid-slide.
   const [ffmpegOpen, setFFmpegOpen] = useState(false);
-  const [seenSessionId, setSeenSessionId] = useState(sessionId);
-  if (seenSessionId !== sessionId) {
-    // Another session's details start with the console closed.
-    setSeenSessionId(sessionId);
-    setFFmpegOpen(false);
-  }
   const ffmpegLogs = useOperationalLogs(
-    { playback_session_id: sessionId ?? "", component: "ffmpeg", limit: 12 },
+    { playback_session_id: shown?.session_id ?? "", component: "ffmpeg", limit: 12 },
     ffmpegOpen && sessionId !== null,
   );
 
@@ -1299,6 +1295,7 @@ function StreamDetailsSheet({
         side="right"
         className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-xl"
         onCloseAutoFocus={(event) => {
+          setFFmpegOpen(false);
           // A card that left the list (its stream ended) can't take focus back.
           const target = returnFocusRef.current;
           if (target?.isConnected) {
