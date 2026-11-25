@@ -803,8 +803,10 @@ func (r *SeriesRootMatchQueueRepository) WakeRoot(ctx context.Context, folderID 
 // root. A complete item refresh calls it once it has cleared the scope's
 // content links, so its own scan matches a root that an earlier failure
 // backed off, such as a hand-matched folder no provider finds on its own
-// (#5337). Like WakeRoot it requests no rerun, and a leased row keeps its
-// available_at.
+// (#5337). Like WakeRoot it requests no rerun of a row that is not leased. A
+// leased row keeps its available_at and is asked to rerun instead, so the
+// worker holding it makes it due again when it finishes or fails, rather than
+// restoring a back-off.
 func (r *SeriesRootMatchQueueRepository) WakeInScope(ctx context.Context, folderID int, scopePath string) error {
 	if err := r.requireConfigured(); err != nil {
 		return err
@@ -822,6 +824,7 @@ func (r *SeriesRootMatchQueueRepository) WakeInScope(ctx context.Context, folder
 			available_at = CASE WHEN q.lease_token = '' THEN NOW() ELSE q.available_at END,
 			deterministic_attempt_count = 0,
 			failure_kind = '', failure_detail = '{}'::jsonb, last_error = '', parked_at = NULL,
+			rerun_requested = q.rerun_requested OR q.lease_token <> '',
 			updated_at = NOW()
 		WHERE q.media_folder_id = $1
 		  AND (

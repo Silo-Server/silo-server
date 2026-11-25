@@ -30,8 +30,8 @@ func (w *itemRefreshTestRootWaker) WakeInScope(_ context.Context, folderID int, 
 }
 
 // A complete refresh of a series, season or episode wakes the scope's series
-// root after it clears the links and before its scan, so the scan matches a
-// root an earlier failure backed off (#5337). A quick refresh and a movie's
+// root before it clears the links and scans, so the scan matches a root an
+// earlier failure backed off (#5337). A quick refresh and a movie's
 // complete refresh leave the TV match queue alone.
 func TestItemRefreshExecutorCompleteRefreshWakesBackedOffSeriesRoot(t *testing.T) {
 	t.Parallel()
@@ -89,16 +89,20 @@ func TestItemRefreshExecutorCompleteRefreshWakesBackedOffSeriesRoot(t *testing.T
 				}
 				return
 			}
-			want := itemRefreshTestWake{folderID: 7, scopePath: "/media/tv/Show", linksCleared: true, scansBeforeIt: 0}
+			want := itemRefreshTestWake{folderID: 7, scopePath: "/media/tv/Show", linksCleared: false, scansBeforeIt: 0}
 			if len(waker.calls) != 1 || waker.calls[0] != want {
-				t.Fatalf("WakeInScope calls = %+v, want one %+v: after the links are cleared, before the scan", waker.calls, want)
+				t.Fatalf("WakeInScope calls = %+v, want one %+v: before the links are cleared and the scan", waker.calls, want)
+			}
+			if fileRepo.clearedPath == "" {
+				t.Fatal("the complete refresh cleared no links")
 			}
 		})
 	}
 }
 
-// A refresh that can't wake the scope's root fails before its scan rather
-// than waiting out a match that won't run.
+// A refresh that can't wake the scope's root fails before it clears the
+// scope's links, so the series stays as it was, rather than waiting out a
+// match that won't run.
 func TestItemRefreshExecutorCompleteRefreshFailsWhenTheWakeFails(t *testing.T) {
 	t.Parallel()
 	ingester := &itemRefreshTestIngester{}
@@ -132,7 +136,7 @@ func TestItemRefreshExecutorCompleteRefreshFailsWhenTheWakeFails(t *testing.T) {
 	if err == nil || !errors.Is(err, waker.err) {
 		t.Fatalf("Execute() error = %v, want the wake error", err)
 	}
-	if ingester.scans != 0 {
-		t.Fatalf("scans = %d, want none after a failed wake", ingester.scans)
+	if ingester.scans != 0 || fileRepo.clearedPath != "" {
+		t.Fatalf("scans = %d, cleared links = %q; want neither after a failed wake", ingester.scans, fileRepo.clearedPath)
 	}
 }
