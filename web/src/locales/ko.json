@@ -43042,7 +43042,7 @@
   "web.admin.insights.devices.subtitles.delivery.embedded": [
     {
       "type": 0,
-      "value": "스트림에 포함"
+      "value": "스트림에 포함됨"
     }
   ],
   "web.admin.insights.devices.subtitles.delivery.hlsRendition": [
