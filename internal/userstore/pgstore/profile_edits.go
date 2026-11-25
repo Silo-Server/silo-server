@@ -151,34 +151,19 @@ func sameSettingValue(a, b json.RawMessage) bool {
 	return reflect.DeepEqual(x, y)
 }
 
-// recordsSettingEdit reports whether a pool-level write of id may record an
-// edit, and so runs in a transaction of its own with its record. A profile
-// outside the set records nothing and needs none.
-func recordsSettingEdit(ctx context.Context, s *PostgresUserStore, id userstore.SettingIdentity) (bool, error) {
-	if !settingRecordable(ctx, s.userID, id) {
-		return false, nil
-	}
-	var synced bool
-	err := s.pool.QueryRow(ctx, `SELECT sync_id IS NOT NULL FROM user_profiles WHERE user_id = $1 AND id = $2`, s.userID, id.ProfileID).Scan(&synced)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	return synced, err
-}
-
 // inRecordingTx runs fn, a pool-level write of id, on the pool, or in a
 // transaction when the write may record an edit, so the write and its record
-// commit together.
+// commit together under the account's lock. Whether the profile is in a set
+// is not asked first: a set can add it between an unlocked check and the
+// write, and the recorder checks it under the lock anyway.
 func inRecordingTx[T any](ctx context.Context, s *PostgresUserStore, id userstore.SettingIdentity, fn func(preferenceSettingsExecutor) (T, error)) (T, error) {
 	var out T
-	record, err := recordsSettingEdit(ctx, s, id)
-	if err != nil {
-		return out, err
-	}
-	if !record {
+	if !settingRecordable(ctx, s.userID, id) {
+		// Nothing this write does can be recorded: no recording actor, or a
+		// key or scope a set doesn't carry.
 		return fn(s.pool)
 	}
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		// The account's lock first, as every recording writer and an
 		// account deletion take it (UpdateProfile).
 		if err := lockPreferenceSettings(ctx, tx, s.userID); err != nil {

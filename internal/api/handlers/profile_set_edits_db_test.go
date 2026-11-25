@@ -22,6 +22,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/profileedits"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // editsFixture is a profile set fixture with an administrator and contexts
@@ -517,7 +518,9 @@ func TestProfileSetEditsRaceSetDB(t *testing.T) {
 		var mu sync.Mutex
 		var unexpected []string
 		check := func(name string, err error) {
-			if err != nil && !allowed(name, err) {
+			// A deadlock is never an allowed outcome, whatever wraps it.
+			var pgErr *pgconn.PgError
+			if err != nil && (errors.As(err, &pgErr) && pgErr.Code == sqlstateDeadlockDetected || !allowed(name, err)) {
 				mu.Lock()
 				unexpected = append(unexpected, name+": "+err.Error())
 				mu.Unlock()
@@ -579,21 +582,24 @@ func TestProfileSetEditsRaceSetDB(t *testing.T) {
 			// Once the account is gone: the set finds no account; the
 			// profile service finds no account or profile (404), no main
 			// profile to manage the household as (403 profile_management),
-			// or a profile gone between its read and its write (500); the
-			// store finds no profile; a setting insert has no account.
+			// or, for the admin edit that passed its account check first, a
+			// profile gone by the time its write ran (500 whose cause is the
+			// store's "profile <id> not found"); the store finds no profile;
+			// a setting insert has no account to refer to (23503).
 			var apiErr *APIError
 			var pgErr *pgconn.PgError
 			if errors.As(err, &apiErr) {
 				switch {
 				case apiErr.Status == http.StatusNotFound, apiErr.Code == "conflict",
-					racer == "web edit" && apiErr.Code == "profile_management",
-					racer == "admin edit" && apiErr.Code == "internal_error":
+					racer == "web edit" && apiErr.Code == "profile_management":
 					return true
+				case racer == "admin edit" && apiErr.Code == "internal_error":
+					return storeProfileNotFound(errors.Unwrap(apiErr))
 				}
 				return false
 			}
 			return isStale(err) || errors.Is(err, userstore.ErrProfileSetAccountGone) ||
-				(errors.As(err, &pgErr) && pgErr.Code == "23503") || strings.Contains(err.Error(), "not found")
+				(errors.As(err, &pgErr) && pgErr.Code == "23503") || storeProfileNotFound(err)
 		})
 		var left int
 		if err := f.pool.QueryRow(t.Context(), `SELECT count(*) FROM profile_set_edits WHERE user_id = $1`, f.userID).Scan(&left); err != nil {
@@ -655,6 +661,18 @@ func raceRacers(t *testing.T, f *editsFixture, main, kid setItem, kidID, extraID
 				ActiveProfileID: f.primary, VerifyProfile: noProfileVerification})
 		},
 	}
+}
+
+// storeProfileNotFound reports the store's answer for a profile that is
+// gone: "profile <id> not found", anywhere in err's chain.
+func storeProfileNotFound(err error) bool {
+	for ; err != nil; err = errors.Unwrap(err) {
+		msg := err.Error()
+		if strings.HasPrefix(msg, "profile ") && strings.HasSuffix(msg, " not found") {
+			return true
+		}
+	}
+	return false
 }
 
 // TestProfileEditAccountDeleteRaceDB: an edit recorded while the account is
@@ -779,4 +797,86 @@ func TestProfileSetNamesWithOwnerRenamesDB(t *testing.T) {
 			t.Fatal("a refused set wrote")
 		}
 	})
+}
+
+// TestProfileEditPoolSettingWaitsForPairingDB: a pool-level setting write on
+// a profile outside the set, while a set is making that profile part of it,
+// waits for the set and commits with its record. It catches a write that
+// decided on an unlocked read not to record, committed its value at once,
+// and then recorded a mark that did not commit with it.
+func TestProfileEditPoolSettingWaitsForPairingDB(t *testing.T) {
+	f := newEditsFixture(t)
+	f.mustApply(t, setDoc(t, 1, newSetItem("Parent")))
+	if err := f.create("Local"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	var localID string
+	if err := f.pool.QueryRow(ctx, `SELECT id FROM user_profiles WHERE user_id = $1 AND name = 'Local'`, f.userID).Scan(&localID); err != nil {
+		t.Fatal(err)
+	}
+	stored := func() bool {
+		var n int
+		if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM user_setting_values WHERE user_id = $1 AND profile_id = $2 AND key = $3`,
+			f.userID, localID, settingskeys.PlaybackAudioLanguage).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n > 0
+	}
+
+	// A set pairing the profile, held open under the account's locks.
+	pairing, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pairing.Rollback(context.Background()) }()
+	if err := pgstore.LockAccountForImport(ctx, pairing, f.userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pairing.Exec(ctx, `UPDATE user_profiles SET sync_id = gen_random_uuid(), sync_position = 1 WHERE user_id = $1 AND id = $2`,
+		f.userID, localID); err != nil {
+		t.Fatal(err)
+	}
+
+	wrote := make(chan error, 1)
+	go func() {
+		_, err := f.store.UpsertSettingValue(f.account(), userstore.SettingIdentity{
+			Key: settingskeys.PlaybackAudioLanguage, Scope: "profile", ProfileID: localID,
+		}, json.RawMessage(`"fr"`))
+		wrote <- err
+	}()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.After(10 * time.Second)
+	for waiting := false; !waiting; {
+		select {
+		case err := <-wrote:
+			t.Fatalf("the write finished (%v) while the set held the account", err)
+		case <-deadline:
+			t.Fatal("the write neither finished nor waited")
+		case <-ticker.C:
+			var n int
+			if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+				WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> pg_backend_pid()`).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			waiting = n > 0
+		}
+	}
+	if stored() {
+		t.Fatal("the write committed its value before the set, apart from its record")
+	}
+	if err := pairing.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-wrote; err != nil {
+		t.Fatal(err)
+	}
+	marked := false
+	for _, e := range f.edits(t) {
+		marked = marked || (e.Field == "settings."+settingskeys.PlaybackAudioLanguage && e.By == profileedits.ByAccount)
+	}
+	if !stored() || !marked {
+		t.Fatalf("after the set: value stored %v, marked %v", stored(), marked)
+	}
 }
