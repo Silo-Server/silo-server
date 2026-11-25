@@ -13,10 +13,11 @@ interface SessionsState {
 
 const state = vi.hoisted(() => ({
   sessions: { data: undefined, isLoading: false, error: null } as SessionsState,
+  refetch: vi.fn(async () => ({})),
 }));
 
 vi.mock("@/hooks/queries/admin/stats", () => ({
-  useAdminSessions: () => ({ ...state.sessions, refetch: async () => ({}) }),
+  useAdminSessions: () => ({ ...state.sessions, refetch: state.refetch }),
 }));
 vi.mock("@/components/realtimeEventsContext", () => ({
   useRealtimeEvents: () => ({ connectionState: "live" }),
@@ -72,6 +73,7 @@ function pressedLayout(): string | undefined {
 beforeEach(() => {
   localStorage.clear();
   state.sessions = { data: undefined, isLoading: false, error: null };
+  state.refetch.mockClear();
 });
 afterEach(() => {
   cleanup();
@@ -82,12 +84,25 @@ describe("LiveActivityTab", () => {
     state.sessions = { data: undefined, isLoading: false, error: new Error("boom") };
     render(ui());
     expect(screen.queryByText(/no active streams/i)).toBeNull();
-    expect(screen.getByRole("button", { name: /retry/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(state.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the last list when a later refresh fails", () => {
+    state.sessions = { data: sessions(2), isLoading: false, error: new Error("boom") };
+    render(ui());
+    expect(screen.queryByRole("button", { name: /retry/i })).toBeNull();
+    expect(screen.getByText("Title s1")).toBeTruthy();
   });
 
   it("picks the layout from the first loaded list, not from a load that hadn't finished", () => {
     const view = render(ui());
     state.sessions = { data: sessions(10), isLoading: false, error: null };
+    view.rerender(ui());
+    expect(pressedLayout()).toBe("Table");
+
+    // Chosen once: fewer streams later don't switch it back to cards.
+    state.sessions = { data: sessions(2), isLoading: false, error: null };
     view.rerender(ui());
     expect(pressedLayout()).toBe("Table");
   });
