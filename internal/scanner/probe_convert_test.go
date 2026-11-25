@@ -53,3 +53,34 @@ func TestConvertProbeDataExcludesAttachmentsFromBitrate(t *testing.T) {
 		})
 	}
 }
+
+// FFprobe reports subtitle flags under disposition; Matroska never writes the
+// hearing-impaired flag as a stream tag.
+func TestConvertProbeDataReadsSubtitleDispositions(t *testing.T) {
+	t.Parallel()
+
+	const probe = `{"format":{"duration":"10.0"},"streams":[
+		{"index":0,"codec_type":"video","codec_name":"h264"},
+		{"index":2,"codec_type":"subtitle","codec_name":"subrip","disposition":{"default":0,"forced":0,"hearing_impaired":1},"tags":{"language":"eng"}},
+		{"index":3,"codec_type":"subtitle","codec_name":"subrip","disposition":{"default":1,"forced":1,"hearing_impaired":0},"tags":{"language":"eng"}}]}`
+	var raw ffprobeOutput
+	if err := json.Unmarshal([]byte(probe), &raw); err != nil {
+		t.Fatal(err)
+	}
+
+	tracks := convertProbeData(&raw).SubtitleTracks
+	if len(tracks) != 2 {
+		t.Fatalf("got %d subtitle tracks, want 2", len(tracks))
+	}
+	want := []struct{ hearingImpaired, forced, isDefault bool }{
+		{hearingImpaired: true},
+		{forced: true, isDefault: true},
+	}
+	for i, w := range want {
+		got := tracks[i]
+		if got.HearingImpaired != w.hearingImpaired || got.Forced != w.forced || got.Default != w.isDefault {
+			t.Errorf("track %d: hearing_impaired=%v forced=%v default=%v, want %v %v %v",
+				got.Index, got.HearingImpaired, got.Forced, got.Default, w.hearingImpaired, w.forced, w.isDefault)
+		}
+	}
+}
