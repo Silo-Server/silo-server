@@ -81,16 +81,19 @@ func (p *AdminInsightsProvider) handlePlaybackEvent(event cache.Event) {
 
 // shouldInvalidateInsightsOnAdminEvent reports whether a cache.ChannelAdmin
 // event can change data shown by the Insights tabs. Unrelated admin chatter
-// (node reachability/drain, settings, policies, plugins, auth/marker config,
-// login session revocations) is ignored so it does not wipe cached tabs or
-// discard in-flight fills.
+// (node reachability/drain, settings, policies, plugins, auth/marker config)
+// is ignored so it does not wipe cached tabs or discard in-flight fills.
 func shouldInvalidateInsightsOnAdminEvent(event cache.Event) bool {
 	switch event.Type {
 	case cache.EventAdminStatsInvalidated,
 		cache.EventUserDisabled,
 		cache.EventUserDeleted,
 		cache.EventNodePoolChanged,
-		"item:updated": // published by AdminHandler.UpdateItemMetadata
+		cache.EventItemUpdated,
+		// Sign-in revocation follows account changes the People tab shows,
+		// such as a provider role change or a username edit with a new
+		// password; those paths publish no stats event of their own.
+		cache.EventUserSessionsRevoked:
 		return true
 	default:
 		return false

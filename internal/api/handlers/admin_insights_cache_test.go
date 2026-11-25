@@ -81,7 +81,8 @@ func TestAdminInsightsProviderEventBusInvalidation(t *testing.T) {
 		{"user_disabled", cache.ChannelAdmin, cache.Event{Type: cache.EventUserDisabled, Payload: "42"}},
 		{"user_deleted", cache.ChannelAdmin, cache.Event{Type: cache.EventUserDeleted, Payload: "42"}},
 		{"node_pool_changed", cache.ChannelAdmin, cache.Event{Type: cache.EventNodePoolChanged}},
-		{"item_updated", cache.ChannelAdmin, cache.Event{Type: "item:updated", Payload: "movie-1"}},
+		{"item_updated", cache.ChannelAdmin, cache.Event{Type: cache.EventItemUpdated, Payload: "movie-1"}},
+		{"user_sessions_revoked", cache.ChannelAdmin, cache.Event{Type: cache.EventUserSessionsRevoked, Payload: "42"}},
 	}
 
 	for _, tc := range relevant {
@@ -127,7 +128,6 @@ func TestAdminInsightsProviderEventBusInvalidation(t *testing.T) {
 		{"plugin_tasks_changed", cache.ChannelAdmin, cache.Event{Type: cache.EventPluginTasksChanged}},
 		{"auth_providers_changed", cache.ChannelAdmin, cache.Event{Type: cache.EventAuthProvidersChanged}},
 		{"marker_provider_config_changed", cache.ChannelAdmin, cache.Event{Type: cache.EventMarkerProviderConfigChanged}},
-		{"user_sessions_revoked", cache.ChannelAdmin, cache.Event{Type: cache.EventUserSessionsRevoked, Payload: "42"}},
 		{"wrong_channel_playback_on_admin", cache.ChannelAdmin, cache.Event{Type: cache.EventPlaybackSessionsChanged}},
 		{"wrong_channel_admin_on_playback", cache.ChannelPlayback, cache.Event{Type: cache.EventAdminStatsInvalidated}},
 	}
