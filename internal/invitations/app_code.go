@@ -56,20 +56,9 @@ func (s *Service) IssueAppCode(ctx context.Context, in AppCodeRequest) (auth.Iss
 		if err != nil {
 			return err
 		}
-		username, email := inv.Email, inv.Email
-		if inv.Email == "" {
-			username = auth.NormalizeUsername(in.Username)
-			if username == "" {
-				return ErrUsernameRequired
-			}
-			email = ""
-			if strings.TrimSpace(in.Email) != "" {
-				// The same rule as accept, signup and the administrator
-				// create form.
-				if email, err = auth.ValidateEmail(in.Email); err != nil {
-					return ErrInvalidEmail
-				}
-			}
+		username, email, err := joinAccountName(inv, in)
+		if err != nil {
+			return err
 		}
 		out, err = auth.IssueJoinAppCodeTx(ctx, tx, auth.JoinAppCode{
 			InvitationID: inv.ID, Username: username, Email: email, InvitationExpiresAt: inv.ExpiresAt,
@@ -77,6 +66,28 @@ func (s *Service) IssueAppCode(ctx context.Context, in AppCodeRequest) (auth.Iss
 		return err
 	})
 	return out, err
+}
+
+// joinAccountName is the name and email a join's account takes: an emailed
+// invitation's address for both, or the username the person chose (required)
+// and their optional email, checked by the rule accept, signup and the
+// administrator create form use.
+func joinAccountName(inv *models.Invitation, in AppCodeRequest) (string, string, error) {
+	if inv.Email != "" {
+		return inv.Email, inv.Email, nil
+	}
+	username := auth.NormalizeUsername(in.Username)
+	if username == "" {
+		return "", "", ErrUsernameRequired
+	}
+	if strings.TrimSpace(in.Email) == "" {
+		return username, "", nil
+	}
+	email, err := auth.ValidateEmail(in.Email)
+	if err != nil {
+		return "", "", ErrInvalidEmail
+	}
+	return username, email, nil
 }
 
 // ClaimJoinTx claims a join code's invitation in the redeem's transaction

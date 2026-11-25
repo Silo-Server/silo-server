@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,7 +45,7 @@ func newJoinEnv(t *testing.T) *joinEnv {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	env := &joinEnv{pool: pool, suffix: fmt.Sprintf("%d", time.Now().UnixNano())}
+	env := &joinEnv{pool: pool, suffix: strconv.FormatInt(time.Now().UnixNano(), 10)}
 	if err := pool.QueryRow(t.Context(), `INSERT INTO users (username, email, password_hash, role, enabled)
 		VALUES ($1, $2, 'x', 'admin', true) RETURNING id`, "join-inviter-"+env.suffix, "join-inviter-"+env.suffix+"@example.invalid").Scan(&env.inviter); err != nil {
 		t.Fatal(err)

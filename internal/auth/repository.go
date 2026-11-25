@@ -22,9 +22,6 @@ import (
 var (
 	ErrNotFound  = errors.New("user not found")
 	ErrDuplicate = errors.New("duplicate user")
-	// ErrNoPasswordConflict refuses a request for an account with no
-	// password that also names a password or turns local sign-in on.
-	ErrNoPasswordConflict = errors.New("an account with no password takes no password and no local sign-in")
 )
 
 // IsNotFound returns true if the error is a "not found" error.
@@ -204,25 +201,9 @@ func NewUserPermissions(input models.CreateUserInput) ([]string, error) {
 func createUser(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, input models.CreateUserInput) (*models.User, error) {
-	// Base columns that are always included.
-	localPasswordLoginEnabled := true
-	if input.LocalPasswordLoginEnabled != nil {
-		localPasswordLoginEnabled = *input.LocalPasswordLoginEnabled
-	}
-	// An account with no password stores NULL and local sign-in off, never
-	// a hash of the empty string.
-	var hash *string
-	if input.NoPassword {
-		if input.Password != "" || localPasswordLoginEnabled && input.LocalPasswordLoginEnabled != nil {
-			return nil, ErrNoPasswordConflict
-		}
-		localPasswordLoginEnabled = false
-	} else {
-		generated, err := passwordhash.Generate(ctx, []byte(input.Password), passwordHashCost)
-		if err != nil {
-			return nil, fmt.Errorf("hashing password: %w", err)
-		}
-		hash = new(string(generated))
+	hash, localPasswordLoginEnabled, err := newUserPassword(ctx, input)
+	if err != nil {
+		return nil, err
 	}
 
 	permissions, err := NewUserPermissions(input)
