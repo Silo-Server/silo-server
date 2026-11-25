@@ -163,9 +163,10 @@ func TestAdminInsightsFillStartedBeforeAnEvent(t *testing.T) {
 
 // TestAdminInsightsServesStaleWhileRefreshing pins the contract that keeps a
 // busy server's tabs instant: a stale entry is served at once and refreshed
-// in the background, no more often than insightsRefreshInterval; a forced
-// read waits for fresh data; a key nobody reads stays warm through the sweep
-// until adminInsightsServeStaleFor, and is dropped after it.
+// in the background, no more often than insightsRefreshInterval; after
+// Invalidate the next read waits for fresh data; the sweep keeps a key warm
+// for adminInsightsKeepWarmFor after its last read, and drops it once nobody
+// has read it for adminInsightsServeStaleFor.
 func TestAdminInsightsServesStaleWhileRefreshing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		p, err := NewAdminInsightsProvider(t.Context(), nil, nil)
@@ -218,7 +219,7 @@ func TestAdminInsightsServesStaleWhileRefreshing(t *testing.T) {
 		}
 
 		// Stale by an event, but refreshed too recently: served, no refresh.
-		p.Invalidate()
+		p.markStale()
 		if v := readNow(); v != 1 || loads.Load() != 1 {
 			t.Fatalf("read = %d with %d loads, want the cached 1 and no refresh", v, loads.Load())
 		}
@@ -234,17 +235,19 @@ func TestAdminInsightsServesStaleWhileRefreshing(t *testing.T) {
 			t.Fatalf("read after refresh = %d, want 2", v)
 		}
 
-		// A forced read waits for fresh data even though the entry is fresh.
-		forced := make(chan int, 1)
-		go func() { forced <- read(withInsightsForceRefresh(t.Context())) }()
+		// Invalidate (an admin change, the Refresh button) drops the entry,
+		// so the next read waits for fresh data even though it was fresh.
+		p.Invalidate()
+		fresh := make(chan int, 1)
+		go func() { fresh <- read(t.Context()) }()
 		synctest.Wait()
 		release <- 3
-		if v := <-forced; v != 3 {
-			t.Fatalf("forced read = %d, want 3", v)
+		if v := <-fresh; v != 3 {
+			t.Fatalf("read after Invalidate = %d, want 3", v)
 		}
 
 		// Nobody reads: the sweep refreshes the stale key in the background.
-		p.Invalidate()
+		p.markStale()
 		time.Sleep(insightsKeepWarmInterval(0) + adminInsightsSweepInterval) //nolint:forbidigo // synctest fake clock: sleeping advances time; nothing waits on the real clock.
 		release <- 4
 		synctest.Wait()
@@ -264,8 +267,10 @@ func TestAdminInsightsServesStaleWhileRefreshing(t *testing.T) {
 		}
 		time.Sleep(adminInsightsSweepInterval) //nolint:forbidigo // synctest fake clock: sleeping advances time; nothing waits on the real clock.
 		synctest.Wait()
-		if loads.Load() == before {
-			t.Fatal("sweep never refreshed a key read within adminInsightsServeStaleFor")
+		// Warm for adminInsightsKeepWarmFor after the last read, every
+		// insightsKeepWarmInterval: a couple of refreshes, then none.
+		if n, most := loads.Load()-before, int32(adminInsightsKeepWarmFor/insightsKeepWarmInterval(0)); n == 0 || n > most {
+			t.Fatalf("sweep refreshed an unread key %d times, want 1..%d", n, most)
 		}
 		p.mu.Lock()
 		_, kept := p.entries["k"]
@@ -336,5 +341,87 @@ func TestCachedInsightsReadCancelsAFillNobodyWaitsFor(t *testing.T) {
 		if _, ok := p.entries["k"]; ok {
 			t.Fatal("canceled fill published a cache entry")
 		}
+	})
+}
+
+// TestAdminInsightsRefreshFailureAndEviction pins two limits on background
+// refreshes: one that fails is retried no sooner than a successful one would
+// be, so a failing read can't keep a read slot busy; and one whose key was
+// evicted while it ran doesn't bring the key back.
+func TestAdminInsightsRefreshFailureAndEviction(t *testing.T) {
+	t.Run("failed refresh waits out its interval", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			p, err := NewAdminInsightsProvider(t.Context(), nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer p.Close()
+			var loads atomic.Int32
+			fail := errors.New("read failed")
+			load := func(context.Context) (int, error) {
+				if loads.Add(1) == 1 {
+					return 1, nil
+				}
+				return 0, fail
+			}
+			read := func() {
+				t.Helper()
+				if _, err := cachedInsightsRead(t.Context(), p, "k", load); err != nil {
+					t.Fatalf("read: %v", err)
+				}
+				synctest.Wait()
+			}
+			read()
+			p.markStale()
+			time.Sleep(insightsRefreshInterval(0)) //nolint:forbidigo // synctest fake clock: sleeping advances time; nothing waits on the real clock.
+			read()                                 // stale and due: one refresh, which fails
+			read()
+			if n := loads.Load(); n != 2 {
+				t.Fatalf("loads = %d after a failed refresh and another read, want 2", n)
+			}
+			time.Sleep(insightsRefreshInterval(0)) //nolint:forbidigo // synctest fake clock: sleeping advances time; nothing waits on the real clock.
+			read()
+			if n := loads.Load(); n != 3 {
+				t.Fatalf("loads = %d once the interval passed, want 3", n)
+			}
+		})
+	})
+
+	t.Run("evicted key stays evicted", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			p, err := NewAdminInsightsProvider(t.Context(), nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer p.Close()
+			release := make(chan struct{})
+			var loads atomic.Int32
+			load := func(context.Context) (int, error) {
+				if loads.Add(1) > 1 {
+					<-release
+				}
+				return 1, nil
+			}
+			if _, err := cachedInsightsRead(t.Context(), p, "k", load); err != nil {
+				t.Fatal(err)
+			}
+			p.markStale()
+			time.Sleep(insightsRefreshInterval(0)) //nolint:forbidigo // synctest fake clock: sleeping advances time; nothing waits on the real clock.
+			if _, err := cachedInsightsRead(t.Context(), p, "k", load); err != nil {
+				t.Fatal(err)
+			}
+			synctest.Wait() // the refresh is now blocked in its read
+			p.mu.Lock()
+			delete(p.entries, "k") // as the sweep evicts an unread key
+			p.mu.Unlock()
+			close(release)
+			synctest.Wait()
+			p.mu.Lock()
+			_, back := p.entries["k"]
+			p.mu.Unlock()
+			if back {
+				t.Fatal("a refresh brought back a key evicted while it ran")
+			}
+		})
 	})
 }

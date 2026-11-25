@@ -18,9 +18,7 @@ import (
 // Each read is cached under its key (tab, window, scope). A playback event
 // marks every entry stale by advancing the generation and drops nothing:
 // dropping meant that on a server with steady playback nearly every tab load
-// ran its full scan. An admin event (an account, item or node change, rare by
-// comparison) drops every entry, and a fill that started before it publishes
-// nothing, so the next read shows the change. A read then:
+// ran its full scan. A read then:
 //
 //   - returns a fresh entry: filled in the current generation and younger than
 //     adminInsightsCacheTTL;
@@ -31,18 +29,21 @@ import (
 //     requests in one generation share that fill, which is canceled once every
 //     request waiting on it has left.
 //
-// A sweep keeps keys read within adminInsightsServeStaleFor warm, refreshing
-// stale ones every insightsKeepWarmInterval of their cost, and drops keys
-// nobody read in that time. Background refreshes run one at a time, so they
-// hold at most one read-gate slot. A read on a context from
-// withInsightsForceRefresh (the page's Refresh button) always fills while it
-// waits. Title detail and custom ranges are read on demand and not cached.
+// Invalidate, which admin events (account, item and node changes) and the
+// Refresh button call, drops every entry instead, and a read that started
+// before it publishes nothing, so the change shows on the next read.
+//
+// A sweep refreshes stale keys read within adminInsightsKeepWarmFor, every
+// insightsKeepWarmInterval of their cost, and drops keys nobody read within
+// adminInsightsServeStaleFor. Background refreshes run one at a time, so they
+// hold at most one read-gate slot. Title detail and custom ranges are read on
+// demand and not cached.
 type AdminInsightsProvider struct {
 	pool *pgxpool.Pool
 
 	mu         sync.Mutex
 	gen        uint64                       // guarded by mu
-	dropGen    uint64                       // guarded by mu; advanced by dropAll
+	dropGen    uint64                       // guarded by mu; advanced by Invalidate
 	entries    map[string]*insightsEntry    // guarded by mu
 	fills      map[string]*insightsFillCall // guarded by mu; key and generation
 	refreshing map[string]bool              // guarded by mu; keys with a background refresh
@@ -58,8 +59,12 @@ type AdminInsightsProvider struct {
 
 const (
 	// adminInsightsServeStaleFor bounds how old a cached read can be and
-	// still be served at once; it is also how long an unread key stays warm.
+	// still be served at once, and how long an unread key is kept.
 	adminInsightsServeStaleFor = 30 * time.Minute
+	// adminInsightsKeepWarmFor is how long after its last read the sweep
+	// keeps refreshing a key, so background reads stop soon after the
+	// Insights page is closed.
+	adminInsightsKeepWarmFor = 5 * time.Minute
 	// adminInsightsSweepInterval is how often the warm keys are checked.
 	adminInsightsSweepInterval = 15 * time.Second
 )
@@ -82,9 +87,21 @@ type insightsEntry struct {
 	val      any
 	gen      uint64        // generation its read started in
 	filledAt time.Time     // when its read started
-	cost     time.Duration // how long its read took
+	cost     time.Duration // how long its read took, or a failed refresh if longer
 	lastRead time.Time     // last request served from it
+	triedAt  time.Time     // when its last background refresh started
 	load     func(context.Context) (any, error)
+}
+
+// refreshDue reports whether a background refresh of e may start now: the
+// interval runs from its last read or refresh attempt, whichever is later, so
+// a refresh that keeps failing is retried no faster than one that succeeds.
+func (e *insightsEntry) refreshDue(now time.Time, interval func(time.Duration) time.Duration) bool {
+	from := e.filledAt
+	if e.triedAt.After(from) {
+		from = e.triedAt
+	}
+	return now.Sub(from) >= interval(e.cost)
 }
 
 var _ AdminInsightsSource = (*AdminInsightsProvider)(nil)
@@ -130,13 +147,13 @@ func NewAdminInsightsProvider(ctx context.Context, pool *pgxpool.Pool, bus cache
 
 func (p *AdminInsightsProvider) handleAdminEvent(event cache.Event) {
 	if shouldInvalidateInsightsOnAdminEvent(event) {
-		p.dropAll()
+		p.Invalidate()
 	}
 }
 
 func (p *AdminInsightsProvider) handlePlaybackEvent(event cache.Event) {
 	if shouldInvalidateInsightsOnPlaybackEvent(event) {
-		p.Invalidate()
+		p.markStale()
 	}
 }
 
@@ -170,25 +187,26 @@ func shouldInvalidateInsightsOnPlaybackEvent(event cache.Event) bool {
 	return event.Type == cache.EventPlaybackSessionsChanged
 }
 
-// Invalidate marks every cached Insights entry stale. Later reads still serve
-// them while a background refresh replaces them, and a fill already in flight
-// still publishes, since its result is newer than the entry it replaces.
+// Invalidate drops every cached Insights entry and keeps reads that started
+// before it from publishing, for a change a stale entry must not show: an
+// admin event, or the Refresh button.
 func (p *AdminInsightsProvider) Invalidate() {
 	if p == nil {
 		return
 	}
 	p.mu.Lock()
 	p.gen++
+	p.dropGen++
+	clear(p.entries)
 	p.mu.Unlock()
 }
 
-// dropAll drops every cached entry, for an admin change a stale entry must not
-// show, and keeps reads that started before it from publishing.
-func (p *AdminInsightsProvider) dropAll() {
+// markStale marks every cached entry stale. Reads still serve them while a
+// background refresh replaces them, and a fill already in flight still
+// publishes, since its result is newer than the entry it replaces.
+func (p *AdminInsightsProvider) markStale() {
 	p.mu.Lock()
 	p.gen++
-	p.dropGen++
-	clear(p.entries)
 	p.mu.Unlock()
 }
 
@@ -215,19 +233,6 @@ func (p *AdminInsightsProvider) Close() {
 
 func insightsWindowCacheable(rangeVal string) bool {
 	return normalizeInsightsRange(rangeVal) != InsightsRangeCustom
-}
-
-type insightsForceRefreshKey struct{}
-
-// withInsightsForceRefresh marks ctx's reads as user-requested refreshes: they
-// skip any cached entry and wait for a fresh read.
-func withInsightsForceRefresh(ctx context.Context) context.Context {
-	return context.WithValue(ctx, insightsForceRefreshKey{}, true)
-}
-
-func insightsForceRefresh(ctx context.Context) bool {
-	force, _ := ctx.Value(insightsForceRefreshKey{}).(bool)
-	return force
 }
 
 // insightsFillCall is one shared fill and the requests waiting on it.
@@ -267,14 +272,12 @@ func cachedInsightsRead[T any](ctx context.Context, p *AdminInsightsProvider, ke
 
 func (p *AdminInsightsProvider) read(ctx context.Context, key string, load func(context.Context) (any, error)) (any, error) {
 	p.mu.Lock()
-	if !insightsForceRefresh(ctx) {
-		if val, ok := p.cachedLocked(key); ok {
-			p.mu.Unlock()
-			return val, nil
-		}
+	if val, ok := p.cachedLocked(key); ok {
+		p.mu.Unlock()
+		return val, nil
 	}
-	// One fill per key and generation: a forced read, which advanced the
-	// generation, never joins a fill that started before it.
+	// One fill per key and generation: a read after Invalidate never joins a
+	// fill that started before it.
 	fillKey := fmt.Sprintf("%s#%d", key, p.gen)
 	call := p.fills[fillKey]
 	if call == nil {
@@ -315,7 +318,7 @@ func (p *AdminInsightsProvider) cachedLocked(key string) (any, bool) {
 	if age >= adminInsightsServeStaleFor {
 		return nil, false
 	}
-	if age >= insightsRefreshInterval(e.cost) {
+	if e.refreshDue(now, insightsRefreshInterval) {
 		p.startRefreshLocked(key, e)
 	}
 	return e.val, true
@@ -388,6 +391,7 @@ func (p *AdminInsightsProvider) startRefreshLocked(key string, e *insightsEntry)
 		p.refreshing = make(map[string]bool)
 	}
 	p.refreshing[key] = true
+	e.triedAt = time.Now()
 	go p.refresh(key, e.load)
 }
 
@@ -406,19 +410,33 @@ func (p *AdminInsightsProvider) refresh(key string, load func(context.Context) (
 	ctx, cancel := p.refreshContext()
 	defer cancel()
 	p.mu.Lock()
+	// The sweep may have dropped an unread key, or an admin change every
+	// key, while this refresh waited for its slot; a refresh never brings
+	// one back.
+	if p.entries[key] == nil {
+		p.mu.Unlock()
+		return
+	}
 	gen, dropGen := p.gen, p.dropGen
 	p.mu.Unlock()
 	start := time.Now()
 	val, err := load(ctx)
-	if err != nil {
-		return // the stale entry stays; the next read or sweep retries
-	}
 	p.mu.Lock()
+	defer p.mu.Unlock()
+	e := p.entries[key]
+	if e == nil {
+		return
+	}
+	if err != nil {
+		// The stale entry stays. Counting the failed attempt's time in its
+		// cost spaces the retries out further when the read is slow to fail.
+		e.cost = max(e.cost, time.Since(start))
+		return
+	}
 	p.publishLocked(key, gen, dropGen, start, load, val)
-	p.mu.Unlock()
 }
 
-// sweepLoop keeps recently read keys warm and drops the rest.
+// sweepLoop keeps recently read keys warm and drops keys nobody reads.
 func (p *AdminInsightsProvider) sweepLoop() {
 	ticker := time.NewTicker(adminInsightsSweepInterval)
 	defer ticker.Stop()
@@ -441,9 +459,9 @@ func (p *AdminInsightsProvider) sweep() {
 			delete(p.entries, key)
 			continue
 		}
-		age := now.Sub(e.filledAt)
-		stale := e.gen != p.gen || age >= adminInsightsCacheTTL
-		if stale && age >= insightsKeepWarmInterval(e.cost) {
+		stale := e.gen != p.gen || now.Sub(e.filledAt) >= adminInsightsCacheTTL
+		recent := now.Sub(e.lastRead) < adminInsightsKeepWarmFor
+		if stale && recent && e.refreshDue(now, insightsKeepWarmInterval) {
 			p.startRefreshLocked(key, e)
 		}
 	}
