@@ -204,9 +204,13 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 	// A collection that hides watched titles reads on past members the viewer
 	// has watched, a bounded number of pages, so a page is not left empty
 	// while unwatched members follow; the continuation is the last member read.
+	// A full page also reads on until the next visible member, so it reports
+	// more only when one exists. The first read takes one member past the page,
+	// so a page with nothing watched behind it still needs only that read.
 	batches, read := 1, opts
 	if display != "" {
 		batches = maxHiddenMemberBatches
+		read.Limit = min(opts.Limit+1, userstore.MaxCollectionItemsPageLimit)
 	}
 	var listed []*models.MediaItem
 	var revision int64
@@ -250,10 +254,10 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 			}
 		}
 		out.HasMore = full || page.HasMore
-		if !page.HasMore || len(out.Items) == opts.Limit {
+		if full || !page.HasMore {
 			break
 		}
-		// The first read is the page's own size; later ones widen, so a run
+		// The first read is about the page's own size; later ones widen, so a run
 		// of watched members costs a few reads rather than ten small ones.
 		read.After, read.Limit = out.Last, max(opts.Limit, hiddenMemberBatchSize)
 	}

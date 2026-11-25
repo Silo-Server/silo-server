@@ -18,6 +18,9 @@ type CollectionItemPosition struct {
 	MediaItemID string
 }
 
+// MaxCollectionItemsPageLimit is the most members one collection page read takes.
+const MaxCollectionItemsPageLimit = 500
+
 type CollectionItemsPageOptions struct {
 	Limit int
 	After *CollectionItemPosition
@@ -26,7 +29,7 @@ type CollectionItemsPageOptions struct {
 }
 
 func (o CollectionItemsPageOptions) Validate() error {
-	if o.Limit < 1 || o.Limit > 500 {
+	if o.Limit < 1 || o.Limit > MaxCollectionItemsPageLimit {
 		return errors.New("collection page limit must be between 1 and 500")
 	}
 	if o.Revision < 0 || (o.After != nil && (o.Revision == 0 || o.After.MediaItemID == "")) {

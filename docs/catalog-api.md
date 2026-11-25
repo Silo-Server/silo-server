@@ -1342,7 +1342,8 @@ profile and never shared through the row cache. Admin reads (`getAdminCollection
 counts) show every member. A `getLibraryCollectionItems` page of a manual or synced collection
 reads on past members the viewer has watched, in up to ten reads (each after the first takes at
 least 100 stored members), so it can still come back empty with a `next` cursor when more watched
-members than that come first; keep paging until `next` is absent.
+members than that come first; keep paging until `next` is absent. A full page has no `next` when
+those reads find nothing more the viewer can see.
 A read without a profile, or through a user store whose watch state PostgreSQL cannot read, also
 shows every member. `getAdminCollectionCapabilities` reports `hide_watched: true` when the field
 is accepted. `/api/v1` neither takes nor answers it.
