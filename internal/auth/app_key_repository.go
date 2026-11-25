@@ -386,7 +386,7 @@ func (r *AppKeyRepository) RevokeAccountKeys(ctx context.Context, userID int) er
 // or Owner) call it in their own transaction, so it needs only Exec. The
 // device keys' rows are locked by their UPDATE before the sessions they
 // opened, the documented order.
-func revokeAccountKeysTx(ctx context.Context, tx execer, userID int) error {
+func revokeAccountKeysTx(ctx context.Context, tx sessionExecQuerier, userID int) error {
 	if _, err := tx.Exec(ctx, `UPDATE auth_person_keys SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, userID); err != nil {
 		return fmt.Errorf("revoking person keys: %w", err)
 	}
@@ -398,11 +398,6 @@ func revokeAccountKeysTx(ctx context.Context, tx execer, userID int) error {
 		return fmt.Errorf("revoking device keys: %w", err)
 	}
 	return nil
-}
-
-// execer is a pool or transaction that runs statements.
-type execer interface {
-	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }
 
 // endDeviceKeySessions ends the live login sessions the device keys opened.

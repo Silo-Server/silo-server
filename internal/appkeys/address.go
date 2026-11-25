@@ -89,23 +89,9 @@ func canonicalAuthority(authority, scheme string) (string, string, error) {
 	if strings.Contains(authority, "@") {
 		return "", "", fail(CodeNotAnAddress)
 	}
-	var hostPart, portPart string
-	hasPort := false
-	if strings.HasPrefix(authority, "[") {
-		closing := strings.Index(authority, "]")
-		if closing < 0 {
-			return "", "", fail(CodeNotAnAddress)
-		}
-		hostPart = authority[:closing+1]
-		tail := authority[closing+1:]
-		if tail != "" {
-			if !strings.HasPrefix(tail, ":") {
-				return "", "", fail(CodeNotAnAddress)
-			}
-			portPart, hasPort = tail[1:], true
-		}
-	} else {
-		hostPart, portPart, hasPort = strings.Cut(authority, ":")
+	hostPart, portPart, hasPort, ok := splitHostPort(authority)
+	if !ok {
+		return "", "", fail(CodeNotAnAddress)
 	}
 	host, ok := canonicalHost(hostPart)
 	if !ok {
@@ -119,6 +105,27 @@ func canonicalAuthority(authority, scheme string) (string, string, error) {
 		return "", "", fail(CodeNotAnAddress)
 	}
 	return host, port, nil
+}
+
+// splitHostPort splits an authority into its host (an IPv6 host with its
+// brackets) and the port after a colon, if any.
+func splitHostPort(authority string) (host, port string, hasPort, ok bool) {
+	if !strings.HasPrefix(authority, "[") {
+		host, port, hasPort = strings.Cut(authority, ":")
+		return host, port, hasPort, true
+	}
+	closing := strings.Index(authority, "]")
+	if closing < 0 {
+		return "", "", false, false
+	}
+	host, tail := authority[:closing+1], authority[closing+1:]
+	if tail == "" {
+		return host, "", false, true
+	}
+	if !strings.HasPrefix(tail, ":") {
+		return "", "", false, false
+	}
+	return host, tail[1:], true, true
 }
 
 // canonicalPort refuses an empty port, a leading zero, a port out of range

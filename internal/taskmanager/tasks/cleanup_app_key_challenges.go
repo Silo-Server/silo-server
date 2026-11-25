@@ -13,7 +13,7 @@ import (
 // expiredKeyChallengeDeleter removes app key challenges that expired
 // unspent; *auth.KeyChallenges satisfies it.
 type expiredKeyChallengeDeleter interface {
-	DeleteExpired(ctx context.Context) (int, error)
+	DeleteExpiredChallenges(ctx context.Context) (int, error)
 }
 
 // AppKeyChallengeCleanupTask deletes app key challenges nobody spent. Spending
@@ -58,10 +58,9 @@ func (t *AppKeyChallengeCleanupTask) Execute(ctx context.Context, progress taskm
 		return nil
 	}
 	progress.Report(0, "Deleting expired app key challenges")
-	deleted, err := t.challenges.DeleteExpired(ctx)
-	if data, marshalErr := json.Marshal(appKeyChallengeCleanupResult{Deleted: deleted}); marshalErr == nil {
-		progress.SetResultData(data)
-	}
+	deleted, err := t.challenges.DeleteExpiredChallenges(ctx)
+	data, _ := json.Marshal(appKeyChallengeCleanupResult{Deleted: deleted})
+	progress.SetResultData(data)
 	if err != nil {
 		slog.WarnContext(ctx, "app key challenge cleanup failed", "component", "taskmanager", "task", t.Key(), "error", err)
 		progress.Report(100, "App key challenge cleanup failed")

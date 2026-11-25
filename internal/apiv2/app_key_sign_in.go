@@ -254,10 +254,7 @@ func (reg *Registry) sealAppKeyAnswer(answer *handlers.AppKeyAnswer) (*SealedRep
 		tokens := tokenPairFromView(*answer.Tokens)
 		reply.Tokens = &tokens
 	}
-	plaintext, err := json.Marshal(reply)
-	if err != nil {
-		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
-	}
+	plaintext, _ := json.Marshal(reply)
 	sealed, err := appkeys.Seal(result.ReplyKey, result.Challenge, plaintext)
 	if err != nil {
 		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")

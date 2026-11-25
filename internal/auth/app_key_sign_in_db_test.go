@@ -164,21 +164,19 @@ func (e *keyEnv) sessionLive(t *testing.T, id string, userID int) bool {
 	return active
 }
 
-// The challenge and signature rules every signed request passes: a
-// challenge works once, and only before it expires; a failed signature does
-// not spend it; a payload for another server, for another purpose, or
-// outside its times is refused; and a revoked key signs nothing in.
-func TestKeySignInRefusalsDB(t *testing.T) {
-	env := newKeyEnv(t, "keyrules")
+// A challenge works once, on any node, and only before it expires; a
+// request whose signature fails does not spend it, so a stranger can't burn
+// a device's challenge.
+func TestKeyChallengeRulesDB(t *testing.T) {
+	env := newKeyEnv(t, "keychallenge")
 	ctx := t.Context()
-	user := env.localAccount(t, "keyrules-user", models.RoleUser)
-	person, device, _ := env.enroll(t, user)
+	user := env.localAccount(t, "keychallenge-user", models.RoleUser)
+	_, device, _ := env.enroll(t, user)
 	signIn := func(m message) error {
 		_, err := env.signIn.SignIn(ctx, env.request(t, m))
 		return err
 	}
 	base := message{purpose: appkeys.PurposeSignIn, signer: device}
-
 	t.Run("replayed challenge", func(t *testing.T) {
 		req := env.request(t, base)
 		if _, err := env.signIn.SignIn(ctx, req); err != nil {
@@ -210,6 +208,23 @@ func TestKeySignInRefusalsDB(t *testing.T) {
 			t.Fatalf("the challenge was spent by a failed signature: %v", err)
 		}
 	})
+}
+
+// The signature rules every signed request passes: a payload for another
+// server, for another purpose, outside its times or from a known-wrong
+// origin is refused, each route takes only its own envelope, a public key is
+// enrolled once, and a revoked key signs nothing in.
+func TestKeySignInRefusalsDB(t *testing.T) {
+	env := newKeyEnv(t, "keyrules")
+	ctx := t.Context()
+	user := env.localAccount(t, "keyrules-user", models.RoleUser)
+	person, device, _ := env.enroll(t, user)
+	signIn := func(m message) error {
+		_, err := env.signIn.SignIn(ctx, env.request(t, m))
+		return err
+	}
+	base := message{purpose: appkeys.PurposeSignIn, signer: device}
+
 	for _, tc := range []struct {
 		name string
 		m    message

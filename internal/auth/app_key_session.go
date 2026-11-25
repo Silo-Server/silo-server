@@ -93,26 +93,7 @@ func (s *Service) keyProviderExpiry(ctx context.Context, userID int, binding Key
 // refuses the account (localPasswordPolicy).
 func keySignInPolicy(ctx context.Context, tx pgx.Tx, user *models.User, binding KeyBinding) (*int64, *time.Time, error) {
 	if binding.ProviderBound {
-		if binding.IdentityID == nil {
-			return nil, nil, ErrNotPermitted
-		}
-		installationID, err := lockOAuthIdentity(ctx, tx, user.ID, *binding.IdentityID)
-		if err != nil {
-			return nil, nil, err
-		}
-		authority, err := primaryAuthorityOf(ctx, tx, user.ID, installationID)
-		if err != nil {
-			return nil, nil, err
-		}
-		if authority.refused {
-			return nil, nil, ErrNotPermitted
-		}
-		anchor, err := identityAnchor(ctx, tx, user.ID, *binding.IdentityID)
-		if err != nil {
-			return nil, nil, err
-		}
-		identityID := *binding.IdentityID
-		return &identityID, &anchor, nil
+		return lockKeyIdentity(ctx, tx, user, binding.IdentityID)
 	}
 	if !user.BreakGlass {
 		// Serialize with a change of auth.local_password_login, as a password
@@ -122,6 +103,31 @@ func keySignInPolicy(ctx context.Context, tx pgx.Tx, user *models.User, binding 
 		}
 	}
 	return nil, nil, localPasswordPolicy(ctx, tx, user)
+}
+
+// lockKeyIdentity locks and checks a provider-bound key's identity and
+// answers it with its anchor, read under the lock.
+func lockKeyIdentity(ctx context.Context, tx pgx.Tx, user *models.User, identityID *int64) (*int64, *time.Time, error) {
+	if identityID == nil {
+		return nil, nil, ErrNotPermitted
+	}
+	installationID, err := lockOAuthIdentity(ctx, tx, user.ID, *identityID)
+	if err != nil {
+		return nil, nil, err
+	}
+	authority, err := primaryAuthorityOf(ctx, tx, user.ID, installationID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if authority.refused {
+		return nil, nil, ErrNotPermitted
+	}
+	anchor, err := identityAnchor(ctx, tx, user.ID, *identityID)
+	if err != nil {
+		return nil, nil, err
+	}
+	id := *identityID
+	return &id, &anchor, nil
 }
 
 // KeySession describes the login session a device key opens.

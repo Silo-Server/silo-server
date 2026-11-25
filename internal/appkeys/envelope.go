@@ -155,7 +155,8 @@ func Verify(env Envelope, purpose Purpose, key PublicKey, serverID string, now t
 	if err := p.parseFields(purpose); err != nil {
 		return p, err
 	}
-	return p, p.CheckClaims(serverID, now)
+	err = p.CheckClaims(serverID, now)
+	return p, err
 }
 
 // CheckClaims refuses a payload naming another server or outside its times.

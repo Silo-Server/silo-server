@@ -69,9 +69,9 @@ func (c *KeyChallenges) Spend(ctx context.Context, raw []byte) error {
 	return nil
 }
 
-// DeleteExpired removes challenges that expired unspent, for the retention
-// step. A spent challenge has no row left.
-func (c *KeyChallenges) DeleteExpired(ctx context.Context) (int, error) {
+// DeleteExpiredChallenges removes challenges that expired unspent, for the
+// retention step. A spent challenge has no row left.
+func (c *KeyChallenges) DeleteExpiredChallenges(ctx context.Context) (int, error) {
 	tag, err := c.pool.Exec(ctx, `DELETE FROM auth_key_challenges WHERE expires_at < NOW()`)
 	if err != nil {
 		return 0, fmt.Errorf("deleting expired app key challenges: %w", err)
