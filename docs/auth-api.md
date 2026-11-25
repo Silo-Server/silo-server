@@ -498,6 +498,40 @@ addresses, existing sessions keep working and refreshing, completing a password 
 an invitation signs in without spending the budget, and a signed-in device can approve a
 new one through device sign-in.
 
+### The demo account
+
+On a [demo](#demo-mode) server, the per-name limit on failed sign-ins is shared by every
+visitor of the demo's shared account. The `demo.account_id` server setting names that
+account by its account ID (empty by default, naming none). While demo mode is on and the
+setting names an existing, enabled account that is not an administrator and signs in with
+its local password, password sign-ins with that account's own sign-in names (its username
+and its email address) skip the per-name budget, wherever the local provider checks the
+password. Nothing else changes: the per-address request limits, profile PIN attempts, and
+every other name's budget apply as before, and a sign-in that names another provider, or
+a Jellyfin name whose budget name signs in to a different account, keeps the budget.
+
+Writing the setting refuses an account that does not exist or is an administrator's, with
+the usual settings validation answer at the setting's field. The exemption fails closed to
+the ordinary budget: with demo mode off, the setting empty, the account deleted, disabled,
+without local password sign-in or promoted to administrator since, or the settings never
+read by this process. The setting is read through the same `demomode.Setting` as
+`demo.enabled`, so a failed read uses the last value this process read. The account's
+names are worked out off the sign-in path (`auth.DemoSignIn`, refreshed in the
+background), and an attempt only compares its name's budget key with them: an attempt for
+any other name runs the same reads as without the setting. An attempt whose name matches
+re-reads the settings and the account before it skips the budget. A rename or a newly
+set email takes effect at the next refresh; until then that name keeps the ordinary
+budget.
+
+What an operator gives up by naming an account:
+
+- The per-name limit no longer slows password guessing against that one account. On a
+  demo its password is public by design; the per-address limits still apply.
+- The server no longer treats that one name like every other, so the promise that the
+  budget reveals nothing about which names exist holds for every name but that one.
+
+A restore treats the setting as server-specific: it names an account row of this server.
+
 ## Authenticated account allowance
 
 Authenticated routes also spend one `account:<user_id>` budget, shared across the
@@ -1027,6 +1061,9 @@ cookie) when it verifies as one of the same account and profile. It closes no pl
 (none records which token opened it). A refresh token the request does not carry stays live
 until it expires. When the account's role can't be read, or the process has never read the
 setting, sign-out takes the demo path. An expired access token revokes nothing.
+
+`demo.account_id` names the shared account so the per-name limit on failed sign-ins does
+not apply to it; see [The demo account](#the-demo-account).
 
 `TestDemoModeCoversAccountOperations` in `internal/apiv2` fails when an operation tagged
 `account`, `api-keys`, `auth`, `device-login`, `notifications` or `profiles` that a
