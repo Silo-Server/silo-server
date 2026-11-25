@@ -49,7 +49,9 @@ person types `account#Profile`. So adding a second profile with no PIN can
 make the bare name stop working at the next sign-in; sessions already open
 keep working. `GET /api/v2/profiles/set` and the `putProfileSet` answer say
 which way it goes (`jellyfin_bare_name_sign_in`, see
-[auth-api.md](auth-api.md#the-profile-set)).
+[auth-api.md](auth-api.md#the-profile-set)). The first case compares with the
+name the person typed, so it never applies to someone who signs in with their
+email address.
 
 Routes and queries that take a
 user ID also accept the dashed form, which clients that signed in before this

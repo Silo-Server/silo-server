@@ -695,7 +695,10 @@ name with code `name_conflict`.
   profile is named like the account (compared without case), or else exactly
   one profile has no PIN; otherwise the person must sign in as
   `account#Profile`. Sessions already open are not affected either way. The
-  member is absent while the Jellyfin-compatible surface is off.
+  member is absent while the Jellyfin-compatible surface is off. It answers
+  for the account's username. A person who types their email address instead
+  is matched by the second rule only (exactly one profile with no PIN),
+  because no profile is named like an email address.
 
 The answer describes the account as it stands after the call, so a repeat of
 the same set answers the same lists.
@@ -706,7 +709,7 @@ the same set answers the same lists.
 | --- | --- |
 | 409 `profile_set_stale` | The version is older than the one the server holds; the same version with other content; the same version whose `set` PIN differs from the stored PIN, or whose `clear` finds a PIN; or the server holds the person's own edits and `edits_seen` is not its current `edits_token`. Nothing is written. |
 | 409 `capability_disabled` | The signed form while `auth.app_key_sign_in` is off. The session form works with app keys off. |
-| 409 `conflict` | The household kept changing while the set was applied, send it again; or the account has profiles but no main profile, which a set can't apply to. |
+| 409 `conflict` | The household kept changing while the set was applied; or the account has profiles but no main profile, which a set can't apply to. Send the set again a few times, waiting longer each time, then stop and report it: the second case doesn't clear by itself. |
 | 401 `signature_invalid`, `challenge_invalid` | The signed form, as on the other signed routes. A payload naming another account is `signature_invalid`. A replayed envelope is `challenge_invalid`. |
 | 401 `authentication_required` | The session form without a login session. An API key carries no login session, so it gets this too. |
 | 401 `session_expired` | The account was deleted while the set was applied. |
@@ -720,6 +723,10 @@ PIN attempt on that profile, exactly as on `verifyProfilePIN`: a wrong PIN
 counts, a right one clears the count, and the fifth wrong one locks the
 profile for five minutes, during which the repeat answers 429 without
 comparing.
+
+After `profile_set_stale`, read `GET /profiles/set` before sending anything:
+it says which version the server holds and its `edits_token`. Sending the held
+version again without that read spends PIN attempts and can lock a profile.
 
 A set that changes the main profile's PIN ends every `X-Profile-Token` minted
 for the old PIN, the caller's included: the next household call needs
