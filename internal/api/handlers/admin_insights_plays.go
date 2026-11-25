@@ -75,6 +75,11 @@ type insightsPlaysScope struct {
 	profileID string
 	libraryID int
 	itemIDs   []string // nil: every item
+	// needFileLibrary projects file_id and file_library_id on vr even when
+	// libraryID == 0, for callers that attribute rows to libraries (e.g.
+	// insightsLibraryOfRowSQL). When false and libraryID == 0, scoped omits
+	// the media_files join.
+	needFileLibrary bool
 }
 
 func newInsightsPlaysScope(win resolvedInsightsWindow, q AdminInsightsWindowQuery) insightsPlaysScope {
@@ -84,7 +89,8 @@ func newInsightsPlaysScope(win resolvedInsightsWindow, q AdminInsightsWindowQuer
 // insightsViewingCTE is the WITH clause viewingRowsSQL fills in: %[1]s the
 // watch-time expression, %[2]s in_window, %[3]s the scope conditions, %[4]s the
 // replaced hand-off grace, %[5]s the viewing gap, %[6]s..%[8]s the direct,
-// remux and transcode predicates over q.play_method.
+// remux and transcode predicates over q.play_method, %[9]s optional file
+// columns, and %[10]s the optional media_files join.
 const insightsViewingCTE = `
 		WITH scoped AS (
 			SELECT
@@ -93,12 +99,10 @@ const insightsViewingCTE = `
 				h.route_facts_recorded,
 				(%[1]s)::double precision AS watch_sec,
 				(%[2]s) AS in_window,
-				ep.series_id, (ep.content_id IS NOT NULL) AS is_episode, mi.type AS item_type,
-				mf.id AS file_id, mf.media_folder_id AS file_library_id
+				ep.series_id, (ep.content_id IS NOT NULL) AS is_episode, mi.type AS item_type%[9]s
 			FROM admin_playback_history h
 			LEFT JOIN media_items mi ON mi.content_id = h.media_item_id
-			LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
-			LEFT JOIN media_files mf ON mf.id = COALESCE(h.effective_media_file_id, h.media_file_id)
+			LEFT JOIN episodes ep ON ep.content_id = h.media_item_id%[10]s
 			WHERE %[3]s
 		),
 		running AS (
@@ -172,7 +176,8 @@ const insightsViewingCTE = `
 //
 //	watch_sec            the session's watch time (adminPlaybackWatchTimeSQL)
 //	in_window            started inside the window
-//	series_id, is_episode, item_type, file_id, file_library_id
+//	series_id, is_episode, item_type
+//	file_id, file_library_id (when libraryID > 0 or needFileLibrary is set)
 //	starts_viewing       first session of its viewing
 //	viewing_completed    any session of the viewing completed
 //	viewing_watch_sec    watch time of the viewing's sessions in scope
@@ -201,10 +206,17 @@ func (s insightsPlaysScope) viewingRowsSQL(args *[]any) (with, counted string) {
 		conds = append(conds, "h.media_item_id = ANY("+param(s.itemIDs)+"::text[])")
 	}
 
+	var fileCols, fileJoin string
+	if s.libraryID > 0 || s.needFileLibrary {
+		fileCols = ",\n\t\t\t\tmf.id AS file_id, mf.media_folder_id AS file_library_id"
+		fileJoin = "\n\t\t\tLEFT JOIN media_files mf ON mf.id = COALESCE(h.effective_media_file_id, h.media_file_id)"
+	}
+
 	with = fmt.Sprintf(insightsViewingCTE,
 		adminPlaybackWatchTimeSQL("h"), inWindow, strings.Join(conds, " AND "),
 		insightsReplacedHandoffGrace, insightsViewingGap,
-		insightsDirectSQL("q.play_method"), insightsRemuxSQL("q.play_method"), insightsTranscodeSQL("q.play_method"))
+		insightsDirectSQL("q.play_method"), insightsRemuxSQL("q.play_method"), insightsTranscodeSQL("q.play_method"),
+		fileCols, fileJoin)
 
 	counted = "vr.in_window"
 	if s.libraryID > 0 {

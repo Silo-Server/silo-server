@@ -84,6 +84,7 @@ func resolveInsightsPlaysWindow(ctx context.Context, tx pgx.Tx, q AdminInsightsW
 // queryInsightsTitlesRanking ranks titles and libraries in one statement, so
 // the viewing grouping runs once per read.
 func queryInsightsTitlesRanking(ctx context.Context, tx pgx.Tx, scope insightsPlaysScope, sortKey string, limit int, out *AdminInsightsTitles) error {
+	scope.needFileLibrary = true
 	var args []any
 	with, counted := scope.viewingRowsSQL(&args)
 	args = append(args, limit, insightsLeastFinishedMinPlays)

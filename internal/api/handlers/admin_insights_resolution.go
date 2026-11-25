@@ -94,22 +94,45 @@ func insightsResolutionLines(label string) (int, bool) {
 }
 
 // queryInsightsResolutions fills the source and delivered resolution
-// breakdowns and the downscale pairs. It groups the window's sessions by the
-// raw facts and classifies them here, so the classifier stays the scanner's.
-func queryInsightsResolutions(ctx context.Context, tx pgx.Tx, whereSQL string, whereArgs []any, out *AdminInsightsDevices) error {
+// breakdowns and the downscale pairs. It pre-groups sessions by file before
+// probing media_files so each unique file's video_tracks dimensions are read
+// once, then classifies the grouped facts here so the classifier stays the
+// scanner's.
+func queryInsightsResolutions(ctx context.Context, tx pgx.Tx, libraryID int, whereSQL string, whereArgs []any, out *AdminInsightsDevices) error {
 	rows, err := tx.Query(ctx, `
+		WITH h_grouped AS (
+			SELECT
+				COALESCE(h.effective_media_file_id, h.media_file_id) AS file_id,
+				LOWER(BTRIM(h.play_method)) AS play_method,
+				LOWER(BTRIM(COALESCE(h.video_decision, ''))) AS video_decision,
+				LOWER(BTRIM(COALESCE(h.target_video_codec, ''))) AS target_video_codec,
+				COALESCE(h.target_resolution, '') AS target_resolution,
+				h.route_facts_recorded,
+				COUNT(*)::bigint AS sessions
+			FROM admin_playback_history h `+insightsLibraryJoinSQL(libraryID)+`
+			WHERE `+whereSQL+`
+			GROUP BY 1, 2, 3, 4, 5, 6
+		),
+		files AS (
+			SELECT
+				mf.id,
+				COALESCE(mf.resolution, '') AS resolution,
+				CASE WHEN vt.w ~ '^[0-9]{1,5}$' THEN vt.w::int ELSE 0 END AS width,
+				CASE WHEN vt.h ~ '^[0-9]{1,5}$' THEN vt.h::int ELSE 0 END AS height
+			FROM (SELECT DISTINCT file_id FROM h_grouped WHERE file_id IS NOT NULL) f
+			JOIN media_files mf ON mf.id = f.file_id
+			CROSS JOIN LATERAL (SELECT mf.video_tracks->0 AS t) v0
+			CROSS JOIN LATERAL (SELECT v0.t->>'width' AS w, v0.t->>'height' AS h) vt
+		)
 		SELECT
-			COALESCE(mf.resolution, ''),
-			CASE WHEN (mf.video_tracks->0->>'width') ~ '^[0-9]{1,5}$' THEN (mf.video_tracks->0->>'width')::int ELSE 0 END,
-			CASE WHEN (mf.video_tracks->0->>'height') ~ '^[0-9]{1,5}$' THEN (mf.video_tracks->0->>'height')::int ELSE 0 END,
-			LOWER(BTRIM(h.play_method)), LOWER(BTRIM(COALESCE(h.video_decision, ''))),
-			LOWER(BTRIM(COALESCE(h.target_video_codec, ''))), COALESCE(h.target_resolution, ''),
-			h.route_facts_recorded,
-			COUNT(*)::bigint
-		FROM admin_playback_history h
-		LEFT JOIN media_files mf ON mf.id = COALESCE(h.effective_media_file_id, h.media_file_id)
-		LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
-		WHERE `+whereSQL+`
+			COALESCE(f.resolution, ''),
+			COALESCE(f.width, 0),
+			COALESCE(f.height, 0),
+			g.play_method, g.video_decision, g.target_video_codec, g.target_resolution,
+			g.route_facts_recorded,
+			SUM(g.sessions)::bigint
+		FROM h_grouped g
+		LEFT JOIN files f ON f.id = g.file_id
 		GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
 	`, whereArgs...)
 	if err != nil {

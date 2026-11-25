@@ -67,19 +67,16 @@ func queryAdminInsightsDevices(ctx context.Context, pool *pgxpool.Pool, q AdminI
 		ProtocolBuckets: make([]AdminInsightsProtocolBucket, 0),
 	}
 
-	if err := queryInsightsDevicesSummary(ctx, tx, whereSQL, whereArgs, out); err != nil {
+	if err := queryInsightsDevicesSummaryAndBreakdowns(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
 		return nil, err
 	}
-	if err := queryInsightsClientCodecMatrix(ctx, tx, whereSQL, whereArgs, clampInsightsMinSessions(q.MinSessions), out); err != nil {
+	if err := queryInsightsClientCodecMatrix(ctx, tx, q.LibraryID, whereSQL, whereArgs, clampInsightsMinSessions(q.MinSessions), out); err != nil {
 		return nil, err
 	}
 	if err := queryInsightsAdaptationReasons(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
 		return nil, err
 	}
-	if err := queryInsightsDevicesBreakdowns(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
-		return nil, err
-	}
-	if err := queryInsightsResolutions(ctx, tx, whereSQL, whereArgs, out); err != nil {
+	if err := queryInsightsResolutions(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
 		return nil, err
 	}
 	if err := queryInsightsClientVersions(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
@@ -91,7 +88,7 @@ func queryAdminInsightsDevices(ctx context.Context, pool *pgxpool.Pool, q AdminI
 	if err := queryInsightsSubtitleUsage(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
 		return nil, err
 	}
-	if err := queryInsightsAudioUsage(ctx, tx, whereSQL, whereArgs, out); err != nil {
+	if err := queryInsightsAudioUsage(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -100,37 +97,79 @@ func queryAdminInsightsDevices(ctx context.Context, pool *pgxpool.Pool, q AdminI
 	return out, nil
 }
 
-func queryInsightsDevicesSummary(ctx context.Context, tx pgx.Tx, whereSQL string, whereArgs []any, out *AdminInsightsDevices) error {
-	err := tx.QueryRow(ctx, `
+// queryInsightsDevicesSummaryAndBreakdowns reads the Devices summary KPIs and
+// the HW-accel, tone-map, and subtitle burn-in codec breakdowns in one scan of
+// admin_playback_history.
+func queryInsightsDevicesSummaryAndBreakdowns(ctx context.Context, tx pgx.Tx, libraryID int, whereSQL string, whereArgs []any, out *AdminInsightsDevices) error {
+	rows, err := tx.Query(ctx, `
 		SELECT
+			CASE WHEN `+insightsPlayTranscodeSQL+` AND h.route_facts_recorded THEN COALESCE(h.transcode_hw_accel, '') END,
+			NULLIF(LOWER(BTRIM(COALESCE(h.tone_map_mode, ''))), ''),
+			CASE WHEN h.subtitle->>'delivery' = 'burn_in' THEN COALESCE(NULLIF(LOWER(BTRIM(h.subtitle->>'codec')), ''), 'unknown') END,
 			COUNT(*)::bigint,
 			COUNT(*) FILTER (WHERE h.measured)::bigint,
 			COUNT(*) FILTER (WHERE h.route_facts_recorded)::bigint,
 			COUNT(*) FILTER (WHERE `+insightsPlayDirectSQL+`)::bigint,
 			COUNT(*) FILTER (WHERE `+insightsPlayRemuxSQL+`)::bigint,
-			COUNT(*) FILTER (WHERE `+insightsPlayTranscodeSQL+`)::bigint,
-			COUNT(*) FILTER (WHERE `+insightsPlayTranscodeSQL+` AND h.route_facts_recorded AND NULLIF(LOWER(BTRIM(COALESCE(h.transcode_hw_accel, ''))), '') IS NOT NULL AND LOWER(BTRIM(h.transcode_hw_accel)) NOT IN ('none', 'software', 'cpu', 'auto', 'unknown'))::bigint,
-			COUNT(*) FILTER (WHERE `+insightsPlayTranscodeSQL+` AND h.route_facts_recorded AND LOWER(BTRIM(COALESCE(h.transcode_hw_accel, ''))) IN ('none', 'software', 'cpu'))::bigint,
-			COUNT(*) FILTER (WHERE h.subtitle->>'delivery' = 'burn_in')::bigint,
-			COUNT(*) FILTER (WHERE NULLIF(LOWER(BTRIM(COALESCE(h.tone_map_mode, ''))), '') IS NOT NULL)::bigint,
-			COUNT(*) FILTER (WHERE LOWER(BTRIM(COALESCE(h.tone_map_mode, ''))) = 'hardware')::bigint,
-			COUNT(*) FILTER (WHERE LOWER(BTRIM(COALESCE(h.tone_map_mode, ''))) = 'software')::bigint
-		FROM admin_playback_history h
-		LEFT JOIN media_files mf ON mf.id = COALESCE(h.effective_media_file_id, h.media_file_id)
-		LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
-		WHERE `+whereSQL, whereArgs...).Scan(
-		&out.Summary.TotalSessions, &out.Coverage.MeasuredSessions, &out.Summary.RouteFactsSessions,
-		&out.Summary.DirectSessions, &out.Summary.RemuxSessions, &out.Summary.TranscodeSessions,
-		&out.Summary.HWTranscodeSessions, &out.Summary.SWTranscodeSessions,
-		&out.Summary.SubtitleBurnInSessions, &out.Summary.HDRToneMapSessions,
-		&out.Summary.HDRToneMapHWSessions, &out.Summary.HDRToneMapSWSessions,
-	)
+			COUNT(*) FILTER (WHERE `+insightsPlayTranscodeSQL+`)::bigint
+		FROM admin_playback_history h `+insightsLibraryJoinSQL(libraryID)+`
+		WHERE `+whereSQL+`
+		GROUP BY 1, 2, 3
+	`, whereArgs...)
 	if err != nil {
-		return fmt.Errorf("querying insights devices summary: %w", err)
+		return fmt.Errorf("querying insights devices summary and breakdowns: %w", err)
+	}
+	defer rows.Close()
+	hwAccel := make(map[string]int64)
+	toneMap := make(map[string]int64)
+	burnIn := make(map[string]int64)
+	for rows.Next() {
+		var hw, tm, burn *string
+		var total, measured, routeFacts, direct, remux, transcode int64
+		if err := rows.Scan(&hw, &tm, &burn, &total, &measured, &routeFacts, &direct, &remux, &transcode); err != nil {
+			return fmt.Errorf("scanning insights devices summary and breakdowns: %w", err)
+		}
+		out.Summary.TotalSessions += total
+		out.Coverage.MeasuredSessions += measured
+		out.Summary.RouteFactsSessions += routeFacts
+		out.Summary.DirectSessions += direct
+		out.Summary.RemuxSessions += remux
+		out.Summary.TranscodeSessions += transcode
+		if hw != nil {
+			k := normalizeHWAccelKey(*hw)
+			hwAccel[k] += total
+			switch k {
+			case insightsHWSoftwareKey:
+				out.Summary.SWTranscodeSessions += total
+			case insightsUnknownKey:
+			default:
+				out.Summary.HWTranscodeSessions += total
+			}
+		}
+		if tm != nil {
+			toneMap[*tm] += total
+			out.Summary.HDRToneMapSessions += total
+			switch *tm {
+			case "hardware":
+				out.Summary.HDRToneMapHWSessions += total
+			case "software":
+				out.Summary.HDRToneMapSWSessions += total
+			}
+		}
+		if burn != nil {
+			burnIn[*burn] += total
+			out.Summary.SubtitleBurnInSessions += total
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
 	}
 	out.Summary.DirectRate = roundInsightsRate(out.Summary.DirectSessions, out.Summary.TotalSessions)
 	out.Coverage.TotalSessions = out.Summary.TotalSessions
 	out.Coverage.RouteFactsSessions = out.Summary.RouteFactsSessions
+	out.HWAccelBreakdown = sortedLabeledCounts(hwAccel)
+	out.ToneMapBreakdown = sortedLabeledCounts(toneMap)
+	out.SubtitleBurnInCodecs = sortedLabeledCounts(burnIn)
 	return nil
 }
 
@@ -140,28 +179,48 @@ func queryInsightsDevicesSummary(ctx context.Context, tx pgx.Tx, whereSQL string
 // read's memory and response bounded however many identities history holds.
 const insightsMatrixMaxRows = 200
 
-func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, whereSQL string, whereArgs []any, minSessions int, out *AdminInsightsDevices) error {
+func insightsClientCodecMatrixSQL(libraryID int, whereSQL string, whereArgs []any, minSessions int) (string, []any) {
 	args := append(append([]any{}, whereArgs...), minSessions, insightsMatrixMaxRows, insightsTopTranscodersLimit)
 	minParam, capParam, topParam := len(args)-2, len(args)-1, len(args)
-	// Only the matrix's rows (over the threshold, within the cap) and the top
-	// transcoders (whatever their size) leave the database.
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		WITH cells AS (
+	// Pre-group sessions by file before probing media_files so each unique file
+	// is looked up once, and return only matrix rows (over the threshold, within
+	// the cap) and top transcoders.
+	query := fmt.Sprintf(`
+		WITH per_file AS (
 			SELECT
+				COALESCE(h.effective_media_file_id, h.media_file_id) AS file_id,
 				LOWER(COALESCE(NULLIF(BTRIM(h.client_name), ''), 'unknown')) AS client_key,
 				LOWER(COALESCE(NULLIF(BTRIM(h.device_platform), ''), 'unknown')) AS platform_key,
-				COALESCE(MIN(NULLIF(BTRIM(h.client_name), '')), 'Unknown') AS client_name,
-				COALESCE(MIN(NULLIF(BTRIM(h.device_platform), '')), 'Unknown') AS device_platform,
-				LOWER(COALESCE(NULLIF(BTRIM(mf.codec_video), ''), 'unknown')) AS source_codec,
+				MIN(NULLIF(BTRIM(h.client_name), '')) AS client_name,
+				MIN(NULLIF(BTRIM(h.device_platform), '')) AS device_platform,
 				BOOL_OR(COALESCE(h.compat_origin, FALSE)) AS compat_origin,
 				COUNT(*)::bigint AS sessions,
 				COUNT(*) FILTER (WHERE %[1]s)::bigint AS direct_sessions,
 				COUNT(*) FILTER (WHERE %[2]s)::bigint AS remux_sessions,
 				COUNT(*) FILTER (WHERE %[3]s)::bigint AS transcode_sessions
-			FROM admin_playback_history h
-			LEFT JOIN media_files mf ON mf.id = COALESCE(h.effective_media_file_id, h.media_file_id)
-			LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
+			FROM admin_playback_history h %[8]s
 			WHERE %[4]s
+			GROUP BY 1, 2, 3
+		),
+		files AS (
+			SELECT mf.id, LOWER(COALESCE(NULLIF(BTRIM(mf.codec_video), ''), 'unknown')) AS source_codec
+			FROM (SELECT DISTINCT file_id FROM per_file WHERE file_id IS NOT NULL) f
+			JOIN media_files mf ON mf.id = f.file_id
+		),
+		cells AS (
+			SELECT
+				pf.client_key,
+				pf.platform_key,
+				COALESCE(MIN(pf.client_name), 'Unknown') AS client_name,
+				COALESCE(MIN(pf.device_platform), 'Unknown') AS device_platform,
+				COALESCE(f.source_codec, 'unknown') AS source_codec,
+				BOOL_OR(pf.compat_origin) AS compat_origin,
+				SUM(pf.sessions)::bigint AS sessions,
+				SUM(pf.direct_sessions)::bigint AS direct_sessions,
+				SUM(pf.remux_sessions)::bigint AS remux_sessions,
+				SUM(pf.transcode_sessions)::bigint AS transcode_sessions
+			FROM per_file pf
+			LEFT JOIN files f ON f.id = pf.file_id
 			GROUP BY 1, 2, 5
 		),
 		pairs AS (
@@ -183,7 +242,13 @@ func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, whereSQL str
 		FROM cells c
 		JOIN ranked r USING (client_key, platform_key)
 		WHERE r.in_matrix OR r.top_transcoder
-	`, insightsPlayDirectSQL, insightsPlayRemuxSQL, insightsPlayTranscodeSQL, whereSQL, minParam, capParam, topParam), args...)
+	`, insightsPlayDirectSQL, insightsPlayRemuxSQL, insightsPlayTranscodeSQL, whereSQL, minParam, capParam, topParam, insightsLibraryJoinSQL(libraryID))
+	return query, args
+}
+
+func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, libraryID int, whereSQL string, whereArgs []any, minSessions int, out *AdminInsightsDevices) error {
+	query, args := insightsClientCodecMatrixSQL(libraryID, whereSQL, whereArgs, minSessions)
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("querying insights client codec matrix: %w", err)
 	}
@@ -355,39 +420,6 @@ func queryLabeledCountMap(ctx context.Context, tx pgx.Tx, sql string, args []any
 		return nil, err
 	}
 	return sortedLabeledCounts(counts), nil
-}
-
-func queryInsightsDevicesBreakdowns(ctx context.Context, tx pgx.Tx, libraryID int, whereSQL string, whereArgs []any, out *AdminInsightsDevices) error {
-	joinSQL := insightsLibraryJoinSQL(libraryID)
-	var err error
-	out.HWAccelBreakdown, err = queryLabeledCountMap(ctx, tx, `
-		SELECT COALESCE(h.transcode_hw_accel, ''), COUNT(*)::bigint
-		FROM admin_playback_history h `+joinSQL+`
-		WHERE `+whereSQL+` AND `+insightsPlayTranscodeSQL+` AND h.route_facts_recorded
-		GROUP BY 1
-	`, whereArgs, normalizeHWAccelKey)
-	if err != nil {
-		return fmt.Errorf("querying insights hw accel breakdown: %w", err)
-	}
-	out.ToneMapBreakdown, err = queryLabeledCountMap(ctx, tx, `
-		SELECT LOWER(BTRIM(h.tone_map_mode)), COUNT(*)::bigint
-		FROM admin_playback_history h `+joinSQL+`
-		WHERE `+whereSQL+` AND NULLIF(BTRIM(COALESCE(h.tone_map_mode, '')), '') IS NOT NULL
-		GROUP BY 1
-	`, whereArgs, nil)
-	if err != nil {
-		return fmt.Errorf("querying insights tone map breakdown: %w", err)
-	}
-	out.SubtitleBurnInCodecs, err = queryLabeledCountMap(ctx, tx, `
-		SELECT COALESCE(NULLIF(LOWER(BTRIM(h.subtitle->>'codec')), ''), 'unknown'), COUNT(*)::bigint
-		FROM admin_playback_history h `+joinSQL+`
-		WHERE `+whereSQL+` AND h.subtitle->>'delivery' = 'burn_in'
-		GROUP BY 1
-	`, whereArgs, nil)
-	if err != nil {
-		return fmt.Errorf("querying insights burn-in subtitle codecs: %w", err)
-	}
-	return nil
 }
 
 func sortedLabeledCounts(m map[string]int64) []AdminInsightsLabeledCount {

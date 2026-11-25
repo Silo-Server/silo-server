@@ -110,73 +110,105 @@ func normalizeInsightsLanguage(raw string) string {
 }
 
 // queryInsightsSubtitleUsage reads which subtitles sessions with route facts
-// showed. A row without route facts may predate subtitle recording, so it is
-// left out rather than counted as "no subtitle".
+// showed in a single scan of admin_playback_history. A row without route facts
+// may predate subtitle recording, so it is left out rather than counted as "no
+// subtitle".
 func queryInsightsSubtitleUsage(ctx context.Context, tx pgx.Tx, libraryID int, whereSQL string, whereArgs []any, out *AdminInsightsDevices) error {
-	joinSQL := insightsLibraryJoinSQL(libraryID)
-	scoped := whereSQL + ` AND h.route_facts_recorded`
 	usage := &out.Subtitles
-	if err := tx.QueryRow(ctx, `
-		SELECT COUNT(*)::bigint,
-			COUNT(*) FILTER (WHERE h.subtitle IS NOT NULL)::bigint,
-			COUNT(*) FILTER (WHERE (h.subtitle->>'forced')::boolean)::bigint,
-			COUNT(*) FILTER (WHERE (h.subtitle->>'hearing_impaired')::boolean)::bigint
-		FROM admin_playback_history h `+joinSQL+`
-		WHERE `+scoped, whereArgs...).Scan(&usage.Sessions, &usage.SubtitledSessions, &usage.ForcedSessions, &usage.HearingImpairedSessions); err != nil {
+	rows, err := tx.Query(ctx, `
+		SELECT
+			(h.subtitle IS NOT NULL),
+			COALESCE((h.subtitle->>'forced')::boolean, FALSE),
+			COALESCE((h.subtitle->>'hearing_impaired')::boolean, FALSE),
+			COALESCE(h.subtitle->>'language', ''),
+			COALESCE(NULLIF(LOWER(BTRIM(h.subtitle->>'delivery')), ''), '`+insightsUnknownKey+`'),
+			COUNT(*)::bigint
+		FROM admin_playback_history h `+insightsLibraryJoinSQL(libraryID)+`
+		WHERE `+whereSQL+` AND h.route_facts_recorded
+		GROUP BY 1, 2, 3, 4, 5
+	`, whereArgs...)
+	if err != nil {
 		return fmt.Errorf("querying insights subtitle usage: %w", err)
 	}
-	var err error
-	usage.Languages, err = queryLabeledCountMap(ctx, tx, `
-		SELECT COALESCE(h.subtitle->>'language', ''), COUNT(*)::bigint
-		FROM admin_playback_history h `+joinSQL+`
-		WHERE `+scoped+` AND h.subtitle IS NOT NULL
-		GROUP BY 1
-	`, whereArgs, normalizeInsightsLanguage)
-	if err != nil {
-		return fmt.Errorf("querying insights subtitle languages: %w", err)
+	defer rows.Close()
+	languages, deliveries := map[string]int64{}, map[string]int64{}
+	for rows.Next() {
+		var hasSubtitle, forced, hearingImpaired bool
+		var language, delivery string
+		var sessions int64
+		if err := rows.Scan(&hasSubtitle, &forced, &hearingImpaired, &language, &delivery, &sessions); err != nil {
+			return fmt.Errorf("scanning insights subtitle usage: %w", err)
+		}
+		usage.Sessions += sessions
+		if !hasSubtitle {
+			continue
+		}
+		usage.SubtitledSessions += sessions
+		if forced {
+			usage.ForcedSessions += sessions
+		}
+		if hearingImpaired {
+			usage.HearingImpairedSessions += sessions
+		}
+		languages[normalizeInsightsLanguage(language)] += sessions
+		deliveries[delivery] += sessions
 	}
-	usage.Deliveries, err = queryLabeledCountMap(ctx, tx, `
-		SELECT COALESCE(NULLIF(LOWER(BTRIM(h.subtitle->>'delivery')), ''), '`+insightsUnknownKey+`'), COUNT(*)::bigint
-		FROM admin_playback_history h `+joinSQL+`
-		WHERE `+scoped+` AND h.subtitle IS NOT NULL
-		GROUP BY 1
-	`, whereArgs, nil)
-	if err != nil {
-		return fmt.Errorf("querying insights subtitle deliveries: %w", err)
+	if err := rows.Err(); err != nil {
+		return err
 	}
+	usage.Languages = sortedLabeledCounts(languages)
+	usage.Deliveries = sortedLabeledCounts(deliveries)
 	return nil
 }
-
-// insightsPlayedAudioTrackSQL is the audio track a history row played: the
-// recorded index into its file's audio_tracks, else the file's default
-// track, else its first (pickAdminAudioTrack's order).
-const insightsPlayedAudioTrackSQL = `COALESCE(
-	CASE WHEN h.audio_track_index IS NOT NULL THEN mf.audio_tracks -> h.audio_track_index END,
-	(SELECT t FROM jsonb_array_elements(CASE WHEN jsonb_typeof(mf.audio_tracks) = 'array' THEN mf.audio_tracks ELSE '[]'::jsonb END) AS t
-		WHERE (t->>'default')::boolean LIMIT 1),
-	CASE WHEN jsonb_typeof(mf.audio_tracks) = 'array' THEN mf.audio_tracks -> 0 END)`
 
 // queryInsightsAudioUsage reads the audio sessions with route facts played:
 // the track's language, whether the audio was copied or converted, and the
 // channels delivered (the target's when converted, else the track's).
-func queryInsightsAudioUsage(ctx context.Context, tx pgx.Tx, whereSQL string, whereArgs []any, out *AdminInsightsDevices) error {
+// Sessions are pre-grouped by file before probing media_files so each unique
+// file's fallback audio track is resolved once.
+func queryInsightsAudioUsage(ctx context.Context, tx pgx.Tx, libraryID int, whereSQL string, whereArgs []any, out *AdminInsightsDevices) error {
 	usage := &out.Audio
 	rows, err := tx.Query(ctx, `
-		WITH a AS (
-			SELECT h.audio_decision, h.target_audio_channels, mf.audio_channels AS file_channels,
-				`+insightsPlayedAudioTrackSQL+` AS track
-			FROM admin_playback_history h
-			LEFT JOIN media_files mf ON mf.id = COALESCE(h.effective_media_file_id, h.media_file_id)
-			LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
+		WITH h_grouped AS (
+			SELECT
+				COALESCE(h.effective_media_file_id, h.media_file_id) AS file_id,
+				h.audio_track_index,
+				COALESCE(NULLIF(LOWER(BTRIM(h.audio_decision)), ''), '`+insightsUnknownKey+`') AS audio_decision,
+				h.target_audio_channels,
+				COUNT(*)::bigint AS sessions
+			FROM admin_playback_history h `+insightsLibraryJoinSQL(libraryID)+`
 			WHERE `+whereSQL+` AND h.route_facts_recorded
+			GROUP BY 1, 2, 3, 4
+		),
+		files AS (
+			SELECT
+				mf.id,
+				mf.audio_channels AS file_channels,
+				mf.audio_tracks,
+				COALESCE(
+					(SELECT t FROM jsonb_array_elements(CASE WHEN jsonb_typeof(mf.audio_tracks) = 'array' THEN mf.audio_tracks ELSE '[]'::jsonb END) AS t
+						WHERE (t->>'default')::boolean LIMIT 1),
+					CASE WHEN jsonb_typeof(mf.audio_tracks) = 'array' THEN mf.audio_tracks -> 0 END
+				) AS fallback_track
+			FROM (SELECT DISTINCT file_id FROM h_grouped WHERE file_id IS NOT NULL) d
+			JOIN media_files mf ON mf.id = d.file_id
+		),
+		a AS (
+			SELECT g.audio_decision, g.target_audio_channels, g.sessions, f.file_channels,
+				COALESCE(
+					CASE WHEN g.audio_track_index IS NOT NULL THEN f.audio_tracks -> g.audio_track_index END,
+					f.fallback_track
+				) AS track
+			FROM h_grouped g
+			LEFT JOIN files f ON f.id = g.file_id
 		)
 		SELECT
 			COALESCE(track->>'language', ''),
-			COALESCE(NULLIF(LOWER(BTRIM(audio_decision)), ''), '`+insightsUnknownKey+`'),
-			CASE WHEN LOWER(BTRIM(COALESCE(audio_decision, ''))) = 'transcode' AND target_audio_channels > 0
+			audio_decision,
+			CASE WHEN audio_decision = 'transcode' AND target_audio_channels > 0
 				THEN target_audio_channels
 				ELSE COALESCE(NULLIF(track->>'channels', '')::int, file_channels) END,
-			COUNT(*)::bigint
+			SUM(sessions)::bigint
 		FROM a GROUP BY 1, 2, 3
 	`, whereArgs...)
 	if err != nil {
