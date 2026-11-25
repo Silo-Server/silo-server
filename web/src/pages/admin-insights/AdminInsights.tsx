@@ -18,6 +18,7 @@ import { markAdminInsightsRefresh } from "@/hooks/queries/admin/insights";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import { adminKeys } from "@/hooks/queries/keys";
+import { edgeMask, useScrollStrip } from "@/hooks/useScrollStrip";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { MessageKey } from "@/locales/keys";
@@ -171,6 +172,13 @@ export default function AdminInsights() {
     filters.userId !== undefined;
 
   const activeTab: InsightsTab = filters.tab;
+  // Six tabs don't fit a phone: the strip scrolls sideways there and keeps
+  // the active tab in view.
+  const {
+    ref: tabStrip,
+    edges: tabEdges,
+    measure: measureTabStrip,
+  } = useScrollStrip<HTMLDivElement>(`[role="tab"][data-state="active"]`, activeTab);
   const showLibraryFilter = activeTab !== "bandwidth";
   const showAccountFilter =
     activeTab === "playback" ||
@@ -235,14 +243,36 @@ export default function AdminInsights() {
         />
 
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-5">
-          <div className="border-border/70 border-b">
-            <TabsList variant="line" className="h-auto gap-2 pb-1">
-              <TabsTrigger value="playback">{t("web.admin.insights.tabs.activity")}</TabsTrigger>
-              <TabsTrigger value="titles">{t("web.admin.insights.tabs.titles")}</TabsTrigger>
-              <TabsTrigger value="library">{t("web.admin.insights.tabs.library")}</TabsTrigger>
-              <TabsTrigger value="people">{t("web.admin.insights.tabs.people")}</TabsTrigger>
-              <TabsTrigger value="devices">{t("web.admin.insights.tabs.devices")}</TabsTrigger>
-              <TabsTrigger value="bandwidth">{t("web.admin.insights.tabs.bandwidth")}</TabsTrigger>
+          <div
+            ref={tabStrip}
+            onScroll={measureTabStrip}
+            className={cn(
+              "border-border/70 -mx-1 overflow-x-auto border-b px-1 max-lg:[scrollbar-width:none] max-lg:[&::-webkit-scrollbar]:hidden",
+              edgeMask(tabEdges),
+            )}
+          >
+            <TabsList
+              variant="line"
+              className="h-auto w-max min-w-full flex-nowrap justify-start gap-2 pb-1"
+            >
+              <TabsTrigger value="playback" className="flex-none">
+                {t("web.admin.insights.tabs.activity")}
+              </TabsTrigger>
+              <TabsTrigger value="titles" className="flex-none">
+                {t("web.admin.insights.tabs.titles")}
+              </TabsTrigger>
+              <TabsTrigger value="library" className="flex-none">
+                {t("web.admin.insights.tabs.library")}
+              </TabsTrigger>
+              <TabsTrigger value="people" className="flex-none">
+                {t("web.admin.insights.tabs.people")}
+              </TabsTrigger>
+              <TabsTrigger value="devices" className="flex-none">
+                {t("web.admin.insights.tabs.devices")}
+              </TabsTrigger>
+              <TabsTrigger value="bandwidth" className="flex-none">
+                {t("web.admin.insights.tabs.bandwidth")}
+              </TabsTrigger>
             </TabsList>
           </div>
 
