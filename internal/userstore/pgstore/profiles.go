@@ -29,7 +29,7 @@ func scanProfile(scanner interface {
 		&p.QualityPreference, &p.Language, &p.PreferredMetadataLanguage, &p.SubtitleLanguage, &p.SubtitleMode,
 		&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview,
 		&p.LibraryRestrictionsEnabled,
-		&p.ShowForcedSubtitles, &p.MaxPlaybackQuality, &p.PINRevision, &createdAt, &updatedAt,
+		&p.ShowForcedSubtitles, &p.MaxPlaybackQuality, &p.PINRevision, &p.SyncID, &p.AvatarSourceSHA256, &createdAt, &updatedAt,
 	}, extra...)...)
 	if err != nil {
 		return nil, err
@@ -133,7 +133,8 @@ var profileByIDQuery = `
 	       require_advisory_age, requests_blocked,
 	       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
 	       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, library_restrictions_enabled,
-	       show_forced_subtitles, max_playback_quality, pin_revision, created_at, updated_at,
+	       show_forced_subtitles, max_playback_quality, pin_revision,
+	       COALESCE(sync_id::text, ''), COALESCE(avatar_source_sha256, ''), created_at, updated_at,
 	       ARRAY(
 	           SELECT library_id FROM user_profile_allowed_libraries l
 	           WHERE l.user_id = user_profiles.user_id AND l.profile_id = user_profiles.id
@@ -217,7 +218,8 @@ func (s *PostgresUserStore) ListProfiles(ctx context.Context) ([]userstore.Profi
 		       require_advisory_age, requests_blocked,
 		       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
 		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, library_restrictions_enabled,
-		       show_forced_subtitles, max_playback_quality, pin_revision, created_at, updated_at
+		       show_forced_subtitles, max_playback_quality, pin_revision,
+	       COALESCE(sync_id::text, ''), COALESCE(avatar_source_sha256, ''), created_at, updated_at
 		FROM user_profiles WHERE user_id = $1 ORDER BY created_at ASC`, s.userID)
 	if err != nil {
 		return nil, fmt.Errorf("listing profiles: %w", err)
@@ -276,6 +278,13 @@ func updateProfile(
 	}
 	if u.Avatar != nil {
 		addArg("avatar", *u.Avatar)
+		// A new picture forgets the old one's source hash unless it brings
+		// its own: only an upload knows the hash of the file it stored.
+		var sourceHash *string
+		if u.AvatarSourceSHA256 != nil && *u.AvatarSourceSHA256 != "" {
+			sourceHash = u.AvatarSourceSHA256
+		}
+		addArg("avatar_source_sha256", sourceHash)
 	}
 	if u.PINHash != nil {
 		addArg("pin_hash", *u.PINHash)
@@ -381,6 +390,21 @@ func updateProfile(
 		}
 	}
 	return nil
+}
+
+// RecordProfileAvatarSourceSHA256 stores sha as the source hash of the
+// profile's uploaded avatar when the profile still shows avatar and has no
+// hash yet. It reports whether it stored one; false means the picture
+// changed or a hash arrived first, and the caller reads the profile again.
+func (s *PostgresUserStore) RecordProfileAvatarSourceSHA256(ctx context.Context, id, avatar, sha string) (bool, error) {
+	result, err := s.pool.Exec(ctx, `
+		UPDATE user_profiles SET avatar_source_sha256 = $4
+		WHERE user_id = $1 AND id = $2 AND avatar = $3 AND avatar_source_sha256 IS NULL`,
+		s.userID, id, avatar, sha)
+	if err != nil {
+		return false, fmt.Errorf("recording avatar hash for profile %s: %w", id, err)
+	}
+	return result.RowsAffected() == 1, nil
 }
 
 // profileCascadeTables are the tables DeleteProfile clears of the profile's

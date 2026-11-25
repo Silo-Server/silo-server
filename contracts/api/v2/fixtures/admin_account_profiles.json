@@ -2,6 +2,7 @@
   "items": [
     {
       "id": "profile-1",
+      "sync_id": null,
       "name": "Parent",
       "avatar": "preset:avatar-3",
       "avatar_url": "/profile-avatars/avatar-3.svg",
@@ -13,6 +14,7 @@
     },
     {
       "id": "profile-2",
+      "sync_id": null,
       "name": "Guest",
       "avatar": "",
       "avatar_source": "none",

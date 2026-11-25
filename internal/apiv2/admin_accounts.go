@@ -128,8 +128,9 @@ type AdminAccountImpersonateInput struct {
 	UserAgent string `header:"User-Agent"`
 }
 type AdminAccountProfile struct {
-	ID   ID     `json:"id"`
-	Name string `json:"name"`
+	ID     ID      `json:"id"`
+	SyncID *string `json:"sync_id" nullable:"true" format:"uuid" doc:"The profile's ID in its account's profile set, the same on every server holding the set; null for a profile that is in no set"`
+	Name   string  `json:"name"`
 	ProfileAvatar
 	HasPIN     bool            `json:"has_pin" doc:"Whether the profile is locked with a PIN"`
 	IsPrimary  bool            `json:"is_primary" doc:"The household parent (not the server admin role)"`
@@ -380,7 +381,7 @@ func registerAdminAccounts(reg *Registry) {
 		}
 		items := make([]AdminAccountProfile, 0, len(rows))
 		for _, row := range rows {
-			items = append(items, AdminAccountProfile{ID: ID(row.ID), Name: row.Name, ProfileAvatar: profileAvatarOf(row.Avatar, row.AvatarURL, row.AvatarSource), HasPIN: row.HasPIN, IsPrimary: row.IsPrimary, IsChild: row.IsChild, LastSeenAt: nullableInstantOf(row.LastSeenAt)})
+			items = append(items, AdminAccountProfile{ID: ID(row.ID), SyncID: syncIDOf(row.SyncID), Name: row.Name, ProfileAvatar: profileAvatarOf(row.Avatar, row.AvatarURL, row.AvatarSource), HasPIN: row.HasPIN, IsPrimary: row.IsPrimary, IsChild: row.IsChild, LastSeenAt: nullableInstantOf(row.LastSeenAt)})
 		}
 		return &AdminAccountProfilesOutput{Body: Paginated(items, "")}, nil
 	})

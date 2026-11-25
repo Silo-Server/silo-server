@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -198,6 +200,10 @@ type ProfileAvatarUpload struct {
 	// accepted.
 	ContentType string
 	File        io.Reader
+	// SourceSHA256 is the lower-case hex SHA-256 of the picture's file as it
+	// was first uploaded, which a device copying a picture from another
+	// server sends; "" stores the hash of the bytes received.
+	SourceSHA256 string
 }
 
 // UploadAvatar stores a profile's uploaded avatar: the store guard, the
@@ -250,8 +256,13 @@ func (h *ProfileHandler) UploadAvatar(ctx context.Context, up ProfileAvatarUploa
 		}
 	}
 
+	sourceHash := up.SourceSHA256
+	if sourceHash == "" {
+		sum := sha256.Sum256(data)
+		sourceHash = hex.EncodeToString(sum[:])
+	}
 	avatarRef := profileAvatarUploadPrefix + originalKey
-	if err := store.UpdateProfile(ctx, profileID, userstore.UpdateProfileInput{Avatar: &avatarRef}); err != nil {
+	if err := store.UpdateProfile(ctx, profileID, userstore.UpdateProfileInput{Avatar: &avatarRef, AvatarSourceSHA256: &sourceHash}); err != nil {
 		// Uploaded avatar keys are stable per profile, so rolling back by deleting the
 		// prefix here can remove the avatar the profile still references after a DB failure.
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to save avatar")
@@ -292,4 +303,57 @@ func (h *ProfileHandler) DeleteAvatar(ctx context.Context, userID int, profileID
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve updated profile")
 	}
 	return h.toProfileResponse(ctx, store, *updatedProfile), nil
+}
+
+// profileAvatarSourceSHA256 returns the source hash of the profile's uploaded
+// avatar, "" when the avatar is not an upload. An upload stored before the
+// server kept hashes has none: the hash of its stored original stands in,
+// computed the first time it is asked for and kept, so every later answer
+// and every server the picture is copied to names it the same way. A store
+// that keeps no hashes gets the computed one each time.
+func (h *ProfileHandler) profileAvatarSourceSHA256(ctx context.Context, store userstore.UserStore, profile userstore.Profile) (string, error) {
+	if !isUploadedAvatarRef(profile.Avatar) {
+		return "", nil
+	}
+	if profile.AvatarSourceSHA256 != "" {
+		return profile.AvatarSourceSHA256, nil
+	}
+	if h.AvatarStore == nil {
+		return "", errors.New("avatar upload storage is not configured")
+	}
+	key := strings.TrimPrefix(strings.TrimSpace(profile.Avatar), profileAvatarUploadPrefix)
+	body, _, err := h.AvatarStore.Get(ctx, key)
+	if err != nil {
+		return "", fmt.Errorf("reading avatar of profile %s: %w", profile.ID, err)
+	}
+	defer func() { _ = body.Close() }()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, body); err != nil {
+		return "", fmt.Errorf("reading avatar of profile %s: %w", profile.ID, err)
+	}
+	sum := hex.EncodeToString(hash.Sum(nil))
+	recorder, ok := store.(userstore.ProfileAvatarHashRecorder)
+	if !ok {
+		return sum, nil
+	}
+	recorded, err := recorder.RecordProfileAvatarSourceSHA256(ctx, profile.ID, profile.Avatar, sum)
+	if err != nil {
+		return "", err
+	}
+	if recorded {
+		return sum, nil
+	}
+	// The picture changed or another request recorded a hash first: answer
+	// with what the profile holds now.
+	current, err := store.GetProfile(ctx, profile.ID)
+	if err != nil {
+		return "", err
+	}
+	if current == nil {
+		return "", fmt.Errorf("profile %s not found", profile.ID)
+	}
+	if current.AvatarSourceSHA256 == "" && isUploadedAvatarRef(current.Avatar) {
+		return "", fmt.Errorf("avatar hash of profile %s was not recorded", profile.ID)
+	}
+	return current.AvatarSourceSHA256, nil
 }

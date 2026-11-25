@@ -90,6 +90,14 @@ type AuditedProfileDeleter interface { //nolint:iface // implemented by pgstore,
 	DeleteProfileAudited(ctx context.Context, id string, audit func(tx pgx.Tx, deleted *Profile) error) (deletedCollectionIDs []string, err error)
 }
 
+// ProfileAvatarHashRecorder stores the source hash of an avatar uploaded
+// before the server kept one: RecordProfileAvatarSourceSHA256 writes sha only
+// while the profile still shows avatar and has no hash, and reports whether
+// it wrote. The SQLite backend keeps no avatar hashes.
+type ProfileAvatarHashRecorder interface { //nolint:iface // implemented by pgstore, asserted by the profile handlers
+	RecordProfileAvatarSourceSHA256(ctx context.Context, id, avatar, sha string) (bool, error)
+}
+
 // UserStore defines the interface for per-user data storage.
 // Both SQLite and Postgres backends implement this interface.
 type UserStore interface {

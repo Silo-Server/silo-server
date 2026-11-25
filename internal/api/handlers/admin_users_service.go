@@ -36,6 +36,7 @@ type AdminAccountView struct {
 // The avatar fields match ProfileView's.
 type AdminProfileView struct {
 	ID, Name                        string
+	SyncID                          string // "" for a profile in no profile set
 	Avatar, AvatarURL, AvatarSource string
 	HasPIN, IsPrimary, IsChild      bool
 	LastSeenAt                      *time.Time
@@ -412,7 +413,7 @@ func (h *AdminHandler) ListAdminAccountProfiles(ctx context.Context, id int) ([]
 	lastSeen := profileLastSeen(devices)
 	result := make([]AdminProfileView, 0, len(rows))
 	for _, row := range rows {
-		view := AdminProfileView{ID: row.ID, Name: strings.TrimSpace(row.Name), Avatar: row.Avatar, HasPIN: row.PINHash != "", IsPrimary: row.IsPrimary, IsChild: row.IsChild}
+		view := AdminProfileView{ID: row.ID, SyncID: row.SyncID, Name: strings.TrimSpace(row.Name), Avatar: row.Avatar, HasPIN: row.PINHash != "", IsPrimary: row.IsPrimary, IsChild: row.IsChild}
 		view.AvatarSource, view.AvatarURL = h.resolveProfileAvatar(ctx, row.Avatar)
 		if at, ok := lastSeen[row.ID]; ok {
 			view.LastSeenAt = &at

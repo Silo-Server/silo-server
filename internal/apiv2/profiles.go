@@ -27,8 +27,9 @@ func profileAvatarOf(avatar, url, source string) ProfileAvatar {
 
 // Profile is one household member.
 type Profile struct {
-	ID   ID     `json:"id" example:"1"`
-	Name string `json:"name" example:"Alice"`
+	ID     ID      `json:"id" example:"1"`
+	SyncID *string `json:"sync_id" nullable:"true" format:"uuid" doc:"The profile's ID in its account's profile set: a lower-case UUID that is the same on every server holding the set, so apps can line up one person's profiles across servers. null for a profile that is in no set" example:"0f8fad5b-d9cb-469f-a165-70867728950e"`
+	Name   string  `json:"name" example:"Alice"`
 	ProfileAvatar
 	HasPIN                     bool    `json:"has_pin" example:"false"`
 	IsChild                    bool    `json:"is_child" example:"false"`
@@ -580,7 +581,8 @@ func (reg *Registry) verifyProfilePIN(ctx context.Context, in *ProfilePINCheckIn
 
 // ProfileAvatarForm is the uploadProfileAvatar multipart form.
 type ProfileAvatarForm struct {
-	Avatar huma.FormFile `form:"avatar" contentType:"image/jpeg,image/png,image/webp" required:"true" doc:"The image; resized server-side to the avatar variants"`
+	Avatar       huma.FormFile `form:"avatar" contentType:"image/jpeg,image/png,image/webp" required:"true" doc:"The image; resized server-side to the avatar variants"`
+	SourceSHA256 string        `form:"source_sha256" required:"false" pattern:"^[0-9a-f]{64}$" doc:"SHA-256 of the picture's file as it was first uploaded, on this server or another, as 64 lower-case hexadecimal characters. A device copying a profile's picture from another server sends it so both servers name the picture by the same hash. Without it the server stores the hash of the bytes it received"`
 }
 
 // ProfileAvatarUploadInput is the uploadProfileAvatar request.
@@ -609,6 +611,7 @@ func (reg *Registry) uploadProfileAvatar(ctx context.Context, in *ProfileAvatarU
 	defer func() { _ = form.Avatar.Close() }()
 	view, err := reg.deps.Profiles.UploadAvatar(ctx, handlers.ProfileAvatarUpload{
 		UserID: claims.UserID, ProfileID: string(in.ID), ContentType: form.Avatar.ContentType, File: form.Avatar.File,
+		SourceSHA256: form.SourceSHA256,
 	})
 	if err != nil {
 		return nil, avatarProblem(err)
@@ -1025,6 +1028,14 @@ func libraryIDsOf(raw []ID) ([]int, *Problem) {
 	return ids, nil
 }
 
+// syncIDOf is a profile's sync_id on the wire: null for a profile in no set.
+func syncIDOf(id string) *string {
+	if id == "" {
+		return nil
+	}
+	return &id
+}
+
 func profileOf(v handlers.ProfileView) (Profile, *Problem) {
 	created, p := storeInstant(v.CreatedAt)
 	if p != nil {
@@ -1036,6 +1047,7 @@ func profileOf(v handlers.ProfileView) (Profile, *Problem) {
 	}
 	return Profile{
 		ID:                         ID(v.ID),
+		SyncID:                     syncIDOf(v.SyncID),
 		Name:                       v.Name,
 		ProfileAvatar:              profileAvatarOf(v.Avatar, v.AvatarURL, v.AvatarSource),
 		HasPIN:                     v.HasPIN,

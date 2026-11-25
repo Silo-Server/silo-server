@@ -1207,6 +1207,7 @@
 
 # The household profile limit holds under concurrent creates (issue #2423).
 ./internal/api/handlers TestCreateProfileLimitConcurrentDB
+./internal/api/handlers TestProfileAvatarSourceHashDB
 
 # A scan request for a scope with an active run joins that run without a
 # duplicate-key ERROR, and queues a new run if that one finished meanwhile
