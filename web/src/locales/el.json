@@ -8007,6 +8007,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Κάρτες"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Διάταξη"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Πίνακας"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -49469,7 +49487,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Τάσεις παρακολούθησης, δημοφιλείς τίτλοι, δραστηριότητα του νοικοκυριού, αναπαραγωγή ανά συσκευή και εύρος ζώνης."
+      "value": "Ζωντανές ροές, τάσεις παρακολούθησης, δημοφιλείς τίτλοι, δραστηριότητα του νοικοκυριού, αναπαραγωγή ανά συσκευή και εύρος ζώνης."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -81542,7 +81560,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Τάσεις παρακολούθησης, δημοφιλείς τίτλοι, λογαριασμοί, συσκευές και εύρος ζώνης."
+      "value": "Ζωντανές ροές, τάσεις παρακολούθησης, δημοφιλείς τίτλοι, λογαριασμοί, συσκευές και εύρος ζώνης."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

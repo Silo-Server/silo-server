@@ -7810,6 +7810,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "カード"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "レイアウト"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "テーブル"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -43631,7 +43649,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "視聴の傾向、人気のタイトル、世帯のアクティビティ、デバイスでの再生、帯域幅。"
+      "value": "ライブストリーム、視聴の傾向、人気のタイトル、世帯のアクティビティ、デバイスでの再生、帯域幅。"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -74123,7 +74141,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "視聴の傾向、人気のタイトル、アカウント、デバイス、帯域幅。"
+      "value": "ライブストリーム、視聴の傾向、人気のタイトル、アカウント、デバイス、帯域幅。"
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

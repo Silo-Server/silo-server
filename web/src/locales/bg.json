@@ -7999,6 +7999,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Карти"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Изглед"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Таблица"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -49345,7 +49363,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Тенденции в гледането, популярни заглавия, активност в домакинството, възпроизвеждане по устройства и трафик."
+      "value": "Потоци на живо, тенденции в гледането, популярни заглавия, активност в домакинството, възпроизвеждане по устройства и трафик."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -81490,7 +81508,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Тенденции в гледането, популярни заглавия, акаунти, устройства и трафик."
+      "value": "Потоци на живо, тенденции в гледането, популярни заглавия, акаунти, устройства и трафик."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

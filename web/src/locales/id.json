@@ -7758,6 +7758,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kartu"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Tata letak"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabel"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -43539,7 +43557,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tren menonton, judul teratas, aktivitas rumah tangga, pemutaran per perangkat, dan bandwidth."
+      "value": "Stream aktif, tren menonton, judul teratas, aktivitas rumah tangga, pemutaran per perangkat, dan bandwidth."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -73963,7 +73981,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tren menonton, judul teratas, akun, perangkat, dan bandwidth."
+      "value": "Stream aktif, tren menonton, judul teratas, akun, perangkat, dan bandwidth."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

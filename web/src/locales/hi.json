@@ -8007,6 +8007,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "कार्ड"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "लेआउट"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "टेबल"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -48905,7 +48923,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "देखने के रुझान, लोकप्रिय टाइटल, परिवार की गतिविधि, डिवाइस पर प्लेबैक और बैंडविड्थ।"
+      "value": "लाइव स्ट्रीम, देखने के रुझान, लोकप्रिय टाइटल, परिवार की गतिविधि, डिवाइस पर प्लेबैक और बैंडविड्थ।"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -80906,7 +80924,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "देखने के रुझान, लोकप्रिय टाइटल, खाते, डिवाइस और बैंडविड्थ।"
+      "value": "लाइव स्ट्रीम, देखने के रुझान, लोकप्रिय टाइटल, खाते, डिवाइस और बैंडविड्थ।"
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

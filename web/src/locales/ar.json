@@ -8855,6 +8855,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "البطاقات"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "التخطيط"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "الجدول"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -71409,7 +71427,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "اتجاهات المشاهدة، والعناوين الأبرز، ونشاط الأسرة، والتشغيل على الأجهزة، وعرض النطاق."
+      "value": "عمليات البث المباشرة، واتجاهات المشاهدة، والعناوين الأبرز، ونشاط الأسرة، والتشغيل على الأجهزة، وعرض النطاق."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -108847,7 +108865,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "اتجاهات المشاهدة، والعناوين الأبرز، والحسابات، والأجهزة، وعرض النطاق."
+      "value": "عمليات البث المباشرة، واتجاهات المشاهدة، والعناوين الأبرز، والحسابات، والأجهزة، وعرض النطاق."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

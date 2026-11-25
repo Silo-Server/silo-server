@@ -43,7 +43,7 @@ type VolumeMetric = "plays" | "watch_time";
 type VolumeSplit = "method" | "media";
 type PeakView = "lines" | "stacked" | "total";
 
-export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
+export function PlaybackTab({ filters }: { filters: InsightsFilterState }) {
   const t = useT();
   const [volumeMetric, setVolumeMetric] = useState<VolumeMetric>("plays");
   const [volumeSplit, setVolumeSplit] = useState<VolumeSplit>("method");

@@ -8513,6 +8513,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Karty"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Rozložení"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabulka"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -61131,7 +61149,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Trendy sledování, nejsledovanější tituly, aktivita domácnosti, přehrávání na zařízeních a šířka pásma."
+      "value": "Živé streamy, trendy sledování, nejsledovanější tituly, aktivita domácnosti, přehrávání na zařízeních a šířka pásma."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -96202,7 +96220,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Trendy sledování, nejsledovanější tituly, účty, zařízení a šířka pásma."
+      "value": "Živé streamy, trendy sledování, nejsledovanější tituly, účty, zařízení a šířka pásma."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

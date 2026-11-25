@@ -8308,6 +8308,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kartītes"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Izkārtojums"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabula"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -56033,7 +56051,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Skatīšanās tendences, populārākie vienumi, mājsaimniecības aktivitāte, atskaņošana ierīcēs un joslas platums."
+      "value": "Tiešraides straumes, skatīšanās tendences, populārākie vienumi, mājsaimniecības aktivitāte, atskaņošana ierīcēs un joslas platums."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -89791,7 +89809,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Skatīšanās tendences, populārākie vienumi, konti, ierīces un joslas platums."
+      "value": "Tiešraides straumes, skatīšanās tendences, populārākie vienumi, konti, ierīces un joslas platums."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
