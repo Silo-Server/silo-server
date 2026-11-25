@@ -742,6 +742,17 @@
 ./internal/auth TestDeviceLoginCopiedBindingDB
 ./internal/auth TestDeviceLoginTwoAccountsOneDeviceDB
 
+# A device sign-in approved in advance is redeemed once, days later, only
+# with the device's secret; revoked, expired, disabled-approver and
+# refused-identity requests answer a terminal status; the session carries the
+# approver's provider identity; an account holds at most 20 waiting; wrong
+# secrets spend the request's own budget and never change it.
+./internal/auth TestDevicePreapprovalRedeemDB
+./internal/auth TestDevicePreapprovalRefusedDB
+./internal/auth TestDevicePreapprovalProviderIdentityDB
+./internal/auth TestDevicePreapprovalCapDB
+./internal/auth TestDevicePreapprovalWrongSecretBudgetDB
+
 # Admin top-activity leaderboards count playback, not marked-watched rows.
 ./internal/api/handlers TestAdminTopActivityCountsFinishedPlayback
 
