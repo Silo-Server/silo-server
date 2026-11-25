@@ -1426,6 +1426,9 @@
 # could not be read, reports it so it is retried without a fallback chain.
 ./internal/backup TestBackupRestoreRoundTripDB
 ./internal/backup TestRestorePluginProvisioningDB
+./internal/backup TestFullRestoreOntoAnotherServerDB
+./internal/backup TestFullRestoreOntoTheSameServerDB
+./internal/backup TestCarryOntoABackupWithoutAppKeysDB
 ./internal/backup TestCarryOntoAnOlderKeyDropsSharedRowsDB
 ./internal/backup TestCarryDropsAProfileKeyItCannotBindDB
 ./internal/backup TestCarryMovesAnswerSequencePastCarriedLinksDB

@@ -48,7 +48,7 @@ func TestCarryCredentialsReconcilesRestoredStreamNodesDB(t *testing.T) {
 		VALUES ('sess-restore-1', $1, 'p-1', 'movie-1', 0, 'transcode', '2026-10-01T10:00:00Z', '2026-10-01T11:00:00Z',
 			 'transcode', 2, 'proxy', 1, TRUE)`, userID)
 
-	if _, err := (PGLoader{}).CarryCredentials(ctx, restoredURL, liveURL); err != nil {
+	if _, err := (PGLoader{}).CarryCredentials(ctx, restoredURL, liveURL, AppKeysKept); err != nil {
 		t.Fatalf("CarryCredentials: %v", err)
 	}
 
@@ -147,7 +147,7 @@ func TestCarryCredentialsKeepsNodeSamplesWithoutDailyArchiveDB(t *testing.T) {
 		VALUES ('2026-10-02T12:00:00Z', 1, 4000),
 		       ('2026-10-02T12:00:00Z', 2, 2000)`)
 
-	if _, err := (PGLoader{}).CarryCredentials(ctx, restoredURL, liveURL); err != nil {
+	if _, err := (PGLoader{}).CarryCredentials(ctx, restoredURL, liveURL, AppKeysKept); err != nil {
 		t.Fatalf("CarryCredentials: %v", err)
 	}
 
