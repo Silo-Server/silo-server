@@ -47,8 +47,9 @@ func New(store Reader) *Setting {
 	return &Setting{store: store}
 }
 
-// Get answers key from the store. For SettingKey a failed read is logged and
-// answered with the last value read, or returned when there is none.
+// Get answers key from the store. For SettingKey a failed read is logged,
+// unless the request itself was canceled, and answered with the last value
+// read, or returned when there is none.
 func (s *Setting) Get(ctx context.Context, key string) (string, error) {
 	value, err := s.store.Get(ctx, key)
 	if key != SettingKey {
@@ -62,7 +63,11 @@ func (s *Setting) Get(ctx context.Context, key string) (string, error) {
 		}
 		return value, nil
 	}
-	slog.WarnContext(ctx, "reading the demo mode setting failed", "component", "demomode", "error", err)
+	// A request its client abandoned cancels the read; that is not a failing
+	// store, so it is not logged as one.
+	if ctx.Err() == nil {
+		slog.WarnContext(ctx, "reading the demo mode setting failed", "component", "demomode", "error", err)
+	}
 	switch s.last.Load() {
 	case on:
 		return OnValue, nil
