@@ -26,17 +26,27 @@ it. The ID is:
 - **Minted once, atomically.** The first read of a fresh deployment seeds it
   with insert-if-absent; concurrent API processes converge on the winner.
   Each process caches it for its lifetime because it never changes.
-- **Stable across restarts, hostname and URL changes, and database restores.**
-  All of those keep the deployment the same server.
-- **Copied by a database clone.** A clone carries the row, so until it is
-  changed the clone *is* the same server to every client: clients group it
-  with the original and may offer its addresses as candidates. That is the
-  intended reading for a restore or a migrated host. An operator who wants a
-  clone to be a separate deployment deletes the `server.identity_id` row on
-  the clone before serving clients; the next read mints a fresh ID. There is
-  no API to regenerate it. The ID authorizes nothing (below), so a collision
-  costs a failed pairing attempt at an address that turns out to be the
-  wrong server, not a credential.
+- **Stable across restarts and hostname and URL changes.** Both keep the
+  deployment the same server.
+- **Kept or taken by a full restore, by one rule** (`checkDeployment` and
+  `CarryServerSpecificSettings` in `internal/backup`; the restore output and
+  docs are in [backups.md](backups.md#server-identity-on-a-full-restore)):
+  - a restore of the deployment's own backup keeps its ID, which is the
+    backup's;
+  - a restore of another deployment's backup onto a server with no accounts
+    (no `users` rows) takes the backup's ID: the server has moved to new
+    hardware, and its clients and app keys follow it;
+  - a restore of another deployment's backup onto a server with an account
+    keeps the live server's ID, as it keeps every server-specific setting.
+- **Copied by a database clone and a separate restore.** Both carry the row,
+  so until it is changed the copy *is* the same server to every client:
+  clients group it with the original and may offer its addresses as
+  candidates. An operator who wants a copy to be a separate deployment
+  deletes the `server.identity_id` row on it before serving clients; the next
+  read mints a fresh ID. There is no API to regenerate it. The ID authorizes
+  nothing on its own (below), so a collision costs a failed pairing attempt at
+  an address that turns out to be the wrong server, not a credential; app keys
+  are the exception, below.
 - **Plaintext.** It is public discovery data, and an encrypted row would
   become unreadable after a `SECRET_KEY` rotation, which must not change who
   a server is.
@@ -47,6 +57,36 @@ it. The ID is:
   still echoes that compat ID. None of them is this value, and clients must
   not key credential storage on it: local credential and settings keys stay
   whatever the client chose.
+
+## Who reads the ID, and two servers with one ID
+
+What each reader does when a server answers with an ID another server had,
+and what goes wrong while that other server still runs. The rule above
+creates the first case on purpose (a move to new hardware); a clone or a
+copy creates both.
+
+| Reader | Answers with the old ID | The old server still running |
+|---|---|---|
+| `GET /system/identity`, `GET /system/connections` (`internal/apiv2/system_identity.go`) | Clients treat the new install as the server they saved. | Clients treat both as one server: see "What a client must handle". |
+| App key capability and verification (`internal/apiv2/app_keys.go`, `app_key_sign_in.go`; `appkeys.Verify`) | The capability names the ID, every signed payload names it, and the server refuses another. Keys from the backup sign in. | A device's key signs in to both. A key revoked on one keeps working on the other. |
+| Push sending (`internal/notifications/push_sender.go`, `relayTarget`) and registration receipts (`internal/apiv2/notification_apple_push.go`, `notification_android_push.go`) | The relay target names the ID and the profile, both restored. Registrations are carried credentials, so a new install has none until each app registers again after it signs in. | Both servers send pushes naming one ID and the same profile IDs, so a device registered with both can't tell which server a push came from. |
+| Device sign-in answers (`internal/apiv2/device_login.go`) | The answer names the ID, so the approving phone picks the saved server with it. | The phone may send the approval to the old server's entry, where the code doesn't exist. |
+| Native sign-in redirect (`server` in `internal/auth/oauth_handler.go`) | The app's check that the redirect comes from its saved server passes. | Each address answers with its own redirect; the check passes on both. |
+| LAN advert (`internal/landiscovery`, `cmd/silo/lan_discovery.go`) | The TXT `id` names the ID, so adverts confirm the saved server. | Two adverts with one ID. With the same `SECRET_KEY` both present the pinned key, so a local route can reach the old server, which refuses the new server's sessions. |
+| Backups (`internal/backup`): the folder `backups/<id>/`, rotation of that folder, the manifest's ID, `checkDeployment` | The new install writes to the old server's folder at the same destination and lists the old backups as its own. A later restore of an old backup counts as the same deployment and carries the new install's live credentials, which is right: its accounts descend from that backup. | Each server rotates away the other's backups in the shared folder, and a backup the old server takes after the move counts as this deployment's even though its accounts have drifted. |
+| Restore sets and profile export and import (`SameServer` in `profile_transfer.go`, `users_plan.go`, `selective_sections.go`) | Files from before the move count as from the same server, so library and collection references resolve, which is right: the restored rows keep their IDs. | A file from the old server made after the move counts as the same server; references created there since don't exist here. |
+
+**What a client must handle.** A move to the same address is clean: the
+saved server, its ID and its keys all carry on. A move to a new address
+leaves a device that still has the old address saved with two entries that
+share one ID: push notifications that both entries claim show generic text,
+and approving a TV sign-in can go to the old entry and fail, until the person
+removes the old entry. With both servers running, casting to a TV saved at
+the old address fails, because the TV starts at the old server and the phone
+approves through the new one. Clients that keep one entry per server avoid
+the two-entry cases. The server can't detect a twin, so a restore that takes
+another server's ID tells the operator to shut the old server down first and
+keep it off.
 
 ## The identity authorizes nothing
 
@@ -60,6 +100,12 @@ collects tokens only if both requests landed in the same store. The ID is a
 hint that makes the candidate worth trying and lets clients group saved
 servers; the approval is the gate. Profile confirmation and every other
 authorization rule are unchanged.
+
+App keys are the one place the ID takes part in authorization: a signed
+request names it, and the server refuses a request naming another, so a
+message signed for one server can't be replayed at another. Two servers that
+share an ID share that boundary, which is why the restore that creates them
+warns ([backups.md](backups.md#server-identity-on-a-full-restore)).
 
 The one other gate is the API server's own TLS key
 ([Local network TLS](#local-network-tls)): a signed-in client may send its

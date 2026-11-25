@@ -33,7 +33,7 @@ func TestCarrySwapsDestinationNamesDB(t *testing.T) {
 	destinations(restored, "Phone", "Tablet")
 	destinations(live, "Tablet", "Phone")
 
-	if _, err := (PGLoader{}).CarryCredentials(ctx, restoredURL, liveURL); err != nil {
+	if _, err := (PGLoader{}).CarryCredentials(ctx, restoredURL, liveURL, AppKeysKept); err != nil {
 		t.Fatalf("carry over swapped names: %v", err)
 	}
 	for _, table := range []string{"notification_plugin_destinations", "notification_webhooks"} {

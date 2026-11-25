@@ -19,6 +19,8 @@ const (
 	tablePluginProvisionOwnership = "plugin_provision_ownership"
 	tablePluginAuthBindings       = "plugin_auth_bindings"
 	tablePluginAuthIdentities     = "plugin_auth_identities"
+	tableAuthPersonKeys           = "auth_person_keys"
+	tableAuthDeviceKeys           = "auth_device_keys"
 )
 
 const (
@@ -31,7 +33,9 @@ const (
 	// backup's rows, since a credential revoked after the backup would work
 	// again and one created since would stop working: it keeps the live
 	// server's rows as they are right before the swap, less those whose
-	// owner is not in the restored data. A separate restore keeps none.
+	// owner is not in the restored data. A separate restore keeps none. A
+	// table whose carry has restoredStay (app keys) keeps, on a full restore,
+	// the backup's rows the live server lacks.
 	secretCarried
 	// secretRestored tables are restored with the rest of the data: what looks
 	// like a secret admits no one to this server, or belongs to the record
@@ -112,6 +116,12 @@ type carrySpec struct {
 	// the restored data: carried without it, the credential would be wider
 	// than it is live.
 	binding *carryBinding
+	// restoredStay keeps the restored rows on a full restore: a live row
+	// replaces the one with its key, and every other restored row stays, so
+	// a full restore with no live server to carry from keeps them all.
+	// Without it, or in a separate restore, a restored row that is not the
+	// same as a carried live one is deleted.
+	restoredStay bool
 }
 
 // carryBinding names a carrySpec.binding column and the SQL condition, over
@@ -187,13 +197,11 @@ const (
 
 // secretTables classifies every table holding a bearer secret or a public
 // capability. Carried tables are replaced in this order, so a table follows
-// the ones its owner condition reads. TestSecretTablesAreClassifiedDB scans
-// the schema for secret-like columns and fails on a table missing here.
+// the ones its owner condition reads. TestEveryTableIsClassifiedDB fails on a
+// table of the schema missing here and from the other backup lists.
 var secretTables = []secretTable{
 	{name: "auth_sessions", handling: secretLeftOut, why: "web and native sign-ins and their refresh tokens"},
 	{name: "device_login_requests", handling: secretLeftOut, why: "device-code sign-ins, which name auth_sessions"},
-	{name: "auth_person_keys", handling: secretLeftOut, why: "app person keys, which vouch for new device keys; a restored server asks devices to enroll again"},
-	{name: "auth_device_keys", handling: secretLeftOut, why: "app device keys, which open login sessions; a restored server asks devices to enroll again"},
 	{name: "auth_key_challenges", handling: secretLeftOut, why: "one-use app key sign-in challenges, which live two minutes"},
 	{name: "auth_grant_uses", handling: secretLeftOut, why: "IDs of grants another app redeemed, kept until each grant expires"},
 	{name: "jellycompat_sessions", handling: secretLeftOut, why: "Jellyfin-protocol access tokens"},
@@ -284,6 +292,23 @@ var secretTables = []secretTable{
 		describe: `format('sign-in provider %s (%s)', r.id, r.capability_id)`,
 		limit: &carryLimit{column: columnAutoProvision, keep: grantCarried(tablePluginAuthBindings),
 			why: "account creation turned off: a new account would get more access under the backup's access groups than here"},
+	}},
+	// App keys (docs/architecture/app-keys.md), after the sign-in links,
+	// which appKeySettle reads as the restore leaves them, and person keys
+	// before the device keys that name them. The live server's row wins
+	// wherever it has one, so a revocation since the backup stays and a key
+	// enrolled since keeps working; a row only the backup has stays, so a
+	// full restore onto a server that never held these keys brings them
+	// back. Key rows are never deleted while their account exists.
+	{name: tableAuthPersonKeys, handling: secretCarried, why: "app person keys", carry: &carrySpec{
+		key: "id", same: []string{"id", columnUserID, "public_key"}, credential: everyRow,
+		owners: []string{columnUserID}, owned: userRestored, restoredStay: true,
+		describe: `format('app person key %s (account %s)', r.id, r.user_id)`,
+	}},
+	{name: tableAuthDeviceKeys, handling: secretCarried, why: "app device keys", carry: &carrySpec{
+		key: "id", same: []string{"id", columnUserID, "public_key"}, credential: everyRow,
+		owners: []string{columnUserID}, owned: userRestored, restoredStay: true,
+		describe: `format('app device key %s %L (account %s)', r.id, r.name, r.user_id)`,
 	}},
 
 	// Destinations that receive notifications without a session: one removed
@@ -467,26 +492,29 @@ type CarriedCredentials struct {
 	// not have, which an older backup predates: it has no rows of them to
 	// replace, and the live server's are not carried.
 	Absent []string
+	// AppKeys is what appKeySettle did.
+	AppKeys SettledAppKeys
 }
 
 // carryCredentials replaces the restored database's credentials with the
 // live server's (liveURL), or with none when liveURL is "", and prints
-// what it kept and dropped.
-func carryCredentials(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, out io.Writer) (bool, error) {
-	carriedRows, err := loader.CarryCredentials(ctx, dbURL, liveURL)
+// what it kept and dropped. keys says what happens to the backup's app keys.
+func carryCredentials(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, keys AppKeyCarry, out io.Writer) (CarriedCredentials, error) {
+	carriedRows, err := loader.CarryCredentials(ctx, dbURL, liveURL, keys)
 	if err != nil {
-		return false, fmt.Errorf("replacing the restored %s: %w", carriedKinds, err)
+		return carriedRows, fmt.Errorf("replacing the restored %s: %w", carriedKinds, err)
 	}
+	defer printAppKeys(out, carriedRows.AppKeys, liveURL, keys)
 	if liveURL == "" {
 		_, _ = fmt.Fprintf(out, "Left out the backup's %s; create new ones after Silo starts.\n", carriedKinds)
-		return carriedRows.pluginProvisionRestricted, nil
+		return carriedRows, nil
 	}
 	if len(carriedRows.Absent) > 0 {
 		_, _ = fmt.Fprintf(out, "The backup's schema predates %s; this server's rows of them are not carried.\n", strings.Join(carriedRows.Absent, ", "))
 	}
 	var kept []string
 	for _, t := range secretTablesHandled(secretCarried) {
-		if n := carriedRows.Kept[t.name]; n > 0 {
+		if n := carriedRows.Kept[t.name]; n > 0 && !t.carry.restoredStay {
 			kept = append(kept, fmt.Sprintf("%s (%d)", t.why, n))
 		}
 	}
@@ -509,13 +537,15 @@ func carryCredentials(ctx context.Context, loader DatabaseLoader, dbURL, liveURL
 		kept := counted(len(carriedRows.Stricter), "security switch as this server has it", "security switches as this server has them")
 		_, _ = fmt.Fprintf(out, "Kept %s, stricter than the backup: %s\n", kept, strings.Join(carriedRows.Stricter, ", "))
 	}
-	return carriedRows.pluginProvisionRestricted, nil
+	return carriedRows, nil
 }
 
 // CarryCredentials replaces the carried secretTables rows of dbURL with
 // the rows of liveURL, or deletes them when liveURL is "", in one
-// transaction.
-func (l PGLoader) CarryCredentials(ctx context.Context, dbURL, liveURL string) (CarriedCredentials, error) {
+// transaction. On a full restore (keys other than AppKeysLeftOut) the
+// restoredStay tables keep the backup's rows the live server lacks, and
+// appKeySettle runs.
+func (l PGLoader) CarryCredentials(ctx context.Context, dbURL, liveURL string, keys AppKeyCarry) (CarriedCredentials, error) {
 	tables := secretTablesHandled(secretCarried)
 	scrubbed := secretTablesHandled(secretScrubbed)
 	live := make([]string, len(tables))
@@ -567,13 +597,23 @@ func (l PGLoader) CarryCredentials(ctx context.Context, dbURL, liveURL string) (
 		if err := carriedGrants(ctx, tx, tables, live, liveState.grants); err != nil {
 			return err
 		}
+		settle := newAppKeySettle(tables, live, keys)
+		if err := settle.holders(ctx, tx, &result); err != nil {
+			return err
+		}
 		for i, table := range tables {
 			if table.name == "stream_nodes" {
 				if err := reconcileRestoredStreamNodeReferences(ctx, tx, live[i]); err != nil {
 					return fmt.Errorf("stream_nodes historical references: %w", err)
 				}
 			}
-			if err := table.carryInto(ctx, tx, live[i], &result); err != nil {
+			if err := settle.before(ctx, tx, table, &result); err != nil {
+				return fmt.Errorf("%s: %w", table.name, err)
+			}
+			if err := table.carriedFor(keys).carryInto(ctx, tx, live[i], &result); err != nil {
+				return fmt.Errorf("%s: %w", table.name, err)
+			}
+			if err := settle.after(ctx, tx, table, &result); err != nil {
 				return fmt.Errorf("%s: %w", table.name, err)
 			}
 		}
@@ -779,7 +819,8 @@ func tableColumns(ctx context.Context, tx pgx.Tx, table string) ([]string, error
 }
 
 // carry runs in the restored database: it deletes the restored credentials
-// that are not the same as a carried live one, upserts the live ones whose
+// that are not the same as a carried live one (none with restoredStay),
+// upserts the live ones whose
 // owner exists, and moves an identity sequence past the ids it wrote. Only
 // the columns the restored schema has are written, so a backup taken
 // before a column was added still restores. A backup taken before a table's
@@ -822,15 +863,12 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 		return err
 	}
 	result.Dropped = append(result.Dropped, dropped...)
-	same := slices.DeleteFunc(slices.Clone(c.same), func(col string) bool { return !slices.Contains(columns, col) })
-	deleted, err := tx.Exec(ctx, fmt.Sprintf(`DELETE FROM %s t WHERE %s AND NOT EXISTS (
-		SELECT 1 FROM %s WHERE (%s) AND (%s) = (%s))`,
-		t.name, c.credential, rows, owned, prefixed("r.", same), prefixed("t.", same)), live)
+	deleted, err := t.deleteUncarried(ctx, tx, columns, rows, owned, live)
 	if err != nil {
 		return err
 	}
 	signIn := t.name == tablePluginAuthBindings || t.name == tablePluginAuthIdentities
-	if signIn && (len(dropped) > 0 || deleted.RowsAffected() > 0) {
+	if signIn && (len(dropped) > 0 || deleted > 0) {
 		result.pluginProvisionRestricted = true
 	}
 	if t.name == tablePluginAuthBindings && !result.pluginProvisionRestricted {
@@ -896,6 +934,21 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 		}
 	}
 	return nil
+}
+
+// deleteUncarried deletes the restored credentials that are not the same
+// as a live one the carry writes (owned), none with restoredStay, and
+// returns how many.
+func (t secretTable) deleteUncarried(ctx context.Context, tx pgx.Tx, columns []string, rows, owned, live string) (int64, error) {
+	c := t.carry
+	if c.restoredStay {
+		return 0, nil
+	}
+	same := slices.DeleteFunc(slices.Clone(c.same), func(col string) bool { return !slices.Contains(columns, col) })
+	tag, err := tx.Exec(ctx, fmt.Sprintf(`DELETE FROM %s t WHERE %s AND NOT EXISTS (
+		SELECT 1 FROM %s WHERE (%s) AND (%s) = (%s))`,
+		t.name, c.credential, rows, owned, prefixed("r.", same), prefixed("t.", same)), live)
+	return tag.RowsAffected(), err
 }
 
 // stageCarried moves the staged column of every restored row the upsert

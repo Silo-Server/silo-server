@@ -95,7 +95,7 @@ var (
 	// through the server's sign-in provider first; after that it works.
 	TypeProviderSignInRequired = ProblemType{"provider_sign_in_required", http.StatusConflict, "Provider sign-in required"}
 	// TypeAppGrantInvalid: the grant another app presented was already used, is
-	// for another server, app key or address, does not verify by the
+	// for another server or address, does not verify by the
 	// account's live person key, or names an administrator's or disabled
 	// account.
 	TypeAppGrantInvalid = ProblemType{"app_grant_invalid", http.StatusForbidden, "App grant invalid"}

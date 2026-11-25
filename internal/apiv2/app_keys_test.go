@@ -236,6 +236,7 @@ func TestAppKeyProblems(t *testing.T) {
 	}{
 		{err: auth.ErrKeySignatureInvalid, want: TypeSignatureInvalid},
 		{err: &appkeys.Error{Code: appkeys.CodeSignatureInvalid}, want: TypeSignatureInvalid},
+		{err: &appkeys.Error{Code: appkeys.CodeKidMismatch}, want: TypeSignatureInvalid},
 		{err: &appkeys.Error{Code: appkeys.CodeServerMismatch}, want: TypeSignatureInvalid},
 		{err: &appkeys.Error{Code: appkeys.CodePurposeMismatch}, want: TypeSignatureInvalid},
 		{err: &appkeys.Error{Code: appkeys.CodeExpired}, want: TypeSignatureInvalid},

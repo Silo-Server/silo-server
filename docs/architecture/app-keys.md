@@ -214,10 +214,11 @@ The number can only ever name that identity:
 - A restore is the one place the sequence can move backwards: a restored
   sequence can be behind the live one, and the restore moves it past the IDs
   it carries (`internal/backup/credentials.go`, the `setval` after carrying a
-  table). It cannot make a key match the wrong identity, because both key
-  tables are left out of backups, so a restored server has no keys at all. The
-  backup code depends on this: if keys are ever carried through a restore, a
-  carried key must be dropped unless its identity is carried with it.
+  table). It cannot make a key match the wrong identity: once the restore has
+  carried the sign-in links, it revokes every provider-bound key whose
+  `(identity_id, user_id)` has no link (`appKeySettle` in
+  `internal/backup/credentials_app_keys.go`), so a key whose identity is gone
+  is already revoked when a later identity reuses its number.
 - Every lookup of a key's identity compares the account as well as the ID, so
   even an equal number can only match an identity of the key's own account. A
   key whose number names another account's identity is treated as a key whose
@@ -259,9 +260,11 @@ with its own key to `POST /auth/grants/redeem` (`AppKeySignIn.RedeemGrant`).
 
 The checks, in order:
 
-1. The outer envelope's signature verifies by the grant's `app_key`, so only
-   the app the person allowed can redeem it; a `kid` that isn't that key's ID
-   is `app_grant_invalid`. The challenge is spent once this signature verifies.
+1. The outer envelope's signature verifies by the grant's `app_key` and its
+   `kid` is that key's ID, so only the app the person allowed can redeem it.
+   A redeemer that doesn't hold that key is `signature_invalid` however it
+   shows, a failed signature or another `kid`; `app_grant_invalid` is about
+   the grant itself. The challenge is spent once this check passes.
 2. The grant verifies by the live person key of the account it names, and both
    envelopes name this server. A person key that was replaced or revoked, or
    is provider-bound to an identity no longer on the account, signs no grant.
@@ -616,22 +619,55 @@ stricter of the live and the backed-up value.
 
 ## Backups
 
-Both key tables, `auth_key_challenges` and `auth_grant_uses` are left out of
-backups, as login sessions and device sign-in requests are. A grant lives five
-minutes, so a restore never revives one that was used. They hold public keys, which are not
-secret, but a key is a
-credential: a restore that brought keys back would reopen sign-ins that were
-revoked after the backup was taken. A restored server has no keys, so each
-device enrolls again.
+Both key tables are in the backup and come back on a full restore, so an
+account with no password can still sign in on its devices once the server is
+restored. The rules are in [backups.md](backups.md#credentials); in short:
+
+- The live server's row wins wherever it has one, so on the server that took
+  the backup a key revoked since stays revoked and a key enrolled since keeps
+  working. The backup's other rows come back.
+- On a server that never held the keys, the backup's come back as the backup
+  has them: a key revoked after the backup works again, and so does a person
+  key replaced after it, as a password changed after the backup does. After
+  such a restore, people check their devices list and revoke what they no
+  longer use. The Silo apps also compare the server's key list with their own
+  record at their next sign-in, but that is what the apps do, not something
+  the server guarantees.
+- Nothing is deleted except a restored row whose public key a live row of
+  another account now holds, so a public key stays enrolled once, revoked rows
+  included. The restore revokes, during the restore, a provider-bound key
+  whose sign-in link is not in the restored data, a key enrolled since the
+  backup on an account the backup gives more authority, and a waiting device
+  key only the backup has.
+- A signed request names the server ID, so the keys work only where the
+  restored server answers with the backup's: on the server it came from, or
+  on an install with no accounts, which takes the backup's ID
+  ([backups.md](backups.md#server-identity-on-a-full-restore)). A full
+  restore onto a server that has an account keeps that server's ID, and the
+  backup's keys come back revoked.
+- A separate restore (`--into`) keeps no keys, and an account a restore set
+  creates has none: its devices sign in another way and enroll.
+
+What doesn't restore, and what a person sees:
+
+- Login sessions: every app signs in again. One with a working key does that
+  by itself.
+- Challenges (`auth_key_challenges`): a sign-in in progress is refused once,
+  and the app asks for a new challenge.
+- Used grant IDs (`auth_grant_uses`): left out. A grant lives five minutes, so
+  a restore never revives one that was used.
+- Waiting keys only the backup has: the device enrolls again and waits for an
+  administrator's approval again.
+- Device sign-ins, including ones approved in advance: the TV shows a new
+  code to approve.
+
+The local network TLS key comes from `SECRET_KEY`, not the database. A
+restore under another `SECRET_KEY` gives the server a new TLS key, and every
+device reports that the server's key changed.
 
 A restore of selected accounts does not carry the profile set: restored
 profiles have no `sync_id`, so they are outside the set and the app pairs them
 again. A full database restore carries everything.
-
-The rule that a public key is enrolled once holds for as long as its row
-does. A restore empties both tables, revoked rows included, so a key that was
-revoked before the restore can be enrolled again by a caller the server
-allows to enroll.
 
 ## Cloned databases
 
