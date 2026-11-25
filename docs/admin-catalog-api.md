@@ -202,6 +202,13 @@ storage object. Source bytes are not frozen at submission. Local paths must be
 available on the worker that claims the job; remote content may change between
 submission and execution.
 
+An import job names its source in `source_label`: the remote URL, the local
+file name, the artifact key's file name, or the English text `Export job <id>`.
+An import queued with `export_job_id` also returns that ID as
+`source_export_job_id`; clients that show the source should build their own
+label from it, since `source_label` is not translated. Imports queued before the
+server recorded that ID have only `source_label`.
+
 The publish operation requires a completed export artifact. It saves a signed URL
 with a seven-day signature lifetime and returns `job_id`, `url`, and `expires_at`.
 It does not change the storage ACL. Repeating it returns the saved URL and original

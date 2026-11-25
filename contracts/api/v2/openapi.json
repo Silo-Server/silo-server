@@ -25954,7 +25954,12 @@
           "refresh_result": {
             "$ref": "#/components/schemas/LibraryRefreshJobResult"
           },
+          "source_export_job_id": {
+            "description": "The export job a catalog_import job reads from, when it was queued with export_job_id. Clients format their own label from it.",
+            "type": "string"
+          },
           "source_label": {
+            "description": "An import's source as English text: the remote URL, the file name, or \"Export job \u003cid\u003e\". Prefer source_export_job_id when present.",
             "type": "string"
           },
           "started_at": {
