@@ -229,7 +229,7 @@ func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInpu
 		}
 		if autoMatch {
 			user, err := scanUser(tx.QueryRow(ctx, `SELECT `+allColumns+` FROM users
-				WHERE email = $1 AND role = 'user' AND NOT is_owner AND NOT break_glass FOR UPDATE`, NormalizeEmail(identity.Email)))
+				WHERE email = $1 AND `+emailMatchCandidateSQL("users")+` FOR UPDATE`, NormalizeEmail(identity.Email)))
 			if err != nil && !IsNotFound(err) {
 				return err
 			}
@@ -311,6 +311,13 @@ func (r *AccountResolver) finish(ctx context.Context, tx pgx.Tx, in ResolveInput
 	}
 	out.user = user
 	return nil
+}
+
+// emailMatchCandidateSQL is the SQL test that the users row named by alias
+// is an account email auto-match may link: an ordinary account, never the
+// Owner, an admin or a break-glass account.
+func emailMatchCandidateSQL(alias string) string {
+	return alias + `.role = 'user' AND NOT ` + alias + `.is_owner AND NOT ` + alias + `.break_glass`
 }
 
 func lockUser(ctx context.Context, tx rowQuerier, id int) (*models.User, error) {

@@ -103,8 +103,8 @@ func registerAdminSettingsWrite(reg *Registry) {
 		o := Operation{Operation: humaOp("PUT", Prefix+"/admin/settings"+path, id, "admin-settings", summary), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyNonRetryable}
 		o.MaxBodyBytes = 1 << 20
 		// Turning auth.local_password_login off without a usable
-		// break-glass admin is refused.
-		o.Description = "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required."
+		// break-glass admin, or without a sign-in provider, is refused.
+		o.Description = "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP sign-in provider is on it is 409 sign_in_provider_required. Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in."
 		o.Errors = append(o.Errors, http.StatusConflict)
 		return o
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
 var (
@@ -23,6 +24,10 @@ var (
 	// local password sign-in off and no enabled break-glass admin that can
 	// still use its password.
 	ErrBreakGlassRequired = errors.New("at least one enabled break-glass admin with password sign-in is required while local password sign-in is off")
+	// ErrSignInProviderRequired refuses turning local password sign-in off
+	// while no OIDC or LDAP sign-in provider is on: nobody but the
+	// break-glass admins could sign in.
+	ErrSignInProviderRequired = errors.New("an enabled sign-in provider is required to turn local password sign-in off")
 )
 
 // rowQuerier is what the policy reads need: a pool or a transaction.
@@ -167,9 +172,11 @@ func usableBreakGlassCount(ctx context.Context, db rowQuerier, excludeID int) (i
 }
 
 // CheckLocalLoginSettingChange refuses turning local password sign-in off
-// while no break-glass admin could still sign in. The caller runs it inside
-// the settings mutation, which already holds the settings lock; before and
-// after are the effective values.
+// while no break-glass admin could still sign in (ErrBreakGlassRequired), or
+// while no sign-in provider is on for everyone else
+// (ErrSignInProviderRequired). The caller runs it inside the settings
+// mutation, which already holds the settings lock; before and after are the
+// effective values.
 func CheckLocalLoginSettingChange(ctx context.Context, db rowQuerier, before, after string) error {
 	wasOn := settingBool(before, true)
 	isOn := settingBool(after, true)
@@ -183,7 +190,168 @@ func CheckLocalLoginSettingChange(ctx context.Context, db rowQuerier, before, af
 	if count == 0 {
 		return ErrBreakGlassRequired
 	}
+	enabled, err := signInProviderEnabled(ctx, db)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return ErrSignInProviderRequired
+	}
 	return nil
+}
+
+// signInProviderEnabled reports whether an OIDC or LDAP sign-in provider is
+// on: an enabled installation with an enabled sign-in binding that is not a
+// network identity binding. A network provider signs in only people on its
+// network, so it does not count.
+func signInProviderEnabled(ctx context.Context, db rowQuerier) (bool, error) {
+	var enabled bool
+	err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM plugin_installations p
+		JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND b.enabled
+		WHERE p.enabled AND NOT `+plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id")+`)`).Scan(&enabled)
+	if err != nil {
+		return false, fmt.Errorf("checking for an enabled sign-in provider: %w", err)
+	}
+	return enabled, nil
+}
+
+// Who loses password sign-in when the server turns it off, grouped by what
+// connects them to the provider at their first sign-in through it.
+const (
+	// LocalPasswordOffEmailMatch: email auto-match can link the account.
+	LocalPasswordOffEmailMatch = "email_match"
+	// LocalPasswordOffAdminLink: nothing links the account until an
+	// administrator does.
+	LocalPasswordOffAdminLink = "admin_link"
+)
+
+// What decides an affected account's outcome (LocalPasswordOffAccount.Reason).
+const (
+	// LocalPasswordOffReasonEmailMatch: an ordinary account with an email,
+	// and email auto-match is on.
+	LocalPasswordOffReasonEmailMatch = "email_match"
+	// LocalPasswordOffReasonEmailMatchOff: an ordinary account with an
+	// email, but email auto-match is off.
+	LocalPasswordOffReasonEmailMatchOff = "email_match_off"
+	// LocalPasswordOffReasonAdministrator: an admin or the Owner, which
+	// email auto-match never links.
+	LocalPasswordOffReasonAdministrator = "administrator"
+	// LocalPasswordOffReasonNoEmail: an ordinary account without an email.
+	LocalPasswordOffReasonNoEmail = "no_email"
+)
+
+// LocalPasswordOffQuery asks for one page of one group.
+type LocalPasswordOffQuery struct {
+	Group string
+	// EmailAutoMatch overrides the saved auth.email_auto_match, to answer
+	// for an edit that changes both settings; nil uses the saved value.
+	EmailAutoMatch *bool
+	// AfterUsername and AfterID are the last row of the previous page;
+	// empty and 0 for the first.
+	AfterUsername string
+	AfterID       int
+	Limit         int
+}
+
+// LocalPasswordOffAccount is one account that loses its way in.
+type LocalPasswordOffAccount struct {
+	ID       int
+	Username string
+	Email    string
+	Role     string
+	IsOwner  bool
+	Reason   string
+}
+
+// LocalPasswordOffPage answers LocalPasswordOffQuery.
+type LocalPasswordOffPage struct {
+	Accounts []LocalPasswordOffAccount
+	// More is set when the group has rows after this page.
+	More bool
+	// EmailAutoMatch is the value the grouping used.
+	EmailAutoMatch  bool
+	EmailMatchTotal int
+	AdminLinkTotal  int
+}
+
+// LocalPasswordOffAccounts answers who loses their way in when local
+// password sign-in is turned off: enabled accounts that can sign in with a
+// password today, are not break-glass (localPasswordPolicy exempts those),
+// and have no usable linked identity (usableIdentitySQL). Each is grouped by
+// whether email auto-match can link it at its first provider sign-in, with
+// the rule account resolution applies (emailMatchCandidateSQL). Both group
+// totals and the page come from one query, ordered by username.
+func (s *IdentityService) LocalPasswordOffAccounts(ctx context.Context, q LocalPasswordOffQuery) (LocalPasswordOffPage, error) {
+	var page LocalPasswordOffPage
+	if q.Group != LocalPasswordOffEmailMatch && q.Group != LocalPasswordOffAdminLink {
+		return page, fmt.Errorf("unknown group %q", q.Group)
+	}
+	if q.Limit <= 0 {
+		return page, errors.New("limit must be positive")
+	}
+	matching := false
+	if q.EmailAutoMatch != nil {
+		matching = *q.EmailAutoMatch
+	} else {
+		saved, err := emailAutoMatchEnabled(ctx, s.pool)
+		if err != nil {
+			return page, err
+		}
+		matching = saved
+	}
+	page.EmailAutoMatch = matching
+	rows, err := s.pool.Query(ctx, `WITH affected AS (
+			SELECT u.id, u.username::text AS username, COALESCE(u.email, '')::text AS email, u.role, u.is_owner,
+				CASE
+					WHEN `+emailMatchCandidateSQL("u")+` AND btrim(COALESCE(u.email, '')) <> '' THEN
+						CASE WHEN $1 THEN 'email_match' ELSE 'email_match_off' END
+					WHEN `+emailMatchCandidateSQL("u")+` THEN 'no_email'
+					ELSE 'administrator'
+				END AS reason
+			FROM users u
+			WHERE u.enabled AND u.local_password_login_enabled AND NOT u.break_glass
+				AND NOT EXISTS (SELECT 1 FROM plugin_auth_identities i WHERE i.user_id = u.id AND `+usableIdentitySQL("i")+`)),
+		totals AS (
+			SELECT COUNT(*) FILTER (WHERE reason = 'email_match') AS matched,
+				COUNT(*) FILTER (WHERE reason <> 'email_match') AS unmatched
+			FROM affected)
+		SELECT t.matched, t.unmatched, a.id, a.username, a.email, a.role, a.is_owner, a.reason
+		FROM totals t
+		LEFT JOIN LATERAL (
+			SELECT * FROM affected
+			WHERE (reason = 'email_match') = $2 AND (username, id) > ($3::text, $4::int)
+			ORDER BY username, id
+			LIMIT $5) a ON true
+		ORDER BY a.username, a.id`,
+		matching, q.Group == LocalPasswordOffEmailMatch, q.AfterUsername, q.AfterID, q.Limit+1)
+	if err != nil {
+		return page, fmt.Errorf("listing accounts that lose password sign-in: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id                            *int
+			username, email, role, reason *string
+			owner                         *bool
+		)
+		if err := rows.Scan(&page.EmailMatchTotal, &page.AdminLinkTotal, &id, &username, &email, &role, &owner, &reason); err != nil {
+			return page, fmt.Errorf("listing accounts that lose password sign-in: %w", err)
+		}
+		if id == nil {
+			continue
+		}
+		page.Accounts = append(page.Accounts, LocalPasswordOffAccount{
+			ID: *id, Username: *username, Email: *email, Role: *role, IsOwner: *owner, Reason: *reason,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return page, fmt.Errorf("listing accounts that lose password sign-in: %w", err)
+	}
+	if len(page.Accounts) > q.Limit {
+		page.Accounts = page.Accounts[:q.Limit]
+		page.More = true
+	}
+	return page, nil
 }
 
 func settingBool(value string, fallback bool) bool {

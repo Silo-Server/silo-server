@@ -12,8 +12,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 )
 
-// Turning local password sign-in off needs a break-glass admin, through the
-// batch and the single-key settings writes alike.
+// Turning local password sign-in off needs a break-glass admin and an
+// enabled OIDC or LDAP sign-in provider, through the batch and the
+// single-key settings writes alike. Without the provider check the server
+// accepted the change with nobody else able to sign in.
 func TestLocalLoginSettingRequiresBreakGlassDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -53,7 +55,33 @@ func TestLocalLoginSettingRequiresBreakGlassDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, id) })
+
+	var providers int
+	if err := pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM plugin_auth_bindings WHERE enabled`).Scan(&providers); err != nil {
+		t.Fatal(err)
+	}
+	if providers > 0 {
+		t.Skipf("%d enabled sign-in bindings already in the database", providers)
+	}
+	for _, single := range []bool{false, true} {
+		requireAdminError(t, saveAdminSetting(t, h, key, "false", single), 409, "sign_in_provider_required")
+	}
+	if _, stored := store.values[key]; stored {
+		t.Fatalf("refused write stored %q", store.values[key])
+	}
+
+	var installation int
+	if err := pool.QueryRow(t.Context(), `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
+		VALUES ($1, '0', '/nonexistent/local-login-setting-test', true, 'manual', 'plugin') RETURNING id`, "local-login-"+suffix).Scan(&installation); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM plugin_installations WHERE id = $1`, installation)
+	})
+	if _, err := pool.Exec(t.Context(), `INSERT INTO plugin_auth_bindings (plugin_installation_id, capability_id, enabled) VALUES ($1, 'oidc', true)`, installation); err != nil {
+		t.Fatal(err)
+	}
 	if err := saveAdminSetting(t, h, key, "false", true); err != nil || store.values[key] != "false" {
-		t.Fatalf("with break-glass: %v, stored %v", err, store.values)
+		t.Fatalf("with break-glass and a provider: %v, stored %v", err, store.values)
 	}
 }

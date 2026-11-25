@@ -1536,12 +1536,20 @@ func (h *AdminHandler) checkLocalLoginSetting(ctx context.Context, tx pgx.Tx, be
 		return nil
 	}
 	if tx != nil {
-		return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, tx, before[key], after[key]))
+		return localLoginSettingError(auth.CheckLocalLoginSettingChange(ctx, tx, before[key], after[key]))
 	}
 	if h.pool == nil {
 		return ErrAdminSettingsUnavailable
 	}
-	return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, h.pool, before[key], after[key]))
+	return localLoginSettingError(auth.CheckLocalLoginSettingChange(ctx, h.pool, before[key], after[key]))
+}
+
+// localLoginSettingError answers a refused auth.local_password_login change.
+func localLoginSettingError(err error) error {
+	if errors.Is(err, auth.ErrSignInProviderRequired) {
+		return apiError(http.StatusConflict, "sign_in_provider_required", "Turn on a sign-in provider before turning local password sign-in off")
+	}
+	return breakGlassError(err)
 }
 
 // errBackupKeyNotConfirmed refuses switching backups to S3 before the admin

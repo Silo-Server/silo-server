@@ -433,8 +433,12 @@ func TestLocalPasswordPolicyDB(t *testing.T) {
 	if err := users.Update(ctx, admin.ID, models.UpdateUserInput{BreakGlass: &glass}); err != nil {
 		t.Fatal(err)
 	}
+	// It also needs a sign-in provider for everyone else.
+	if _, err := env.pool.Exec(ctx, `UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, env.installationID); err != nil {
+		t.Fatal(err)
+	}
 	if err := CheckLocalLoginSettingChange(ctx, env.pool, "true", "false"); err != nil {
-		t.Fatalf("settings check with break-glass = %v", err)
+		t.Fatalf("settings check with break-glass and a provider = %v", err)
 	}
 	env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "false")
 

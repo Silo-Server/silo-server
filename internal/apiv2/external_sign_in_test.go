@@ -48,6 +48,30 @@ func fixtureIdentity() handlers.ExternalIdentityView {
 	}
 }
 
+// ListLocalPasswordOffAccounts answers two ordinary accounts email
+// auto-match links and one admin nothing links, one per page.
+func (f *fakeExternalSignIn) ListLocalPasswordOffAccounts(_ context.Context, q auth.LocalPasswordOffQuery) (auth.LocalPasswordOffPage, error) {
+	page := auth.LocalPasswordOffPage{EmailAutoMatch: true, EmailMatchTotal: 2, AdminLinkTotal: 1}
+	all := []auth.LocalPasswordOffAccount{
+		{ID: 12, Username: "alice", Email: "alice@example.test", Role: "user", Reason: auth.LocalPasswordOffReasonEmailMatch},
+		{ID: 13, Username: "bob", Email: "bob@example.test", Role: "user", Reason: auth.LocalPasswordOffReasonEmailMatch},
+	}
+	if q.Group == auth.LocalPasswordOffAdminLink {
+		all = []auth.LocalPasswordOffAccount{{ID: 2, Username: "carol", Email: "carol@example.test", Role: "admin", Reason: auth.LocalPasswordOffReasonAdministrator}}
+	}
+	for _, account := range all {
+		if account.Username <= q.AfterUsername {
+			continue
+		}
+		if len(page.Accounts) == q.Limit {
+			page.More = true
+			break
+		}
+		page.Accounts = append(page.Accounts, account)
+	}
+	return page, nil
+}
+
 func (f *fakeExternalSignIn) IdentitiesAvailable() bool     { return true }
 func (f *fakeExternalSignIn) ConnectionTestAvailable() bool { return true }
 func (f *fakeExternalSignIn) ListIdentities(_ context.Context, userID int) ([]handlers.ExternalIdentityView, error) {

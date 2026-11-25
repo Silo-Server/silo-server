@@ -102,14 +102,21 @@ func listIdentitiesForUser(ctx context.Context, db dbQuerier, userID int) ([]Lin
 	return identities, nil
 }
 
-// usableIdentityCount counts links whose installation and sign-in binding
-// are enabled. A disabled provider cannot be a fallback after unlinking.
+// usableIdentitySQL is the SQL test that the plugin_auth_identities row
+// named by alias is usable: its installation and a sign-in binding of it
+// are enabled. A link to a disabled provider signs nobody in.
+func usableIdentitySQL(alias string) string {
+	return `EXISTS (SELECT 1 FROM plugin_installations p
+		JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND b.enabled
+		WHERE p.id = ` + alias + `.plugin_installation_id AND p.enabled)`
+}
+
+// usableIdentityCount counts the account's usable links (usableIdentitySQL).
+// A disabled provider cannot be a fallback after unlinking.
 func usableIdentityCount(ctx context.Context, db rowQuerier, userID int, excludeID int64) (int, error) {
 	var count int
 	err := db.QueryRow(ctx, `SELECT COUNT(*) FROM plugin_auth_identities i
-		JOIN plugin_installations p ON p.id = i.plugin_installation_id AND p.enabled
-		WHERE i.user_id = $1 AND i.id <> $2 AND EXISTS (
-			SELECT 1 FROM plugin_auth_bindings b WHERE b.plugin_installation_id = p.id AND b.enabled)`,
+		WHERE i.user_id = $1 AND i.id <> $2 AND `+usableIdentitySQL("i"),
 		userID, excludeID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("counting enabled sign-in identities: %w", err)
