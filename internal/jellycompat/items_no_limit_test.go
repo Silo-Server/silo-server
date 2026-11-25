@@ -138,3 +138,41 @@ func TestBrowseItemsWithoutLimitBoundsLookupsAndShufflesOnce(t *testing.T) {
 		t.Fatalf("favorite lookups = %v progress lookups = %v, want %v", userData.favoriteLookups, userData.progressLookups, want)
 	}
 }
+
+// A random browse with StartIndex shuffles every match and then skips
+// StartIndex of them, so the items it returns can be any of the library's,
+// not only those after StartIndex in title order.
+func TestBrowseItemsWithoutLimitShufflesBeforeStartIndex(t *testing.T) {
+	content := &pagedLibraryContent{n: 2037}
+	codec := NewResourceIDCodec()
+	h := &ItemsHandler{
+		catalogUserState: true,
+		content:          content,
+		codec:            codec,
+		mapper:           newMapper(codec, &config.Config{}),
+		userData:         &mockUserDataService{},
+		images:           NewImageCache(time.Hour, time.Now),
+	}
+
+	result := performItemsRequest(t, h, "/Items?IncludeItemTypes=Movie&Recursive=true&SortBy=Random&StartIndex=1000")
+
+	ids := decodedItemIDs(t, codec, result)
+	if len(ids) != 1037 || result.TotalRecordCount != 2037 {
+		t.Fatalf("items = %d total = %d, want 1037 total 2037", len(ids), result.TotalRecordCount)
+	}
+	if content.calls[0].offset != 0 {
+		t.Fatalf("first browse offset = %d, want 0: every match is read before the shuffle", content.calls[0].offset)
+	}
+	early := 0
+	for _, id := range ids {
+		var n int
+		if _, err := fmt.Sscanf(id, "movie-%d", &n); err == nil && n < 1000 {
+			early++
+		}
+	}
+	// About half of a uniform shuffle's last 1,037 come from the first 1,000
+	// in title order; none did when StartIndex was skipped first.
+	if early == 0 {
+		t.Fatal("no item from before StartIndex in title order came back")
+	}
+}

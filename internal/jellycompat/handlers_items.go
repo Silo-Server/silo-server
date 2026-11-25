@@ -2938,12 +2938,15 @@ func (h *ItemsHandler) otherTypesTotal(ctx context.Context, session *Session, qu
 // compatBrowseMaxLimit, so pages are read until the browse reports no more. A
 // played filter's overlay can end a page short and page by catalog rows, so an
 // item a later page repeats is kept once. A random order is shuffled once over
-// the whole result: pages shuffled on their own would skip items.
+// every match, then StartIndex is applied: pages shuffled on their own would
+// skip items, and so would skipping StartIndex items in title order first.
 func (h *ItemsHandler) browseAllItems(ctx context.Context, session *Session, query itemsQuery) (*upstreamBrowseResponse, error) {
 	query.limit = compatBrowseMaxLimit
 	shuffle := query.sort == compatBrowseRandomSort
+	skip := 0
 	if shuffle {
 		query.sort = catalog.BrowseSortTitle
+		skip, query.startIndex = query.startIndex, 0
 	}
 	var all *upstreamBrowseResponse
 	seen := make(map[string]struct{})
@@ -2968,6 +2971,7 @@ func (h *ItemsHandler) browseAllItems(ctx context.Context, session *Session, que
 			if shuffle {
 				//nolint:gosec // a display order, not a secret
 				rand.Shuffle(len(all.Items), func(i, j int) { all.Items[i], all.Items[j] = all.Items[j], all.Items[i] })
+				all.Items = all.Items[min(skip, len(all.Items)):]
 			}
 			return all, nil
 		}
