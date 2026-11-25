@@ -14,8 +14,8 @@ type PersonKeyLookup func(accountID string) (PublicKey, error)
 // key, then the grant's own signature against the person key of the grant's
 // account. server_id must be this server's in both.
 //
-// A kid that isn't the app key's ID is grant_invalid; a failed outer
-// signature is signature_invalid; grant_expired is only for the grant's own
+// A kid that isn't the app key's ID is app_grant_invalid; a failed outer
+// signature is signature_invalid; app_grant_expired is only for the grant's own
 // exp.
 func VerifyGrantRedeem(env Envelope, serverID string, now time.Time, personKey PersonKeyLookup) (*Payload, *Payload, error) {
 	if err := env.CheckShape(PurposeGrantRedeem); err != nil {
@@ -76,7 +76,7 @@ func readUnverifiedGrant(env Envelope) (*Payload, error) {
 }
 
 // verifyGrant checks the grant's signature by the account's person key and
-// its claims. Every refusal is grant_invalid except the grant's own expiry.
+// its claims. Every refusal is app_grant_invalid except the grant's own expiry.
 func verifyGrant(env Envelope, accountID, serverID string, now time.Time, personKey PersonKeyLookup) (*Payload, error) {
 	key, err := personKey(accountID)
 	if err != nil {

@@ -422,9 +422,8 @@ func appKeyProblemAt(err error, payloadLocation string) error {
 		return NewProblem(TypeRateLimited, detail).WithRetryAfter(int(retry.RetryAfter.Seconds()))
 	}
 	if code := appkeys.CodeOf(err); code != "" {
-		// The verifier names these as the protocol's test vectors do; the
-		// API answers app_grant_invalid and app_grant_expired, which can't
-		// be mistaken for the OAuth problem invalid_grant.
+		// Named app_grant_* so they can't be mistaken for the OAuth problem
+		// invalid_grant.
 		switch code {
 		case appkeys.CodeGrantInvalid, appkeys.CodeOriginNotGranted:
 			return NewProblem(TypeAppGrantInvalid, grantInvalidDetail)

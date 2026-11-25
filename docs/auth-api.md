@@ -776,6 +776,10 @@ account.
 | The outer signature doesn't verify by the `app_key`, or the `grant-redeem` envelope is outside its own `iat` and `exp` | 401 `signature_invalid` |
 | The `app_key` is already enrolled on this server | 409 `conflict` |
 
+A revoked app key is still enrolled: a public key is enrolled once on a server
+and can't be enrolled again. An app the person removed and then allows again
+makes a new key and asks for a new grant.
+
 **Sealed reply.** The routes that open a session answer
 `{ "epk", "nonce", "ciphertext" }`, the plaintext sealed to the payload's
 `reply_key`:
