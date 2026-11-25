@@ -579,13 +579,17 @@ func updateUser(ctx context.Context, db interface {
 			return err
 		}
 	}
+	// The promoted account's keys go before any session is touched: key rows
+	// are locked before sessions on every path.
+	if promoting {
+		if err := revokeCredentialsIssuedToNonAdmin(ctx, db, id); err != nil {
+			return err
+		}
+	}
 	if roleChanging {
 		if err := endImpersonationsInvolving(ctx, db, id); err != nil {
 			return err
 		}
-	}
-	if promoting {
-		return revokeCredentialsIssuedToNonAdmin(ctx, db, id)
 	}
 	return nil
 }

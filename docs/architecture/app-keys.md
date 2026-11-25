@@ -72,10 +72,18 @@ the login sessions those keys opened. A sign-in reads the key's binding
 without a lock, locks the installation and identity, then locks the key row
 and refuses the sign-in when its binding changed meanwhile. `enroll` and
 `PUT /auth/keys/person` lock the enrolling session's identity before the key
-rows and the session's own row last. Uninstalling a plugin and deleting an
-identity take the installation, the identity, the key rows (the revoking
-trigger) and the sessions in the same order without the account lock, so the
-two cannot deadlock. Opening a session by key holds the account and key locks
+rows and the session's own row last. Every sweep that revokes an account's
+keys and sessions together (a provider refusal, an email match, a promotion,
+an ownership move, deleting the account) revokes the keys first, then the
+sessions. Deleting an identity takes the identity, then the key rows bound to
+it and their sessions (the revoking trigger). Unlinking takes the account lock
+first (`UnlinkOwn` and `AdminUnlink`); uninstalling a plugin takes none, and
+the trigger then needs no account row either: it clears the keys' and
+sessions' `identity_id` itself, so the foreign key's `SET NULL` has nothing
+left to update and Postgres doesn't re-check the rows' `user_id`. So an
+uninstall that holds key rows and a sweep that holds the account row queue on
+the key rows instead of deadlocking
+(`TestRefusalSweepAndIdentityDeleteDontDeadlockDB`). Opening a session by key holds the account and key locks
 when it inserts the session, so a sign-in cannot create a live session after a
 concurrent revocation has ended the key's sessions.
 

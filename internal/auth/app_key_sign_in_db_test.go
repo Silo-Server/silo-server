@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -727,5 +728,92 @@ func TestProviderRefusalRevokesAppKeysDB(t *testing.T) {
 	}
 	if _, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: device})); !errors.Is(err, ErrKeySignatureInvalid) {
 		t.Fatalf("key sign-in after the refusal = %v", err)
+	}
+}
+
+// A provider refusing the person and deleting another identity of the same
+// account (unlinking it, or uninstalling its plugin, which takes no account
+// lock) both reach the key bound to that identity and the session it opened.
+// Each locks the key row before the session, so they queue instead of
+// deadlocking. The identity delete holds the key row first; the refusal sweep
+// must wait on that key, not on a session the delete needs next.
+func TestRefusalSweepAndIdentityDeleteDontDeadlockDB(t *testing.T) {
+	env := newKeyEnv(t, "keylockorder")
+	ctx := t.Context()
+	var otherInstallation int
+	if err := env.pool.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
+		VALUES ($1, '0', '/nonexistent/key-lock-order-test', true, 'manual', 'plugin') RETURNING id`, "key-lock-order-"+env.suffix).Scan(&otherInstallation); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = env.pool.Exec(context.WithoutCancel(ctx), `DELETE FROM plugin_installations WHERE id = $1`, otherInstallation)
+	})
+	var otherIdentity int64
+	if err := env.pool.QueryRow(ctx, `INSERT INTO plugin_auth_identities (plugin_installation_id, external_subject, user_id)
+		VALUES ($1, $2, $3) RETURNING id`, otherInstallation, "other|"+env.suffix, env.user.ID).Scan(&otherIdentity); err != nil {
+		t.Fatal(err)
+	}
+	bound, err := env.signIn.keys.InsertDeviceKey(ctx, NewDeviceKey{UserID: env.user.ID, PublicKey: newTestKey(t).pub,
+		Kind: models.DeviceKeyKindDevice, Name: "Tablet", EnrolledVia: models.AppKeyEnrolledSession, IdentityID: &otherIdentity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := env.svc.sessions.Create(ctx, models.AuthSession{UserID: env.user.ID, DeviceName: "Tablet",
+		ExpiresAt: time.Now().Add(time.Hour), DeviceKeyID: &bound.ID, OpenedVia: models.SessionOpenedAppKey}); err != nil {
+		t.Fatal(err)
+	}
+	refusing := env.loginSession(t, env.user, models.SessionOpenedProvider, &env.identityID)
+	pair, err := env.svc.generateTokenPair(*refusing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_DISABLED, "")
+	env.makeDue(t)
+
+	deleting, err := env.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = deleting.Rollback(context.WithoutCancel(ctx)) }()
+	if _, err := deleting.Exec(ctx, `SELECT 1 FROM auth_device_keys WHERE id = $1 FOR UPDATE`, bound.ID); err != nil {
+		t.Fatal(err)
+	}
+	sweep := make(chan error, 1)
+	go func() {
+		_, err := env.svc.Refresh(ctx, pair.RefreshToken)
+		sweep <- err
+	}()
+	// Wait until the sweep is queued behind the key row this transaction
+	// holds: another backend waiting on a lock.
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		var waiting bool
+		if err := env.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+			WHERE NOT l.granted AND a.datname = current_database() AND a.query ILIKE '%auth_device_keys%')`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case err := <-sweep:
+			t.Fatalf("the sweep finished without waiting on the held key: %v", err)
+		case <-time.After(10 * time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the sweep never queued behind the key row")
+		}
+	}
+	if _, err := deleting.Exec(ctx, `DELETE FROM plugin_auth_identities WHERE id = $1`, otherIdentity); err != nil {
+		t.Fatalf("identity delete while the sweep waits: %v", err)
+	}
+	if err := deleting.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-sweep; !errors.Is(err, ErrSessionRevoked) {
+		t.Fatalf("refusal sweep = %v, want the refusal to end the session", err)
+	}
+	if !env.keyRevoked(t, bound.ID) {
+		t.Fatal("the bound key survived both")
 	}
 }

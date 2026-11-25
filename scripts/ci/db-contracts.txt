@@ -340,6 +340,7 @@
 ./internal/auth TestLinkingBindsAppKeysDB
 ./internal/auth TestDeletedIdentityRevokesItsKeysDB
 ./internal/auth TestProviderRefusalRevokesAppKeysDB
+./internal/auth TestRefusalSweepAndIdentityDeleteDontDeadlockDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
 ./internal/auth TestSignupPolicySerializationDB
 ./internal/apiv2 TestSignupCommitPolicyErrorsDB

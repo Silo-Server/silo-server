@@ -246,16 +246,17 @@ func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInpu
 					if err != nil {
 						return err
 					}
+					// Whoever held the account before the match may hold its
+					// app keys too. Keys before sessions, the order every
+					// sweep takes (revokeAccountKeysTx).
+					if err := revokeAccountKeysTx(ctx, tx, user.ID); err != nil {
+						return err
+					}
 					if err := RevokeSignInsInTransaction(ctx, tx, user.ID); err != nil {
 						return err
 					}
 					keys, err := deleteAPIKeys(ctx, tx, user.ID)
 					if err != nil {
-						return err
-					}
-					// Whoever held the account before the match may hold its
-					// app keys too.
-					if err := revokeAccountKeysTx(ctx, tx, user.ID); err != nil {
 						return err
 					}
 					out.sessionsRevoke = true
