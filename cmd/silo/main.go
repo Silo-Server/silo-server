@@ -1589,8 +1589,16 @@ func main() {
 	subtitlePlaySync := &subtitles.PlaySyncHook{}
 	// Set when shutdown begins; /api/v1/ready fails from then on.
 	var shuttingDown atomic.Bool
+	demoMode := demomode.New(settingsRepo)
+	// Every password sign-in surface shares one demo account exemption,
+	// refreshed off the sign-in path.
+	demoSignIn := auth.NewDemoSignIn(auth.NewUserRepository(pool), demoMode)
+	if mode == "" || mode == "integrated" || mode == "api" {
+		go demoSignIn.Run(appCtx)
+	}
 	deps := api.Dependencies{
-		DemoMode:                     demomode.New(settingsRepo),
+		DemoMode:                     demoMode,
+		DemoSignIn:                   demoSignIn,
 		ShuttingDown:                 shuttingDown.Load,
 		AdminDefaults:                adminDefaults,
 		SubtitlePlaySync:             subtitlePlaySync,
@@ -4042,6 +4050,7 @@ func main() {
 			nil, // user store: not needed here
 		)
 		absAuthSvc.SetSignInAttempts(deps.SignInAttempts)
+		absAuthSvc.SetDemoSignIn(deps.DemoSignIn)
 		// Audiobookshelf compatibility (beta) signs in local accounts only:
 		// its sessions refresh without the provider re-check, so directory
 		// users are not routed to their provider here.
@@ -4483,6 +4492,7 @@ func main() {
 			provider := auth.NewLocalProvider(userRepo, sessionRepo)
 			compatDeps.AuthService = auth.NewService(provider, jwtService, sessionRepo, userRepo, nil, nil, nil)
 			compatDeps.AuthService.SetSignInAttempts(deps.SignInAttempts)
+			compatDeps.AuthService.SetDemoSignIn(deps.DemoSignIn)
 			// Jellyfin Quick Connect runs on the device sign-in requests the
 			// native API approves; profile tokens are only for remote playback.
 			if devices := auth.NewDeviceLoginService(deps.DB, userRepo, jwtService, sessionRepo, compatDeps.UserStoreProvider, nil); devices != nil {

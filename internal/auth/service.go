@@ -123,6 +123,9 @@ type Service struct {
 	// signInAttempts bounds password attempts per sign-in name; nil allows
 	// every attempt (SetSignInAttempts).
 	signInAttempts SignInAttemptLimiter
+	// demoSignIn names the demo account whose names skip that budget; nil
+	// exempts no name.
+	demoSignIn *DemoSignIn
 	// signInFolds remembers how the database folded sign-in names.
 	signInFolds signInFoldCache
 	// sessionsRevoked runs after a password change signed the account out
@@ -243,6 +246,7 @@ func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, pa
 		budgetName = username
 	}
 	spend := s.newSignInSpend(ctx, budgetName, username)
+	spend.demoExempt = s.demoSignIn.exempts(ctx, spend)
 	if err = s.reserveSignIn(ctx, spend); err != nil {
 		return nil, nil, false, err
 	}
@@ -298,6 +302,7 @@ func (s *Service) LoginWithProvider(
 	ip string,
 ) (pair *TokenPair, user *models.User, err error) {
 	spend := s.newSignInSpend(ctx, username, "")
+	spend.demoExempt = s.demoSignIn.exempts(ctx, spend)
 	if err = s.reserveSignIn(ctx, spend); err != nil {
 		return nil, nil, err
 	}

@@ -188,6 +188,9 @@ type signInSpend struct {
 	// name that signed in (Jellyfin's "alice#Kids"), which can be another
 	// account's.
 	derived bool
+	// demoExempt skips the name's budget: the name is one of the demo's
+	// shared account's own (DemoSignIn).
+	demoExempt bool
 }
 
 // newSignInSpend starts a sign-in's spend of the budget of name. loginName is
@@ -238,7 +241,7 @@ func signInSource(ctx context.Context) string {
 // *SignInThrottledError and the caller must not check the password; a
 // request whose context is done gets the context's error instead.
 func (s *Service) reserveSignIn(ctx context.Context, spend *signInSpend) error {
-	if s.signInAttempts == nil {
+	if s.signInAttempts == nil || spend.demoExempt {
 		return nil
 	}
 	lane, retryAfter, ok := s.signInAttempts.Reserve(ctx, spend.key, spend.source)
@@ -334,7 +337,12 @@ func (s *Service) trustSignInSource(ctx context.Context, user *models.User) {
 // another account's username as its email, and that name is the other
 // account's to clear or extend.
 func (s *Service) ownSignInKeys(ctx context.Context, user *models.User) ([]string, bool) {
-	if user == nil || s.users == nil {
+	return ownSignInKeys(ctx, s.users, user)
+}
+
+// ownSignInKeys is Service.ownSignInKeys for the accounts users holds.
+func ownSignInKeys(ctx context.Context, users *UserRepository, user *models.User) ([]string, bool) {
+	if user == nil || users == nil {
 		return nil, false
 	}
 	names := make([]string, 0, 2)
@@ -349,7 +357,7 @@ func (s *Service) ownSignInKeys(ctx context.Context, user *models.User) ([]strin
 	ctx, cancel := context.WithTimeout(ctx, signInLookupTimeout)
 	defer cancel()
 	var folded []string
-	err := s.users.pool.QueryRow(ctx, `
+	err := users.pool.QueryRow(ctx, `
 		SELECT coalesce(array_agg(lower(t.name) ORDER BY t.i) FILTER (WHERE coalesce(
 			(SELECT u.id FROM users u WHERE u.username = t.name::citext),
 			(SELECT u.id FROM users u WHERE u.email = t.name::citext)) = $2), '{}')
