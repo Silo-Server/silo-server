@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -69,12 +70,25 @@ func (c *KeyChallenges) Spend(ctx context.Context, raw []byte) error {
 	return nil
 }
 
-// DeleteExpiredChallenges removes challenges that expired unspent, for the
-// retention step. A spent challenge has no row left.
+// grantUseRetention is how long a used grant's ID is kept past the grant's
+// exp. The grant's exp is judged on the API process's clock and the row is
+// deleted on the database's, so the margin covers a database clock that runs
+// ahead: the row is gone only once every process refuses the grant by its
+// exp.
+const grantUseRetention = time.Hour
+
+// DeleteExpiredChallenges removes challenges that expired unspent, and the
+// IDs of used grants past their exp and grantUseRetention, for the retention
+// step. A spent challenge has no row left.
 func (c *KeyChallenges) DeleteExpiredChallenges(ctx context.Context) (int, error) {
 	tag, err := c.pool.Exec(ctx, `DELETE FROM auth_key_challenges WHERE expires_at < NOW()`)
 	if err != nil {
 		return 0, fmt.Errorf("deleting expired app key challenges: %w", err)
 	}
-	return int(tag.RowsAffected()), nil
+	grants, err := c.pool.Exec(ctx, `DELETE FROM auth_grant_uses WHERE expires_at < NOW() - make_interval(secs => $1)`,
+		grantUseRetention.Seconds())
+	if err != nil {
+		return int(tag.RowsAffected()), fmt.Errorf("deleting expired grant uses: %w", err)
+	}
+	return int(tag.RowsAffected() + grants.RowsAffected()), nil
 }

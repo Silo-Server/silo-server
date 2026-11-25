@@ -24,13 +24,17 @@ import (
 )
 
 // fakeAppKeys answers the app key calls: the signed ones, the revocation and
-// the replacement with err when set, otherwise answer.
+// the replacement with err when set, otherwise answer. A grant redemption
+// answers grantErr first when set.
 type fakeAppKeys struct {
-	enabled bool
-	err     error
-	answer  *handlers.AppKeyAnswer
-	keys    auth.OwnAppKeys
-	pending []*models.AppDeviceKey
+	enabled  bool
+	err      error
+	grantErr error
+	// credentialErr answers SessionMayIssueCredential.
+	credentialErr error
+	answer        *handlers.AppKeyAnswer
+	keys          auth.OwnAppKeys
+	pending       []*models.AppDeviceKey
 	// pendingErr is what the waiting-device operations answer.
 	pendingErr error
 	calls      int
@@ -92,6 +96,14 @@ func (f *fakeAppKeys) EnrollAppKeys(context.Context, auth.KeyEnrollRequest) (*ha
 	return f.signed()
 }
 
+func (f *fakeAppKeys) RedeemAppKeyGrant(context.Context, auth.KeyRequest) (*handlers.AppKeyAnswer, error) {
+	if f.grantErr != nil {
+		f.calls++
+		return nil, f.grantErr
+	}
+	return f.signed()
+}
+
 func (f *fakeAppKeys) ListOwnAppKeys(context.Context, *auth.Claims) (auth.OwnAppKeys, error) {
 	f.calls++
 	return f.keys, nil
@@ -105,6 +117,10 @@ func (f *fakeAppKeys) RevokeOwnDeviceKey(context.Context, *auth.Claims, string) 
 func (f *fakeAppKeys) ReplacePersonKey(context.Context, *auth.Claims, appkeys.PublicKey) error {
 	f.calls++
 	return f.err
+}
+
+func (f *fakeAppKeys) SessionMayIssueCredential(context.Context, *auth.Claims) error {
+	return f.credentialErr
 }
 
 // A syntactically valid envelope; the fake service never verifies it.
@@ -144,7 +160,7 @@ func TestAppKeyCapabilityFollowsSetting(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 				t.Fatal(err)
 			}
-			if body.State != tc.state || !body.SignIn || !body.Introduce || !body.Enroll || body.Protocol != appkeys.Protocol || body.ServerID != fixtureServerID {
+			if body.State != tc.state || !body.SignIn || !body.Introduce || !body.Enroll || !body.Grants || body.Protocol != appkeys.Protocol || body.ServerID != fixtureServerID {
 				t.Fatalf("body = %s", rec.Body.String())
 			}
 		})
@@ -164,6 +180,7 @@ func TestAppKeyRoutesFollowTheSwitch(t *testing.T) {
 		{method: http.MethodPost, path: "/auth/keys/challenge", body: `{}`},
 		{method: http.MethodPost, path: "/auth/keys/introduce", body: testEnvelope},
 		{method: http.MethodPost, path: "/auth/keys/sign-in", body: testEnvelope},
+		{method: http.MethodPost, path: "/auth/grants/redeem", body: testEnvelope},
 		{method: http.MethodPost, path: "/auth/keys/enroll", body: `{"person_key":"` + testPersonKey + `","message":` + testEnvelope + `}`, headers: bearer(memberToken)},
 		{method: http.MethodPut, path: "/auth/keys/person", body: `{"person_key":"` + testPersonKey + `"}`, headers: bearer(memberToken)},
 		{method: http.MethodGet, path: "/auth/keys", headers: bearer(memberToken), open: http.StatusOK},
@@ -289,6 +306,12 @@ func TestAppKeyProblems(t *testing.T) {
 		// check's store failure.
 		{err: fmt.Errorf("reading provider identity: %w: %w", auth.ErrSessionCheckUnavailable, errors.New("connection reset")), want: TypeDependencyUnavailable, retry: strconv.Itoa(apimw.CredentialCheckRetryAfterSeconds)},
 		{err: auth.ErrProviderUnavailable, want: TypeProviderUnavailable},
+		// An app tells a used or wrong grant apart from an expired one,
+		// which a wrong clock where it was signed causes.
+		{err: auth.ErrGrantInvalid, want: TypeAppGrantInvalid},
+		{err: &appkeys.Error{Code: appkeys.CodeGrantInvalid}, want: TypeAppGrantInvalid},
+		{err: &appkeys.Error{Code: appkeys.CodeOriginNotGranted}, want: TypeAppGrantInvalid},
+		{err: &appkeys.Error{Code: appkeys.CodeGrantExpired}, want: TypeAppGrantExpired},
 	} {
 		t.Run(tc.want.ID+" "+tc.err.Error(), func(t *testing.T) {
 			keys := &fakeAppKeys{enabled: true, err: tc.err}

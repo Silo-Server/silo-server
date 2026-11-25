@@ -475,10 +475,13 @@ func selectNamedProfile(profileName string, profiles []upstreamProfile) (upstrea
 }
 
 // Jellyfin's answer to a refused sign-in: the error code, and the message
-// of a plain credentials failure.
+// of a plain credentials failure. The message is the same for a name with no
+// account, a wrong password and an account with no password, so it does not
+// tell a stranger which names exist or have a password; it names Quick
+// Connect for the last.
 const (
 	loginErrorCode            = "InvalidUsernameOrPassword"
-	invalidCredentialsMessage = "Invalid username or password"
+	invalidCredentialsMessage = "Invalid username or password. Accounts without a password sign in with Quick Connect."
 )
 
 func mapLoginError(err error) (int, string, string) {

@@ -444,6 +444,14 @@ func TestSessionAllowsDB(t *testing.T) {
 			allowed(ActionManageKeys, tc.manage)
 			allowed(ActionApproveDeviceSignIn, tc.approve)
 			allowed(ActionReadKeys, tc.read)
+			// A personal API key or a linked sign-in is refused only to
+			// another app's session. The operations' own rules decide the
+			// rest, as before app keys: they already keep out an API key,
+			// an administrator acting as the account and remote playback.
+			refused := tc.claims == grantSession
+			if err := SessionMayIssueCredential(ctx, env.pool, tc.claims); !refused && err != nil || refused && !errors.Is(err, ErrSessionNotAllowed) {
+				t.Fatalf("issuing a credential: err = %v, want refused %v", err, refused)
+			}
 		})
 	}
 }

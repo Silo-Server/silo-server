@@ -47,6 +47,13 @@ func (h *AuthHandler) SignInWithAppKey(ctx context.Context, req auth.KeyRequest)
 	return h.appKeyAnswer(ctx, result, err)
 }
 
+// RedeemAppKeyGrant enrolls another app's key with a grant the person key
+// signed.
+func (h *AuthHandler) RedeemAppKeyGrant(ctx context.Context, req auth.KeyRequest) (*AppKeyAnswer, error) {
+	result, err := h.appKeys.RedeemGrant(ctx, req)
+	return h.appKeyAnswer(ctx, result, err)
+}
+
 // EnrollAppKeys enrolls a person key and a device key from a login session.
 func (h *AuthHandler) EnrollAppKeys(ctx context.Context, req auth.KeyEnrollRequest) (*AppKeyAnswer, error) {
 	result, err := h.appKeys.Enroll(ctx, req)
@@ -61,6 +68,12 @@ func (h *AuthHandler) ListOwnAppKeys(ctx context.Context, claims *auth.Claims) (
 // RevokeOwnDeviceKey revokes one of the caller's device keys.
 func (h *AuthHandler) RevokeOwnDeviceKey(ctx context.Context, claims *auth.Claims, id string) error {
 	return h.appKeys.RevokeOwnDeviceKey(ctx, claims, id)
+}
+
+// SessionMayIssueCredential reports whether the caller's session may be
+// handed a personal API key or a linked sign-in.
+func (h *AuthHandler) SessionMayIssueCredential(ctx context.Context, claims *auth.Claims) error {
+	return h.appKeys.SessionMayIssueCredential(ctx, claims)
 }
 
 // ReplacePersonKey replaces the caller's person key.

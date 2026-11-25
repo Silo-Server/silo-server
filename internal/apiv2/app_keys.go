@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -22,6 +23,7 @@ type AppKeyService interface {
 	IntroduceAppKey(context.Context, auth.KeyRequest) (*handlers.AppKeyAnswer, error)
 	SignInWithAppKey(context.Context, auth.KeyRequest) (*handlers.AppKeyAnswer, error)
 	EnrollAppKeys(context.Context, auth.KeyEnrollRequest) (*handlers.AppKeyAnswer, error)
+	RedeemAppKeyGrant(context.Context, auth.KeyRequest) (*handlers.AppKeyAnswer, error)
 	ListOwnAppKeys(context.Context, *auth.Claims) (auth.OwnAppKeys, error)
 	RevokeOwnDeviceKey(ctx context.Context, claims *auth.Claims, id string) error
 	ReplacePersonKey(context.Context, *auth.Claims, appkeys.PublicKey) error
@@ -31,6 +33,29 @@ type AppKeyService interface {
 	// ActsAsVerifiedMainProfile is the main-profile rule of the operations
 	// that create lasting access (requireVerifiedMainProfile).
 	ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, error)
+	// SessionMayIssueCredential answers auth.ErrSessionNotAllowed for a
+	// session another app opened with a grant, which must not be handed a
+	// personal API key or a linked sign-in.
+	SessionMayIssueCredential(context.Context, *auth.Claims) error
+}
+
+// credentialSessionProblem refuses handing the account a credential that
+// outlives the asking session (a personal API key, a linked sign-in
+// provider account) when another app opened that session with a grant: the
+// app's access must end when its key is revoked. Without app keys wired no
+// such session exists.
+func (reg *Registry) credentialSessionProblem(ctx context.Context, claims *auth.Claims) *Problem {
+	if reg.deps.AppKeys == nil {
+		return nil
+	}
+	err := reg.deps.AppKeys.SessionMayIssueCredential(ctx, claims)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, auth.ErrSessionNotAllowed):
+		return NewProblem(TypePermissionDenied, "A sign-in another app was allowed cannot do this.")
+	}
+	return serviceProblem(err)
 }
 
 // appKeyDomain names the capability in its problems.
@@ -106,6 +131,7 @@ func (reg *Registry) getAppKeyCapability(ctx context.Context, _ *CapabilityInput
 			Introduce:         true,
 			SignIn:            true,
 			Enroll:            true,
+			Grants:            true,
 			SignatureSuites:   []string{appKeySignatureSuite},
 			SealedReplySuites: []string{appKeySealedReplySuite},
 		},

@@ -229,6 +229,14 @@ break-glass account, as a password would, and is refused with 403
 `local_login_disabled` otherwise (`keySignInPolicy`). On such a server the
 person signs in through the provider and enrolls from that session.
 
+**Jellyfin-compatible apps.** An account that signs in only with app keys has
+no password, so a Jellyfin-compatible app signs it in with Quick Connect: the
+app shows a code, and a key session approves it on
+`POST /api/v2/auth/device/approve-handoff` for one of the account's profiles
+(see [jellycompat-api.md](../jellycompat-api.md#quick-connect)). The user that
+app gets reports `HasPassword: false`, and a password sign-in for the account
+fails with the same answer as an unknown name.
+
 **Administrators.** Every key an administrator's `introduce` enrolls is stored
 `pending`, and the sealed answer is `approval_required` with no tokens, so a
 copied person key alone can't open an admin session. Keys from `enroll` start
@@ -267,6 +275,70 @@ hourly) also revokes waiting keys past their 24 hours. It sets `revoked_at` and
 never deletes the row, so the public key stays enrolled once, and it takes
 each account's lock in turn. A swept key's `sign-in` still verifies its
 signature and answers `key_denied`, as it did before the sweep.
+
+## Grants
+
+A grant lets another app, one that doesn't hold the person key, enroll its own
+key on one account. The person allows the app on a device that holds the
+person key, which signs a `grant` envelope away from the server: the app's
+public key (`app_key`), the account (`account_id`), the addresses the app may
+use (`origins`), the app's name, a random 16-byte `grant_id`, and `exp` at
+most 300 seconds after `iat`. The app sends it inside a `grant-redeem` signed
+with its own key to `POST /auth/grants/redeem` (`AppKeySignIn.RedeemGrant`).
+
+The checks, in order:
+
+1. The outer envelope's signature verifies by the grant's `app_key`, so only
+   the app the person allowed can redeem it; a `kid` that isn't that key's ID
+   is `app_grant_invalid`. The challenge is spent once this signature verifies.
+2. The grant verifies by the live person key of the account it names, and both
+   envelopes name this server. A person key that was replaced or revoked, or
+   is provider-bound to an identity no longer on the account, signs no grant.
+   The grant's own `exp` past is `app_grant_expired`, so the app can tell a wrong
+   clock where it was signed from a bad grant; the `grant-redeem` envelope's
+   own times follow the general rule (`signature_invalid`).
+3. The redeem's `origin` is one of the grant's `origins`, and the origin rule
+   applies to it as on the other signed routes.
+4. In one transaction, under the usual lock order: the account is enabled and
+   not an administrator's, the person key's provider binding still holds, the
+   person key is still live, and the grant's ID is recorded for the account
+   in `auth_grant_uses`. A second redemption of one grant, on any API process,
+   finds the row and is refused `app_grant_invalid`. The record is per account
+   because the signer chooses the ID: another account's grant with the same
+   ID uses up only its own. Then the key is enrolled and its session opened.
+   A person key whose identity is gone from the account is revoked here, as
+   at its next use anywhere, and the grant refused.
+
+A refusal for an account with no person key takes about as long as one for a
+grant that fails its signature (a decoy check), so the time does not say
+which accounts have a person key.
+
+The enrolled key has `kind = 'app'`, `enrolled_via = 'grant'`, the signing
+person key as `person_key_id`, and that person key's provider binding
+(`identity_id`, `provider_bound`), so the provider rule applies to the app as
+to the person's own devices. Its name is the redeem's `device_name`, or else
+the grant's `app_name`. The key list shows it with `allowed_by`, the account's
+name. From then on the app signs in with `sign-in` like any device.
+
+**Administrators.** A grant for an administrator's account is refused. An
+admin's own devices wait for approval when they introduce themselves, and a
+grant has no approval step; another app has no business holding an admin
+session.
+
+**What the app's session may not do.** The app's access must end when its key
+is revoked, so its session may not mint access that outlives that (see "Who
+decides"): it can't enroll keys, replace the person key, approve a device
+sign-in now or in advance, read the account's key list, or revoke any key but
+its own. It also can't create a personal API key or link a sign-in provider
+account, the two older routes that hand an account a lasting credential
+(`SessionMayIssueCredential`); other sessions keep what those routes' own
+rules give them. The person, or the server's owner, revokes the app from the key list
+like any device.
+
+**Retention.** A used grant's ID is kept until an hour past the grant's `exp`
+(the margin covers a database clock ahead of an API process's), then the
+hourly retention step that clears challenges deletes it. By then every process
+refuses the grant by its `exp`.
 
 ## Who decides
 
@@ -435,7 +507,7 @@ TLS connection covers all of it.
 ## Rate limits
 
 `createAppKeyChallenge` spends the per-address `key_challenge` budget;
-`introduce`, `sign-in` and `enroll` spend `key_sign_in`. Both default to 60 a
+`introduce`, `sign-in`, `enroll` and grant redemption spend `key_sign_in`. Both default to 60 a
 minute with a burst of 20, enough for a few waiting devices behind one address
 (each asks every five seconds). Neither budget can be spent per key before the
 signature verifies; the challenge is what makes each signed request single
@@ -443,8 +515,8 @@ use.
 
 ## Multi-node rules
 
-Nothing about app keys lives in a node's memory. Challenges, keys, waiting
-keys' last tries and sessions are Postgres rows, so a challenge issued by one
+Nothing about app keys lives in a node's memory. Challenges, used grants, keys,
+waiting keys' last tries and sessions are Postgres rows, so a challenge issued by one
 API process is spent once on any of them, and a revocation on one ends the
 sessions every node checks. The switch and the local-password setting are read
 from `server_settings` on each request. The rate-limit budgets follow the
@@ -455,8 +527,8 @@ rate limiter's backend (cluster-wide with Redis).
 `auth.app_key_sign_in` (default on) turns app key sign-in on or off
 server-wide. It is read from `server_settings` on each request, so a change on
 any node applies at once. While it is off, `getAppKeyCapability` reports
-`disabled`, and the challenge, `introduce`, `sign-in`, `enroll`,
-`PUT /auth/keys/person` and `pending/{id}/approve` answer
+`disabled`, and the challenge, `introduce`, `sign-in`, `enroll`, grant
+redemption, `PUT /auth/keys/person` and `pending/{id}/approve` answer
 `capability_disabled`. A person's own key list and its deletes, the pending
 list and `deny` stay open, so keys can be reviewed, revoked and refused; sessions keys
 opened before are not ended by the switch. Backups classify it as an access setting: a restore keeps the
@@ -477,8 +549,9 @@ administrator) and the device login capability reports `preapprove: false`.
 
 ## Backups
 
-Both key tables and `auth_key_challenges` are left out of backups, as login
-sessions and device sign-in requests are. They hold public keys, which are not
+Both key tables, `auth_key_challenges` and `auth_grant_uses` are left out of
+backups, as login sessions and device sign-in requests are. A grant lives five
+minutes, so a restore never revives one that was used. They hold public keys, which are not
 secret, but a key is a
 credential: a restore that brought keys back would reopen sign-ins that were
 revoked after the backup was taken. A restored server has no keys, so each
