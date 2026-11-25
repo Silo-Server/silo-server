@@ -92,7 +92,7 @@ body:
     id: media-details
     attributes:
       label: Media and playback details
-      description: For playback problems. Admins can open a title's menu > **Media Info** in the web app for the container, video, audio, and subtitle formats. **Admin > Activity** shows how the session was played (Direct Play, Remux, Direct Stream, or Transcode) and the encoder.
+      description: For playback problems. Admins can open a title's menu > **Media Info** in the web app for the container, video, audio, and subtitle formats. **Admin > Insights > Activity** shows how the session was played (Direct Play, Remux, Direct Stream, or Transcode) and the encoder.
   - type: input
     id: diagnostics-reference
     attributes:

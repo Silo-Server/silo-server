@@ -1,0 +1,11 @@
+{
+  "revision": "c15bec2f7888e7c57ea3349e2c03dce235defdff41c13fe60f105fe2abadd16a",
+  "state": "available",
+  "allowed": true,
+  "available": true,
+  "node_egress_daily": true,
+  "titles": true,
+  "profile_filter": true,
+  "library": true,
+  "breakdowns": true
+}

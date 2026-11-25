@@ -1,6 +1,7 @@
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { AIR_DATE_TITLE_SEPARATOR, episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import { BookOpen, Play } from "lucide-react";
-import { Children, memo, useCallback, useRef } from "react";
+import { Children, memo, useCallback, useRef, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import type { ItemDetail, SectionItem } from "@/api/types";
 import { homeDismissalForCard } from "@/hooks/queries/homeDismissals";
@@ -95,6 +96,10 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
           seriesTitle: props.sectionItem.series_title,
           seasonNumber: props.sectionItem.season_number,
           episodeNumber: props.sectionItem.episode_number,
+          airDateLabel: episodeAirDateLabel(
+            props.sectionItem.episode_labels,
+            props.sectionItem.air_date,
+          ),
           backdropIsStill: props.sectionItem.backdrop_is_episode_still,
           posterIsStill: props.sectionItem.poster_is_episode_still,
           backdropUrl: props.sectionItem.backdrop_url,
@@ -119,6 +124,7 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
           seriesTitle: props.detail.series_title,
           seasonNumber: props.detail.season_number,
           episodeNumber: props.detail.episode_number,
+          airDateLabel: episodeAirDateLabel(props.detail.episode_labels, props.detail.air_date),
           backdropIsStill: props.detail.backdrop_is_episode_still ?? false,
           posterIsStill: props.detail.poster_is_episode_still ?? props.detail.type === "episode",
           backdropUrl: props.detail.backdrop_url,
@@ -168,13 +174,22 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
       {card.title}
     </span>
   ) : null;
-  const episodeMeta = hasEpisodeMeta
-    ? card.seriesTitle && card.title
-      ? t("web.home.continueWatching.episodeLabelWithTitle", {
-          ...episodeNumbers,
-          title: episodeTitle,
-        })
-      : t("web.home.continueWatching.episodeLabel", episodeNumbers)
+  // Typed as ReactNode so Children.map below accepts the date-and-title array.
+  const episodeMeta: ReactNode = hasEpisodeMeta
+    ? card.airDateLabel
+      ? // A date-labeled series (sports): the game's date replaces its
+        // synthetic season and episode numbers. The parts are an array, not a
+        // fragment, because Children.map below doesn't look inside a fragment
+        // and the date would lose its own non-shrinking box.
+        card.title && card.seriesTitle
+        ? [`${card.airDateLabel}${AIR_DATE_TITLE_SEPARATOR}`, episodeTitle]
+        : card.airDateLabel
+      : card.seriesTitle && card.title
+        ? t("web.home.continueWatching.episodeLabelWithTitle", {
+            ...episodeNumbers,
+            title: episodeTitle,
+          })
+        : t("web.home.continueWatching.episodeLabel", episodeNumbers)
     : isMangaChapter
       ? episodeTitle
       : null;

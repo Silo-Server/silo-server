@@ -227,13 +227,26 @@ capability RPCs may only reuse the supervisor's running process.
 
 Two API replicas would both load the `api` scope and share one node key,
 which the overlay treats as one node flapping between two machines. Phase one
-therefore supports one API server; in `server.mode = api` each replica keeps
-a unique process presence marker in Redis (`cache.APIReplicaPresence`, 90 s
-TTL), independent of shared logical node names, and logs a
+therefore supports one API server; on every API host (`api` and `integrated`)
+each replica keeps a unique process presence member in a Redis sorted set
+(`cache.APIReplicaPresence`, 90 s TTL), independent of shared logical node names,
+and logs a
 warning at start when providers are installed and more than one live replica
 is seen (best effort, no hard refusal). The census runs once per start, so
 the warning appears in the log of whichever replica starts second, not the
-one already running. Proxy nodes scale freely because each has its own scope.
+one already running. During a rolling update from the previous release, which
+writes its presence marker under a different Redis key, the warning may not fire. Proxy nodes scale freely because each has its own scope.
+
+Direct connections also terminate on one API replica. They share this process
+presence marker and, while direct connections are on, count live replicas every
+30 seconds. A Redis lease allows one holder to run the engine, renews every
+30 seconds, and expires after 90 seconds; the holder stops the engine once its
+last successful renewal is older than 60 seconds, and a fresh grant waits 90
+seconds before the engine runs. Multiple replicas or a census error make new
+direct connections unavailable while a valid holder can keep established sessions.
+Without Redis, a single integrated process runs the engine without a census or
+lease, and `server.mode = api` keeps the engine off. See
+[Direct Connections](direct-connections.md#replica-census-and-lease).
 
 ## Discovery
 

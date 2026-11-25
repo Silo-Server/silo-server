@@ -293,6 +293,17 @@ step.
   start is parked on the server and moves with only a flow ID (see Native
   apps). Refusals that need no browser state (bad installation id, plugin not
   loaded) answer before any redirect.
+- **Start rate limit.** A start needs no credential, yet each one costs a
+  plugin `InitAuthorize` call (which may itself call the provider) and a flow
+  row kept for the state lifetime plus its grace. The three starts share the
+  per-address `oauth_start` budget (40 a minute, burst 20), spent by the
+  route's gate before the handler runs, so a refused start makes no plugin
+  call and stores no flow. A refusal is a 429 Problem document with
+  `Retry-After`, never a redirect. The budget is twice `device_start`
+  because one sign-in can spend it twice: the form post bounces to the GET
+  start, and a parked native start resumes on the same route. The callback
+  has no budget: without a valid state and binding cookie it does no plugin
+  call.
 - **Browser binding.** Every start sets a cookie holding 256 random bits,
   named after the flow's state so parallel flows do not collide, HttpOnly,
   SameSite=Lax (the provider's redirect back is a top-level GET), Secure on an

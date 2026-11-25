@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // ---------------------------------------------------------------------------
@@ -137,6 +139,9 @@ type ProgressRow struct {
 	ProgressPct     float64
 	IsFinished      bool
 	UpdatedAt       time.Time
+	// HideFromContinue is the row's "remove from Continue Listening" flag
+	// (SetHideFromContinue); read-only here, UpsertProgress ignores it.
+	HideFromContinue bool
 }
 
 // ABSPlaybackSession is the in-memory representation of an abs_playback_sessions row.
@@ -170,19 +175,31 @@ func (h *Handler) handleGetMyProgress(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if h.deps.ProgressStore == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"mediaProgress": []any{}})
-		return
-	}
-	rows, err := h.deps.ProgressStore.ListProgressForAudiobooks(r.Context(), a.UserID, a.ProfileID, 500)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
 		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
 		return
+	}
+	out, err := h.accessibleProgress(r.Context(), a, access)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"mediaProgress": out})
+}
+
+// accessibleProgress returns the caller's audiobook progress rows in ABS
+// wire shape, dropping rows whose book is outside access. GET /me/progress
+// and the user object (login, authorize, refresh, /me) share it, so every
+// endpoint reports the same rows.
+func (h *Handler) accessibleProgress(ctx context.Context, a ctxAuth, access catalog.AccessFilter) ([]map[string]any, error) {
+	out := make([]map[string]any, 0)
+	if h.deps.ProgressStore == nil {
+		return out, nil
+	}
+	rows, err := h.deps.ProgressStore.ListProgressForAudiobooks(ctx, a.UserID, a.ProfileID, 500)
+	if err != nil {
+		return nil, err
 	}
 	ids := make([]string, 0, len(rows))
 	for _, p := range rows {
@@ -190,19 +207,30 @@ func (h *Handler) handleGetMyProgress(w http.ResponseWriter, r *http.Request) {
 	}
 	// One batch fetch acts as the access/existence gate (the item itself isn't
 	// rendered here), instead of one query per progress row.
-	byID, err := h.deps.MediaStore.GetAudiobooksByIDs(r.Context(), ids, access)
+	byID, err := h.deps.MediaStore.GetAudiobooksByIDs(ctx, ids, access)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, err
 	}
-	out := make([]map[string]any, 0, len(rows))
 	for _, p := range rows {
 		if byID[p.ContentID] == nil {
 			continue
 		}
 		out = append(out, progressRowToABS(p))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"mediaProgress": out})
+	return out, nil
+}
+
+// userMediaProgress returns the progress rows for the user object's
+// mediaProgress. A failed read is logged and yields an empty list: the user
+// object also answers login, and a progress outage must not block sign-in.
+func (h *Handler) userMediaProgress(ctx context.Context, a ctxAuth, access catalog.AccessFilter) []map[string]any {
+	progress, err := h.accessibleProgress(ctx, a, access)
+	if err != nil {
+		slog.WarnContext(ctx, "abs user object: media progress unavailable", "component", "audiobooks",
+			"user_id", a.UserID, "profile_id", a.ProfileID, "err", err)
+		return nil
+	}
+	return progress
 }
 
 // handleGetItemProgress — GET /abs/api/me/progress/{libraryItemId}
@@ -307,6 +335,9 @@ func (h *Handler) handleSetItemProgress(w http.ResponseWriter, r *http.Request) 
 		ProgressPct:     cur.ProgressPct,
 		IsFinished:      cur.IsFinished,
 		UpdatedAt:       time.Now(),
+		// UpsertProgress keeps the stored flag; carry it so the fallback
+		// reply below reports the same value a fresh read would.
+		HideFromContinue: cur.HideFromContinue,
 	}
 	if body.CurrentTime != nil {
 		next.CurrentSeconds = *body.CurrentTime
@@ -581,6 +612,14 @@ func progressRowToABS(p ProgressRow) map[string]any {
 		"finishedAt":    nil,
 		"lastUpdate":    lastMs,
 	}
+	// The rest of real ABS MediaProgress.getOldMediaProgress's key set, so
+	// strict clients decode the rows the user object carries.
+	out["userId"] = p.UserID
+	out["episodeId"] = nil
+	out["mediaItemType"] = LibraryMediaType
+	out["hideFromContinueListening"] = p.HideFromContinue
+	out["ebookLocation"] = nil
+	out["ebookProgress"] = 0
 	if p.IsFinished {
 		out["finishedAt"] = lastMs
 	}

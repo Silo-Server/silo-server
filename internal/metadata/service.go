@@ -241,6 +241,8 @@ type metadataEpisodeLocalizationRepo interface {
 // for looking up per-library settings like metadata language.
 type metadataFolderRepo interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFolder, error)
+	// ListByIDs returns the enabled folders among ids.
+	ListByIDs(ctx context.Context, ids []int) ([]*models.MediaFolder, error)
 }
 
 // metadataVideoRepo persists remote provider videos. The concrete
@@ -680,6 +682,11 @@ func (s *MetadataService) SetImageResolver(r interface {
 // Provider chains are determined by admin configuration and change rarely, so
 // caching avoids repeated DB queries when processing batches of files.
 func (s *MetadataService) resolveChainCached(ctx context.Context, folderID int, contentLevel string) ([]Provider, error) {
+	if folderID <= 0 {
+		if folderIDs := itemChainScopeFolders(ctx); len(folderIDs) > 0 {
+			return s.resolveLibrariesChain(ctx, folderIDs, contentLevel)
+		}
+	}
 	key := fmt.Sprintf("%d:%s", folderID, contentLevel)
 
 	s.chainCacheMu.RLock()
@@ -735,6 +742,10 @@ func (s *MetadataService) Process(ctx context.Context, req ProcessRequest) (*Pro
 	}
 
 	folderID := parseProcessFolderID(req.FolderID)
+	ctx, err = s.withItemChainScope(ctx, req.ContentID, folderID)
+	if err != nil {
+		return nil, err
+	}
 	languages, err := s.resolveProcessLanguages(ctx, req, folderID)
 	if err != nil {
 		return nil, err
@@ -3027,6 +3038,12 @@ func (s *MetadataService) mergeAndPersist(
 					"content_id", contentID, "error", creditsErr)
 			}
 		}
+		// Episode labels belong to whichever provider the series is matched
+		// to. An Identify picks that provider anew, even when no trusted ID
+		// differs (a Sportarr league has none), so only its answer counts.
+		if req.Mode == ModeIdentify {
+			existingResult.EpisodeLabels = ""
+		}
 		// A correction's stored values describe another title, and a reset's
 		// or a Complete Refresh's are what the admin asked to replace: either
 		// way a value the providers lack must not stay behind.
@@ -4774,6 +4791,10 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		return err
 	} else if ignored {
 		return ErrMetadataNotFound
+	}
+	ctx, err = s.withItemChainScope(ctx, seriesID, folderID)
+	if err != nil {
+		return err
 	}
 
 	languages, err := s.resolveProcessLanguages(ctx, ProcessRequest{
@@ -9648,6 +9669,7 @@ func itemToMetadataResult(item *models.MediaItem) *MetadataResult {
 		result.SeasonCount = *item.SeasonCount
 	}
 	result.ShowStatus = item.ShowStatus
+	result.EpisodeLabels = item.EpisodeLabels
 
 	return result
 }
@@ -9732,6 +9754,7 @@ func metadataResultToItem(r *MetadataResult, contentType string) *models.MediaIt
 	// manga enrichment pipeline). Pass non-series values through untouched so
 	// a round-trip through itemToMetadataResult can never mangle them.
 	if contentType == "series" {
+		item.EpisodeLabels = models.NormalizeEpisodeLabels(r.EpisodeLabels)
 		item.ShowStatus = showstatus.Normalize(r.ShowStatus)
 	} else {
 		item.ShowStatus = r.ShowStatus

@@ -1,4 +1,5 @@
 import { ChevronDown, X } from "lucide-react";
+import { airDateWithTitle, episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import "@/styles/player-hud.css";
 import { useMediaSkipHandlers } from "../hooks/useMediaSkipHandlers";
 import {
@@ -28,6 +29,7 @@ import { MarkerEditPanel } from "./MarkerEditPanel";
 import { usePlaybackRealtime } from "../hooks/usePlaybackRealtime";
 import { useWatchProgress } from "../hooks/useWatchProgress";
 import type { PlaybackConnectionStatus } from "../hooks/usePlaybackSession";
+import type { PlaybackSessionEndReason } from "../player-fetch";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { usePlayerFullscreenRoot } from "../context/PlayerFullscreenContext";
 import { isNativeVideoFullscreen, isPlayerFullscreen, toggleFullscreen } from "../utils/fullscreen";
@@ -299,6 +301,8 @@ interface VideoPlayerProps {
   /** Why reconnecting gave up, while `connectionStatus` is `lost`. */
   connectionErrorTitle?: string | null;
   connectionError?: string | null;
+  /** Why the server ended the session, while `connectionStatus` is `ended`. */
+  connectionEndReason?: PlaybackSessionEndReason | null;
   /**
    * Replan for a plan the server invalidated over the realtime
    * `plan_invalidated` command. Resolving false rejects the command, which is
@@ -563,6 +567,7 @@ export function VideoPlayer({
   connectionStatus = "connected",
   connectionErrorTitle = null,
   connectionError = null,
+  connectionEndReason = null,
   onPlanInvalidated,
   onReanchorSeek,
   onSeek,
@@ -817,6 +822,9 @@ export function VideoPlayer({
   sessionIdRef.current = sessionId;
   const [isLeaving, setIsLeaving] = useState(false);
   const leaveInProgressRef = useRef(false);
+  // Whether the leave holding leaveInProgressRef is a minimize, which lets go
+  // of the guard when it finishes; every other leave exits.
+  const minimizeInProgressRef = useRef(false);
   const [notice, setNotice] = useState<PlaybackNoticeState | null>(null);
   const noticeRef = useRef(notice);
   useEffect(() => {
@@ -2051,8 +2059,13 @@ export function VideoPlayer({
   useMediaSkipHandlers(displayMode !== "postroll", skipActions.back, skipActions.forward);
 
   // -- Watch progress reporting --
-  const [progressSessionEnded, setProgressSessionEnded] = useState(false);
-  const markSessionEnded = useCallback(() => setProgressSessionEnded(true), []);
+  const [progressSessionEnded, setProgressSessionEnded] = useState<PlaybackSessionEndReason | null>(
+    null,
+  );
+  const markSessionEnded = useCallback(
+    (reason: PlaybackSessionEndReason) => setProgressSessionEnded(reason),
+    [],
+  );
   const flushWatchProgress = useWatchProgress(
     sessionId,
     videoRef,
@@ -2188,7 +2201,10 @@ export function VideoPlayer({
     async (action: "exit" | "minimize") => {
       if (leaveInProgressRef.current) return;
 
+      // A replaced room's minimize exits instead.
+      const minimizes = action === "minimize" && !!onMinimize && !watchTogether.replacementReason;
       leaveInProgressRef.current = true;
+      minimizeInProgressRef.current = minimizes;
       setIsLeaving(true);
 
       const exitState = buildExitState();
@@ -2210,7 +2226,7 @@ export function VideoPlayer({
         // room page (WatchPlaybackChrome navigates there when no destination
         // is given). Ending the party is the room page's decision, not a side
         // effect of closing the player.
-        if (action === "minimize" && onMinimize && !watchTogether.replacementReason) {
+        if (minimizes && onMinimize) {
           await onMinimize(exitState);
           return;
         }
@@ -2218,6 +2234,7 @@ export function VideoPlayer({
         await onExit(exitState);
       } finally {
         if (action === "minimize") {
+          minimizeInProgressRef.current = false;
           resetLeaveState();
         }
       }
@@ -2230,20 +2247,42 @@ export function VideoPlayer({
   }, [handleLeave]);
 
   // The server ended the session for good (an administrator stopped it while
-  // this player could not be told directly): leave instead of reconnecting.
-  const sessionEndedHandledRef = useRef(false);
+  // this player could not be told directly, or it stayed paused too long):
+  // leave instead of reconnecting.
+  const sessionEndNoticeShownRef = useRef(false);
+  const sessionEndExitStartedRef = useRef(false);
   // Set when an administrator's stop or terminate already showed the notice,
   // with its reason; the exit below must still run.
   const adminEndNoticeShownRef = useRef(false);
   useEffect(() => {
-    if (connectionStatus !== "ended" && !progressSessionEnded) return;
-    if (sessionEndedHandledRef.current) return;
-    sessionEndedHandledRef.current = true;
-    if (!adminEndNoticeShownRef.current) {
-      toast.info(tRef.current("web.player.session.endedByAdmin"), { id: SESSION_ENDED_TOAST_ID });
+    const endReason =
+      progressSessionEnded ??
+      (connectionStatus === "ended" ? (connectionEndReason ?? "ended") : null);
+    if (!endReason) return;
+    if (!sessionEndNoticeShownRef.current) {
+      sessionEndNoticeShownRef.current = true;
+      if (endReason === "paused_timeout") {
+        toast.info(tRef.current("web.player.session.endedPausedTimeout"), {
+          id: SESSION_ENDED_TOAST_ID,
+        });
+      } else if (!adminEndNoticeShownRef.current) {
+        toast.info(tRef.current("web.player.session.endedByAdmin"), {
+          id: SESSION_ENDED_TOAST_ID,
+        });
+      }
     }
+    if (sessionEndExitStartedRef.current) return;
+    // A leave under way holds the guard handleExit checks. Any exit already
+    // leaves; a minimize lets go when it finishes, isLeaving clears, and this
+    // runs again to leave the minimized player.
+    if (leaveInProgressRef.current && !minimizeInProgressRef.current) {
+      sessionEndExitStartedRef.current = true;
+      return;
+    }
+    if (isLeaving || leaveInProgressRef.current) return;
+    sessionEndExitStartedRef.current = true;
     void handleExit();
-  }, [connectionStatus, handleExit, progressSessionEnded]);
+  }, [connectionEndReason, connectionStatus, handleExit, isLeaving, progressSessionEnded]);
 
   const handleMinimize = useCallback(async () => {
     await handleLeave("minimize");
@@ -2700,15 +2739,22 @@ export function VideoPlayer({
 
   // Title strip copy passed into the floating HUD.
   const hudTitle = seriesContext?.seriesTitle ?? title;
-  const hudSubtitle = seriesContext
-    ? t(title ? "web.player.hud.episodeWithTitle" : "web.player.hud.episode", {
-        season: codeNumber(seriesContext.currentSeason),
-        episode: codeNumber(seriesContext.currentEpisode),
-        title,
-      })
-    : year
-      ? numberText(year)
-      : undefined;
+  // A date-labeled series (sports) names the game by its date, not its
+  // synthetic season and episode numbers.
+  const airDateLabel = seriesContext
+    ? episodeAirDateLabel(seriesContext.episodeLabels, seriesContext.currentAirDate)
+    : null;
+  const hudSubtitle = airDateLabel
+    ? airDateWithTitle(airDateLabel, title)
+    : seriesContext
+      ? t(title ? "web.player.hud.episodeWithTitle" : "web.player.hud.episode", {
+          season: codeNumber(seriesContext.currentSeason),
+          episode: codeNumber(seriesContext.currentEpisode),
+          title,
+        })
+      : year
+        ? numberText(year)
+        : undefined;
   const flushWatchProgressRef = useRef(flushWatchProgress);
 
   useEffect(() => {
@@ -5528,6 +5574,7 @@ export function VideoPlayer({
     onCommand: executeRealtimeCommand,
     onEvent: handleRealtimeEvent,
     supportedCommands: VIDEO_PLAYBACK_COMMANDS,
+    onSessionEnded: markSessionEnded,
   });
 
   useEffect(() => {
@@ -5720,16 +5767,18 @@ export function VideoPlayer({
                     : (seriesContext.seriesTitle ?? title)}
                 </span>
                 <span>
-                  {title
-                    ? t("web.player.episode.codeWithTitle", {
-                        season: codeNumber(seriesContext.currentSeason),
-                        episode: codeNumber(seriesContext.currentEpisode),
-                        title,
-                      })
-                    : t("web.player.episode.code", {
-                        season: codeNumber(seriesContext.currentSeason),
-                        episode: codeNumber(seriesContext.currentEpisode),
-                      })}
+                  {airDateLabel
+                    ? hudSubtitle
+                    : title
+                      ? t("web.player.episode.codeWithTitle", {
+                          season: codeNumber(seriesContext.currentSeason),
+                          episode: codeNumber(seriesContext.currentEpisode),
+                          title,
+                        })
+                      : t("web.player.episode.code", {
+                          season: codeNumber(seriesContext.currentSeason),
+                          episode: codeNumber(seriesContext.currentEpisode),
+                        })}
                 </span>
               </>
             ) : (

@@ -123,6 +123,54 @@ func TestPgExecutionRepositoryPruneReportsBatchLimit(t *testing.T) {
 	}
 }
 
+// The cleanup lock must not take the pool's only connection: database.max_connections
+// accepts 1, and a pinned connection would leave Prune's own queries, and every
+// other query on the server, waiting on it.
+func TestPgExecutionRepositoryPruneRunsOnASingleConnectionPool(t *testing.T) {
+	shared := taskHistoryTestPool(t)
+	clearTaskHistory(t, shared)
+	key := taskKey(t, shared, "single")
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for i := range 3 {
+		insertTaskExecution(t, shared, key, now.Add(time.Duration(i)*time.Minute))
+	}
+
+	cfg := shared.Config().Copy()
+	cfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	result, err := NewPgExecutionRepository(pool).Prune(ctx, 1, now.Add(-24*time.Hour), 100, 10)
+	if err != nil {
+		t.Fatalf("Prune on a one-connection pool: %v", err)
+	}
+	if result.Deleted != 2 || result.Skipped || result.LimitReached {
+		t.Fatalf("Prune result = %#v, want 2 deleted", result)
+	}
+
+	// Another server holding the lock still makes this one skip.
+	held, err := shared.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+	if _, err := held.Exec(ctx, `SELECT pg_advisory_lock($1)`, taskHistoryCleanupAdvisoryLock); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = held.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, taskHistoryCleanupAdvisoryLock)
+	}()
+	result, err = NewPgExecutionRepository(pool).Prune(ctx, 1, now.Add(-24*time.Hour), 100, 10)
+	if err != nil || !result.Skipped {
+		t.Fatalf("Prune while another session holds the lock = %#v, %v; want skipped", result, err)
+	}
+}
+
 // A run lease that stops being renewed becomes one interrupted failure that
 // ends at its last heartbeat; a renewed lease is left alone and is recorded,
 // and released, when its run finishes.

@@ -184,7 +184,7 @@ func lintStatuses(fail func(string, ...any), where, path, method string, op oper
 				}
 			}
 		}
-		implied = apiv2.RawImpliedStatuses(class, serviceBacked)
+		implied = apiv2.RawImpliedStatuses(class, serviceBacked, false)
 	}
 	for _, status := range implied {
 		if _, ok := op.Responses[strconv.Itoa(status)]; !ok {

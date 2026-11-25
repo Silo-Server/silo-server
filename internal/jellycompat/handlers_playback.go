@@ -3481,11 +3481,14 @@ func appendSubtitleMediaStreams(streams []mediaStreamDTO, routeItemID, mediaSour
 	return streams
 }
 
+// compatNegotiationVariant writes source ids in their canonical spelling, so a
+// negotiation stored while media-source ids still had dashes is replaced by the
+// same negotiation made after the upgrade.
 func compatNegotiationVariant(sources []PlaybackMediaSource) string {
 	var variant strings.Builder
 	for _, source := range sources {
 		fmt.Fprintf(&variant, "%s|a=%s|s=%s|r=%t|ts=%t|ta=%t|dv=%t;",
-			source.ID,
+			canonicalCompatID(source.ID),
 			compatOptionalIndex(source.SelectedAudioStreamIndex),
 			compatOptionalIndex(source.SelectedSubtitleStreamIndex),
 			source.HLSRemux,
@@ -3899,8 +3902,8 @@ func videoTrackDisplayTitle(track models.VideoTrack, versionHDR bool) string {
 	hdr10Plus := strings.HasSuffix(rangeType, compatRangeHDR10Plus)
 	dolbyVision := ""
 	if strings.HasPrefix(rangeType, compatRangeDOVI) {
-		// The range type has no HDR10+ form for profiles other than 7 and 8,
-		// so read the track's own flag as well.
+		// The range type has no HDR10+ form for profiles other than 7, 8 and
+		// 10, so read the track's own flag as well.
 		dolbyVision = compatDolbyVisionTitle(track, hdr10Plus || track.HDR10Plus)
 	}
 	switch {

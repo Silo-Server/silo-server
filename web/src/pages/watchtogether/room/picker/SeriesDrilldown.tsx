@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { airDateWithTitle, episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import { Play, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -164,6 +165,10 @@ export function SeriesDrilldown({
   const t = useT();
   const detail = useCatalogItemDetail(series.content_id, series.library_id);
   const item = detail.data;
+  // The series' episode labels: from the card, else from the fetched detail.
+  const episodeLabels = series.episode_labels ?? item?.episode_labels;
+  // A date-labeled series (sports) names the picked game by its air date.
+  const pickedAirDate = picked ? episodeAirDateLabel(episodeLabels, picked.episode.air_date) : null;
   const seasons = useSeasons(series.content_id);
   const spoilerPrefs = useEpisodeSpoilerPrefs();
   const seasonList = useMemo(() => seasons.data?.seasons ?? [], [seasons.data?.seasons]);
@@ -365,8 +370,15 @@ export function SeriesDrilldown({
                   const isNext = nextUp?.episode.content_id === episode.content_id;
                   const isPicked = picked?.episode.content_id === episode.content_id;
                   const unwatched = isEpisodeUnwatched(episode.user_data);
+                  // The fetched detail carries the series' episode labels when
+                  // the card it was opened from does not, so the staged pick
+                  // keeps naming a date-labeled game by its date.
                   const pick = () =>
-                    onPick({ episode, series, seasonNumber: season ?? episode.season_number });
+                    onPick({
+                      episode,
+                      series: { ...series, episode_labels: episodeLabels },
+                      seasonNumber: season ?? episode.season_number,
+                    });
                   return (
                     <li
                       key={episode.content_id}
@@ -404,9 +416,11 @@ export function SeriesDrilldown({
                           ) : null}
                           <span className="flex items-baseline gap-2">
                             <span className="text-muted-foreground shrink-0 text-xs font-semibold tabular-nums">
-                              {t("web.watchTogether.common.episodeNumber", {
-                                number: codeNumber(episode.episode_number),
-                              })}
+                              {/* A date-labeled series (sports) names the game by its date. */}
+                              {episodeAirDateLabel(episodeLabels, episode.air_date) ??
+                                t("web.watchTogether.common.episodeNumber", {
+                                  number: codeNumber(episode.episode_number),
+                                })}
                             </span>
                             <span className="truncate text-sm font-medium">{episode.title}</span>
                             <span className="text-muted-foreground shrink-0 text-xs">
@@ -465,11 +479,13 @@ export function SeriesDrilldown({
               {t("web.watchTogether.series.yourPick")}
             </p>
             <p className="truncate text-sm font-semibold">
-              {t("web.watchTogether.series.pickedEpisode", {
-                season: picked.seasonNumber,
-                episode: picked.episode.episode_number,
-                title: picked.episode.title,
-              })}
+              {pickedAirDate
+                ? airDateWithTitle(pickedAirDate, picked.episode.title)
+                : t("web.watchTogether.series.pickedEpisode", {
+                    season: picked.seasonNumber,
+                    episode: picked.episode.episode_number,
+                    title: picked.episode.title,
+                  })}
             </p>
             {risk ? (
               <p className="text-xs text-amber-300">

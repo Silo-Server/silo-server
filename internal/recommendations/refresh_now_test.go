@@ -119,6 +119,32 @@ func TestProfileRefreshRunsAgainForAChangeMadeWhileItRuns(t *testing.T) {
 	}
 }
 
+// A stale sweep's refresh that ends past the sweep's deadline is not run
+// again for a change made during it: the change's stale mark waits for the
+// next sweep, so the sweep does not hold its lock for further runs.
+func TestSweepRefreshPastItsDeadlineDoesNotRunAgain(t *testing.T) {
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	w.engine = &Engine{}
+	refresh := newBlockingRefresh()
+	key := profileRefreshKey(1, "p")
+	if !w.claimProfileRefresh(key) {
+		t.Fatal("could not claim the profile refresh")
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = w.runProfileRefreshUntil(context.Background(), nil, 1, "p", refresh.run, time.Now())
+		close(done)
+	}()
+	receive(t, refresh.started, "the first run")
+	w.RequestProfileRefresh(t.Context(), 1, "p") // while running
+	refresh.release <- struct{}{}
+	receive(t, refresh.finished, "the first run to finish")
+	receive(t, done, "the refresh to end after one run")
+	if !w.claimProfileRefresh(key) {
+		t.Fatal("the pending key was not released")
+	}
+}
+
 // A profile still changing after profileRefreshMaxRuns runs is left for the
 // stale sweep: the refresh stops and releases the key rather than looping
 // for as long as the changes keep coming.

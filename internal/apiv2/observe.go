@@ -3,10 +3,12 @@ package apiv2
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +23,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -127,7 +130,8 @@ func observationFrom(ctx context.Context) *observation {
 
 // observe is the outermost v2 chi middleware after requestID: it records the
 // request once, whatever answered it (an operation, a gate, the 404/405
-// fallbacks, or the panic recovery inside bufferResponse).
+// fallbacks, the panic recovery inside bufferResponse, or recoverRaw for a
+// panic that reached no Huma operation).
 func observe(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -142,7 +146,7 @@ func observe(next http.Handler) http.Handler {
 		o.clientName, o.clientVersion = clientIdentity(r)
 		r = r.WithContext(context.WithValue(r.Context(), observationKey{}, o))
 		sw := &statusRecorder{ResponseWriter: w}
-		httpstream.Serve(next, sw, r, func(aborted bool) {
+		httpstream.Serve(recoverRaw(next, sw), sw, r, func(aborted bool) {
 			status := sw.status
 			if activitylog.RecordedStatus(r, status, status != 0) == activitylog.StatusClientClosedRequest {
 				// The client went away, and its server error is recorded as
@@ -174,6 +178,62 @@ func observe(next http.Handler) http.Handler {
 	})
 }
 
+// recoverRaw answers a panic that bufferResponse did not catch: one from a raw
+// registration or from a v2 chi middleware. Without it the panic would unwind
+// past observe unrecorded, to the listener-wide recoverer, whose empty 500
+// differs from the internal_error problem every Huma operation answers with.
+// A response that is already committed cannot be replaced, so it is broken
+// with http.ErrAbortHandler and recorded as aborted, as a handler that aborts
+// itself is. A hijacked connection is recorded the same way, but it belongs to
+// the handler: net/http does not close it, so the handler's own cleanup must.
+// That sentinel passes through untouched.
+func recoverRaw(next http.Handler, sw *statusRecorder) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			rec := recover()
+			if rec == nil {
+				return
+			}
+			if rec == http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+				panic(rec)
+			}
+			logHandlerPanic(r, rec)
+			if sw.status != 0 || sw.hijacked {
+				panic(http.ErrAbortHandler)
+			}
+			// Drop the headers that describe the handler's unsent body. The
+			// rest stay: the listener's and the route's (request ID, nosniff,
+			// media CORS), so a cross-origin player can still read the problem.
+			h := w.Header()
+			for _, name := range rawRepresentationHeaders {
+				h.Del(name)
+			}
+			writeProblem(w, r, NewProblem(TypeInternalError, "An unexpected error occurred."))
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+// rawRepresentationHeaders describe a raw handler's own body. writeProblem
+// replaces Content-Type and Cache-Control itself.
+//
+//nolint:goconst // plain header names; the package's constants are named for other features
+var rawRepresentationHeaders = []string{
+	"Accept-Ranges", "Content-Disposition", "Content-Encoding", "Content-Language",
+	"Content-Length", "Content-Range", "Content-Security-Policy", "ETag",
+	"Last-Modified", "Location", "Trailer",
+}
+
+// logHandlerPanic logs a recovered v2 handler panic with its stack. The panic
+// value is free text that may quote a credential, so it is masked first.
+func logHandlerPanic(r *http.Request, rec any) {
+	slog.ErrorContext(r.Context(), "apiv2 handler panic",
+		"component", "apiv2",
+		"request_id", requestIDFrom(r.Context()),
+		"panic", logredact.SanitizeText(fmt.Sprint(rec)),
+		"stack", string(debug.Stack()))
+}
+
 // statusRecorder captures structured and raw response statuses and counts the
 // body bytes the handler wrote, before any compression (the compression
 // middleware wraps the v2 router from outside). Unwrap lets
@@ -185,11 +245,15 @@ type statusRecorder struct {
 	bytes    int64
 }
 
+// WriteHeader records the first final status the writer below accepted. An
+// informational 1xx (other than 101) commits nothing, and net/http panics on an
+// invalid code before sending any header; neither may make a panic that
+// follows look like it broke a committed response.
 func (s *statusRecorder) WriteHeader(status int) {
-	if s.status == 0 {
+	s.ResponseWriter.WriteHeader(status)
+	if s.status == 0 && (status >= 200 || status == http.StatusSwitchingProtocols) {
 		s.status = status
 	}
-	s.ResponseWriter.WriteHeader(status)
 }
 
 func (s *statusRecorder) Write(p []byte) (int, error) {

@@ -147,7 +147,6 @@ vi.mock("@/pages/ItemDetail/index", () => stubPage("Item detail"));
 vi.mock("@/pages/Collections", () => stubPage("Collections"));
 vi.mock("@/pages/CollectionEditorPage", () => stubPage("Collection editor"));
 vi.mock("@/pages/AdminDashboard", () => stubPage("Admin dashboard"));
-vi.mock("@/pages/AdminActivity", () => stubPage("Admin activity"));
 vi.mock("@/pages/AdminLogs", () => stubPage("Admin logs"));
 vi.mock("@/pages/AdminUsers", () => stubPage("Admin users"));
 vi.mock("@/pages/AdminLibraries", () => stubPage("Admin libraries"));
@@ -254,6 +253,15 @@ describe("Catalog page", () => {
       expect.objectContaining({ includeTotal: true }),
     );
     expect(mockItemGrid).toHaveBeenCalled();
+    expect(markup).not.toContain("Find films, series, performances");
+  });
+
+  it("lists a filtered query across libraries without search text", () => {
+    appInitialEntries = [
+      "/catalog?source=query&type=movie&groups%5B0%5D%5Brules%5D%5B0%5D%5Bfield%5D=studio&groups%5B0%5D%5Brules%5D%5B0%5D%5Bop%5D=is&groups%5B0%5D%5Brules%5D%5B0%5D%5Bvalue%5D=Pixar",
+    ];
+    const markup = staticApp();
+    expect(mockUseCatalogWindow).toHaveBeenCalled();
     expect(markup).not.toContain("Find films, series, performances");
   });
 

@@ -11,32 +11,32 @@ import type { WidgetRange } from "./types";
  */
 
 /** Widest-to-narrowest order the picker renders in. */
-export const WIDGET_RANGE_ORDER: readonly WidgetRange[] = ["hour", "day", "week", "month"];
+export const WIDGET_RANGE_ORDER: readonly WidgetRange[] = [
+  "hour",
+  "day",
+  "week",
+  "month",
+  "quarter",
+  "year",
+  "all",
+];
 
 /**
  * Hours for the timeseries and playback-activity endpoints. A month is 720
  * hours (30 days), so the charted window matches the "30d" label and the
- * 30-day window `RANGE_DAYS` asks the top-activity endpoint for. The sampler
- * retains 31 days — deliberately one day wider than anything charted here, so
- * the oldest bucket in view is never one the retention job is about to drop.
+ * 30-day Insights window. The sampler retains 31 days — deliberately one day
+ * wider than anything charted here, so the oldest bucket in view is never one
+ * the retention job is about to drop.
  */
 const RANGE_HOURS: Record<WidgetRange, number> = {
   hour: 1,
   day: 24,
   week: 168,
   month: 720,
-};
-
-/**
- * Days for the top-activity endpoint. "hour" collapses onto a single day: the
- * leaderboards do not offer it, and a sub-day window would return almost
- * nothing worth ranking.
- */
-const RANGE_DAYS: Record<WidgetRange, number> = {
-  hour: 1,
-  day: 1,
-  week: 7,
-  month: 30,
+  // Sampled widgets never offer these; the endpoints clamp to 31 days anyway.
+  quarter: 720,
+  year: 720,
+  all: 720,
 };
 
 /** Compact label for the segmented control. */
@@ -45,6 +45,9 @@ const RANGE_LABELS: Record<WidgetRange, MessageKey> = {
   day: "web.admin.dashboard.range.label.day",
   week: "web.admin.dashboard.range.label.week",
   month: "web.admin.dashboard.range.label.month",
+  quarter: "web.admin.dashboard.range.label.quarter",
+  year: "web.admin.dashboard.range.label.year",
+  all: "web.admin.dashboard.range.label.all",
 };
 
 /** Spoken form, for aria-labels and prose ("No plays in the last 7 days"). */
@@ -53,6 +56,9 @@ const RANGE_PHRASES: Record<WidgetRange, MessageKey> = {
   day: "web.admin.dashboard.range.phrase.day",
   week: "web.admin.dashboard.range.phrase.week",
   month: "web.admin.dashboard.range.phrase.month",
+  quarter: "web.admin.dashboard.range.phrase.quarter",
+  year: "web.admin.dashboard.range.phrase.year",
+  all: "web.admin.dashboard.range.phrase.all",
 };
 
 /** Card title with its window, e.g. "Egress · last 30 d". */
@@ -61,6 +67,9 @@ const RANGE_TITLES: Record<WidgetRange, MessageKey> = {
   day: "web.admin.dashboard.range.title.day",
   week: "web.admin.dashboard.range.title.week",
   month: "web.admin.dashboard.range.title.month",
+  quarter: "web.admin.dashboard.range.title.quarter",
+  year: "web.admin.dashboard.range.title.year",
+  all: "web.admin.dashboard.range.title.all",
 };
 
 /** Leading edge label on a time axis; the trailing one is always "now". */
@@ -69,14 +78,13 @@ const RANGE_EDGE_LABELS: Record<WidgetRange, MessageKey> = {
   day: "web.admin.dashboard.range.edgeStart.day",
   week: "web.admin.dashboard.range.edgeStart.week",
   month: "web.admin.dashboard.range.edgeStart.month",
+  quarter: "web.admin.dashboard.range.edgeStart.quarter",
+  year: "web.admin.dashboard.range.edgeStart.year",
+  all: "web.admin.dashboard.range.edgeStart.all",
 };
 
 export function rangeHours(range: WidgetRange): number {
   return RANGE_HOURS[range];
-}
-
-export function rangeDays(range: WidgetRange): number {
-  return RANGE_DAYS[range];
 }
 
 export function rangeLabel(range: WidgetRange): string {
@@ -87,9 +95,36 @@ export function rangePhrase(range: WidgetRange): string {
   return t(RANGE_PHRASES[range]);
 }
 
-/** "Playback activity · last 24 h" — one format for every ranged widget. */
+/** Stands in for the title while the translated frame around it is formatted. */
+const TITLE_MARK = "\ue000";
+
+/**
+ * "Playback activity · last 24 h" — one format for every ranged widget.
+ *
+ * A narrow card wraps the title, so the translated window ("· last 24 h") is
+ * joined with no-break spaces and the line can only break between it and the
+ * widget's name: the space next to the title stays a normal one.
+ */
 export function rangeTitle(title: string, range: WidgetRange): string {
-  return t(RANGE_TITLES[range], { title });
+  const frame = t(RANGE_TITLES[range], { title: TITLE_MARK });
+  const at = frame.indexOf(TITLE_MARK);
+  if (at < 0) {
+    // A translation without the title has nothing to keep apart from it.
+    return frame;
+  }
+  const before = frame.slice(0, at);
+  const after = frame.slice(at + TITLE_MARK.length);
+  // The last space before the title and the first one after it stay breakable.
+  const lastSpace = before.lastIndexOf(" ");
+  const firstSpace = after.indexOf(" ");
+  const lead =
+    nonBreaking(before.slice(0, Math.max(lastSpace, 0))) + before.slice(Math.max(lastSpace, 0));
+  const trail = after.slice(0, firstSpace + 1) + nonBreaking(after.slice(firstSpace + 1));
+  return lead + title + trail;
+}
+
+function nonBreaking(text: string): string {
+  return text.replaceAll(" ", "\u00a0");
 }
 
 /** Axis edges: how far back the window starts, and where it ends. */

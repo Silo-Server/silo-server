@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
+import { episodeSubtitle } from "@/lib/episodeCardLabels";
 import { useLocation, useNavigate } from "react-router";
 import type { ItemDetail } from "@/api/types";
+import { buildFieldFilterHref } from "@/pages/catalogSearchParams";
 import { useStartShuffle } from "@/hooks/queries/shuffles";
 import { useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
@@ -154,7 +156,12 @@ export default function SeriesContent({
       ? {
           content_id: nextUpEpisode.content_id,
           title: nextUpEpisode.title,
-          subtitle: `S${nextUpEpisode.season_number} E${nextUpEpisode.episode_number}`,
+          subtitle: episodeSubtitle(
+            item.episode_labels,
+            nextUpEpisode.air_date,
+            nextUpEpisode.season_number,
+            nextUpEpisode.episode_number,
+          ),
           poster_url: item.poster_url,
           poster_thumbhash: item.poster_thumbhash,
         }
@@ -173,6 +180,11 @@ export default function SeriesContent({
             topNav={<PageBack />}
             context={t("web.detail.hero.typeSeries")}
             studioLabel={firstNetwork}
+            studioHref={
+              firstNetwork
+                ? buildFieldFilterHref("network", firstNetwork, { libraryId, mediaType: "series" })
+                : undefined
+            }
             backdropUrl={item.backdrop_url}
             backdropThumbhash={item.backdrop_thumbhash}
             posterUrl={item.poster_url}
@@ -284,6 +296,7 @@ export default function SeriesContent({
                     isLoading={singleSeasonEpisodesQuery.isLoading}
                     episodeLinkState={singleSeasonEpisodeLinkState}
                     libraryId={libraryId}
+                    episodeLabels={item.episode_labels}
                   />
                 </section>
               ) : (

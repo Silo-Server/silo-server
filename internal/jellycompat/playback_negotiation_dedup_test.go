@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 func TestPlaybackSessionStorePutNegotiatedPreservesDistinctOrStartedPlays(t *testing.T) {
@@ -84,6 +85,29 @@ func TestHandlePlaybackInfoReplacesDuplicateJellyfinWebNegotiation(t *testing.T)
 	}
 	if stored.ClientDeviceID != "web-device" {
 		t.Fatalf("ClientDeviceID = %q, want web-device", stored.ClientDeviceID)
+	}
+}
+
+// A negotiation stored while media-source ids still had dashes (#4491) is
+// replaced by the same negotiation made after the upgrade, not left routable
+// beside it until it expires.
+func TestHandlePlaybackInfoReplacesNegotiationStoredWithDashedSourceIDs(t *testing.T) {
+	handler, routeID := newSubtitleSelectionHandler(t)
+	first := postPlaybackInfoForDevice(t, handler, routeID, "web-device")
+	store := handler.playbackStore.(*PlaybackSessionStore)
+	if err := store.Update(first.PlaySessionID, func(session *PlaybackSession) error {
+		for i := range session.MediaSources {
+			session.MediaSources[i].ID = uuid.MustParse(session.MediaSources[i].ID).String()
+		}
+		session.NegotiationVariant = compatNegotiationVariant(session.MediaSources)
+		return nil
+	}); err != nil {
+		t.Fatalf("rewrite first negotiation with dashed ids: %v", err)
+	}
+
+	postPlaybackInfoForDevice(t, handler, routeID, "web-device")
+	if _, ok := store.Get(first.PlaySessionID); ok {
+		t.Fatal("negotiation stored with dashed media-source ids remained routable")
 	}
 }
 

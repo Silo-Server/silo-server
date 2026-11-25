@@ -39,6 +39,7 @@ type itemsQuery struct {
 	isResumable            bool
 	isNotFolder            bool   // Filters=IsNotFolder or IsFolder=false: leaf items only
 	includesOnlyLeafTypes  bool   // IncludeItemTypes names Episode and no Series or Season
+	includesEpisode        bool   // IncludeItemTypes names Episode
 	hasItemTypeFilter      bool   // true when IncludeItemTypes or ExcludeItemTypes was present in the request
 	wantsBoxSets           bool   // true when IncludeItemTypes contains BoxSet
 	wantsViews             bool   // true when IncludeItemTypes contains CollectionFolder
@@ -217,7 +218,8 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	result.wantsBoxSets = includeItemTypesContain(rawItemTypes, "boxset")
 	result.wantsViews = includeItemTypesContain(rawItemTypes, "collectionfolder")
 	includedTypes := mapIncludeItemTypes(rawItemTypes)
-	result.includesOnlyLeafTypes = itemTypesContain(includedTypes, "episode") &&
+	result.includesEpisode = itemTypesContain(includedTypes, "episode")
+	result.includesOnlyLeafTypes = result.includesEpisode &&
 		!itemTypesContain(includedTypes, "series") && !itemTypesContain(includedTypes, "season")
 	result.sortExplicit = strings.TrimSpace(q.Get("SortBy")) != ""
 	result.sortByKey = selectedSortKey(q.Get("SortBy"), false)

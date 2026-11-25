@@ -75,7 +75,12 @@ function defaultCatalogSubtitle(t: Translate, source: string): string {
 export default function Catalog() {
   const [searchParams, setSearchParams] = useSearchParams();
   const state = useMemo(() => parseCatalogSearchParams(searchParams), [searchParams]);
-  const isEmptySearch = state.source === "query" && !state.q && !state.library_id;
+  // A query with filters (a studio, a genre) lists its matches without search text.
+  const isEmptySearch =
+    state.source === "query" &&
+    !state.q &&
+    !state.library_id &&
+    state.query_definition.groups.length === 0;
 
   // Each view owns its tab title. A title set here too would run after the
   // results' own on mount and replace it whenever the results were cached.

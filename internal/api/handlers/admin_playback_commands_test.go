@@ -2,12 +2,20 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
+)
+
+// The wire contract for messages (docs/admin-api.md): a player's completed
+// result within the documented wait makes the receipt acknowledged.
+const (
+	deliveryAcknowledged  = "acknowledged"
+	documentedMessageWait = 3 * time.Second
 )
 
 const (
@@ -208,8 +216,9 @@ func TestSequencedCommandValidationAndSessionState(t *testing.T) {
 		t.Fatalf("message without lane err = %v", err)
 	}
 	conn := sequencedLane(t, control, hub, session)
+	conn.answer = answerAsPlayer(t, control, playback.RealtimeResultStatusCompleted)
 	view, err := control.Command(ctx, message)
-	if err != nil || view.Outcome != AdminPlaybackCommandApplied || view.Delivery != AdminPlaybackDeliveryDispatched {
+	if err != nil || view.Outcome != AdminPlaybackCommandApplied || view.Delivery != deliveryAcknowledged {
 		t.Fatalf("message = %+v, %v", view, err)
 	}
 	env, ok := conn.messages[len(conn.messages)-1].(playback.CommandEnvelope)
@@ -396,5 +405,226 @@ func TestUnconfirmedPauseEndsTheAttemptAsAdministratorStop(t *testing.T) {
 			t.Fatalf("attempt not ended by administrator: %+v, %v", record, err)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// answerAsPlayer answers each command the way a player does: a result frame
+// read from the session's control socket.
+func answerAsPlayer(t *testing.T, control *AdminPlaybackControlHandler, status playback.RealtimeResultStatus) func(playback.CommandEnvelope) {
+	t.Helper()
+	return func(env playback.CommandEnvelope) {
+		result := playback.ResultEnvelope{Type: playback.RealtimeMessageTypeResult, CommandID: env.CommandID, SessionID: env.SessionID, Status: status}
+		if status != playback.RealtimeResultStatusCompleted {
+			result.Error = "unsupported"
+		}
+		data, err := json.Marshal(result)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if err := control.playback.handleRealtimeClientMessage(env.SessionID, data); err != nil {
+			t.Errorf("player result: %v", err)
+		}
+	}
+}
+
+// A message the player answers is acknowledged, and so is its replay. A real
+// player answers over the network after the write returns, while the sender
+// waits with the ledger lock released, so both timings must be seen.
+func TestMessageIsAcknowledgedWhenThePlayerAnswers(t *testing.T) {
+	for _, answersDuringWrite := range []bool{true, false} {
+		name := "during the wait"
+		if answersDuringWrite {
+			name = "during the write"
+		}
+		t.Run(name, func(t *testing.T) {
+			control, _, hub, session := newAdminPlaybackControlTestHandler(t)
+			conn := sequencedLane(t, control, hub, session)
+			player := answerAsPlayer(t, control, playback.RealtimeResultStatusCompleted)
+			if answersDuringWrite {
+				conn.answer = player
+			}
+			message := sequencedInput(session.ID, sequencedCommandA, 1, playback.CommandDisplayMessage)
+			message.Message = "Movie night ends at nine"
+
+			type outcome struct {
+				view AdminPlaybackCommandView
+				err  error
+			}
+			done := make(chan outcome, 1)
+			started := time.Now()
+			go func() {
+				view, err := control.Command(context.Background(), message)
+				done <- outcome{view, err}
+			}()
+			if !answersDuringWrite {
+				waitForPendingMessages(t, control, session.ID)
+				env, ok := conn.messages[len(conn.messages)-1].(playback.CommandEnvelope)
+				if !ok {
+					t.Fatalf("last frame = %#v", conn.messages[len(conn.messages)-1])
+				}
+				player(env)
+			}
+			got := <-done
+			if got.err != nil || got.view.Outcome != AdminPlaybackCommandApplied || got.view.Delivery != deliveryAcknowledged {
+				t.Fatalf("message = %+v, %v", got.view, got.err)
+			}
+			if elapsed := time.Since(started); elapsed >= documentedMessageWait {
+				t.Fatalf("an answered message took %v", elapsed)
+			}
+			replay, err := control.Command(context.Background(), message)
+			if err != nil || replay.Outcome != AdminPlaybackCommandReplayed || replay.Delivery != deliveryAcknowledged {
+				t.Fatalf("replay = %+v, %v", replay, err)
+			}
+		})
+	}
+}
+
+// A message whose player does not answer, or rejects it, is not reported as
+// received; and while it waits, commands for other sessions are not held up.
+func TestUnansweredMessageStaysDispatchedWithoutDelayingOtherSessions(t *testing.T) {
+	control, sessionMgr, hub, silent := newAdminPlaybackControlTestHandler(t)
+	sequencedLane(t, control, hub, silent)
+	refusing, err := sessionMgr.StartSession(1, "profile-1", 101, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sequencedLane(t, control, hub, refusing).answer = answerAsPlayer(t, control, playback.RealtimeResultStatusRejected)
+	healthy, err := sessionMgr.StartSession(1, "profile-1", 102, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sequencedLane(t, control, hub, healthy).answer = answerAsPlayer(t, control, playback.RealtimeResultStatusCompleted)
+
+	type outcome struct {
+		view    AdminPlaybackCommandView
+		err     error
+		elapsed time.Duration
+	}
+	send := func(sessionID string) <-chan outcome {
+		done := make(chan outcome, 1)
+		go func() {
+			in := sequencedInput(sessionID, sequencedCommandA, 1, playback.CommandDisplayMessage)
+			in.Message = "Back in five"
+			started := time.Now()
+			view, err := control.Command(context.Background(), in)
+			done <- outcome{view, err, time.Since(started)}
+		}()
+		return done
+	}
+	silentDone, refusedDone := send(silent.ID), send(refusing.ID)
+	waitForPendingMessages(t, control, silent.ID, refusing.ID)
+
+	started := time.Now()
+	view, err := control.Command(context.Background(), sequencedInput(healthy.ID, sequencedCommandB, 1, playback.CommandPause))
+	if err != nil || view.Delivery != AdminPlaybackDeliveryDispatched {
+		t.Fatalf("pause on another session = %+v, %v", view, err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("pause on another session waited %v behind an unanswered message", elapsed)
+	}
+
+	for name, done := range map[string]<-chan outcome{"silent": silentDone, "rejected": refusedDone} {
+		got := <-done
+		if got.err != nil || got.view.Outcome != AdminPlaybackCommandApplied || got.view.Delivery != AdminPlaybackDeliveryDispatched {
+			t.Fatalf("%s message = %+v, %v", name, got.view, got.err)
+		}
+		if waited := got.elapsed >= documentedMessageWait; waited != (name == "silent") {
+			t.Fatalf("%s message answered after %v; only a silent player gets the whole wait", name, got.elapsed)
+		}
+	}
+}
+
+// waitForPendingMessages waits until each session's message is recorded, so
+// the sender has released the ledger lock and is waiting for the player.
+func waitForPendingMessages(t *testing.T, control *AdminPlaybackControlHandler, sessionIDs ...string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for _, sessionID := range sessionIDs {
+		for {
+			if latest, _, ok := control.commandLedgerState(sessionID); ok && latest == 1 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("message to %s was never recorded", sessionID)
+			}
+			//nolint:forbidigo // Polls observable state: the message is sent on its own goroutine.
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
+
+// A player's answer is reported at once even while other sessions' commands
+// hold the ledger lock (a lane write can hold it for seconds), so a relayed
+// message is not turned into a no-reply by unrelated traffic.
+func TestAnsweredMessageDoesNotQueueBehindOtherCommands(t *testing.T) {
+	control, _, hub, session := newAdminPlaybackControlTestHandler(t)
+	conn := sequencedLane(t, control, hub, session)
+	message := sequencedInput(session.ID, sequencedCommandA, 1, playback.CommandDisplayMessage)
+	message.Message = "Movie night ends at nine"
+	done := make(chan AdminPlaybackCommandView, 1)
+	go func() {
+		view, err := control.Command(context.Background(), message)
+		if err != nil {
+			t.Error(err)
+		}
+		done <- view
+	}()
+	waitForPendingMessages(t, control, session.ID)
+	env := conn.messages[len(conn.messages)-1].(playback.CommandEnvelope)
+
+	control.commandMu.Lock()
+	answerAsPlayer(t, control, playback.RealtimeResultStatusCompleted)(env)
+	select {
+	case view := <-done:
+		control.commandMu.Unlock()
+		if view.Delivery != deliveryAcknowledged {
+			t.Fatalf("message = %+v", view)
+		}
+	case <-time.After(time.Second):
+		control.commandMu.Unlock()
+		<-done
+		t.Fatal("an answered message waited for the ledger lock")
+	}
+}
+
+// A retry that arrives while the first request still waits for the player
+// reports the player's answer, not the provisional "dispatched".
+func TestReplayDuringTheWaitReportsThePlayersAnswer(t *testing.T) {
+	control, _, hub, session := newAdminPlaybackControlTestHandler(t)
+	conn := sequencedLane(t, control, hub, session)
+	message := sequencedInput(session.ID, sequencedCommandA, 1, playback.CommandDisplayMessage)
+	message.Message = "Movie night ends at nine"
+	first, replay := make(chan AdminPlaybackCommandView, 1), make(chan AdminPlaybackCommandView, 1)
+	send := func(out chan<- AdminPlaybackCommandView) {
+		view, err := control.Command(context.Background(), message)
+		if err != nil {
+			t.Error(err)
+		}
+		out <- view
+	}
+	go send(first)
+	waitForPendingMessages(t, control, session.ID)
+	env := conn.messages[len(conn.messages)-1].(playback.CommandEnvelope)
+
+	waiting := make(chan struct{})
+	control.beforeReplayWait = func() { close(waiting) }
+	go send(replay)
+	select {
+	case <-waiting:
+	case view := <-replay:
+		t.Fatalf("replay answered %+v without waiting for the player", view)
+	case <-time.After(time.Second):
+		t.Fatal("the replay never started waiting for the player")
+	}
+	answerAsPlayer(t, control, playback.RealtimeResultStatusCompleted)(env)
+	if view := <-first; view.Outcome != AdminPlaybackCommandApplied || view.Delivery != deliveryAcknowledged {
+		t.Fatalf("first = %+v", view)
+	}
+	if view := <-replay; view.Outcome != AdminPlaybackCommandReplayed || view.Delivery != deliveryAcknowledged {
+		t.Fatalf("replay = %+v", view)
+	}
+	if len(conn.messages) != 1 {
+		t.Fatalf("the player got %d frames, want the message once", len(conn.messages))
 	}
 }

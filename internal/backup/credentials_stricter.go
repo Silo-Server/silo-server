@@ -192,8 +192,10 @@ const (
 // not stricterFlags, each with why the backup's value is the one to keep.
 var restoredFlagColumns = map[string]string{
 	"access_groups.is_default":                                "which group new accounts join; the invitation carry compares the policy it grants",
+	"admin_playback_history.compat_origin":                    whyHistory,
 	"admin_playback_history.completed":                        whyHistory,
 	"admin_playback_history.measured":                         whyHistory,
+	"admin_playback_history.route_facts_recorded":             whyHistory,
 	"autoscan_settings.id":                                    whyKey,
 	"download_artifacts.progress_unavailable":                 whyFacts,
 	"download_artifacts.tone_map_dv_bl_compat_id_present":     whyFacts,

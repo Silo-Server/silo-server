@@ -28,11 +28,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/darthShadow/shunpike/engine"
+	"github.com/darthShadow/shunpike/engine/n4"
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/quic-go/quic-go/http3"
 	"github.com/redis/go-redis/v9"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -820,7 +823,19 @@ func main() {
 		slog.Warn("runtime metrics configuration failed", "error", err)
 	}
 	if len(os.Args) > 1 && os.Args[1] == "compat-web" {
-		if err := runCompatWebCommand(context.Background(), os.Args[2:]); err != nil {
+		// The install runs git and npm in process groups of their own, which a
+		// terminal's Ctrl-C does not reach, so an interrupt cancels the context
+		// and the installer kills them. After the first, a signal gets its
+		// default handling again, so a second Ctrl-C exits at once. status and
+		// remove don't use the context, so they keep the default handling.
+		ctx, stop := context.Background(), func() {}
+		if len(os.Args) > 2 && (os.Args[2] == "install" || os.Args[2] == "update") {
+			ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+			context.AfterFunc(ctx, stop)
+		}
+		err := runCompatWebCommand(ctx, os.Args[2:])
+		stop()
+		if err != nil {
 			log.Fatalf("compat-web: %v", err)
 		}
 		return
@@ -1555,6 +1570,7 @@ func main() {
 	// startup completes.
 	var ipResolver *clientip.Resolver
 	var directConn *directconn.Service
+	var rootHandler http.Handler
 	// Assigned below when recommendations start; nil (a no-op) otherwise.
 	var settingsRecWorker *recommendations.Worker
 	// Assigned below with the marker plugin providers; nil without plugins.
@@ -1908,6 +1924,7 @@ func main() {
 		fileRepo := scanner.NewFileRepository(deps.DB)
 		deps.FolderRepo = folderRepo
 		deps.FileRepo = fileRepo
+		deps.StreamEnds = playback.NewStreamEndRecorder(fileRepo)
 
 		ffprobePath := scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath)
 		s := scanner.NewScanner(fileRepo, ffprobePath, deps.Blobs.Assets, cfg.Scanner.Workers, cfg.Scanner.EmptyTrashAfterScan, cfg.Scanner.FileRemovalGrace)
@@ -3124,6 +3141,13 @@ func main() {
 		defer downloadsStatsProvider.Close()
 		deps.AdminDownloadsStatsProvider = downloadsStatsProvider
 
+		insightsProvider, insightsErr := handlers.NewAdminInsightsProvider(appCtx, deps.DB, deps.EventBus)
+		if insightsErr != nil {
+			log.Fatalf("failed to create admin insights provider: %v", insightsErr)
+		}
+		defer insightsProvider.Close()
+		deps.AdminInsightsProvider = insightsProvider
+
 		// The dashboard metrics sampler is the only writer of concurrent-stream
 		// and egress history. Proxy and transcode nodes serve bytes but do not
 		// own the catalog database, so only the API-facing modes sample. An
@@ -3214,8 +3238,46 @@ func main() {
 	}
 	ipResolver = clientip.NewResolver(trustedCIDRs)
 	deps.ClientIPResolver = ipResolver
-	if mode == "" || mode == "integrated" || mode == "api" {
-		directConn = directconn.New(appCtx, directconn.Config{Settings: settingsRepo, Logger: slog.Default(), Tuning: tuningCfg, Adjustments: adjustments, HeldAtStart: netadmin.Current().HeldAtStart})
+	var apiReplicaPresence *cache.APIReplicaPresence
+	apiHost := mode == "" || mode == "integrated" || mode == "api"
+	// Redis is configured but unusable when its client failed to build; the direct
+	// gate then fails closed instead of reading it as a deployment without Redis.
+	directRedisUnavailable := apiRedisErr != nil
+	var directRedis *redis.Client
+	if apiHost && !directRedisUnavailable {
+		// The presence writes and the engine lease bound each call with a deadline,
+		// which only a deadline-enabled client honors at the socket.
+		var directRedisErr error
+		directRedis, directRedisErr = cache.NewDeadlineRedisClientForRole(cfg.Redis, "api")
+		if directRedisErr != nil {
+			slog.Warn("redis client init failed; direct connections stay off", "error", directRedisErr)
+			directRedisUnavailable = true
+		} else if directRedis != nil {
+			defer func() { _ = cache.CloseRedisClient(directRedis) }()
+		}
+	}
+	if apiHost {
+		apiReplicaPresence = cache.NewAPIReplicaPresence(directRedis, nodeID)
+		if err := apiReplicaPresence.Register(appCtx); err != nil {
+			slog.WarnContext(appCtx, "api replica presence unavailable", "component", "directconn", "error", err)
+		}
+	}
+	if apiHost {
+		// Direct shutdown drains HTTP/3 before releasing the lease and engine.
+		directConn = directconn.New(context.WithoutCancel(appCtx), directconn.Config{
+			SecretKey: bc.SecretKey, Settings: settingsRepo, Logger: slog.Default(), Tuning: tuningCfg,
+			Adjustments: adjustments, HeldAtStart: netadmin.Current().HeldAtStart, ReplicaPresence: apiReplicaPresence, RedisClient: directRedis,
+			RedisUnavailable: directRedisUnavailable,
+			// Separate API processes share the engine lease only through Redis; a
+			// single integrated process has no one to share it with.
+			RequireRedis: mode == "api",
+			// The router depends on directConn: no engine starts before
+			// HandlerReady, after rootHandler exists.
+			AwaitHandler: true,
+			ServerFactory: func(e *engine.Engine, policy n4.Policy) *http3.Server {
+				return directconn.NewHTTP3Server(e, lanTLS.HTTP3Config(), policy, nodeID, rootHandler)
+			},
+		})
 		deps.DirectConnections = directConn
 		// Subscribe before the initial read: Subscribe returns once Redis
 		// confirms it, so a change another replica commits after that point
@@ -3326,7 +3388,7 @@ func main() {
 	// The per-name password sign-in budget follows the same rule. One
 	// limiter serves the native, Jellyfin and Audiobookshelf auth services,
 	// so no listener gets its own allowance.
-	deps.SignInAttempts = ratelimit.NewSignInNameAttemptLimiter(apiRedisClient)
+	deps.SignInAttempts = ratelimit.NewSignInLimiter(apiRedisClient)
 
 	// Activity log writer + consumer.
 	if err := activitylog.SeedDefaults(ctx, settingsRepo); err != nil {
@@ -4126,7 +4188,10 @@ func main() {
 
 	// Step 8: Build the handler the primary port serves — the API router and
 	// frontend. Metrics use a separate opt-in listener; see newRootHandler.
-	rootHandler := newRootHandler(router)
+	rootHandler = newRootHandler(router)
+	if directConn != nil {
+		directConn.HandlerReady()
+	}
 	stopMetricsListener, err := startMetricsListener(true)
 	if err != nil {
 		log.Fatalf("metrics listener: %v", err)
@@ -4286,6 +4351,7 @@ func main() {
 		// Wire direct dependencies when DB is available.
 		if deps.DB != nil {
 			compatDeps.RestoreReconstructedWatch = handlers.ReconstructedWatchRestorer(handlers.NewPGPlaybackAdminStore(deps.DB, nil))
+			compatDeps.StreamEnds = deps.StreamEnds
 			browseRepo := catalog.NewBrowseRepository(deps.DB)
 			itemRepo := catalog.NewItemRepository(deps.DB)
 			seasonRepo := catalog.NewSeasonRepository(deps.DB)
@@ -4525,9 +4591,7 @@ func main() {
 		}
 		if pluginService != nil {
 			pluginService.StartResidents(appCtx)
-			if mode == "api" {
-				warnOnMultipleAPIReplicas(appCtx, cache.NewAPIReplicaPresence(apiRedisClient, nodeID), pluginService)
-			}
+			warnOnMultipleAPIReplicas(appCtx, apiReplicaPresence, pluginService)
 		}
 	}
 	jellyfinListenResult := startCompatServer(appCtx, compatSrv, tcpcongestion.ListenerJellyfin, opts, errCh)
@@ -4605,9 +4669,18 @@ func main() {
 	}
 
 	// 1. Stop accepting new requests.
+	var directShutdown sync.WaitGroup
+	if directConn != nil {
+		directShutdown.Go(func() {
+			if shutdownErr := directConn.Shutdown(shutdownCtx); shutdownErr != nil {
+				slog.Error("direct connections shutdown error", "error", shutdownErr)
+			}
+		})
+	}
 	if shutdownErr := srv.Shutdown(shutdownCtx); shutdownErr != nil {
 		slog.Error("HTTP shutdown error", "error", shutdownErr)
 	}
+	directShutdown.Wait()
 	if compatSrv != nil {
 		if shutdownErr := compatSrv.Shutdown(shutdownCtx); shutdownErr != nil {
 			slog.Error("jellyfin compat shutdown error", "error", shutdownErr)

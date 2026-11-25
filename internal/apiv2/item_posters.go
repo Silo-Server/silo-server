@@ -16,6 +16,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -36,8 +37,9 @@ type RemotePosterFetcher interface {
 }
 
 const (
-	// itemPosterProxyCache lets a client keep proxied bytes briefly. The link
-	// stays the same when the art is cached, and then redirects instead.
+	// itemPosterProxyCache lets a client keep poster bytes briefly. The link
+	// names the item's current poster, whose stored object can change, so it
+	// never gets the immutable caching of a revisioned artwork URL.
 	itemPosterProxyCache = "private, max-age=300"
 	// itemPosterEnqueueMemo is how long a server skips re-queueing the cache
 	// job of an item it queued, so a link polled every few seconds costs one
@@ -76,6 +78,8 @@ var errPosterResolveBusy = errors.New("poster resolution is busy")
 type itemPosterHandler struct {
 	posters  *artworkurl.ItemPosters
 	source   ItemPosterSource
+	store    blobstore.Store
+	repair   ArtworkRepairService
 	fetcher  RemotePosterFetcher
 	enqueued posterEnqueueMemo
 	resolved posterResolveMemo
@@ -245,20 +249,25 @@ func posterFetchLogError(err error) string {
 
 func registerItemPosters(reg *Registry) {
 	h := &itemPosterHandler{
-		posters: reg.deps.ItemPosters, source: reg.deps.ItemPosterSource, fetcher: reg.deps.RemotePosters,
+		posters: reg.deps.ItemPosters, source: reg.deps.ItemPosterSource, store: reg.deps.ArtworkStore, repair: reg.deps.ArtworkRepair, fetcher: reg.deps.RemotePosters,
 	}
 	op := Operation{Operation: humaOp(http.MethodGet, Prefix+"/item-posters/{content_id}", "getItemPoster", "artwork",
-		"Read a catalog item's current poster from a signed link that admin reads return in poster_url. Cached art redirects to its stored object; art not cached yet is fetched from its provider through the server and queued for caching."),
+		"Read a catalog item's current poster from a signed link that admin reads return in poster_url for art not cached yet. Once the art is cached, the link serves the stored object through this server; until then the art is fetched from its provider through the server and queued for caching."),
 		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: ratelimit.ItemPosterBucket}
 	op.Parameters = []*huma.Param{
 		{Name: "content_id", In: paramInPath, Required: true, Description: "Content ID of the movie or series whose poster the link names.", Schema: &huma.Schema{Type: huma.TypeString}},
 		{Name: signedLinkExpiryParam, In: artworkParamQuery, Required: true, Schema: &huma.Schema{Type: artworkIntegerType, Format: playbackIntegerFormat}},
 		{Name: signedLinkSigParam, In: artworkParamQuery, Required: true, Schema: &huma.Schema{Type: huma.TypeString}},
+		{Name: ifNoneMatchField, In: paramInHeader, Schema: &huma.Schema{Type: huma.TypeString}},
+		{Name: artworkRangeHeader, In: paramInHeader, Schema: &huma.Schema{Type: huma.TypeString}},
 	}
 	op.Responses = map[string]*huma.Response{
-		"200": {Description: "Poster bytes of art not cached yet", Content: map[string]*huma.MediaType{artworkImageMediaType: {Schema: &huma.Schema{Type: huma.TypeString, Format: artworkBinaryFormat}}}},
-		"302": {Description: "Redirect to the cached poster's signed URL", Headers: map[string]*huma.Header{"Location": {Schema: &huma.Schema{Type: huma.TypeString, Format: "uri-reference"}}}},
-		"404": {Description: "Link invalid or expired, item gone, no poster, or the provider refused or failed"},
+		"200": {Description: "Poster bytes, read from the artwork store once cached or fetched from its provider until then", Content: map[string]*huma.MediaType{artworkImageMediaType: {Schema: &huma.Schema{Type: huma.TypeString, Format: artworkBinaryFormat}}}},
+		"206": {Description: "Partial bytes of a cached poster", Content: map[string]*huma.MediaType{artworkImageMediaType: {Schema: &huma.Schema{Type: huma.TypeString, Format: artworkBinaryFormat}}}},
+		"302": {Description: "Redirect to a same-server path returned by a metadata plugin", Headers: map[string]*huma.Header{jobLocationHeader: {Schema: &huma.Schema{Type: huma.TypeString, Format: "uri-reference"}}}},
+		"304": {Description: "Cached poster not modified"},
+		"404": {Description: "Link invalid or expired, item gone, no poster, or the provider or store has no servable image"},
+		"416": {Description: "Requested range is outside the cached poster"},
 		"429": {
 			Description: "Poster request rate limit exceeded",
 			Headers:     map[string]*huma.Header{"Retry-After": {Description: "Seconds to wait before retrying.", Schema: &huma.Schema{Type: huma.TypeInteger}}},
@@ -295,6 +304,10 @@ func (h *itemPosterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, unavailable("poster"))
 		return
 	}
+	if artworkurl.IsStoredArtworkPath(posterPath) {
+		h.serveStored(w, r, posterPath)
+		return
+	}
 	target, proxy, ok, err := h.resolve(r.Context(), posterPath)
 	if err != nil {
 		writeProblem(w, r, NewProblem(TypeDependencyUnavailable, "Poster fetches are busy.").WithRetryAfter(5))
@@ -311,6 +324,25 @@ func (h *itemPosterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.queueCache(r.Context(), contentID)
 	// A signed poster link authorizes downloads from public addresses only.
 	serveRemotePoster(w, r, h.fetcher, contentID, target, slog.String("content_id", contentID))
+}
+
+// serveStored answers with a cached poster's stored object, streamed through
+// this server by the same code as GET /api/v2/artwork/{key}, so a link issued
+// before the art was cached keeps answering with bytes instead of pointing a
+// tool at the object store.
+func (h *itemPosterHandler) serveStored(w http.ResponseWriter, r *http.Request, posterPath string) {
+	// Validate the stored path before deriving its rung: the derivation
+	// cleans the path, which would hide a malformed row.
+	key := artworkurl.StoredPosterVariant(posterPath)
+	if blobstore.ValidateKey(posterPath) != nil || blobstore.ValidateKey(key) != nil || blobstore.Unserved(key) {
+		writeProblem(w, r, NewProblem(TypeNotFound, "Poster not found."))
+		return
+	}
+	if h.store == nil {
+		writeProblem(w, r, unavailable("artwork storage"))
+		return
+	}
+	serveStoredArtwork(w, r, h.store, h.repair, key, func() string { return itemPosterProxyCache })
 }
 
 // serveRemotePoster downloads a poster that is not cached through fetcher,
@@ -346,18 +378,16 @@ func serveRemotePoster(w http.ResponseWriter, r *http.Request, fetcher RemotePos
 	_, _ = w.Write(image.Data)
 }
 
-// resolve maps an item's stored poster path to what the route answers with:
-// a stored object's URL to redirect to, or a provider URL to fetch and proxy.
-// ok is false when the path names nothing the route serves: no poster, or a
-// local source (file://, nfo+…) that only the image-cache job reads. err is
-// errPosterResolveBusy when a plugin would have to be asked and the memo of
-// plugin answers is full.
+// resolve maps an item poster path that is not a stored key to what the route
+// answers with: a same-server rooted path a plugin returned, to redirect to,
+// or a provider URL to fetch and proxy. ok is false when the path names
+// nothing the route serves: no poster, or a local source (file://, nfo+…) that
+// only the image-cache job reads. err is errPosterResolveBusy when a plugin
+// would have to be asked and the memo of plugin answers is full.
 func (h *itemPosterHandler) resolve(ctx context.Context, posterPath string) (target string, proxy, ok bool, err error) {
 	switch {
 	case posterPath == "" || posterPath == "-":
 		return "", false, false, nil
-	case artworkurl.IsStoredArtworkPath(posterPath):
-		return h.posters.Presign(ctx, artworkurl.StoredPosterVariant(posterPath)), false, true, nil
 	case !metadata.IsRemoteImageSourcePath(posterPath):
 		return "", false, false, nil
 	case isHTTPURL(posterPath):
@@ -379,7 +409,7 @@ func (h *itemPosterHandler) resolve(ctx context.Context, posterPath string) (tar
 	switch {
 	// One leading slash is a path on this server; "//host/..." is another
 	// host, which the tool this route serves may not reach.
-	case strings.HasPrefix(resolved, "/") && !strings.HasPrefix(resolved, "//"):
+	case artworkurl.IsSameServerPath(resolved):
 		return resolved, false, true, nil
 	case isHTTPURL(resolved):
 		return resolved, true, true, nil

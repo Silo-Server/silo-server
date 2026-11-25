@@ -4,8 +4,24 @@ import { Select as SelectPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
 
-function Select({ ...props }: React.ComponentProps<typeof SelectPrimitive.Root>) {
-  return <SelectPrimitive.Root data-slot="select" {...props} />;
+function Select({ onValueChange, ...props }: React.ComponentProps<typeof SelectPrimitive.Root>) {
+  return (
+    <SelectPrimitive.Root
+      data-slot="select"
+      // Inside a form, Radix mirrors the value into a hidden native select. A
+      // value that arrives together with its own new item reaches that select
+      // before the item's option does, and the select reports "" back. No item
+      // can have the value "" (Radix reserves it), so that report is never a
+      // choice; passing it on would undo the value just set.
+      onValueChange={
+        onValueChange &&
+        ((value) => {
+          if (value !== "") onValueChange(value);
+        })
+      }
+      {...props}
+    />
+  );
 }
 
 function SelectGroup({ ...props }: React.ComponentProps<typeof SelectPrimitive.Group>) {

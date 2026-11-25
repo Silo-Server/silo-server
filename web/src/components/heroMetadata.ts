@@ -1,4 +1,5 @@
 import type { DisplayRating, SectionItem } from "@/api/types";
+import { episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import { primaryCardRating } from "@/components/ratings/ratings";
 import { codeNumber, numberText, t } from "@/i18n";
 
@@ -48,7 +49,13 @@ export function formatHeroMetadata(item: SectionItem): HeroMetadataEntry[] {
   const contentRating = item.content_rating?.trim().toUpperCase();
 
   if (item.type === "episode") {
-    if (isNonNegativeInteger(item.season_number) && isNonNegativeInteger(item.episode_number)) {
+    const airDateLabel = episodeAirDateLabel(item.episode_labels, item.air_date);
+    if (airDateLabel) {
+      entries.push({ key: "episode-identity", label: airDateLabel });
+    } else if (
+      isNonNegativeInteger(item.season_number) &&
+      isNonNegativeInteger(item.episode_number)
+    ) {
       entries.push({
         key: "episode-identity",
         label: t("web.home.hero.episodeIdentity", {

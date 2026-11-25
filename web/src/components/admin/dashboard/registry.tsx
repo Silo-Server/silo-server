@@ -35,6 +35,14 @@ import { ScanActivityWidget } from "./widgets/ScanActivityWidget";
 import { RecentErrorsWidget } from "./widgets/RecentErrorsWidget";
 import { RecentActivityWidget } from "./widgets/RecentActivityWidget";
 import { ApiClientsWidget } from "./widgets/ApiClientsWidget";
+import {
+  InsightsActivePeopleWidget,
+  InsightsHourOfDayWidget,
+  InsightsLibraryCoverageWidget,
+  InsightsPlaysWidget,
+  InsightsViewingHoursWidget,
+  InsightsWeekdayWidget,
+} from "./widgets/InsightsWidgets";
 
 /**
  * Sampled charts read `dashboard_metric_samples`, which the sampler keeps for a
@@ -46,11 +54,18 @@ const SAMPLED_RANGES: WidgetRangeOptions = {
 };
 
 /**
- * Leaderboards start at a day: an hour of watch history ranks too little to be
- * worth a chart, and the endpoint's window is measured in days anyway.
+ * Widgets backed by the Insights reads offer the Insights presets: from a week
+ * to everything history holds. Insights windows are whole local days, so there
+ * is nothing shorter than a week to offer.
  */
+const INSIGHTS_RANGES: WidgetRangeOptions = {
+  allowed: ["week", "month", "quarter", "year", "all"],
+  default: "month",
+};
+
+/** The leaderboards read Insights too, and start on the last week. */
 const LEADERBOARD_RANGES: WidgetRangeOptions = {
-  allowed: ["day", "week", "month"],
+  allowed: INSIGHTS_RANGES.allowed,
   default: "week",
 };
 
@@ -266,6 +281,87 @@ export const DASHBOARD_WIDGETS: DashboardWidgetDefinition[] = [
     defaultRows: 3,
     ranges: LEADERBOARD_RANGES,
     Component: TopProfilesWidget,
+  }),
+  defineDashboardWidget({
+    id: "insights-plays",
+    titleKey: "web.admin.dashboard.widgetCatalog.insightsPlays.title",
+    descriptionKey: "web.admin.dashboard.widgetCatalog.insightsPlays.description",
+    minSpan: 6,
+    maxSpan: 12,
+    defaultSpan: 6,
+    minRows: 2,
+    maxRows: 5,
+    defaultRows: 3,
+    ranges: INSIGHTS_RANGES,
+    views: { allowed: ["method", "media", "watch_time"], default: "method" },
+    Component: InsightsPlaysWidget,
+  }),
+  defineDashboardWidget({
+    id: "insights-viewing-hours",
+    titleKey: "web.admin.dashboard.widgetCatalog.insightsViewingHours.title",
+    descriptionKey: "web.admin.dashboard.widgetCatalog.insightsViewingHours.description",
+    minSpan: 6,
+    maxSpan: 12,
+    defaultSpan: 6,
+    minRows: 3,
+    maxRows: 4,
+    defaultRows: 3,
+    ranges: INSIGHTS_RANGES,
+    Component: InsightsViewingHoursWidget,
+  }),
+  defineDashboardWidget({
+    id: "insights-weekday",
+    titleKey: "web.admin.dashboard.widgetCatalog.insightsWeekday.title",
+    descriptionKey: "web.admin.dashboard.widgetCatalog.insightsWeekday.description",
+    minSpan: 4,
+    maxSpan: 8,
+    defaultSpan: 4,
+    minRows: 2,
+    maxRows: 4,
+    defaultRows: 2,
+    ranges: INSIGHTS_RANGES,
+    views: { allowed: ["plays", "watch_time"], default: "plays" },
+    Component: InsightsWeekdayWidget,
+  }),
+  defineDashboardWidget({
+    id: "insights-hour-of-day",
+    titleKey: "web.admin.dashboard.widgetCatalog.insightsHourOfDay.title",
+    descriptionKey: "web.admin.dashboard.widgetCatalog.insightsHourOfDay.description",
+    minSpan: 4,
+    maxSpan: 12,
+    defaultSpan: 6,
+    minRows: 2,
+    maxRows: 4,
+    defaultRows: 2,
+    ranges: INSIGHTS_RANGES,
+    views: { allowed: ["plays", "watch_time"], default: "plays" },
+    Component: InsightsHourOfDayWidget,
+  }),
+  defineDashboardWidget({
+    id: "insights-active-people",
+    titleKey: "web.admin.dashboard.widgetCatalog.insightsActivePeople.title",
+    descriptionKey: "web.admin.dashboard.widgetCatalog.insightsActivePeople.description",
+    minSpan: 4,
+    maxSpan: 12,
+    defaultSpan: 6,
+    minRows: 2,
+    maxRows: 5,
+    defaultRows: 3,
+    ranges: INSIGHTS_RANGES,
+    Component: InsightsActivePeopleWidget,
+  }),
+  defineDashboardWidget({
+    id: "insights-library-coverage",
+    titleKey: "web.admin.dashboard.widgetCatalog.insightsLibraryCoverage.title",
+    descriptionKey: "web.admin.dashboard.widgetCatalog.insightsLibraryCoverage.description",
+    minSpan: 4,
+    maxSpan: 8,
+    defaultSpan: 6,
+    minRows: 2,
+    maxRows: 6,
+    defaultRows: 3,
+    ranges: INSIGHTS_RANGES,
+    Component: InsightsLibraryCoverageWidget,
   }),
   defineDashboardWidget({
     id: "watch-providers",

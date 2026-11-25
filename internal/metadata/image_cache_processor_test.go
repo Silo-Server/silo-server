@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -682,4 +683,43 @@ func testSeriesPosterJob(id int64, source string) *models.MetadataImageCacheJob 
 
 func intPointer(v int) *int {
 	return &v
+}
+
+type deferringImageCacheJobs struct {
+	fakeImageCacheJobs
+	deferredIDs []int64
+	deferText   string
+}
+
+func (f *deferringImageCacheJobs) DeferClaimed(_ context.Context, id int64, _ string, errText string, _, _ time.Duration) error {
+	f.deferredIDs = append(f.deferredIDs, id)
+	f.deferText = errText
+	return nil
+}
+
+// A full artwork store must not spend the queue's attempts: failing each job
+// would park every one of them for a week before the admin could free space.
+// The jobs after the first wait without being downloaded.
+func TestImageCacheProcessorDefersJobsWhileStorageIsFull(t *testing.T) {
+	jobs := &deferringImageCacheJobs{fakeImageCacheJobs: fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{
+		testSeriesPosterJob(41, "tmdb://poster/a.jpg"),
+		testSeriesPosterJob(42, "tmdb://poster/b.jpg"),
+	}}}
+	cacher := &fakeImageCacher{err: fmt.Errorf("imagecache: upload poster: %w", syscall.ENOSPC)}
+	resolver := &fakeImageResolver{url: "https://image.tmdb.org/t/p/original/poster.jpg"}
+
+	processor := NewImageCacheProcessorWithTargets(jobs, cacher, resolver, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
+	stats, err := processor.RunOnce(context.Background(), "test-worker", 10, 1)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if jobs.failedID != 0 || stats.Failed != 0 {
+		t.Fatalf("job %d marked failed (%d failures), want every job deferred", jobs.failedID, stats.Failed)
+	}
+	if len(jobs.deferredIDs) != 2 || jobs.deferText != imageCacheStorageFullError || stats.Deferred != 2 {
+		t.Fatalf("deferred %v (%q, stats %d), want both jobs waiting for space", jobs.deferredIDs, jobs.deferText, stats.Deferred)
+	}
+	if len(cacher.reqs) != 1 {
+		t.Fatalf("CacheImage called %d times, want 1", len(cacher.reqs))
+	}
 }

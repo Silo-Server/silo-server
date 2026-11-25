@@ -250,13 +250,34 @@ func RefreshAudiobookGroupStats(ctx context.Context, pool *pgxpool.Pool, skipWit
 	if fresh {
 		return false, nil
 	}
-	if _, err := conn.Exec(ctx, `REFRESH MATERIALIZED VIEW CONCURRENTLY audiobook_group_stats`); err != nil {
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("starting audiobook group stats refresh transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// PostgreSQL 18's ReadStream prefetches temp-table blocks up to
+	// effective_io_concurrency; during REFRESH MATERIALIZED VIEW CONCURRENTLY,
+	// a high server setting with default temp_buffers can pin every local
+	// buffer and fail with SQLSTATE 53000 ("no empty local buffer available").
+	// Lower it to 16 for this transaction only, so the setting doesn't leak
+	// into the pool. A lower setting stays: raising it would undo an operator's
+	// tuning, and PostgreSQL 17 and older reject any nonzero value on platforms
+	// without posix_fadvise.
+	if _, err := tx.Exec(ctx, `
+		SELECT set_config('effective_io_concurrency', '16', true)
+		WHERE current_setting('effective_io_concurrency')::int > 16`); err != nil {
+		return false, fmt.Errorf("setting effective_io_concurrency for audiobook group stats refresh: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `REFRESH MATERIALIZED VIEW CONCURRENTLY audiobook_group_stats`); err != nil {
 		return false, fmt.Errorf("refreshing audiobook group stats: %w", err)
 	}
-	if _, err := conn.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO audiobook_group_stats_refresh (singleton, refreshed_at) VALUES (true, $1)
 		ON CONFLICT (singleton) DO UPDATE SET refreshed_at = EXCLUDED.refreshed_at`, startedAt); err != nil {
 		return false, fmt.Errorf("recording audiobook group stats refresh: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("committing audiobook group stats refresh: %w", err)
 	}
 	return false, nil
 }

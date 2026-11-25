@@ -312,6 +312,48 @@ func (h *PlaybackHandler) forgetRealtimeCommand(commandID string) {
 	h.realtimeCommandMu.Unlock()
 }
 
+// realtimeResultKey names one command on one session. Command ids are chosen
+// by administrators and are only unique within a session's ledger, so a
+// waiter never matches another session's result.
+type realtimeResultKey struct {
+	sessionID string
+	commandID string
+}
+
+// awaitRealtimeResult registers interest in the player's result for one
+// command. The returned channel receives that result's status; release
+// removes the registration. Register before the command is written, so a
+// result that arrives before the caller starts waiting is not missed.
+func (h *PlaybackHandler) awaitRealtimeResult(sessionID, commandID string) (<-chan playback.RealtimeResultStatus, func()) {
+	key := realtimeResultKey{sessionID: sessionID, commandID: commandID}
+	answered := make(chan playback.RealtimeResultStatus, 1)
+	h.realtimeCommandMu.Lock()
+	if h.realtimeResultWaiters == nil {
+		h.realtimeResultWaiters = map[realtimeResultKey]chan playback.RealtimeResultStatus{}
+	}
+	h.realtimeResultWaiters[key] = answered
+	h.realtimeCommandMu.Unlock()
+	return answered, func() {
+		h.realtimeCommandMu.Lock()
+		if h.realtimeResultWaiters[key] == answered {
+			delete(h.realtimeResultWaiters, key)
+		}
+		h.realtimeCommandMu.Unlock()
+	}
+}
+
+// signalRealtimeResult hands the result's status to the waiter for this
+// session's command, if any. The first result wins.
+func (h *PlaybackHandler) signalRealtimeResult(sessionID, commandID string, status playback.RealtimeResultStatus) {
+	key := realtimeResultKey{sessionID: sessionID, commandID: commandID}
+	h.realtimeCommandMu.Lock()
+	if answered, ok := h.realtimeResultWaiters[key]; ok {
+		answered <- status // buffered for one, and removed before a second
+		delete(h.realtimeResultWaiters, key)
+	}
+	h.realtimeCommandMu.Unlock()
+}
+
 func (h *PlaybackHandler) getRealtimeCommand(commandID string) (playbackCommandRecord, bool) {
 	if h == nil || commandID == "" {
 		return playbackCommandRecord{}, false
@@ -469,12 +511,22 @@ func (h *PlaybackHandler) setConfirmedPauseState(sessionID string, paused bool, 
 		}
 		return
 	}
-	if !changed {
+	// The admin list reads the pause state from the lifecycle row, so it
+	// moves before the sync that cues monitors to re-read the list. It moves
+	// even when this copy already had the state: progress another replica
+	// accepted can have moved the row without reaching this copy. A moved
+	// row is synced too: SetPaused adopted that sample's position above, and
+	// the sync announces sessions.replaced when the snapshot it writes changed.
+	rowChanged := h.sessionPauseConfirmed(context.Background(), sessionID, paused, receivedSequence)
+	if !changed && !rowChanged {
 		return
 	}
 	syncCtx, cancelSync := context.WithTimeout(context.Background(), 10*time.Second)
 	h.syncSessionsNow(syncCtx, "realtime_pause")
 	cancelSync()
+	if !changed {
+		return // this copy already had the state, so there is no transition to scrobble
+	}
 	// A start scrobble still queued behind busy start workers must reach the
 	// provider first, or it would land after this pause and leave the
 	// provider playing. The admin views above are already up to date.

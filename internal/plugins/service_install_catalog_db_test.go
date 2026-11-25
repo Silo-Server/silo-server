@@ -46,6 +46,9 @@ func TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB(t *testing.T
 		// refused after the download passed its checks.
 		{name: "manifest declares an asset", withAsset: true, wantEvents: []string{}, wantVersion: "1.0.0", wantEnabled: true},
 		{name: "accepted package", wantEvents: []string{"update", "stop"}, wantVersion: "2.0.0", wantEnabled: true},
+		// The replacement clears the recorded update in its own write; no
+		// second clear may follow and erase an offer recorded since (#4518).
+		{name: "applied update", viaUpdate: true, wantEvents: []string{"update", "stop"}, wantVersion: "2.0.0", wantEnabled: true},
 		{name: "disabled during download", toggleTo: new(false), wantEvents: []string{"update", "stop"}, wantVersion: "2.0.0"},
 		{name: "enabled during download", installedOff: true, toggleTo: new(true), wantEvents: []string{"update", "stop"}, wantVersion: "2.0.0", wantEnabled: true},
 		// The package was prepared against 1.0.0, so it must not replace the

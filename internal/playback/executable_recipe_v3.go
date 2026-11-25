@@ -2,6 +2,7 @@ package playback
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -230,6 +231,53 @@ func (r ExecutableRecipeV3) ValidFor(plan PlanV3) bool {
 // as MPEG-TS (TranscodeOpts.CopyVideoMPEGTS) rather than fMP4.
 func PlanCopiesVideoAsMPEGTSV3(plan PlanV3) bool {
 	return plan.Delivery == DeliveryRemuxHLSV3 && plan.EffectiveRecipe.SegmentContainer == SegmentContainerMPEGTSV3
+}
+
+// PlannedOutputV3 holds the transport protocol, container, and effective target
+// video codec derived from a committed v3 plan and recipe. Both live session
+// preparation and detached stop finalization derive output facts through
+// ResolvePlannedOutputV3 so they cannot drift apart.
+type PlannedOutputV3 struct {
+	TargetVideoCodec  string
+	OutputProtocol    string
+	OutputContainer   string
+	ClearsVideoTarget bool
+}
+
+// ResolvePlannedOutputV3 derives the output protocol, muxer/segment container,
+// and effective target video codec for a v3 plan. When delivery is a video copy
+// (HLS remux, progressive remux, or PlayRemux), TargetVideoCodec is normalized
+// to "copy" and ClearsVideoTarget is true so callers drop transcode-only video
+// resolution and bitrate caps.
+func ResolvePlannedOutputV3(plan PlanV3, playMethod PlayMethod, sourceVideoCodec, targetVideoCodec, sourceContainer string) PlannedOutputV3 {
+	videoCodec := targetVideoCodec
+	if plan.Delivery == DeliveryRemuxHLSV3 || plan.Delivery == DeliveryRemuxProgressiveV3 || playMethod == PlayRemux {
+		videoCodec = codecCopyV3
+	}
+	out := PlannedOutputV3{
+		TargetVideoCodec:  videoCodec,
+		ClearsVideoTarget: strings.EqualFold(videoCodec, codecCopyV3),
+	}
+	switch plan.Delivery {
+	case DeliveryRemuxHLSV3, DeliveryTranscodeHLSV3:
+		out.OutputProtocol = OutputProtocolHLS
+		if seg := strings.ToLower(strings.TrimSpace(plan.EffectiveRecipe.SegmentContainer)); seg != "" {
+			out.OutputContainer = seg
+		} else {
+			out.OutputContainer = HLSOutputContainer(TranscodeOpts{
+				TargetCodecVideo: videoCodec,
+				SourceVideoCodec: sourceVideoCodec,
+				CopyVideoMPEGTS:  PlanCopiesVideoAsMPEGTSV3(plan),
+			})
+		}
+	case DeliveryRemuxProgressiveV3:
+		out.OutputProtocol = OutputProtocolHTTP
+		out.OutputContainer = OutputContainerFMP4
+	case DeliveryOriginalHTTPV3:
+		out.OutputProtocol = OutputProtocolHTTP
+		out.OutputContainer = sourceContainer
+	}
+	return out
 }
 
 // PlannerResult restores a planner result from the frozen executable recipe.

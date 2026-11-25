@@ -273,8 +273,8 @@ const (
 
 // buildRemuxArgs constructs the ffmpeg argument list for a remux operation.
 // The args perform codec copy (-c copy) into the target container format,
-// using fragmented output for streaming (frag_keyframe+delay_moov+default_base_moof) and
-// pipe:1 for stdout output.
+// using fragmented output for streaming (frag_keyframe+delay_moov+default_base_moof, plus
+// a 2-second fragment duration for audio-only output) and pipe:1 for stdout output.
 // When transcodeAudio is true, video is copied but audio is transcoded to
 // stereo AAC (handles cases like DTS/TrueHD that browsers cannot decode).
 // dvProfile is the file's Dolby Vision profile (0 = none). Profile 7 remuxes
@@ -565,8 +565,14 @@ func buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat string, seekS
 		// writing codec configuration. empty_moov fails immediately for copied
 		// E-AC-3/Atmos tracks because their frame size is not known at header time.
 		"-movflags", "frag_keyframe+delay_moov+default_base_moof",
-		"pipe:1",
 	)
+	if audioOnly {
+		// frag_keyframe only cuts at video keyframes, so audio-only output
+		// would be one fragment that FFmpeg writes when the whole book is done.
+		// Cut one every 2 seconds (in microseconds) so the first audio arrives at once.
+		args = append(args, "-frag_duration", "2000000")
+	}
+	args = append(args, "pipe:1")
 
 	return args
 }

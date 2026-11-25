@@ -42,7 +42,8 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, absUserObject(a.UserID, name, a.Token, defaultLibID, h.mayDownload(r.Context(), a.UserID), time.Now()))
+	progress := h.userMediaProgress(r.Context(), a, access)
+	writeJSON(w, http.StatusOK, absUserObject(a.UserID, name, a.Token, defaultLibID, h.mayDownload(r.Context(), a.UserID), progress, time.Now()))
 }
 
 // audiobookLibraryID returns the ABS-wire library ID string for an

@@ -92,93 +92,150 @@ func ListAttachedSubtitleFonts(ctx context.Context, inputPath, ffmpegPath string
 	return fonts, nil
 }
 
-// ExtractAttachedSubtitleFonts extracts font attachments from a media file.
-// Matroska ASS releases commonly include the exact fonts needed by the script;
-// loading them into JASSUB is the closest browser equivalent to libass on a
-// native player. The result holds at most 32 fonts and 32 MiB of font data;
-// fonts that do not fit are skipped in container order, so it can be partial or
-// empty with a nil error.
-func ExtractAttachedSubtitleFonts(ctx context.Context, inputPath string, ffmpegPath string) ([]SubtitleFontAttachment, error) {
-	return extractAttachedSubtitleFonts(ctx, inputPath, ffmpegPath, nil)
+// ExtractAttachedSubtitleFonts extracts the font attachments of a media file
+// for its embedded ASS/SSA track at subtitleTrack, the track's ordinal among
+// the file's subtitle streams. Matroska ASS releases commonly include the exact
+// fonts needed by the script; loading them into JASSUB is the closest browser
+// equivalent to libass on a native player. The result holds at most 32 fonts
+// and 32 MiB of font data, in container order. When the file attaches more,
+// the attachments whose family the track's script names come first and the
+// rest fill what room is left in container order, so it can be partial or
+// empty with a nil error. The script's styles come from the track header;
+// its \fn overrides count once cache, which may be nil, holds the extracted
+// track.
+func ExtractAttachedSubtitleFonts(ctx context.Context, inputPath string, ffmpegPath string, subtitleTrack int, cache *SubtitleCache) ([]SubtitleFontAttachment, error) {
+	return extractSubtitleFontBundle(ctx, inputPath, ffmpegPath, func(ctx context.Context) []string {
+		return subtitleScriptFonts(ctx, inputPath, subtitleTrack, cache)
+	})
 }
 
 // ExtractAttachedSubtitleFont extracts only the requested container stream.
 // Font validation and the attachment count and byte limits match bundles, but a
 // font over the byte limit is an error here, where a bundle skips it.
 func ExtractAttachedSubtitleFont(ctx context.Context, inputPath, ffmpegPath string, index int) (*SubtitleFontAttachment, error) {
-	fonts, err := extractAttachedSubtitleFonts(ctx, inputPath, ffmpegPath, &index)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	streams, videoStream, err := probeSubtitleFontStreams(ctx, inputPath, ffmpegPath)
+	if err != nil || len(streams) == 0 {
+		return nil, err
+	}
+	if len(streams) > maxSubtitleFontAttachments {
+		streams = streams[:maxSubtitleFontAttachments]
+	}
+	selected := slices.IndexFunc(streams, func(stream attachmentProbeStream) bool { return stream.Index == index })
+	if selected < 0 {
+		return nil, nil
+	}
+	name := safeAttachmentDisplayName(streams[selected], fmt.Sprintf("attachment-%d%s", selected, fontAttachmentExt(streams[selected])))
+	fonts, err := dumpFontAttachments(ctx, inputPath, resolveFontFFmpeg(ffmpegPath), streams[selected:selected+1], videoStream, maxSubtitleFontBytes)
 	if err != nil || len(fonts) == 0 {
 		return nil, err
 	}
+	fonts[0].Name = name
 	return &fonts[0], nil
 }
 
-func extractAttachedSubtitleFonts(ctx context.Context, inputPath, ffmpegPath string, index *int) ([]SubtitleFontAttachment, error) {
+// extractSubtitleFontBundle builds a bundle within the attachment count and
+// byte limits. scriptFonts names the font families the subtitle script uses;
+// it is called only when the attachments do not all fit, since reading the
+// script and the fonts' own names costs more than the bundle itself.
+func extractSubtitleFontBundle(ctx context.Context, inputPath, ffmpegPath string, scriptFonts func(context.Context) []string) ([]SubtitleFontAttachment, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if strings.TrimSpace(inputPath) == "" {
-		return nil, fmt.Errorf("subtitle fonts: input path is required")
+	streams, videoStream, err := probeSubtitleFontStreams(ctx, inputPath, ffmpegPath)
+	if err != nil || len(streams) == 0 {
+		return nil, err
 	}
+	bin := resolveFontFFmpeg(ffmpegPath)
 
-	streams, videoStream, err := probeFontAttachmentStreams(ctx, inputPath, ffprobePathFromFFmpeg(ffmpegPath))
+	kept, err := chooseBundleFonts(ctx, inputPath, bin, streams, videoStream, scriptFonts)
 	if err != nil {
 		return nil, err
 	}
-	if len(streams) == 0 {
-		return nil, nil
-	}
-	selectedName := ""
-	if index != nil {
-		if len(streams) > maxSubtitleFontAttachments {
-			streams = streams[:maxSubtitleFontAttachments]
-		}
-		selected := slices.IndexFunc(streams, func(stream attachmentProbeStream) bool { return stream.Index == *index })
-		if selected < 0 {
-			return nil, nil
-		}
-		selectedName = safeAttachmentDisplayName(streams[selected], fmt.Sprintf("attachment-%d%s", selected, fontAttachmentExt(streams[selected])))
-		streams = streams[selected : selected+1]
-	} else {
-		var omitted int
-		streams, omitted = fontStreamsWithinBudget(streams, maxSubtitleFontBytes)
-		if len(streams) > maxSubtitleFontAttachments {
-			streams = streams[:maxSubtitleFontAttachments]
-		}
-		if omitted > 0 {
-			slog.InfoContext(ctx, "subtitle font bundle over size limit; leaving out fonts that do not fit",
-				"component", "playback", "input", inputPath, "omitted", omitted, "kept", len(streams), "limit_bytes", maxSubtitleFontBytes)
-		}
-	}
-
-	bin := ffmpegPath
-	if strings.TrimSpace(bin) == "" {
-		bin = "ffmpeg"
-	}
-
-	fonts, err := dumpFontAttachments(ctx, inputPath, bin, streams, videoStream, maxSubtitleFontBytes)
-	if selectedName != "" && len(fonts) > 0 {
-		fonts[0].Name = selectedName
-	}
-	return fonts, err
+	return dumpFontAttachments(ctx, inputPath, bin, kept, videoStream, maxSubtitleFontBytes)
 }
 
-// fontStreamsWithinBudget keeps attachments, in container order, while their
-// probed sizes fit maxBytes and skips any that would overflow it. A release that
-// ships more font data than the limit still gets each font that fits in what is
-// left of the limit, instead of an error that leaves the script with no attached
-// fonts at all. Sizes of zero or less are kept so dumpFontAttachments still
-// rejects the probe.
-func fontStreamsWithinBudget(streams []attachmentProbeStream, maxBytes int64) ([]attachmentProbeStream, int) {
-	kept := make([]attachmentProbeStream, 0, len(streams))
+// chooseBundleFonts returns the attachments a bundle holds, in container
+// order. It errs only when ctx ends.
+func chooseBundleFonts(ctx context.Context, inputPath, ffmpegPath string, streams []attachmentProbeStream, videoStream int, scriptFonts func(context.Context) []string) ([]attachmentProbeStream, error) {
+	kept := fontStreamsWithinLimits(streams, maxSubtitleFontBytes, maxSubtitleFontAttachments)
+	if len(kept) == len(streams) {
+		return kept, nil
+	}
+	var wanted, wantedKept int
+	if families := scriptFonts(ctx); len(families) > 0 {
+		// Reading the attachments' names gets half of what is left of the
+		// deadline, so storage too slow for it still leaves time to serve the
+		// bundle in container order.
+		namesCtx, cancel := ctx, context.CancelFunc(func() {})
+		if deadline, ok := ctx.Deadline(); ok {
+			namesCtx, cancel = context.WithDeadline(ctx, time.Now().Add(time.Until(deadline)/2))
+		}
+		ordered, n, err := scriptFontStreamsFirst(namesCtx, inputPath, ffmpegPath, streams, videoStream, families)
+		cancel()
+		switch {
+		case ctx.Err() != nil:
+			return nil, ctx.Err()
+		case err != nil:
+			slog.WarnContext(ctx, "subtitle font bundle could not read attached font names; keeping container order",
+				"component", "playback", "input", inputPath, "error", err)
+		default:
+			kept = fontStreamsWithinLimits(ordered, maxSubtitleFontBytes, maxSubtitleFontAttachments)
+			wanted, wantedKept = n, countStreams(kept, ordered[:n])
+			slices.SortFunc(kept, func(a, b attachmentProbeStream) int { return a.Index - b.Index })
+		}
+	}
+	slog.InfoContext(ctx, "subtitle font bundle over limit; leaving out fonts that do not fit",
+		"component", "playback", "input", inputPath, "omitted", len(streams)-len(kept), "kept", len(kept),
+		"script_fonts", wanted, "script_fonts_kept", wantedKept,
+		"limit_fonts", maxSubtitleFontAttachments, "limit_bytes", maxSubtitleFontBytes)
+	return kept, nil
+}
+
+func probeSubtitleFontStreams(ctx context.Context, inputPath, ffmpegPath string) ([]attachmentProbeStream, int, error) {
+	if strings.TrimSpace(inputPath) == "" {
+		return nil, -1, errors.New("subtitle fonts: input path is required")
+	}
+	return probeFontAttachmentStreams(ctx, inputPath, ffprobePathFromFFmpeg(ffmpegPath))
+}
+
+func resolveFontFFmpeg(ffmpegPath string) string {
+	if strings.TrimSpace(ffmpegPath) == "" {
+		return defaultFFmpegBinary
+	}
+	return ffmpegPath
+}
+
+func countStreams(streams, of []attachmentProbeStream) int {
+	n := 0
+	for _, stream := range streams {
+		if slices.ContainsFunc(of, func(o attachmentProbeStream) bool { return o.Index == stream.Index }) {
+			n++
+		}
+	}
+	return n
+}
+
+// fontStreamsWithinLimits keeps attachments, in the given order, while their
+// probed sizes fit maxBytes and their count maxCount, and skips any that would
+// overflow the byte limit. A release that ships more font data than the limit
+// still gets each font that fits in what is left of the limit, instead of an
+// error that leaves the script with no attached fonts at all. Sizes of zero or
+// less are kept so dumpFontAttachments still rejects the probe.
+func fontStreamsWithinLimits(streams []attachmentProbeStream, maxBytes int64, maxCount int) []attachmentProbeStream {
+	kept := make([]attachmentProbeStream, 0, min(len(streams), maxCount))
 	var total int64
 	for _, stream := range streams {
+		if len(kept) == maxCount {
+			break
+		}
 		if stream.ExtraDataSize > maxBytes-total {
 			continue
 		}
 		kept = append(kept, stream)
 		total += max(stream.ExtraDataSize, 0)
 	}
-	return kept, len(streams) - len(kept)
+	return kept
 }
 
 // EncodeSubtitleFontBundle converts raw font attachments to base64 JSON items.
@@ -212,46 +269,31 @@ func dumpFontAttachments(ctx context.Context, inputPath string, ffmpegPath strin
 	if expected == 0 {
 		return nil, nil
 	}
+	data := make([]byte, 0, expected)
+	fonts := make([]SubtitleFontAttachment, 0, len(streams))
+	err := readFontAttachments(ctx, inputPath, ffmpegPath, streams, videoStream, func(stream attachmentProbeStream, font []byte) {
+		start := len(data)
+		data = append(data, font...)
+		fonts = append(fonts, SubtitleFontAttachment{
+			StreamIndex: stream.Index,
+			Name:        safeAttachmentDisplayName(stream, fmt.Sprintf("attachment-%d%s", len(fonts), fontAttachmentExt(stream))),
+			Data:        data[start:len(data):len(data)],
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return fonts, nil
+}
+
+// fontPipeDumpArgs has FFmpeg write streams' attachments to stdout, one after
+// another.
+func fontPipeDumpArgs(inputPath string, streams []attachmentProbeStream, videoStream int) []string {
 	args := []string{ffmpegHideBannerArg, "-nostats", ffmpegLogLevelArg, ffmpegErrorLogLevel}
 	for _, stream := range streams {
 		args = append(args, fmt.Sprintf("-dump_attachment:%d", stream.Index), "pipe:1")
 	}
-	args = append(append(args, "-i", inputPath), attachmentDumpOutputArgs(videoStream)...)
-	cmd := fspath.CommandContext(ctx, ffmpegPath, args...)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("subtitle fonts: start attachment extract: %w", err)
-	}
-	data, readErr := io.ReadAll(io.LimitReader(stdout, expected+1))
-	if readErr != nil || int64(len(data)) > expected {
-		_ = procgroup.Kill(cmd)
-		_ = cmd.Wait()
-		return nil, errors.New("subtitle fonts: attachment data exceeds probed size or could not be read")
-	}
-	if err := cmd.Wait(); err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		return nil, fmt.Errorf("subtitle fonts: extract attachments: %w", err)
-	}
-	if int64(len(data)) != expected {
-		return nil, errors.New("subtitle fonts: attachment data differs from probed size")
-	}
-	fonts := make([]SubtitleFontAttachment, 0, len(streams))
-	offset := 0
-	for i, stream := range streams {
-		end := offset + int(stream.ExtraDataSize)
-		fonts = append(fonts, SubtitleFontAttachment{
-			StreamIndex: stream.Index,
-			Name:        safeAttachmentDisplayName(stream, fmt.Sprintf("attachment-%d%s", i, fontAttachmentExt(stream))),
-			Data:        data[offset:end:end],
-		})
-		offset = end
-	}
-	return fonts, nil
+	return append(append(args, "-i", inputPath), attachmentDumpOutputArgs(videoStream)...)
 }
 
 // attachmentDumpOutputArgs is the output of an FFmpeg run that dumps

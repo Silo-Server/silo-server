@@ -34,7 +34,7 @@ func TestHandleAuthenticateByNameRejectsOversizedBody(t *testing.T) {
 // listener's error envelope with the time left in Retry-After.
 func TestHandleAuthenticateByNameThrottledName(t *testing.T) {
 	svc := auth.NewService(nil, nil, nil, nil, nil, nil, nil)
-	svc.SetSignInAttempts(ratelimit.NewMemoryAttemptLimiter(ratelimit.AttemptPolicy{MaxAttempts: 1, Window: time.Minute}))
+	svc.SetSignInAttempts(ratelimit.NewMemorySignInLimiter(ratelimit.AttemptPolicy{MaxAttempts: 1, Window: time.Minute}, ratelimit.SignInSourcePolicy))
 	h := NewAuthHandler(func() *config.Config { return &config.Config{} }, NewLoginResolver(svc, nil, nil, nil, nil), nil)
 	signIn := func() *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/Users/AuthenticateByName", strings.NewReader(`{"Username":"alice","Pw":"secret"}`))
