@@ -187,11 +187,11 @@ func (h *ProfileHandler) profileSetPicture(ctx context.Context, store userstore.
 		}
 		return profileSetPicturePrefixHash + label, nil
 	}
-	preset, err := normalizePresetAvatarReference(p.Avatar)
-	if err != nil {
-		return "", nil
+	if preset, err := normalizePresetAvatarReference(p.Avatar); err == nil {
+		return preset, nil
 	}
-	return preset, nil
+	// A stored preset this server no longer knows shows no picture.
+	return "", nil
 }
 
 // ApplyProfileSet makes the account's household match the set, in one

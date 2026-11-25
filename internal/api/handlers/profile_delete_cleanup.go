@@ -47,7 +47,7 @@ func (h *ProfileHandler) afterProfileDeleted(
 		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		if err := run(purgeCtx); err != nil {
-			slog.WarnContext(ctx, "profile "+what+" failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+			slog.WarnContext(ctx, "profile clean-up failed after delete", "component", "api", "step", what, "user_id", userID, "profile_id", profileID, "error", err)
 		}
 	}
 	if h.JellyfinSessionPurger != nil {

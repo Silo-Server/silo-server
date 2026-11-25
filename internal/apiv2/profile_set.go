@@ -104,8 +104,6 @@ type profileSetDocumentFields struct {
 
 // ProfileSetDocument is the set in the session form. The handler reads it
 // from the raw body, with the parser the signed form uses.
-//
-//nolint:recvcheck // UnmarshalJSON needs a pointer receiver; Schema is read from the value.
 type ProfileSetDocument json.RawMessage
 
 // UnmarshalJSON keeps nothing: the handler reads the raw body.
@@ -431,7 +429,10 @@ func (reg *Registry) getProfileSet(ctx context.Context, in *ProfileSetGetInput) 
 		return nil, profileSetProblem(err, false)
 	}
 	body := profileSetHeldOf(held)
-	tag := profileSetTag(body)
+	tag, err := profileSetTag(body)
+	if err != nil {
+		return nil, err
+	}
 	out := &ProfileSetGetOutput{ETag: tag.String(), Body: body}
 	if matched, p := EvaluateReadPreconditions(in.IfMatch, in.IfNoneMatch, tag); p != nil {
 		return nil, p
@@ -443,10 +444,13 @@ func (reg *Registry) getProfileSet(ctx context.Context, in *ProfileSetGetInput) 
 
 // profileSetTag is the answer's strong ETag: a hash of its body, which holds
 // no URL or time that changes on its own.
-func profileSetTag(body ProfileSetHeld) EntityTag {
-	encoded, _ := json.Marshal(body)
+func profileSetTag(body ProfileSetHeld) (EntityTag, error) {
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return EntityTag{}, err
+	}
 	sum := sha256.Sum256(encoded)
-	return EntityTag{Opaque: "ps1-" + base64.RawURLEncoding.EncodeToString(sum[:])[:22]}
+	return EntityTag{Opaque: "ps1-" + base64.RawURLEncoding.EncodeToString(sum[:])[:22]}, nil
 }
 
 func profileSetHeldOf(h handlers.ProfileSetHeld) ProfileSetHeld {

@@ -102,6 +102,9 @@ func (f *profileSetDBFixture) state(t *testing.T) string {
 			}
 			b.WriteString(line + "\n")
 		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
 		rows.Close()
 	}
 	return b.String()

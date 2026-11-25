@@ -142,7 +142,9 @@ func parseProfileSet(set, pairs json.RawMessage, editsSeen string) (*profileSetD
 	if doc.Pairs, err = parseProfileSetPairs(pairs, syncIDs); err != nil {
 		return nil, err
 	}
-	doc.Hash = profileSetContentHash(doc)
+	if doc.Hash, err = profileSetContentHash(doc); err != nil {
+		return nil, err
+	}
 	return doc, nil
 }
 
@@ -341,7 +343,7 @@ func sameProfileName(a, b string) bool {
 // a PIN's digits get the same hash; a plain hash of a one-profile set would
 // give a four-digit PIN up faster than its bcrypt hash would. pairs and
 // edits_seen are not content: they describe how the set is sent.
-func profileSetContentHash(doc *profileSetDoc) []byte {
+func profileSetContentHash(doc *profileSetDoc) ([]byte, error) {
 	items := make([]any, len(doc.Items))
 	for i, item := range doc.Items {
 		canonical := make(map[string]any, len(item.raw))
@@ -353,7 +355,13 @@ func profileSetContentHash(doc *profileSetDoc) []byte {
 		canonical["pin"] = item.PIN.kind
 		items[i] = canonical
 	}
-	encoded, _ := json.Marshal(map[string]any{"version": doc.Version, "items": items})
+	encoded, err := json.Marshal(struct {
+		Version int64 `json:"version"`
+		Items   []any `json:"items"`
+	}{doc.Version, items})
+	if err != nil {
+		return nil, fmt.Errorf("encoding the set's content: %w", err)
+	}
 	sum := sha256.Sum256(encoded)
-	return sum[:]
+	return sum[:], nil
 }

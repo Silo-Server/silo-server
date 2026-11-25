@@ -141,7 +141,7 @@ func (s *PostgresUserStore) WithProfileSetTransaction(ctx context.Context, inSet
 	if err != nil {
 		return fmt.Errorf("beginning profile set transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	defer tx.Rollback(ctx) //nolint:errcheck // after Commit, Rollback is a no-op
 	if err := LockAccountForImport(ctx, tx, s.userID); err != nil {
 		return err
 	}

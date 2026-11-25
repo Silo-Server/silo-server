@@ -34,6 +34,9 @@ const metaAttachSession = "silo.attach_session"
 // read, and a missing or unproven one never refuses the request.
 const metaOptionalViewerScope = "silo.optional_viewer_scope"
 
+// gateViewerAccess names the viewer access gate when the wiring lacks it.
+const gateViewerAccess = "viewer access"
+
 // Legacy v1 error codes the gates translate that have no v2 problem type of
 // their own (the others reuse the matching ProblemType's ID).
 const (
@@ -69,7 +72,7 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 			chain = append(chain, deps.Auth.AttachSession)
 			if scoped, _ := op.Metadata[metaOptionalViewerScope].(bool); scoped {
 				if deps.ViewerAccess == nil {
-					missing = "viewer access"
+					missing = gateViewerAccess
 				} else {
 					chain = append(chain, deps.ViewerAccess.ResolveIfPresent)
 				}
@@ -126,7 +129,7 @@ func gateChain(deps Dependencies, class Class, permission string, demoRestricted
 		return chain, ""
 	}
 	if deps.ViewerAccess == nil {
-		return nil, "viewer access"
+		return nil, gateViewerAccess
 	}
 	if household && deps.HouseholdProfile == nil {
 		return nil, "household profile gate"

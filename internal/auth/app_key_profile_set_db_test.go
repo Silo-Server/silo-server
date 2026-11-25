@@ -100,27 +100,33 @@ func TestVerifyProfileSetDB(t *testing.T) {
 			t.Fatal("a revoked key spent the challenge")
 		}
 	})
-	t.Run("provider-bound key whose identity is gone", func(t *testing.T) {
-		providerEnv := newKeyEnv(t, "keysetgone")
-		person, device := newTestKey(t), newTestKey(t)
-		claims := providerEnv.loginSession(t, providerEnv.user, models.SessionOpenedProvider, &providerEnv.identityID)
-		if _, err := providerEnv.signIn.Enroll(ctx, KeyEnrollRequest{
-			KeyRequest: providerEnv.request(t, message{purpose: appkeys.PurposeEnroll, signer: person, device: &device}),
-			PersonKey:  person.pub, Claims: claims,
-		}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := providerEnv.pool.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, providerEnv.installationID); err != nil {
-			t.Fatal(err)
-		}
-		req := providerEnv.request(t, message{purpose: appkeys.PurposeProfileSet, signer: person,
-			fields: map[string]any{"account_id": strconv.Itoa(providerEnv.user.ID), "set": set}})
-		if _, err := providerEnv.signIn.VerifyProfileSet(ctx, req); !errors.Is(err, ErrKeySignatureInvalid) {
-			t.Fatalf("err = %v, want signature_invalid", err)
-		}
-		var revoked bool
-		if err := providerEnv.pool.QueryRow(ctx, `SELECT revoked_at IS NOT NULL FROM auth_person_keys WHERE user_id = $1`, providerEnv.user.ID).Scan(&revoked); err != nil || !revoked {
-			t.Fatalf("person key revoked = %v, %v", revoked, err)
-		}
-	})
+	t.Run("provider-bound key whose identity is gone", func(t *testing.T) { verifyProfileSetIdentityGone(t, set) })
+}
+
+// verifyProfileSetIdentityGone: a provider-bound person key whose identity
+// was deleted is a revoked key, here as at sign-in.
+func verifyProfileSetIdentityGone(t *testing.T, set map[string]any) {
+	t.Helper()
+	ctx := t.Context()
+	providerEnv := newKeyEnv(t, "keysetgone")
+	person, device := newTestKey(t), newTestKey(t)
+	claims := providerEnv.loginSession(t, providerEnv.user, models.SessionOpenedProvider, &providerEnv.identityID)
+	if _, err := providerEnv.signIn.Enroll(ctx, KeyEnrollRequest{
+		KeyRequest: providerEnv.request(t, message{purpose: appkeys.PurposeEnroll, signer: person, device: &device}),
+		PersonKey:  person.pub, Claims: claims,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := providerEnv.pool.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, providerEnv.installationID); err != nil {
+		t.Fatal(err)
+	}
+	req := providerEnv.request(t, message{purpose: appkeys.PurposeProfileSet, signer: person,
+		fields: map[string]any{"account_id": strconv.Itoa(providerEnv.user.ID), "set": set}})
+	if _, err := providerEnv.signIn.VerifyProfileSet(ctx, req); !errors.Is(err, ErrKeySignatureInvalid) {
+		t.Fatalf("err = %v, want signature_invalid", err)
+	}
+	var revoked bool
+	if err := providerEnv.pool.QueryRow(ctx, `SELECT revoked_at IS NOT NULL FROM auth_person_keys WHERE user_id = $1`, providerEnv.user.ID).Scan(&revoked); err != nil || !revoked {
+		t.Fatalf("person key revoked = %v, %v", revoked, err)
+	}
 }
