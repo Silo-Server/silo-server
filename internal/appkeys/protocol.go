@@ -68,6 +68,8 @@ const (
 	MaxDeviceNameLength     = 128
 	MaxDevicePlatformLength = 64
 	MaxAppNameLength        = 128
+	// MaxEditsSeenLength bounds a profile-set's edits_seen token.
+	MaxEditsSeenLength = 64
 )
 
 // Times.

@@ -107,3 +107,61 @@ func (m *ViewerAccessMiddleware) RequireViewerAccess(next http.Handler) http.Han
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
+
+// unverifiedProfileKey carries the profile a request named but did not
+// verify, on an operation that resolves viewer access only if it can.
+type unverifiedProfileKey struct{}
+
+// UnverifiedProfileID returns the profile the request named without a valid
+// proof, "" when it named none or proved it. Only ResolveIfPresent sets it.
+func UnverifiedProfileID(ctx context.Context) string {
+	id, _ := ctx.Value(unverifiedProfileKey{}).(string)
+	return id
+}
+
+// ResolveIfPresent resolves the viewer scope as RequireViewerAccess does,
+// for an operation whose authority may come from the request body instead
+// of a session: with no session, or a profile header that is unknown or
+// unproven, the request continues without a scope rather than being
+// refused. An unproven profile is recorded (UnverifiedProfileID), so the
+// operation can ask for its PIN. A policy that ran out of time still
+// answers 503.
+func (m *ViewerAccessMiddleware) ResolveIfPresent(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := GetClaims(r.Context())
+		if claims == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		profileID := r.Header.Get("X-Profile-Id")
+		scope, err := m.resolver.Resolve(r.Context(), access.ResolveInput{
+			UserID: claims.UserID, SessionID: claims.SessionID, ProfileID: profileID,
+			ProfileToken: r.Header.Get("X-Profile-Token"), SkipPINVerification: claims.SkipsProfilePIN(),
+		})
+		switch {
+		case err == nil:
+			ctx := access.SetScope(r.Context(), scope)
+			if profileID != "" {
+				ctx = SetProfileID(ctx, profileID)
+			}
+			next.ServeHTTP(w, r.WithContext(ctx))
+		case errors.Is(err, access.ErrProfileUnverified):
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), unverifiedProfileKey{}, profileID)))
+		case errors.Is(err, access.ErrProfileNotFound):
+			next.ServeHTTP(w, r)
+		case errors.Is(err, policy.ErrPolicyEvalTimeout):
+			recordDenialReason(w, ReasonViewerAccessUnavailable)
+			w.Header().Set("Retry-After", strconv.Itoa(ViewerAccessRetryAfterSeconds))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(errorResponse{
+				Error:   CodeServiceUnavailable,
+				Message: "Viewer access could not be resolved right now; try again shortly",
+			})
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(errorResponse{Error: "internal_error", Message: "Failed to resolve viewer access"})
+		}
+	})
+}
