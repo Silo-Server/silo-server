@@ -215,6 +215,39 @@ func TestJoinWithAppCodeRefusalsDB(t *testing.T) {
 			t.Fatalf("an account's name: %v", err)
 		}
 	})
+	t.Run("an address another code reserves", func(t *testing.T) {
+		// One code's email is another's address-as-username, and the other
+		// way round: two unspent codes never claim one address.
+		first := env.name("first") + "@example.test"
+		second := env.name("second") + "@example.test"
+		issueAs := func(username, email string) error {
+			token, _ := env.invite(t, models.RoleUser)
+			_, err := env.svc.IssueAppCode(ctx, AppCodeRequest{Token: token, Username: username, Email: email})
+			return err
+		}
+		if err := issueAs(env.name("bob"), first); err != nil {
+			t.Fatal(err)
+		}
+		var taken *auth.NameTakenError
+		if err := issueAs(strings.ToUpper(first), first); !errors.As(err, &taken) || taken.Field != auth.NameFieldUsername {
+			t.Fatalf("an address reserved as an email, taken as a username: %v", err)
+		}
+		if err := issueAs(second, second); err != nil {
+			t.Fatal(err)
+		}
+		if err := issueAs(env.name("carol"), strings.ToUpper(second)); !errors.As(err, &taken) || taken.Field != auth.NameFieldEmail {
+			t.Fatalf("an address reserved as a username, taken as an email: %v", err)
+		}
+	})
+	t.Run("renewing a code with the same name and email", func(t *testing.T) {
+		token, _ := env.invite(t, models.RoleUser)
+		request := AppCodeRequest{Token: token, Username: env.name("renew"), Email: env.name("renew") + "@example.test"}
+		for range 2 {
+			if _, err := env.svc.IssueAppCode(ctx, request); err != nil {
+				t.Fatalf("renewal: %v", err)
+			}
+		}
+	})
 	t.Run("a name taken before redeem", func(t *testing.T) {
 		username := env.name("raced")
 		code, inv := issue(t, username)

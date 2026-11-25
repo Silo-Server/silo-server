@@ -127,7 +127,7 @@ type JoinAppCode struct {
 // claimed, so two codes for one invitation are issued one after the other;
 // the new code replaces any unspent one, which stops working. The name and
 // email must be free: no account holds either, and no other unspent join
-// code reserves the name. The reservation is advisory: redeeming creates the
+// code reserves either as its name or its email. The reservation is advisory: redeeming creates the
 // account, and a name taken in between refuses the redeem.
 func IssueJoinAppCodeTx(ctx context.Context, tx pgx.Tx, in JoinAppCode) (IssuedAppCode, error) {
 	username := NormalizeUsername(in.Username)
@@ -148,6 +148,12 @@ func IssueJoinAppCodeTx(ctx context.Context, tx pgx.Tx, in JoinAppCode) (IssuedA
 		taken, err := loginIdentifierTaken(ctx, tx, check.name)
 		if err != nil {
 			return IssuedAppCode{}, err
+		}
+		if !taken {
+			taken, err = reservedByAnotherCode(ctx, tx, check.name)
+			if err != nil {
+				return IssuedAppCode{}, err
+			}
 		}
 		if taken {
 			return IssuedAppCode{}, &NameTakenError{Field: check.field}
@@ -171,6 +177,22 @@ func IssueJoinAppCodeTx(ctx context.Context, tx pgx.Tx, in JoinAppCode) (IssuedA
 	}
 	out.Code = code
 	return out, nil
+}
+
+// reservedByAnotherCode reports whether another unspent, unexpired join code
+// reserves name as its username or its email, compared case-insensitively as
+// sign-in compares them. The caller deleted its invitation's own code first,
+// so a renewal doesn't clash with itself, and holds the settings lock, which
+// every issue takes first, so two issues can't both pass.
+func reservedByAnotherCode(ctx context.Context, tx pgx.Tx, name string) (bool, error) {
+	var reserved bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM auth_app_codes
+		WHERE kind = $2 AND redeemed_at IS NULL AND expires_at > clock_timestamp()
+			AND (reserved_username = $1::citext OR reserved_email = $1::citext))`, name, appCodeKindJoin).Scan(&reserved)
+	if err != nil {
+		return false, fmt.Errorf("checking app code reservations: %w", err)
+	}
+	return reserved, nil
 }
 
 // IssueSessionAppCode issues an app code for the claims' own account, so the
