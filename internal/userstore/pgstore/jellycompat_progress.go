@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func (s *PostgresUserStore) setJellycompatProgress(ctx context.Context, tx pgx.Tx, profileID, itemID string, position, duration float64, completed bool, date time.Time) error {

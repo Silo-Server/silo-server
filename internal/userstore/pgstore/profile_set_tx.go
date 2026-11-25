@@ -193,7 +193,7 @@ func (s *PostgresUserStore) WithProfileSetTransaction(ctx context.Context, inSet
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR NO KEY UPDATE`, s.userID); err != nil {
 		return fmt.Errorf("locking the account: %w", err)
 	}
-	writer := &profileSetTx{preferenceSettingsTx: preferenceSettingsTx{exec: tx, userID: s.userID}, tx: tx, removable: removable}
+	writer := &profileSetTx{preferenceSettingsTx: preferenceSettingsTx{exec: tx, userID: s.userID, defaults: s.adminDefaults}, tx: tx, removable: removable}
 	if err := fn(writer); err != nil {
 		return err
 	}

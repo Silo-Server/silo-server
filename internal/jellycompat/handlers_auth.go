@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -182,6 +183,9 @@ type AuthHandler struct {
 	storeProvider userstore.UserStoreProvider
 	// avatars decides the PrimaryImageTag; nil reports no user avatars.
 	avatars *compatUserAvatars
+	// adminDefaults resolves the user configuration's settings as the native
+	// settings routes do; nil uses the contract defaults.
+	adminDefaults settingsresolve.ServerSettings
 	// passwordSignIn answers whether the account signs in with a password
 	// here (auth.Service.PasswordSignInFor). Nil reports that it does.
 	passwordSignIn passwordSignInReader

@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/profileedits"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
@@ -1054,5 +1055,84 @@ func TestProfileSetLockedTokenRecheckDB(t *testing.T) {
 	}
 	if got := changedFields(f.held(t), kid.syncID()); !slices.Equal(got, []string{"account:name"}) {
 		t.Fatalf("changed_here = %v, want the rename's mark", got)
+	}
+}
+
+// staticAdminDefaults answers administrator defaults from a map of server
+// settings keys to stored values.
+type staticAdminDefaults map[string]string
+
+func (d staticAdminDefaults) Get(_ context.Context, key string) (string, error) { return d[key], nil }
+
+// TestProfileEditEffectiveValueDB: a setting edit is judged on the value the
+// profile effectively has, administrator default included. It catches an
+// explicit choice of the contract default going unrecorded when the profile
+// inherited the administrator's other default, an echo of an inherited value
+// recorded as an edit, and a reset judged on whether a row went rather than
+// on whether the profile's value changed.
+func TestProfileEditEffectiveValueDB(t *testing.T) {
+	f := newEditsFixture(t)
+	f.mustApply(t, setDoc(t, 1, newSetItem("Parent")))
+	key := settingskeys.UiNextUpMode
+	provider := pgstore.NewPostgresProvider(f.pool).WithAdminDefaults(staticAdminDefaults{
+		settingscontract.AdminDefaultSettingKey(key): `"separate"`, // the contract default is "combined"
+	})
+	store, err := provider.ForUser(t.Context(), f.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := userstore.SettingIdentity{Key: key, Scope: "profile", ProfileID: f.primary}
+	put := func(t *testing.T, ctx context.Context, value string) {
+		t.Helper()
+		if _, err := store.UpsertSettingValue(ctx, id, json.RawMessage(value)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reset := func(t *testing.T, ctx context.Context) {
+		t.Helper()
+		if _, err := store.DeleteSettingValue(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	field := "settings." + key
+	for _, tc := range []struct {
+		name  string
+		write func(t *testing.T)
+		want  []string
+	}{
+		{"the account choosing the contract default over the administrator's", func(t *testing.T) {
+			put(t, f.account(), `"combined"`)
+		}, []string{fmt.Sprintf("account:%s:%d", field, f.userID)}},
+		{"an administrator choosing the contract default over the administrator's", func(t *testing.T) {
+			put(t, f.admin(), `"combined"`)
+		}, []string{fmt.Sprintf("owner:%s:%d", field, f.adminID)}},
+		{"an echo of the inherited administrator default", func(t *testing.T) {
+			put(t, f.account(), `"separate"`)
+		}, nil},
+		{"a reset that changes the effective value", func(t *testing.T) {
+			put(t, profileedits.WithoutRecording(f.account()), `"combined"`)
+			reset(t, f.account())
+		}, []string{fmt.Sprintf("account:%s:%d", field, f.userID)}},
+		{"a reset of a value equal to the inherited one", func(t *testing.T) {
+			put(t, profileedits.WithoutRecording(f.account()), `"separate"`)
+			reset(t, f.account())
+		}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := f.pool.Exec(t.Context(), `DELETE FROM user_setting_values WHERE user_id = $1 AND key = $2`, f.userID, key); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.pool.Exec(t.Context(), `DELETE FROM profile_set_edits WHERE user_id = $1`, f.userID); err != nil {
+				t.Fatal(err)
+			}
+			tc.write(t)
+			var got []string
+			for _, e := range f.edits(t) {
+				got = append(got, fmt.Sprintf("%s:%s:%d", e.By, e.Field, e.ActorUserID))
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("edit rows = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

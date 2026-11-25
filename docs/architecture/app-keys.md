@@ -738,9 +738,20 @@ by a set built elsewhere.
 transaction: `updateProfile` for the set's item fields, compared before and
 after under the row lock (a web save sends every field, so presence would
 mark them all); the setting upsert, compare-and-set and delete helpers for a
-profile-scope key a set carries, when the profile's value changes (the stored
-value, or the contract default when nothing is stored, is read under the
-row's lock first; a reset that removes nothing changes nothing), with the key
+profile-scope key a set carries, when the profile's effective value changes.
+The value is resolved before and after the write, in its transaction, by
+`settingsresolve` over the same candidate query the settings routes use and
+the same administrator defaults reader the store is given
+(`PostgresProvider.WithAdminDefaults`), with no policy constraint: the
+profile's own row (locked first), else the account-scope row where the key
+resolves through it, else the administrator's default, else the contract's.
+An account-scope value written through the settings routes takes the
+account's preference-settings lock, as the recording writers do, so it can't
+change in between; an administrator default is read from the shared cached
+reader, as the read routes read it, and a change landing between the two
+reads at worst records or skips one edit.
+A write or reset that leaves the effective value unchanged records nothing,
+with the key
 its contract mirror names (`settingscontract.MirrorKey`) recorded alongside,
 since a set leaves the pair alone while either is the owner's; the profile
 delete for the removal. The preference columns are recorded

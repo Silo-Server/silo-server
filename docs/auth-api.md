@@ -837,15 +837,19 @@ What counts as an edit:
   reference stays the same; `pin` changes whenever a PIN is set, the same
   digits included.
 - A setting, `settings.<key>`, when a write or reset changes the profile's
-  own value. Writing the value already stored, or the default when nothing is
-  stored, and resetting a value that isn't there, are not edits. Two keys
+  effective value: the value the settings routes answer for that profile
+  (its own value, else what it inherits, an administrator's default
+  included). Writing the value the profile already has, inherited or stored,
+  and resetting a value equal to the one it would inherit, are not edits;
+  choosing the contract default over a different administrator default is. Two keys
   the settings contract keeps as spellings of one preference
   (`playback.intro_skip_mode` and `playback.auto_skip_intro`) are recorded
   together: a change of either moves both to whoever made it.
   `server_local` keys and settings stored per device, library or series are
   not in the set and are never recorded. A Jellyfin-compatible app's
-  configuration save writes only the values that differ from the ones it
-  shows the app, so echoing a page back records nothing.
+  configuration save writes only the values that differ from the effective
+  ones it shows the app, resolved the same way, so echoing a page back
+  records nothing.
 - A profile's deletion, in `deleted_here`. An owner's deletion also hides the
   profile: a set does not create or pair it again on this server, and reports
   it in `hidden_by_owner`.

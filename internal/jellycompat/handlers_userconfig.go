@@ -90,7 +90,13 @@ func (h *AuthHandler) resolvedUserDTO(ctx context.Context, session *Session) (us
 	if err != nil {
 		return dto, err
 	}
-	values, err := settingsresolve.New(contract).Resolve(ctx, store, settingsresolve.Context{ProfileID: session.ProfileID}, []string{settingskeys.PlaybackAudioLanguage, settingskeys.PlaybackSubtitleLanguage, settingskeys.PlaybackSubtitleMode, settingskeys.PlaybackShowForcedSubtitles, settingskeys.PlaybackAutoPlayNext, settingskeys.HomeHideWatchedItems}, nil)
+	// The resolution the native settings routes answer with, administrator
+	// defaults included, so a value echoed back reads as the one shown.
+	resolver := settingsresolve.New(contract)
+	if h.adminDefaults != nil {
+		resolver = resolver.WithAdminDefaults(h.adminDefaults)
+	}
+	values, err := resolver.Resolve(ctx, store, settingsresolve.Context{ProfileID: session.ProfileID}, []string{settingskeys.PlaybackAudioLanguage, settingskeys.PlaybackSubtitleLanguage, settingskeys.PlaybackSubtitleMode, settingskeys.PlaybackShowForcedSubtitles, settingskeys.PlaybackAutoPlayNext, settingskeys.HomeHideWatchedItems}, nil)
 	if err != nil {
 		return dto, err
 	}

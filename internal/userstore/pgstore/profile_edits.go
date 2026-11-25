@@ -11,6 +11,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/profileedits"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -119,27 +120,83 @@ func settingRecordable(ctx context.Context, userID int, id userstore.SettingIden
 	return ok
 }
 
-// settingBefore reads, locking its row, the value a write of id replaces:
-// the stored value, or the contract default when nothing is stored. A write
-// that leaves it as it was is not an edit.
-func settingBefore(ctx context.Context, exec preferenceSettingsExecutor, userID int, id userstore.SettingIdentity) (json.RawMessage, error) {
+// settingEffect follows a profile-scope setting's effective value across a
+// write: the value the profile has, resolved as the settings read routes
+// resolve it (the profile's own value, else what it inherits: the account's
+// value where the key resolves through the account, else the
+// administrator's default, else the contract's). A write or reset that leaves
+// it as it was is not an edit; one that changes it is, even when the stored
+// row then equals a default.
+type settingEffect struct {
+	before json.RawMessage
+	active bool
+}
+
+// beginSettingEffect locks id's row, if there is one, and resolves the
+// effective value before the write, when ctx records a change of id.
+func beginSettingEffect(ctx context.Context, exec preferenceSettingsExecutor, userID int, defaults settingsresolve.ServerSettings, id userstore.SettingIdentity) (settingEffect, error) {
+	if !settingRecordable(ctx, userID, id) {
+		return settingEffect{}, nil
+	}
 	clause, args := settingIdentityPredicate(userID, id)
-	var stored []byte
-	err := exec.QueryRow(ctx, "SELECT value FROM user_setting_values WHERE "+clause+" FOR UPDATE", args...).Scan(&stored)
-	if errors.Is(err, pgx.ErrNoRows) {
-		contract, err := settingscontract.Load()
-		if err != nil {
-			return nil, err
-		}
-		if def, ok := contract.Lookup(id.Key); ok {
-			return def.DefaultValue, nil
-		}
+	if _, err := exec.Exec(ctx, "SELECT 1 FROM user_setting_values WHERE "+clause+" FOR UPDATE", args...); err != nil {
+		return settingEffect{}, fmt.Errorf("locking setting %q before a write: %w", id.Key, err)
+	}
+	before, err := effectiveSetting(ctx, exec, userID, defaults, id)
+	if err != nil {
+		return settingEffect{}, err
+	}
+	return settingEffect{before: before, active: true}, nil
+}
+
+// finish resolves the effective value after the write and records an edit
+// when it changed.
+func (e settingEffect) finish(ctx context.Context, exec preferenceSettingsExecutor, userID int, defaults settingsresolve.ServerSettings, id userstore.SettingIdentity) error {
+	if !e.active {
+		return nil
+	}
+	after, err := effectiveSetting(ctx, exec, userID, defaults, id)
+	if err != nil {
+		return err
+	}
+	if sameSettingValue(e.before, after) {
+		return nil
+	}
+	return recordSettingEdit(ctx, exec, userID, id)
+}
+
+// effectiveSetting resolves id.Key for id.ProfileID with the resolver and
+// candidate read the settings routes use, on exec, with no policy
+// constraint: the value the profile chose or inherits, not what a cap lets
+// it play.
+func effectiveSetting(ctx context.Context, exec preferenceSettingsExecutor, userID int, defaults settingsresolve.ServerSettings, id userstore.SettingIdentity) (json.RawMessage, error) {
+	contract, err := settingscontract.Load()
+	if err != nil {
+		return nil, err
+	}
+	resolver := settingsresolve.New(contract)
+	if defaults != nil {
+		resolver = resolver.WithAdminDefaults(defaults)
+	}
+	values, err := resolver.Resolve(ctx, resolutionRows{exec: exec, userID: userID},
+		settingsresolve.Context{ProfileID: id.ProfileID}, []string{id.Key}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("resolving setting %q: %w", id.Key, err)
+	}
+	if len(values) == 0 {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, fmt.Errorf("reading setting %q before a write: %w", id.Key, err)
-	}
-	return stored, nil
+	return values[0].Value, nil
+}
+
+// resolutionRows reads candidate rows for the resolver on one executor.
+type resolutionRows struct {
+	exec   preferenceSettingsExecutor
+	userID int
+}
+
+func (r resolutionRows) ListSettingValuesForResolution(ctx context.Context, q userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
+	return listSettingValuesForResolution(ctx, r.exec, r.userID, q)
 }
 
 // sameSettingValue reports whether two JSON values are equal as values.

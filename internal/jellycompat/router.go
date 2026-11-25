@@ -92,6 +92,7 @@ func NewRouter(deps Dependencies) chi.Router {
 
 	systemHandler := NewSystemHandler(deps.CurrentConfig)
 	authHandler := NewAuthHandler(deps.CurrentConfig, deps.LoginResolver, deps.Authenticator).WithUserStore(deps.UserStoreProvider)
+	authHandler.adminDefaults = deps.AdminDefaults
 	if deps.AuthService != nil {
 		authHandler.passwordSignIn = deps.AuthService
 	}

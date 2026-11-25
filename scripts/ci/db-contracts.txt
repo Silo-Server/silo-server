@@ -1269,6 +1269,7 @@
 ./internal/api/handlers TestProfileSetRefusalOrderDB
 ./internal/api/handlers TestProfileSetAnswerNeedsNoUploadReadDB
 ./internal/api/handlers TestProfileSetLockedTokenRecheckDB
+./internal/api/handlers TestProfileEditEffectiveValueDB
 ./internal/api/handlers TestProfileSetEditsRaceSetDB
 ./internal/api/handlers TestProfileEditAccountDeleteRaceDB
 ./internal/api/handlers TestProfileEditPoolSettingWaitsForPairingDB
