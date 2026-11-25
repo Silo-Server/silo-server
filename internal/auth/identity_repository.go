@@ -103,13 +103,17 @@ func listIdentitiesForUser(ctx context.Context, db dbQuerier, userID int) ([]Lin
 }
 
 // lockIdentitiesBeforeSessions locks the accounts' provider identities, in
-// id order, before a transaction writes their device sign-in requests and
-// login sessions. A plugin uninstall's cascade takes those rows in that order
-// (identities, the requests approved through them, then the sessions opened
-// through them), so taking the identities first makes it wait for this
-// transaction, or this one wait for it, instead of deadlocking. forDelete
-// takes the lock that deleting them needs; otherwise the lock only stops an
-// uninstall or unlink from deleting them meanwhile.
+// id order. Every transaction that writes an account's device sign-in
+// requests or login sessions and may meet a plugin uninstall locks the
+// account row, then calls this before touching those rows: revocation,
+// account delete, approving and collecting a device sign-in. An uninstall
+// deletes the identities first, so it waits here, or this waits for it,
+// instead of the two deadlocking on requests and sessions. forDelete takes
+// the lock that deleting them needs. Otherwise the lock only stops an
+// uninstall or unlink from deleting them meanwhile; a provider sign-in to the
+// same account (which locks the identity FOR UPDATE) waits for it, as it
+// already waits on the account row, but account resolution's non-key update
+// of the identity does not.
 func lockIdentitiesBeforeSessions(ctx context.Context, db dbQuerier, userIDs []int, forDelete bool) error {
 	lock := "FOR KEY SHARE"
 	if forDelete {

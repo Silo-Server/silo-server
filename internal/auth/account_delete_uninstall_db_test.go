@@ -3,6 +3,8 @@ package auth
 import (
 	"context"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,8 +25,11 @@ type signInRowsFixture struct {
 	userID         int
 	installationID int64
 	identityID     int64
+	adminID        int
 	sessionID      string
 	requestID      string
+	deviceCode     string
+	deviceName     string
 	absSessionID   int64
 }
 
@@ -39,17 +44,22 @@ func newSignInRowsFixture(t *testing.T) *signInRowsFixture {
 		t.Fatal(err)
 	}
 	ctx := t.Context()
-	f := &signInRowsFixture{pool: pool, sessionID: uuid.NewString(), requestID: uuid.NewString()}
 	name := "signin-rows-" + uuid.NewString()
+	f := &signInRowsFixture{pool: pool, sessionID: uuid.NewString(), requestID: uuid.NewString(),
+		deviceCode: uuid.NewString(), deviceName: name}
 	t.Cleanup(func() {
 		ctx := context.WithoutCancel(t.Context())
-		_, _ = pool.Exec(ctx, `DELETE FROM device_login_requests WHERE id = $1`, f.requestID)
-		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, f.userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM device_login_requests WHERE device_name = $1`, f.deviceName)
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = ANY($1)`, []int{f.userID, f.adminID})
 		_, _ = pool.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, f.installationID)
 		pool.Close()
 	})
 	if err := pool.QueryRow(ctx, `INSERT INTO users (username, email, password_hash, role, enabled)
 		VALUES ($1, $2, 'x', 'user', true) RETURNING id`, name, name+"@example.test").Scan(&f.userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, email, password_hash, role, enabled)
+		VALUES ($1, $2, 'x', 'admin', true) RETURNING id`, name+"-admin", name+"-admin@example.test").Scan(&f.adminID); err != nil {
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path)
@@ -66,8 +76,9 @@ func newSignInRowsFixture(t *testing.T) *signInRowsFixture {
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO device_login_requests (id, device_code_hash, browser_code_hash, user_code_hash, match_code,
 			device_name, status, approved_by_user_id, approved_identity_id, approved_at, expires_at)
-		VALUES ($1, $2, $3, $4, '00', 'Test device', $5, $6, $7, NOW(), NOW() + interval '10 minutes')`,
-		f.requestID, uuid.NewString(), uuid.NewString(), uuid.NewString(), DeviceLoginStatusApproved, f.userID, f.identityID); err != nil {
+		VALUES ($1, $2, $3, $4, '00', $5, $6, $7, $8, NOW(), NOW() + interval '10 minutes')`,
+		f.requestID, hashDeviceLoginSecret(f.deviceCode), uuid.NewString(), uuid.NewString(), f.deviceName,
+		DeviceLoginStatusApproved, f.userID, f.identityID); err != nil {
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(ctx, `INSERT INTO abs_sessions (user_id, token_hash, device_id)
@@ -77,16 +88,20 @@ func newSignInRowsFixture(t *testing.T) *signInRowsFixture {
 	return f
 }
 
-// mutate runs an administrator's delete (nil input) or update of the account
-// in the background; revoke is what the caller's validation asks for.
-func (f *signInRowsFixture) mutate(ctx context.Context, input *models.UpdateUserInput, revoke bool) <-chan error {
-	done := make(chan error, 1)
-	go func() {
+// mutate is an administrator's delete (nil input) or update of the account;
+// revoke is what the caller's validation asks for.
+func (f *signInRowsFixture) mutate(input *models.UpdateUserInput, revoke bool) func(context.Context) error {
+	return func(ctx context.Context) error {
 		_, err := NewUserRepository(f.pool).MutateAdminAccount(ctx, f.userID, -1, input,
 			func(*models.User, pgx.Tx) (bool, error) { return revoke, nil })
-		done <- err
-	}()
-	return done
+		return err
+	}
+}
+
+// devices is a device sign-in service over the fixture's database.
+func (f *signInRowsFixture) devices() *DeviceLoginService {
+	return NewDeviceLoginService(f.pool, NewUserRepository(f.pool), NewJWTService("signin-rows-test-secret", time.Hour, 24*time.Hour),
+		NewSessionRepository(f.pool), nil, nil)
 }
 
 // uninstall begins the plugin uninstall's delete on its own connection,
@@ -178,18 +193,19 @@ func (f *signInRowsFixture) count(t *testing.T, query string, args ...any) int {
 	return n
 }
 
-// raceUninstall holds the account change at the Audiobookshelf session it
-// revokes after the login sessions, starts the uninstall and waits until
-// the uninstall waits on the account change, then lets the change go on.
-// Both must finish. Before the fix the change held the login session the
-// uninstall waited for, then waited for an identity or device sign-in
+// raceUninstall holds the account change on the row holdQuery locks, at a
+// point after it has locked rows the uninstall needs, starts the uninstall,
+// waits until the uninstall waits on the change, then lets the change go on.
+// Both must finish. Before the fix the change held a login session or device
+// sign-in request the uninstall waited for, then waited for an identity or
 // request the uninstall held: deadlock detected, 500.
-func (f *signInRowsFixture) raceUninstall(t *testing.T, input *models.UpdateUserInput, revoke bool) {
+func (f *signInRowsFixture) raceUninstall(t *testing.T, change func(context.Context) error, holdQuery string, holdArgs ...any) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	holder, holderPID := f.hold(ctx, t, `SELECT id FROM abs_sessions WHERE id = $1 FOR UPDATE`, f.absSessionID)
-	changed := f.mutate(ctx, input, revoke)
+	holder, holderPID := f.hold(ctx, t, holdQuery, holdArgs...)
+	changed := make(chan error, 1)
+	go func() { changed <- change(ctx) }()
 	changePID := f.blockedBy(ctx, t, holderPID, 0)
 	uninstallTx, uninstallPID, uninstalled := f.uninstall(ctx, t)
 	f.blockedBy(ctx, t, changePID, uninstallPID)
@@ -207,6 +223,18 @@ func (f *signInRowsFixture) raceUninstall(t *testing.T, input *models.UpdateUser
 	}
 }
 
+const holdABSSession = `SELECT id FROM abs_sessions WHERE id = $1 FOR UPDATE`
+
+// revoked counts the fixture's rows a sign-out everywhere ends, after the
+// uninstall unlinked them: the login session revoked and the device sign-in
+// approval withdrawn.
+func (f *signInRowsFixture) revoked(t *testing.T) int {
+	t.Helper()
+	return f.count(t, `SELECT count(*) FROM auth_sessions WHERE id = $1 AND revoked_at IS NOT NULL AND identity_id IS NULL`, f.sessionID) +
+		f.count(t, `SELECT count(*) FROM device_login_requests WHERE id = $1 AND status = $2 AND approved_identity_id IS NULL`,
+			f.requestID, DeviceLoginStatusDenied)
+}
+
 // Administrators changing an account's sign-ins while another uninstalls the
 // plugin behind its provider: both finish. The uninstall deletes the
 // identities, then clears device_login_requests.approved_identity_id, then
@@ -214,7 +242,7 @@ func (f *signInRowsFixture) raceUninstall(t *testing.T, input *models.UpdateUser
 func TestAccountSignInChangesDuringPluginUninstallDB(t *testing.T) {
 	t.Run("account delete", func(t *testing.T) {
 		f := newSignInRowsFixture(t)
-		f.raceUninstall(t, nil, false)
+		f.raceUninstall(t, f.mutate(nil, false), holdABSSession, f.absSessionID)
 		if n := f.count(t, `SELECT count(*) FROM users WHERE id = $1`, f.userID) +
 			f.count(t, `SELECT count(*) FROM auth_sessions WHERE id = $1`, f.sessionID); n != 0 {
 			t.Fatalf("%d of the account and session rows remain", n)
@@ -223,12 +251,61 @@ func TestAccountSignInChangesDuringPluginUninstallDB(t *testing.T) {
 	t.Run("account disable", func(t *testing.T) {
 		f := newSignInRowsFixture(t)
 		disabled := false
-		f.raceUninstall(t, &models.UpdateUserInput{Enabled: &disabled}, true)
-		if n := f.count(t, `SELECT count(*) FROM users WHERE id = $1 AND NOT enabled`, f.userID) +
-			f.count(t, `SELECT count(*) FROM auth_sessions WHERE id = $1 AND revoked_at IS NOT NULL AND identity_id IS NULL`, f.sessionID) +
-			f.count(t, `SELECT count(*) FROM device_login_requests WHERE id = $1 AND status = $2 AND approved_identity_id IS NULL`,
-				f.requestID, DeviceLoginStatusDenied); n != 3 {
-			t.Fatalf("%d of 3: account disabled, session revoked and unlinked, approval withdrawn and unlinked", n)
+		f.raceUninstall(t, f.mutate(&models.UpdateUserInput{Enabled: &disabled}, true), holdABSSession, f.absSessionID)
+		if f.count(t, `SELECT count(*) FROM users WHERE id = $1 AND NOT enabled`, f.userID) != 1 || f.revoked(t) != 2 {
+			t.Fatal("want the account disabled, its session revoked and its approval withdrawn, unlinked")
+		}
+	})
+	t.Run("administrator signs the account out everywhere", func(t *testing.T) {
+		f := newSignInRowsFixture(t)
+		f.raceUninstall(t, func(ctx context.Context) error {
+			_, err := NewSessionRepository(f.pool).RevokeAsAdmin(ctx, f.adminID, f.userID, nil)
+			return err
+		}, holdABSSession, f.absSessionID)
+		if f.revoked(t) != 2 {
+			t.Fatal("want the session revoked and the approval withdrawn, unlinked")
+		}
+	})
+	t.Run("device sign-in approved from a provider session", func(t *testing.T) {
+		f := newSignInRowsFixture(t)
+		devices := f.devices()
+		start, err := devices.Start(t.Context(), DeviceLoginStartInput{DeviceName: f.deviceName, ClientPurpose: DeviceLoginPurposeLogin})
+		if err != nil {
+			t.Fatal(err)
+		}
+		claims := &Claims{UserID: f.userID, SessionID: f.sessionID, TokenType: TokenTypeAccess}
+		// Held at the pending request, after the approval locked its session.
+		f.raceUninstall(t, func(ctx context.Context) error {
+			return devices.Approve(WithClaims(ctx, claims), DeviceLoginLookupInput{UserCode: start.UserCode}, f.userID)
+		}, `SELECT id FROM device_login_requests WHERE device_name = $1 AND status = $2 FOR UPDATE`,
+			f.deviceName, DeviceLoginStatusPending)
+		if f.count(t, `SELECT count(*) FROM device_login_requests WHERE device_name = $1 AND id <> $2 AND status = $3 AND approved_by_user_id = $4`,
+			f.deviceName, f.requestID, DeviceLoginStatusApproved, f.userID) != 1 {
+			t.Fatal("the device sign-in was not approved")
+		}
+	})
+	t.Run("device collects a sign-in approved through the provider", func(t *testing.T) {
+		f := newSignInRowsFixture(t)
+		// Hold the collect after it locked the request, as its session
+		// insert starts: a trigger waits on an advisory lock the test holds.
+		key := int64(uuid.New().ID())
+		fn := "test_hold_session_insert_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		if _, err := f.pool.Exec(t.Context(), `CREATE FUNCTION `+fn+`() RETURNS trigger LANGUAGE plpgsql AS $$
+			BEGIN PERFORM pg_advisory_xact_lock(`+strconv.FormatInt(key, 10)+`); RETURN NEW; END $$;
+			CREATE TRIGGER `+fn+` BEFORE INSERT ON auth_sessions FOR EACH ROW
+				WHEN (NEW.device_name = '`+f.deviceName+`') EXECUTE FUNCTION `+fn+`()`); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = f.pool.Exec(context.WithoutCancel(t.Context()), `DROP TRIGGER IF EXISTS `+fn+` ON auth_sessions; DROP FUNCTION IF EXISTS `+fn+`()`)
+		})
+		devices := f.devices()
+		f.raceUninstall(t, func(ctx context.Context) error {
+			_, err := devices.Poll(ctx, f.deviceCode, "")
+			return err
+		}, `SELECT pg_advisory_xact_lock($1)`, key)
+		if f.count(t, `SELECT count(*) FROM device_login_requests WHERE id = $1 AND status = $2`, f.requestID, DeviceLoginStatusConsumed) != 1 {
+			t.Fatal("the device did not collect its sign-in")
 		}
 	})
 }

@@ -423,6 +423,18 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 	if err := CheckOwnerTarget(OwnerActor{ID: actor.ID, IsOwner: actor.IsOwner}, target); err != nil {
 		return 0, err
 	}
+	// Sign out everywhere takes the account's identities, then its device
+	// sign-in approvals, then its sessions, as revokeSignInsInTransaction
+	// does (see lockIdentitiesBeforeSessions).
+	var withdrawn int64
+	if sessionID == nil {
+		if err := lockIdentitiesBeforeSessions(ctx, tx, []int{userID}, false); err != nil {
+			return 0, err
+		}
+		if withdrawn, err = withdrawDeviceSignInApprovalsInTransaction(ctx, tx, []int{userID}); err != nil {
+			return 0, err
+		}
+	}
 	query := `UPDATE auth_sessions SET revoked_at = NOW()
 		WHERE (user_id = $1 OR impersonator_user_id = $1)
 		AND revoked_at IS NULL AND expires_at > NOW()`
@@ -451,10 +463,10 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 	}
 	// Sign out everywhere also ends the account's other sign-ins; ending any
 	// of them is worth a domain row, even with no login session left.
-	ended := tag.RowsAffected()
+	ended := tag.RowsAffected() + withdrawn
 	if sessionID == nil {
 		for _, revoke := range []func(context.Context, pgx.Tx, []int) (int64, error){
-			revokeAudiobookshelfSessionsInTransaction, deleteJellyfinSessionsInTransaction, withdrawDeviceSignInApprovalsInTransaction,
+			revokeAudiobookshelfSessionsInTransaction, deleteJellyfinSessionsInTransaction,
 		} {
 			n, err := revoke(ctx, tx, []int{userID})
 			if err != nil {

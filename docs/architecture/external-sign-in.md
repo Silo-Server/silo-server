@@ -22,16 +22,31 @@ SDK's `docs/auth-provider.md`.
   to one account.
 - Upgrading a plugin keeps its installation id, so links survive. Uninstalling
   removes the installation and its identity rows; the accounts stay.
-- Lock order: account row, then identities, then device sign-in requests,
-  then login sessions. That is the order an uninstall's cascade takes them:
-  it deletes the identities, clears `device_login_requests.approved_identity_id`,
-  then clears `auth_sessions.identity_id`. The administrator account delete
-  and every revocation of an account's sign-ins (`revokeSignInsInTransaction`)
-  lock the account's identities first (`lockIdentitiesBeforeSessions`), and the
-  revocation withdraws device sign-in approvals before it revokes sessions.
-  The expired-session cleanup deletes sessions before the requests that name
-  them, so it never waits: it skips a session or request another transaction
-  holds and deletes that session on a later run.
+- Lock order with a plugin uninstall: a transaction that writes several of an
+  account's device sign-in requests or login sessions locks the account row,
+  then the account's identities (`lockIdentitiesBeforeSessions`, or the
+  identity `FOR UPDATE` where a path works on one identity), and only then
+  those rows. Revocation (`revokeSignInsInTransaction`, an administrator's
+  sign-out everywhere, replacing a temporary password), the administrator
+  account delete, a provider re-check, unlinking an identity, a provider
+  sign-in, and approving and collecting a device sign-in all do. An uninstall
+  reaches requests and sessions only through the `ON DELETE SET NULL` actions
+  of the identities it deletes, and those rows belong to the identity's
+  account, so it waits at the identities or the other transaction waits for
+  it. Today the uninstall's cascade clears requests before sessions, an order
+  that follows from the order the foreign keys were created and is not relied
+  on. Revocation also withdraws device sign-in approvals before it revokes
+  sessions.
+- Writes that take one request or one session row (marking a request opened,
+  a device's cancel, a denial, a single session's revoke, last-seen and expiry
+  updates) cannot form a cycle. Ending impersonation sessions (role changes, ownership moves)
+  touches only sessions that carry no identity, which an uninstall never
+  locks.
+- The expired-session and expired-request cleanups take no account or
+  identity locks, so they never wait: each skips any row another transaction
+  holds and deletes it on a later run. Deleting a session also clears
+  `device_login_requests.auth_session_id`, so the session cleanup skips a
+  session whose request is held too.
 
 ## Plugin answers
 
