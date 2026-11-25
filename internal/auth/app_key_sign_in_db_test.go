@@ -534,7 +534,7 @@ func TestKeySessionContinuesProviderChainDB(t *testing.T) {
 	env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_UNSUPPORTED, "")
 	env.makeDue(t)
 	setVouched(time.Now().Add(-recheckRefreshExpiry - time.Hour))
-	if _, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: device})); !errors.Is(err, ErrNotPermitted) {
+	if _, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: device})); !errors.Is(err, ErrProviderSignInRequired) {
 		t.Fatalf("key sign-in past the provider's age = %v", err)
 	}
 	// Signing in through the provider again moves the anchor; the key

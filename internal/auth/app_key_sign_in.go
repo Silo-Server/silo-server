@@ -26,6 +26,11 @@ var (
 	// ErrAppKeyDenied refuses a device key an administrator denied, or one
 	// that waited for approval longer than appkeys.PendingKeyLifetime.
 	ErrAppKeyDenied = errors.New("device key denied")
+	// ErrProviderSignInRequired refuses a provider-bound key whose identity
+	// row is gone, or whose provider can't re-check the identity and last
+	// vouched for it longer ago than a session may live. The person signs in
+	// through the provider once, and the key works again.
+	ErrProviderSignInRequired = errors.New("sign in through the provider again")
 	// ErrPersonKeyConflict refuses enrolling a person key on an account that
 	// holds a different one.
 	ErrPersonKeyConflict = errors.New("account has a different person key")

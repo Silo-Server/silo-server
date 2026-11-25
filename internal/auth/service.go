@@ -1422,6 +1422,12 @@ func (s *Service) checkSessionStanding(ctx context.Context, sessionID string) (*
 	return &sessionStanding{session: session, user: user, expiry: newExpiry, rechecked: rechecked}, nil
 }
 
+// errProviderChainEnded is the ErrSessionRevoked of a session past its
+// absolute age: the provider can't re-check it and last vouched more than
+// refresh_token_expiry ago. Opening a session by app key tells it apart from
+// a refusal.
+var errProviderChainEnded = fmt.Errorf("%w: the provider has not vouched for the person recently enough", ErrSessionRevoked)
+
 // providerExpiry is the furthest session may run under its provider chain,
 // from now: refresh_token_expiry for a session the provider vouches for or
 // that has none, and at most refresh_token_expiry after the provider last
@@ -1458,7 +1464,7 @@ func (s *Service) providerExpiry(ctx context.Context, session *models.AuthSessio
 		// did, and refresh no longer slides it.
 		limit := providerAnchor(session).Add(s.jwt.RefreshExpiry())
 		if !limit.After(now) {
-			return time.Time{}, rechecked, ErrSessionRevoked
+			return time.Time{}, rechecked, errProviderChainEnded
 		}
 		newExpiry = limit
 		if !session.ExpiresAt.IsZero() && session.ExpiresAt.Before(limit) {

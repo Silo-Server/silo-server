@@ -761,11 +761,13 @@ envelope, or a payload field in the wrong form once the signature verifies, is
 public key already enrolled on this server, or a different person key already
 on the account, is 409 `conflict`. While `auth.local_password_login` is off, a
 key not enrolled through the sign-in provider is 403 `local_login_disabled`
-except for a break-glass account. A key enrolled through the provider is 403
-`not_permitted` when the provider refuses the person, the identity is gone, or
-the provider can't re-check it and last vouched longer ago than
-`auth.refresh_token_expiry`; 503 `provider_unavailable` while its provider is
-disabled or, under the fail-closed outage policy, unreachable. A disabled
+except for a break-glass account. A key enrolled through the provider is 409
+`provider_sign_in_required` when its identity is gone, or the provider can't
+re-check it and last vouched longer ago than `auth.refresh_token_expiry`: the
+person signs in through the provider once and the key works again. It is 403
+`not_permitted` when the provider refused the person, and 503
+`provider_unavailable` while its provider is disabled or, under the fail-closed
+outage policy, unreachable. A disabled
 account is 403 `permission_denied`.
 
 `enroll`, `PUT /auth/keys/person` and `DELETE /auth/keys/devices/{id}` refuse an

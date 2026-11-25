@@ -225,6 +225,7 @@ func TestAppKeyProblems(t *testing.T) {
 		{err: auth.ErrAppKeyAlreadyEnrolled, want: TypeConflict},
 		{err: auth.ErrLocalLoginDisabled, want: TypeLocalLoginDisabled},
 		{err: auth.ErrNotPermitted, want: TypeNotPermitted},
+		{err: auth.ErrProviderSignInRequired, want: TypeProviderSignInRequired},
 		{err: &auth.KeyRetryError{RetryAfter: 3 * time.Second}, want: TypeRateLimited, retry: "3"},
 	} {
 		t.Run(tc.want.ID+" "+tc.err.Error(), func(t *testing.T) {

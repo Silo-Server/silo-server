@@ -362,6 +362,7 @@ var appKeyProblems = []struct {
 	{auth.ErrSessionRevoked, TypeSessionExpired, "The login session is no longer valid."},
 	{auth.ErrUserDisabled, TypePermissionDenied, "The account is disabled."},
 	{auth.ErrLocalLoginDisabled, TypeLocalLoginDisabled, "This server signs this account in only through its sign-in provider."},
+	{auth.ErrProviderSignInRequired, TypeProviderSignInRequired, "Sign in with this server's sign-in provider once; after that this device signs in again."},
 	{auth.ErrNotPermitted, TypeNotPermitted, "The sign-in provider does not permit this account to sign in."},
 	{auth.ErrProviderUnavailable, TypeProviderUnavailable, "The sign-in provider is unavailable; try again later."},
 }

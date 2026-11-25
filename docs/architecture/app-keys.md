@@ -134,8 +134,9 @@ re-checks the provider when due, under the outage policy, and where the
 provider can't re-check the identity it refuses the sign-in once that time is
 more than `auth.refresh_token_expiry` ago. Inside the transaction the identity
 and its installation are locked and checked as an OAuth sign-in checks them.
-A key whose identity row is gone is refused, and so is one the provider
-refuses (403 `not_permitted`); a disabled installation or a fail-closed outage
+A key whose identity row is gone, or past that age limit, is 409
+`provider_sign_in_required`; one the provider refused is 403 `not_permitted`,
+as an OAuth sign-in answers it; a disabled installation or a fail-closed outage
 is 503 `provider_unavailable`. The person recovers by signing in through the
 provider again on any device, which moves `last_authenticated_at`; their keys
 then work again without enrolling anew. That age limit does not revoke keys.
@@ -209,8 +210,18 @@ never carries it. An app that signs in by key follows these rules:
 - The reply is sealed but not signed, so a pin learned from it is trust on
   first use, and only when the device holds no pin for that server. A reply
   whose pin differs from the one the device holds is a mismatch, and the device
-  stops. A device replaces a pin only over a connection authenticated by a
-  system-trusted certificate or by the old pin, or when the person says so.
+  stops.
+- A device replaces a pin it holds only over TLS that presents the old pin, over
+  HTTPS with a system-trusted certificate at an address the person reached
+  themselves, or when the person says so. HTTPS with a system-trusted
+  certificate at an address the server merely reported is not enough: a server
+  that reports a domain it no longer controls would let whoever holds that
+  domain, with a valid certificate, hand the device their own key as the new
+  pin.
+- TLS that presents a key while the device holds no pin for the server is
+  acceptable only at an address the person reached themselves, as first
+  contact, and the pin the device takes from the sealed reply must equal the
+  key that connection presented.
 - After a first contact over plain HTTP, the device moves to HTTPS with the pin
   on the same host and port before it sends anything else.
 - An address that has presented the pinned key once must always present it.

@@ -34,7 +34,7 @@ func identityAnchor(ctx context.Context, db rowQuerier, userID int, identityID i
 	err := db.QueryRow(ctx, `SELECT COALESCE(last_authenticated_at, linked_at) FROM plugin_auth_identities
 		WHERE id = $1 AND user_id = $2`, identityID, userID).Scan(&anchor)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return time.Time{}, ErrNotPermitted
+		return time.Time{}, ErrProviderSignInRequired
 	}
 	if err != nil {
 		return time.Time{}, fmt.Errorf("reading provider identity: %w", err)
@@ -49,9 +49,10 @@ func identityAnchor(ctx context.Context, db rowQuerier, userID int, identityID i
 // runs before the sign-in's transaction, because a re-check takes the
 // account lock in a transaction of its own.
 //
-// A refusal, an identity row that is gone, and a chain past its end refuse
-// the sign-in with ErrNotPermitted; the person signs in through the provider
-// again, which moves the anchor, and the key works again. An outage under the
+// An identity row that is gone, and a chain past its end, refuse the sign-in
+// with ErrProviderSignInRequired: the person signs in through the provider
+// again, which moves the anchor, and the key works again. A refusal on record
+// is ErrNotPermitted, as an OAuth sign-in answers it. An outage under the
 // fail-closed policy is ErrProviderUnavailable. A key that is not
 // provider-bound runs the ordinary refresh_token_expiry.
 func (s *Service) keyProviderExpiry(ctx context.Context, userID int, binding KeyBinding) (time.Time, error) {
@@ -60,7 +61,7 @@ func (s *Service) keyProviderExpiry(ctx context.Context, userID int, binding Key
 		return now.Add(s.jwt.RefreshExpiry()), nil
 	}
 	if binding.IdentityID == nil {
-		return time.Time{}, ErrNotPermitted
+		return time.Time{}, ErrProviderSignInRequired
 	}
 	anchor, err := identityAnchor(ctx, s.sessions.pool, userID, *binding.IdentityID)
 	if err != nil {
@@ -69,7 +70,10 @@ func (s *Service) keyProviderExpiry(ctx context.Context, userID int, binding Key
 	expiry, _, err := s.providerExpiry(ctx, &models.AuthSession{
 		UserID: userID, IdentityID: binding.IdentityID, ProviderSince: &anchor, CreatedAt: now,
 	}, now)
-	if errors.Is(err, ErrSessionRevoked) {
+	switch {
+	case errors.Is(err, errProviderChainEnded):
+		return time.Time{}, ErrProviderSignInRequired
+	case errors.Is(err, ErrSessionRevoked):
 		return time.Time{}, ErrNotPermitted
 	}
 	return expiry, err
@@ -84,7 +88,7 @@ func (s *Service) keyProviderExpiry(ctx context.Context, userID int, binding Key
 // it (the installation enabled, no refusal on record, and a network
 // identity's primary provider not refusing the account), and the session is
 // opened under it from the identity's anchor (identityAnchor), read under
-// that lock. A key whose identity row is gone is refused. keyProviderExpiry
+// that lock. A key whose identity row is gone is ErrProviderSignInRequired. keyProviderExpiry
 // has already applied the re-check and the age limit.
 //
 // A key that is not provider-bound is a local credential. While the server
@@ -109,7 +113,7 @@ func keySignInPolicy(ctx context.Context, tx pgx.Tx, user *models.User, binding 
 // answers it with its anchor, read under the lock.
 func lockKeyIdentity(ctx context.Context, tx pgx.Tx, user *models.User, identityID *int64) (*int64, *time.Time, error) {
 	if identityID == nil {
-		return nil, nil, ErrNotPermitted
+		return nil, nil, ErrProviderSignInRequired
 	}
 	installationID, err := lockOAuthIdentity(ctx, tx, user.ID, *identityID)
 	if err != nil {
