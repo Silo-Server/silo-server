@@ -618,11 +618,18 @@ so that leaving the member out can't loosen what the profile may see.
 
 **One validation for both forms.** The session form's body is checked by the
 request schema before its handler runs, and then by the set parser. A signed
-set is opaque to the schema until its envelope verifies, so the handler runs
-the payload's `set`, `pairs` and `edits_seen` through that same schema as the
-session body they would have been (`validateSignedProfileSet`), and then both
-forms go through the one parser (`handlers.CheckProfileSet`) before anything
-is spent or locked. The two forms therefore cannot disagree on what a set may
+set is opaque to the schema until its envelope verifies. The envelope's
+verifier (`appkeys.VerifyProfileSet`) checks the signature, the challenge and
+the envelope's own fields, requires only that a set is there, and hands the
+`set`, `pairs` and `edits_seen` back as sent; it applies none of the
+protocol's rules for what they hold, because a refusal there would name
+`body.payload` and not the member. The handler then runs those three through
+the same schema as the session body they would have been
+(`validateSignedProfileSet`), and both forms go through the one parser
+(`handlers.CheckProfileSet`) before anything is spent or locked. That shared
+rule refuses everything the protocol's own content rule refuses
+(`appkeys.Verify`, which the protocol's test vectors still run). A payload
+with no set, or a null one, is a fault of the envelope. The two forms therefore cannot disagree on what a set may
 hold, and they name a fault at the same location (`body.set.items[2].name`)
 with the same code. A table test sends each malformed set both ways and
 requires identical answers.

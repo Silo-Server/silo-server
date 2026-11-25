@@ -50,7 +50,10 @@ type Payload struct {
 	Pairs json.RawMessage
 	// EditsSeen is a profile-set's optional edits_seen: the edits token the
 	// device read from the server before building the set, "" when absent.
-	EditsSeen string
+	// EditsSeenRaw is the member as sent, nil when absent, for a caller that
+	// checks the content itself (VerifyProfileSet).
+	EditsSeen    string
+	EditsSeenRaw json.RawMessage
 
 	fields map[string]json.RawMessage
 }
@@ -80,7 +83,7 @@ func (p *Payload) parse(raw []byte, purpose Purpose) error {
 }
 
 // parseFields reads and checks every field the purpose carries.
-func (p *Payload) parseFields(purpose Purpose) error {
+func (p *Payload) parseFields(purpose Purpose, setContentLater bool) error {
 	if err := p.parseCommon(); err != nil {
 		return err
 	}
@@ -113,7 +116,15 @@ func (p *Payload) parseFields(purpose Purpose) error {
 		}
 		return p.parseInnerGrant()
 	case PurposeProfileSet:
-		return p.parseProfileSet()
+		if err := p.parseProfileSet(); err != nil {
+			return err
+		}
+		if setContentLater {
+			// A string edits_seen is still read, for a caller that uses it.
+			_ = decodeJSONString(p.EditsSeenRaw, &p.EditsSeen)
+			return nil
+		}
+		return p.checkProfileSetContent()
 	}
 	return fail(CodeFieldInvalid)
 }
@@ -214,10 +225,30 @@ func (p *Payload) parseProfileSet() error {
 	if !decodeJSONString(p.fields["account_id"], &p.AccountID) || p.AccountID == "" {
 		return fail(CodeFieldInvalid)
 	}
-	var set map[string]json.RawMessage
-	if err := json.Unmarshal(p.fields["set"], &set); err != nil || set == nil {
+	// The envelope's own fields end here. The set, pairs and edits_seen are
+	// carried as sent: what they may hold is checkProfileSetContent's rule,
+	// or the caller's (VerifyProfileSet).
+	// A payload with no set, or a null one, carries no set at all: that is
+	// a fault of the envelope, not of a set.
+	raw, ok := p.fields["set"]
+	if !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return fail(CodeFieldInvalid)
 	}
+	p.Set, p.Pairs, p.EditsSeenRaw = raw, p.fields["pairs"], p.fields["edits_seen"]
+	return nil
+}
+
+// checkProfileSetContent is the protocol's rule for what a profile-set
+// carries: a set with a whole-number version and an array of items, pairs
+// that are an array, and an edits_seen that is a short string. Verify applies
+// it. VerifyProfileSet leaves it to a caller that holds the set to a
+// stricter rule of its own and wants to name the member at fault.
+func (p *Payload) checkProfileSetContent() error {
+	var set map[string]json.RawMessage
+	if err := json.Unmarshal(p.Set, &set); err != nil || set == nil {
+		return fail(CodeFieldInvalid)
+	}
+	var err error
 	if p.SetVersion, err = WholeNumber(set["version"]); err != nil {
 		return err
 	}
@@ -225,13 +256,11 @@ func (p *Payload) parseProfileSet() error {
 	if err := json.Unmarshal(set["items"], &items); err != nil || items == nil {
 		return fail(CodeFieldInvalid)
 	}
-	p.Set = p.fields["set"]
-	if raw, ok := p.fields["pairs"]; ok {
+	if p.Pairs != nil {
 		var pairs []json.RawMessage
-		if err := json.Unmarshal(raw, &pairs); err != nil || pairs == nil {
+		if err := json.Unmarshal(p.Pairs, &pairs); err != nil || pairs == nil {
 			return fail(CodeFieldInvalid)
 		}
-		p.Pairs = raw
 	}
 	p.EditsSeen, _, err = p.textField("edits_seen", MaxEditsSeenLength, false)
 	return err

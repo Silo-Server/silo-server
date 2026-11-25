@@ -674,8 +674,10 @@ travels inside `payload`, and its members are still reported at the locations
 the session form uses (`body.set…`), so an app has one mapping from a location
 to a field. There `body.set` is not a path into the signed request, which has
 no `set` member; it names the same member of the same set. Only a fault in the
-envelope itself (its signature, challenge, `account_id` or times) is reported
-as the other signed routes report it. A new item named like a profile outside
+envelope itself (its signature, challenge, `account_id` or times, or a payload
+with no set at all) is reported as the other signed routes report it. A signed
+set is validated after its signature verifies, so a 422 for it has already
+spent the challenge: correct the set, get a new challenge, and sign again. A new item named like a profile outside
 the set is 422 at its name with code `name_conflict`.
 
 **Answer.**

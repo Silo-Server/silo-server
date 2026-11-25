@@ -196,13 +196,17 @@ func TestProfileSetFormsValidateAlike(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			setJSON, _ := json.Marshal(tc.set)
 			members := map[string]any{"set": tc.set}
-			authority := &auth.ProfileSetAuthority{UserID: 1, Set: setJSON, EditsSeen: tc.editsSeen}
+			// What a verified envelope hands the route: the payload's members
+			// as sent, and edits_seen as a string when it is one.
+			authority := &auth.ProfileSetAuthority{UserID: 1, Set: setJSON}
 			if tc.pairs != nil {
 				members["pairs"] = tc.pairs
 				authority.Pairs, _ = json.Marshal(tc.pairs)
 			}
-			if tc.editsSeen != "" {
+			if tc.editsSeen != nil {
 				members["edits_seen"] = tc.editsSeen
+				authority.EditsSeenRaw, _ = json.Marshal(tc.editsSeen)
+				authority.EditsSeen, _ = tc.editsSeen.(string)
 			}
 			sessionBody, _ := json.Marshal(members)
 			send := func(body string, headers map[string]string) answer {
@@ -228,10 +232,12 @@ func TestProfileSetFormsValidateAlike(t *testing.T) {
 
 // profileSetFormCase is one set sent in both forms.
 type profileSetFormCase struct {
-	name      string
-	set       any
+	name string
+	set  any
+	// pairs and editsSeen are sent as they are, whatever their type; nil
+	// leaves the member out.
 	pairs     any
-	editsSeen string
+	editsSeen any
 	ok        bool
 }
 
@@ -292,6 +298,12 @@ func profileSetFormCases() []profileSetFormCase {
 		{name: "a pair without local_id", set: set(whole()), pairs: []any{map[string]any{"sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e"}}},
 		{name: "pairs not an array", set: set(whole()), pairs: "x"},
 		{name: "edits_seen too long", set: set(whole()), editsSeen: strings.Repeat("e", 65)},
+		{name: "edits_seen a number", set: set(whole()), editsSeen: 5},
+		{name: "edits_seen with a control character", set: set(whole()), editsSeen: "e1.\x00"},
+		{name: "edits_seen as the server gave it", set: set(whole()), editsSeen: "", ok: true},
+		{name: "items null", set: map[string]any{"version": 1, "items": nil}},
+		{name: "version 2^53", set: map[string]any{"version": float64(1 << 53), "items": []any{whole()}}},
+		{name: "a pair not an object", set: set(whole()), pairs: []any{5}},
 	}
 	for member := range whole() {
 		item := whole()

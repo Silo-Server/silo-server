@@ -133,8 +133,8 @@ func parseProfileSet(set, pairs json.RawMessage, editsSeen string) (*profileSetD
 	if err := json.Unmarshal(top["items"], &rawItems); err != nil || len(rawItems) == 0 || len(rawItems) > maxProfileSetItems {
 		return nil, profileSetFieldError("set.items", fmt.Sprintf("The set must hold 1 to %d items.", maxProfileSetItems))
 	}
-	if utf8.RuneCountInString(editsSeen) > appkeys.MaxEditsSeenLength {
-		return nil, profileSetFieldError("edits_seen", "edits_seen is at most 64 characters.")
+	if utf8.RuneCountInString(editsSeen) > appkeys.MaxEditsSeenLength || hasControlCharacter(editsSeen) {
+		return nil, profileSetFieldError("edits_seen", "edits_seen is at most 64 characters, with no control characters.")
 	}
 	doc := &profileSetDoc{Version: version, EditsSeen: editsSeen}
 	syncIDs := map[string]bool{}

@@ -49,6 +49,30 @@ func TestVerifyProfileSetDB(t *testing.T) {
 			t.Fatal("replaying an accepted set was not refused as challenge_invalid")
 		}
 	})
+	// What the set, pairs and edits_seen hold is not judged here: the route
+	// holds a signed set to the rule it holds a session's to, and names the
+	// member at fault. They come back as sent.
+	t.Run("malformed content is the route's to refuse", func(t *testing.T) {
+		req := request(person, user.ID, map[string]any{
+			"set": map[string]any{"version": "three", "items": "none"}, "pairs": "x", "edits_seen": 5,
+		})
+		got, err := env.signIn.VerifyProfileSet(ctx, req)
+		if err != nil {
+			t.Fatalf("err = %v, want the content left to the caller", err)
+		}
+		if !strings.Contains(string(got.Set), `"three"`) || string(got.Pairs) != `"x"` || string(got.EditsSeenRaw) != "5" || got.EditsSeen != "" {
+			t.Fatalf("authority = %+v, want the members as sent", got)
+		}
+		if !spent(t, req) {
+			t.Fatal("the challenge was not spent")
+		}
+		// A payload with no set is the envelope's fault.
+		for _, fields := range []map[string]any{{"set": nil}} {
+			if _, err := env.signIn.VerifyProfileSet(ctx, request(person, user.ID, fields)); appkeys.CodeOf(err) != appkeys.CodeFieldInvalid {
+				t.Fatalf("a payload whose set is %v: err = %v, want field_invalid", fields["set"], err)
+			}
+		}
+	})
 	t.Run("another account", func(t *testing.T) {
 		req := request(person, admin.ID, nil)
 		if _, err := env.signIn.VerifyProfileSet(ctx, req); !errors.Is(err, ErrKeySignatureInvalid) {
@@ -65,12 +89,6 @@ func TestVerifyProfileSetDB(t *testing.T) {
 		}
 		if !spent(t, req) {
 			t.Fatal("the challenge was not spent")
-		}
-	})
-	t.Run("edits_seen over 64 characters", func(t *testing.T) {
-		_, err := env.signIn.VerifyProfileSet(ctx, request(person, user.ID, map[string]any{"edits_seen": strings.Repeat("e", 65)}))
-		if appkeys.CodeOf(err) != appkeys.CodeFieldInvalid {
-			t.Fatalf("err = %v, want a field refusal", err)
 		}
 	})
 	t.Run("edits_seen changed after signing", func(t *testing.T) {
