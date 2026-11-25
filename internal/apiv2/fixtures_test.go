@@ -2651,6 +2651,8 @@ func (fixtureProfileSets) ApplyProfileSet(_ context.Context, cmd handlers.Profil
 	sam := "0f8fad5b-d9cb-469f-a165-70867728950e"
 	return handlers.ProfileSetResult{Version: 1, Profiles: []handlers.ProfileSetMember{{SyncID: sam, ID: "p-owner"}},
 		AwaitingPins: []string{}, SkippedSettings: []handlers.ProfileSetSkippedSetting{{SyncID: sam, Key: "playback.subtitle_mode"}},
+		HiddenByOwner:          []string{"6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11"},
+		Overrides:              []handlers.ProfileSetOverride{{SyncID: sam, Field: "max_content_rating", Value: json.RawMessage(`"PG"`)}},
 		JellyfinBareNameSignIn: new(true)}, nil
 }
 
@@ -2658,8 +2660,20 @@ func (fixtureProfileSets) HeldProfileSet(_ context.Context, userID int) (handler
 	if userID == 2 {
 		return handlers.ProfileSetHeld{LocalOnly: []handlers.ProfileSetLocal{{ID: "p-admin", Name: "Ada"}}}, nil
 	}
+	sam, at := "0f8fad5b-d9cb-469f-a165-70867728950e", time.Date(2026, 11, 25, 3, 50, 0, 0, time.UTC)
 	return handlers.ProfileSetHeld{Version: 7, LocalOnly: []handlers.ProfileSetLocal{{ID: "p-guest", Name: "Guest"}}, JellyfinBareNameSignIn: new(false),
-		Items: []handlers.ProfileSetHeldItem{{SyncID: "0f8fad5b-d9cb-469f-a165-70867728950e", ID: "p-owner", Name: "Sam",
-			Picture: "preset:avatar-3", HasPIN: true, MaxAdvisoryAge: 12,
-			Settings: map[string]json.RawMessage{"playback.audio_language": json.RawMessage(`"en"`)}}}}, nil
+		Items: []handlers.ProfileSetHeldItem{{SyncID: sam, ID: "p-owner", Name: "Sam",
+			Picture: "preset:avatar-3", HasPIN: true, MaxContentRating: "PG", MaxAdvisoryAge: 12,
+			Settings: map[string]json.RawMessage{"playback.audio_language": json.RawMessage(`"en"`)},
+			ChangedHere: []handlers.ProfileSetFieldChange{
+				{Field: "max_content_rating", At: at, By: "owner"}, {Field: "name", At: at, By: "account"},
+				{Field: "settings.playback.subtitle_language", At: at, By: "owner"},
+			}}},
+		DeletedHere: []handlers.ProfileSetDeletion{{SyncID: "6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11", At: at, By: "owner"}},
+		Overrides: []handlers.ProfileSetOverride{
+			{SyncID: sam, Field: "max_content_rating", Value: json.RawMessage(`"PG"`)},
+			{SyncID: sam, Field: "settings.playback.subtitle_language"},
+		},
+		HiddenByOwner: []string{"6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11"},
+		EditsToken:    "e1.mFzDq0dX7eTsc3m6SfN0Lw1o2s0kHqgV"}, nil
 }
