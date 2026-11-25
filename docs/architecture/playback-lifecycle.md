@@ -51,9 +51,15 @@ transition.
 - Native v2 pause and resume commit in `ApplyProgress`'s transaction, after the
   attempt's compare-and-set. The attempt row lock orders concurrent samples, every
   applied sample sets the state to its own, and a stale sample is never applied. The
-  announced state is therefore always the latest accepted sample's, and a lost update
-  is repaired by the next sample. The control socket's confirmed pause does not touch
-  it; the player's next sample carries the pause.
+  announced state is therefore always the latest accepted sample's, or a
+  confirmation received after it (below), and a lost update is repaired by the next
+  sample.
+- A pause or resume the player confirms over its control socket moves the row at
+  once, before the sync that cues monitors to re-read the list
+  (`ConfirmLifecyclePause`). It holds a share lock on the attempt row and applies only
+  while the attempt has accepted no progress since the confirmation
+  arrived, so progress accepted after that receipt is never overwritten: that sample
+  set its own state.
 - Jellyfin and Audiobookshelf reports carry no sequence. Their pause state
   follows database arrival order and writes only when it changes.
 - `stopped` is final.
@@ -135,8 +141,8 @@ before the attempt expires, and the existing expiry then ends the session.
   Watch Together room (`runtime->'members'`, phase `lobby` or `playing`; a runtime
   whose `members` is not an object lists nobody), and an audio-only effective
   file (`MediaFile.IsAudioOnly`, resolved in Go because it depends on the
-  probe). The pause starts when a sample turns the lifecycle
-  row paused; later paused samples, and seeks while paused, do not restart it.
+  probe). The pause starts when a sample or a confirmed pause
+  turns the lifecycle row paused; later paused samples, and seeks while paused, do not restart it.
 - **Ownership.** A session this server holds, or one no server has synced for
   45 seconds, is this server's to end. One another server synced recently is
   left to that server's sweep, which ends it from its own copy; the candidate

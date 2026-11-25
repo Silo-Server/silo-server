@@ -514,6 +514,9 @@ func (h *PlaybackHandler) setConfirmedPauseState(sessionID string, paused bool, 
 	if !changed {
 		return
 	}
+	// The admin list reads the pause state from the lifecycle row, so it
+	// moves before the sync that cues monitors to re-read the list.
+	h.sessionPauseConfirmed(context.Background(), sessionID, paused, receivedSequence)
 	syncCtx, cancelSync := context.WithTimeout(context.Background(), 10*time.Second)
 	h.syncSessionsNow(syncCtx, "realtime_pause")
 	cancelSync()

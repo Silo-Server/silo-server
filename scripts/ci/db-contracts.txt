@@ -758,6 +758,7 @@
 ./internal/api/handlers TestPlaybackLifecycleTransitionsDB
 ./internal/api/handlers TestNativeSessionsListLifecycleDB
 ./internal/api/handlers TestPlaybackLifecycleOrderAndStartStateDB
+./internal/api/handlers TestConfirmedPauseLifecycleDB
 ./internal/api/handlers TestLifecycleSweepSelectsWhatItCanEndDB
 ./internal/api/handlers TestLifecycleSweepPassesLiveJellyfinPlaysDB
 ./internal/api/handlers TestLifecycleSweepBacksOffFailedEndsDB
