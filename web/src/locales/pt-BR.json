@@ -8220,6 +8220,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Cartões"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Layout"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabela"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -55250,7 +55268,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tendências de exibição, títulos populares, atividade da casa, reprodução por dispositivo e largura de banda."
+      "value": "Transmissões ao vivo, tendências de exibição, títulos populares, atividade da casa, reprodução por dispositivo e largura de banda."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -88596,7 +88614,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tendências de exibição, títulos populares, contas, dispositivos e largura de banda."
+      "value": "Transmissões ao vivo, tendências de exibição, títulos populares, contas, dispositivos e largura de banda."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

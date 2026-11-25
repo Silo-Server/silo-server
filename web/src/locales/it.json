@@ -8228,6 +8228,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Schede"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Layout"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabella"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -54966,7 +54984,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tendenze di visione, titoli più visti, attività del nucleo familiare, riproduzione sui dispositivi e larghezza di banda."
+      "value": "Stream live, tendenze di visione, titoli più visti, attività del nucleo familiare, riproduzione sui dispositivi e larghezza di banda."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -88448,7 +88466,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tendenze di visione, titoli più visti, account, dispositivi e larghezza di banda."
+      "value": "Stream live, tendenze di visione, titoli più visti, account, dispositivi e larghezza di banda."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

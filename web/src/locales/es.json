@@ -8248,6 +8248,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Tarjetas"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Diseño"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabla"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -55190,7 +55208,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tendencias de visualización, títulos más vistos, actividad del hogar, reproducción por dispositivo y ancho de banda."
+      "value": "Transmisiones en directo, tendencias de visualización, títulos más vistos, actividad del hogar, reproducción por dispositivo y ancho de banda."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -88556,7 +88574,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tendencias de visualización, títulos más vistos, cuentas, dispositivos y ancho de banda."
+      "value": "Transmisiones en directo, tendencias de visualización, títulos más vistos, cuentas, dispositivos y ancho de banda."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

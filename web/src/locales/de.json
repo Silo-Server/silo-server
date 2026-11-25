@@ -7991,6 +7991,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Karten"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Layout"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabelle"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -49089,7 +49107,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Wiedergabetrends, beliebte Titel, Aktivität im Haushalt, Wiedergabe auf Geräten und Bandbreite."
+      "value": "Live-Streams, Wiedergabetrends, beliebte Titel, Aktivität im Haushalt, Wiedergabe auf Geräten und Bandbreite."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -81054,7 +81072,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Wiedergabetrends, beliebte Titel, Konten, Geräte und Bandbreite."
+      "value": "Live-Streams, Wiedergabetrends, beliebte Titel, Konten, Geräte und Bandbreite."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

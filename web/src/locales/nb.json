@@ -8015,6 +8015,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kort"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Oppsett"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabell"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -49321,7 +49339,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Seertrender, populære titler, aktivitet i husstanden, avspilling per enhet og båndbredde."
+      "value": "Aktive strømmer, seertrender, populære titler, aktivitet i husstanden, avspilling per enhet og båndbredde."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -81214,7 +81232,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Seertrender, populære titler, kontoer, enheter og båndbredde."
+      "value": "Aktive strømmer, seertrender, populære titler, kontoer, enheter og båndbredde."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
