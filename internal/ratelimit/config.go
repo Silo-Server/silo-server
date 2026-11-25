@@ -114,6 +114,8 @@ func DefaultSettings() map[string]string {
 		"ratelimit.auth.key_challenge.burst":                 "20",
 		"ratelimit.auth.key_sign_in.requests_per_minute":     "60",
 		"ratelimit.auth.key_sign_in.burst":                   "20",
+		"ratelimit.auth.profile_set.requests_per_minute":     "20",
+		"ratelimit.auth.profile_set.burst":                   "10",
 		"ratelimit.auth.item_poster.requests_per_minute":     "600",
 		"ratelimit.auth.item_poster.burst":                   "400",
 		sessionModeSetting:                                   SessionQuotaLog,

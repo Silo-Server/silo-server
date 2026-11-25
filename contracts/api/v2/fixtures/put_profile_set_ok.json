@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "id": "p-owner"
+    }
+  ],
+  "left_off": [],
+  "awaiting_libraries": [],
+  "awaiting_pictures": [],
+  "awaiting_pins": [],
+  "hidden_by_owner": [],
+  "overrides": [],
+  "skipped_settings": [
+    {
+      "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "key": "playback.subtitle_mode"
+    }
+  ]
+}

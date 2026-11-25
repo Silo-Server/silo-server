@@ -23,6 +23,12 @@ type AppKeyService interface {
 	ListOwnAppKeys(context.Context, *auth.Claims) (auth.OwnAppKeys, error)
 	RevokeOwnDeviceKey(ctx context.Context, claims *auth.Claims, id string) error
 	ReplacePersonKey(context.Context, *auth.Claims, appkeys.PublicKey) error
+	// VerifyProfileSet verifies a signed profile set and spends its
+	// challenge.
+	VerifyProfileSet(context.Context, auth.KeyRequest) (*auth.ProfileSetAuthority, error)
+	// ProfileSetSessionAllowed refuses a login session that may not read or
+	// send the account's profile set.
+	ProfileSetSessionAllowed(context.Context, *auth.Claims) error
 }
 
 // appKeyDomain names the capability in its problems.
@@ -97,6 +103,7 @@ func (reg *Registry) getAppKeyCapability(ctx context.Context, _ *CapabilityInput
 			Introduce:         true,
 			SignIn:            true,
 			Enroll:            true,
+			ProfileSet:        reg.deps.ProfileSet != nil && reg.deps.ProfileSet.ProfileSetSupported(),
 			SignatureSuites:   []string{appKeySignatureSuite},
 			SealedReplySuites: []string{appKeySealedReplySuite},
 		},

@@ -2956,6 +2956,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if profileHandler != nil {
 		v2deps.Profiles = profileHandler
+		v2deps.ProfileSet = profileHandler
 	}
 	if deps.FolderRepo != nil {
 		v2deps.Libraries = deps.FolderRepo

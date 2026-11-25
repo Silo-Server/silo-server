@@ -1797,6 +1797,7 @@ func fixtureCases() []fixtureCase {
 		status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/AppKeyCapability"})
 	cases = append(cases, devicePreapprovalFixtureCases()...)
 	cases = append(cases, appKeyFixtureCases()...)
+	cases = append(cases, profileSetFixtureCases()...)
 	return cases
 }
 
@@ -2172,6 +2173,7 @@ func fixtureDeps() Dependencies {
 	deps.DirectConnections = fakeDirectConnections{}
 	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
 	deps.AppKeys = fixtureAppKeys()
+	deps.ProfileSet = fixtureProfileSets{}
 	deps.AdminPluginProvisionStatus = func(context.Context) ([]plugins.ProvisionStatus, error) {
 		return []plugins.ProvisionStatus{{PluginID: "silo.auth.oidc", Version: "0.1.2", State: "pending"}}, nil
 	}
@@ -2588,4 +2590,53 @@ func devicePreapprovalFixtureCases() []fixtureCase {
 			method:   http.MethodPost, path: "/api/v2/auth/device/poll", body: `{"device_code":"dev-locked","binding_secret":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"}`,
 			status: http.StatusTooManyRequests, assertHeaders: []string{"Content-Type", "Cache-Control", "Retry-After"}, schema: problem},
 	}
+}
+
+// profileSetFixtureCases are the profile set shapes the phone apps decode.
+func profileSetFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	staleSet := strings.Replace(testSessionSet, `"version":1`, `"version":0`, 1)
+	return []fixtureCase{
+		{name: "put_profile_set_ok", operationID: "putProfileSet",
+			scenario: "The main profile sends the household's set over its login session; the server answers each profile's ID here and what still waits for the person.",
+			method:   http.MethodPut, path: "/api/v2/profiles/set", body: testSessionSet, headers: profileOwner(),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ProfileSetApplied"},
+		{name: "put_profile_set_stale", operationID: "putProfileSet",
+			scenario: "A set older than the one the server holds is refused; the app reads the held set and sends a newer one.",
+			method:   http.MethodPut, path: "/api/v2/profiles/set", body: staleSet, headers: profileOwner(),
+			status: http.StatusConflict, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_profile_set_ok", operationID: "getProfileSet",
+			scenario: "The set as this server holds it, with a profile outside the set.",
+			method:   http.MethodGet, path: "/api/v2/profiles/set", headers: bearer(memberToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/ProfileSetHeld"},
+		{name: "get_profile_set_never_taken", operationID: "getProfileSet",
+			scenario: "An account that never took a set: version 0, no items, and every profile in local_only, which is how an app tells a server to bring profiles from.",
+			method:   http.MethodGet, path: "/api/v2/profiles/set", headers: bearer(adminToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/ProfileSetHeld"},
+	}
+}
+
+// fixtureProfileSets answers the profile set fixtures: a set of version 0 is
+// stale, and account 2 never took a set.
+type fixtureProfileSets struct{}
+
+func (fixtureProfileSets) ProfileSetSupported() bool { return true }
+
+func (fixtureProfileSets) ApplyProfileSet(_ context.Context, cmd handlers.ProfileSetCommand) (handlers.ProfileSetResult, error) {
+	if strings.Contains(string(cmd.Set), `"version":0`) {
+		return handlers.ProfileSetResult{}, handlers.ErrProfileSetStale
+	}
+	sam := "0f8fad5b-d9cb-469f-a165-70867728950e"
+	return handlers.ProfileSetResult{Version: 1, Profiles: []handlers.ProfileSetMember{{SyncID: sam, ID: "p-owner"}},
+		AwaitingPins: []string{}, SkippedSettings: []handlers.ProfileSetSkippedSetting{{SyncID: sam, Key: "playback.subtitle_mode"}}}, nil
+}
+
+func (fixtureProfileSets) HeldProfileSet(_ context.Context, userID int) (handlers.ProfileSetHeld, error) {
+	if userID == 2 {
+		return handlers.ProfileSetHeld{LocalOnly: []handlers.ProfileSetLocal{{ID: "p-admin", Name: "Ada"}}}, nil
+	}
+	return handlers.ProfileSetHeld{Version: 7, LocalOnly: []handlers.ProfileSetLocal{{ID: "p-guest", Name: "Guest"}},
+		Items: []handlers.ProfileSetHeldItem{{SyncID: "0f8fad5b-d9cb-469f-a165-70867728950e", ID: "p-owner", Name: "Sam",
+			Picture: "preset:avatar-3", HasPIN: true, MaxAdvisoryAge: 12,
+			Settings: map[string]json.RawMessage{"playback.audio_language": json.RawMessage(`"en"`)}}}}, nil
 }

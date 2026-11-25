@@ -1,0 +1,31 @@
+{
+  "version": 7,
+  "items": [
+    {
+      "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "id": "p-owner",
+      "position": 0,
+      "name": "Sam",
+      "picture": "preset:avatar-3",
+      "has_pin": true,
+      "is_child": false,
+      "max_content_rating": "",
+      "max_advisory_age": 12,
+      "require_advisory_age": false,
+      "requests_blocked": false,
+      "settings": {
+        "playback.audio_language": "en"
+      },
+      "changed_here": []
+    }
+  ],
+  "deleted_here": [],
+  "overrides": [],
+  "local_only": [
+    {
+      "id": "p-guest",
+      "name": "Guest"
+    }
+  ],
+  "edits_token": ""
+}

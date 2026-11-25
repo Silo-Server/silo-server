@@ -298,6 +298,7 @@ var householdGateExemptOperations = map[string]string{
 	"deleteProfileAvatar":   exemptProfiles,
 	"listHouseholdSessions": exemptProfiles,
 	"listProfiles":          exemptProfiles,
+	"getProfileSet":         "the person's app reads the household's own set without a profile; the key-management session rule decides",
 	"updateProfile":         exemptProfiles,
 	"uploadProfileAvatar":   exemptProfiles,
 	"verifyProfilePIN":      exemptProfiles,
