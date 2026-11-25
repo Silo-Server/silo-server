@@ -257553,6 +257553,10 @@
           },
           "speech": {
             "$ref": "#/x-silo-worker-protocols/schemas/mediasample_SpeechLevels"
+          },
+          "video_frames": {
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [

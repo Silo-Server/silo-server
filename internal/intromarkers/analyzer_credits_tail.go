@@ -2,7 +2,6 @@ package intromarkers
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -197,12 +196,12 @@ func (a *Analyzer) ensureCreditsInputs(ctx context.Context, candidates []Candida
 			}
 
 			if needTail {
-				// A clean run that parsed no keyframes from a file with video
-				// points at the log format, not the file: retry it later
-				// rather than storing the tail as permanently sparse.
+				// A clean run without keyframes is a sparse tail like any
+				// other with too few, unless ffmpeg counted keyframes the
+				// parsers did not read (sample.TailErr).
 				tailErr := sampleErr
-				if tailErr == nil && len(sample.Tail.Frames) == 0 {
-					tailErr = errNoTailFrames
+				if tailErr == nil {
+					tailErr = sample.TailErr
 				}
 				tail, err := a.settleCreditsTail(ctx, candidate, episodeTailSpec(candidate), sample.Tail, tailErr)
 				if err != nil {
@@ -287,10 +286,6 @@ func (a *Analyzer) creditsTailArtifact(artifact *mediaartifact.Artifact, candida
 	}
 	return &tail, mediaartifact.Ready
 }
-
-// errNoTailFrames fails a tail pass that exited cleanly without any parsed
-// keyframe statistics.
-var errNoTailFrames = errors.New("credits tail pass parsed no keyframes")
 
 // settleCreditsTail stores the outcome of a tail pass and returns the tail
 // when it can be classified.

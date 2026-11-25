@@ -84,6 +84,11 @@ filter instance is told apart by its position in the chain
 pixels darker than each threshold (`PBlack`), and luma and saturation
 minimum, 10th percentile, average, 90th percentile, and maximum. A frame
 missing any value, such as one cut short when ffmpeg stopped, is dropped.
+`Result.VideoFrames` is ffmpeg's own count of the frames the `Stats` output
+received, from its last `frame=` progress line, and is absent when ffmpeg
+printed none. A caller tells a span with no frame (zero)
+from frames the log parsers could not read (a count with no `Frames`): the
+credits tail pass stores the first as `sparse` and retries the second.
 
 `Samples` reads only the stretches of the file it samples. The runner first
 opens the input on its own (`-t 0` stream copy) and reads the container and
