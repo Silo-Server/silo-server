@@ -90,7 +90,18 @@ type appKeyReply struct {
 	LocalRoute *ServerLocalRoute `json:"local_route,omitempty"`
 }
 
-const sealedReplyDescription = " The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited."
+// providerAnswersDescription names the answers a key enrolled through the
+// server's sign-in provider can get, and what each asks of the client.
+const providerAnswersDescription = " A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person)."
+
+// sealedRefusals lists the unsealed refusals of every signed route.
+const sealedRefusals = "Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited."
+
+// sealedReplyDescriptionSignedIn is sealedReplyDescription for a route
+// whose answer is always signed_in.
+const sealedReplyDescriptionSignedIn = " The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status: signed_in, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity). " + sealedRefusals
+
+const sealedReplyDescription = " The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. " + sealedRefusals
 
 func registerAppKeySignIn(reg *Registry) {
 	challenge := humaOp(http.MethodPost, Prefix+"/auth/keys/challenge", "createAppKeyChallenge", "app-keys",
@@ -102,21 +113,21 @@ func registerAppKeySignIn(reg *Registry) {
 
 	introduce := humaOp(http.MethodPost, Prefix+"/auth/keys/introduce", "introduceAppKey", "app-keys",
 		"Enroll this device's key with the account's person key and open a login session.")
-	introduce.Description = "The body is an introduce envelope signed with the account's person key, with device_sig from the device key in the payload. The device key is enrolled and opens the session. For an administrator's account it is stored waiting for approval, and the device repeats signInWithAppKey until it is approved. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget." + sealedReplyDescription
+	introduce.Description = "The body is an introduce envelope signed with the account's person key, with device_sig from the device key in the payload. The device key is enrolled and opens the session. For an administrator's account it is stored waiting for approval, and the device repeats signInWithAppKey until it is approved. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget." + sealedReplyDescription + providerAnswersDescription
 	introduce.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
 	Register(reg, Operation{Operation: introduce, RetrySafety: RetrySafetyNonRetryable,
 		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}, reg.introduceAppKey)
 
 	signIn := humaOp(http.MethodPost, Prefix+"/auth/keys/sign-in", "signInWithAppKey", "app-keys",
 		"Open a login session with an enrolled device key.")
-	signIn.Description = "The body is a sign-in envelope signed with the device key, with no device_sig. A key waiting for an administrator's approval answers approval_required, sealed, at most once every five seconds (sooner is 429 rate_limited with Retry-After) and for 24 hours; after that, or once denied, it is 403 key_denied. Spends the per-address key_sign_in rate-limit budget." + sealedReplyDescription
+	signIn.Description = "The body is a sign-in envelope signed with the device key, with no device_sig. A key waiting for an administrator's approval answers approval_required, sealed, at most once every five seconds (sooner is 429 rate_limited with Retry-After) and for 24 hours; after that, or once denied, it is 403 key_denied. Spends the per-address key_sign_in rate-limit budget." + sealedReplyDescription + providerAnswersDescription
 	signIn.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
 	Register(reg, Operation{Operation: signIn, RetrySafety: RetrySafetyNonRetryable,
 		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}, reg.signInWithAppKey)
 
 	enroll := humaOp(http.MethodPost, Prefix+"/auth/keys/enroll", "enrollAppKeys", "app-keys",
 		"Enroll a person key and a device key on the signed-in account and open a session bound to the device key.")
-	enroll.Description = "Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. The person key is registered when the account has none; a different one already on the account is 409 conflict, and so is a public key already enrolled on this server. Both keys take the provider identity of the session that enrolls them. The sealed plaintext adds person_key_id; the client drops the session it called with." + sealedReplyDescription
+	enroll.Description = "Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. The person key is registered when the account has none; a different one already on the account is 409 conflict, and so is a public key already enrolled on this server. Both keys take the provider identity of the session that enrolls them. The sealed plaintext adds person_key_id; the client drops the session it called with. Keys enrolled here start active, also on an administrator's account, so enroll never answers approval_required." + sealedReplyDescriptionSignedIn + providerAnswersDescription
 	enroll.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
 	Register(reg, Operation{Operation: enroll, RetrySafety: RetrySafetyNonRetryable,
 		Class: ClassAuthenticated, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}, reg.enrollAppKeys)
@@ -279,8 +290,11 @@ func (reg *Registry) sealAppKeyAnswer(answer *handlers.AppKeyAnswer) (*SealedRep
 func (reg *Registry) appKeyKnownOrigins(ctx context.Context) []string {
 	connections := reg.deps.ServerConnections
 	if path := netaccess.PathFromContext(ctx); !path.IsDefault() {
-		status, ok := connections.Providers.ByProvider(path.Provider)
-		if !ok || !status.Connected() {
+		// The installation the request came through, not the first
+		// installation of that provider: two installations of one provider
+		// serve different origins.
+		status, ok := connections.Providers.Get(path.InstallationID)
+		if !ok || status.Provider != path.Provider || !status.Connected() {
 			return nil
 		}
 		var known []string
@@ -344,7 +358,12 @@ func appKeyProblem(err error) error {
 	if code := appkeys.CodeOf(err); code != "" {
 		switch code.Stage() {
 		case appkeys.StageShape:
-			return validationProblem(locationBody, codeInvalid, "The signed message is not in its shape for this route.")
+			location := locationBody
+			var refusal *appkeys.Error
+			if errors.As(err, &refusal) && refusal.Field != "" {
+				location += "." + refusal.Field
+			}
+			return validationProblem(location, codeInvalid, "The signed message is not in its shape for this route.")
 		case appkeys.StageFields:
 			return validationProblem(locationBody+".payload", codeInvalid, "A field of the signed payload is missing or malformed.")
 		}

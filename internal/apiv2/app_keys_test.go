@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -267,6 +268,8 @@ func TestEnrollAppKeysNeedsOwnSession(t *testing.T) {
 func TestAppKeyOriginRule(t *testing.T) {
 	cache := netaccess.NewStatusCache()
 	cache.Report(netaccess.Status{InstallationID: 7, Provider: "stub", State: netaccess.StateConnected, Origin: "HTTPS://Silo.Overlay.Example.Test/"})
+	// A second installation of the same provider, on another overlay.
+	cache.Report(netaccess.Status{InstallationID: 8, Provider: "stub", State: netaccess.StateConnected, Origin: "https://other.overlay.example.test"})
 	reg := &Registry{deps: Dependencies{ServerConnections: ServerConnections{
 		PublicURL: func() string { return "https://media.example.test/silo/" },
 		Providers: cache,
@@ -274,6 +277,7 @@ func TestAppKeyOriginRule(t *testing.T) {
 	for _, tc := range []struct {
 		name, host, signed string
 		provider           string
+		installation       int
 		refused            bool
 	}{
 		{name: "public address, its origin", host: "media.example.test", signed: "https://media.example.test"},
@@ -281,12 +285,18 @@ func TestAppKeyOriginRule(t *testing.T) {
 		{name: "provider path, its origin", host: "anything.example.test", provider: "stub", signed: "https://silo.overlay.example.test"},
 		{name: "provider path, the public origin", host: "media.example.test", provider: "stub", signed: "https://media.example.test", refused: true},
 		{name: "LAN address", host: "192.168.1.20:8080", signed: "https://evil.example.test"},
+		{name: "second installation, its origin", host: "anything.example.test", provider: "stub", installation: 8, signed: "https://other.overlay.example.test"},
+		{name: "second installation, the first one's origin", host: "anything.example.test", provider: "stub", installation: 8, signed: "https://silo.overlay.example.test", refused: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPost, "https://"+tc.host+"/api/v2/auth/keys/sign-in", nil)
 			ctx := context.WithValue(r.Context(), requestKey{}, r)
 			if tc.provider != "" {
-				ctx = netaccess.WithPath(ctx, netaccess.Path{Provider: tc.provider, InstallationID: 7})
+				installation := tc.installation
+				if installation == 0 {
+					installation = 7
+				}
+				ctx = netaccess.WithPath(ctx, netaccess.Path{Provider: tc.provider, InstallationID: installation})
 			}
 			err := judgeSignedOrigin(reg.appKeyKnownOrigins(ctx), tc.signed)
 			if (err != nil) != tc.refused {
@@ -308,12 +318,30 @@ func TestAppKeyEnvelopeIsStrict(t *testing.T) {
 		{body: `{"kid":"zT321tSgcB7emUH9k0B0oA","payload":"eyJ9"}`, want: TypeValidationFailed},
 		{body: `not json`, want: TypeMalformedRequest},
 		{body: `{"KID":"zT321tSgcB7emUH9k0B0oA","Payload":"eyJ9","Sig":"c2ln"}`, want: TypeValidationFailed},
+		{body: `{"kid":"zT321tSgcB7emUH9k0B0oA","payload":"eyJ9","sig":"c2ln","kid":"PgujdSfBbNNyXngLWCsOgw"}`, want: TypeValidationFailed},
 	} {
 		keys := &fakeAppKeys{enabled: true}
 		rec := do(t, NewHandler(appKeyDeps(keys)), http.MethodPost, Prefix+"/auth/keys/sign-in", tc.body, nil)
 		requireProblem(t, rec, tc.want)
 		if keys.calls != 0 {
 			t.Fatalf("%s: service ran", tc.body)
+		}
+	}
+}
+
+// The enroll body is exactly person_key and message, each once, and a bad
+// person_key is reported at its own field.
+func TestEnrollAppKeysBodyIsStrict(t *testing.T) {
+	for _, tc := range []struct {
+		body, location string
+	}{
+		{body: `{"person_key":"` + testPersonKey + `","message":` + testEnvelope + `,"person_key":"` + testPersonKey + `"}`, location: "body"},
+		{body: `{"person_key":"` + strings.Repeat("A", 87) + `","message":` + testEnvelope + `}`, location: "body.person_key"},
+	} {
+		keys := &fakeAppKeys{enabled: true}
+		p := requireProblem(t, do(t, NewHandler(appKeyDeps(keys)), http.MethodPost, Prefix+"/auth/keys/enroll", tc.body, bearer(memberToken)), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || keys.calls != 0 {
+			t.Fatalf("errors = %+v, calls %d; want location %s", p.Errors, keys.calls, tc.location)
 		}
 	}
 }
