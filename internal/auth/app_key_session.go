@@ -37,7 +37,9 @@ func identityAnchor(ctx context.Context, db rowQuerier, userID int, identityID i
 		return time.Time{}, ErrProviderSignInRequired
 	}
 	if err != nil {
-		return time.Time{}, fmt.Errorf("reading provider identity: %w", err)
+		// As the session check reports a store it couldn't ask: the route
+		// answers 503 with Retry-After, and the key is not judged.
+		return time.Time{}, sessionCheckUnavailable("reading provider identity", err)
 	}
 	return anchor, nil
 }

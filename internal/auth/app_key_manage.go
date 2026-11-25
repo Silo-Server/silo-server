@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -34,7 +35,10 @@ func (a *AppKeySignIn) ListOwnKeys(ctx context.Context, claims *Claims) (OwnAppK
 	}
 	out := OwnAppKeys{Person: keys.Person}
 	for _, key := range keys.Devices {
-		if key.Status != models.DeviceKeyStatusDenied {
+		// A denied key, and a waiting key past its lifetime (sign-in answers
+		// it key_denied), are left out. Either can still be revoked by ID.
+		expired := key.Status == models.DeviceKeyStatusPending && time.Since(key.CreatedAt) >= appkeys.PendingKeyLifetime
+		if key.Status != models.DeviceKeyStatusDenied && !expired {
 			out.Devices = append(out.Devices, key)
 		}
 	}

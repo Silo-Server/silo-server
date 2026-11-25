@@ -174,7 +174,7 @@ func TestKeyChallengeRulesDB(t *testing.T) {
 	ctx := t.Context()
 	user := env.localAccount(t, "keychallenge-user", models.RoleUser)
 	_, device, _ := env.enroll(t, user)
-	signIn := func(m message) error {
+	signIn := func(t *testing.T, m message) error {
 		_, err := env.signIn.SignIn(ctx, env.request(t, m))
 		return err
 	}
@@ -195,7 +195,7 @@ func TestKeyChallengeRulesDB(t *testing.T) {
 		if _, err := env.pool.Exec(ctx, `UPDATE auth_key_challenges SET expires_at = NOW() - INTERVAL '1 second' WHERE challenge_hash = $1`, sum[:]); err != nil {
 			t.Fatal(err)
 		}
-		if err := signIn(message{purpose: appkeys.PurposeSignIn, signer: device, fields: map[string]any{"challenge": challenge}}); !errors.Is(err, ErrKeyChallengeInvalid) {
+		if err := signIn(t, message{purpose: appkeys.PurposeSignIn, signer: device, fields: map[string]any{"challenge": challenge}}); !errors.Is(err, ErrKeyChallengeInvalid) {
 			t.Fatalf("expired: %v", err)
 		}
 	})
@@ -206,7 +206,7 @@ func TestKeyChallengeRulesDB(t *testing.T) {
 		if _, err := env.signIn.SignIn(ctx, forged); appkeys.CodeOf(err) != appkeys.CodeSignatureInvalid {
 			t.Fatalf("forged: %v", err)
 		}
-		if err := signIn(message{purpose: appkeys.PurposeSignIn, signer: device, fields: map[string]any{"challenge": challenge}}); err != nil {
+		if err := signIn(t, message{purpose: appkeys.PurposeSignIn, signer: device, fields: map[string]any{"challenge": challenge}}); err != nil {
 			t.Fatalf("the challenge was spent by a failed signature: %v", err)
 		}
 	})
@@ -221,7 +221,7 @@ func TestKeySignInRefusalsDB(t *testing.T) {
 	ctx := t.Context()
 	user := env.localAccount(t, "keyrules-user", models.RoleUser)
 	person, device, _ := env.enroll(t, user)
-	signIn := func(m message) error {
+	signIn := func(t *testing.T, m message) error {
 		_, err := env.signIn.SignIn(ctx, env.request(t, m))
 		return err
 	}
@@ -247,7 +247,7 @@ func TestKeySignInRefusalsDB(t *testing.T) {
 			if tc.m.purpose == appkeys.PurposeIntroduce {
 				_, err = env.signIn.Introduce(ctx, env.request(t, tc.m))
 			} else {
-				err = signIn(tc.m)
+				err = signIn(t, tc.m)
 			}
 			if appkeys.CodeOf(err) != tc.code {
 				t.Fatalf("err = %v, want %s", err, tc.code)
@@ -295,7 +295,7 @@ func TestKeySignInRefusalsDB(t *testing.T) {
 		if env.sessionLive(t, result.Pair.SessionID, user.ID) {
 			t.Fatal("the revoked key's session is still live")
 		}
-		if err := signIn(message{purpose: appkeys.PurposeSignIn, signer: introduced}); !errors.Is(err, ErrKeySignatureInvalid) {
+		if err := signIn(t, message{purpose: appkeys.PurposeSignIn, signer: introduced}); !errors.Is(err, ErrKeySignatureInvalid) {
 			t.Fatalf("revoked device key: %v", err)
 		}
 		if err := env.signIn.keys.RevokePersonKey(ctx, user.ID); err != nil {
@@ -305,7 +305,7 @@ func TestKeySignInRefusalsDB(t *testing.T) {
 		if _, err := env.signIn.Introduce(ctx, env.request(t, message{purpose: appkeys.PurposeIntroduce, signer: person, device: &other})); !errors.Is(err, ErrKeySignatureInvalid) {
 			t.Fatalf("revoked person key: %v", err)
 		}
-		if err := signIn(base); err != nil {
+		if err := signIn(t, base); err != nil {
 			t.Fatalf("revoking the person key stopped a device already in: %v", err)
 		}
 	})
@@ -337,16 +337,27 @@ func TestKeySignInAdminWaitsForApprovalDB(t *testing.T) {
 	}
 	// A waiting key never opened a session, so it shows as never used,
 	// however often it asks.
-	neverUsed := func(when string) {
+	listed := func() *models.AppDeviceKey {
 		t.Helper()
 		keys, err := env.signIn.ListOwnKeys(ctx, env.loginSession(t, admin, models.SessionOpenedPassword, nil))
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, key := range keys.Devices {
-			if key.ID == result.DeviceID && key.LastUsedAt != nil {
-				t.Fatalf("%s: a waiting key shows last_used_at %v", when, key.LastUsedAt)
+			if key.ID == result.DeviceID {
+				return key
 			}
+		}
+		return nil
+	}
+	neverUsed := func(when string) {
+		t.Helper()
+		key := listed()
+		if key == nil {
+			t.Fatalf("%s: the waiting key is not listed", when)
+		}
+		if key.LastUsedAt != nil {
+			t.Fatalf("%s: a waiting key shows last_used_at %v", when, key.LastUsedAt)
 		}
 	}
 	neverUsed("after introduce")
@@ -368,6 +379,10 @@ func TestKeySignInAdminWaitsForApprovalDB(t *testing.T) {
 	}
 	if _, err := signIn(); !errors.Is(err, ErrAppKeyDenied) {
 		t.Fatalf("after a day = %v", err)
+	}
+	// Past its lifetime the waiting key is refused, and no longer listed.
+	if key := listed(); key != nil {
+		t.Fatalf("a waiting key past its lifetime is listed: %+v", key)
 	}
 	if _, err := env.pool.Exec(ctx, `UPDATE auth_device_keys SET created_at = NOW(), status = 'denied' WHERE id = $1`, result.DeviceID); err != nil {
 		t.Fatal(err)
@@ -641,14 +656,18 @@ func TestKeySessionContinuesProviderChainDB(t *testing.T) {
 		t.Fatalf("key sign-in past the provider's age = %v", err)
 	}
 	// Signing in through the provider again moves the anchor; the key
-	// works again without enrolling anew, within the new age.
-	setVouched(time.Now())
+	// works again without enrolling anew. The provider still can't
+	// re-check, so the session ends the refresh lifetime after the anchor,
+	// not after the sign-in: with the anchor ten days back the two differ by
+	// ten days.
+	again := time.Now().Add(-10 * 24 * time.Hour).Truncate(time.Second)
+	setVouched(again)
 	result, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: device}))
 	if err != nil {
 		t.Fatalf("key sign-in after the provider vouched again = %v", err)
 	}
-	if expires := env.sessionRow(t, result.Pair.SessionID).ExpiresAt; expires.After(time.Now().Add(recheckRefreshExpiry).Add(time.Minute)) {
-		t.Fatalf("key session expires %v, past the provider's age", expires)
+	if expires, want := env.sessionRow(t, result.Pair.SessionID).ExpiresAt, again.Add(recheckRefreshExpiry); expires.Sub(want).Abs() > time.Second {
+		t.Fatalf("key session expires %v, want the provider's limit %v", expires, want)
 	}
 }
 

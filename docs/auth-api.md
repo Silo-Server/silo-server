@@ -12,7 +12,9 @@ The public auth operations that decode a JSON body before any credential is chec
 `signInWithAppKey`) follow the shared body rules: a body over the
 1 MiB structured-body cap answers `413 payload_too_large`, and a non-blank body that is not
 `application/json` (optionally with `charset=utf-8`), including one with no `Content-Type`,
-answers `415 unsupported_media_type` before the operation runs.
+answers `415 unsupported_media_type` before the operation runs. The app key routes set lower
+caps: `createAppKeyChallenge` refuses a body over 1 KiB, and `introduceAppKey`,
+`signInWithAppKey` and `enrollAppKeys` one over 16 KiB, with the same `413`.
 
 For `setupServer` the media-type rule is what stops a cross-site browser form or `no-cors`
 fetch from claiming the first administrator. A cross-origin JSON fetch requires a preflight,
@@ -702,7 +704,7 @@ operation contract.
 | `POST /auth/keys/challenge` (`createAppKeyChallenge`) | none | Body `{}`. Answers `challenge` (base64url of 32 bytes), `expires_in` (120), `server_id` and `server_time` (Unix seconds). A challenge works for one signed request within two minutes, on any API process. |
 | `POST /auth/keys/introduce` (`introduceAppKey`) | an `introduce` envelope signed by the account's person key, with `device_sig` | Enrolls the payload's `device_key` and opens a session. For an administrator's account the key is stored waiting and the sealed answer is `approval_required`. |
 | `POST /auth/keys/sign-in` (`signInWithAppKey`) | a `sign-in` envelope signed by an enrolled device key, without `device_sig` | Opens a session. A waiting key answers `approval_required`; see below. |
-| `POST /auth/keys/enroll` (`enrollAppKeys`) | the account's own login session, and `{ "person_key", "message" }` where `message` is an `enroll` envelope signed with that person key, with `device_sig` | Registers the person key when the account has none and the device key, then opens a session bound to the device key. The sealed plaintext adds `person_key_id` (the person key's `kid`); the client drops the session it called with. |
+| `POST /auth/keys/enroll` (`enrollAppKeys`) | the account's own login session, and `{ "person_key", "message" }` where `message` is an `enroll` envelope signed with that person key, with `device_sig` | Registers the person key when the account has none, taking the session's provider binding; when `person_key` is already the account's person key it is reused as it is, binding unchanged. Enrolls the device key, which takes the session's provider binding, then opens a session bound to it. A different person key on the account, or a device key already enrolled on this server, is 409 `conflict`. The sealed plaintext adds `person_key_id` (the person key's `kid`); the client drops the session it called with. A malformed payload field is 422 at `body.message.payload`. |
 | `GET /auth/keys` (`listAppKeys`) | the account's own login session | `person_key` (`kid`, `enrolled_at`; absent when the account has none) and `devices[]` (`id`, `kid`, `kind` `device`\|`app`, `name`, `platform`, `status` `active`\|`pending`, `enrolled_by` `introduce`\|`session`\|`app-code`\|`grant`, `allowed_by`, `enrolled_at`, `last_used_at`), newest first. Revoked and denied keys are left out. `last_used_at` is the last time the key opened a session: a key enrolled and not used since shows it equal to `enrolled_at`, and a key waiting for approval shows `null`. |
 | `DELETE /auth/keys/devices/{id}` (`revokeAppDeviceKey`) | the account's own login session | 204. Revokes the key and ends every session it opened. A device may revoke its own key, which ends the session making the request. 404 for a key that isn't the account's. |
 | `PUT /auth/keys/person` (`replacePersonKey`) | the account's own login session | Body `{ "person_key" }`, unsigned. Answers `{ "person_key_id": "<kid>" }`. The old person key is revoked; devices already enrolled keep their keys. Sending the current key again changes nothing. |
@@ -749,10 +751,14 @@ device follows with it. Refusals are not sealed.
 
 **Waiting keys.** Every key an administrator's `introduce` enrolls waits for
 approval; keys from `enroll` start active. A waiting device repeats `sign-in`
-with its own key on a fresh challenge and gets `approval_required` until it is
-approved. Sooner than five seconds after its last try it is 429 `rate_limited`
+with its own key and gets `approval_required` until it is approved. Each
+attempt needs a fresh challenge and a newly signed envelope: resending the same
+envelope after a 429 answers 401 `challenge_invalid`, because its challenge was
+spent. Sooner than five seconds after its last try it is 429 `rate_limited`
 with `Retry-After`; a key that has waited 24 hours, or was denied, is 403
-`key_denied`.
+`key_denied` and is left out of `GET /auth/keys`. A key whose provider binding
+changed during the request also answers 429, with a one-second `Retry-After`;
+asking again succeeds.
 
 **Problems.** A refusal at or before the signature (a bad signature, a key this
 server doesn't hold or holds revoked, the wrong purpose or `server_id`, outside

@@ -5,6 +5,7 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -233,6 +234,9 @@ func TestAppKeyProblems(t *testing.T) {
 		{err: &auth.KeyRetryError{RetryAfter: 3 * time.Second}, want: TypeRateLimited, retry: "3"},
 		{err: fmt.Errorf("getting session: %w", auth.ErrSessionCheckUnavailable), want: TypeDependencyUnavailable, retry: strconv.Itoa(apimw.CredentialCheckRetryAfterSeconds)},
 		{err: auth.ErrProviderCheckIncomplete, want: TypeDependencyUnavailable},
+		// The provider anchor's lookup failing is reported like the session
+		// check's store failure.
+		{err: fmt.Errorf("reading provider identity: %w: %w", auth.ErrSessionCheckUnavailable, errors.New("connection reset")), want: TypeDependencyUnavailable, retry: strconv.Itoa(apimw.CredentialCheckRetryAfterSeconds)},
 		{err: auth.ErrProviderUnavailable, want: TypeProviderUnavailable},
 	} {
 		t.Run(tc.want.ID+" "+tc.err.Error(), func(t *testing.T) {
@@ -342,6 +346,25 @@ func TestEnrollAppKeysBodyIsStrict(t *testing.T) {
 		p := requireProblem(t, do(t, NewHandler(appKeyDeps(keys)), http.MethodPost, Prefix+"/auth/keys/enroll", tc.body, bearer(memberToken)), TypeValidationFailed)
 		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || keys.calls != 0 {
 			t.Fatalf("errors = %+v, calls %d; want location %s", p.Errors, keys.calls, tc.location)
+		}
+	}
+}
+
+// A malformed field of the signed payload is reported where that payload sits
+// in the route's body: the envelope itself on sign-in, message on enroll.
+func TestAppKeyPayloadErrorLocation(t *testing.T) {
+	enrollEnvelope := `{"kid":"zT321tSgcB7emUH9k0B0oA","payload":"eyJ9","sig":"c2ln","device_sig":"c2ln"}`
+	for _, tc := range []struct {
+		path, body, location string
+		headers              map[string]string
+	}{
+		{path: "/auth/keys/sign-in", body: testEnvelope, location: "body.payload"},
+		{path: "/auth/keys/enroll", body: `{"person_key":"` + testPersonKey + `","message":` + enrollEnvelope + `}`, headers: bearer(memberToken), location: "body.message.payload"},
+	} {
+		keys := &fakeAppKeys{enabled: true, err: &appkeys.Error{Code: appkeys.CodeFieldInvalid}}
+		p := requireProblem(t, do(t, NewHandler(appKeyDeps(keys)), http.MethodPost, Prefix+tc.path, tc.body, tc.headers), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location {
+			t.Fatalf("%s: errors = %+v, want location %s", tc.path, p.Errors, tc.location)
 		}
 	}
 }

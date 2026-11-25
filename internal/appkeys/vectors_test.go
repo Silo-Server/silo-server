@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -362,8 +363,8 @@ func TestLinkVectors(t *testing.T) {
 // same host as the name without it, so an address written with one has a
 // second spelling. Only the last label decides whether a host is a number:
 // all digits, or 0x and zero or more hex digits, as URL parsers read it; a
-// LAN name such as 0xroom stays a name. Labels are letters, digits and
-// inner hyphens.
+// LAN name such as 0xroom stays a name. A label is 1 to 63 characters from
+// letters, digits, '-' and '_', in any position.
 func TestAddressSpellings(t *testing.T) {
 	for _, tc := range []struct {
 		input string
@@ -378,8 +379,13 @@ func TestAddressSpellings(t *testing.T) {
 		{input: "http://0x1f.example:52830", ok: true},
 		{input: "http://room.0x1f:52830"},
 		{input: "http://0X1F:52830"},
-		{input: "http://my_host:8096"},
-		{input: "http://-room:8096"},
+		{input: "http://my_nas:8096", ok: true},
+		{input: "http://-room:8096", ok: true},
+		{input: "http://room-:8096", ok: true},
+		{input: "http://_:8096", ok: true},
+		{input: "http://" + strings.Repeat("a", 63) + ":8096", ok: true},
+		{input: "http://" + strings.Repeat("a", 64) + ":8096"},
+		{input: "http://a..b:8096"},
 	} {
 		t.Run(tc.input, func(t *testing.T) {
 			_, err := CanonicalOrigin(tc.input)

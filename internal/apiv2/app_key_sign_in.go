@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/danielgtaylor/huma/v2"
 	"net/http"
 	"slices"
 	"strings"
@@ -103,34 +104,75 @@ const sealedReplyDescriptionSignedIn = " The response is a sealed reply: the ans
 
 const sealedReplyDescription = " The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. " + sealedRefusals
 
+// enrollPayloadLocation is where enroll's signed payload sits in its body.
+const enrollPayloadLocation = locationBody + ".message.payload"
+
+// appKeyBodyLimits states the routes' body caps, which are lower than the
+// shared structured-body cap.
+const (
+	appKeyChallengeBodyNote = " A body over 1 KiB is 413 payload_too_large."
+	appKeySignedBodyNote    = " A body over 16 KiB is 413 payload_too_large."
+)
+
+// pendingRetryNote is how a device waiting for approval asks again.
+const pendingRetryNote = " A device waiting for approval asks again each time with a fresh challenge and a newly signed envelope: resending the same envelope after a 429 answers 401 challenge_invalid, because its challenge was spent."
+
 func registerAppKeySignIn(reg *Registry) {
 	challenge := humaOp(http.MethodPost, Prefix+"/auth/keys/challenge", "createAppKeyChallenge", "app-keys",
 		"Issue a challenge for one signed app key request.")
-	challenge.Description = "Send an empty JSON object. The challenge is good for two minutes and one signed request, on any API process. Spends the per-address key_challenge rate-limit budget. 409 capability_disabled while auth.app_key_sign_in is off."
+	challenge.Description = "Send an empty JSON object. The challenge is good for two minutes and one signed request, on any API process. Spends the per-address key_challenge rate-limit budget. 409 capability_disabled while auth.app_key_sign_in is off." + appKeyChallengeBodyNote
 	challenge.Errors = []int{http.StatusConflict, http.StatusTooManyRequests}
-	Register(reg, Operation{Operation: challenge, RetrySafety: RetrySafetyNonRetryable,
-		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketKeyChallenge, MaxBodyBytes: 1 << 10}, reg.createAppKeyChallenge)
+	challengeOp := Operation{Operation: challenge, RetrySafety: RetrySafetyNonRetryable,
+		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketKeyChallenge, MaxBodyBytes: 1 << 10}
+	Register(reg, challengeOp, reg.createAppKeyChallenge)
 
 	introduce := humaOp(http.MethodPost, Prefix+"/auth/keys/introduce", "introduceAppKey", "app-keys",
 		"Enroll this device's key with the account's person key and open a login session.")
-	introduce.Description = "The body is an introduce envelope signed with the account's person key, with device_sig from the device key in the payload. The device key is enrolled and opens the session. For an administrator's account it is stored waiting for approval, and the device repeats signInWithAppKey until it is approved. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget." + sealedReplyDescription + providerAnswersDescription
+	introduce.Description = "The body is an introduce envelope signed with the account's person key, with device_sig from the device key in the payload. The device key is enrolled and opens the session. For an administrator's account it is stored waiting for approval, and the device repeats signInWithAppKey until it is approved. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + sealedReplyDescription + providerAnswersDescription
 	introduce.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
-	Register(reg, Operation{Operation: introduce, RetrySafety: RetrySafetyNonRetryable,
-		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}, reg.introduceAppKey)
+	introduceOp := Operation{Operation: introduce, RetrySafety: RetrySafetyNonRetryable,
+		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
+	Register(reg, introduceOp, reg.introduceAppKey)
 
 	signIn := humaOp(http.MethodPost, Prefix+"/auth/keys/sign-in", "signInWithAppKey", "app-keys",
 		"Open a login session with an enrolled device key.")
-	signIn.Description = "The body is a sign-in envelope signed with the device key, with no device_sig. A key waiting for an administrator's approval answers approval_required, sealed, at most once every five seconds (sooner is 429 rate_limited with Retry-After) and for 24 hours; after that, or once denied, it is 403 key_denied. Spends the per-address key_sign_in rate-limit budget." + sealedReplyDescription + providerAnswersDescription
+	signIn.Description = "The body is a sign-in envelope signed with the device key, with no device_sig. A key waiting for an administrator's approval answers approval_required, sealed, at most once every five seconds (sooner is 429 rate_limited with Retry-After) and for 24 hours; after that, or once denied, it is 403 key_denied." + pendingRetryNote + " A key whose provider binding changed during the request also answers 429 with a one-second Retry-After; asking again succeeds. Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + sealedReplyDescription + providerAnswersDescription
 	signIn.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
-	Register(reg, Operation{Operation: signIn, RetrySafety: RetrySafetyNonRetryable,
-		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}, reg.signInWithAppKey)
+	signInOp := Operation{Operation: signIn, RetrySafety: RetrySafetyNonRetryable,
+		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
+	Register(reg, signInOp, reg.signInWithAppKey)
 
 	enroll := humaOp(http.MethodPost, Prefix+"/auth/keys/enroll", "enrollAppKeys", "app-keys",
 		"Enroll a person key and a device key on the signed-in account and open a session bound to the device key.")
-	enroll.Description = "Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. The person key is registered when the account has none; a different one already on the account is 409 conflict, and so is a public key already enrolled on this server. Both keys take the provider identity of the session that enrolls them. The sealed plaintext adds person_key_id; the client drops the session it called with. Keys enrolled here start active, also on an administrator's account, so enroll never answers approval_required." + sealedReplyDescriptionSignedIn + providerAnswersDescription
+	enroll.Description = "Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. When the account has no person key, person_key is registered and takes the provider identity of the session that enrolls it. When person_key is the account's person key already, it is reused as it is, binding unchanged. A different person key on the account is 409 conflict, and so is a device key already enrolled on this server. The new device key takes the session's provider identity. The sealed plaintext adds person_key_id; the client drops the session it called with. Keys enrolled here start active, also on an administrator's account, so enroll never answers approval_required. A malformed payload field is 422 at body.message.payload." + appKeySignedBodyNote + sealedReplyDescriptionSignedIn + providerAnswersDescription
 	enroll.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
-	Register(reg, Operation{Operation: enroll, RetrySafety: RetrySafetyNonRetryable,
-		Class: ClassAuthenticated, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}, reg.enrollAppKeys)
+	enrollOp := Operation{Operation: enroll, RetrySafety: RetrySafetyNonRetryable,
+		Class: ClassAuthenticated, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
+	Register(reg, enrollOp, reg.enrollAppKeys)
+
+	declareRetryAfter(reg, challengeOp, introduceOp, signInOp, enrollOp)
+}
+
+// declareRetryAfter documents the Retry-After header the app key routes send
+// with a 429 and a 503, as other operations that send it declare it.
+func declareRetryAfter(reg *Registry, ops ...Operation) {
+	for _, op := range ops {
+		registered := registeredOperation(reg.api.OpenAPI(), op)
+		if registered == nil {
+			continue
+		}
+		for _, status := range []string{"429", "503"} {
+			response := registered.Responses[status]
+			if response == nil {
+				continue
+			}
+			if response.Headers == nil {
+				response.Headers = map[string]*huma.Header{}
+			}
+			response.Headers["Retry-After"] = &huma.Header{Schema: &huma.Schema{Type: huma.TypeString},
+				Description: "Seconds to wait before asking again, on a fresh challenge."}
+		}
+	}
 }
 
 func (reg *Registry) createAppKeyChallenge(ctx context.Context, in *AppKeyChallengeInput) (*AppKeyChallengeOutput, error) {
@@ -223,7 +265,7 @@ func (reg *Registry) enrollAppKeys(ctx context.Context, in *EnrollAppKeysInput) 
 	}
 	personKey, env, err := appkeys.ParseKeyBody(in.RawBody, appkeys.PurposeEnroll)
 	if err != nil {
-		return nil, appKeyProblem(err)
+		return nil, appKeyProblemAt(err, enrollPayloadLocation)
 	}
 	req, err := reg.keyRequest(ctx, env)
 	if err != nil {
@@ -231,7 +273,7 @@ func (reg *Registry) enrollAppKeys(ctx context.Context, in *EnrollAppKeysInput) 
 	}
 	answer, err := svc.EnrollAppKeys(withClientDevice(ctx), auth.KeyEnrollRequest{KeyRequest: req, PersonKey: personKey, Claims: claims})
 	if err != nil {
-		return nil, appKeyProblem(err)
+		return nil, appKeyProblemAt(err, enrollPayloadLocation)
 	}
 	return reg.sealAppKeyAnswer(answer)
 }
@@ -341,6 +383,12 @@ func judgeSignedOrigin(known []string, signed string) error {
 // before the signature is signature_invalid; a malformed envelope or payload
 // field, once the signature verifies, is validation_failed.
 func appKeyProblem(err error) error {
+	return appKeyProblemAt(err, locationBody+".payload")
+}
+
+// appKeyProblemAt is appKeyProblem with the location of the route's signed
+// payload, for a payload field it refuses.
+func appKeyProblemAt(err error, payloadLocation string) error {
 	if errors.Is(err, auth.ErrSessionCheckUnavailable) {
 		// As at refresh: the store couldn't be asked, and the key is not
 		// judged.
@@ -368,7 +416,7 @@ func appKeyProblem(err error) error {
 			}
 			return validationProblem(location, codeInvalid, "The signed message is not in its shape for this route.")
 		case appkeys.StageFields:
-			return validationProblem(locationBody+".payload", codeInvalid, "A field of the signed payload is missing or malformed.")
+			return validationProblem(payloadLocation, codeInvalid, "A field of the signed payload is missing or malformed.")
 		}
 		return NewProblem(TypeSignatureInvalid, "The signed message did not verify.")
 	}

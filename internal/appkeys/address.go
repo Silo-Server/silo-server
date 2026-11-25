@@ -181,16 +181,16 @@ func canonicalIPv6(host string) (string, bool) {
 	return "[" + addr.String() + "]", true
 }
 
-// validHostLabel accepts a letters-digits-hyphen label of at most 63 bytes
-// that neither starts nor ends with a hyphen. An empty label is a leading,
-// trailing or doubled dot.
+// validHostLabel accepts a label of 1 to 63 characters from a-z, 0-9, '-'
+// and '_', in any position: home network names such as my_nas are real. An
+// empty label is a leading, trailing or doubled dot.
 func validHostLabel(label string) bool {
-	if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+	if label == "" || len(label) > 63 {
 		return false
 	}
 	for i := 0; i < len(label); i++ {
 		c := label[i]
-		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '_' {
 			return false
 		}
 	}

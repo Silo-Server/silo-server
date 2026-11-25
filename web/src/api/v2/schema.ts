@@ -6970,7 +6970,7 @@ export interface paths {
     put?: never;
     /**
      * Issue a challenge for one signed app key request.
-     * @description Send an empty JSON object. The challenge is good for two minutes and one signed request, on any API process. Spends the per-address key_challenge rate-limit budget. 409 capability_disabled while auth.app_key_sign_in is off.
+     * @description Send an empty JSON object. The challenge is good for two minutes and one signed request, on any API process. Spends the per-address key_challenge rate-limit budget. 409 capability_disabled while auth.app_key_sign_in is off. A body over 1 KiB is 413 payload_too_large.
      */
     post: operations["createAppKeyChallenge"];
     delete?: never;
@@ -7010,7 +7010,7 @@ export interface paths {
     put?: never;
     /**
      * Enroll a person key and a device key on the signed-in account and open a session bound to the device key.
-     * @description Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. The person key is registered when the account has none; a different one already on the account is 409 conflict, and so is a public key already enrolled on this server. Both keys take the provider identity of the session that enrolls them. The sealed plaintext adds person_key_id; the client drops the session it called with. Keys enrolled here start active, also on an administrator's account, so enroll never answers approval_required. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status: signed_in, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity). Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
+     * @description Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. When the account has no person key, person_key is registered and takes the provider identity of the session that enrolls it. When person_key is the account's person key already, it is reused as it is, binding unchanged. A different person key on the account is 409 conflict, and so is a device key already enrolled on this server. The new device key takes the session's provider identity. The sealed plaintext adds person_key_id; the client drops the session it called with. Keys enrolled here start active, also on an administrator's account, so enroll never answers approval_required. A malformed payload field is 422 at body.message.payload. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status: signed_in, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity). Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
      */
     post: operations["enrollAppKeys"];
     delete?: never;
@@ -7030,7 +7030,7 @@ export interface paths {
     put?: never;
     /**
      * Enroll this device's key with the account's person key and open a login session.
-     * @description The body is an introduce envelope signed with the account's person key, with device_sig from the device key in the payload. The device key is enrolled and opens the session. For an administrator's account it is stored waiting for approval, and the device repeats signInWithAppKey until it is approved. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
+     * @description The body is an introduce envelope signed with the account's person key, with device_sig from the device key in the payload. The device key is enrolled and opens the session. For an administrator's account it is stored waiting for approval, and the device repeats signInWithAppKey until it is approved. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
      */
     post: operations["introduceAppKey"];
     delete?: never;
@@ -7070,7 +7070,7 @@ export interface paths {
     put?: never;
     /**
      * Open a login session with an enrolled device key.
-     * @description The body is a sign-in envelope signed with the device key, with no device_sig. A key waiting for an administrator's approval answers approval_required, sealed, at most once every five seconds (sooner is 429 rate_limited with Retry-After) and for 24 hours; after that, or once denied, it is 403 key_denied. Spends the per-address key_sign_in rate-limit budget. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
+     * @description The body is a sign-in envelope signed with the device key, with no device_sig. A key waiting for an administrator's approval answers approval_required, sealed, at most once every five seconds (sooner is 429 rate_limited with Retry-After) and for 24 hours; after that, or once denied, it is 403 key_denied. A device waiting for approval asks again each time with a fresh challenge and a newly signed envelope: resending the same envelope after a 429 answers 401 challenge_invalid, because its challenge was spent. A key whose provider binding changed during the request also answers 429 with a one-second Retry-After; asking again succeeds. Spends the per-address key_sign_in rate-limit budget. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
      */
     post: operations["signInWithAppKey"];
     delete?: never;
@@ -101690,6 +101690,8 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         headers: {
+          /** @description Seconds to wait before asking again, on a fresh challenge. */
+          "Retry-After"?: string;
           [name: string]: unknown;
         };
         content: {
@@ -101708,6 +101710,8 @@ export interface operations {
       /** @description Service Unavailable */
       503: {
         headers: {
+          /** @description Seconds to wait before asking again, on a fresh challenge. */
+          "Retry-After"?: string;
           [name: string]: unknown;
         };
         content: {
@@ -101931,6 +101935,8 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         headers: {
+          /** @description Seconds to wait before asking again, on a fresh challenge. */
+          "Retry-After"?: string;
           [name: string]: unknown;
         };
         content: {
@@ -101949,6 +101955,8 @@ export interface operations {
       /** @description Service Unavailable */
       503: {
         headers: {
+          /** @description Seconds to wait before asking again, on a fresh challenge. */
+          "Retry-After"?: string;
           [name: string]: unknown;
         };
         content: {
@@ -102070,6 +102078,8 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         headers: {
+          /** @description Seconds to wait before asking again, on a fresh challenge. */
+          "Retry-After"?: string;
           [name: string]: unknown;
         };
         content: {
@@ -102088,6 +102098,8 @@ export interface operations {
       /** @description Service Unavailable */
       503: {
         headers: {
+          /** @description Seconds to wait before asking again, on a fresh challenge. */
+          "Retry-After"?: string;
           [name: string]: unknown;
         };
         content: {
@@ -102341,6 +102353,8 @@ export interface operations {
       /** @description Too Many Requests */
       429: {
         headers: {
+          /** @description Seconds to wait before asking again, on a fresh challenge. */
+          "Retry-After"?: string;
           [name: string]: unknown;
         };
         content: {
@@ -102359,6 +102373,8 @@ export interface operations {
       /** @description Service Unavailable */
       503: {
         headers: {
+          /** @description Seconds to wait before asking again, on a fresh challenge. */
+          "Retry-After"?: string;
           [name: string]: unknown;
         };
         content: {
