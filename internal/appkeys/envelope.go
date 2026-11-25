@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
 	"math/big"
 	"time"
 )
@@ -27,8 +29,8 @@ type Envelope struct {
 // ParseEnvelope decodes an envelope that has exactly its fields, each a
 // string, and checks its shape for the purpose (CheckShape).
 func ParseEnvelope(data []byte, purpose Purpose) (Envelope, error) {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
+	fields, err := objectMembers(data)
+	if err != nil {
 		return Envelope{}, fail(CodeEnvelopeMalformed)
 	}
 	env, ok := envelopeFromFields(fields)
@@ -93,16 +95,19 @@ func (e Envelope) signingInput(purpose Purpose) []byte {
 // VerifySignature checks Sig by key over the purpose's signing input, then
 // that KeyID is key's ID, and returns the decoded payload bytes. It does not
 // look inside the payload.
+//
+// The signature verified whenever the payload is returned, even with a
+// kid_mismatch error, so a route can spend the challenge it names.
 func (e Envelope) VerifySignature(purpose Purpose, key PublicKey) ([]byte, error) {
 	if !verifyRawSignature(key, e.signingInput(purpose), e.Sig) {
 		return nil, fail(CodeSignatureInvalid)
 	}
-	if e.KeyID != key.KeyID() {
-		return nil, fail(CodeKidMismatch)
-	}
-	payload, err := encoding.DecodeString(e.Payload)
+	payload, err := decodeB64(e.Payload)
 	if err != nil {
 		return nil, fail(CodePayloadMalformed)
+	}
+	if e.KeyID != key.KeyID() {
+		return payload, fail(CodeKidMismatch)
 	}
 	return payload, nil
 }
@@ -110,7 +115,7 @@ func (e Envelope) VerifySignature(purpose Purpose, key PublicKey) ([]byte, error
 // verifyRawSignature checks a base64url r || s ECDSA P-256 signature over
 // SHA-256 of msg. Any valid (r, s) passes, a high s included.
 func verifyRawSignature(key PublicKey, msg []byte, encodedSig string) bool {
-	sig, err := encoding.DecodeString(encodedSig)
+	sig, err := decodeB64(encodedSig)
 	if err != nil || len(sig) != SignatureSize {
 		return false
 	}
@@ -140,13 +145,17 @@ func Verify(env Envelope, purpose Purpose, key PublicKey, serverID string, now t
 	if err := env.CheckShape(purpose); err != nil {
 		return nil, err
 	}
-	raw, err := env.VerifySignature(purpose, key)
-	if err != nil {
-		return nil, err
+	raw, sigErr := env.VerifySignature(purpose, key)
+	if raw == nil {
+		return nil, sigErr
 	}
 	p := &Payload{}
-	if err := p.parse(raw, purpose); err != nil {
-		return p, err
+	parseErr := p.parse(raw, purpose)
+	if sigErr != nil {
+		return p, sigErr
+	}
+	if parseErr != nil {
+		return p, parseErr
 	}
 	if purpose.enrollsDeviceKey() {
 		if err := p.checkDeviceSig(env, purpose); err != nil {
@@ -156,7 +165,7 @@ func Verify(env Envelope, purpose Purpose, key PublicKey, serverID string, now t
 	if err := p.parseFields(purpose); err != nil {
 		return p, err
 	}
-	err = p.CheckClaims(serverID, now)
+	err := p.CheckClaims(serverID, now)
 	return p, err
 }
 
@@ -207,8 +216,8 @@ type KeyBody struct {
 // ParseKeyBody decodes a body of exactly person_key and message and checks
 // the message's shape for the purpose.
 func ParseKeyBody(data []byte, purpose Purpose) (PublicKey, Envelope, error) {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil || len(fields) != 2 {
+	fields, err := objectMembers(data)
+	if err != nil || len(fields) != 2 {
 		return PublicKey{}, Envelope{}, fail(CodeBodyMalformed)
 	}
 	var encodedKey string
@@ -219,7 +228,7 @@ func ParseKeyBody(data []byte, purpose Purpose) (PublicKey, Envelope, error) {
 	}
 	key, err := ParsePublicKey(encodedKey)
 	if err != nil {
-		return PublicKey{}, Envelope{}, fail(CodeBodyMalformed)
+		return PublicKey{}, Envelope{}, &Error{Code: CodeBodyMalformed, Field: "person_key"}
 	}
 	env, err := ParseEnvelope(msgRaw, purpose)
 	return key, env, err
@@ -245,4 +254,49 @@ var decoyKey = func() PublicKey {
 // refusal takes about as long as a known key's failed signature.
 func DecoyVerify(env Envelope, purpose Purpose) {
 	_ = verifyRawSignature(decoyKey, env.signingInput(purpose), env.Sig)
+}
+
+// errDuplicateMember is a JSON object that names one member twice.
+var errDuplicateMember = errors.New("appkeys: repeated member")
+
+// objectMembers decodes one JSON object into its members, refusing a member
+// that appears twice: an envelope and a key body have exactly their fields,
+// each once, so a body can't carry two values of which a reader keeps one.
+// Members repeated inside a signed payload are a different matter; there the
+// last value wins, as JSON readers do.
+func objectMembers(data []byte) (map[string]json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		return nil, errDuplicateMember
+	}
+	fields := map[string]json.RawMessage{}
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		name, ok := tok.(string)
+		if !ok {
+			return nil, errDuplicateMember
+		}
+		if _, seen := fields[name]; seen {
+			return nil, errDuplicateMember
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return nil, err
+		}
+		fields[name] = value
+	}
+	if _, err := dec.Token(); err != nil {
+		return nil, err
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, errDuplicateMember
+	}
+	return fields, nil
 }

@@ -8,6 +8,7 @@ import (
 	"crypto/elliptic"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 )
 
 // PublicKeySize is the length of an uncompressed P-256 point: 0x04, then the
@@ -25,6 +26,24 @@ var ErrInvalidPublicKey error = &Error{Code: CodeNotAPoint}
 // unused trailing bits are set, so each key has exactly one spelling.
 var encoding = base64.RawURLEncoding.Strict()
 
+// decodeB64 decodes base64url without padding, refusing any character outside
+// the base64url alphabet first: Go's strict decoder still skips CR and LF, so
+// a value with a line break in it would decode as if the break weren't there,
+// giving one value two spellings.
+func decodeB64(s string) ([]byte, error) {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '_' {
+			return nil, ErrInvalidBase64
+		}
+	}
+	return encoding.DecodeString(s)
+}
+
+// ErrInvalidBase64 is returned for a value that is not base64url without
+// padding.
+var ErrInvalidBase64 = errors.New("appkeys: not base64url")
+
 // PublicKey is a validated P-256 public key in its 65-byte uncompressed form.
 type PublicKey struct {
 	raw [PublicKeySize]byte
@@ -35,7 +54,7 @@ func ParsePublicKey(encoded string) (PublicKey, error) {
 	if encoding.DecodedLen(len(encoded)) != PublicKeySize {
 		return PublicKey{}, ErrInvalidPublicKey
 	}
-	raw, err := encoding.DecodeString(encoded)
+	raw, err := decodeB64(encoded)
 	if err != nil {
 		return PublicKey{}, ErrInvalidPublicKey
 	}
@@ -79,7 +98,7 @@ func (k PublicKey) KeyID() string {
 // be kept: base64url of SHA-256 over the bytes the base64url token decodes
 // to.
 func TokenHash(token string) (string, error) {
-	raw, err := encoding.DecodeString(token)
+	raw, err := decodeB64(token)
 	if err != nil {
 		return "", err
 	}

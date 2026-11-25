@@ -181,33 +181,31 @@ func canonicalIPv6(host string) (string, bool) {
 	return "[" + addr.String() + "]", true
 }
 
-// validHostLabel accepts a non-empty label of letters, digits, '-' and '_',
-// at most 63 bytes. An empty label is a leading, trailing or doubled dot.
+// validHostLabel accepts a letters-digits-hyphen label of at most 63 bytes
+// that neither starts nor ends with a hyphen. An empty label is a leading,
+// trailing or doubled dot.
 func validHostLabel(label string) bool {
-	if label == "" || len(label) > 63 {
+	if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
 		return false
 	}
 	for i := 0; i < len(label); i++ {
 		c := label[i]
-		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '_' {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
 			return false
 		}
 	}
 	return true
 }
 
-// looksNumeric reports whether a host's last label makes it an IPv4 address
-// to a URL parser: all digits, or a 0x hex number.
+// looksNumeric reports whether a host's last label, already lower-cased,
+// makes it an IPv4 address to a URL parser: all digits, or 0x followed by
+// zero or more hexadecimal digits (a bare 0x reads as zero). Any other label,
+// 0xroom included, is a name.
 func looksNumeric(label string) bool {
-	if strings.HasPrefix(label, "0x") {
-		return true
+	if rest, ok := strings.CutPrefix(label, "0x"); ok {
+		return strings.Trim(rest, "0123456789abcdef") == ""
 	}
-	for i := 0; i < len(label); i++ {
-		if label[i] < '0' || label[i] > '9' {
-			return false
-		}
-	}
-	return true
+	return label != "" && strings.Trim(label, "0123456789") == ""
 }
 
 // validIPv4 accepts exactly four decimal numbers from 0 to 255 with no

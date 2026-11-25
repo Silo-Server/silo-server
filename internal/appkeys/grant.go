@@ -21,7 +21,7 @@ func VerifyGrantRedeem(env Envelope, serverID string, now time.Time, personKey P
 	if err := env.CheckShape(PurposeGrantRedeem); err != nil {
 		return nil, nil, err
 	}
-	unverified, err := encoding.DecodeString(env.Payload)
+	unverified, err := decodeB64(env.Payload)
 	if err != nil {
 		return nil, nil, fail(CodeSignatureInvalid)
 	}
@@ -61,7 +61,7 @@ func VerifyGrantRedeem(env Envelope, serverID string, now time.Time, personKey P
 // readUnverifiedGrant decodes a grant's payload to find its app key and
 // account, before anything about it is trusted.
 func readUnverifiedGrant(env Envelope) (*Payload, error) {
-	raw, err := encoding.DecodeString(env.Payload)
+	raw, err := decodeB64(env.Payload)
 	if err != nil {
 		return nil, fail(CodeGrantInvalid)
 	}

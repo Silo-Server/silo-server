@@ -3,8 +3,10 @@ package appkeys
 import (
 	"bytes"
 	"crypto/ecdh"
+	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/hkdf"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"math/big"
@@ -356,15 +358,77 @@ func TestLinkVectors(t *testing.T) {
 	})
 }
 
-// A trailing dot names the same host as the name without it, so an address
-// written with one has a second spelling.
-func TestAddressRefusesTrailingDot(t *testing.T) {
-	for _, input := range []string{"https://media.example.com.", "https://media.example.com./silo", "http://192.168.1.20.:8080"} {
-		if _, err := CanonicalOrigin(input); CodeOf(err) != CodeNotAnAddress {
-			t.Errorf("CanonicalOrigin(%q) = %v", input, err)
+// Host spellings the frozen vectors don't pin yet. A trailing dot names the
+// same host as the name without it, so an address written with one has a
+// second spelling. Only the last label decides whether a host is a number:
+// all digits, or 0x and zero or more hex digits, as URL parsers read it; a
+// LAN name such as 0xroom stays a name. Labels are letters, digits and
+// inner hyphens.
+func TestAddressSpellings(t *testing.T) {
+	for _, tc := range []struct {
+		input string
+		ok    bool
+	}{
+		{input: "https://media.example.com."},
+		{input: "https://media.example.com./silo"},
+		{input: "http://192.168.1.20.:8080"},
+		{input: "http://0xroom:52830", ok: true},
+		{input: "http://0x1f:52830"},
+		{input: "http://0x:52830"},
+		{input: "http://0x1f.example:52830", ok: true},
+		{input: "http://room.0x1f:52830"},
+		{input: "http://0X1F:52830"},
+		{input: "http://my_host:8096"},
+		{input: "http://-room:8096"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			_, err := CanonicalOrigin(tc.input)
+			if (err == nil) != tc.ok || (!tc.ok && CodeOf(err) != CodeNotAnAddress) {
+				t.Fatalf("CanonicalOrigin = %v, want ok %v", err, tc.ok)
+			}
+			if _, err := CanonicalServerAddress(tc.input); (err == nil) != tc.ok {
+				t.Fatalf("CanonicalServerAddress = %v, want ok %v", err, tc.ok)
+			}
+		})
+	}
+}
+
+// Go's strict base64url decoder skips CR and LF. A payload with a line break
+// in it, signed exactly as sent, would otherwise verify and decode as if the
+// break weren't there: one payload, two spellings. It is refused, and so is
+// any other character outside the alphabet.
+func TestPayloadRefusesCharactersOutsideBase64url(t *testing.T) {
+	var signIn vectorCase
+	for _, m := range loadVectors(t, "signed-messages.json").Cases {
+		if m["name"] == "sign-in" {
+			signIn = vectorCase{t: t, m: m}
 		}
-		if _, err := CanonicalServerAddress(input); CodeOf(err) != CodeNotAnAddress {
-			t.Errorf("CanonicalServerAddress(%q) = %v", input, err)
-		}
+	}
+	priv, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), signIn.bytes("signer_private_key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(int64(signIn.m["now"].(float64)), 0)
+	payload := signIn.str("payload")
+	for _, tc := range []struct{ name, payload string }{
+		{name: "line feed", payload: payload[:20] + "\n" + payload[20:]},
+		{name: "carriage return", payload: payload[:20] + "\r" + payload[20:]},
+		{name: "standard alphabet", payload: payload[:20] + "+" + payload[21:]},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := Envelope{KeyID: signIn.key("signer_public_key").KeyID(), Payload: tc.payload}
+			digest := sha256.Sum256(env.signingInput(PurposeSignIn))
+			r, s, err := ecdsa.Sign(rand.Reader, priv, digest[:])
+			if err != nil {
+				t.Fatal(err)
+			}
+			sig := make([]byte, SignatureSize)
+			r.FillBytes(sig[:32])
+			s.FillBytes(sig[32:])
+			env.Sig = encoding.EncodeToString(sig)
+			if _, err := Verify(env, PurposeSignIn, signIn.key("signer_public_key"), signIn.str("server_id"), now); CodeOf(err) != CodePayloadMalformed {
+				t.Fatalf("Verify = %v, want payload_malformed", err)
+			}
+		})
 	}
 }

@@ -49,7 +49,7 @@ func ParseJoinLink(link string) (JoinLink, error) {
 	if parts[0] != joinLinkVersion {
 		return JoinLink{}, fail(CodeJoinVersion)
 	}
-	address, err := encoding.DecodeString(parts[1])
+	address, err := decodeB64(parts[1])
 	if err != nil {
 		return JoinLink{}, fail(CodeJoinAddress)
 	}
@@ -57,7 +57,7 @@ func ParseJoinLink(link string) (JoinLink, error) {
 	if err != nil || canonical != string(address) {
 		return JoinLink{}, fail(CodeJoinAddress)
 	}
-	code, err := encoding.DecodeString(parts[2])
+	code, err := decodeB64(parts[2])
 	if err != nil || len(code) != AppCodeSize {
 		return JoinLink{}, fail(CodeJoinAppCode)
 	}

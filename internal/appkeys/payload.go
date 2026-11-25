@@ -259,7 +259,7 @@ func (p *Payload) bytesField(name string, size int) ([]byte, error) {
 	if !decodeJSONString(p.fields[name], &s) {
 		return nil, fail(CodeFieldInvalid)
 	}
-	b, err := encoding.DecodeString(s)
+	b, err := decodeB64(s)
 	if err != nil || len(b) != size {
 		return nil, fail(CodeFieldInvalid)
 	}

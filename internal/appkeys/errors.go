@@ -68,6 +68,8 @@ const (
 // Error is a refusal with the code of the check that failed.
 type Error struct {
 	Code Code
+	// Field names the body member at fault, when one is known.
+	Field string
 }
 
 func (e *Error) Error() string { return "appkeys: " + string(e.Code) }

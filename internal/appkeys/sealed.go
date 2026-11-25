@@ -88,7 +88,7 @@ func Open(replyPrivate []byte, challenge []byte, sealed SealedReply) ([]byte, er
 	if err != nil {
 		return nil, fail(CodeOpenFailed)
 	}
-	epk, err := encoding.DecodeString(sealed.EphemeralKey)
+	epk, err := decodeB64(sealed.EphemeralKey)
 	if err != nil {
 		return nil, fail(CodeOpenFailed)
 	}
@@ -96,11 +96,11 @@ func Open(replyPrivate []byte, challenge []byte, sealed SealedReply) ([]byte, er
 	if err != nil || len(epk) != PublicKeySize {
 		return nil, fail(CodeOpenFailed)
 	}
-	nonce, err := encoding.DecodeString(sealed.Nonce)
+	nonce, err := decodeB64(sealed.Nonce)
 	if err != nil || len(nonce) != sealNonceSize {
 		return nil, fail(CodeOpenFailed)
 	}
-	ciphertext, err := encoding.DecodeString(sealed.Ciphertext)
+	ciphertext, err := decodeB64(sealed.Ciphertext)
 	if err != nil {
 		return nil, fail(CodeOpenFailed)
 	}
