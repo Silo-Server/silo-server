@@ -114,6 +114,7 @@ func TestLibraryCollectionHidesViewersWatchedTitlesDB(t *testing.T) {
 	ctx := context.Background()
 	everyone := f.movies
 	unwatched := f.movies[1:]
+	byFlag := map[bool][]*models.LibraryCollection{true: f.collections(t, true), false: f.collections(t, false)}
 	for _, tc := range []struct {
 		name        string
 		hideWatched bool
@@ -124,7 +125,7 @@ func TestLibraryCollectionHidesViewersWatchedTitlesDB(t *testing.T) {
 		{"another profile sees every member", true, f.other, everyone},
 		{"off keeps watched titles", false, f.watcher, everyone},
 	} {
-		for _, c := range f.collections(t, tc.hideWatched) {
+		for _, c := range byFlag[tc.hideWatched] {
 			for _, cursor := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/%s/cursor=%t", tc.name, c.CollectionType, cursor), func(t *testing.T) {
 					result, err := f.resolver.Resolve(ctx, CatalogRequest{Source: CatalogSourceLibraryCollection, CollectionID: c.ID, CursorPaging: cursor, Limit: 50}, tc.viewer)
