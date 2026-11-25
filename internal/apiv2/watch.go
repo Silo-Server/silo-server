@@ -47,6 +47,8 @@ type WatchDetail struct {
 	UserData                        *WatchUserData          `json:"user_data,omitempty" doc:"The acting profile's progress; absent without a profile or progress"`
 	SeriesID                        string                  `json:"series_id,omitempty" doc:"Owning series of an episode"`
 	SeriesTitle                     string                  `json:"series_title,omitempty"`
+	EpisodeLabels                   string                  `json:"episode_labels,omitempty" enum:"air_date" doc:"The series' episode labels, as on CatalogItem: air_date means show air_date where the season and episode numbers would go; absent or unknown means show the numbers" example:"air_date"`
+	AirDate                         *string                 `json:"air_date,omitempty" format:"date" doc:"An episode's air date, YYYY-MM-DD; sent when episode_labels is air_date"`
 	SeasonNumber                    int                     `json:"season_number,omitempty"`
 	EpisodeNumber                   int                     `json:"episode_number,omitempty"`
 	EffectiveSubtitleLanguage       *string                 `json:"effective_subtitle_language,omitempty" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$" doc:"The subtitle language the profile's preferences resolve to: BCP 47 tag; empty when the preference is None"`
@@ -389,6 +391,8 @@ func watchDetailOf(d *catalogpkg.WatchDetail) WatchDetail {
 		UserData:                   watchUserDataOf(d.UserData),
 		SeriesID:                   d.SeriesID,
 		SeriesTitle:                d.SeriesTitle,
+		EpisodeLabels:              d.EpisodeLabels,
+		AirDate:                    watchAirDate(d),
 		SeasonNumber:               d.SeasonNumber,
 		EpisodeNumber:              d.EpisodeNumber,
 		EffectiveVersionResolution: d.EffectiveVersionResolution,
@@ -556,4 +560,13 @@ type WatchService interface {
 	WatchDetail(ctx context.Context, userID int, profileID, contentID string, filter catalogpkg.AccessFilter) (*catalogpkg.WatchDetail, error)
 	SetWatchedState(ctx context.Context, userID int, profileID, contentID string, played, recordRewatch bool, filter catalogpkg.AccessFilter) (handlers.WatchedStateView, error)
 	ClearResumePosition(ctx context.Context, userID int, profileID, contentID string, filter catalogpkg.AccessFilter) error
+}
+
+// watchAirDate is the episode's air date, sent only for a date-labeled series:
+// a numbered episode's player shows its numbers.
+func watchAirDate(d *catalogpkg.WatchDetail) *string {
+	if d.EpisodeLabels == "" {
+		return nil
+	}
+	return datePtr(d.AirDate)
 }

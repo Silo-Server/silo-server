@@ -386,6 +386,10 @@ export interface SeriesContext {
   currentSeason: number;
   currentEpisode: number;
   episodes: EpisodeRef[];
+  /** The series' episode labels: "air_date" labels its episodes by date. */
+  episodeLabels?: string;
+  /** The current episode's air date. */
+  currentAirDate?: string | null;
 }
 
 /** Minimal episode reference for the player. */

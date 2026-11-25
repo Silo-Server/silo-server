@@ -846,6 +846,10 @@ type EpisodeCardContext struct {
 	EpisodeNumber int
 	StillPath     string
 	ParentArtwork models.EpisodeParentArtwork
+	// EpisodeLabels is the series' models.EpisodeLabelsAirDate choice and
+	// AirDate the episode's air date (YYYY-MM-DD, empty when undated).
+	EpisodeLabels string
+	AirDate       string
 }
 
 // ListCardContexts loads the card context of each episode in one query,
@@ -859,7 +863,8 @@ func (r *EpisodeRepository) ListCardContexts(ctx context.Context, contentIDs []s
 		SELECT e.content_id, e.series_id, COALESCE(si.title, ''), e.season_number, e.episode_number, COALESCE(e.still_path, ''),
 			COALESCE(si.poster_path, ''), COALESCE(si.poster_thumbhash, ''),
 			COALESCE(si.backdrop_path, ''), COALESCE(si.backdrop_thumbhash, ''),
-			COALESCE(s.poster_path, ''), COALESCE(s.poster_thumbhash, '')
+			COALESCE(s.poster_path, ''), COALESCE(s.poster_thumbhash, ''),
+			COALESCE(si.episode_labels, ''), COALESCE(e.air_date::text, '')
 		FROM episodes e
 		LEFT JOIN media_items si ON si.content_id = e.series_id
 		LEFT JOIN seasons s ON s.content_id = e.season_id
@@ -876,7 +881,7 @@ func (r *EpisodeRepository) ListCardContexts(ctx context.Context, contentIDs []s
 		)
 		if err := rows.Scan(&id, &c.SeriesID, &c.SeriesTitle, &c.SeasonNumber, &c.EpisodeNumber, &c.StillPath,
 			&p.SeriesPosterPath, &p.SeriesPosterThumbhash, &p.SeriesBackdropPath, &p.SeriesBackdropThumbhash,
-			&p.SeasonPosterPath, &p.SeasonPosterThumbhash); err != nil {
+			&p.SeasonPosterPath, &p.SeasonPosterThumbhash, &c.EpisodeLabels, &c.AirDate); err != nil {
 			return nil, fmt.Errorf("scanning episode card context: %w", err)
 		}
 		out[id] = c
