@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Activity, History, RefreshCw, RotateCcw } from "lucide-react";
+import { History, RefreshCw, RotateCcw } from "lucide-react";
 
 import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { markAdminInsightsRefresh } from "@/hooks/queries/admin/insights";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import { adminKeys } from "@/hooks/queries/keys";
 import { edgeMask, useScrollStrip } from "@/hooks/useScrollStrip";
@@ -23,16 +24,18 @@ import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { MessageKey } from "@/locales/keys";
 
-import { ActivityTab } from "./ActivityTab";
 import { BandwidthTab } from "./BandwidthTab";
 import { DevicesTab } from "./DevicesTab";
 import { InsightsDashboardPinsProvider } from "./InsightsDashboardPins";
 import { LibraryTab } from "./LibraryTab";
+import { LiveActivityTab } from "./LiveActivityTab";
 import { PeopleTab } from "./PeopleTab";
+import { PlaybackTab } from "./PlaybackTab";
 import { PersonDetailSheet } from "./PersonDetailSheet";
 import { TitleDetailSheet } from "./TitleDetailSheet";
 import { TitlesTab } from "./TitlesTab";
 import {
+  DEFAULT_INSIGHTS_TAB,
   INSIGHTS_DETAIL_PARAMS,
   INSIGHTS_RANGES,
   defaultCustomDates,
@@ -69,6 +72,7 @@ export default function AdminInsights() {
 
   const { data: libraries = [] } = useAdminLibraries();
   const { data: users = [] } = useAdminUsers();
+  const { refetch: refetchSessions } = useAdminSessions();
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const refreshStartRef = useRef<number | null>(null);
@@ -85,7 +89,7 @@ export default function AdminInsights() {
   const handleTabChange = useCallback(
     (value: string) => {
       updateParams((next) => {
-        if (value === "playback") {
+        if (value === DEFAULT_INSIGHTS_TAB) {
           next.delete("tab");
         } else {
           next.set("tab", value);
@@ -132,7 +136,7 @@ export default function AdminInsights() {
 
   const handleReset = useCallback(() => {
     const next = new URLSearchParams();
-    if (filters.tab !== "playback") {
+    if (filters.tab !== DEFAULT_INSIGHTS_TAB) {
       next.set("tab", filters.tab);
     }
     setSearchParams(next, { replace: true });
@@ -142,8 +146,12 @@ export default function AdminInsights() {
     refreshStartRef.current = Date.now();
     setIsRefreshing(true);
     try {
-      markAdminInsightsRefresh();
-      await queryClient.invalidateQueries({ queryKey: adminKeys.insightsRoot() });
+      if (filters.tab === "activity") {
+        await refetchSessions();
+      } else {
+        markAdminInsightsRefresh();
+        await queryClient.invalidateQueries({ queryKey: adminKeys.insightsRoot() });
+      }
     } finally {
       const started = refreshStartRef.current;
       if (started !== null) {
@@ -157,7 +165,7 @@ export default function AdminInsights() {
       refreshStartRef.current = null;
       setIsRefreshing(false);
     }
-  }, [queryClient]);
+  }, [filters.tab, queryClient, refetchSessions]);
 
   const timezoneOptions = useMemo(() => {
     const opts = new Set<string>([browserTz, "UTC"]);
@@ -165,14 +173,18 @@ export default function AdminInsights() {
     return Array.from(opts);
   }, [browserTz, filters.tz]);
 
-  const hasNonDefaultFilters =
-    filters.range !== "30d" ||
-    filters.tz !== browserTz ||
-    filters.libraryId !== undefined ||
-    filters.userId !== undefined;
-
   const activeTab: InsightsTab = filters.tab;
-  // Six tabs don't fit a phone: the strip scrolls sideways there and keeps
+  // Live streams have no date window or filters of the page's own; the tab
+  // brings its own search and filters.
+  const isLiveTab = activeTab === "activity";
+  const hasNonDefaultFilters =
+    !isLiveTab &&
+    (filters.range !== "30d" ||
+      filters.tz !== browserTz ||
+      filters.libraryId !== undefined ||
+      filters.userId !== undefined);
+
+  // Seven tabs don't fit a phone: the strip scrolls sideways there and keeps
   // the active tab in view.
   const {
     ref: tabStrip,
@@ -205,12 +217,6 @@ export default function AdminInsights() {
           subtitle={t("web.admin.insights.subtitle")}
           actions={
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="ghost" size="sm" asChild>
-                <Link to="/admin/activity">
-                  <Activity className="h-3.5 w-3.5" />
-                  {t("web.admin.insights.action.liveActivity")}
-                </Link>
-              </Button>
               <Button variant="ghost" size="sm" asChild>
                 <Link to="/admin/history">
                   <History className="h-3.5 w-3.5" />
@@ -255,6 +261,9 @@ export default function AdminInsights() {
               variant="line"
               className="h-auto w-max min-w-full flex-nowrap justify-start gap-2 pb-1"
             >
+              <TabsTrigger value="activity" className="flex-none">
+                {t("web.admin.activity.page.title")}
+              </TabsTrigger>
               <TabsTrigger value="playback" className="flex-none">
                 {t("web.admin.insights.tabs.activity")}
               </TabsTrigger>
@@ -277,7 +286,12 @@ export default function AdminInsights() {
           </div>
 
           {/* Shared filter toolbar */}
-          <div className="surface-panel flex flex-wrap items-center gap-2.5 rounded-2xl border-0 p-3">
+          <div
+            className={cn(
+              "surface-panel flex flex-wrap items-center gap-2.5 rounded-2xl border-0 p-3",
+              isLiveTab && "hidden",
+            )}
+          >
             <div
               role="group"
               aria-label={t("web.admin.insights.filter.rangeLabel")}
@@ -437,8 +451,11 @@ export default function AdminInsights() {
             ) : null}
           </div>
 
+          <TabsContent value="activity" className="mt-0 space-y-5">
+            {activeTab === "activity" ? <LiveActivityTab /> : null}
+          </TabsContent>
           <TabsContent value="playback" className="mt-0 space-y-5">
-            {activeTab === "playback" ? <ActivityTab filters={filters} /> : null}
+            {activeTab === "playback" ? <PlaybackTab filters={filters} /> : null}
           </TabsContent>
           <TabsContent value="titles" className="mt-0 space-y-5">
             {activeTab === "titles" ? <TitlesTab filters={filters} /> : null}
