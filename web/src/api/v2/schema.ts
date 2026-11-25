@@ -19176,7 +19176,7 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision, or null
        */
       oldest_history_at: string | null;
-      /** @description Up to 20 titles added in the window without a play since, newest first */
+      /** @description Up to 20 titles added in the window with no play yet, newest first */
       recently_added_unplayed: components["schemas"]["AdminInsightsUnplayedTitle"][];
       summary: components["schemas"]["AdminInsightsLibrarySummary"];
       /** @description Titles added in the window by how long they waited for a first play: day, week, month, later or not_yet; sessions holds the title count */
@@ -19223,7 +19223,7 @@ export interface components {
     AdminInsightsLibrarySummary: {
       /**
        * Format: int64
-       * @description Titles added in the window that have a play since
+       * @description Titles added in the window that have a play since, up to now
        */
       added_played: number;
       /**
@@ -19238,7 +19238,7 @@ export interface components {
       median_days_to_first_play: number | null;
       /**
        * Format: int64
-       * @description Titles with no playback session from the start of history to the window's end
+       * @description Titles with no playback session at all, up to now
        */
       never_started: number;
       /** Format: double */

@@ -86,6 +86,28 @@ func TestAdminInsightsBreakdownsDB(t *testing.T) {
 	t.Run("devices usage", func(t *testing.T) { assertBreakdownsDevicesDB(t, h, month) })
 	t.Run("library coverage", func(t *testing.T) { assertBreakdownsLibraryCoverageDB(t, h, s, month) })
 	t.Run("library breakdowns", func(t *testing.T) { assertBreakdownsLibraryPlaysDB(t, h, s, month) })
+	t.Run("library past window", func(t *testing.T) { assertBreakdownsLibraryPastWindowDB(t, h, s) })
+}
+
+// A window that ended before M2's first play: M2 is not played in it, but it
+// is not "not played yet" or "never started" either, since both are about now.
+func assertBreakdownsLibraryPastWindowDB(t *testing.T, h *AdminHandler, s breakdownsSeed) {
+	day := func(n int) string { return s.now.AddDate(0, 0, -n).Format("2006-01-02") }
+	past := AdminInsightsWindowQuery{Range: InsightsRangeCustom, FromDate: day(12), ToDate: day(10), TZ: "UTC"}
+	lib, err := h.ReadAdminInsightsLibrary(t.Context(), past, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := lib.Summary
+	if sum.Titles != 3 || sum.PlayedTitles != 0 || sum.NeverStarted != 0 || sum.AddedTitles != 1 || sum.AddedPlayed != 1 {
+		t.Errorf("summary = %+v", sum)
+	}
+	if !labeledCountsEqual(lib.TimeToFirstPlay, map[string]int64{"day": 0, "week": 1, "month": 0, "later": 0, "not_yet": 0}) {
+		t.Errorf("time to first play = %+v", lib.TimeToFirstPlay)
+	}
+	if len(lib.RecentlyAddedUnplayed) != 0 || len(lib.Genres) != 0 {
+		t.Errorf("unplayed = %+v, genres = %+v", lib.RecentlyAddedUnplayed, lib.Genres)
+	}
 }
 
 func assertBreakdownsDevicesDB(t *testing.T, h *AdminHandler, month AdminInsightsWindowQuery) {

@@ -13329,7 +13329,7 @@
             ]
           },
           "recently_added_unplayed": {
-            "description": "Up to 20 titles added in the window without a play since, newest first",
+            "description": "Up to 20 titles added in the window with no play yet, newest first",
             "items": {
               "$ref": "#/components/schemas/AdminInsightsUnplayedTitle"
             },
@@ -13457,7 +13457,7 @@
         "additionalProperties": false,
         "properties": {
           "added_played": {
-            "description": "Titles added in the window that have a play since",
+            "description": "Titles added in the window that have a play since, up to now",
             "format": "int64",
             "type": "integer"
           },
@@ -13475,7 +13475,7 @@
             ]
           },
           "never_started": {
-            "description": "Titles with no playback session from the start of history to the window's end",
+            "description": "Titles with no playback session at all, up to now",
             "format": "int64",
             "type": "integer"
           },

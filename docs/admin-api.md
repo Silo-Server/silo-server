@@ -2396,9 +2396,8 @@ window. The implementation and its edge cases are documented in
   Titles are movies and series; a series is played when any of its episodes has a play.
   Coverage is per title: `libraries` (libraries with movies or series, most titles first) and
   `summary` count titles, titles played in the window, titles never started (no playback
-  session from the start of history to the window's end, so a false start counts as started),
-  and titles added in
-  the window (`media_item_libraries.first_seen_at`; across libraries the earliest). A title in
+  session at all, up to now, so a false start counts as started), and titles added in the
+  window (`media_item_libraries.first_seen_at`; across libraries the earliest). A title in
   two libraries counts once in `summary` and is played in both when either file played; the
   account and profile filters narrow "played" and "started" to that person. `genres` (up to
   20; a title counts in each of its genres), `decades` (key is the decade's first year,
@@ -2406,7 +2405,9 @@ window. The implementation and its edge cases are documented in
   play like the other reads. `time_to_first_play` buckets the titles added in the window by how
   long they waited for a first play (`day`, `week`, `month`, `later`, `not_yet`; `sessions`
   holds the title count), `summary.median_days_to_first_play` is the median wait over those
-  with a play, and `recently_added_unplayed` lists up to 20 of the newest still waiting.
+  with a play, and `recently_added_unplayed` lists up to 20 of the newest still waiting. The
+  first play is looked up to now, so a window that ended in the past still reports a title
+  first played after it as played, with its full wait, though it is not "played in the window".
 
 The dashboard's Top Titles and Most active profiles widgets read `getAdminInsightsTitles` and
 `top_profiles`, so they count plays the same way as the Titles and People tabs. The older

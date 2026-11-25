@@ -14,9 +14,9 @@ type AdminInsightsLibrarySummary struct {
 	Titles                int64    `json:"titles" doc:"Distinct movies and series in scope; a title in two libraries counts once"`
 	PlayedTitles          int64    `json:"played_titles" doc:"Titles with a play in the window; a series counts when any episode has one"`
 	PlayedShare           float64  `json:"played_share"`
-	NeverStarted          int64    `json:"never_started" doc:"Titles with no playback session from the start of history to the window's end"`
+	NeverStarted          int64    `json:"never_started" doc:"Titles with no playback session at all, up to now"`
 	AddedTitles           int64    `json:"added_titles" doc:"Titles first seen in the window"`
-	AddedPlayed           int64    `json:"added_played" doc:"Titles added in the window that have a play since"`
+	AddedPlayed           int64    `json:"added_played" doc:"Titles added in the window that have a play since, up to now"`
 	MedianDaysToFirstPlay *float64 `json:"median_days_to_first_play" nullable:"true" doc:"Median days from being added to the first play, over titles added in the window that have one"`
 }
 
@@ -57,7 +57,7 @@ type AdminInsightsLibrary struct {
 	Decades               []AdminInsightsLabeledPlays    `json:"decades" doc:"Plays by release decade (key is the decade's first year), oldest first, unknown last"`
 	ContentRatings        []AdminInsightsLabeledPlays    `json:"content_ratings" doc:"Up to 15 content ratings by plays"`
 	TimeToFirstPlay       []AdminInsightsLabeledCount    `json:"time_to_first_play" doc:"Titles added in the window by how long they waited for a first play: day, week, month, later or not_yet; sessions holds the title count"`
-	RecentlyAddedUnplayed []AdminInsightsUnplayedTitle   `json:"recently_added_unplayed" doc:"Up to 20 titles added in the window without a play since, newest first"`
+	RecentlyAddedUnplayed []AdminInsightsUnplayedTitle   `json:"recently_added_unplayed" doc:"Up to 20 titles added in the window with no play yet, newest first"`
 }
 
 type AdminInsightsLibraryOutput struct {
