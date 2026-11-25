@@ -299,12 +299,25 @@ func insightsLibraryCoverageSQL(win resolvedInsightsWindow, q AdminInsightsWindo
 		startedConds = append(startedConds, "h.profile_id = "+param(profileID))
 	}
 
-	// Deduplicate media_item_id before probing episodes so repeated plays of
-	// the same item probe episodes once.
 	ctes := `
 		WITH played AS (
 			SELECT id AS title_id FROM unnest($1::text[]) AS t(id)
-		),
+		)`
+	// A title was started when any session played it or one of its episodes.
+	// Within one library, across every account, each title probes the
+	// history's item index, which beats collecting the distinct items of the
+	// whole history. Otherwise the started titles are collected, deduplicating
+	// media_item_id before probing episodes: the whole catalog probes slower
+	// than that, and one account's or profile's sessions are few.
+	startedJoin := ""
+	// Only a series has episodes; keeping the movies out of that probe also
+	// keeps the planner from hashing every session's episode instead.
+	neverStarted := `NOT (EXISTS (SELECT 1 FROM admin_playback_history h WHERE h.media_item_id = mi.content_id)
+		OR CASE WHEN mi.type = 'series' THEN EXISTS (
+			SELECT 1 FROM episodes ep JOIN admin_playback_history h ON h.media_item_id = ep.content_id
+			WHERE ep.series_id = mi.content_id) ELSE FALSE END)`
+	if q.LibraryID <= 0 || len(startedConds) > 1 {
+		ctes += `,
 		started AS (
 			SELECT DISTINCT COALESCE(ep.series_id, h.media_item_id) AS title_id
 			FROM (
@@ -314,6 +327,9 @@ func insightsLibraryCoverageSQL(win resolvedInsightsWindow, q AdminInsightsWindo
 			) h
 			LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
 		)`
+		startedJoin = "LEFT JOIN started s ON s.title_id = mi.content_id"
+		neverStarted = "s.title_id IS NULL"
+	}
 
 	if q.LibraryID > 0 {
 		// Within one library, (content_id, media_folder_id) is unique, so per-
@@ -325,12 +341,12 @@ func insightsLibraryCoverageSQL(win resolvedInsightsWindow, q AdminInsightsWindo
 				SELECT mil.media_folder_id AS library_id,
 					COUNT(*)::bigint AS titles,
 					COUNT(*) FILTER (WHERE p.title_id IS NOT NULL)::bigint AS played_titles,
-					COUNT(*) FILTER (WHERE s.title_id IS NULL)::bigint AS never_started,
+					COUNT(*) FILTER (WHERE ` + neverStarted + `)::bigint AS never_started,
 					COUNT(*) FILTER (WHERE mil.first_seen_at >= $2)::bigint AS added_titles
 				FROM media_item_libraries mil
 				JOIN media_items mi ON mi.content_id = mil.content_id
 				LEFT JOIN played p ON p.title_id = mi.content_id
-				LEFT JOIN started s ON s.title_id = mi.content_id
+				` + startedJoin + `
 				WHERE mi.type IN ('movie', 'series') AND mil.first_seen_at < $3
 				  AND mil.media_folder_id = ` + libParam + `
 				GROUP BY mil.media_folder_id
@@ -346,11 +362,11 @@ func insightsLibraryCoverageSQL(win resolvedInsightsWindow, q AdminInsightsWindo
 				SELECT mil.media_folder_id AS library_id, mil.content_id,
 					(mil.first_seen_at >= $2) AS is_added,
 					(p.title_id IS NOT NULL) AS is_played,
-					(s.title_id IS NULL) AS is_never_started
+					(` + neverStarted + `) AS is_never_started
 				FROM media_item_libraries mil
 				JOIN media_items mi ON mi.content_id = mil.content_id
 				LEFT JOIN played p ON p.title_id = mi.content_id
-				LEFT JOIN started s ON s.title_id = mi.content_id
+				` + startedJoin + `
 				WHERE mi.type IN ('movie', 'series') AND mil.first_seen_at < $3
 			)
 			SELECT 0, g.library_id, COALESCE(lib.name, ''), g.titles, g.played_titles, g.never_started, g.added_titles
