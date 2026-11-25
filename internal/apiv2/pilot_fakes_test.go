@@ -1414,6 +1414,10 @@ func (f *fakeSessionService) SetupInitialUser(_ context.Context, in handlers.Reg
 
 func (f *fakeSessionService) SignupEnabled(context.Context) (bool, error) { return f.signupOn, f.err }
 
+func (f *fakeSessionService) PasswordPolicy(context.Context) (auth.PasswordPolicy, error) {
+	return auth.DefaultPasswordPolicy(), f.err
+}
+
 func (f *fakeSessionService) Signup(_ context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error) {
 	if f.err != nil {
 		return handlers.TokenPairView{}, f.err

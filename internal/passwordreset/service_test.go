@@ -298,3 +298,15 @@ func TestCompleteValidatesFirstAndReportsCommittedReset(t *testing.T) {
 		t.Fatalf("sign-in as another account = %v, %v, %v, revoked %v", pair, user, err, loggedOut)
 	}
 }
+
+func TestCompleteAppliesTheStoredPasswordPolicy(t *testing.T) {
+	repo := &fakeRepo{user: &models.User{ID: 5, Username: "alice"}}
+	s := newTestService(repo, &fakeMail{}, fakeSettings{"auth.password_require_special": "true"})
+
+	if _, _, err := s.Complete(t.Context(), "tok", "longenough", "", ""); !errors.Is(err, auth.ErrPasswordNeedsSpecial) || len(repo.completed) != 0 {
+		t.Fatalf("policy breach: %v, spent %d links", err, len(repo.completed))
+	}
+	if _, _, err := s.Complete(t.Context(), "tok", "longenough!", "", ""); err != nil || len(repo.completed) != 1 {
+		t.Fatalf("policy met: %v, spent %d links", err, len(repo.completed))
+	}
+}

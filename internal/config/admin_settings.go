@@ -320,6 +320,13 @@ const ServerLocalURLSettingKey = "server.local_url"
 // Read per request, so a change applies without restart.
 const WebMediaURLSettingKey = "server.web_media_url"
 
+// The range of auth.password_min_length: never below the built-in minimum,
+// and never above the 72-byte bcrypt limit a password must also fit.
+const (
+	PasswordMinLengthFloor   = 8
+	PasswordMinLengthCeiling = 72
+)
+
 // External sign-in settings (docs/architecture/external-sign-in.md).
 const (
 	// AuthLocalPasswordLoginSettingKey turns local password sign-in on or off
@@ -341,6 +348,17 @@ const (
 	// creates keys. Turning it off stops new keys and leaves existing ones
 	// working until they are revoked.
 	AuthUserAPIKeysSettingKey = "auth.user_api_keys" //nolint:gosec // A setting name, not a credential.
+	// AuthPasswordMinLengthSettingKey is the fewest characters a new local
+	// password may have, from PasswordMinLengthFloor to PasswordMinLengthCeiling.
+	// The password policy settings apply when a password is chosen or
+	// replaced; passwords already stored keep working.
+	AuthPasswordMinLengthSettingKey = "auth.password_min_length"
+	// AuthPasswordRequireUppercaseSettingKey asks a new local password for a
+	// capital letter.
+	AuthPasswordRequireUppercaseSettingKey = "auth.password_require_uppercase"
+	// AuthPasswordRequireSpecialSettingKey asks a new local password for a
+	// punctuation mark or symbol.
+	AuthPasswordRequireSpecialSettingKey = "auth.password_require_special"
 	// AuthProviderRecheckIntervalSettingKey is how old an identity's last
 	// provider check may be before a session refresh asks the provider again.
 	AuthProviderRecheckIntervalSettingKey = "auth.provider_recheck_interval"
@@ -430,6 +448,9 @@ var adminSettingDefaults = map[string]string{
 	AuthLocalPasswordLoginSettingKey:          "true",
 	AuthEmailAutoMatchSettingKey:              "false",
 	AuthUserAPIKeysSettingKey:                 "false",
+	AuthPasswordMinLengthSettingKey:           strconv.Itoa(PasswordMinLengthFloor),
+	AuthPasswordRequireUppercaseSettingKey:    "false",
+	AuthPasswordRequireSpecialSettingKey:      "false",
 	AuthProviderRecheckIntervalSettingKey:     "12h",
 	AuthProviderRecheckOutagePolicySettingKey: AuthRecheckFailOpen,
 
@@ -788,6 +809,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"catalog.search.meilisearch.semantic_enabled", "catalog.search.meilisearch.binary_quantized",
 		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style",
 		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, AuthUserAPIKeysSettingKey, ServerLANDiscoverySettingKey,
+		AuthPasswordRequireUppercaseSettingKey, AuthPasswordRequireSpecialSettingKey,
 		BackupEnabledSettingKey, BackupIncludeIntroFingerprintsSettingKey, BackupIncludeSubtitlesSettingKey,
 		BackupS3PathStyleSettingKey:
 		return normalizeAdminBool(key, value)
@@ -800,6 +822,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return fmt.Sprintf("%02d:%02d", hour, minute), nil
 	case BackupKeepSettingKey:
 		return normalizeAdminInt(key, value, MinBackupKeep, MaxBackupKeep)
+	case AuthPasswordMinLengthSettingKey:
+		return normalizeAdminInt(key, value, PasswordMinLengthFloor, PasswordMinLengthCeiling)
 	case BackupDestinationSettingKey:
 		return normalizeAdminEnum(key, value, BackupDestinationDefault, BackupDestinationS3)
 	case BackupS3EndpointSettingKey:

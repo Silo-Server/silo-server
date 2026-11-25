@@ -15,8 +15,9 @@ import { AuthBackground } from "@/components/auth/AuthBackground";
 import { AuthLanguagePicker } from "@/components/auth/AuthLanguagePicker";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
-import { newPasswordLengthProblem } from "@/lib/newPassword";
+import { newPasswordPolicyProblem, newPasswordHint } from "@/lib/newPassword";
 import { toast } from "sonner";
+import { usePasswordPolicy } from "@/hooks/queries/account";
 import { useT } from "@/i18n";
 import { hasArabicScript } from "@/lib/direction";
 
@@ -71,6 +72,7 @@ export default function Signup() {
   const { serverName } = useServerBranding();
   const redirectTarget = sanitizeAuthRedirect(searchParams.get("redirect"));
   const t = useT();
+  const passwordPolicy = usePasswordPolicy();
 
   const statusQuery = useQuery({
     queryKey: ["auth", "signup-status"],
@@ -113,7 +115,7 @@ export default function Signup() {
   const problems: Record<Field, string | null> = {
     username: username.trim() ? null : required(t("web.auth.username")),
     email: isValidEmail(email) ? null : invalidEmailMessage(),
-    password: newPasswordLengthProblem(password),
+    password: newPasswordPolicyProblem(password, passwordPolicy),
     confirmPassword: password === confirmPassword ? null : t("web.auth.passwordRules.mismatch"),
     inviteCode: inviteCode.trim() ? null : required(t("web.auth.signup.inviteCodeLabel")),
   };
@@ -230,9 +232,7 @@ export default function Signup() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="signup-password">{t("web.auth.password")}</Label>
-                <p className="text-muted-foreground text-xs">
-                  {t("web.auth.passwordRules.minLength")}
-                </p>
+                <p className="text-muted-foreground text-xs">{newPasswordHint(passwordPolicy)}</p>
                 <PasswordInput
                   {...fieldProps("password", "signup-password")}
                   value={password}

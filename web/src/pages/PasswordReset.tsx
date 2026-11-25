@@ -15,11 +15,12 @@ import { useLinkToken } from "@/hooks/useLinkToken";
 import { usePostSignInNavigation } from "@/hooks/usePostSignInNavigation";
 import { usePasswordResetAvailable } from "@/hooks/queries/passwordReset";
 import { formatDateTime } from "@/lib/datetime";
-import { newPasswordProblem, passwordErrorMessage } from "@/lib/newPassword";
+import { newPasswordProblem, passwordErrorMessage, newPasswordHint } from "@/lib/newPassword";
 import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/PasswordInput";
 import { Label } from "@/components/ui/label";
 import { AuthCard, SignInHint } from "@/components/auth/AuthCard";
+import { usePasswordPolicy } from "@/hooks/queries/account";
 import { useT } from "@/i18n";
 
 export default function PasswordReset() {
@@ -55,6 +56,8 @@ function ResetForm({ token }: { token: string }) {
   const busy = useRef(false);
   const lifetime = useRef<AbortController | null>(null);
   const t = useT();
+  // A signed-in visitor is asked to sign out first; the form is not theirs yet.
+  const passwordPolicy = usePasswordPolicy(!user);
   useDocumentTitle(t("web.auth.passwordReset.documentTitle"));
 
   useEffect(() => {
@@ -156,7 +159,7 @@ function ResetForm({ token }: { token: string }) {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (busy.current || recovery || getAccessToken()) return;
-    const problem = newPasswordProblem(password, confirmation);
+    const problem = newPasswordProblem(password, confirmation, passwordPolicy);
     if (problem) {
       setError(problem);
       return;
@@ -222,7 +225,7 @@ function ResetForm({ token }: { token: string }) {
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="reset-password">{t("web.auth.passwordRules.newPassword")}</Label>
-          <p className="text-muted-foreground text-xs">{t("web.auth.passwordRules.minLength")}</p>
+          <p className="text-muted-foreground text-xs">{newPasswordHint(passwordPolicy)}</p>
           <PasswordInput
             id="reset-password"
             value={password}

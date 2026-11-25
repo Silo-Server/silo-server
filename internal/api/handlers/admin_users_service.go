@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -91,11 +90,19 @@ func adminAccountTransactionGroup(ctx context.Context, tx pgx.Tx, user *models.U
 	}
 	return new(group.Policy()), group.Revision, nil
 }
-func validateAdminPassword(password string) error {
-	if utf8.RuneCountInString(password) < 8 || len(password) > 72 {
-		return fieldError("password", "Use at least 8 characters and at most 72 UTF-8 bytes")
+
+// validateAdminPassword applies the server's password policy to a password
+// an administrator sets.
+func (h *AdminHandler) validateAdminPassword(ctx context.Context, password string) error {
+	var settings auth.SettingsGetter
+	if h.SettingsRepo != nil {
+		settings = h.SettingsRepo
 	}
-	return nil
+	err := auth.CheckNewPassword(ctx, settings, password)
+	if message, ok := auth.PasswordRuleMessage(err); ok {
+		return fieldError("password", message).WithCause(err)
+	}
+	return err
 }
 
 func validateAdminIdentity(username, email, role string) error {
@@ -132,7 +139,7 @@ func (h *AdminHandler) CreateAdminAccount(ctx context.Context, input auth.Create
 	if err := validateAdminIdentity(input.User.Username, input.User.Email, input.User.Role); err != nil {
 		return 0, err
 	}
-	if err := validateAdminPassword(input.User.Password); err != nil {
+	if err := h.validateAdminPassword(ctx, input.User.Password); err != nil {
 		return 0, err
 	}
 	if apimw.IsScopedAPIKey(ctx) && input.User.Role == roleAdmin {
@@ -198,7 +205,7 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 		return 0, apiError(501, "capability_unsupported", "Guarded account management is unavailable")
 	}
 	if input.Password != nil {
-		if err := validateAdminPassword(*input.Password); err != nil {
+		if err := h.validateAdminPassword(ctx, *input.Password); err != nil {
 			return 0, err
 		}
 	}

@@ -1774,6 +1774,10 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, adminDashboardLayoutFixtureCases()...)
 	cases = append(cases, catalogItemCollectionsFixtureCases()...)
 	cases = append(cases, directConnectionsFixtureCases()...)
+	cases = append(cases, fixtureCase{name: "get_password_policy_ok", operationID: "getPasswordPolicy",
+		scenario: "The rules a new password must meet, before login: setup, signup and a password reset read them.",
+		method:   http.MethodGet, path: "/api/v2/auth/password-policy",
+		status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PasswordPolicy"})
 	cases = append(cases,
 		fixtureCase{name: "get_admin_plugin_capabilities_ok", operationID: "getAdminPluginCapabilities",
 			scenario: "An administrator discovers deployment-managed plugin settings.",
