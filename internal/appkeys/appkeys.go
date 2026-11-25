@@ -8,7 +8,6 @@ import (
 	"crypto/elliptic"
 	"crypto/sha256"
 	"encoding/base64"
-	"errors"
 )
 
 // PublicKeySize is the length of an uncompressed P-256 point: 0x04, then the
@@ -20,7 +19,7 @@ const keyIDSize = 16
 
 // ErrInvalidPublicKey is returned for a value that is not the base64url form
 // of an uncompressed P-256 point on the curve.
-var ErrInvalidPublicKey = errors.New("appkeys: invalid public key")
+var ErrInvalidPublicKey error = &Error{Code: CodeNotAPoint}
 
 // encoding is base64url without padding. Strict refuses an encoding whose
 // unused trailing bits are set, so each key has exactly one spelling.

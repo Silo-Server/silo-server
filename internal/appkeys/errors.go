@@ -48,6 +48,9 @@ const (
 	CodeGrantExpired Code = "grant_expired"
 	// CodeOpenFailed: a sealed reply that does not open.
 	CodeOpenFailed Code = "open_failed"
+	// CodeNotAPoint: a public key that is not the uncompressed form of a
+	// point on P-256.
+	CodeNotAPoint Code = "not_a_point"
 	// CodeNotAnAddress: an origin or server address that is not http or
 	// https written in its one spelling.
 	CodeNotAnAddress Code = "not_an_address"

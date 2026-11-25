@@ -3,9 +3,14 @@ package appkeys
 import (
 	"bytes"
 	"crypto/ecdh"
+	"crypto/elliptic"
+	"crypto/hkdf"
+	"crypto/sha256"
 	"encoding/json"
+	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -101,6 +106,23 @@ func (c vectorCase) expectRefusal(err error, known map[Code]bool) {
 	}
 }
 
+// caseFields are the fields each case type may carry: the ones its handler
+// reads. A refreshed file that adds a field fails here, as a new case type
+// does, rather than passing with the field unchecked.
+var caseFields = map[string][]string{
+	"signed-message": {"type", "name", "valid", "reason", "error", "purpose", "now", "server_id", "signer_private_key",
+		"signer_public_key", "device_private_key", "device_public_key", "payload_json", "payload", "signing_input", "sig",
+		"device_sig", "envelope", "body", "verify_key", "s_form", "grant_signer_private_key", "grant_signer_public_key"},
+	"sealed-reply": {"type", "name", "valid", "reason", "error", "challenge", "reply_private_key", "reply_public_key",
+		"ephemeral_private_key", "ephemeral_public_key", "z", "kdf_input", "key", "nonce", "plaintext_json", "sealed"},
+	"key":            {"type", "name", "valid", "private_key", "public_key", "kid"},
+	"token-hash":     {"type", "name", "valid", "token", "token_hash"},
+	"public-key":     {"type", "name", "valid", "reason", "error", "public_key"},
+	"origin":         {"type", "name", "valid", "reason", "error", "input", "origin"},
+	"server-address": {"type", "name", "valid", "reason", "error", "input", "address"},
+	"join-link":      {"type", "name", "valid", "reason", "error", "form", "string", "address", "app_code"},
+}
+
 func runVectorCases(t *testing.T, file string, handlers map[string]func(vectorCase), skip map[string]string) {
 	for _, m := range loadVectors(t, file).Cases {
 		typ, _ := m["type"].(string)
@@ -113,8 +135,28 @@ func runVectorCases(t *testing.T, file string, handlers map[string]func(vectorCa
 			if !ok {
 				t.Fatalf("case type %q is not read by this test", typ)
 			}
+			for field := range m {
+				if !slices.Contains(caseFields[typ], field) {
+					t.Fatalf("case field %q is not read by this test", field)
+				}
+			}
 			handle(vectorCase{t: t, m: m})
 		})
+	}
+}
+
+// privateOf checks that a case's private key derives its public key.
+func (c vectorCase) privateOf(private, public string) {
+	c.t.Helper()
+	if !c.has(private) {
+		return
+	}
+	priv, err := ecdh.P256().NewPrivateKey(c.bytes(private))
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	if !bytes.Equal(priv.PublicKey().Bytes(), c.key(public).Bytes()) {
+		c.t.Fatalf("%s does not derive %s", private, public)
 	}
 }
 
@@ -176,6 +218,34 @@ func checkSignedMessage(c vectorCase) {
 			c.t.Fatalf("signing input differs")
 		}
 	}
+	checkSignedMessageInputs(c)
+}
+
+// checkSignedMessageInputs reads the inputs a valid case states beside its
+// envelope: the keys that made it, the payload JSON it encodes, and the form
+// of its s.
+func checkSignedMessageInputs(c vectorCase) {
+	c.privateOf("signer_private_key", "signer_public_key")
+	c.privateOf("device_private_key", "device_public_key")
+	c.privateOf("grant_signer_private_key", "grant_signer_public_key")
+	if c.has("payload_json") {
+		if decoded, err := encoding.DecodeString(c.str("payload")); err != nil || string(decoded) != c.str("payload_json") {
+			c.t.Fatalf("payload does not encode payload_json")
+		}
+	}
+	for _, field := range []string{"sig", "device_sig"} {
+		if c.has(field) && c.str(field) == "" {
+			c.t.Fatalf("empty %s", field)
+		}
+	}
+	if c.has("s_form") {
+		sig := c.bytes("sig")
+		half := new(big.Int).Rsh(elliptic.P256().Params().N, 1)
+		high := new(big.Int).SetBytes(sig[32:]).Cmp(half) > 0
+		if high != (c.str("s_form") == "high") {
+			c.t.Fatalf("s is not %s", c.str("s_form"))
+		}
+	}
 }
 
 func TestSealedReplyVectors(t *testing.T) {
@@ -207,6 +277,24 @@ func checkSealedReply(c vectorCase) {
 	if resealed != sealed {
 		c.t.Fatalf("sealed %+v, want %+v", resealed, sealed)
 	}
+	c.privateOf("reply_private_key", "reply_public_key")
+	c.privateOf("ephemeral_private_key", "ephemeral_public_key")
+	recipient, err := ecdh.P256().NewPublicKey(c.bytes("reply_public_key"))
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	z, err := ephemeral.ECDH(recipient)
+	if err != nil || !bytes.Equal(z, c.bytes("z")) {
+		c.t.Fatalf("z differs: %v", err)
+	}
+	input := append(append(append([]byte(nil), z...), c.bytes("ephemeral_public_key")...), c.bytes("reply_public_key")...)
+	if !bytes.Equal(input, c.bytes("kdf_input")) {
+		c.t.Fatal("kdf_input differs")
+	}
+	key, err := hkdf.Key(sha256.New, input, challenge, ReplyLabel, sealKeySize)
+	if err != nil || !bytes.Equal(key, c.bytes("key")) {
+		c.t.Fatalf("key differs: %v", err)
+	}
 }
 
 func TestKeyVectors(t *testing.T) {
@@ -228,7 +316,7 @@ func TestKeyVectors(t *testing.T) {
 		},
 		"public-key": func(c vectorCase) {
 			_, err := ParsePublicKey(c.str("public_key"))
-			c.expectRefusal(err, nil)
+			c.expectRefusal(err, map[Code]bool{CodeNotAPoint: true})
 		},
 	}, nil)
 }

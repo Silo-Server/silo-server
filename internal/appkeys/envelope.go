@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"math/big"
 	"time"
@@ -222,4 +223,26 @@ func ParseKeyBody(data []byte, purpose Purpose) (PublicKey, Envelope, error) {
 	}
 	env, err := ParseEnvelope(msgRaw, purpose)
 	return key, env, err
+}
+
+// decoyKey is a fixed public key nobody signs with: the P-256 base point.
+var decoyKey = func() PublicKey {
+	raw, err := hex.DecodeString("04" +
+		"6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296" +
+		"4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5")
+	if err != nil {
+		panic(err)
+	}
+	key, err := PublicKeyFromBytes(raw)
+	if err != nil {
+		panic(err)
+	}
+	return key
+}()
+
+// DecoyVerify runs one signature check of env against a key nobody holds. A
+// route calls it when the envelope names a key it doesn't hold, so that
+// refusal takes about as long as a known key's failed signature.
+func DecoyVerify(env Envelope, purpose Purpose) {
+	_ = verifyRawSignature(decoyKey, env.signingInput(purpose), env.Sig)
 }

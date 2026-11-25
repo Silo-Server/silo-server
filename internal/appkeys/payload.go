@@ -298,8 +298,19 @@ func (p *Payload) textField(name string, limit int, required bool) (string, bool
 		return "", false, nil
 	}
 	var s string
-	if !decodeJSONString(raw, &s) || utf8.RuneCountInString(s) > limit {
+	if !decodeJSONString(raw, &s) || utf8.RuneCountInString(s) > limit || hasControl(s) {
 		return "", false, fail(CodeFieldInvalid)
 	}
 	return s, true, nil
+}
+
+// hasControl reports a C0 control character (NUL included) or DEL. Names are
+// stored and shown to people; Postgres refuses a NUL.
+func hasControl(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] == 0x7f {
+			return true
+		}
+	}
+	return false
 }
