@@ -104,12 +104,13 @@ func (a *AppKeySignIn) VerifyProfileSet(ctx context.Context, req KeyRequest) (*P
 	}, nil
 }
 
-// ProfileSetSessionAllowed refuses a login session that may not read or
-// send the account's profile set: the rule for sessions that manage keys
-// (SessionAllows with ActionManageKeys), which holds back a grant-enrolled
-// app, a device sign-in session, an administrator acting as the account, an
-// API key, a remote-playback handoff, and a session older than the record
-// of how sessions are opened.
-func (a *AppKeySignIn) ProfileSetSessionAllowed(ctx context.Context, claims *Claims) error {
+// SessionMayManageKeys refuses a login session that may not manage the
+// account's keys or read or send its profile set (SessionAllows with
+// ActionManageKeys): a grant-enrolled app, a device sign-in session, an
+// administrator acting as the account, an API key, a remote-playback
+// handoff, and a session older than the record of how sessions are opened.
+// The routes ask it before they look at the profile, so such a session is
+// told it may not do this, not to switch profile.
+func (a *AppKeySignIn) SessionMayManageKeys(ctx context.Context, claims *Claims) error {
 	return SessionAllows(ctx, a.pool, claims, ActionManageKeys)
 }

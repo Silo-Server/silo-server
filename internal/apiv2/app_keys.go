@@ -36,9 +36,9 @@ type AppKeyService interface {
 	// VerifyProfileSet verifies a signed profile set and spends its
 	// challenge.
 	VerifyProfileSet(context.Context, auth.KeyRequest) (*auth.ProfileSetAuthority, error)
-	// ProfileSetSessionAllowed refuses a login session that may not read or
-	// send the account's profile set.
-	ProfileSetSessionAllowed(context.Context, *auth.Claims) error
+	// SessionMayManageKeys refuses a login session that may not manage
+	// keys or read or send the profile set (auth.ErrSessionNotAllowed).
+	SessionMayManageKeys(context.Context, *auth.Claims) error
 	// SessionMayIssueCredential answers auth.ErrSessionNotAllowed for a
 	// session another app opened with a grant, which must not be handed a
 	// personal API key or a linked sign-in.

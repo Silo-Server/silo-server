@@ -31,7 +31,7 @@ type PendingAppKeyDecisionInput struct {
 // mainProfileRule is how an operation that creates lasting access to the
 // shared account is limited to the household's main profile
 // (requireVerifiedMainProfile).
-const mainProfileRule = " It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile of the account is 403 permission_denied, and an X-Profile-Id that names no profile of the account is 404 not_found. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 permission_denied. The operation checks the profile again once it holds the account: if the profile's PIN changed, it stopped being the main profile, or it was being written at that moment, the answer is 403 profile_verification_required with nothing changed, and the request is made again (enrollAppKeys on a new challenge, since the first is spent)."
+const mainProfileRule = " It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile of the account is 403 main_profile_required, and an X-Profile-Id that names no profile of the account is 404 not_found. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 main_profile_required. On this operation 403 permission_denied means the session itself may not do this, whatever profile it names. The operation checks the profile again once it holds the account: if the profile's PIN changed, it stopped being the main profile, or it was being written at that moment, the answer is 403 profile_verification_required with nothing changed, and the request is made again (enrollAppKeys on a new challenge, since the first is spent)."
 
 // pendingSessionRule names the sessions the pending key operations refuse.
 const pendingSessionRule = "Only the account's own login session: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that."
@@ -51,6 +51,9 @@ func mainProfileOnly(op Operation) Operation {
 // (handlers.AuthHandler.ActsAsVerifiedMainProfile); the app key service and
 // the device login service both carry it.
 type mainProfileChecker interface {
+	// SessionMayManageKeys refuses a session that may not do this whatever
+	// profile it names.
+	SessionMayManageKeys(context.Context, *auth.Claims) error
 	ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, auth.ActingProfile, error)
 }
 
@@ -66,6 +69,11 @@ func (reg *Registry) requireVerifiedMainProfile(ctx context.Context, svc mainPro
 	if !claims.IsOwnLoginSession() {
 		return none, appKeyProblem(auth.ErrSessionNotAllowed)
 	}
+	// The session before the profile: one that may not do this is told so,
+	// not sent to switch profile and prove a PIN for nothing.
+	if err := svc.SessionMayManageKeys(ctx, claims); err != nil {
+		return none, appKeyProblem(err)
+	}
 	acted, acting, err := svc.ActsAsVerifiedMainProfile(ctx, claims.UserID, profileFrom(ctx), verifyHouseholdProfile(ctx))
 	if errors.Is(err, access.ErrProfileUnverified) {
 		return none, NewProblem(TypeProfileVerificationRequired, "This change requires verifying the main profile's PIN.")
@@ -74,9 +82,18 @@ func (reg *Registry) requireVerifiedMainProfile(ctx context.Context, svc mainPro
 		return none, serviceProblem(err)
 	}
 	if !acted {
-		return none, NewProblem(TypePermissionDenied, "This change requires the household's main profile.")
+		return none, mainProfileRequiredProblem()
 	}
 	return acting, nil
+}
+
+// mainProfileRequiredProblem answers a request that does not act as the
+// household's main profile: it names another profile, or names none where
+// one is needed. It has its own problem type so an app can tell "switch to
+// the main profile" from permission_denied, which on these operations means
+// the session itself may not do this and signing in again is the remedy.
+func mainProfileRequiredProblem() *Problem {
+	return NewProblem(TypeMainProfileRequired, "This change requires the household's main profile.")
 }
 
 // mainProfileChangedProblem answers auth.ErrActingProfileChanged: the main

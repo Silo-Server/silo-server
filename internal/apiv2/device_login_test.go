@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 )
 
@@ -411,14 +412,21 @@ func TestDevicePreapprovalOperations(t *testing.T) {
 		hdr  map[string]string
 		want ProblemType
 	}{
-		{"no profile named", bearer(memberToken), TypePermissionDenied},
-		{"secondary profile", with(bearer(householdToken), "X-Profile-Id", "p-kid"), TypePermissionDenied},
+		{"no profile named", bearer(memberToken), TypeMainProfileRequired},
+		{"secondary profile", with(bearer(householdToken), "X-Profile-Id", "p-kid"), TypeMainProfileRequired},
 		{"main profile with a PIN, unverified", with(bearer(householdToken), "X-Profile-Id", "p-primary-locked"), TypeProfileVerificationRequired},
 	} {
 		t.Run(caller.name, func(t *testing.T) {
 			requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/preapprove", create, caller.hdr), caller.want)
 		})
 	}
+	// A session that may not approve in advance is told so whatever profile
+	// it names, not sent to switch profile first.
+	held := pilotDeps(nil, nil)
+	devices := fixtureDevices()
+	devices.manageErr = auth.ErrSessionNotAllowed
+	held.Devices = devices
+	requireProblem(t, do(t, newTestHandler(t, held), http.MethodPost, "/api/v2/auth/device/preapprove", create, with(bearer(householdToken), "X-Profile-Id", "p-kid")), TypePermissionDenied)
 	// A demo server's visitors share one account: none leaves a 30-day
 	// sign-in on it, and the capability says so.
 	demoDeps := pilotDeps(nil, nil)
