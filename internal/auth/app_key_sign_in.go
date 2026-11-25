@@ -132,7 +132,17 @@ func (a *AppKeySignIn) IssueChallenge(ctx context.Context) (string, int64, error
 // once the signature verifies, even when a later check refuses, and never
 // when the signature fails.
 func (a *AppKeySignIn) verify(ctx context.Context, req KeyRequest, purpose appkeys.Purpose, key appkeys.PublicKey) (*appkeys.Payload, error) {
-	payload, err := appkeys.Verify(req.Envelope, purpose, key, req.ServerID, a.now())
+	var (
+		payload *appkeys.Payload
+		err     error
+	)
+	if purpose == appkeys.PurposeProfileSet {
+		// What the set may hold is judged once, for both forms of the
+		// request, after the envelope is verified (VerifyProfileSet).
+		payload, err = appkeys.VerifyProfileSet(req.Envelope, key, req.ServerID, a.now())
+	} else {
+		payload, err = appkeys.Verify(req.Envelope, purpose, key, req.ServerID, a.now())
+	}
 	if payload == nil {
 		return nil, err
 	}

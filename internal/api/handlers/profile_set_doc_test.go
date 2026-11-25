@@ -16,7 +16,7 @@ import (
 // disagreeing on what a set may hold, and an item member becoming optional.
 func TestParseProfileSetMembers(t *testing.T) {
 	item := func(name, pin string) string {
-		return fmt.Sprintf(`{"sync_id":"0f8fad5b-d9cb-469f-a165-70867728950e","name":%q,"picture":"","pin":%s,"is_child":false,"max_content_rating":"","max_advisory_age":null,"require_advisory_age":false,"requests_blocked":false}`, name, pin)
+		return fmt.Sprintf(`{"sync_id":"0f8fad5b-d9cb-469f-a165-70867728950e","name":%q,"picture":"","pin":%s,"is_child":false,"max_content_rating":"","max_advisory_age":null,"require_advisory_age":false,"requests_blocked":false,"settings":{}}`, name, pin)
 	}
 	for _, tc := range []struct {
 		name, set string
@@ -34,10 +34,11 @@ func TestParseProfileSetMembers(t *testing.T) {
 			}
 		})
 	}
-	// Every member an item has today is required: one left out is refused at
-	// that member, never read as false, empty or "no limit". settings and
-	// settings_reset are the optional ones, and the items above leave both
-	// out.
+	// Every member an item has today is required, settings included ({} is
+	// how an app says it has none to apply): one left out is refused at that
+	// member with the code required, never read as false, empty or "no
+	// limit". settings_reset is the optional one, and the items above leave
+	// it out.
 	var whole map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(item("Sam", `{"keep":true}`)), &whole); err != nil {
 		t.Fatal(err)
@@ -53,8 +54,8 @@ func TestParseProfileSetMembers(t *testing.T) {
 			body, _ := json.Marshal(map[string]any{"version": 1, "items": []any{partial}})
 			_, err := parseProfileSet(body, nil, "")
 			var field *ProfileSetFieldError
-			if !errors.As(err, &field) || field.Location != "set.items[0]."+member {
-				t.Fatalf("err = %v, want a field error at set.items[0].%s", err, member)
+			if !errors.As(err, &field) || field.Location != "set.items[0]."+member || field.Code != "required" {
+				t.Fatalf("err = %+v, want a required error at set.items[0].%s", err, member)
 			}
 		})
 	}

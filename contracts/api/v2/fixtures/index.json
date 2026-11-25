@@ -14531,7 +14531,7 @@
           "Authorization": "Bearer tok-member",
           "X-Profile-Id": "p-owner"
         },
-        "body": "{\"set\":{\"version\":1,\"items\":[{\"sync_id\":\"0f8fad5b-d9cb-469f-a165-70867728950e\",\"name\":\"Sam\",\"picture\":\"\",\"pin\":{\"keep\":true},\"is_child\":false,\"max_content_rating\":\"\",\"max_advisory_age\":null,\"require_advisory_age\":false,\"requests_blocked\":false,\"a_newer_member\":1}]}}"
+        "body": "{\"set\":{\"version\":1,\"items\":[{\"sync_id\":\"0f8fad5b-d9cb-469f-a165-70867728950e\",\"name\":\"Sam\",\"picture\":\"\",\"pin\":{\"keep\":true},\"is_child\":false,\"max_content_rating\":\"\",\"max_advisory_age\":null,\"require_advisory_age\":false,\"requests_blocked\":false,\"settings\":{},\"a_newer_member\":1}]}}"
       },
       "expected_status": 200,
       "response_headers": {
@@ -14553,7 +14553,7 @@
           "Authorization": "Bearer tok-member",
           "X-Profile-Id": "p-owner"
         },
-        "body": "{\"set\":{\"version\":0,\"items\":[{\"sync_id\":\"0f8fad5b-d9cb-469f-a165-70867728950e\",\"name\":\"Sam\",\"picture\":\"\",\"pin\":{\"keep\":true},\"is_child\":false,\"max_content_rating\":\"\",\"max_advisory_age\":null,\"require_advisory_age\":false,\"requests_blocked\":false,\"a_newer_member\":1}]}}"
+        "body": "{\"set\":{\"version\":0,\"items\":[{\"sync_id\":\"0f8fad5b-d9cb-469f-a165-70867728950e\",\"name\":\"Sam\",\"picture\":\"\",\"pin\":{\"keep\":true},\"is_child\":false,\"max_content_rating\":\"\",\"max_advisory_age\":null,\"require_advisory_age\":false,\"requests_blocked\":false,\"settings\":{},\"a_newer_member\":1}]}}"
       },
       "expected_status": 409,
       "response_headers": {

@@ -139,6 +139,21 @@ func verifyRawSignature(key PublicKey, msg []byte, encodedSig string) bool {
 // signer committed to (Payload.Challenge may still be nil when that field is
 // malformed). grant-redeem has its own order; use VerifyGrantRedeem.
 func Verify(env Envelope, purpose Purpose, key PublicKey, serverID string, now time.Time) (*Payload, error) {
+	return verify(env, purpose, key, serverID, now, false)
+}
+
+// VerifyProfileSet is Verify for a profile-set, without the rule for what
+// the set, pairs and edits_seen may hold: it requires only that the set is
+// there, and returns the three as sent (Payload.Set, Pairs, EditsSeenRaw;
+// EditsSeen is filled when it is a string). It is for a server that holds a
+// set to one rule however it arrives and reports a fault at the member, the
+// same way for a signed set as for one sent in a session's body. That rule
+// must refuse everything Verify's does.
+func VerifyProfileSet(env Envelope, key PublicKey, serverID string, now time.Time) (*Payload, error) {
+	return verify(env, PurposeProfileSet, key, serverID, now, true)
+}
+
+func verify(env Envelope, purpose Purpose, key PublicKey, serverID string, now time.Time, setContentLater bool) (*Payload, error) {
 	if purpose == PurposeGrantRedeem {
 		return nil, fail(CodeEnvelopeMalformed)
 	}
@@ -162,7 +177,7 @@ func Verify(env Envelope, purpose Purpose, key PublicKey, serverID string, now t
 			return p, err
 		}
 	}
-	if err := p.parseFields(purpose); err != nil {
+	if err := p.parseFields(purpose, setContentLater); err != nil {
 		return p, err
 	}
 	err := p.CheckClaims(serverID, now)

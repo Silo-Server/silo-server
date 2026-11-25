@@ -22,9 +22,14 @@ var ErrProfileSetAdminAccount = errors.New("an administrator's profiles change o
 type ProfileSetAuthority struct {
 	UserID      int
 	PersonKeyID string
-	Set         json.RawMessage
-	Pairs       json.RawMessage
-	EditsSeen   string
+	// Set, Pairs and EditsSeenRaw are the payload's members as sent, not yet
+	// held to any rule: the caller validates them as it validates a set sent
+	// in a session's body. Pairs and EditsSeenRaw are nil when absent;
+	// EditsSeen is the string when edits_seen is one.
+	Set          json.RawMessage
+	Pairs        json.RawMessage
+	EditsSeen    string
+	EditsSeenRaw json.RawMessage
 }
 
 // VerifyProfileSet verifies a signed profile-set message with the person key
@@ -100,7 +105,7 @@ func (a *AppKeySignIn) VerifyProfileSet(ctx context.Context, req KeyRequest) (*P
 	}
 	return &ProfileSetAuthority{
 		UserID: person.UserID, PersonKeyID: req.Envelope.KeyID,
-		Set: payload.Set, Pairs: payload.Pairs, EditsSeen: payload.EditsSeen,
+		Set: payload.Set, Pairs: payload.Pairs, EditsSeen: payload.EditsSeen, EditsSeenRaw: payload.EditsSeenRaw,
 	}, nil
 }
 
