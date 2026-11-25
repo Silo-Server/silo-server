@@ -90,7 +90,14 @@ func (c *CollectionRowCards) libraryCards(ctx context.Context, ids []string, sco
 			kept = append(kept, collection)
 		}
 	}
-	kept = catalog.CollectionsShownToViewer(kept, h.viewerCollectionCounts(ctx, kept, scope.Filter))
+	// A collection that hides watched titles counts what the viewing profile
+	// still sees, so its card matches its page; Home's filter carries no
+	// profile of its own.
+	countAccess := scope.Filter
+	if countAccess.ProfileID == "" {
+		countAccess.UserID, countAccess.ProfileID = scope.UserID, scope.ProfileID
+	}
+	kept = catalog.CollectionsShownToViewer(kept, h.viewerCollectionCounts(ctx, kept, countAccess))
 	for _, collection := range h.withViewerPosters(ctx, kept, scope.Filter) {
 		tab := h.libraryTabCardOf(ctx, collection)
 		library := shownIn[collection.ID]

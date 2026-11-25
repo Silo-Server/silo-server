@@ -13,6 +13,7 @@
 ./internal/catalog TestLibraryCollectionHidesViewersWatchedTitlesDB
 ./internal/catalog TestLibraryCollectionCountsHideViewersWatchedTitlesDB
 ./internal/catalog TestCappedLibraryCollectionHidesAfterPickingMembersDB
+./internal/catalog TestEpisodeLibraryCollectionHidesWatchedEpisodesDB
 ./internal/catalog TestLibraryCollectionReplaceItemsWritesOnlyTheDifferenceDB
 ./internal/catalog TestLibraryCollectionReplaceItemsRacesMemberDeleteDB
 ./internal/catalog TestLibraryCollectionNamesDB
@@ -1620,4 +1621,6 @@
 ./internal/workmetrics TestQueueSamplerImagesReportsDueQueuedAgeDB
 ./internal/sections TestHideWatchedCollectionRowsArePerProfileDB
 ./internal/api/handlers TestLibraryCollectionItemsPageReadsPastWatchedMembersDB
+./internal/api/handlers TestLibraryCollectionItemsPageReadsPastALongWatchedRunDB
 ./internal/jellycompat TestBoxSetCountIgnoresHideWatchedDB
+./internal/api/handlers TestHideWatchedCollectionCardCountsTheProfileDB

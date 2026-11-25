@@ -1438,7 +1438,8 @@ func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, librar
 	// Library collection rails are shared across profiles (see
 	// isCacheableSectionType), so only the creator's user-agnostic default
 	// sort applies here — a viewer's personal override is honored on the
-	// collection's own browse page.
+	// collection's own browse page. One that hides watched titles is read
+	// per profile instead, but still in that default sort.
 	queryAccess := collectionRailQueryAccess(filter, libraryID, libraryIDs)
 	membership, err := catalog.ResolveLibraryCollectionMembership(collection, queryAccess)
 	if err != nil {

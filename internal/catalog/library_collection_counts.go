@@ -40,8 +40,8 @@ type ViewerCollectionCount struct {
 // ViewerCollectionCounts returns what each server collection shows the viewer
 // described by access, keyed by collection ID, counted the way the
 // collection's catalog page counts its members. It returns nil when access
-// narrows nothing, since the stored counts are then the viewer's, and
-// otherwise a non-nil map. Stored members are counted in one statement; smart
+// narrows nothing and no collection hides watched titles from the viewer,
+// since the stored counts are then the viewer's, and otherwise a non-nil map. Stored members are counted in one statement; smart
 // collections run their count queries in concurrent batches, and those the
 // viewer can open nothing in are counted again without the viewer's access,
 // because their cached count may predate their current members. A collection

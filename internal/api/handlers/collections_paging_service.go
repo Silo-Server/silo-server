@@ -140,8 +140,13 @@ func (h *CollectionHandler) PersonalCollectionItemsPage(ctx context.Context, use
 }
 
 // maxHiddenMemberBatches bounds the stored-member pages one page of a
-// collection that hides watched titles reads.
-const maxHiddenMemberBatches = 10
+// collection that hides watched titles reads, and hiddenMemberBatchSize is the
+// fewest members each of those reads, so a small page (a three-title peek)
+// still reads on past a run of watched members.
+const (
+	maxHiddenMemberBatches = 10
+	hiddenMemberBatchSize  = 100
+)
 
 func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Context, libraryID int, id string, access catalog.AccessFilter, opts userstore.CollectionItemsPageOptions, afterQuery *catalog.QueryCursor) (LibraryCollectionPageView, error) {
 	out := LibraryCollectionPageView{Items: []CollectionItemView{}}
@@ -199,14 +204,15 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 	// A collection that hides watched titles reads on past members the viewer
 	// has watched, a bounded number of pages, so a page is not left empty
 	// while unwatched members follow; the continuation is the last member read.
-	batches := 1
+	batches, read := 1, opts
 	if display != "" {
 		batches = maxHiddenMemberBatches
+		read.Limit = max(opts.Limit, hiddenMemberBatchSize)
 	}
 	var listed []*models.MediaItem
 	var revision int64
 	for batch := 0; batch < batches; batch++ {
-		page, err := h.repo.ListItemsPage(ctx, id, opts)
+		page, err := h.repo.ListItemsPage(ctx, id, read)
 		if err != nil {
 			return out, collectionPageError(err)
 		}
@@ -242,10 +248,10 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 			}
 		}
 		out.HasMore = full || page.HasMore
-		if full || !page.HasMore || len(out.Items) == opts.Limit {
+		if !page.HasMore || len(out.Items) == opts.Limit {
 			break
 		}
-		opts.After = out.Last
+		read.After = out.Last
 	}
 	h.setListingLogos(ctx, out.Items, listed, access)
 	if _, err = h.repo.ListItemsPage(ctx, id, userstore.CollectionItemsPageOptions{Limit: 1, Revision: revision}); err != nil {

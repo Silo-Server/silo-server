@@ -219,3 +219,50 @@ func TestLibraryCollectionCountsHideViewersWatchedTitlesDB(t *testing.T) {
 		})
 	}
 }
+
+// An episode collection that hides watched titles lists the episodes the
+// viewer has not watched on every read: offset pages (with and without a
+// sort) and play or shuffle read them as episodes, as the cursor page does.
+func TestEpisodeLibraryCollectionHidesWatchedEpisodesDB(t *testing.T) {
+	pool := newBatchEquivTestPool(t)
+	ctx := t.Context()
+	f := seedEpisodeCountLibrary(t, pool)
+	repo := NewLibraryCollectionRepository(pool)
+	definition, err := json.Marshal(QueryDefinition{MediaScope: "episode", LibraryIDs: []int{f.library}, Sort: QuerySort{Field: "title", Order: "asc"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := repo.Create(ctx, CreateLibraryCollectionInput{
+		LibraryID: f.library, Slug: f.id("hide-watched-episodes"), Title: "episodes", CollectionType: "smart",
+		Visibility: "visible", HideWatched: true, QueryDefinition: definition,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { batchEquivExec(t, pool, `DELETE FROM library_collections WHERE id = $1`, c.ID) })
+	resolver := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool)).WithUserStoreProvider(postgresCatalogStateProvider{})
+	viewer := AccessFilter{UserID: f.userID, ProfileID: f.profile, AllowedLibraryIDs: []int{f.library}}
+	// The profile has finished two of the library's eight episodes.
+	const unwatched = 6
+	for name, req := range map[string]CatalogRequest{
+		"offset":         {Limit: 50},
+		"offset, sorted": {Limit: 50, Query: QueryDefinition{Sort: QuerySort{Field: "title", Order: "desc"}}},
+		"cursor":         {Limit: 50, CursorPaging: true},
+	} {
+		req.Source, req.CollectionID = CatalogSourceLibraryCollection, c.ID
+		result, err := resolver.Resolve(ctx, req, viewer)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(result.Items) != unwatched {
+			t.Errorf("%s lists %d episodes, want %d", name, len(result.Items), unwatched)
+		}
+	}
+	_, items, err := resolver.loadCollectionSource(ctx, CatalogRequest{Source: CatalogSourceLibraryCollection, CollectionID: c.ID}, viewer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != unwatched {
+		t.Errorf("play and shuffle read %d episodes, want %d", len(items), unwatched)
+	}
+}
