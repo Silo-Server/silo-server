@@ -99,6 +99,9 @@ func TestProfileComparisonCoversEveryField(t *testing.T) {
 	}
 	notAuthority := map[string]string{
 		"ID": "identity", "Name": "display", "Avatar": "display", "CreatedAt": "bookkeeping", "UpdatedAt": "bookkeeping",
+		// The profile's ID in its profile set and its picture's hash name
+		// the profile and its picture across servers; neither grants access.
+		"SyncID": "identity", "AvatarSourceSHA256": "display",
 		// Verification tokens are bound to it, and a full restore replaces
 		// the signing keys, so no earlier token survives either way.
 		"PINRevision":       "token binding",
