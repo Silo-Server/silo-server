@@ -19,8 +19,14 @@ type ControlDB interface {
 	OID(ctx context.Context, name string) (oid uint32, found bool, err error)
 	// NameOf returns the current name of the database with oid.
 	NameOf(ctx context.Context, oid uint32) (name string, found bool, err error)
-	// OtherConnections counts sessions on name other than this command's.
+	// OtherConnections counts client sessions on name other than this
+	// command's: not the control session, and not a connection made under
+	// OwnApplicationName.
 	OtherConnections(ctx context.Context, name string) (int, error)
+	// OwnApplicationName is the application name the restore gives its own
+	// connections to the live database so OtherConnections can leave them
+	// out; empty when the control does not tell them apart.
+	OwnApplicationName() string
 	// CheckPrivileges confirms the role can create and rename databases and
 	// change ALLOW_CONNECTIONS on live.
 	CheckPrivileges(ctx context.Context, live string) error
@@ -122,6 +128,13 @@ func RestoreSwap(ctx context.Context, src *Source, loader DatabaseLoader, ctl Co
 		return err
 	}
 	defer unlock(ctx)
+	// Every connection the restore opens from here carries its own name, so
+	// the checks for other clients don't count one it has just closed.
+	if own := ctl.OwnApplicationName(); own != "" {
+		if opts.LiveURL, err = WithApplicationName(opts.LiveURL, own); err != nil {
+			return err
+		}
+	}
 	// Step 1.
 	dep, err := validateForSwap(ctx, src, loader, opts, out)
 	if err != nil {
