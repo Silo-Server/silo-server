@@ -313,7 +313,9 @@ nothing authorizes on them.
 `DELETE /api/v2/auth/sessions/{id}` revokes a session owned by the caller's account and returns
 `204 No Content`. A missing session or one owned by another account returns `404 not_found`.
 In [demo mode](#demo-mode) a caller that is not an administrator may revoke only the session
-making the request; any other session is `403 permission_denied`.
+making the request; another session of the same account is `403 permission_denied`. A missing
+session or another account's is still `404 not_found`: ownership is checked first, in the
+revocation's transaction.
 
 The login-session step of the `database_maintenance` scheduled task deletes expired
 login-session rows daily at 05:00 by default. Revoked sessions remain stored until their
@@ -971,6 +973,12 @@ answers a caller that is not an administrator `403 permission_denied` with the d
 action is not available in demo mode." Reads are never restricted, and administrators are
 never restricted.
 
+When the `demo.enabled` setting can't be read, the server can't tell whether it is a demo, so
+it fails closed without claiming to be one: a non-administrator's demo-restricted change is
+`500 internal_error`, `deleteSession` on another session is `500 internal_error` (the caller's
+own session still ends), and the capability answers below say no. The read error is logged.
+An administrator's request does not read the setting.
+
 A visitor can:
 
 - browse, play, and sign out (`logout`, or `deleteSession` on the session making the request);
@@ -989,15 +997,29 @@ A visitor cannot:
 - end another session of the account (`deleteSession` on any other session);
 - create or revoke personal API keys, or create, change or delete profiles.
 
+External sign-in enforces the same rule where every linking flow attaches its identity, in
+account resolution: a linking flow that ends on an account that is not an administrator while
+demo mode is on, including one started before demo mode was turned on, is refused with
+`not_permitted` and attaches nothing. Email auto-match (`auth.email_auto_match`) does not apply
+in demo mode, as when it is off, so a provider sign-in whose verified email equals the demo
+account's goes on to account creation, which refuses the taken email. When the setting can't be
+read, the link fails and matching matches nothing.
+
 The capability answers clients read before offering these actions say no to a visitor:
 `getAccountPasswordCapability` `allowed`, `getLoginSessionCapabilities`
 `revoke_other_sessions`, and `listAccountIdentities` `can_link` and `can_unlink`.
 
 The Jellyfin-compatible listener serves no password change, identity linking, or revocation of
-another session; its `POST /Sessions/Logout` ends only the calling session.
+another session; its `POST /Sessions/Logout` ends only the calling session. On the
+Audiobookshelf-compatible listener (beta), signing out normally revokes every token of the
+account and profile and closes their playback sessions; in demo mode, for an account that is
+not an administrator, it revokes only the presented token and closes no playback session (none
+records which token opened it). A refresh token is a row of its own and stays live until it
+expires. When the setting or the account's role can't be read, sign-out takes the demo path.
 
 `TestDemoModeCoversAccountOperations` in `internal/apiv2` fails when an operation tagged
-`account`, `api-keys`, `auth`, `device-login` or `profiles` that a non-administrator can call
+`account`, `api-keys`, `auth`, `device-login`, `notifications` or `profiles` that a
+non-administrator can call
 is neither demo-restricted nor listed, with its reason, as allowed.
 
 ## Policy discovery
