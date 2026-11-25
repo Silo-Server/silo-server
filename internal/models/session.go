@@ -12,6 +12,16 @@ const (
 	SessionPurposeRemotePlayback = "remote_playback"
 )
 
+// How a login session was opened (auth_sessions.opened_via). A session
+// older than the column has none, and is treated as the least trusted kind.
+const (
+	SessionOpenedPassword      = "password"
+	SessionOpenedProvider      = "provider"
+	SessionOpenedDeviceLogin   = "device_login"
+	SessionOpenedAppKey        = "app_key"
+	SessionOpenedImpersonation = "impersonation"
+)
+
 // AuthSession represents a row in the auth_sessions table.
 type AuthSession struct {
 	ID                     string     // UUID session ID (included in JWT claims)
@@ -54,6 +64,9 @@ type AuthSession struct {
 	// (auth_sessions.device_key_id); nil for every other sign-in. Revoking
 	// the key ends the session.
 	DeviceKeyID *string
+	// OpenedVia is how the session was opened, one of the SessionOpened
+	// values; written once at creation.
+	OpenedVia string
 }
 
 // IsRemotePlayback reports whether the session is a remote-playback handoff.

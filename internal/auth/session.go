@@ -144,8 +144,8 @@ func (r *SessionRepository) createWithQuerier(
 	}
 
 	query := `INSERT INTO auth_sessions
-		(id, user_id, device_name, ip_address, expires_at, impersonator_user_id, impersonation_started_at, identity_id, provider_since, device_id, device_platform, purpose, bound_profile_id, absolute_expires_at, device_key_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, ''), $14, $15::uuid)`
+		(id, user_id, device_name, ip_address, expires_at, impersonator_user_id, impersonation_started_at, identity_id, provider_since, device_id, device_platform, purpose, bound_profile_id, absolute_expires_at, device_key_id, opened_via)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, ''), $14, $15::uuid, NULLIF($16, ''))`
 
 	// ip_address is a Postgres inet column; an empty string fails the
 	// inet input parser (SQLSTATE 22P02). Pass NULL when the caller
@@ -172,6 +172,7 @@ func (r *SessionRepository) createWithQuerier(
 		session.BoundProfileID,
 		session.AbsoluteExpiresAt,
 		session.DeviceKeyID,
+		session.OpenedVia,
 	)
 	if err != nil {
 		return fmt.Errorf("creating session: %w", err)
