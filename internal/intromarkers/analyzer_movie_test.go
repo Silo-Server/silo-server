@@ -20,7 +20,9 @@ type fakeMovieSampler struct {
 	mu        sync.Mutex
 	preflight error
 	errs      map[int]error
-	silences  []mediasample.Interval
+	// noFrames answers every tail pass cleanly without a frame.
+	noFrames bool
+	silences []mediasample.Interval
 	// silenceErr fails every silence read.
 	silenceErr error
 	tails      []int
@@ -42,7 +44,7 @@ func (f *fakeMovieSampler) SampleMovieTail(_ context.Context, candidate Candidat
 	if onSample != nil {
 		onSample()
 	}
-	if err != nil {
+	if err != nil || f.noFrames {
 		return creditsTail{}, err
 	}
 	var frames []mediasample.FrameStats
@@ -193,6 +195,26 @@ func TestAnalyzeMovieSilenceTimeoutLeavesTheMovieUnsettled(t *testing.T) {
 		len(repo.artifactFailures) != 0 || sampler.tailCount() != 1 {
 		t.Fatalf("stale tail after a timed out silence pass: status %q, invalidation time %v, %d failures, %d tail passes; want it stored again with the file's time",
 			artifact.Status, artifact.MarkersInvalidatedAt, len(repo.artifactFailures), sampler.tailCount())
+	}
+}
+
+// Issue #5260: a movie tail pass that runs cleanly without a frame is stored
+// as sparse and not sampled again, rather than failed and retried.
+func TestMovieTailWithoutFramesSettlesAsSparse(t *testing.T) {
+	repo := &fakeIntroRepository{movieCandidates: []Candidate{movieCandidate(10, 7200)}}
+	sampler := &fakeMovieSampler{noFrames: true}
+	analyzer := movieAnalyzer(repo, sampler)
+
+	summary, err := analyzer.AnalyzeMovie(context.Background(), "movie")
+	if err != nil {
+		t.Fatalf("AnalyzeMovie: %v", err)
+	}
+	artifact := repo.artifact(10, ArtifactKindCreditsTail)
+	if summary.CreditsTailScanErrors != 0 || artifact.Status != mediaartifact.StatusUnusable || artifact.Detail != tailDetailSparse {
+		t.Fatalf("summary %+v, tail artifact %q (%q); want it unusable as sparse", summary, artifact.Status, artifact.Detail)
+	}
+	if _, err := analyzer.AnalyzeMovie(context.Background(), "movie"); err != nil || sampler.tailCount() != 1 {
+		t.Fatalf("AnalyzeMovie: %v, %d tail passes; want the settled tail left alone", err, sampler.tailCount())
 	}
 }
 

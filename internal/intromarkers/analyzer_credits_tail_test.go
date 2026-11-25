@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
 
@@ -85,5 +86,39 @@ func TestAudioOnlyCreditsRunKeepsTailSettledGroup(t *testing.T) {
 	}
 	if len(patchesOfKind(repo.patches, kindCredits)) == 0 {
 		t.Fatal("audio-only run wrote no credits, so the skip above proves nothing")
+	}
+}
+
+// Issue #5260: a tail pass that runs cleanly but decodes no keyframe (the
+// video stops before the tail window, or the window has no IDR frame) has
+// too few keyframes to classify. It is stored as sparse, like any other tail
+// with too few, and not decoded again until the file changes.
+func TestTailPassWithoutKeyframesSettlesAsSparse(t *testing.T) {
+	repo := &fakeIntroRepository{}
+	sampler := &fakeTailSampler{}
+	analyzer := &Analyzer{
+		repo: repo, extractor: &fakeFingerprintExtractor{}, tailSampler: sampler, config: DefaultConfig("ffmpeg"),
+		node: "node-a", logger: slog.New(slog.DiscardHandler),
+	}
+	episode := Candidate{FileID: 3, FileHash: "h", FileSize: 3, DurationSeconds: 600, CodecVideo: "h264", CodecAudio: "aac"}
+	opts := creditsInputOptions{tails: true, tailFileIDs: map[int]struct{}{3: {}}}
+
+	inputs, err := analyzer.ensureCreditsInputs(context.Background(), []Candidate{episode}, opts)
+	if err != nil {
+		t.Fatalf("ensureCreditsInputs: %v", err)
+	}
+	if inputs.tailCounts.unusable != 1 || inputs.tailCounts.failed != 0 || len(repo.artifactFailures) != 0 {
+		t.Fatalf("tail counts %+v with %d failures, want the tail unusable and no failure", inputs.tailCounts, len(repo.artifactFailures))
+	}
+	artifact := repo.artifact(3, ArtifactKindCreditsTail)
+	if artifact.Status != mediaartifact.StatusUnusable || artifact.Detail != tailDetailSparse {
+		t.Fatalf("tail artifact %q (%q), want unusable as sparse", artifact.Status, artifact.Detail)
+	}
+
+	if inputs, err = analyzer.ensureCreditsInputs(context.Background(), []Candidate{episode}, opts); err != nil {
+		t.Fatalf("ensureCreditsInputs: %v", err)
+	}
+	if sampler.callCount() != 1 || inputs.tailCounts.unusable != 1 {
+		t.Fatalf("%d tail passes, counts %+v; want the settled tail left alone", sampler.callCount(), inputs.tailCounts)
 	}
 }
