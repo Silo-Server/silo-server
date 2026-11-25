@@ -108,6 +108,7 @@
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(skipNativeMediaCompression, apiv2.IdentityEncoded)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "profileedits.Middleware(deps.ProfileEditsWaker)",
         "apimw.Recoverer",
         "apimw.ProvideActingAdmin(actingAdmin)"
       ]
@@ -124,6 +125,7 @@
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(skipNativeMediaCompression, apiv2.IdentityEncoded)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "profileedits.Middleware(deps.ProfileEditsWaker)",
         "apimw.Recoverer",
         "apimw.ProvideActingAdmin(actingAdmin)",
         "nodecontrol.RequireNode(deps.NodeKeyRegistry)"
@@ -141,6 +143,7 @@
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(skipNativeMediaCompression, apiv2.IdentityEncoded)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "profileedits.Middleware(deps.ProfileEditsWaker)",
         "apimw.Recoverer",
         "apimw.ProvideActingAdmin(actingAdmin)",
         "nodecontrol.RequireNode(deps.NodeKeyRegistry)",
@@ -159,6 +162,7 @@
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(skipNativeMediaCompression, apiv2.IdentityEncoded)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "profileedits.Middleware(deps.ProfileEditsWaker)",
         "apimw.Recoverer",
         "apimw.ProvideActingAdmin(actingAdmin)",
         "nodecontrol.RequireNode(deps.NodeKeyRegistry)",
@@ -177,6 +181,7 @@
         "apimw.Metrics",
         "httpstream.CompressWithExclusions(skipNativeMediaCompression, apiv2.IdentityEncoded)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
+        "profileedits.Middleware(deps.ProfileEditsWaker)",
         "apimw.Recoverer",
         "apimw.ProvideActingAdmin(actingAdmin)",
         "nodecontrol.RequireNode(deps.NodeKeyRegistry)",
