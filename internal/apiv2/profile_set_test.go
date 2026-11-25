@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -138,6 +141,64 @@ func TestPutProfileSetAuthority(t *testing.T) {
 			}
 			if rec.Code != http.StatusOK || sets.calls != 1 || sets.cmd.Signed != tc.signed {
 				t.Fatalf("status %d, calls %d, cmd %+v: %s", rec.Code, sets.calls, sets.cmd, rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestPutProfileSetSpendsTheAccountBudget: a set is limited by account, not
+// by address. The budget is spent by the session's account, or by the
+// account a signed set names once its signature has verified; a set whose
+// signature doesn't verify spends none of it; and a spent budget is 429 with
+// Retry-After and applies nothing. It catches a household behind one address
+// sharing one person's allowance, and an unverified request spending
+// someone's budget.
+func TestPutProfileSetSpendsTheAccountBudget(t *testing.T) {
+	session := map[string]string{"Authorization": "Bearer " + adminToken, profileHeader: "p-owner"}
+	for _, tc := range []struct {
+		name      string
+		body      string
+		headers   map[string]string
+		verifyErr error
+		spent     bool
+		account   int
+	}{
+		{name: "session form", body: testSessionSet, headers: session, spent: true, account: 2},
+		{name: "signed form", body: testEnvelope, spent: true, account: 1},
+		{name: "signature that doesn't verify", body: testEnvelope, verifyErr: auth.ErrKeySignatureInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, denied := range []bool{false, true} {
+				var spent []string
+				deps := appKeyDeps(&fakeAppKeys{enabled: true})
+				deps.AppKeys = &profileSetKeys{fakeAppKeys: &fakeAppKeys{enabled: true}, verifyErr: tc.verifyErr}
+				sets := fakeProfileSets{}
+				deps.ProfileSet = &sets
+				deps.AccountRateLimit = func(_ context.Context, bucket string, accountID int) ratelimit.AllowResult {
+					spent = append(spent, fmt.Sprintf("%s:%d", bucket, accountID))
+					return ratelimit.AllowResult{Allowed: !denied, RetryAfter: 7 * time.Second}
+				}
+				rec := do(t, NewHandler(deps), http.MethodPut, Prefix+"/profiles/set", tc.body, tc.headers)
+				want := []string(nil)
+				if tc.spent {
+					want = []string{fmt.Sprintf("profile_set:%d", tc.account)}
+				}
+				if !slices.Equal(spent, want) {
+					t.Fatalf("budgets spent = %v, want %v", spent, want)
+				}
+				if !tc.spent {
+					continue
+				}
+				if !denied {
+					if rec.Code != http.StatusOK || sets.calls != 1 {
+						t.Fatalf("with budget left: status %d, applied %d times: %s", rec.Code, sets.calls, rec.Body.String())
+					}
+					continue
+				}
+				requireProblem(t, rec, TypeRateLimited)
+				if rec.Header().Get("Retry-After") != "7" || sets.calls != 0 {
+					t.Fatalf("with the budget spent: Retry-After %q, applied %d times", rec.Header().Get("Retry-After"), sets.calls)
+				}
 			}
 		})
 	}
