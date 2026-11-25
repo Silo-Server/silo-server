@@ -14,10 +14,13 @@ type PersonKeyLookup func(accountID string) (PublicKey, error)
 // key, then the grant's own signature against the person key of the grant's
 // account. server_id must be this server's in both.
 //
-// A redeemer that doesn't hold the grant's app key is signature_invalid,
-// however it shows: an outer signature that fails under that key, or an
-// envelope signed by it that carries another kid. app_grant_invalid is for
-// the grant itself, and app_grant_expired only for the grant's own exp.
+// The redeem's own envelope is refused at its signature like any request's:
+// signature_invalid when the outer signature fails under the grant's app
+// key, kid_mismatch when that key signed it under another kid. Both are the
+// one answer on the wire (signature_invalid), and neither returns a payload,
+// so the challenge stays unspent. app_grant_invalid is for the grant inside,
+// when it fails against the account's person key, and app_grant_expired only
+// for the grant's own exp.
 func VerifyGrantRedeem(env Envelope, serverID string, now time.Time, personKey PersonKeyLookup) (*Payload, *Payload, error) {
 	if err := env.CheckShape(PurposeGrantRedeem); err != nil {
 		return nil, nil, err
@@ -37,8 +40,11 @@ func VerifyGrantRedeem(env Envelope, serverID string, now time.Time, personKey P
 	if err != nil {
 		return nil, nil, fail(CodeSignatureInvalid)
 	}
-	if !verifyRawSignature(*grant.AppKey, env.signingInput(PurposeGrantRedeem), env.Sig) || env.KeyID != grant.AppKey.KeyID() {
+	if !verifyRawSignature(*grant.AppKey, env.signingInput(PurposeGrantRedeem), env.Sig) {
 		return nil, nil, fail(CodeSignatureInvalid)
+	}
+	if env.KeyID != grant.AppKey.KeyID() {
+		return nil, nil, fail(CodeKidMismatch)
 	}
 	if err := outer.parseFields(PurposeGrantRedeem); err != nil {
 		return outer, nil, err

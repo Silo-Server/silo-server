@@ -217,8 +217,9 @@ func TestGrantRedeemRefusalsDB(t *testing.T) {
 }
 
 // The redeemer must hold the grant's app key. An envelope that key did sign
-// but that carries another kid is refused like a failed signature, with the
-// same answer, and uses nothing up: the same grant then redeems.
+// but that carries another kid is refused at the signature stage (the route
+// answers signature_invalid for it, as for a failed signature), and uses
+// nothing up: the same grant then redeems.
 func TestGrantRedeemUnderAnotherKidDB(t *testing.T) {
 	env := newKeyEnv(t, "grantkid")
 	ctx := t.Context()
@@ -228,7 +229,7 @@ func TestGrantRedeemUnderAnotherKidDB(t *testing.T) {
 	grant := env.grantEnvelope(t, person, user.ID, app, nil)
 	req := env.request(t, message{purpose: appkeys.PurposeGrantRedeem, signer: app, fields: map[string]any{"grant": grant}})
 	req.Envelope.KeyID = newTestKey(t).pub.KeyID()
-	if result, err := env.signIn.RedeemGrant(ctx, req); result != nil || appkeys.CodeOf(err) != appkeys.CodeSignatureInvalid {
+	if result, err := env.signIn.RedeemGrant(ctx, req); result != nil || appkeys.CodeOf(err) != appkeys.CodeKidMismatch {
 		t.Fatalf("redeem under another kid = %+v, %v", result, err)
 	}
 	if _, err := env.redeem(t, app, grant); err != nil {

@@ -993,6 +993,38 @@
           "device_sig": "iC0n7--le4mgDblNwtTZbSQEVPv8THyLx8Gj2j9tZ2T3WAqUx1XUVZW2Qg_eUg9HD3e8yZJ-Ugy2BAVX7Z1aDw"
         }
       }
+    },
+    {
+      "type": "signed-message",
+      "name": "grant-redeem signed by a key other than the grant's app_key",
+      "valid": false,
+      "reason": "the outer sig must verify by the grant's app_key",
+      "error": "signature_invalid",
+      "purpose": "grant-redeem",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "grant_signer_public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "envelope": {
+        "kid": "8D4MxPIBmIIAJ4WCllsWdg",
+        "payload": "eyJwdXJwb3NlIjoiZ3JhbnQtcmVkZWVtIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJyZXBseV9rZXkiOiJCQUQ4aVNIZi1vY2pLc1YySXFMZTBTdWNoVHo1SVdJSmk4OWRqcVd3SHV6OXZGQUotUFFVRmxKdHp0TkNRVVloTjRTMnhWVlhvelNnQ2h1QmxlVWkxTjQiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwiZ3JhbnQiOnsia2lkIjoiUGd1amRTZkJiTk55WG5nTFdDc09ndyIsInBheWxvYWQiOiJleUp3ZFhKd2IzTmxJam9pWjNKaGJuUWlMQ0p6WlhKMlpYSmZhV1FpT2lJNU5tTXhZbVF3T0MxaU9ETTVMVFJrTkRjdE9UZ3daUzAxTjJRMFpUZGhORFJqWm1FaUxDSnBZWFFpT2pFM09UVTFOemcyTURBc0ltVjRjQ0k2TVRjNU5UVTNPRGt3TUN3aVozSmhiblJmYVdRaU9pSkRSbTU1WlhGNlMycEVaVkE1UWpOSVUwdGxORmRuSWl3aVlXTmpiM1Z1ZEY5cFpDSTZJalFpTENKdmNtbG5hVzV6SWpwYkltaDBkSEJ6T2k4dmJXVmthV0V1WlhoaGJYQnNaUzVqYjIwaUxDSm9kSFJ3T2k4dk1Ua3lMakUyT0M0eExqSXdPamd3T0RBaVhTd2lZWEJ3WDJ0bGVTSTZJa0pGVG04eGFFUlRaMXB4ZUVGNWJXTkJka1pyWWxOWU9FRkhXRFpwTUcxbWRtaDVUM28zTkRsRWR6Z3dSUzF1VEU1QlpVaG1TWFJEUlhGMGFuQndPVUZUUldSQ1gwNVlXbVF5TUZCeWJXaFNOazVuVDJKaE9DSXNJbUZ3Y0Y5dVlXMWxJam9pUlhoaGJYQnNaU0JRYkdGNVpYSWlmUSIsInNpZyI6IlFmWTNwajc2SXYxVWFVSjRCX05jTEhkR1Y3TnRMYWNzb3NGQTBWczItUzVEbjN0MUNIYVJMSDJVVFhGamVZRF9QMnBNTksyZVlHTVFMandKOVE5OUxRIn0sImRldmljZV9uYW1lIjoiRXhhbXBsZSBQbGF5ZXIgb24gU2FtJ3MgaVBhZCIsImRldmljZV9wbGF0Zm9ybSI6ImlwYWRvcyJ9",
+        "sig": "uE-d1ExYpy_A67qU59sOvFVzD2RRvEzwuJ1zf_IH6k-bKOX0-fLY3c128Hng64InRlUgbMETRO49s_9R2gUOwA"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "grant-redeem whose kid is not the app_key's ID",
+      "valid": false,
+      "reason": "kid must be the ID of the grant's app_key",
+      "error": "kid_mismatch",
+      "purpose": "grant-redeem",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "grant_signer_public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "envelope": {
+        "kid": "8D4MxPIBmIIAJ4WCllsWdg",
+        "payload": "eyJwdXJwb3NlIjoiZ3JhbnQtcmVkZWVtIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJyZXBseV9rZXkiOiJCQUQ4aVNIZi1vY2pLc1YySXFMZTBTdWNoVHo1SVdJSmk4OWRqcVd3SHV6OXZGQUotUFFVRmxKdHp0TkNRVVloTjRTMnhWVlhvelNnQ2h1QmxlVWkxTjQiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwiZ3JhbnQiOnsia2lkIjoiUGd1amRTZkJiTk55WG5nTFdDc09ndyIsInBheWxvYWQiOiJleUp3ZFhKd2IzTmxJam9pWjNKaGJuUWlMQ0p6WlhKMlpYSmZhV1FpT2lJNU5tTXhZbVF3T0MxaU9ETTVMVFJrTkRjdE9UZ3daUzAxTjJRMFpUZGhORFJqWm1FaUxDSnBZWFFpT2pFM09UVTFOemcyTURBc0ltVjRjQ0k2TVRjNU5UVTNPRGt3TUN3aVozSmhiblJmYVdRaU9pSkRSbTU1WlhGNlMycEVaVkE1UWpOSVUwdGxORmRuSWl3aVlXTmpiM1Z1ZEY5cFpDSTZJalFpTENKdmNtbG5hVzV6SWpwYkltaDBkSEJ6T2k4dmJXVmthV0V1WlhoaGJYQnNaUzVqYjIwaUxDSm9kSFJ3T2k4dk1Ua3lMakUyT0M0eExqSXdPamd3T0RBaVhTd2lZWEJ3WDJ0bGVTSTZJa0pGVG04eGFFUlRaMXB4ZUVGNWJXTkJka1pyWWxOWU9FRkhXRFpwTUcxbWRtaDVUM28zTkRsRWR6Z3dSUzF1VEU1QlpVaG1TWFJEUlhGMGFuQndPVUZUUldSQ1gwNVlXbVF5TUZCeWJXaFNOazVuVDJKaE9DSXNJbUZ3Y0Y5dVlXMWxJam9pUlhoaGJYQnNaU0JRYkdGNVpYSWlmUSIsInNpZyI6IlFmWTNwajc2SXYxVWFVSjRCX05jTEhkR1Y3TnRMYWNzb3NGQTBWczItUzVEbjN0MUNIYVJMSDJVVFhGamVZRF9QMnBNTksyZVlHTVFMandKOVE5OUxRIn0sImRldmljZV9uYW1lIjoiRXhhbXBsZSBQbGF5ZXIgb24gU2FtJ3MgaVBhZCIsImRldmljZV9wbGF0Zm9ybSI6ImlwYWRvcyJ9",
+        "sig": "FiejXoWAw0vTrwNEPXoxp9O2UkEB-ifxFjNyUlg13Eio9O6PbPO2eCp3h9i_1K-T-utWTnqQu9crydOtzd_Ouw"
+      }
     }
   ]
 }
