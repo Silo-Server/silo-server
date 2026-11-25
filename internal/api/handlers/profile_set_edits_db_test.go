@@ -975,3 +975,71 @@ func TestProfileSetAnswerNeedsNoUploadReadDB(t *testing.T) {
 		t.Fatalf("answer = %+v", res)
 	}
 }
+
+// TestProfileSetLockedTokenRecheckDB: an edit that commits after a set's
+// first read and before its locked read makes the set stale, and the edit
+// and its mark survive. The set is held between the two reads by the
+// account lock it waits on. It catches a set that trusts the token its
+// first read saw, restores the old name and settles a mark it never saw.
+func TestProfileSetLockedTokenRecheckDB(t *testing.T) {
+	f := newEditsFixture(t)
+	main, kid := newSetItem("Parent"), newSetItem("Kid")
+	f.mustApply(t, setDoc(t, 1, main, kid))
+	kidID := f.profileBySyncID(t, kid.syncID()).ID
+	ctx := t.Context()
+
+	editing, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = editing.Rollback(context.Background()) }()
+	if err := pgstore.LockAccountForImport(ctx, editing, f.userID); err != nil {
+		t.Fatal(err)
+	}
+	var editingPID int
+	if err := editing.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&editingPID); err != nil {
+		t.Fatal(err)
+	}
+
+	applied := make(chan error, 1)
+	go func() {
+		_, err := f.applySeen(t, setDoc(t, 2, main, kid), "")
+		applied <- err
+	}()
+	// The set has read no edits and waits for the account lock.
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.After(10 * time.Second)
+	for waiting := false; !waiting; {
+		select {
+		case err := <-applied:
+			t.Fatalf("the set finished (%v) while the account was locked", err)
+		case <-deadline:
+			t.Fatal("the set never waited for the account lock")
+		case <-ticker.C:
+			if err := f.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+				WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid)))`, editingPID).Scan(&waiting); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// The person's rename, recorded, commits before the set's locked read.
+	if _, err := editing.Exec(ctx, `UPDATE user_profiles SET name = 'Renamed' WHERE user_id = $1 AND id = $2`, f.userID, kidID); err != nil {
+		t.Fatal(err)
+	}
+	if err := profileedits.RecordFields(f.account(), editing, f.userID, kidID, []string{profileedits.FieldName}); err != nil {
+		t.Fatal(err)
+	}
+	if err := editing.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-applied; !isStale(err) {
+		t.Fatalf("err = %v, want profile_set_stale", err)
+	}
+	if p := f.profileBySyncID(t, kid.syncID()); p.Name != "Renamed" {
+		t.Fatalf("name = %q, want the rename kept", p.Name)
+	}
+	if got := changedFields(f.held(t), kid.syncID()); !slices.Equal(got, []string{"account:name"}) {
+		t.Fatalf("changed_here = %v, want the rename's mark", got)
+	}
+}
