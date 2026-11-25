@@ -365,6 +365,30 @@
       "value": "허용 범위를 벗어난 값이에요."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "! 또는 # 같은 특수 문자를 1개 이상 포함하세요."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "대문자를 1개 이상 포함하세요."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "비밀번호가 너무 길어요."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "비밀번호가 너무 짧아요."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -92333,6 +92357,18 @@
           "value": "선택 사항"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "시청한 작품 숨기기"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "각 프로필에서는 이 컬렉션의 페이지, 행, 개수에서 해당 프로필이 시청한 작품이 빠진 채로 표시돼요. 삭제되는 항목은 없어요. 작품 수 제한이 있는 스마트 컬렉션은 작품을 먼저 고르므로 표시되는 작품이 더 적을 수 있어요."
     }
   ],
   "web.collections.details.label": [

@@ -365,6 +365,30 @@
       "value": "Dieser Wert liegt außerhalb des zulässigen Bereichs."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Verwende mindestens ein Sonderzeichen, zum Beispiel ! oder #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Verwende mindestens einen Großbuchstaben."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Dieses Passwort ist zu lang."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Dieses Passwort ist zu kurz."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -100888,6 +100912,18 @@
           "value": "Optional"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Gesehene Titel ausblenden"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Jedes Profil sieht diese Sammlung ohne die Titel, die es gesehen hat: auf ihrer Seite, in ihren Reihen und in ihrer Anzahl. Es wird nichts entfernt. Eine intelligente Sammlung mit Titelbegrenzung wählt zuerst ihre Titel aus und zeigt daher eventuell weniger an."
     }
   ],
   "web.collections.details.label": [

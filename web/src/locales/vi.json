@@ -365,6 +365,30 @@
       "value": "Giá trị này nằm ngoài phạm vi."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Thêm ít nhất một ký tự đặc biệt, chẳng hạn như ! hoặc #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Thêm ít nhất một chữ cái viết hoa."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Mật khẩu này quá dài."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Mật khẩu này quá ngắn."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -101608,6 +101632,18 @@
           "value": "Không bắt buộc"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Ẩn các tựa đã xem"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Mỗi hồ sơ sẽ thấy bộ sưu tập này mà không có các tựa hồ sơ đó đã xem, trên trang, trong các hàng và trong số lượng của bộ sưu tập. Không có gì bị xóa. Bộ sưu tập thông minh có giới hạn số tựa sẽ chọn tựa trước, nên có thể hiển thị ít tựa hơn."
     }
   ],
   "web.collections.details.label": [

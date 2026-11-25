@@ -365,6 +365,30 @@
       "value": "Deze waarde valt buiten het bereik."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Gebruik minstens één speciaal teken, zoals ! of #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Gebruik minstens één hoofdletter."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Dit wachtwoord is te lang."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Dit wachtwoord is te kort."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -100672,6 +100696,18 @@
           "value": "Optioneel"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Bekeken titels verbergen"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Elk profiel ziet deze collectie zonder de titels die het heeft bekeken, op de pagina, in de rijen en in het aantal. Er wordt niets verwijderd. Een slimme collectie met een titellimiet kiest eerst de titels, dus kan er minder tonen."
     }
   ],
   "web.collections.details.label": [

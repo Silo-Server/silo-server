@@ -365,6 +365,30 @@
       "value": "This value is out of range."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Include at least one special character, such as ! or #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Include at least one capital letter."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "This password is too long."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "This password is too short."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -101314,6 +101338,18 @@
           "value": "Optional"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Hide watched titles"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Each profile sees this collection without the titles it has watched, on its page, in its rows and in its count. Nothing is removed. A smart collection with a title limit picks its titles first, so it can show fewer."
     }
   ],
   "web.collections.details.label": [

@@ -365,6 +365,30 @@
       "value": "Nilai ini di luar julat."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Sertakan sekurang-kurangnya satu aksara khas, seperti ! atau #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Sertakan sekurang-kurangnya satu huruf besar."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Kata laluan ini terlalu panjang."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Kata laluan ini terlalu pendek."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -91745,6 +91769,18 @@
           "value": "Pilihan"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Sembunyikan tajuk yang ditonton"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Setiap profil melihat koleksi ini tanpa tajuk yang sudah ditonton oleh profil itu, di halamannya, dalam barisnya dan dalam kiraannya. Tiada apa yang dialih keluar. Koleksi pintar yang mempunyai had tajuk memilih tajuknya dahulu, jadi koleksi itu mungkin menunjukkan lebih sedikit tajuk."
     }
   ],
   "web.collections.details.label": [
