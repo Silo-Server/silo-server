@@ -1,10 +1,16 @@
 package apiv2
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -44,25 +50,34 @@ type profileSetKeys struct {
 	*fakeAppKeys
 	verifyErr  error
 	sessionErr error
+	// signed is what a verified envelope carried; nil is a set the fake
+	// service accepts without reading.
+	signed *auth.ProfileSetAuthority
 }
 
 func (k *profileSetKeys) VerifyProfileSet(context.Context, auth.KeyRequest) (*auth.ProfileSetAuthority, error) {
 	if k.verifyErr != nil {
 		return nil, k.verifyErr
 	}
-	return &auth.ProfileSetAuthority{UserID: 1, Set: []byte(`{"version":1,"items":[]}`)}, nil
+	if k.signed != nil {
+		return k.signed, nil
+	}
+	return &auth.ProfileSetAuthority{UserID: 1, Set: []byte(testSet)}, nil
 }
 
 func (k *profileSetKeys) SessionMayManageKeys(context.Context, *auth.Claims) error {
 	return k.sessionErr
 }
 
-const testSessionSet = `{"set":{"version":1,"items":[{"sync_id":"0f8fad5b-d9cb-469f-a165-70867728950e","name":"Sam","picture":"","pin":{"keep":true},"is_child":false,"max_content_rating":"","max_advisory_age":null,"require_advisory_age":false,"requests_blocked":false,"a_newer_member":1}]}}`
+// testSet is a well-formed set with a member a newer app might add.
+const testSet = `{"version":1,"items":[{"sync_id":"0f8fad5b-d9cb-469f-a165-70867728950e","name":"Sam","picture":"","pin":{"keep":true},"is_child":false,"max_content_rating":"","max_advisory_age":null,"require_advisory_age":false,"requests_blocked":false,"settings":{},"a_newer_member":1}]}`
+
+const testSessionSet = `{"set":` + testSet + `}`
 
 // testOpenSessionSet carries members a newer app might add to the set and
 // to a PIN, and a 64-character name padded with spaces.
 var testOpenSessionSet = `{"set":{"version":1,"future":true,"items":[{"sync_id":"0f8fad5b-d9cb-469f-a165-70867728950e","name":"  ` +
-	strings.Repeat("n", 64) + `  ","picture":"","pin":{"keep":true,"future":1},"is_child":false,"max_content_rating":"","max_advisory_age":null,"require_advisory_age":false,"requests_blocked":false}]}}`
+	strings.Repeat("n", 64) + `  ","picture":"","pin":{"keep":true,"future":1},"is_child":false,"max_content_rating":"","max_advisory_age":null,"require_advisory_age":false,"requests_blocked":false,"settings":{}}]}}`
 
 // TestProfileSetProblems: refusals the service reports reach the client as
 // their own problems, never as a 500. It catches an account deleted during a
@@ -77,7 +92,7 @@ func TestProfileSetProblems(t *testing.T) {
 		{handlers.ErrProfileSetStale, TypeProfileSetStale},
 	} {
 		var p *Problem
-		if !errors.As(profileSetProblem(tc.err, false), &p) || p.Type != tc.want.URI() {
+		if !errors.As(profileSetProblem(tc.err), &p) || p.Type != tc.want.URI() {
 			t.Fatalf("%v answered %+v, want %s", tc.err, p, tc.want.ID)
 		}
 	}
@@ -141,6 +156,154 @@ func TestPutProfileSetAuthority(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestProfileSetFormsValidateAlike: what a set may hold does not depend on
+// how it arrives. Each set below is sent in the session form and inside a
+// verified signed envelope, and the two must answer alike: the same status
+// and, for a refusal, the same problem with the same errors (location, code
+// and detail). It catches the forms drifting apart, as when a missing member
+// was "required" at its own location in one form and "invalid" at the payload
+// in the other, and a member one form required being optional in the other.
+func TestProfileSetFormsValidateAlike(t *testing.T) {
+	cases := profileSetFormCases()
+
+	type answer struct {
+		Status int
+		Type   string
+		Detail string
+		Errors []ProblemError
+	}
+	read := func(t *testing.T, rec *httptest.ResponseRecorder) answer {
+		t.Helper()
+		out := answer{Status: rec.Code}
+		if rec.Code == http.StatusOK {
+			return out
+		}
+		var p Problem
+		if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
+			t.Fatalf("answer %d is not a problem: %s", rec.Code, rec.Body.String())
+		}
+		out.Type, out.Detail, out.Errors = p.Type, p.Detail, p.Errors
+		slices.SortFunc(out.Errors, func(a, b ProblemError) int {
+			return cmp.Or(cmp.Compare(a.Location, b.Location), cmp.Compare(a.Code, b.Code), cmp.Compare(a.Detail, b.Detail))
+		})
+		return out
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setJSON, _ := json.Marshal(tc.set)
+			members := map[string]any{"set": tc.set}
+			authority := &auth.ProfileSetAuthority{UserID: 1, Set: setJSON, EditsSeen: tc.editsSeen}
+			if tc.pairs != nil {
+				members["pairs"] = tc.pairs
+				authority.Pairs, _ = json.Marshal(tc.pairs)
+			}
+			if tc.editsSeen != "" {
+				members["edits_seen"] = tc.editsSeen
+			}
+			sessionBody, _ := json.Marshal(members)
+			send := func(body string, headers map[string]string) answer {
+				deps := appKeyDeps(&fakeAppKeys{enabled: true})
+				deps.AppKeys = &profileSetKeys{fakeAppKeys: &fakeAppKeys{enabled: true}, signed: authority}
+				deps.ProfileSet = &fakeProfileSets{}
+				return read(t, do(t, NewHandler(deps), http.MethodPut, Prefix+"/profiles/set", body, headers))
+			}
+			session := send(string(sessionBody), map[string]string{"Authorization": "Bearer " + memberToken, profileHeader: "p-owner"})
+			signed := send(testEnvelope, nil)
+			if !reflect.DeepEqual(session, signed) {
+				t.Fatalf("the two forms answer differently:\nsession: %+v\nsigned:  %+v", session, signed)
+			}
+			if tc.ok != (session.Status == http.StatusOK) {
+				t.Fatalf("answer = %+v, want accepted %v", session, tc.ok)
+			}
+			if !tc.ok && (session.Status != http.StatusUnprocessableEntity || len(session.Errors) == 0) {
+				t.Fatalf("a malformed set answered %+v, want 422 with errors", session)
+			}
+		})
+	}
+}
+
+// profileSetFormCase is one set sent in both forms.
+type profileSetFormCase struct {
+	name      string
+	set       any
+	pairs     any
+	editsSeen string
+	ok        bool
+}
+
+// profileSetFormCases are well-formed sets and one of each kind of malformed
+// one: every required member left out, each member with a wrong type or out
+// of range, and the faults only the parser sees.
+func profileSetFormCases() []profileSetFormCase {
+	whole := func() map[string]any {
+		return map[string]any{
+			"sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e", "name": "Sam", "picture": "", "pin": map[string]any{"keep": true},
+			"is_child": false, "max_content_rating": "", "max_advisory_age": nil, "require_advisory_age": false,
+			"requests_blocked": false, "settings": map[string]any{},
+		}
+	}
+	with := func(member string, value any) map[string]any {
+		item := whole()
+		item[member] = value
+		return item
+	}
+	set := func(items ...any) map[string]any { return map[string]any{"version": 1, "items": items} }
+	second := with("sync_id", "7c9e6679-7425-40de-944b-e07fc1f90ae7")
+	second["name"] = "Alex"
+	cases := []profileSetFormCase{
+		{name: "a whole item", set: set(whole()), ok: true},
+		{name: "settings and a reset", set: set(with("settings", map[string]any{"playback.subtitle_mode": "always"}), with2(second, "settings_reset", []string{"playback.audio_language"})), ok: true},
+		{name: "a pair", set: set(whole()), pairs: []any{map[string]any{"sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e", "local_id": "p-owner"}}, ok: true},
+		{name: "name a number", set: set(with("name", 5))},
+		{name: "name null", set: set(with("name", nil))},
+		{name: "name empty", set: set(with("name", ""))},
+		{name: "name only spaces", set: set(with("name", "   "))},
+		{name: "name 65 characters", set: set(with("name", strings.Repeat("n", 65)))},
+		{name: "sync_id upper case", set: set(with("sync_id", "0F8FAD5B-D9CB-469F-A165-70867728950E"))},
+		{name: "sync_id not a UUID", set: set(with("sync_id", "x"))},
+		{name: "picture too long", set: set(with("picture", strings.Repeat("p", 201)))},
+		{name: "pin empty", set: set(with("pin", map[string]any{}))},
+		{name: "pin two digits", set: set(with("pin", map[string]any{"set": "12"}))},
+		{name: "pin two instructions", set: set(with("pin", map[string]any{"set": "1234", "keep": true}))},
+		{name: "pin a string", set: set(with("pin", "1234"))},
+		{name: "is_child a string", set: set(with("is_child", "yes"))},
+		{name: "max_advisory_age 0", set: set(with("max_advisory_age", 0))},
+		{name: "max_advisory_age 22", set: set(with("max_advisory_age", 22))},
+		{name: "max_advisory_age a string", set: set(with("max_advisory_age", "12"))},
+		{name: "max_content_rating too long", set: set(with("max_content_rating", strings.Repeat("r", 33)))},
+		{name: "settings an array", set: set(with("settings", []any{}))},
+		{name: "settings null", set: set(with("settings", nil))},
+		{name: "settings_reset a string", set: set(with("settings_reset", "x"))},
+		{name: "a key set and reset", set: set(with2(with("settings", map[string]any{"playback.subtitle_mode": "always"}), "settings_reset", []string{"playback.subtitle_mode"}))},
+		{name: "no items", set: set()},
+		{name: "items not an array", set: map[string]any{"version": 1, "items": "x"}},
+		{name: "an item not an object", set: set(5)},
+		{name: "version negative", set: map[string]any{"version": -1, "items": []any{whole()}}},
+		{name: "version a fraction", set: map[string]any{"version": 1.5, "items": []any{whole()}}},
+		{name: "version a string", set: map[string]any{"version": "1", "items": []any{whole()}}},
+		{name: "version missing", set: map[string]any{"items": []any{whole()}}},
+		{name: "two items with one sync_id", set: set(whole(), with("name", "Alex"))},
+		{name: "two items with one name", set: set(whole(), with("sync_id", "7c9e6679-7425-40de-944b-e07fc1f90ae7"))},
+		{name: "a pair for no item", set: set(whole()), pairs: []any{map[string]any{"sync_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "local_id": "p-owner"}}},
+		{name: "a pair without local_id", set: set(whole()), pairs: []any{map[string]any{"sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e"}}},
+		{name: "pairs not an array", set: set(whole()), pairs: "x"},
+		{name: "edits_seen too long", set: set(whole()), editsSeen: strings.Repeat("e", 65)},
+	}
+	for member := range whole() {
+		item := whole()
+		delete(item, member)
+		cases = append(cases, profileSetFormCase{name: "without " + member, set: set(item)})
+	}
+	return cases
+}
+
+// with2 is a copy of item with one more member set.
+func with2(item map[string]any, member string, value any) map[string]any {
+	out := maps.Clone(item)
+	out[member] = value
+	return out
 }
 
 // TestGetProfileSetETag: an app polls the set with If-None-Match and gets

@@ -606,13 +606,26 @@ undo a PIN changed since. These checks run on a first read and again under the
 set's locks.
 
 **Item members.** Every item carries every member the set defines today,
-except `settings` and `settings_reset`; an item that leaves one out is refused
-(422). An absent member is never read as false, empty or "no limit": a client
+except `settings_reset`; an item that leaves one out is refused (422,
+`required`). `settings` is required and `{}` means "leave every setting as it
+is": the meaning an absent member would have, which is exactly why absence is
+refused. An absent member is never read as false, empty or "no limit": a client
 that forgot a field would silently drop a child's limit. The rule for later
 versions follows from that. The members required today stay required. A
 member added later is optional and has a stated default, so a set built by an
 older app keeps being accepted by a newer server, and the default is chosen
 so that leaving the member out can't loosen what the profile may see.
+
+**One validation for both forms.** The session form's body is checked by the
+request schema before its handler runs, and then by the set parser. A signed
+set is opaque to the schema until its envelope verifies, so the handler runs
+the payload's `set`, `pairs` and `edits_seen` through that same schema as the
+session body they would have been (`validateSignedProfileSet`), and then both
+forms go through the one parser (`handlers.CheckProfileSet`) before anything
+is spent or locked. The two forms therefore cannot disagree on what a set may
+hold, and they name a fault at the same location (`body.set.items[2].name`)
+with the same code. A table test sends each malformed set both ways and
+requires identical answers.
 
 The content hash is SHA-256 over a canonical JSON document of the version and
 each item as sent, members the server doesn't know included, keys sorted,
