@@ -193,16 +193,6 @@ func (c lockedChain) session(ip string, expiry time.Time) KeySession {
 // new binding; answering it as a bad key would make the device discard it.
 var errKeyBindingChanged = &KeyRetryError{RetryAfter: time.Second, Changed: true}
 
-// keyChainError maps a failure of the provider locks in a key sign-in: an
-// identity deleted meanwhile has had its keys revoked by its trigger, so the
-// key is answered as revoked.
-func keyChainError(err error) error {
-	if errors.Is(err, errKeyIdentityGone) {
-		return ErrKeySignatureInvalid
-	}
-	return err
-}
-
 // unknownKey answers a request signed by a key this server doesn't hold, or
 // holds revoked, after a signature check against a throwaway key, so it takes
 // about as long as a known key's refusal.
@@ -235,9 +225,10 @@ func (a *AppKeySignIn) Introduce(ctx context.Context, req KeyRequest) (*KeySignI
 	}
 	binding := KeyBinding{IdentityID: person.IdentityID, ProviderBound: person.ProviderBound}
 	expiry, err := a.service.keyProviderExpiry(ctx, person.UserID, binding)
-	if err != nil {
+	if err != nil && !errors.Is(err, errKeyIdentityGone) {
 		return nil, err
 	}
+	gone := false
 	out := &KeySignInResult{ReplyKey: *payload.ReplyKey, Challenge: payload.Challenge}
 	err = a.inTx(ctx, func(tx pgx.Tx) error {
 		user, err := lockEnabledUser(ctx, tx, person.UserID)
@@ -245,8 +236,12 @@ func (a *AppKeySignIn) Introduce(ctx context.Context, req KeyRequest) (*KeySignI
 			return err
 		}
 		chain, err := lockChain(ctx, tx, user, binding)
+		if errors.Is(err, errKeyIdentityGone) {
+			gone = true
+			return revokePersonKeyTx(ctx, tx, user.ID, person.ID)
+		}
 		if err != nil {
-			return keyChainError(err)
+			return err
 		}
 		locked, err := lockPersonKey(ctx, tx, user.ID, person.ID)
 		if errors.Is(err, ErrAppKeyNotFound) || (err == nil && locked.RevokedAt != nil) {
@@ -281,6 +276,9 @@ func (a *AppKeySignIn) Introduce(ctx context.Context, req KeyRequest) (*KeySignI
 	})
 	if err != nil {
 		return nil, err
+	}
+	if gone {
+		return nil, ErrKeySignatureInvalid
 	}
 	return a.signedIn(ctx, out), nil
 }
@@ -327,10 +325,11 @@ func (a *AppKeySignIn) SignIn(ctx context.Context, req KeyRequest) (*KeySignInRe
 	}
 	var expiry time.Time
 	if device.Status == models.DeviceKeyStatusActive {
-		if expiry, err = a.service.keyProviderExpiry(ctx, device.UserID, bindingOfDeviceKey(device)); err != nil {
+		if expiry, err = a.service.keyProviderExpiry(ctx, device.UserID, bindingOfDeviceKey(device)); err != nil && !errors.Is(err, errKeyIdentityGone) {
 			return nil, err
 		}
 	}
+	gone := false
 	out := &KeySignInResult{ReplyKey: *payload.ReplyKey, Challenge: payload.Challenge, DeviceID: device.ID}
 	err = a.inTx(ctx, func(tx pgx.Tx) error {
 		user, err := lockEnabledUser(ctx, tx, device.UserID)
@@ -338,8 +337,12 @@ func (a *AppKeySignIn) SignIn(ctx context.Context, req KeyRequest) (*KeySignInRe
 			return err
 		}
 		chain, err := lockChain(ctx, tx, user, bindingOfDeviceKey(device))
+		if errors.Is(err, errKeyIdentityGone) {
+			gone = true
+			return revokeDeviceKeyTx(ctx, tx, user.ID, device.ID)
+		}
 		if err != nil {
-			return keyChainError(err)
+			return err
 		}
 		key, err := lockDeviceKey(ctx, tx, user.ID, device.ID)
 		if errors.Is(err, ErrAppKeyNotFound) || (err == nil && key.RevokedAt != nil) {
@@ -369,6 +372,9 @@ func (a *AppKeySignIn) SignIn(ctx context.Context, req KeyRequest) (*KeySignInRe
 	})
 	if err != nil {
 		return nil, err
+	}
+	if gone {
+		return nil, ErrKeySignatureInvalid
 	}
 	return a.signedIn(ctx, out), nil
 }

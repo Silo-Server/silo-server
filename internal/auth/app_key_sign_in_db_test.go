@@ -756,44 +756,6 @@ func TestLinkingBindsAppKeysDB(t *testing.T) {
 	}
 }
 
-// Deleting an identity revokes the keys bound to it and ends their
-// sessions, so the device enrolls again instead of being refused for ever; a
-// key of the same account not bound to it is untouched. The trigger also
-// fires on the cascade from uninstalling the plugin.
-func TestDeletedIdentityRevokesItsKeysDB(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		delete string
-	}{
-		{name: "unlink", delete: `DELETE FROM plugin_auth_identities WHERE id = $1`},
-		{name: "plugin uninstall", delete: `DELETE FROM plugin_installations WHERE id = (SELECT plugin_installation_id FROM plugin_auth_identities WHERE id = $1)`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			env := newKeyEnv(t, "keyidgone")
-			ctx := t.Context()
-			_, bound := env.enrollFromProvider(t)
-			unbound, err := env.signIn.keys.InsertDeviceKey(ctx, NewDeviceKey{UserID: env.user.ID, PublicKey: newTestKey(t).pub,
-				Kind: models.DeviceKeyKindDevice, Name: "Tablet", EnrolledVia: models.AppKeyEnrolledSession})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := env.pool.Exec(ctx, tc.delete, env.identityID); err != nil {
-				t.Fatal(err)
-			}
-			if !env.keyRevoked(t, bound.DeviceID) || env.sessionLive(t, bound.Pair.SessionID, env.user.ID) {
-				t.Fatal("the bound key or its session survived the identity")
-			}
-			var personRevoked bool
-			if err := env.pool.QueryRow(ctx, `SELECT revoked_at IS NOT NULL FROM auth_person_keys WHERE user_id = $1`, env.user.ID).Scan(&personRevoked); err != nil || !personRevoked {
-				t.Fatalf("person key revoked = %v, %v", personRevoked, err)
-			}
-			if env.keyRevoked(t, unbound.ID) {
-				t.Fatal("a key not bound to the identity was revoked")
-			}
-		})
-	}
-}
-
 // A provider refusing the person revokes the account's app keys with its
 // API keys, and ends the sessions they opened.
 func TestProviderRefusalRevokesAppKeysDB(t *testing.T) {
@@ -818,97 +780,6 @@ func TestProviderRefusalRevokesAppKeysDB(t *testing.T) {
 	}
 }
 
-// A provider refusing the person and deleting another identity of the same
-// account (unlinking it, or uninstalling its plugin, which takes no account
-// lock) both reach the key bound to that identity and the session it opened.
-// Each locks the key row before the session, so they queue instead of
-// deadlocking. The identity delete holds the key row first; the refusal sweep
-// must wait on that key, not on a session the delete needs next.
-func TestRefusalSweepAndIdentityDeleteDontDeadlockDB(t *testing.T) {
-	env := newKeyEnv(t, "keylockorder")
-	ctx := t.Context()
-	var otherInstallation int
-	if err := env.pool.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
-		VALUES ($1, '0', '/nonexistent/key-lock-order-test', true, 'manual', 'plugin') RETURNING id`, "key-lock-order-"+env.suffix).Scan(&otherInstallation); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = env.pool.Exec(context.WithoutCancel(ctx), `DELETE FROM plugin_installations WHERE id = $1`, otherInstallation)
-	})
-	var otherIdentity int64
-	if err := env.pool.QueryRow(ctx, `INSERT INTO plugin_auth_identities (plugin_installation_id, external_subject, user_id)
-		VALUES ($1, $2, $3) RETURNING id`, otherInstallation, "other|"+env.suffix, env.user.ID).Scan(&otherIdentity); err != nil {
-		t.Fatal(err)
-	}
-	bound, err := env.signIn.keys.InsertDeviceKey(ctx, NewDeviceKey{UserID: env.user.ID, PublicKey: newTestKey(t).pub,
-		Kind: models.DeviceKeyKindDevice, Name: "Tablet", EnrolledVia: models.AppKeyEnrolledSession, IdentityID: &otherIdentity})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := env.svc.sessions.Create(ctx, models.AuthSession{UserID: env.user.ID, DeviceName: "Tablet",
-		ExpiresAt: time.Now().Add(time.Hour), DeviceKeyID: &bound.ID, OpenedVia: models.SessionOpenedAppKey}); err != nil {
-		t.Fatal(err)
-	}
-	refusing := env.loginSession(t, env.user, models.SessionOpenedProvider, &env.identityID)
-	pair, err := env.svc.generateTokenPair(*refusing)
-	if err != nil {
-		t.Fatal(err)
-	}
-	env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_DISABLED, "")
-	env.makeDue(t)
-
-	deleting, err := env.pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = deleting.Rollback(context.WithoutCancel(ctx)) }()
-	if _, err := deleting.Exec(ctx, `SELECT 1 FROM auth_device_keys WHERE id = $1 FOR UPDATE`, bound.ID); err != nil {
-		t.Fatal(err)
-	}
-	var deletingPID int
-	if err := deleting.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&deletingPID); err != nil {
-		t.Fatal(err)
-	}
-	sweep := make(chan error, 1)
-	go func() {
-		_, err := env.svc.Refresh(ctx, pair.RefreshToken)
-		sweep <- err
-	}()
-	// Wait until the sweep is queued behind the key row this transaction
-	// holds: a backend blocked by this transaction and nothing else.
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		var waiting bool
-		if err := env.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
-			WHERE $1 = ANY (pg_blocking_pids(pid)))`, deletingPID).Scan(&waiting); err != nil {
-			t.Fatal(err)
-		}
-		if waiting {
-			break
-		}
-		select {
-		case err := <-sweep:
-			t.Fatalf("the sweep finished without waiting on the held key: %v", err)
-		case <-time.After(10 * time.Millisecond):
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the sweep never queued behind the key row")
-		}
-	}
-	if _, err := deleting.Exec(ctx, `DELETE FROM plugin_auth_identities WHERE id = $1`, otherIdentity); err != nil {
-		t.Fatalf("identity delete while the sweep waits: %v", err)
-	}
-	if err := deleting.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-sweep; !errors.Is(err, ErrSessionRevoked) {
-		t.Fatalf("refusal sweep = %v, want the refusal to end the session", err)
-	}
-	if !env.keyRevoked(t, bound.ID) {
-		t.Fatal("the bound key survived both")
-	}
-}
-
 // keyedAccount gives the env's provider account keys bound to its identity,
 // a live session opened by the device key, and a device sign-in approved in
 // advance from that session. It returns the enrollment and the pre-approval.
@@ -926,46 +797,6 @@ func (e *keyEnv) keyedAccount(t *testing.T) (*KeySignInResult, string) {
 		_, _ = e.pool.Exec(context.WithoutCancel(t.Context()), `DELETE FROM device_login_requests WHERE id = $1`, preapproved.ID)
 	})
 	return enrolled, preapproved.ID
-}
-
-// Deleting an identity, here through the cascade of uninstalling its plugin
-// (which takes no account lock), never waits for the account's row. Every
-// path that holds the account row and then waits on a key, a session or a
-// pre-approval would otherwise deadlock with it. The trigger leaves nothing
-// for a later statement in the same transaction to update again; a second
-// update would re-check the row's foreign keys and share-lock the account.
-func TestIdentityDeleteNeverWaitsForAccountDB(t *testing.T) {
-	env := newKeyEnv(t, "keynowait")
-	ctx := t.Context()
-	enrolled, preapproval := env.keyedAccount(t)
-
-	holder, err := env.pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = holder.Rollback(context.WithoutCancel(ctx)) }()
-	if _, err := holder.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, env.user.ID); err != nil {
-		t.Fatal(err)
-	}
-	err = pgx.BeginFunc(ctx, env.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '3s'`); err != nil {
-			return err
-		}
-		_, err := tx.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, env.installationID)
-		return err
-	})
-	if err != nil {
-		t.Fatalf("uninstall while the account row is held: %v", err)
-	}
-	if err := holder.Rollback(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if !env.keyRevoked(t, enrolled.DeviceID) || env.sessionLive(t, enrolled.Pair.SessionID, env.user.ID) {
-		t.Fatal("the key or its session survived the uninstall")
-	}
-	if status := preapprovalStatus(t, env.pool, preapproval); status != DeviceLoginStatusDenied {
-		t.Fatalf("pre-approval status = %s, want denied", status)
-	}
 }
 
 // An account holding provider-bound keys, a key session, a pre-approval
@@ -1010,5 +841,180 @@ func TestAccountWithKeysCanBeDeletedDB(t *testing.T) {
 	var requests int
 	if err := env.pool.QueryRow(ctx, `SELECT COUNT(*) FROM device_login_requests WHERE approved_by_user_id = $1`, env.user.ID).Scan(&requests); err != nil || requests != 0 {
 		t.Fatalf("device sign-in requests still naming the account = %d, %v", requests, err)
+	}
+}
+
+// otherIdentity links a second identity, on its own plugin installation, to
+// the env's account and returns its ID and installation.
+func (e *keyEnv) otherIdentity(t *testing.T, label string) (int64, int) {
+	t.Helper()
+	ctx := t.Context()
+	var installation int
+	if err := e.pool.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
+		VALUES ($1, '0', '/nonexistent/key-identity-test', true, 'manual', 'plugin') RETURNING id`, label+"-"+e.suffix).Scan(&installation); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = e.pool.Exec(context.WithoutCancel(ctx), `DELETE FROM plugin_installations WHERE id = $1`, installation)
+	})
+	var identity int64
+	if err := e.pool.QueryRow(ctx, `INSERT INTO plugin_auth_identities (plugin_installation_id, external_subject, user_id)
+		VALUES ($1, $2, $3) RETURNING id`, installation, label+"|"+e.suffix, e.user.ID).Scan(&identity); err != nil {
+		t.Fatal(err)
+	}
+	return identity, installation
+}
+
+// listedKeys reports whether the account's key list shows its person key and
+// the device key with id.
+func (e *keyEnv) listedKeys(t *testing.T, id string) (person, device bool) {
+	t.Helper()
+	keys, err := e.signIn.ListOwnKeys(t.Context(), e.loginSession(t, e.user, models.SessionOpenedPassword, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range keys.Devices {
+		device = device || key.ID == id
+	}
+	return keys.Person != nil, device
+}
+
+// Uninstalling a sign-in provider deletes its identities by cascade, which
+// takes no account lock. Nothing in that cascade may wait on, or write, a
+// key row: key rows are written only by application transactions that hold
+// the account lock. Here one transaction holds both the account row and the
+// bound device key's row, and the uninstall must still finish.
+func TestUninstallNeverTouchesKeyRowsDB(t *testing.T) {
+	env := newKeyEnv(t, "keyuninstall")
+	ctx := t.Context()
+	enrolled, _ := env.keyedAccount(t)
+	holder, err := env.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(context.WithoutCancel(ctx)) }()
+	if _, err := holder.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, env.user.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec(ctx, `SELECT 1 FROM auth_device_keys WHERE id = $1 FOR UPDATE`, enrolled.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	err = pgx.BeginFunc(ctx, env.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '3s'`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, env.installationID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("uninstall while the account and key rows are held: %v", err)
+	}
+}
+
+// After its provider is uninstalled, a key bound to it is dead: the key
+// list leaves it out at once, and its next use revokes it and answers
+// signature_invalid, which tells the device to enroll again. The same holds
+// for a key whose identity number names another account's identity. The
+// session the key opened survives with its identity cleared: it is then a
+// provider session whose identity is gone, which refresh ends at the
+// provider age limit, as any such session.
+func TestKeysOfAGoneIdentityAreDeadDB(t *testing.T) {
+	env := newKeyEnv(t, "keydead")
+	ctx := t.Context()
+	person, device := newTestKey(t), newTestKey(t)
+	claims := env.loginSession(t, env.user, models.SessionOpenedProvider, &env.identityID)
+	enrolled, err := env.signIn.Enroll(ctx, KeyEnrollRequest{
+		KeyRequest: env.request(t, message{purpose: appkeys.PurposeEnroll, signer: person, device: &device}),
+		PersonKey:  person.pub, Claims: claims,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasPerson, hasDevice := env.listedKeys(t, enrolled.DeviceID); !hasPerson || !hasDevice {
+		t.Fatalf("before the uninstall: person %v, device %v listed", hasPerson, hasDevice)
+	}
+	if _, err := env.pool.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, env.installationID); err != nil {
+		t.Fatal(err)
+	}
+	if hasPerson, hasDevice := env.listedKeys(t, enrolled.DeviceID); hasPerson || hasDevice {
+		t.Fatalf("after the uninstall: person %v, device %v listed", hasPerson, hasDevice)
+	}
+	if _, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: device})); !errors.Is(err, ErrKeySignatureInvalid) {
+		t.Fatalf("sign-in with the dead key = %v", err)
+	}
+	if !env.keyRevoked(t, enrolled.DeviceID) {
+		t.Fatal("the dead device key was not revoked at its use")
+	}
+	newDevice := newTestKey(t)
+	if _, err := env.signIn.Introduce(ctx, env.request(t, message{purpose: appkeys.PurposeIntroduce, signer: person, device: &newDevice})); !errors.Is(err, ErrKeySignatureInvalid) {
+		t.Fatalf("introduce with the dead person key = %v", err)
+	}
+	var personRevoked bool
+	if err := env.pool.QueryRow(ctx, `SELECT revoked_at IS NOT NULL FROM auth_person_keys WHERE user_id = $1`, env.user.ID).Scan(&personRevoked); err != nil || !personRevoked {
+		t.Fatalf("person key revoked = %v, %v", personRevoked, err)
+	}
+	// The key's session was opened before the uninstall. Revoking the key at
+	// its use ended it; before that, it had only lost its identity.
+	session := env.sessionRow(t, enrolled.Pair.SessionID)
+	if session.IdentityID != nil || session.ProviderSince == nil {
+		t.Fatalf("key session after the uninstall = identity %v since %v", session.IdentityID, session.ProviderSince)
+	}
+
+	// A key whose identity number is another account's identity is not
+	// bound to that identity: it is a key whose identity is gone.
+	stranger := env.localAccount(t, "keydead-stranger", models.RoleUser)
+	foreign, installation := env.otherIdentity(t, "keydead-foreign")
+	if _, err := env.pool.Exec(ctx, `UPDATE plugin_auth_identities SET user_id = $2 WHERE id = $1 AND plugin_installation_id = $3`,
+		foreign, stranger.ID, installation); err != nil {
+		t.Fatal(err)
+	}
+	misbound := newTestKey(t)
+	key, err := env.signIn.keys.InsertDeviceKey(ctx, NewDeviceKey{UserID: env.user.ID, PublicKey: misbound.pub,
+		Kind: models.DeviceKeyKindDevice, Name: "Misbound", EnrolledVia: models.AppKeyEnrolledSession, IdentityID: &foreign})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, device := env.listedKeys(t, key.ID); device {
+		t.Fatal("a key bound to another account's identity is listed")
+	}
+	if _, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: misbound})); !errors.Is(err, ErrKeySignatureInvalid) {
+		t.Fatalf("sign-in with a key bound to another account's identity = %v", err)
+	}
+	if !env.keyRevoked(t, key.ID) {
+		t.Fatal("the misbound key was not revoked")
+	}
+}
+
+// Unlinking an identity revokes the keys bound to it and ends their sessions
+// at once; a key of the same account bound to another identity, and one not
+// bound to any, are untouched.
+func TestUnlinkRevokesItsKeysDB(t *testing.T) {
+	env := newKeyEnv(t, "keyunlink")
+	ctx := t.Context()
+	_, bound := env.enrollFromProvider(t)
+	otherID, _ := env.otherIdentity(t, "keyunlink-other")
+	elsewhere, err := env.signIn.keys.InsertDeviceKey(ctx, NewDeviceKey{UserID: env.user.ID, PublicKey: newTestKey(t).pub,
+		Kind: models.DeviceKeyKindDevice, Name: "Elsewhere", EnrolledVia: models.AppKeyEnrolledSession, IdentityID: &otherID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unbound, err := env.signIn.keys.InsertDeviceKey(ctx, NewDeviceKey{UserID: env.user.ID, PublicKey: newTestKey(t).pub,
+		Kind: models.DeviceKeyKindDevice, Name: "Unbound", EnrolledVia: models.AppKeyEnrolledSession})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The account keeps its password, so unlinking isn't refused as its
+	// last way in.
+	if _, err := env.pool.Exec(ctx, `UPDATE users SET local_password_login_enabled = true WHERE id = $1`, env.user.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewIdentityService(env.pool).UnlinkOwn(ctx, env.user.ID, env.identityID); err != nil {
+		t.Fatalf("unlink: %v", err)
+	}
+	if !env.keyRevoked(t, bound.DeviceID) || env.sessionLive(t, bound.Pair.SessionID, env.user.ID) {
+		t.Fatal("the unlinked identity's key or its session survived")
+	}
+	if env.keyRevoked(t, elsewhere.ID) || env.keyRevoked(t, unbound.ID) {
+		t.Fatal("unlinking revoked a key not bound to that identity")
 	}
 }

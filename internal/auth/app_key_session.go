@@ -34,7 +34,7 @@ func identityAnchor(ctx context.Context, db rowQuerier, userID int, identityID i
 	err := db.QueryRow(ctx, `SELECT COALESCE(last_authenticated_at, linked_at) FROM plugin_auth_identities
 		WHERE id = $1 AND user_id = $2`, identityID, userID).Scan(&anchor)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return time.Time{}, ErrProviderSignInRequired
+		return time.Time{}, errKeyIdentityGone
 	}
 	if err != nil {
 		// As the session check reports a store it couldn't ask: the route
@@ -129,10 +129,12 @@ func lockKeyIdentity(ctx context.Context, tx pgx.Tx, user *models.User, identity
 	}
 	installationID, err := lockOAuthIdentity(ctx, tx, user.ID, *identityID)
 	if errors.Is(err, ErrNotPermitted) {
+		// No identity of this account has that ID: unlinked, its plugin
+		// uninstalled, or a number that names another account's identity.
+		// Either way the key can never sign in again.
 		var exists bool
-		if qerr := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM plugin_auth_identities WHERE id = $1)`, *identityID).Scan(&exists); qerr == nil && !exists {
-			// Deleted since the binding was read: the identity's trigger has
-			// revoked the keys bound to it.
+		if qerr := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM plugin_auth_identities WHERE id = $1 AND user_id = $2)`,
+			*identityID, user.ID).Scan(&exists); qerr == nil && !exists {
 			return nil, nil, errKeyIdentityGone
 		}
 	}
@@ -154,9 +156,10 @@ func lockKeyIdentity(ctx context.Context, tx pgx.Tx, user *models.User, identity
 	return &id, &anchor, nil
 }
 
-// errKeyIdentityGone is a key's identity deleted while the request ran. It is
-// ErrNotPermitted to any caller that doesn't look for it; a key sign-in
-// answers it as the revoked key it now is.
+// errKeyIdentityGone is a provider-bound key whose identity no longer exists
+// on its account. It is ErrNotPermitted to any caller that doesn't look for
+// it; a key sign-in revokes the key and answers it as the revoked key it now
+// is.
 var errKeyIdentityGone = fmt.Errorf("%w: the key's provider identity was deleted", ErrNotPermitted)
 
 // KeySession describes the login session a device key opens.

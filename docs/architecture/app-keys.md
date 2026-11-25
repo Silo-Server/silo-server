@@ -65,44 +65,24 @@ and reads no key table: the session is already revoked, so its next request
 fails like any other revoked session's. Revoking every key of an account does
 the same for each of its device keys.
 
-**Lock order.** Every key path takes its locks in one order: the account row
-(`lockUser`), then the plugin installation and the provider identity a key is
-bound to (`keySignInPolicy`), then the person key, then device key rows, then
-the login sessions those keys opened. A sign-in reads the key's binding
-without a lock, locks the installation and identity, then locks the key row
-and, when its binding changed meanwhile (a link committed in between),
+**Lock order.** Key rows are written only by application transactions, and
+always in one order: the account row (`lockUser`), the plugin installation
+(share) and the provider identity a key is bound to (`keySignInPolicy`), the
+person key, the device keys, then the login sessions those keys opened. No
+database trigger or cascade writes to a key row. A sign-in reads the key's
+binding without a lock, locks the installation and identity, then locks the
+key row and, when its binding changed meanwhile (a link committed in between),
 answers 429 with a one-second `Retry-After`: the key is still good, and the
-next attempt sees the new binding. An identity deleted in between has revoked
-the key (below), so that sign-in answers `signature_invalid`. `enroll` and
-`PUT /auth/keys/person` lock the enrolling session's identity before the key
-rows and the session's own row last. Every sweep that revokes an account's
-keys and sessions together (a provider refusal, an email match, a promotion,
-an ownership move) revokes the keys first, then the sessions. Deleting an
-account deletes its device keys (which ends their sessions by cascade) and
-then its person keys before it revokes the remaining sessions and deletes the
-account: revoked key rows would be updated again by the identity trigger when
-the delete cascades to the account's identities.
-
-Deleting an identity takes the identity, then the key rows bound to it, then
-the device sign-ins approved in advance from their sessions, then those
-sessions (the revoking trigger). Unlinking takes the account lock first
-(`UnlinkOwn` and `AdminUnlink`); uninstalling a plugin takes none, and the
-trigger never reads the account row. The rule that keeps it so: **the
-trigger leaves nothing for a later statement in the same transaction to
-update again.** When a transaction updates a row twice, Postgres re-checks
-the row's foreign keys on the second update, and for a row that names an
-account that share-locks the `users` row, which a sweep, a key sign-in or a
-password reset may hold while it waits on the same keys. So the trigger
-clears `identity_id` on the keys and sessions it revokes, and denies the
-pre-approvals of those sessions and clears their `approved_identity_id`, so
-that neither the foreign keys' `SET NULL` nor the sessions' pre-approval
-withdrawal trigger has anything left to change.
-`TestIdentityDeleteNeverWaitsForAccountDB` holds the account row and requires
-an uninstall to finish, and `TestRefusalSweepAndIdentityDeleteDontDeadlockDB`
-runs a refusal sweep against an identity delete. Opening a session by key
-holds the account and key locks when it inserts the session, so a sign-in
-cannot create a live session after a concurrent revocation has ended the
-key's sessions.
+next attempt sees the new binding. `enroll` and `PUT /auth/keys/person` lock
+the enrolling session's identity before the key rows and the session's own row
+last. Every sweep that revokes an account's keys and sessions together (a
+provider refusal, an email match, a promotion, an ownership move, unlinking an
+identity) revokes the keys first, then the sessions. Deleting an account
+deletes its device keys (which ends their sessions by cascade) and then its
+person keys before it revokes the remaining sessions and deletes the account.
+Opening a session by key holds the account and key locks when it inserts the
+session, so a sign-in cannot create a live session after a concurrent
+revocation has ended the key's sessions.
 
 ## Protocol
 
@@ -204,14 +184,40 @@ the identity in the same transaction. From then on the provider rule applies
 to them, so a key enrolled from a password session can't keep opening sessions
 the provider never checks.
 
-**Deleting an identity.** Unlinking an identity, or uninstalling its plugin,
-revokes every key bound to that identity and ends the sessions its device keys
-opened: a new provider sign-in makes a new identity row, so such a key could
-never sign in again. A trigger on `plugin_auth_identities` does it, so it
-holds on every path that deletes one, the cascade from uninstalling a plugin
-and nodes on an older release included. The device then gets
-`signature_invalid` and enrolls again. A provider-bound key with no identity
-should not exist; the sign-in code refuses one as a guard.
+**When an identity is deleted.** A key records the identity it is bound to as
+a plain number (`identity_id`, with no foreign key) and `provider_bound`.
+Deleting an identity therefore never writes to a key row; that is what keeps
+the cascade from uninstalling a plugin, which takes no account lock, out of
+the key rows that application transactions write under it.
+
+- **Unlinking** (`UnlinkOwn`, `AdminUnlink`, both through `deleteIdentity`,
+  which runs under the account lock) revokes the keys bound to that identity
+  and ends the sessions they opened, before the identity is deleted.
+- **Uninstalling a plugin** deletes its identities by cascade and does nothing
+  to keys. A provider-bound key whose identity is gone is dead: the key list
+  leaves it out, and its next `sign-in` or `introduce` revokes it, under the
+  account lock, and answers `signature_invalid`, which tells the device to
+  enroll again. Sessions such a key opened earlier lose their identity through
+  `auth_sessions.identity_id`'s `ON DELETE SET NULL`, as every provider
+  session does when its identity disappears, and refresh ends them at the
+  provider age limit (`checkSessionStanding`).
+
+The number can only ever name that identity:
+
+- Identity IDs come from a sequence and are not reused. Uninstalling a plugin
+  and installing it again gives its people new identity rows with new IDs, so
+  keys bound to the old ones stay dead.
+- A restore is the one place the sequence can move backwards: a restored
+  sequence can be behind the live one, and the restore moves it past the IDs
+  it carries (`internal/backup/credentials.go`, the `setval` after carrying a
+  table). It cannot make a key match the wrong identity, because both key
+  tables are left out of backups, so a restored server has no keys at all. The
+  backup code depends on this: if keys are ever carried through a restore, a
+  carried key must be dropped unless its identity is carried with it.
+- Every lookup of a key's identity compares the account as well as the ID, so
+  even an equal number can only match an identity of the key's own account. A
+  key whose number names another account's identity is treated as a key whose
+  identity is gone.
 
 **Local passwords off.** A key that is not provider-bound is a local
 credential. While `auth.local_password_login` is off it signs in only for a
@@ -340,8 +346,9 @@ TLS connection covers all of it.
 - **A password reset, "sign out everywhere" and a password change** end
   sessions as before and keep keys: the device signs in again with its key. The
   devices list is where a key is revoked.
-- **Deleting an identity** (unlinking it, or uninstalling its plugin) revokes
-  the keys bound to it and ends their sessions (above).
+- **Unlinking an identity** revokes the keys bound to it and ends their
+  sessions. **Uninstalling a plugin** leaves them dead, revoked at their next
+  use (above).
 - **A provider that can't re-check** bounds key sign-in by age (above) without
   revoking anything.
 

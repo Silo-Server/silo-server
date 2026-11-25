@@ -153,7 +153,15 @@ func recordIdentitySignIn(ctx context.Context, db dbQuerier, id int64, identity 
 	return nil
 }
 
+// deleteIdentity deletes one of the account's identities. The caller holds
+// the account row lock. The app keys bound to it are revoked first, and the
+// sessions they opened end: a key bound to a gone identity can never sign in
+// again. Nothing else that deletes an identity (the cascade from uninstalling
+// a plugin) touches key rows; those keys are revoked at their next use.
 func deleteIdentity(ctx context.Context, db dbQuerier, userID int, identityID int64) (*LinkedIdentity, error) {
+	if err := revokeIdentityKeysTx(ctx, db, userID, identityID); err != nil {
+		return nil, err
+	}
 	return scanIdentity(db.QueryRow(ctx, `
 		DELETE FROM plugin_auth_identities WHERE id = $1 AND user_id = $2
 		RETURNING `+identityColumns, identityID, userID))
