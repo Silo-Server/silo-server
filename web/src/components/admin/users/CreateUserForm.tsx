@@ -139,6 +139,9 @@ function CreateUserForm({
   // A password the policy refuses, shown at the field rather than in the alert.
   const [passwordError, setPasswordError] = useState("");
   const passwordRef = useRef<HTMLInputElement>(null);
+  // The password as last typed. A save that settles after the admin left the
+  // Account tab can't read it from the unmounted input.
+  const latestPassword = useRef("");
   const [requirePasswordChange, setRequirePasswordChange] = useState(false);
   const [role, setRole] = useState("user");
   const [permissions, setPermissions] = useState<string[]>([PERMISSION_MARKER_EDIT]);
@@ -262,7 +265,7 @@ function CreateUserForm({
       // at the field like the form's own check, unless the admin has already
       // changed the password it refused.
       if (err instanceof V2ProblemError && err.problem.errors?.[0]?.location === "body.password") {
-        if (passwordRef.current?.value === body.password) {
+        if (latestPassword.current === body.password) {
           showPasswordError(passwordErrorMessage(err, ""));
         }
       } else {
@@ -351,6 +354,7 @@ function CreateUserForm({
                   value={password}
                   onChange={(e) => {
                     setPassword(e.target.value);
+                    latestPassword.current = e.target.value;
                     setPasswordError("");
                   }}
                   aria-invalid={passwordError ? true : undefined}

@@ -110,3 +110,32 @@ it("shows a password the server refuses at the field", async () => {
     "Include at least one special character, such as ! or #.",
   );
 });
+
+it("shows a refusal that arrives after the admin left the Account tab", async () => {
+  const refused = v2Problem(
+    422,
+    "validation_failed",
+    "The request did not pass validation; see errors.",
+  );
+  refused.problem.errors = [
+    { location: "body.password", code: "invalid", detail: "Include at least one capital letter." },
+  ];
+  let reject: (err: unknown) => void = () => {};
+  create.mockReturnValueOnce(new Promise((_, r) => (reject = r)));
+  const user = userEvent.setup();
+  render(
+    <Dialog open>
+      <CreateUserDialogContent onClose={() => {}} onBusy={() => {}} />
+    </Dialog>,
+  );
+  await user.type(screen.getByLabelText("Username"), "bob");
+  await user.type(screen.getByLabelText("Email"), "bob@example.test");
+  await user.type(screen.getByLabelText("Password"), "UppercaseOnlyPw1");
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  await user.click(screen.getByRole("tab", { name: "Limits" }));
+  expect(screen.queryByLabelText("Password")).toBeNull();
+  reject(refused);
+
+  const password = await screen.findByLabelText("Password");
+  expect(password).toHaveAccessibleErrorMessage("Include at least one capital letter.");
+});
