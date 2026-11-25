@@ -648,6 +648,13 @@ the PostgreSQL user store: elsewhere they answer 501
 | `settings` | object | Optional. Settings-contract keys stored per profile, each to its value. |
 | `settings_reset` | array | Optional. Up to 256 keys whose profile value is removed. A key in both `settings` and `settings_reset` is 422. |
 
+Every member in the table is required in every item, except `settings` and
+`settings_reset`: an item that leaves one out is 422 at that member. A set is
+the whole truth about a profile, and a missing limit must never be read as "no
+limit". This stays so. A member added to the item later is optional and has a
+stated default, so a set from an older app is still accepted by a newer
+server.
+
 Item members the server does not know are ignored. `pairs` is
 `[{ "sync_id", "local_id" }]`, for the first use on an account that already has
 profiles: each names an item and the existing profile it becomes. `edits_seen`

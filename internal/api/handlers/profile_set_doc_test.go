@@ -13,7 +13,7 @@ import (
 // TestParseProfileSetMembers: both forms read a set with this parser, so
 // members a newer app adds to the set or to a PIN are ignored in both, and a
 // name is trimmed before its length is checked. It catches the two forms
-// disagreeing on what a set may hold.
+// disagreeing on what a set may hold, and an item member becoming optional.
 func TestParseProfileSetMembers(t *testing.T) {
 	item := func(name, pin string) string {
 		return fmt.Sprintf(`{"sync_id":"0f8fad5b-d9cb-469f-a165-70867728950e","name":%q,"picture":"","pin":%s,"is_child":false,"max_content_rating":"","max_advisory_age":null,"require_advisory_age":false,"requests_blocked":false}`, name, pin)
@@ -31,6 +31,30 @@ func TestParseProfileSetMembers(t *testing.T) {
 			_, err := parseProfileSet(json.RawMessage(tc.set), nil, "")
 			if (err == nil) != tc.ok {
 				t.Fatalf("err = %v, want ok %v", err, tc.ok)
+			}
+		})
+	}
+	// Every member an item has today is required: one left out is refused at
+	// that member, never read as false, empty or "no limit". settings and
+	// settings_reset are the optional ones, and the items above leave both
+	// out.
+	var whole map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(item("Sam", `{"keep":true}`)), &whole); err != nil {
+		t.Fatal(err)
+	}
+	for member := range whole {
+		t.Run("without "+member, func(t *testing.T) {
+			partial := map[string]json.RawMessage{}
+			for k, v := range whole {
+				if k != member {
+					partial[k] = v
+				}
+			}
+			body, _ := json.Marshal(map[string]any{"version": 1, "items": []any{partial}})
+			_, err := parseProfileSet(body, nil, "")
+			var field *ProfileSetFieldError
+			if !errors.As(err, &field) || field.Location != "set.items[0]."+member {
+				t.Fatalf("err = %v, want a field error at set.items[0].%s", err, member)
 			}
 		})
 	}
