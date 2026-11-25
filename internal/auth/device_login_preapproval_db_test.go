@@ -207,16 +207,59 @@ func TestDevicePreapprovalRefusedDB(t *testing.T) {
 	if err := svc.sessions.Revoke(t.Context(), ClaimsFromContext(loggedOutPhone).SessionID); err != nil {
 		t.Fatal(err)
 	}
+	// An administrator ending that one session withdraws them as well.
+	var adminID int
+	if err := pool.QueryRow(t.Context(), `INSERT INTO users (username, email, password_hash, role, enabled)
+		VALUES ($1, $2, 'x', 'admin', true) RETURNING id`, name("admin"), name("admin")+"@example.invalid").Scan(&adminID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.WithoutCancel(t.Context()), `DELETE FROM users WHERE id = $1`, adminID)
+	})
+	adminEndedPhone := preapprovalApprover(t, svc, userID, nil, nil)
+	adminEndedSecret, adminEndedBinding := preapprovalSecret(t)
+	adminEnded, err := svc.Preapprove(adminEndedPhone, DevicePreapprovalInput{DeviceName: name("admin ended"), Binding: adminEndedBinding}, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminEndedSession := ClaimsFromContext(adminEndedPhone).SessionID
+	if _, err := svc.sessions.RevokeAsAdmin(t.Context(), adminID, userID, &adminEndedSession); err != nil {
+		t.Fatal(err)
+	}
+	// And so does revoking the app key that opened the session.
+	key, err := NewAppKeyRepository(pool).InsertDeviceKey(t.Context(), NewDeviceKey{
+		UserID: userID, PublicKey: newAppPublicKey(t), Kind: models.DeviceKeyKindDevice, Name: "Phone",
+		EnrolledVia: models.AppKeyEnrolledSession,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keySession := models.AuthSession{ID: uuid.New().String(), UserID: userID, DeviceName: "key phone",
+		ExpiresAt: time.Now().Add(24 * time.Hour), DeviceKeyID: &key.ID}
+	if err := svc.sessions.Create(t.Context(), keySession); err != nil {
+		t.Fatal(err)
+	}
+	keyPhone := WithClaims(t.Context(), &Claims{UserID: userID, SessionID: keySession.ID, TokenType: TokenTypeAccess})
+	keyRevokedSecret, keyRevokedBinding := preapprovalSecret(t)
+	keyRevoked, err := svc.Preapprove(keyPhone, DevicePreapprovalInput{DeviceName: name("key revoked"), Binding: keyRevokedBinding}, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := NewAppKeyRepository(pool).RevokeDeviceKey(t.Context(), userID, key.ID); err != nil {
+		t.Fatal(err)
+	}
 	if got := preapprovalStatus(t, pool, keptID); got != DeviceLoginStatusApproved {
 		t.Fatalf("ending another session left the kept pre-approval %s", got)
 	}
 
 	_, oldCode, oldSecret := preapprove("old", -(DevicePreapprovalTTL + time.Hour))
 	for label, tc := range map[string]struct{ code, secret, want string }{
-		"revoked":            {revokedCode, revokedSecret, DeviceLoginStatusDenied},
-		"session ended":      {ended.DeviceCode, endedSecret, DeviceLoginStatusDenied},
-		"session logged out": {loggedOut.DeviceCode, loggedOutSecret, DeviceLoginStatusDenied},
-		"expired":            {oldCode, oldSecret, DeviceLoginStatusExpired},
+		"revoked":                           {revokedCode, revokedSecret, DeviceLoginStatusDenied},
+		"session ended":                     {ended.DeviceCode, endedSecret, DeviceLoginStatusDenied},
+		"session logged out":                {loggedOut.DeviceCode, loggedOutSecret, DeviceLoginStatusDenied},
+		"session ended by an administrator": {adminEnded.DeviceCode, adminEndedSecret, DeviceLoginStatusDenied},
+		"app key revoked":                   {keyRevoked.DeviceCode, keyRevokedSecret, DeviceLoginStatusDenied},
+		"expired":                           {oldCode, oldSecret, DeviceLoginStatusExpired},
 	} {
 		poll, err := svc.Poll(t.Context(), tc.code, tc.secret)
 		if err != nil || poll.TokenPair != nil || poll.Status != tc.want {

@@ -244,8 +244,9 @@ the fingerprint. Nothing on the poll changes for the TV.
   nor destroy its sign-in.
 - **Rolling deploys and rollback.** A node from the release before this one
   does not know the marker: it would let a bare device code cancel a
-  pre-approved request and would collect one without the provider check
-  above. Clients create pre-approved sign-ins only after
+  pre-approved request, would collect one without the provider check above,
+  and would end a session without withdrawing the sign-ins it approved in
+  advance. Clients create pre-approved sign-ins only after
   `GET /api/v2/auth/device/capability` reports `preapprove`, which an older
   node never does, and an upgrade should finish before the feature is relied
   on. Rolling the migration back deletes the waiting pre-approved requests.
