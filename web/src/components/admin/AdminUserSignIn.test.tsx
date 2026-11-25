@@ -84,6 +84,7 @@ const LDAP = {
 let capabilities: Record<string, unknown>;
 let identities: Array<typeof IDENTITY>;
 let appKeys: Record<string, unknown> | null = null;
+let hanging: Set<string>;
 let failures: Record<string, unknown>;
 let serverPasswordLogin: string;
 const calls: Array<{ op: string; options?: { body?: unknown; path?: unknown } }> = [];
@@ -128,12 +129,14 @@ beforeEach(() => {
   };
   identities = [IDENTITY];
   appKeys = null;
+  hanging = new Set();
   failures = {};
   serverPasswordLogin = "true";
   calls.length = 0;
   vi.mocked(v2).mockImplementation(((op: string, options?: { body?: unknown }) => {
     calls.push({ op, options });
     if (failures[op]) return Promise.reject(failures[op]);
+    if (hanging.has(op)) return new Promise(() => {});
     switch (op) {
       case "GET /api/v2/auth/external-sign-in/capabilities":
         return Promise.resolve(capabilities);
@@ -244,6 +247,43 @@ describe("AdminUserSignIn identities", () => {
     if (warns) expect(dialog).toHaveTextContent(sentence);
     else expect(dialog).not.toHaveTextContent(sentence);
   });
+
+  // A key list that couldn't be read can't say whether keys go with the
+  // provider account, so the dialog says what holds either way.
+  it("hedges about app keys when the key list failed, and lets the unlink go ahead", async () => {
+    appKeys = { devices: [] };
+    failures["GET /api/v2/admin/users/{user_id}/keys"] = new Error("unavailable");
+    const user = userEvent.setup();
+    mount();
+    await user.click(await screen.findByRole("button", { name: "Unlink Company SSO (alice)" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await waitFor(() =>
+      expect(within(dialog).getByRole("button", { name: "Unlink" })).toBeEnabled(),
+    );
+    expect(dialog).toHaveTextContent(
+      "Any of alice’s Silo app keys tied to this provider account are removed",
+    );
+  });
+
+  // Until both the account capability and the key list answer, the dialog
+  // can't know what unlinking removes.
+  it.each([["GET /api/v2/admin/users/capabilities"], ["GET /api/v2/admin/users/{user_id}/keys"]])(
+    "keeps Unlink off while %s hasn't answered",
+    async (op) => {
+      appKeys = { devices: [] };
+      hanging.add(op);
+      const user = userEvent.setup();
+      mount();
+      await user.click(await screen.findByRole("button", { name: "Unlink Company SSO (alice)" }));
+      const dialog = await screen.findByRole("alertdialog");
+      // The key list is asked for only once the capability says it is served.
+      if (op.endsWith("/keys"))
+        await waitFor(() =>
+          expect(opCalls("GET /api/v2/admin/users/{user_id}/keys")).toHaveLength(1),
+        );
+      expect(within(dialog).getByRole("button", { name: "Unlink" })).toBeDisabled();
+    },
+  );
 
   it("hides changes from an admin who may not manage the account", async () => {
     mount({ ...USER, role: "admin" }, { manageable: false, viewerIsOwner: false });

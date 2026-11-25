@@ -23662,6 +23662,22 @@
             }
           ]
         },
+        "unknown": {
+          "value": [
+            {
+              "type": 0,
+              "value": " Any of "
+            },
+            {
+              "type": 1,
+              "value": "username"
+            },
+            {
+              "type": 0,
+              "value": "’s Silo app keys tied to this provider account are removed, and those devices are signed out."
+            }
+          ]
+        },
         "other": {
           "value": []
         }
@@ -139916,6 +139932,12 @@
     {
       "type": 0,
       "value": "Sign the Silo app on your phone or tablet in to this account, without a password."
+    }
+  ],
+  "web.settings.openInSilo.mainProfileOnly": [
+    {
+      "type": 0,
+      "value": "Only the household’s main profile can open Silo for this account. Switch to it and try again."
     }
   ],
   "web.settings.openInSilo.title": [

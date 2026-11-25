@@ -439,13 +439,13 @@ export function AdminUserSignIn({
   const identitiesServed = caps?.admin_identities === true;
   const identities = useAdminUserIdentities(user.id, identitiesServed);
   const unlink = useUnlinkAdminUserIdentity();
-  // Unlinking a provider account revokes the app keys added through it.
-  const appKeysServed = useAdminUserCapabilities().data?.app_keys === true;
-  const appKeysRead = appKeysServed && identitiesServed;
+  const accountCaps = useAdminUserCapabilities();
+  const appKeysRead = accountCaps.data?.app_keys === true && identitiesServed;
   const appKeys = useAdminAppKeys(user.id, appKeysRead).keys;
-  // Unlinking revokes only the keys bound to that provider account. While the
-  // list hasn't answered, the dialog says nothing about keys and waits.
-  const keysSettling = appKeysRead && appKeys.isPending && !appKeys.isError;
+  // Unlinking revokes only the keys bound to that provider account. Unlink
+  // waits until the capability and the key list have each answered; a list
+  // that failed gets a sentence that holds whether or not keys exist.
+  const keysSettling = accountCaps.isPending || (appKeysRead && appKeys.isPending);
   const keysBoundTo = (identityId: string) =>
     [appKeys.data?.person_key, ...(appKeys.data?.devices ?? [])].some(
       (key) => key?.identity_id === identityId && !key.identity_gone,
@@ -689,7 +689,12 @@ export function AdminUserSignIn({
         description={t("web.admin.common.adminUserSignIn.unlinkConfirm.text", {
           username: user.username,
           last_way: lastWay ? "yes" : "no",
-          keys: unlinking && keysBoundTo(String(unlinking.id)) ? "yes" : "no",
+          keys:
+            appKeysRead && appKeys.isError
+              ? "unknown"
+              : unlinking && keysBoundTo(String(unlinking.id))
+                ? "yes"
+                : "no",
         })}
         confirmDisabled={keysSettling}
         confirmLabel={t("web.admin.common.adminUserSignIn.unlink")}
