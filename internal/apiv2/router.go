@@ -459,13 +459,15 @@ type Dependencies struct {
 	AdminSubtitleDelete     AdminSubtitleDeleteService
 	AdminAPIKeys            AdminAPIKeyService
 	PersonalAPIKeys         PersonalAPIKeyService
-	PolicyCapability        PolicyCapabilityService
-	Branding                BrandingService
-	OverlayImages           OverlayImageService
-	ArtworkStore            blobstore.Store
-	ArtworkBackend          string
-	ArtworkSigner           *artworkurl.Signer
-	ArtworkRepair           ArtworkRepairService
+	// AppKeys stores app keys; nil reports the capability not_configured.
+	AppKeys          AppKeyService
+	PolicyCapability PolicyCapabilityService
+	Branding         BrandingService
+	OverlayImages    OverlayImageService
+	ArtworkStore     blobstore.Store
+	ArtworkBackend   string
+	ArtworkSigner    *artworkurl.Signer
+	ArtworkRepair    ArtworkRepairService
 	// ItemPosters mints and checks the admin poster URLs (admin session rows,
 	// listAdminCatalogItems) that getItemPoster serves.
 	ItemPosters                        *artworkurl.ItemPosters

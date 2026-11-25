@@ -50,6 +50,10 @@ type AuthSession struct {
 	// AbsoluteExpiresAt is the latest ExpiresAt may reach: a refresh never
 	// extends the session past it. nil for a session without a fixed end.
 	AbsoluteExpiresAt *time.Time
+	// DeviceKeyID is the app device key that opened the session
+	// (auth_sessions.device_key_id); nil for every other sign-in. Revoking
+	// the key ends the session.
+	DeviceKeyID *string
 }
 
 // IsRemotePlayback reports whether the session is a remote-playback handoff.

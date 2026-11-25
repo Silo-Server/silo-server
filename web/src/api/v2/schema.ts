@@ -6825,6 +6825,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/auth/keys/capability": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Describe app key sign-in support.
+     * @description Public, so an app can ask before it signs in. state is available while the auth.app_key_sign_in server setting is on and disabled while it is off. Each feature field turns true once this server supports that operation.
+     */
+    get: operations["getAppKeyCapability"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/auth/login": {
     parameters: {
       query?: never;
@@ -24743,6 +24763,66 @@ export interface components {
       audience: "admin" | "user";
       description: string;
       name: string;
+    };
+    AppKeyCapability: {
+      /** @description Whether the current principal may use the capability */
+      allowed?: boolean;
+      /**
+       * @description Whether this server issues and redeems one-time app codes
+       * @example false
+       */
+      app_codes: boolean;
+      /**
+       * @description Whether a signed-in account can enroll a person key and a device key
+       * @example false
+       */
+      enroll: boolean;
+      /**
+       * @description Whether another app can enroll its own key with a grant signed by the person key
+       * @example false
+       */
+      grants: boolean;
+      /**
+       * @description Whether a person key can introduce a new device key and open its first session
+       * @example false
+       */
+      introduce: boolean;
+      /**
+       * @description Whether the account's profiles can be read and written as one versioned document
+       * @example false
+       */
+      profile_set: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Suites a sealed reply may use
+       * @example [
+       *       "P256-HKDF-SHA256-AES256GCM"
+       *     ]
+       */
+      sealed_reply_suites: string[];
+      /**
+       * @description Whether an enrolled device key can open a login session
+       * @example false
+       */
+      sign_in: boolean;
+      /**
+       * @description Whether an administrator can send a single-use sign-in link
+       * @example false
+       */
+      sign_in_links: boolean;
+      /**
+       * @description Signature suites signed requests may use
+       * @example [
+       *       "ES256"
+       *     ]
+       */
+      signature_suites: string[];
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
     };
     ApplePushRegistrationBody: {
       /** @enum {string} */
@@ -100286,6 +100366,98 @@ export interface operations {
       };
       /** @description Too Many Requests */
       429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAppKeyCapability: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AppKeyCapability"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
         headers: {
           [name: string]: unknown;
         };
