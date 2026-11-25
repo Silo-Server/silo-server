@@ -593,7 +593,10 @@ the multipart part `avatar` and an optional text part `source_sha256`: a
 SHA-256 that names the picture, as 64 lower-case hexadecimal characters.
 Without the part, or with it empty, the server stores the SHA-256 of the
 bytes it received. Any other value is 422 `validation_failed` at
-`body.source_sha256`. The hash is a label the server keeps with the picture:
+`body.source_sha256`. The uploader chooses the value. To name one picture
+alike on several servers, send the SHA-256 of the file as it was first
+uploaded, not of a re-encoded copy. The hash is a label the server keeps
+with the picture:
 it never fetches, compares or deduplicates files by it, and choosing a preset
 or deleting the avatar clears it. No response returns it.
 
