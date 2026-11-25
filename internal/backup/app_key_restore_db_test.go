@@ -179,7 +179,6 @@ func (r keyRestore) swap(t *testing.T, liveURL string, validate ValidateOptions)
 		t.Fatal(err)
 	}
 	defer func() { _ = ctl.Close(ctx) }()
-	waitForNoClients(t, ctl, liveURL)
 	var out bytes.Buffer
 	var previous string
 	err = RestoreSwap(ctx, openTestSource(t, r.folder), r.loader, ctl, SwapOptions{
@@ -195,32 +194,6 @@ func (r keyRestore) swap(t *testing.T, liveURL string, validate ValidateOptions)
 		t.Fatal(err)
 	}
 	return out.String()
-}
-
-// waitForNoClients waits until no other client is connected to the database
-// at liveURL. A restore refuses a database with other clients, and a pool the
-// test has just closed stays in pg_stat_activity until the server has ended
-// its backends.
-func waitForNoClients(t *testing.T, ctl *PGControl, liveURL string) {
-	t.Helper()
-	live, err := databaseName(liveURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		others, err := ctl.OtherConnections(t.Context(), live)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if others == 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%d clients are still connected to %s", others, live)
-		}
-		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // a closed connection's backend signals nothing but its pg_stat_activity row going away
-	}
 }
 
 func wantOutput(t *testing.T, out string, want ...string) {
