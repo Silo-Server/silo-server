@@ -102,15 +102,22 @@ func (o SessionOrigin) Allows(action SessionAction) bool {
 // way that may make it (SessionOrigin.Allows). It is the one rule the
 // operations that hand out lasting access call.
 func SessionAllows(ctx context.Context, db rowQuerier, claims *Claims, action SessionAction) error {
+	_, err := allowedSessionOrigin(ctx, db, claims, action)
+	return err
+}
+
+// allowedSessionOrigin is SessionAllows that also answers how the session
+// was opened, for a caller with one more thing to check about it.
+func allowedSessionOrigin(ctx context.Context, db rowQuerier, claims *Claims, action SessionAction) (SessionOrigin, error) {
 	if !claims.IsOwnLoginSession() {
-		return ErrSessionNotAllowed
+		return SessionOrigin{}, ErrSessionNotAllowed
 	}
 	origin, err := ReadSessionOrigin(ctx, db, claims)
 	if err != nil {
-		return err
+		return SessionOrigin{}, err
 	}
 	if !origin.Allows(action) {
-		return ErrSessionNotAllowed
+		return SessionOrigin{}, ErrSessionNotAllowed
 	}
-	return nil
+	return origin, nil
 }

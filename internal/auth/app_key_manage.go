@@ -111,6 +111,15 @@ func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key
 			if _, err := tx.Exec(ctx, `UPDATE auth_person_keys SET revoked_at = NOW() WHERE id = $1`, current.ID); err != nil {
 				return fmt.Errorf("revoking person key: %w", err)
 			}
+			// Replacing the key is how the person cuts off a copy of it, and
+			// a device still waiting for approval may be the copy's work: it
+			// is refused with the key that vouched for it. Devices already
+			// approved keep their keys.
+			if _, err := tx.Exec(ctx, `UPDATE auth_device_keys SET status = $3
+				WHERE user_id = $1 AND person_key_id = $2 AND status = $4 AND revoked_at IS NULL`,
+				user.ID, current.ID, models.DeviceKeyStatusDenied, models.DeviceKeyStatusPending); err != nil {
+				return fmt.Errorf("refusing the replaced person key's waiting devices: %w", err)
+			}
 		}
 		binding := unlocked.binding()
 		if _, err := insertPersonKeyTx(ctx, tx, NewPersonKey{

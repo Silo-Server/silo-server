@@ -30,7 +30,7 @@ type PendingAppKeyDecisionInput struct {
 // mainProfileRule is how an operation that creates lasting access to the
 // shared account is limited to the household's main profile
 // (requireVerifiedMainProfile).
-const mainProfileRule = " It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied. A request without X-Profile-Id is accepted only from an administrator account while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied."
+const mainProfileRule = " It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 permission_denied."
 
 // pendingSessionRule names the sessions the pending key operations refuse.
 const pendingSessionRule = "Only the account's own login session: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied."

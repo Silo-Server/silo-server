@@ -335,6 +335,7 @@
 ./internal/auth TestKeyEnrollRulesDB
 ./internal/auth TestPendingKeyApproveDB
 ./internal/auth TestPendingKeyDenyDB
+./internal/auth TestReplacingPersonKeyDeniesItsWaitingDevicesDB
 ./internal/auth TestPendingKeyRefusalsDB
 ./internal/auth TestPendingKeyCapDB
 ./internal/auth TestExpiredPendingKeySweepDB

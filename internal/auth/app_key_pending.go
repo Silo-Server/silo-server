@@ -38,14 +38,11 @@ const auditFieldDeviceKey = "device_key_id"
 // opened. A waiting key has opened none, so the second check only matters
 // for a key that is already active.
 func (a *AppKeySignIn) pendingDecisionAllowed(ctx context.Context, claims *Claims, action SessionAction, id string) error {
-	if !claims.IsOwnLoginSession() {
-		return ErrSessionNotAllowed
-	}
-	origin, err := ReadSessionOrigin(ctx, a.pool, claims)
+	origin, err := allowedSessionOrigin(ctx, a.pool, claims, action)
 	if err != nil {
 		return err
 	}
-	if !origin.Allows(action) || (origin.DeviceKeyID != "" && origin.DeviceKeyID == id) {
+	if origin.DeviceKeyID != "" && origin.DeviceKeyID == id {
 		return ErrSessionNotAllowed
 	}
 	return nil

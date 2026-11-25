@@ -78,6 +78,31 @@ func TestPendingKeyApproveDB(t *testing.T) {
 	}
 }
 
+// Replacing the person key is how a person cuts off a copy of it. A device
+// the old key introduced that is still waiting may be the copy's work, so it
+// is refused with the key: it can no longer be approved, and its sign-in
+// answers key_denied. A device already approved keeps its key.
+func TestReplacingPersonKeyDeniesItsWaitingDevicesDB(t *testing.T) {
+	env := newKeyEnv(t, "keyreplacewaiting")
+	ctx := t.Context()
+	admin := env.localAccount(t, "keyreplacewaiting-admin", models.RoleAdmin)
+	person, _, enrolled := env.enroll(t, admin)
+	claims := env.loginSession(t, admin, models.SessionOpenedPassword, nil)
+	id, device := env.introduceWaiting(t, person)
+	if err := env.signIn.ReplacePersonKey(ctx, claims, newTestKey(t).pub); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.signIn.ApprovePendingKey(ctx, claims, id); !errors.Is(err, ErrAppKeyNotFound) {
+		t.Fatalf("approving a device the replaced key introduced = %v", err)
+	}
+	if _, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: device})); !errors.Is(err, ErrAppKeyDenied) {
+		t.Fatalf("its sign-in = %v", err)
+	}
+	if env.keyRevoked(t, enrolled.DeviceID) {
+		t.Fatal("replacing the person key revoked a device that was already enrolled")
+	}
+}
+
 // A denied device is refused at its next sign-in and is gone from both
 // lists; denying it again changes nothing, and it can't be approved after.
 func TestPendingKeyDenyDB(t *testing.T) {

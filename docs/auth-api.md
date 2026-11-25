@@ -730,9 +730,9 @@ operation contract.
 | `POST /auth/keys/enroll` (`enrollAppKeys`) | the account's own login session acting as the household's main profile (see below), and `{ "person_key", "message" }` where `message` is an `enroll` envelope signed with that person key, with `device_sig` | Registers the person key when the account has none, taking the session's provider binding; when `person_key` is already the account's person key it is reused as it is, binding unchanged. Enrolls the device key, which takes the session's provider binding, then opens a session bound to it. A different person key on the account, or a device key already enrolled on this server, is 409 `conflict`. The sealed plaintext adds `person_key_id` (the person key's `kid`); the client drops the session it called with. A malformed payload field is 422 at `body.message.payload`. |
 | `GET /auth/keys` (`listAppKeys`) | the account's own login session, opened by password, provider or the person's own device key | `person_key` (`kid`, `enrolled_at`; absent when the account has none) and `devices[]` (`id`, `kid`, `kind` `device`\|`app`, `name`, `platform`, `status` `active`\|`pending`, `enrolled_by` `introduce`\|`session`\|`app-code`\|`grant`, `allowed_by`, `enrolled_at`, `last_used_at`), newest first. Revoked and denied keys are left out, and so is a waiting key older than 24 hours, without anyone denying or revoking it. `last_used_at` is the last time the key opened a session: a key enrolled and not used since shows it equal to `enrolled_at`, and a key waiting for approval shows `null`. |
 | `DELETE /auth/keys/devices/{id}` (`revokeAppDeviceKey`) | the account's own login session | 204. Revokes the key and ends every session it opened. A device may revoke its own key, which ends the session making the request. 404 for a key that isn't the account's. |
-| `PUT /auth/keys/person` (`replacePersonKey`) | the account's own login session acting as the household's main profile | Body `{ "person_key" }`, unsigned. Answers `{ "person_key_id": "<kid>" }`. The old person key is revoked; devices already enrolled keep their keys. Sending the current key again changes nothing. |
+| `PUT /auth/keys/person` (`replacePersonKey`) | the account's own login session acting as the household's main profile | Body `{ "person_key" }`, unsigned. Answers `{ "person_key_id": "<kid>" }`. The old person key is revoked; devices already enrolled keep their keys, and a device the old key introduced that is still waiting for approval is denied with it. Sending the current key again changes nothing. |
 | `GET /auth/keys/pending` (`listPendingAppKeys`) | as `GET /auth/keys` | `{ "items": [ ... ] }`, each a device object as in `GET /auth/keys` with `status` `pending`: the account's waiting keys inside their 24 hours, oldest first. |
-| `POST /auth/keys/pending/{id}/approve` (`approvePendingAppKey`) | the account's own login session acting as the household's main profile | Body `{}`, 204. The key becomes active and the device's next `sign-in` opens a session. The account must still be an enabled administrator (403 `permission_denied`). Approving an active key changes nothing; an unknown, denied, revoked or expired key is 404 `not_found`. A session opened by one of the administrator's own device keys may approve. Audited as `user.device_key_approved`. |
+| `POST /auth/keys/pending/{id}/approve` (`approvePendingAppKey`) | the account's own login session acting as the household's main profile | Body `{}`, 204. The key becomes active and the device's next `sign-in` opens a session. The account must still be an enabled administrator (403 `permission_denied`). Approving an active key changes nothing, except that the session that key itself opened is refused (403 `permission_denied`); an unknown, denied, revoked or expired key is 404 `not_found`. A session opened by one of the administrator's own device keys may approve. Audited as `user.device_key_approved`. |
 | `POST /auth/keys/pending/{id}/deny` (`denyPendingAppKey`) | as `GET /auth/keys` | Body `{}`, 204. The key's next `sign-in` answers 403 `key_denied`, and neither list shows it. Denying a denied key changes nothing; an active, revoked or unknown key is 404 `not_found`. Audited as `user.device_key_denied`. |
 
 **Signed messages.** An envelope is exactly `{ "kid", "payload", "sig" }`, plus
@@ -831,10 +831,11 @@ shares, so only the household's main profile may call them. `X-Profile-Id` must
 name the account's primary profile, with `X-Profile-Token` when it has a PIN
 (without it, 403 `profile_verification_required`); naming any other profile is
 403 `permission_denied`, on an administrator's account too. A request without
-`X-Profile-Id` is accepted only from an administrator account whose profiles
-have no PIN, maturity or library limit; otherwise it is 403
-`permission_denied`, also for a one-profile account that isn't an
-administrator. The other key routes have no profile rule.
+`X-Profile-Id` is accepted only from an administrator account that has at most
+one profile, with no PIN, maturity or library limit. An administrator's account
+with several profiles, or a PIN, names its main profile and sends its token
+like any other account. Otherwise the request is 403 `permission_denied`, also
+for a one-profile account that isn't an administrator. The other key routes have no profile rule.
 
 **Switch.** While `auth.app_key_sign_in` is off the challenge, `introduce`,
 `sign-in`, `enroll`, `PUT /auth/keys/person` and `pending/{id}/approve` answer

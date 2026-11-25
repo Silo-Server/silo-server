@@ -26,6 +26,17 @@ func (h lockedAdminHouseholds) ForUser(ctx context.Context, userID int) (usersto
 	return h.fakeHouseholds.ForUser(ctx, userID)
 }
 
+// twoProfileAdminHouseholds gives account 2 (an administrator) two profiles,
+// neither protected.
+type twoProfileAdminHouseholds struct{ fakeHouseholds }
+
+func (h twoProfileAdminHouseholds) ForUser(ctx context.Context, userID int) (userstore.UserStore, error) {
+	if userID == 2 {
+		return fakeHouseholdStore{profiles: []userstore.Profile{{ID: "p-owner", IsPrimary: true}, {ID: "p-second"}}}, nil
+	}
+	return h.fakeHouseholds.ForUser(ctx, userID)
+}
+
 const pendingKeyPath = "/auth/keys/pending/0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11"
 
 // Enrolling keys, replacing the person key and approving a waiting device
@@ -33,7 +44,8 @@ const pendingKeyPath = "/auth/keys/pending/0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11"
 // so only the household's main profile, verified with its PIN when it has
 // one, may: a secondary profile and an unverified main profile are refused
 // before the service runs. A request that names no profile passes only from
-// an administrator account whose profiles are all unlimited.
+// an administrator account with a single unprotected profile; with several
+// profiles, or a PIN, an administrator names the main profile like anyone.
 func TestKeyCreatingRoutesNeedVerifiedMainProfile(t *testing.T) {
 	enrollBody := `{"person_key":"` + testPersonKey + `","message":{"kid":"zT321tSgcB7emUH9k0B0oA","payload":"eyJ9","sig":"c2ln","device_sig":"c2ln"}}`
 	routes := []struct{ method, path, body string }{
@@ -55,6 +67,8 @@ func TestKeyCreatingRoutesNeedVerifiedMainProfile(t *testing.T) {
 		{name: "one profile without a PIN, no header, not an administrator", headers: bearer(memberToken), refused: &TypePermissionDenied},
 		{name: "one profile without a PIN, no header, administrator", headers: bearer(adminToken)},
 		{name: "main profile with a PIN, no header, administrator", headers: bearer(adminToken), households: lockedAdminHouseholds{}, refused: &TypePermissionDenied},
+		{name: "two profiles without a PIN, no header, administrator", headers: bearer(adminToken), households: twoProfileAdminHouseholds{}, refused: &TypePermissionDenied},
+		{name: "two profiles without a PIN, main profile named, administrator", headers: mainProfile(adminToken), households: twoProfileAdminHouseholds{}},
 	} {
 		for _, route := range routes {
 			t.Run(tc.name+" "+route.path, func(t *testing.T) {

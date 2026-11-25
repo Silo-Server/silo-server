@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -95,12 +96,26 @@ func (h *AuthHandler) SetHouseholdStores(stores userstore.UserStoreProvider) {
 // device), and it is the household manager rule that disconnecting a sign-in
 // and creating a personal API key already apply (canManageHouseholdAs): a
 // named profile must be the primary one and pass verify; a request that names
-// none passes only from an administrator account whose profiles are all
-// unlimited (no PIN, no maturity or library limit). verify returns
-// access.ErrProfileUnverified for a PIN-locked main profile the request did
-// not verify.
+// none passes only from an administrator account that has at most one
+// profile, with no PIN and no maturity or library limit: there the request
+// can only mean that profile. An administrator's account with several
+// profiles, or a PIN, names the main profile like anyone else's. verify
+// returns access.ErrProfileUnverified for a PIN-locked main profile the
+// request did not verify.
 func (h *AuthHandler) ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, error) {
-	return mayManageHouseholdOf(ctx, h.householdStores, userID, activeProfileID, verify)
+	allowed, err := mayManageHouseholdOf(ctx, h.householdStores, userID, activeProfileID, verify)
+	if err != nil || !allowed || activeProfileID != "" {
+		return allowed, err
+	}
+	store, err := h.householdStores.ForUser(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("opening user store: %w", err)
+	}
+	profiles, err := store.ListProfiles(ctx)
+	if err != nil {
+		return false, fmt.Errorf("listing household profiles: %w", err)
+	}
+	return len(profiles) <= 1, nil
 }
 
 // appKeyAnswer adds the token view a signed-in result carries. Errors pass

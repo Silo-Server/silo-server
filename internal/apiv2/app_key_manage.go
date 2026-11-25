@@ -79,7 +79,7 @@ func registerAppKeyManagement(reg *Registry) {
 
 	replace := humaOp(http.MethodPut, Prefix+"/auth/keys/person", "replacePersonKey", "app-keys",
 		"Replace the signed-in account's person key.")
-	replace.Description = ownKeySessionRule + " A session opened by device sign-in or by another app's key is refused too. The old person key is revoked: new devices need the new one, and devices already enrolled keep their own keys. Sending the current key again changes nothing; a public key enrolled anywhere else on this server is 409 conflict. 409 capability_disabled while auth.app_key_sign_in is off." + mainProfileRule
+	replace.Description = ownKeySessionRule + " A session opened by device sign-in or by another app's key is refused too. The old person key is revoked: new devices need the new one, and devices already enrolled keep their own keys. A device the old key introduced that is still waiting for approval is denied with it. Sending the current key again changes nothing; a public key enrolled anywhere else on this server is 409 conflict. 409 capability_disabled while auth.app_key_sign_in is off." + mainProfileRule
 	replace.Errors = []int{http.StatusForbidden, http.StatusConflict}
 	Register(reg, mainProfileOnly(Operation{Operation: replace, RetrySafety: RetrySafetyNaturalIdempotent, ServiceBacked: true}), reg.replacePersonKey)
 }

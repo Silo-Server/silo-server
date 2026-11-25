@@ -244,8 +244,9 @@ locks the account, then the key, then the approving session, and re-checks
 under those locks that the account is still an enabled administrator, the key
 is still waiting, unrevoked, inside its 24 hours and on this account, and the
 approving session is still live. The device's next `sign-in` opens a session
-and runs the provider checks then. Approving an active key changes nothing; an
-unknown, denied, revoked or expired one is 404. `POST
+and runs the provider checks then. Approving an active key changes nothing
+(except from the session that key itself opened, which is refused: a device
+does not approve itself); an unknown, denied, revoked or expired one is 404. `POST
 /auth/keys/pending/{id}/deny` marks the key `denied`: its next `sign-in`
 answers `key_denied`, and neither list shows it. Both decisions are recorded
 as domain audit actions on the account (`user.device_key_approved`,
@@ -318,9 +319,12 @@ personal API key apply (`canManageHouseholdAs`):
   or from the handler if the PIN changed since the token). Naming any other
   profile is 403 `permission_denied`, on an administrator's account too.
 - A request with no `X-Profile-Id` passes only from an administrator account
-  whose profiles are all unlimited (no PIN, no maturity or library limit).
-  Anyone else, including a one-profile account that is not an administrator,
-  must name the main profile; without it the request is 403
+  that has at most one profile, with no PIN and no maturity or library limit:
+  there the request can only mean that profile. This is not "administrators
+  may leave the header out": an administrator's account with several
+  profiles, or a PIN, names its main profile and sends its token like any
+  other account. Anyone else, including a one-profile account that is not an
+  administrator, must name the main profile; without it the request is 403
   `permission_denied`. This is stricter than `changePassword`, which lets an
   administrator leave the header out even when the main profile has a PIN;
   approving a waiting device is only ever done by an administrator, so that
@@ -406,7 +410,10 @@ TLS connection covers all of it.
 - **Revoking a device key** (the person's devices list) ends its sessions at
   once, as above.
 - **Replacing the person key** revokes the old one: new devices need the new
-  key, devices already enrolled keep theirs.
+  key, devices already enrolled keep theirs. A device the old key introduced
+  that is still waiting for approval is refused with it (`denied`): replacing
+  the key is how a person cuts off a copy of it, and a waiting device may be
+  the copy's work. That device is introduced again with the new key.
 - **A provider refusing the person** (`applyAnswer`), **an email match taking
   over the account** (`account_resolution.go`), **a promotion to admin or a
   move of ownership** (`revokeCredentialsIssuedToNonAdmin`) revoke every key of
