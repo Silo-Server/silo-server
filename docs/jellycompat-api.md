@@ -39,7 +39,19 @@ A Jellyfin user is one household profile on one account. Its `Id` is a
 deterministic UUID derived from the account and profile. It is sent the way
 Jellyfin serializes a Guid: 32 lowercase hex digits without dashes, in the user
 DTO, `SessionInfo.UserId`, `/Sessions`, and `UserDataChanged` socket messages.
-Seerr's avatar proxy rejects any other shape. Routes and queries that take a
+Seerr's avatar proxy rejects any other shape.
+
+A password sign-in (`POST /Users/AuthenticateByName`) names the profile as
+`account#Profile`. The bare account name picks a profile only in two cases:
+exactly one profile is named like the account (compared without case), or,
+failing that, exactly one profile has no PIN. Otherwise it is refused and the
+person types `account#Profile`. So adding a second profile with no PIN can
+make the bare name stop working at the next sign-in; sessions already open
+keep working. `GET /api/v2/profiles/set` and the `putProfileSet` answer say
+which way it goes (`jellyfin_bare_name_sign_in`, see
+[auth-api.md](auth-api.md#the-profile-set)).
+
+Routes and queries that take a
 user ID also accept the dashed form, which clients that signed in before this
 format still send. Media-source IDs take the same form (see
 [Playback negotiation and media](#playback-negotiation-and-media)). Item,

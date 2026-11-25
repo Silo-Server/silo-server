@@ -689,6 +689,13 @@ name with code `name_conflict`.
 - `skipped_settings`: known settings whose value this server refused; it kept
   its own. Unknown keys and `server_local` keys are not listed.
 - `hidden_by_owner` and `overrides` are always empty today.
+- `jellyfin_bare_name_sign_in`: whether a Jellyfin-compatible app that signs
+  in with the bare account name (no `#profile`) gets a profile, as the
+  account's profiles stand after the set. It is `true` when exactly one
+  profile is named like the account (compared without case), or else exactly
+  one profile has no PIN; otherwise the person must sign in as
+  `account#Profile`. Sessions already open are not affected either way. The
+  member is absent while the Jellyfin-compatible surface is off.
 
 The answer describes the account as it stands after the call, so a repeat of
 the same set answers the same lists.
@@ -699,12 +706,20 @@ the same set answers the same lists.
 | --- | --- |
 | 409 `profile_set_stale` | The version is older than the one the server holds; the same version with other content; the same version whose `set` PIN differs from the stored PIN, or whose `clear` finds a PIN; or the server holds the person's own edits and `edits_seen` is not its current `edits_token`. Nothing is written. |
 | 409 `capability_disabled` | The signed form while `auth.app_key_sign_in` is off. The session form works with app keys off. |
-| 409 `conflict` | The household kept changing while the set was applied; send it again. |
+| 409 `conflict` | The household kept changing while the set was applied, send it again; or the account has profiles but no main profile, which a set can't apply to. |
 | 401 `signature_invalid`, `challenge_invalid` | The signed form, as on the other signed routes. A payload naming another account is `signature_invalid`. A replayed envelope is `challenge_invalid`. |
-| 401 `authentication_required` | The session form without a login session. |
-| 403 `permission_denied` | The signed form for an administrator's account; a session opened by device sign-in, by another app's key, or by an administrator acting as the account, an API key, a session older than the record of how sessions open; a session form not acting as the main profile; a non-administrator in demo mode. |
+| 401 `authentication_required` | The session form without a login session. An API key carries no login session, so it gets this too. |
+| 401 `session_expired` | The account was deleted while the set was applied. |
+| 403 `permission_denied` | The signed form for an administrator's account; a session opened by device sign-in, by another app's key, or by an administrator acting as the account, a remote-playback handoff, a session older than the record of how sessions open; a session form not acting as the main profile; either form from a non-administrator in demo mode. |
 | 403 `profile_verification_required` | The main profile has a PIN and the request did not prove it. |
-| 429 `rate_limited` | The per-address `profile_set` budget, 20 a minute with a burst of 10 by default (`ratelimit.auth.profile_set.*`). |
+| 429 `rate_limited` | The per-address `profile_set` budget, 20 a minute with a burst of 10 by default (`ratelimit.auth.profile_set.*`). Also, on a repeat of the held version, a profile whose PIN is locked after too many wrong PINs, with `Retry-After`, as `verifyProfilePIN` answers it. |
+
+A repeat of the held version with a `set` PIN tells whether that PIN is the
+stored one (200 or `profile_set_stale`), so each such comparison counts as a
+PIN attempt on that profile, exactly as on `verifyProfilePIN`: a wrong PIN
+counts, a right one clears the count, and the fifth wrong one locks the
+profile for five minutes, during which the repeat answers 429 without
+comparing.
 
 A set that changes the main profile's PIN ends every `X-Profile-Token` minted
 for the old PIN, the caller's included: the next household call needs
@@ -725,7 +740,8 @@ it, with or without a profile header; it needs no PIN.
   }],
   "deleted_here": [],
   "overrides": [],
-  "local_only": [{ "id": "15", "name": "Guest" }],
+  "local_only": [{ "id": "15", "name": "Guest", "has_pin": false }],
+  "jellyfin_bare_name_sign_in": true,
   "edits_token": ""
 }
 ```
@@ -733,7 +749,10 @@ it, with or without a profile header; it needs no PIN.
 `items` are the profiles holding a `sync_id`, in set order. `settings` is the
 profile's own stored values for the keys a set carries; a key not set on the
 profile is absent. `local_only` lists the profiles outside the set, in
-creation order. `edits_token` names the person's own edits on this server that
+creation order, with `has_pin`, so an app can work out
+`jellyfin_bare_name_sign_in` for a set before it sends it.
+`jellyfin_bare_name_sign_in` is as in the `PUT` answer, for the profiles as
+they stand now. `edits_token` names the person's own edits on this server that
 no set has settled yet; it is `""` when there are none, which is always today.
 `changed_here`, `deleted_here` and `overrides` are always empty today. An
 account that never took a set answers `version` 0, no items, and every profile

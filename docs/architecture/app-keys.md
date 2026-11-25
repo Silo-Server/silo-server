@@ -404,7 +404,13 @@ app reads the set in the background.
 is `profile_set_stale`. The held version again never changes anything: with
 other content it is stale; with the same content, each `set` PIN is compared
 with the stored PIN and each `clear` with whether a PIN exists, and any
-difference is stale. Otherwise it answers 200 and writes nothing. So a PIN
+difference is stale. Otherwise it answers 200 and writes nothing. Because
+that answer tells whether a `set` PIN matched, each such comparison on a
+repeat spends the profile's PIN attempts as `verifyProfilePIN` does (a wrong
+PIN counts, a right one clears the count), and a locked profile answers 429
+without comparing; otherwise the main profile or the person key could read
+another profile's four-digit PIN by repeating the held set. A newer version's
+answer never depends on a PIN comparison, so it spends nothing. So a PIN
 changes only with a higher version, and a retried or replayed old set cannot
 undo a PIN changed since. These checks run on a first read and again under the
 set's locks.
@@ -493,8 +499,11 @@ removes in ID order, every profile row of the account in ID order, and the
 account row last. That is a profile delete's order extended, and a profile
 save locks its profile row before the account row, so neither deadlocks with
 a set. Deleting the account locks the account row before its profiles, the
-opposite order: a set and an account deletion running together can abort one
-of the two with a retryable error.
+opposite order: a set and an account deletion running together can deadlock,
+and PostgreSQL aborts one of them. An aborted set starts over; a set whose
+account is gone answers as any request for a deleted account
+(`session_expired`). The lock order stays, because it is the one profile
+saves need.
 
 **SQLite.** The SQLite user store keeps profiles in a per-account file while
 other profile data lives in PostgreSQL, so a set can't be one transaction
