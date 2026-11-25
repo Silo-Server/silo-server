@@ -131878,6 +131878,16 @@
       "value": "Date de dernière diffusion"
     }
   ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Verrouiller "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    }
+  ],
   "web.item.editMetadata.locked": [
     {
       "type": 0,

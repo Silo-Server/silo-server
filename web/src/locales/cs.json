@@ -143635,6 +143635,16 @@
       "value": "Datum posledního vysílání"
     }
   ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Uzamknout pole "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    }
+  ],
   "web.item.editMetadata.locked": [
     {
       "type": 0,

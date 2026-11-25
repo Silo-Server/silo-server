@@ -111202,6 +111202,16 @@
       "value": "마지막 방영일"
     }
   ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " 잠금"
+    }
+  ],
   "web.item.editMetadata.locked": [
     {
       "type": 0,

@@ -145089,6 +145089,20 @@
       "value": "Paskutinio rodymo data"
     }
   ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Užrakinti lauką „"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "“"
+    }
+  ],
   "web.item.editMetadata.locked": [
     {
       "type": 0,

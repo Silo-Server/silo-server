@@ -120871,6 +120871,16 @@
       "value": "Letzte Ausstrahlung"
     }
   ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " sperren"
+    }
+  ],
   "web.item.editMetadata.locked": [
     {
       "type": 0,

@@ -111848,6 +111848,16 @@
       "value": "最後播出日期"
     }
   ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "鎖定 "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    }
+  ],
   "web.item.editMetadata.locked": [
     {
       "type": 0,

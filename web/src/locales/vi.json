@@ -121827,6 +121827,16 @@
       "value": "Ngày phát sóng cuối cùng"
     }
   ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Khóa "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    }
+  ],
   "web.item.editMetadata.locked": [
     {
       "type": 0,
