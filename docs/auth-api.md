@@ -1154,7 +1154,22 @@ Redeem's two 409 `conflict` answers have different remedies, so an app reads
 | `errors[0].code` | `errors[0].location` | Meaning | What the app does |
 | --- | --- | --- | --- |
 | `duplicate` | `body.message.payload` | The account name or email the join reserved was taken since the code was issued. | Send the person back to the server's page to choose another name and get a new code. |
-| `key_enrolled` | `body.person_key` or `body.message.payload` (the device key) | This server already holds that public key. | Make that key again and redeem a new code. |
+| `key_enrolled` | `body.person_key` or `body.message.payload` (the device key) | This server already holds that public key. | Make that key again, get a new challenge and redeem the same code. |
+
+What a refusal of `redeemAppCode` uses up. The challenge is spent once the
+envelope's signature verifies, whatever is refused after that. The code is
+spent only when the redeem succeeds: every refusal after the code is found
+rolls it back, so it stays good until it expires.
+
+| Answer | Challenge | Code |
+| --- | --- | --- |
+| 409 `capability_disabled`, 429 `rate_limited`, 413, 400 `malformed_request`, 422 at the envelope's shape or `person_key` | not spent | not spent |
+| 401 `signature_invalid` because the signature doesn't verify by `person_key` | not spent | not spent |
+| 401 `signature_invalid` after the signature verified (`kid` isn't `person_key`'s ID, wrong `server_id` or purpose, outside `iat` and `exp`), 422 at `body.message.payload`, 403 `origin_mismatch` | spent | not spent |
+| 401 `challenge_invalid` | (already unusable) | not spent |
+| 404 `app_code_invalid` | spent | unknown, used or expired already; a code whose invitation or session can no longer be used stays unspent but can never succeed |
+| 409 `conflict` (`duplicate` or `key_enrolled`), 409 `provider_sign_in_required`, 501 `capability_unsupported`, 403 `permission_denied` (the account is disabled), 503 | spent | not spent |
+| 200 | spent | spent |
 
 A session code is not checked against the main profile's PIN again at redeem:
 it was issued to the verified main profile and ends with the session that

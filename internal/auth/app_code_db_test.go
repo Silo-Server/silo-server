@@ -242,30 +242,44 @@ func TestSessionKeyAccessDB(t *testing.T) {
 	})
 }
 
-// A redeem whose device key this server holds already names that key, so the
-// app knows to make a new one rather than send the person back to the page.
+// A redeem with a key this server holds already names that key, so the app
+// knows to make it again rather than send the person back to the page. The
+// refusal rolls the code back (only the challenge is spent), so the same code
+// works on a fresh challenge with the key made again.
 func TestRedeemAppCodeKeyEnrolledDB(t *testing.T) {
 	env := newKeyEnv(t, "appcodekey")
 	ctx := t.Context()
-	issue := func(t *testing.T, claims *Claims) string {
+	otherPerson, otherDevice, _ := env.enroll(t, env.localAccount(t, "appcodekey-other", models.RoleUser))
+	redeem := func(t *testing.T, code string, person, device testKey) error {
 		t.Helper()
-		issued, err := env.signIn.IssueSessionAppCode(ctx, claims, ActingProfile{})
-		if err != nil {
-			t.Fatalf("issue: %v", err)
-		}
-		return issued.Code
+		_, err := env.signIn.RedeemAppCode(ctx, KeyRedeemRequest{
+			KeyRequest: env.request(t, message{purpose: appkeys.PurposeRedeem, signer: person, device: &device, fields: map[string]any{"code": code}}),
+			PersonKey:  person.pub,
+		})
+		return err
 	}
-	other := env.localAccount(t, "appcode-otherdevice", models.RoleUser)
-	_, taken, _ := env.enroll(t, other)
-	user := env.localAccount(t, "appcode-keytaken", models.RoleUser)
-	code := issue(t, env.loginSession(t, user, models.SessionOpenedPassword, nil))
-	person := newTestKey(t)
-	_, err := env.signIn.RedeemAppCode(ctx, KeyRedeemRequest{
-		KeyRequest: env.request(t, message{purpose: appkeys.PurposeRedeem, signer: person, device: &taken, fields: map[string]any{"code": code}}),
-		PersonKey:  person.pub,
-	})
-	var enrolled *KeyEnrolledError
-	if !errors.As(err, &enrolled) || enrolled.Member != KeyMemberDevice {
-		t.Fatalf("redeem = %v, want the device key named as enrolled", err)
+	for _, tc := range []struct {
+		name           string
+		person, device func() testKey
+		member         string
+	}{
+		{name: "device key", person: func() testKey { return newTestKey(t) }, device: func() testKey { return otherDevice }, member: KeyMemberDevice},
+		{name: "person key", person: func() testKey { return otherPerson }, device: func() testKey { return newTestKey(t) }, member: KeyMemberPerson},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			user := env.localAccount(t, "appcodekey-"+tc.member, models.RoleUser)
+			issued, err := env.signIn.IssueSessionAppCode(ctx, env.loginSession(t, user, models.SessionOpenedPassword, nil), ActingProfile{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = redeem(t, issued.Code, tc.person(), tc.device())
+			var enrolled *KeyEnrolledError
+			if !errors.As(err, &enrolled) || enrolled.Member != tc.member {
+				t.Fatalf("redeem = %v, want %s named as enrolled", err, tc.member)
+			}
+			if err := redeem(t, issued.Code, newTestKey(t), newTestKey(t)); err != nil {
+				t.Fatalf("the same code with the keys made again: %v", err)
+			}
+		})
 	}
 }

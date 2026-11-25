@@ -437,7 +437,10 @@ different remedies, told apart by `errors[0].code`, never by the detail:
 since the code was issued, and the person gets a new code from the page with
 another name; `key_enrolled` is a public key this server already holds, at
 `body.person_key` for the person key and `body.message.payload` for the device
-key, and the app makes that key again. Issuing a join code answers a taken name
+key, and the app makes that key again and redeems the same code on a new
+challenge. Every refusal after the code is found returns inside the redeem's
+transaction, so the code's spend rolls back and only the challenge is used up
+(`docs/auth-api.md` has the table). Issuing a join code answers a taken name
 with `duplicate` at `body.username` or `body.email`, whichever clashed. The sealed
 plaintext is the usual `signed_in` answer plus `username` and `person_key`
 (`enrolled` or `replaced`). An unknown, spent or expired code, and one whose

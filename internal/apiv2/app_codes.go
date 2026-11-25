@@ -100,7 +100,7 @@ func registerAppCodes(reg *Registry) {
 
 	redeem := humaOp(http.MethodPost, Prefix+"/auth/app-codes/redeem", "redeemAppCode", "app-keys",
 		"Enroll a person key and a device key with an app code and open the device's login session.")
-	redeem.Description = "message is a redeem envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig; the app code is in its payload. A join code creates the invited account, with no password and the invitation's access, enrolls both keys and marks the invitation accepted, in one transaction. A session code enrolls the keys on the account that issued it, with that session's provider identity: person_key is enrolled when the account has none and replaces a different one (the old one is revoked; devices already enrolled keep their keys, devices waiting on it are refused). Keys from a code start active, also on an administrator's account. The sealed plaintext adds username (the account's name) and person_key: enrolled, or replaced. 404 app_code_invalid: the code is unknown, used or expired, its invitation was revoked, replaced or accepted since, or the session that issued it ended. 409 conflict has two causes, told apart by errors[0].code: duplicate (at body.message.payload) means the reserved name or email was taken since, and the person gets a new code from the page with another name; key_enrolled means a public key is already enrolled on this server, at body.person_key for the person key or body.message.payload for the device key, and the app makes that key again. 409 provider_sign_in_required: a join code while local password sign-in is off. A malformed payload field is 422 at body.message.payload. Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + sealedReplyDescriptionSignedIn + providerAnswersDescription
+	redeem.Description = "message is a redeem envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig; the app code is in its payload. A join code creates the invited account, with no password and the invitation's access, enrolls both keys and marks the invitation accepted, in one transaction. A session code enrolls the keys on the account that issued it, with that session's provider identity: person_key is enrolled when the account has none and replaces a different one (the old one is revoked; devices already enrolled keep their keys, devices waiting on it are refused). Keys from a code start active, also on an administrator's account. The sealed plaintext adds username (the account's name) and person_key: enrolled, or replaced. 404 app_code_invalid: the code is unknown, used or expired, its invitation was revoked, replaced or accepted since, or the session that issued it ended. 409 conflict has two causes, told apart by errors[0].code: duplicate (at body.message.payload) means the reserved name or email was taken since, and the person gets a new code from the page with another name; key_enrolled means a public key is already enrolled on this server, at body.person_key for the person key or body.message.payload for the device key, and the app makes that key again and redeems the same code on a new challenge. Every refusal after the code is looked up rolls the code back, so it stays good for its ten minutes; the challenge is spent once the signature verifies. 409 provider_sign_in_required: a join code while local password sign-in is off. A malformed payload field is 422 at body.message.payload. Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + sealedReplyDescriptionSignedIn + providerAnswersDescription
 	redeem.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
 	redeemOp := Operation{Operation: redeem, RetrySafety: RetrySafetyNonRetryable, Class: ClassPublic, ServiceBacked: true,
 		RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
@@ -255,7 +255,8 @@ func appCodeIssueProblem(err error) error {
 // duplicate is a taken account name or email (the person goes back to the
 // page for another), at body.username or body.email when the code is
 // requested and at body.message.payload when it is redeemed; key_enrolled is
-// a public key this server holds already (the app makes that key again), at
+// a public key this server holds already (the app makes that key again and
+// redeems the same code: the refusal rolled the code back), at
 // body.person_key or, for the device key, body.message.payload. It answers
 // nil for every other error.
 func appCodeConflict(err error) *Problem {
@@ -273,7 +274,7 @@ func appCodeConflict(err error) *Problem {
 			location = locationBody + ".person_key"
 		}
 		return NewProblem(TypeConflict, "That public key is already enrolled on this server.").
-			WithErrors(ProblemError{Location: location, Code: codeKeyEnrolled, Detail: "Make a new key and redeem a new code."})
+			WithErrors(ProblemError{Location: location, Code: codeKeyEnrolled, Detail: "Make that key again and redeem the same code on a new challenge."})
 	}
 	return nil
 }
