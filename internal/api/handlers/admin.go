@@ -1539,20 +1539,26 @@ func (h *AdminHandler) checkLocalLoginSetting(ctx context.Context, tx pgx.Tx, be
 	was := auth.LocalLoginSettings{LocalPasswordLogin: before[local], PublicURL: before[url]}
 	will := auth.LocalLoginSettings{LocalPasswordLogin: after[local], PublicURL: after[url]}
 	if tx != nil {
-		return localLoginSettingError(auth.CheckLocalLoginSettingChange(ctx, tx, was, will))
+		return localLoginSettingError(auth.CheckLocalLoginSettingChange(ctx, tx, was, will), was)
 	}
 	if h.pool == nil {
 		return ErrAdminSettingsUnavailable
 	}
-	return localLoginSettingError(auth.CheckLocalLoginSettingChange(ctx, h.pool, was, will))
+	return localLoginSettingError(auth.CheckLocalLoginSettingChange(ctx, h.pool, was, will), was)
 }
 
-// localLoginSettingError answers a refused auth.local_password_login change.
-func localLoginSettingError(err error) error {
-	if errors.Is(err, auth.ErrSignInProviderRequired) {
-		return apiError(http.StatusConflict, "sign_in_provider_required", "Turn on a sign-in provider that can sign people in before turning local password sign-in off; an OpenID Connect provider also needs server.public_url")
+// localLoginSettingError answers a refused change. was is what the save
+// changes from: a save turning password sign-in off is told to turn a
+// provider on, and one that would take the provider's public URL away while
+// passwords are already off is told to turn passwords back on first.
+func localLoginSettingError(err error, was auth.LocalLoginSettings) error {
+	if !errors.Is(err, auth.ErrSignInProviderRequired) {
+		return breakGlassError(err)
 	}
-	return breakGlassError(err)
+	if on, parseErr := strconv.ParseBool(strings.TrimSpace(was.LocalPasswordLogin)); parseErr == nil && !on {
+		return apiError(http.StatusConflict, "sign_in_provider_required", "Password sign-in is off, and an OpenID Connect provider needs server.public_url to sign anyone in. Turn password sign-in back on first. Break-glass administrators can sign in with a password either way")
+	}
+	return apiError(http.StatusConflict, "sign_in_provider_required", "Turn on a sign-in provider that can sign people in before turning local password sign-in off; an OpenID Connect provider also needs server.public_url")
 }
 
 // errBackupKeyNotConfirmed refuses switching backups to S3 before the admin

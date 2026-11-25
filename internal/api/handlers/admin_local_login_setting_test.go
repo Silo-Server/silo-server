@@ -118,4 +118,17 @@ func TestLocalLoginSettingRequiresBreakGlassDB(t *testing.T) {
 			}
 		})
 	}
+
+	// With password sign-in off and only the OpenID Connect provider on,
+	// clearing the public URL would leave nobody but break-glass admins able
+	// to sign in.
+	if _, err := pool.Exec(t.Context(), `UPDATE plugin_auth_bindings SET enabled = (capability_id = 'oidc') WHERE plugin_installation_id = $1`, installation); err != nil {
+		t.Fatal(err)
+	}
+	store.values[key] = "false"
+	store.values[config.ServerPublicURLSettingKey] = "https://silo.example.test"
+	requireAdminError(t, saveAdminSetting(t, h, config.ServerPublicURLSettingKey, "", true), 409, "sign_in_provider_required")
+	if store.values[config.ServerPublicURLSettingKey] == "" {
+		t.Fatal("refused write cleared the public URL")
+	}
 }
