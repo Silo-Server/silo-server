@@ -179,6 +179,34 @@ function invalidateAdminDeviceCaches(
   queryClient.invalidateQueries({ queryKey: adminKeys.devices() });
 }
 
+/**
+ * Takes reset device overrides out of the cached settings list before the
+ * reset settles. A reopened subtitle appearance editor reads its row and
+ * override flag from that list, so it can't wait on a refetch that may be
+ * slow, skipped or fail: it would offer the deleted values back.
+ */
+async function dropAdminDeviceOverrideRows(
+  queryClient: ReturnType<typeof useQueryClient>,
+  authority: ReturnType<typeof captureAdminSettingAuthority>,
+  target: { userId: number; profileId: string; deviceId: string; keys: readonly string[] },
+) {
+  if (target.keys.length === 0) return;
+  const settingsKey = adminUserSettingValuesKey(authority, target.userId);
+  await queryClient.cancelQueries({ queryKey: settingsKey });
+  queryClient.setQueryData<AdminSettingValueRow[]>(settingsKey, (rows) =>
+    rows?.filter(
+      (row) =>
+        !(
+          row.scope === "profile_device" &&
+          // useAdminUserDeviceSettings reports a missing id as "".
+          (row.profile_id ?? "") === target.profileId &&
+          (row.device_id ?? "") === target.deviceId &&
+          target.keys.includes(row.key)
+        ),
+    ),
+  );
+}
+
 export const adminUsersKey = (scope = adminUserScope()) => [...adminKeys.users(), scope];
 export async function fetchAllAdminUsers(signal?: AbortSignal): Promise<AdminUser[]> {
   return listAdminUsers(captureAdminUserAuthority(), signal);
@@ -527,8 +555,12 @@ export function useDeleteAdminUserDeviceSetting() {
         { scope: "profile_device", profileId, deviceId },
         authority,
       ),
-    onSuccess: (_data, variables) => {
+    onSuccess: async (_data, variables) => {
       toast.success(t("web.admin.common.users.deviceOverrideReset"));
+      await dropAdminDeviceOverrideRows(queryClient, authority, {
+        ...variables,
+        keys: [variables.key],
+      });
       invalidateAdminDeviceCaches(queryClient, variables.userId, authority);
       queryClient.invalidateQueries({
         queryKey: adminKeys.deviceDetail(variables.userId, variables.deviceId),
@@ -563,34 +595,44 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
       deviceId: string;
       keys: readonly string[];
     }) => {
-      let completed = 0;
-      for (const key of keys) {
-        try {
-          await deleteAdminSettingValue(
-            userId,
-            key,
-            { scope: "profile_device", profileId, deviceId },
-            authority,
-          );
-          completed++;
-        } catch (err) {
-          if (err instanceof V2ProblemError && err.status === 404) {
-            completed++;
-            continue;
+      const reset: string[] = [];
+      try {
+        for (const key of keys) {
+          try {
+            await deleteAdminSettingValue(
+              userId,
+              key,
+              { scope: "profile_device", profileId, deviceId },
+              authority,
+            );
+            reset.push(key);
+          } catch (err) {
+            if (err instanceof V2ProblemError && err.status === 404) {
+              reset.push(key);
+              continue;
+            }
+            // A failure without a readable reason (no connection) gets none: the
+            // count already says how far the reset got.
+            throw new Error(
+              t("web.admin.common.users.resetAllStopped", {
+                count: keys.length,
+                count_text: keys.length,
+                completed: reset.length,
+                reason: readableErrorText(err, ""),
+              }).trimEnd(),
+            );
           }
-          // A failure without a readable reason (no connection) gets none: the
-          // count already says how far the reset got.
-          throw new Error(
-            t("web.admin.common.users.resetAllStopped", {
-              count: keys.length,
-              count_text: keys.length,
-              completed: completed,
-              reason: readableErrorText(err, ""),
-            }).trimEnd(),
-          );
         }
+      } finally {
+        // Keys reset before a failure are gone too.
+        await dropAdminDeviceOverrideRows(queryClient, authority, {
+          userId,
+          profileId,
+          deviceId,
+          keys: reset,
+        });
       }
-      return { completed };
+      return { completed: reset.length };
     },
     onSuccess: (_data, variables) => {
       toast.success(t("web.admin.common.users.resetAllDone"));
