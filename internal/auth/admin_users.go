@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -55,15 +54,15 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 	if revision != -1 && current.Revision != revision {
 		return current, ErrAdminUserRevision
 	}
-	before := current.User
-	revoke, err := validate(current.User, tx)
-	if err != nil {
-		return current, err
-	}
 	if input == nil {
 		if err = lockIdentitiesBeforeSessions(ctx, tx, id); err != nil {
 			return current, err
 		}
+	}
+	before := current.User
+	revoke, err := validate(current.User, tx)
+	if err != nil {
+		return current, err
 	}
 	if input == nil || revoke {
 		if err = RevokeSignInsInTransaction(ctx, tx, id); err != nil {
@@ -94,16 +93,4 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 	}
 	auditmutation.CommitMutation(ctx, audit)
 	return current, nil
-}
-
-// lockIdentitiesBeforeSessions locks the account's provider identities, in id
-// order, for a transaction that deletes them and also writes the account's
-// login sessions. Identities come before sessions: uninstalling a plugin
-// deletes its identities and then clears auth_sessions.identity_id, so a
-// transaction that locked the sessions first would deadlock against it.
-func lockIdentitiesBeforeSessions(ctx context.Context, tx pgx.Tx, userID int) error {
-	if _, err := tx.Exec(ctx, `SELECT id FROM plugin_auth_identities WHERE user_id = $1 ORDER BY id FOR UPDATE`, userID); err != nil {
-		return fmt.Errorf("locking provider identities: %w", err)
-	}
-	return nil
 }

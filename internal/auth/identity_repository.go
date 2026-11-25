@@ -153,6 +153,18 @@ func recordIdentitySignIn(ctx context.Context, db dbQuerier, id int64, identity 
 	return nil
 }
 
+// lockIdentitiesBeforeSessions locks the account's provider identities, in id
+// order, for a transaction that deletes them and also writes the account's
+// login sessions. Identities come before sessions: uninstalling a plugin
+// deletes its identities and then clears auth_sessions.identity_id, so a
+// transaction that locked the sessions first would deadlock against it.
+func lockIdentitiesBeforeSessions(ctx context.Context, db dbQuerier, userID int) error {
+	if _, err := db.Exec(ctx, `SELECT id FROM plugin_auth_identities WHERE user_id = $1 ORDER BY id FOR UPDATE`, userID); err != nil {
+		return fmt.Errorf("locking provider identities: %w", err)
+	}
+	return nil
+}
+
 func deleteIdentity(ctx context.Context, db dbQuerier, userID int, identityID int64) (*LinkedIdentity, error) {
 	return scanIdentity(db.QueryRow(ctx, `
 		DELETE FROM plugin_auth_identities WHERE id = $1 AND user_id = $2

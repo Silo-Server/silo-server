@@ -321,12 +321,12 @@
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestPasswordSignInForDB
 ./internal/auth TestCreatePersonalAPIKeyDB
+./internal/auth TestAccountDeleteDuringPluginUninstallDB
 ./internal/auth TestAPIKeyCreationRefusesRevokedCredentialDB
 ./internal/auth TestPasswordSignInForRoutesDB
 ./internal/auth TestExternalAccountCannotPreemptInitialSetupDB
 ./internal/auth TestPluginAuthBindingCallbackModeDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
-./internal/auth TestAccountDeleteDuringPluginUninstallDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
 ./internal/auth TestSignupPolicySerializationDB
 ./internal/apiv2 TestSignupCommitPolicyErrorsDB
