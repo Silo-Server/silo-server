@@ -91,11 +91,9 @@ uploaded there. The same value on another server names something else or
 nothing. At revision 31 five keys carry it: `ui.disabled_library_ids`,
 `ui.library_order`, `ui.sidebar_pins`, `nav.shortcuts` and `ui.card_overlays`.
 
-- A client must not carry a `server_local` value from one server to another,
-  whether it copies a profile's settings itself or sends them in a profile set.
-- A profile set does not carry these keys. The server ignores a `server_local`
-  key in a set's settings, as it ignores a key it does not know, and leaves the
-  profile's value on this server as it was.
+- A client must not carry a `server_local` value from one server to another.
+  An app that copies a profile's settings between servers leaves these keys
+  out.
 - On the server that stores it, the value resolves like any other remote
   setting; the mark changes nothing about resolution.
 

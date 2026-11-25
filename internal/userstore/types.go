@@ -53,14 +53,14 @@ type Profile struct {
 	// service writes the rows.
 	AllowedTitleIDs    []string
 	MaxPlaybackQuality string
-	// SyncID is the profile's ID in its account's profile set, a lower-case
-	// UUID that is the same on every server holding the set; "" for a
-	// profile that is in no set. Only the profile set writes it.
+	// SyncID is the profile's shared ID: a lower-case UUID that is the same
+	// for this profile on every server its person uses; "" when it has none.
 	SyncID string
-	// AvatarSourceSHA256 is the lower-case hex SHA-256 of an uploaded
-	// avatar's file as it was first uploaded, on this server or another; ""
-	// when the avatar is not an upload or the upload predates the column
-	// (EnsureProfileAvatarSourceSHA256 in the handlers fills that in).
+	// AvatarSourceSHA256 is the lower-case hex SHA-256 that names an uploaded
+	// avatar: the hash the uploader supplied, or of the bytes this server
+	// received. It is "" when the avatar is not an upload, and for an upload
+	// that predates the column until profileAvatarSourceSHA256 in the
+	// handlers records the hash of the stored original, a re-encoded file.
 	AvatarSourceSHA256 string
 	CreatedAt          string
 	UpdatedAt          string

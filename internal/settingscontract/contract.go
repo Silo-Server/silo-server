@@ -161,8 +161,7 @@ type Definition struct {
 	// ServerLocal marks a value that names something on one server (a
 	// library, section, collection or uploaded image). It only means
 	// something there, so a client never carries it from one server to
-	// another and a profile set does not carry it. Remote, profile-scope
-	// settings only.
+	// another. Remote, profile-scope settings only.
 	ServerLocal bool `json:"server_local,omitempty"`
 	Deprecated  bool `json:"deprecated,omitempty"`
 	// Notes is maintainer commentary. It is stripped from the public manifest.

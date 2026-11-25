@@ -20,9 +20,9 @@ ALTER TABLE public.users
 -- user_profiles.sync_id: the profile's ID in the set, the same on every server
 -- (NULL for a profile that is not in one). sync_position is its place in the
 -- set's order. sync_applied holds the values the set last wrote to the
--- profile, per field. avatar_source_sha256 is the SHA-256 of the uploaded
--- picture's file as it was first uploaded, lower-case hex; it is NULL for a
--- preset or no picture.
+-- profile, per field. avatar_source_sha256 is a SHA-256 that names an
+-- uploaded picture, lower-case hex: the hash its uploader supplied, or of the
+-- bytes the server received. It is NULL for a preset or no picture.
 ALTER TABLE public.user_profiles
     ADD COLUMN sync_id              uuid,
     ADD COLUMN sync_position        integer,

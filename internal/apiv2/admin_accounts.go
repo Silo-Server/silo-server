@@ -129,7 +129,7 @@ type AdminAccountImpersonateInput struct {
 }
 type AdminAccountProfile struct {
 	ID     ID      `json:"id"`
-	SyncID *string `json:"sync_id" nullable:"true" format:"uuid" doc:"The profile's ID in its account's profile set, the same on every server holding the set; null for a profile that is in no set"`
+	SyncID *string `json:"sync_id" nullable:"true" format:"uuid" doc:"The profile's shared ID: a lower-case UUID that is the same for this profile on every server its person uses; null when the profile has none"`
 	Name   string  `json:"name"`
 	ProfileAvatar
 	HasPIN     bool            `json:"has_pin" doc:"Whether the profile is locked with a PIN"`

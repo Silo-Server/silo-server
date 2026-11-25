@@ -171,7 +171,7 @@ func generateGo(contract *settingscontract.Manifest, pkg string) ([]byte, error)
 // generator emits under its own spelling.
 const serverLocalListDoc = `// ServerLocal lists keys whose value names something on one server: a
 // library, section, collection or uploaded image. A client must not carry such
-// a value from one server to another, and a profile set does not carry it.
+// a value from one server to another.
 `
 
 // deprecatedListDoc explains the generated Deprecated list. Every generator

@@ -28,7 +28,7 @@ func profileAvatarOf(avatar, url, source string) ProfileAvatar {
 // Profile is one household member.
 type Profile struct {
 	ID     ID      `json:"id" example:"1"`
-	SyncID *string `json:"sync_id" nullable:"true" format:"uuid" doc:"The profile's ID in its account's profile set: a lower-case UUID that is the same on every server holding the set, so apps can line up one person's profiles across servers. null for a profile that is in no set" example:"0f8fad5b-d9cb-469f-a165-70867728950e"`
+	SyncID *string `json:"sync_id" nullable:"true" format:"uuid" doc:"The profile's shared ID: a lower-case UUID that is the same for this profile on every server its person uses, so apps can line up one person's profiles across servers. null when the profile has none" example:"0f8fad5b-d9cb-469f-a165-70867728950e"`
 	Name   string  `json:"name" example:"Alice"`
 	ProfileAvatar
 	HasPIN                     bool    `json:"has_pin" example:"false"`

@@ -14510,7 +14510,7 @@ export interface components {
       name: string;
       /**
        * Format: uuid
-       * @description The profile's ID in its account's profile set, the same on every server holding the set; null for a profile that is in no set
+       * @description The profile's shared ID: a lower-case UUID that is the same for this profile on every server its person uses; null when the profile has none
        */
       sync_id: string | null;
     };
@@ -34481,7 +34481,7 @@ export interface components {
       subtitle_mode: string;
       /**
        * Format: uuid
-       * @description The profile's ID in its account's profile set: a lower-case UUID that is the same on every server holding the set, so apps can line up one person's profiles across servers. null for a profile that is in no set
+       * @description The profile's shared ID: a lower-case UUID that is the same for this profile on every server its person uses, so apps can line up one person's profiles across servers. null when the profile has none
        * @example 0f8fad5b-d9cb-469f-a165-70867728950e
        */
       sync_id: string | null;

@@ -338,7 +338,7 @@
           "type": "boolean"
         },
         "server_local": {
-          "description": "The value names something on one server (a library, section, collection or uploaded image). It stays on that server: a client never carries it to another server, and a profile set does not carry it. Remote settings with the profile scope only.",
+          "description": "The value names something on one server (a library, section, collection or uploaded image). It stays on that server: a client never carries it to another server. Remote settings with the profile scope only.",
           "type": "boolean",
           "default": false
         },
