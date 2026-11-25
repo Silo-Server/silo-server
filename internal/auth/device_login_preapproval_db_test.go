@@ -209,9 +209,9 @@ func TestDevicePreapprovalRefusedDB(t *testing.T) {
 	}
 }
 
-// TestDevicePreapprovalWithdrawnWithSessionDB: ending the one login session
+// TestDevicePreapprovalWithdrawnWithSessionDB: revoking the one login session
 // that approved a sign-in in advance withdraws it, whichever way the session
-// ends, and leaves what the account approved from another session. Without
+// is revoked, and leaves what the account approved from another session. Without
 // this a caller holding someone else's session could leave a sign-in behind
 // after the session was ended, or hide it by logging the session out.
 func TestDevicePreapprovalWithdrawnWithSessionDB(t *testing.T) {
@@ -267,6 +267,11 @@ func TestDevicePreapprovalWithdrawnWithSessionDB(t *testing.T) {
 		}},
 		"app key revoked": {deviceKeyID: &key.ID, end: func(string) error {
 			return keys.RevokeDeviceKey(t.Context(), userID, key.ID)
+		}},
+		// What a node from a release before pre-approval does on logout.
+		"revoked by a bare update": {end: func(session string) error {
+			_, err := pool.Exec(t.Context(), `UPDATE auth_sessions SET revoked_at = NOW() WHERE id = $1`, session)
+			return err
 		}},
 	} {
 		session, _, code, secret := approve(label, end.deviceKeyID)

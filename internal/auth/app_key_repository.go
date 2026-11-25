@@ -399,15 +399,9 @@ func revokeAccountKeysTx(ctx context.Context, tx pgx.Tx, userID int) error {
 // endDeviceKeySessions ends the live login sessions the device keys opened.
 // It runs after the keys' rows are locked.
 func endDeviceKeySessions(ctx context.Context, tx pgx.Tx, ids []string) error {
-	rows, err := tx.Query(ctx, `UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, NOW())
-		WHERE device_key_id = ANY($1::uuid[]) AND revoked_at IS NULL RETURNING id`, ids)
-	if err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, NOW())
+		WHERE device_key_id = ANY($1::uuid[]) AND revoked_at IS NULL`, ids); err != nil {
 		return fmt.Errorf("ending device key sessions: %w", err)
 	}
-	ended, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return fmt.Errorf("ending device key sessions: %w", err)
-	}
-	// A device sign-in one of those sessions approved in advance goes with it.
-	return withdrawSessionPreapprovalsInTransaction(ctx, tx, ended)
+	return nil
 }

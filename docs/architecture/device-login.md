@@ -199,16 +199,18 @@ the fingerprint. Nothing on the poll changes for the TV.
   or deleted since answers `denied`; this holds for every device sign-in, not
   only pre-approved ones, since over 30 days it is a normal case.
 - **The approving session.** The row records the login session that approved
-  it (`preapproved_session_id`). Ending that one session withdraws the
+  it (`preapproved_session_id`). Revoking that one session withdraws the
   sign-ins it approved in advance and that no device has redeemed, in the
-  same transaction: from the session list, by the account or by an
-  administrator; by logging the session out; and by revoking an app key that
-  opened it. A session someone else was using therefore cannot leave a
-  sign-in behind for later, and cannot hide one by logging itself out.
-  Sign-ins the account approved from its other sessions stay, and so does a
-  device that already redeemed: its session is its own and is ended from the
-  session list. A session that reaches its expiry leaves its sign-ins in
-  place; they expire within the same 30 days.
+  same statement. A database trigger on `auth_sessions` does it, not
+  application code, so it holds for every write that revokes a login
+  session: the session list, an administrator, logout, a revoked app key that
+  opened it, the account-wide revocations, and a node from an older release.
+  A session someone else was using therefore cannot leave a sign-in behind
+  for later, and cannot hide one by logging itself out. Sign-ins the account
+  approved from its other sessions stay, and so does a device that already
+  redeemed: its session is its own and is ended from the session list. A
+  session that only reaches its expiry is not revoked and leaves its sign-ins
+  in place; they expire within the same 30 days.
 - **Provider identity at redemption.** When the approving session came from a
   provider identity, the poll locks and checks that identity as a provider
   sign-in does, before the device row: a refused identity, an unlinked one, or
@@ -244,9 +246,9 @@ the fingerprint. Nothing on the poll changes for the TV.
   nor destroy its sign-in.
 - **Rolling deploys and rollback.** A node from the release before this one
   does not know the marker: it would let a bare device code cancel a
-  pre-approved request, would collect one without the provider check above,
-  and would end a session without withdrawing the sign-ins it approved in
-  advance. Clients create pre-approved sign-ins only after
+  pre-approved request and would collect one without the provider check
+  above. Ending the approving session still withdraws its sign-ins there,
+  because the database does that. Clients create pre-approved sign-ins only after
   `GET /api/v2/auth/device/capability` reports `preapprove`, which an older
   node never does, and an upgrade should finish before the feature is relied
   on. Rolling the migration back deletes the waiting pre-approved requests.

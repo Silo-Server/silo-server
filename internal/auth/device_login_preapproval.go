@@ -85,6 +85,14 @@ type DevicePreapproval struct {
 	ExpiresAt      time.Time
 }
 
+// A pre-approved request records the login session that approved it
+// (preapproved_session_id). The database withdraws it when that session is
+// revoked: the trigger auth_sessions_withdraw_preapprovals fires on every
+// write that revokes a login session, whichever code path or release made
+// it, so no revocation here has to remember to. Preapprove holds the
+// session's row lock while it inserts, and a revocation takes that lock
+// first, so neither can miss the other.
+
 // Preapprove approves a sign-in in advance for the device holding the secret
 // behind input.Binding, as approverUserID's account. The request claims in
 // ctx must be that account's own login session; the account and session are
@@ -173,25 +181,6 @@ func (s *DeviceLoginService) Preapprove(ctx context.Context, input DevicePreappr
 		return nil, err
 	}
 	return result, nil
-}
-
-// withdrawSessionPreapprovalsInTransaction withdraws the sign-ins the given
-// login sessions approved in advance that no device has redeemed yet. Ending
-// one session calls it in the transaction that ends the session, after the
-// session row is locked: Preapprove holds that row's lock while it inserts,
-// so neither can miss the other. Sign-ins the account approved from its
-// other sessions are unchanged.
-func withdrawSessionPreapprovalsInTransaction(ctx context.Context, tx pgx.Tx, sessionIDs []string) error {
-	if len(sessionIDs) == 0 {
-		return nil
-	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE device_login_requests SET status = $2, denied_at = NOW(), updated_at = NOW()
-		WHERE preapproved_session_id = ANY($1::text[]) AND preapproved_at IS NOT NULL AND status = $3`,
-		sessionIDs, DeviceLoginStatusDenied, DeviceLoginStatusApproved); err != nil {
-		return fmt.Errorf("withdrawing a session's device pre-approvals: %w", err)
-	}
-	return nil
 }
 
 // ListPreapprovals lists userID's waiting pre-approved sign-ins, newest
