@@ -313,7 +313,7 @@ func registerOAuthAccountOperations(reg *Registry) {
 			if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
 				return nil, p
 			}
-			claims, p := linkingClaims(ctx)
+			claims, p := reg.linkingClaims(ctx)
 			if p != nil {
 				return nil, p
 			}
@@ -352,7 +352,7 @@ func registerOAuthAccountOperations(reg *Registry) {
 			if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
 				return nil, p
 			}
-			claims, p := linkingClaims(ctx)
+			claims, p := reg.linkingClaims(ctx)
 			if p != nil {
 				return nil, p
 			}
@@ -390,7 +390,7 @@ func registerOAuthAccountOperations(reg *Registry) {
 			if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
 				return nil, p
 			}
-			claims, p := linkingClaims(ctx)
+			claims, p := reg.linkingClaims(ctx)
 			if p != nil {
 				return nil, p
 			}
@@ -429,14 +429,18 @@ func registerOAuthAccountOperations(reg *Registry) {
 }
 
 // linkingClaims admits only the account's own signed-in session to the
-// linking operations.
-func linkingClaims(ctx context.Context) (*auth.Claims, *Problem) {
+// linking operations, and not one another app opened with a grant: a linked
+// sign-in is a way in that outlives the app's key.
+func (reg *Registry) linkingClaims(ctx context.Context) (*auth.Claims, *Problem) {
 	claims := claimsFrom(ctx)
 	if claims == nil {
 		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
 	if !claims.IsOwnLoginSession() {
 		return nil, NewProblem(TypePermissionDenied, "Only the account's own signed-in session can link a sign-in.")
+	}
+	if p := reg.credentialSessionProblem(ctx, claims); p != nil {
+		return nil, p
 	}
 	return claims, nil
 }

@@ -29,9 +29,11 @@ type fakeAppKeys struct {
 	enabled  bool
 	err      error
 	grantErr error
-	answer   *handlers.AppKeyAnswer
-	keys     auth.OwnAppKeys
-	calls    int
+	// credentialErr answers SessionMayIssueCredential.
+	credentialErr error
+	answer        *handlers.AppKeyAnswer
+	keys          auth.OwnAppKeys
+	calls         int
 }
 
 func (f *fakeAppKeys) AppKeySignInEnabled(context.Context) (bool, error) { return f.enabled, nil }
@@ -82,6 +84,10 @@ func (f *fakeAppKeys) RevokeOwnDeviceKey(context.Context, *auth.Claims, string) 
 func (f *fakeAppKeys) ReplacePersonKey(context.Context, *auth.Claims, appkeys.PublicKey) error {
 	f.calls++
 	return f.err
+}
+
+func (f *fakeAppKeys) SessionMayIssueCredential(context.Context, *auth.Claims) error {
+	return f.credentialErr
 }
 
 // A syntactically valid envelope; the fake service never verifies it.
@@ -251,10 +257,10 @@ func TestAppKeyProblems(t *testing.T) {
 		{err: auth.ErrProviderUnavailable, want: TypeProviderUnavailable},
 		// An app tells a used or wrong grant apart from an expired one,
 		// which a wrong clock where it was signed causes.
-		{err: auth.ErrGrantInvalid, want: TypeGrantInvalid},
-		{err: &appkeys.Error{Code: appkeys.CodeGrantInvalid}, want: TypeGrantInvalid},
-		{err: &appkeys.Error{Code: appkeys.CodeOriginNotGranted}, want: TypeGrantInvalid},
-		{err: &appkeys.Error{Code: appkeys.CodeGrantExpired}, want: TypeGrantExpired},
+		{err: auth.ErrGrantInvalid, want: TypeAppGrantInvalid},
+		{err: &appkeys.Error{Code: appkeys.CodeGrantInvalid}, want: TypeAppGrantInvalid},
+		{err: &appkeys.Error{Code: appkeys.CodeOriginNotGranted}, want: TypeAppGrantInvalid},
+		{err: &appkeys.Error{Code: appkeys.CodeGrantExpired}, want: TypeAppGrantExpired},
 	} {
 		t.Run(tc.want.ID+" "+tc.err.Error(), func(t *testing.T) {
 			keys := &fakeAppKeys{enabled: true, err: tc.err}

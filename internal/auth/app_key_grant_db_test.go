@@ -119,7 +119,7 @@ func TestGrantRedeemDB(t *testing.T) {
 }
 
 // Each grant the server must not honor is refused with the problem the app
-// branches on: grant_expired only for the grant's own exp, grant_invalid for
+// branches on: app_grant_expired only for the grant's own exp, app_grant_invalid for
 // a grant that can't be used here, and signature_invalid for a redeemer that
 // doesn't hold the app key.
 func TestGrantRedeemRefusalsDB(t *testing.T) {
@@ -132,6 +132,11 @@ func TestGrantRedeemRefusalsDB(t *testing.T) {
 	replaced := env.localAccount(t, "grantno-replaced", models.RoleUser)
 	oldPerson, _, _ := env.enroll(t, replaced)
 	if err := env.signIn.ReplacePersonKey(ctx, env.loginSession(t, replaced, models.SessionOpenedPassword, nil), newTestKey(t).pub); err != nil {
+		t.Fatal(err)
+	}
+	disabled := env.localAccount(t, "grantno-disabled", models.RoleUser)
+	disabledPerson, _, _ := env.enroll(t, disabled)
+	if _, err := env.pool.Exec(ctx, `UPDATE users SET enabled = false WHERE id = $1`, disabled.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -167,6 +172,9 @@ func TestGrantRedeemRefusalsDB(t *testing.T) {
 		{name: "grant for an admin account", grant: func(app testKey) map[string]any {
 			return env.grantEnvelope(t, adminPerson, admin.ID, app, nil)
 		}, want: grantInvalid},
+		{name: "grant for a disabled account", grant: func(app testKey) map[string]any {
+			return env.grantEnvelope(t, disabledPerson, disabled.ID, app, nil)
+		}, want: func(err error) bool { return errors.Is(err, ErrGrantInvalid) }},
 		{name: "redeemer without the app key", signer: newTestKey(t), grant: func(app testKey) map[string]any {
 			return env.grantEnvelope(t, person, user.ID, app, nil)
 		}, want: func(err error) bool { return appkeys.CodeOf(err) == appkeys.CodeSignatureInvalid }},
@@ -208,6 +216,51 @@ func TestGrantRedeemRefusalsDB(t *testing.T) {
 	}
 }
 
+// A grant's ID is the signer's choice, so its one use is counted per
+// account: a grant of one account that reuses the ID of another account's
+// grant, before or after that one is redeemed, uses up only its own.
+func TestGrantUseIsPerAccountDB(t *testing.T) {
+	env := newKeyEnv(t, "grantid")
+	one := env.localAccount(t, "grantid-one", models.RoleUser)
+	onePerson, _, _ := env.enroll(t, one)
+	two := env.localAccount(t, "grantid-two", models.RoleUser)
+	twoPerson, _, _ := env.enroll(t, two)
+	id := map[string]any{"grant_id": base64.RawURLEncoding.EncodeToString(make([]byte, appkeys.GrantIDSize))}
+	first, second := newTestKey(t), newTestKey(t)
+	if _, err := env.redeem(t, first, env.grantEnvelope(t, onePerson, one.ID, first, id)); err != nil {
+		t.Fatalf("the first account's grant = %v", err)
+	}
+	if _, err := env.redeem(t, second, env.grantEnvelope(t, twoPerson, two.ID, second, id)); err != nil {
+		t.Fatalf("another account's grant with the same ID = %v", err)
+	}
+}
+
+// A grant signed by a person key whose provider identity is gone (its
+// plugin was uninstalled) is refused, and redeeming it revokes that dead
+// key, as its next use anywhere does.
+func TestGrantFromADeadPersonKeyDB(t *testing.T) {
+	env := newKeyEnv(t, "grantdead")
+	ctx := t.Context()
+	person, device := newTestKey(t), newTestKey(t)
+	if _, err := env.signIn.Enroll(ctx, KeyEnrollRequest{
+		KeyRequest: env.request(t, message{purpose: appkeys.PurposeEnroll, signer: person, device: &device}),
+		PersonKey:  person.pub, Claims: env.loginSession(t, env.user, models.SessionOpenedProvider, &env.identityID),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, env.installationID); err != nil {
+		t.Fatal(err)
+	}
+	app := newTestKey(t)
+	if result, err := env.redeem(t, app, env.grantEnvelope(t, person, env.user.ID, app, nil)); result != nil || !errors.Is(err, ErrGrantInvalid) {
+		t.Fatalf("redeem with a dead person key = %+v, %v", result, err)
+	}
+	var revoked bool
+	if err := env.pool.QueryRow(ctx, `SELECT revoked_at IS NOT NULL FROM auth_person_keys WHERE user_id = $1`, env.user.ID).Scan(&revoked); err != nil || !revoked {
+		t.Fatalf("dead person key revoked = %v, %v", revoked, err)
+	}
+}
+
 // Two redemptions of one grant, racing on different API processes: exactly
 // one enrolls the app.
 func TestGrantRedeemConcurrentDB(t *testing.T) {
@@ -233,7 +286,7 @@ func TestGrantRedeemConcurrentDB(t *testing.T) {
 		case err == nil:
 			succeeded++
 		case !errors.Is(err, ErrGrantInvalid):
-			t.Fatalf("the losing redemption = %v, want grant_invalid", err)
+			t.Fatalf("the losing redemption = %v, want app_grant_invalid", err)
 		}
 	}
 	if succeeded != 1 {

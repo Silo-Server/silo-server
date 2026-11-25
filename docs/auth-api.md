@@ -765,11 +765,14 @@ The answer is a sealed reply with the usual `signed_in` plaintext. The key
 takes the provider binding of the person key that signed the grant. A session
 the app opens can't enroll keys, replace the person key, approve a device
 sign-in now or in advance, read the key list, or revoke any key but its own.
+It is also refused (403 `permission_denied`) on creating a personal API key
+(`createPersonalAPIKey`) and on the operations that link a sign-in provider
+account.
 
 | Refusal | Problem |
 | --- | --- |
-| The grant was already used; it names another server, or its `origins` leave out the redeem's `origin`; it doesn't verify by the account's live person key (unknown account, replaced or revoked person key); the account is an administrator's or disabled; the outer `kid` isn't the `app_key`'s ID | 403 `grant_invalid` |
-| The grant's own `exp` has passed | 403 `grant_expired` |
+| The grant was already used; it names another server, or its `origins` leave out the redeem's `origin`; it doesn't verify by the account's live person key (unknown account, replaced or revoked person key); the account is an administrator's or disabled; the outer `kid` isn't the `app_key`'s ID | 403 `app_grant_invalid` |
+| The grant's own `exp` has passed | 403 `app_grant_expired` |
 | The outer signature doesn't verify by the `app_key`, or the `grant-redeem` envelope is outside its own `iat` and `exp` | 401 `signature_invalid` |
 | The `app_key` is already enrolled on this server | 409 `conflict` |
 

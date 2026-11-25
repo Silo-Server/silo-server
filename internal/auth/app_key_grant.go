@@ -20,21 +20,26 @@ var ErrGrantInvalid = errors.New("grant used, or not valid for this account")
 
 // grantSigner is the person key the verifier looked up for a grant, and a
 // store failure the lookup met: the verifier can only answer that the grant
-// does not verify, and a failure to ask must not look like that.
+// does not verify, and a failure to ask must not look like that. missed is
+// an account with no person key to check the grant against.
 type grantSigner struct {
-	key *models.AppPersonKey
-	err error
+	key    *models.AppPersonKey
+	err    error
+	missed bool
 }
 
-// lookup finds the live person key of the account a grant names. accountID
-// is the account's wire ID, a decimal number in its one spelling.
+// lookup finds the unrevoked person key of the account a grant names.
+// accountID is the account's wire ID, a decimal number in its one spelling.
+// A provider-bound key whose identity is gone is found too: the redemption's
+// transaction revokes it, as its next use anywhere does.
 func (s *grantSigner) lookup(ctx context.Context, keys *AppKeyRepository) appkeys.PersonKeyLookup {
 	return func(accountID string) (appkeys.PublicKey, error) {
+		s.missed = true
 		userID, err := strconv.Atoi(accountID)
 		if err != nil || userID <= 0 || strconv.Itoa(userID) != accountID {
 			return appkeys.PublicKey{}, ErrGrantInvalid
 		}
-		key, err := keys.LivePersonKey(ctx, userID)
+		key, err := keys.UnrevokedPersonKey(ctx, userID)
 		if err != nil {
 			if !errors.Is(err, ErrAppKeyNotFound) {
 				s.err = err
@@ -45,7 +50,7 @@ func (s *grantSigner) lookup(ctx context.Context, keys *AppKeyRepository) appkey
 		if err != nil {
 			return appkeys.PublicKey{}, ErrGrantInvalid
 		}
-		s.key = key
+		s.key, s.missed = key, false
 		return public, nil
 	}
 }
@@ -71,6 +76,13 @@ func (a *AppKeySignIn) RedeemGrant(ctx context.Context, req KeyRequest) (*KeySig
 	}
 	if signer.err != nil {
 		return nil, signer.err
+	}
+	if signer.missed && payload.Grant != nil {
+		// No person key to check the grant against: check it against a key
+		// nobody holds, so this refusal takes about as long as a grant that
+		// fails its signature and the time doesn't say which accounts have a
+		// person key.
+		appkeys.DecoyVerify(*payload.Grant, appkeys.PurposeGrant)
 	}
 	if err != nil {
 		return nil, err
@@ -121,7 +133,7 @@ func (a *AppKeySignIn) RedeemGrant(ctx context.Context, req KeyRequest) (*KeySig
 		if !(KeyBinding{IdentityID: locked.IdentityID, ProviderBound: locked.ProviderBound}).same(binding) {
 			return errKeyBindingChanged
 		}
-		if err := claimGrantTx(ctx, tx, grant); err != nil {
+		if err := claimGrantTx(ctx, tx, user.ID, grant); err != nil {
 			return err
 		}
 		key, err := insertDeviceKeyTx(ctx, tx, NewDeviceKey{
@@ -146,12 +158,13 @@ func (a *AppKeySignIn) RedeemGrant(ctx context.Context, req KeyRequest) (*KeySig
 	return a.signedIn(ctx, out), nil
 }
 
-// claimGrantTx records the grant as used. Of two redemptions of one grant,
-// on any API processes, the second finds the row and is refused. The row is
-// kept past the grant's exp, until the retention step deletes it.
-func claimGrantTx(ctx context.Context, tx pgx.Tx, grant *appkeys.Payload) error {
-	tag, err := tx.Exec(ctx, `INSERT INTO auth_grant_uses (grant_id, expires_at)
-		VALUES ($1, to_timestamp($2)) ON CONFLICT (grant_id) DO NOTHING`, grant.GrantID, grant.ExpiresAt)
+// claimGrantTx records the account's grant as used. Of two redemptions of
+// one grant, on any API processes, the second finds the row and is refused.
+// The row is kept past the grant's exp, until the retention step deletes it.
+// tx holds the account row lock.
+func claimGrantTx(ctx context.Context, tx pgx.Tx, userID int, grant *appkeys.Payload) error {
+	tag, err := tx.Exec(ctx, `INSERT INTO auth_grant_uses (user_id, grant_id, expires_at)
+		VALUES ($1, $2, to_timestamp($3)) ON CONFLICT (user_id, grant_id) DO NOTHING`, userID, grant.GrantID, grant.ExpiresAt)
 	if err != nil {
 		return fmt.Errorf("recording grant use: %w", err)
 	}

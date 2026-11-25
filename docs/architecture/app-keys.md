@@ -253,21 +253,28 @@ The checks, in order:
 
 1. The outer envelope's signature verifies by the grant's `app_key`, so only
    the app the person allowed can redeem it; a `kid` that isn't that key's ID
-   is `grant_invalid`. The challenge is spent once this signature verifies.
+   is `app_grant_invalid`. The challenge is spent once this signature verifies.
 2. The grant verifies by the live person key of the account it names, and both
    envelopes name this server. A person key that was replaced or revoked, or
    is provider-bound to an identity no longer on the account, signs no grant.
-   The grant's own `exp` past is `grant_expired`, so the app can tell a wrong
+   The grant's own `exp` past is `app_grant_expired`, so the app can tell a wrong
    clock where it was signed from a bad grant; the `grant-redeem` envelope's
    own times follow the general rule (`signature_invalid`).
 3. The redeem's `origin` is one of the grant's `origins`, and the origin rule
    applies to it as on the other signed routes.
 4. In one transaction, under the usual lock order: the account is enabled and
    not an administrator's, the person key's provider binding still holds, the
-   person key is still live, and the grant's ID is recorded in
-   `auth_grant_uses`. A second redemption of one grant, on any API process,
-   finds the row and is refused `grant_invalid`. Then the key is enrolled and
-   its session opened.
+   person key is still live, and the grant's ID is recorded for the account
+   in `auth_grant_uses`. A second redemption of one grant, on any API process,
+   finds the row and is refused `app_grant_invalid`. The record is per account
+   because the signer chooses the ID: another account's grant with the same
+   ID uses up only its own. Then the key is enrolled and its session opened.
+   A person key whose identity is gone from the account is revoked here, as
+   at its next use anywhere, and the grant refused.
+
+A refusal for an account with no person key takes about as long as one for a
+grant that fails its signature (a decoy check), so the time does not say
+which accounts have a person key.
 
 The enrolled key has `kind = 'app'`, `enrolled_via = 'grant'`, the signing
 person key as `person_key_id`, and that person key's provider binding
@@ -285,7 +292,10 @@ session.
 is revoked, so its session may not mint access that outlives that (see "Who
 decides"): it can't enroll keys, replace the person key, approve a device
 sign-in now or in advance, read the account's key list, or revoke any key but
-its own. The person, or the server's owner, revokes the app from the key list
+its own. It also can't create a personal API key or link a sign-in provider
+account, the two older routes that hand an account a lasting credential
+(`SessionMayIssueCredential`); other sessions keep what those routes' own
+rules give them. The person, or the server's owner, revokes the app from the key list
 like any device.
 
 **Retention.** A used grant's ID is kept until an hour past the grant's `exp`

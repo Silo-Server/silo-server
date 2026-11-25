@@ -67,6 +67,12 @@ func (h *AuthHandler) RevokeOwnDeviceKey(ctx context.Context, claims *auth.Claim
 	return h.appKeys.RevokeOwnDeviceKey(ctx, claims, id)
 }
 
+// SessionMayIssueCredential reports whether the caller's session may be
+// handed a personal API key or a linked sign-in.
+func (h *AuthHandler) SessionMayIssueCredential(ctx context.Context, claims *auth.Claims) error {
+	return h.appKeys.SessionMayIssueCredential(ctx, claims)
+}
+
 // ReplacePersonKey replaces the caller's person key.
 func (h *AuthHandler) ReplacePersonKey(ctx context.Context, claims *auth.Claims, key appkeys.PublicKey) error {
 	return h.appKeys.ReplacePersonKey(ctx, claims, key)

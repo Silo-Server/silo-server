@@ -298,6 +298,14 @@ func (r *AppKeyRepository) LivePersonKey(ctx context.Context, userID int) (*mode
 		WHERE user_id = $1 AND revoked_at IS NULL AND `+identityLive, userID))
 }
 
+// UnrevokedPersonKey finds the account's person key that is not revoked,
+// whether or not its identity still exists: a caller that goes on to use the
+// key revokes one whose identity is gone.
+func (r *AppKeyRepository) UnrevokedPersonKey(ctx context.Context, userID int) (*models.AppPersonKey, error) {
+	return scanPersonKey(r.pool.QueryRow(ctx, `SELECT `+personKeyColumns+` FROM auth_person_keys
+		WHERE user_id = $1 AND revoked_at IS NULL`, userID))
+}
+
 // DeviceKeyByKeyID finds a device key by its key ID, revoked or not.
 func (r *AppKeyRepository) DeviceKeyByKeyID(ctx context.Context, keyID string) (*models.AppDeviceKey, error) {
 	if !ValidTextKey(keyID) {
