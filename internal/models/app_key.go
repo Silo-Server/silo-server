@@ -62,6 +62,11 @@ type AppDeviceKey struct {
 	IdentityID    *int64
 	ProviderBound bool
 	CreatedAt     time.Time
-	LastUsedAt    *time.Time
+	// LastUsedAt is when the key last opened a login session; nil for a key
+	// that never has (a key waiting for approval).
+	LastUsedAt *time.Time
+	// LastAttemptAt is a waiting key's last sign-in attempt, for the retry
+	// interval. Never shown.
+	LastAttemptAt *time.Time
 	RevokedAt     *time.Time
 }

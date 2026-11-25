@@ -375,6 +375,11 @@ func linkIdentityTx(ctx context.Context, tx pgx.Tx, user *models.User, installat
 				AND revoked_at IS NULL AND expires_at > NOW()`, linked.ID, user.ID); err != nil {
 			return nil, fmt.Errorf("attaching sessions to the identity: %w", err)
 		}
+		// Its app keys too: a key enrolled from a password session would
+		// otherwise keep opening sessions the provider never re-checks.
+		if err := bindAccountKeysToIdentity(ctx, tx, user.ID, linked.ID); err != nil {
+			return nil, err
+		}
 	}
 	return linked, nil
 }

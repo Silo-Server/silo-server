@@ -38,7 +38,7 @@ var (
 
 const personKeyColumns = `id::text, user_id, public_key, key_id, identity_id, provider_bound, enrolled_via, created_at, revoked_at`
 
-const deviceKeyColumns = `id::text, user_id, public_key, key_id, kind, name, platform, status, enrolled_via, person_key_id::text, identity_id, provider_bound, created_at, last_used_at, revoked_at`
+const deviceKeyColumns = `id::text, user_id, public_key, key_id, kind, name, platform, status, enrolled_via, person_key_id::text, identity_id, provider_bound, created_at, last_used_at, revoked_at, last_attempt_at`
 
 // Unique constraints Postgres names after the columns in the migration.
 const (
@@ -50,9 +50,13 @@ const (
 )
 
 // AppKeyRepository stores app keys: an account's person key and its device
-// keys. Every write takes its locks in one order: the account row
-// (lockUser), then the person key, then device key rows, then the login
-// sessions those keys opened.
+// keys. Every key path takes its locks in one order: the account row
+// (lockUser), the plugin installation and provider identity of a
+// provider-bound key (keySignInPolicy), the person key, the device key rows,
+// then the login sessions those keys opened. Uninstalling a plugin and
+// deleting an identity lock the installation, the identity, the key rows (the
+// revoking trigger) and the sessions in the same order, without the account
+// lock.
 type AppKeyRepository struct {
 	pool *pgxpool.Pool
 }
@@ -118,7 +122,7 @@ func scanPersonKey(row pgx.Row) (*models.AppPersonKey, error) {
 func scanDeviceKey(row pgx.Row) (*models.AppDeviceKey, error) {
 	var k models.AppDeviceKey
 	err := row.Scan(&k.ID, &k.UserID, &k.PublicKey, &k.KeyID, &k.Kind, &k.Name, &k.Platform, &k.Status, &k.EnrolledVia,
-		&k.PersonKeyID, &k.IdentityID, &k.ProviderBound, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt)
+		&k.PersonKeyID, &k.IdentityID, &k.ProviderBound, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt, &k.LastAttemptAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrAppKeyNotFound
 	}
@@ -406,6 +410,23 @@ func endDeviceKeySessions(ctx context.Context, tx pgx.Tx, ids []string) error {
 	if _, err := tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, NOW())
 		WHERE device_key_id = ANY($1::uuid[]) AND revoked_at IS NULL`, ids); err != nil {
 		return fmt.Errorf("ending device key sessions: %w", err)
+	}
+	return nil
+}
+
+// bindAccountKeysToIdentity brings the account's live keys that are not
+// provider-bound under identityID, when linking makes the provider answer for
+// the account (linkIdentityTx). From then on the provider rule applies to them
+// like any provider-bound key. tx holds the account row lock and has just
+// inserted the identity.
+func bindAccountKeysToIdentity(ctx context.Context, tx sessionExecQuerier, userID int, identityID int64) error {
+	if _, err := tx.Exec(ctx, `UPDATE auth_person_keys SET identity_id = $2, provider_bound = true
+		WHERE user_id = $1 AND revoked_at IS NULL AND NOT provider_bound`, userID, identityID); err != nil {
+		return fmt.Errorf("binding person key to the identity: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE auth_device_keys SET identity_id = $2, provider_bound = true
+		WHERE user_id = $1 AND revoked_at IS NULL AND NOT provider_bound`, userID, identityID); err != nil {
+		return fmt.Errorf("binding device keys to the identity: %w", err)
 	}
 	return nil
 }
