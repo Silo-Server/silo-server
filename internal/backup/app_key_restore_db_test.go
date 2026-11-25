@@ -219,26 +219,72 @@ func openPool(t *testing.T, dbURL string) *pgxpool.Pool {
 // backup onto an install with no accounts takes the backup's server
 // identity, so a passwordless account signs in by key there; onto a server
 // with an account it keeps the live identity, and the backup's keys are kept
-// revoked. A waiting key only the backup has is revoked either way. When a
-// sign-in switch is off on the live server, the restore keeps it off and
-// names the passwordless account, which has no way in.
+// revoked. A waiting key only the backup has is revoked either way. The
+// restore names each account that held a key and is left with no way in:
+// an administrator whose only key is a person key and an account whose keys
+// are all bound to a sign-in link always (another server's links are not
+// carried), and the passwordless account too when its keys are revoked or a
+// sign-in switch is off on the live server, which the restore keeps off. A
+// backup that predates app keys takes the backup's identity without saying
+// that devices sign in by key.
 func TestFullRestoreOntoAnotherServerDB(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		account  bool
 		off      string // a switch turned off on the live server
-		stranded bool
+		stranded bool   // the passwordless account is listed
+		noKeys   bool   // the backup predates the key tables
 	}{
 		{name: "empty install"},
-		{name: "install with an account", account: true},
+		{name: "install with an account", account: true, stranded: true},
 		{name: "key sign-in off", off: config.AuthAppKeySignInSettingKey, stranded: true},
 		{name: "local passwords off", off: config.AuthLocalPasswordLoginSettingKey, stranded: true},
+		{name: "backup without key tables", noKeys: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source, sourceURL := backuptest.Database(t)
 			dbExec(t, source, `INSERT INTO server_settings (key, value) VALUES ($1, $2)`, serveridentity.Key, keyBackupServerID)
+			if tc.noKeys {
+				dbExec(t, source, `ALTER TABLE auth_sessions DROP COLUMN device_key_id`)
+				dbExec(t, source, `DROP TABLE auth_device_keys, auth_person_keys`)
+				dbExec(t, source, `DELETE FROM goose_db_version WHERE version_id IN (20261125041456, 20261125074454)`)
+				dbExec(t, source, `INSERT INTO users (role, username) VALUES ('user', 'passwordless')`)
+				r := backupKeys(t, source, sourceURL)
+				live, liveURL := backuptest.Database(t)
+				serverIDOf(t, live)
+				live.Close()
+				validate := r.validate
+				validate.AcceptLostCredentials = true
+				out := r.swap(t, liveURL, validate)
+				if got := serverIDOf(t, openPool(t, liveURL)); got != keyBackupServerID {
+					t.Fatalf("server id = %q, want the backup's %q", got, keyBackupServerID)
+				}
+				wantOutput(t, out, identityTakenNoKeys, keepOriginalOff)
+				if strings.Contains(out, identityTaken) || strings.Contains(out, strandedSentence) {
+					t.Fatalf("a restore that kept no app keys says devices sign in by key, or lists accounts:\n%s", out)
+				}
+				return
+			}
 			holder := seedKeyHolder(t, source, "passwordless", "user")
 			waiting := insertDeviceKey(t, source, holder.userID, appkeystest.NewKey(t), deviceKeyRow{status: "pending"})
+			// An administrator whose only key is a person key: introducing a
+			// device with it waits for another administrator.
+			var adminID int64
+			if err := source.QueryRow(t.Context(), `INSERT INTO users (role, username) VALUES ('admin', 'person-key-admin') RETURNING id`).Scan(&adminID); err != nil {
+				t.Fatal(err)
+			}
+			insertPersonKey(t, source, adminID, appkeystest.NewKey(t))
+			// An account whose only key is bound to its sign-in link.
+			var linkedID, identityID int64
+			if err := source.QueryRow(t.Context(), `INSERT INTO users (role, username) VALUES ('user', 'linked') RETURNING id`).Scan(&linkedID); err != nil {
+				t.Fatal(err)
+			}
+			dbExec(t, source, `INSERT INTO plugin_installations (id, plugin_id, version, install_path, enabled) VALUES (9001, 'silo.auth.oidc', '1.0.0', '/plugins/oidc', true)`)
+			if err := source.QueryRow(t.Context(), `INSERT INTO plugin_auth_identities (plugin_installation_id, external_subject, user_id)
+				VALUES (9001, 'subject', $1) RETURNING id`, linkedID).Scan(&identityID); err != nil {
+				t.Fatal(err)
+			}
+			insertDeviceKey(t, source, linkedID, appkeystest.NewKey(t), deviceKeyRow{identityID: &identityID})
 			r := backupKeys(t, source, sourceURL)
 
 			live, liveURL := backuptest.Database(t)
@@ -259,10 +305,11 @@ func TestFullRestoreOntoAnotherServerDB(t *testing.T) {
 			if _, revoked := keyRevoked(t, restored, tableAuthDeviceKeys, waiting); !revoked {
 				t.Fatal("the backup's waiting key is not revoked")
 			}
-			listed := fmt.Sprintf("%s passwordless (account %d).", strandedSentence, holder.userID)
-			if strings.Contains(out, strandedSentence) != tc.stranded || (tc.stranded && !strings.Contains(out, listed)) {
-				t.Fatalf("stranded accounts listed %v, want %v (%q):\n%s", !tc.stranded, tc.stranded, listed, out)
+			listed := fmt.Sprintf("person-key-admin (account %d), linked (account %d).", adminID, linkedID)
+			if tc.stranded {
+				listed = fmt.Sprintf("passwordless (account %d), ", holder.userID) + listed
 			}
+			wantOutput(t, out, strandedSentence+" "+listed)
 			if !tc.account {
 				if got != keyBackupServerID {
 					t.Fatalf("server id = %q, want the backup's %q", got, keyBackupServerID)
@@ -340,8 +387,8 @@ func TestFullRestoreOntoTheSameServerDB(t *testing.T) {
 	out := r.swap(t, sourceURL, r.validate)
 	restored := openPool(t, sourceURL)
 	wantOutput(t, out, "App keys: kept this server's where it has them")
-	if strings.Contains(out, identityTaken) || strings.Contains(out, identityKept) {
-		t.Fatalf("a same-server restore printed an identity notice:\n%s", out)
+	if strings.Contains(out, identityTaken) || strings.Contains(out, identityKept) || strings.Contains(out, strandedSentence) {
+		t.Fatalf("a same-server restore printed an identity notice or listed an account:\n%s", out)
 	}
 
 	t.Run("live wins", func(t *testing.T) {

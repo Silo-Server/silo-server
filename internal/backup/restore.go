@@ -361,22 +361,25 @@ const (
 // plugin releases, and policies with those of carryFrom, or with none when
 // carryFrom is empty. destination is the live database that will be replaced,
 // even if the backup came from another deployment. keys says what happens to
-// the backup's app keys. cipher is this server's SECRET_KEY, or nil.
-func (p postLoad) carry(ctx context.Context, loader DatabaseLoader, dbURL, carryFrom, destination string, keys AppKeyCarry, cipher *secret.Cipher) error {
-	authorityRestricted, err := carryCredentials(ctx, loader, dbURL, carryFrom, keys, p.out)
+// the backup's app keys, and carry returns what it did with them. cipher is
+// this server's SECRET_KEY, or nil.
+func (p postLoad) carry(ctx context.Context, loader DatabaseLoader, dbURL, carryFrom, destination string, keys AppKeyCarry, cipher *secret.Cipher) (SettledAppKeys, error) {
+	carried, err := carryCredentials(ctx, loader, dbURL, carryFrom, keys, p.out)
+	authorityRestricted := carried.pluginProvisionRestricted
 	// The fallback carries nothing from the live server, so it keeps no
 	// backup app key either: one revoked here since the backup would work
 	// again.
 	if err := p.strictStep("replacing the backup's credentials", err,
 		"leaving out all of the backup's "+carriedKinds+", and app keys", func() error {
 			authorityRestricted = true
-			_, err := carryCredentials(ctx, loader, dbURL, "", AppKeysLeftOut, p.out)
+			carried, err = carryCredentials(ctx, loader, dbURL, "", AppKeysLeftOut, p.out)
 			return err
 		}); err != nil {
-		return err
+		return SettledAppKeys{}, err
 	}
+	keysDone := carried.AppKeys
 	if err := p.step("carrying the outbound settings", carryOutboundSettings(ctx, loader, dbURL, carryFrom, cipher, p.out)); err != nil {
-		return err
+		return keysDone, err
 	}
 	releasesRestricted, err := carryPluginReleases(ctx, loader, dbURL, carryFrom, p.out)
 	if err := p.strictStep("carrying the plugin releases", err,
@@ -388,12 +391,12 @@ func (p postLoad) carry(ctx context.Context, loader DatabaseLoader, dbURL, carry
 			}
 			return err
 		}); err != nil {
-		return err
+		return keysDone, err
 	}
 	if err := p.step("carrying the account policies", carryPolicies(ctx, loader, dbURL, carryFrom, p.out)); err != nil {
-		return err
+		return keysDone, err
 	}
-	return finishPluginProvisionRestore(ctx, loader, dbURL, destination, carryFrom == "", authorityRestricted || releasesRestricted, p.out)
+	return keysDone, finishPluginProvisionRestore(ctx, loader, dbURL, destination, carryFrom == "", authorityRestricted || releasesRestricted, p.out)
 }
 
 // ValidateOptions are the inputs to §10.2 step 1.
@@ -604,9 +607,10 @@ type DatabaseLoader interface {
 	// HasAccounts reports whether dbURL holds an account: a users row. A
 	// database without the table holds none.
 	HasAccounts(ctx context.Context, dbURL string) (bool, error)
-	// StrandedAccounts lists the enabled accounts of dbURL that hold an app
-	// key and have no way to sign in under its switches.
-	StrandedAccounts(ctx context.Context, dbURL string) ([]string, error)
+	// StrandedAccounts lists the enabled accounts among holders (accounts
+	// that held an app key when the restore read them) that dbURL leaves
+	// with no way to sign in.
+	StrandedAccounts(ctx context.Context, dbURL string, holders []int64) ([]string, error)
 	// CarryPolicies gives dbURL liveURL's custom access policies ("" for
 	// none), returning the backup's it turned off.
 	CarryPolicies(ctx context.Context, dbURL, liveURL string) ([]string, error)
@@ -809,7 +813,7 @@ func RestoreSeparate(ctx context.Context, src *Source, loader DatabaseLoader, op
 	}
 	// A copy is not the live server: it gets none of the backup's
 	// credentials and none of the live ones.
-	if err := post.carry(ctx, loader, opts.Into, "", "", AppKeysLeftOut, opts.Cipher); err != nil {
+	if _, err := post.carry(ctx, loader, opts.Into, "", "", AppKeysLeftOut, opts.Cipher); err != nil {
 		return RestoreReport{}, err
 	}
 	if err := post.step(stepInterrupt, interruptWork(ctx, loader, opts.Into, "", out)); err != nil {

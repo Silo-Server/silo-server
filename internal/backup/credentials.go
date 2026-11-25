@@ -498,15 +498,15 @@ type CarriedCredentials struct {
 // carryCredentials replaces the restored database's credentials with the
 // live server's (liveURL), or with none when liveURL is "", and prints
 // what it kept and dropped. keys says what happens to the backup's app keys.
-func carryCredentials(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, keys AppKeyCarry, out io.Writer) (bool, error) {
+func carryCredentials(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, keys AppKeyCarry, out io.Writer) (CarriedCredentials, error) {
 	carriedRows, err := loader.CarryCredentials(ctx, dbURL, liveURL, keys)
 	if err != nil {
-		return false, fmt.Errorf("replacing the restored %s: %w", carriedKinds, err)
+		return carriedRows, fmt.Errorf("replacing the restored %s: %w", carriedKinds, err)
 	}
 	defer printAppKeys(out, carriedRows.AppKeys, liveURL, keys)
 	if liveURL == "" {
 		_, _ = fmt.Fprintf(out, "Left out the backup's %s; create new ones after Silo starts.\n", carriedKinds)
-		return carriedRows.pluginProvisionRestricted, nil
+		return carriedRows, nil
 	}
 	if len(carriedRows.Absent) > 0 {
 		_, _ = fmt.Fprintf(out, "The backup's schema predates %s; this server's rows of them are not carried.\n", strings.Join(carriedRows.Absent, ", "))
@@ -536,7 +536,7 @@ func carryCredentials(ctx context.Context, loader DatabaseLoader, dbURL, liveURL
 		kept := counted(len(carriedRows.Stricter), "security switch as this server has it", "security switches as this server has them")
 		_, _ = fmt.Fprintf(out, "Kept %s, stricter than the backup: %s\n", kept, strings.Join(carriedRows.Stricter, ", "))
 	}
-	return carriedRows.pluginProvisionRestricted, nil
+	return carriedRows, nil
 }
 
 // CarryCredentials replaces the carried secretTables rows of dbURL with
@@ -597,6 +597,9 @@ func (l PGLoader) CarryCredentials(ctx context.Context, dbURL, liveURL string, k
 			return err
 		}
 		settle := newAppKeySettle(tables, live, keys)
+		if err := settle.holders(ctx, tx, &result); err != nil {
+			return err
+		}
 		for i, table := range tables {
 			if table.name == "stream_nodes" {
 				if err := reconcileRestoredStreamNodeReferences(ctx, tx, live[i]); err != nil {

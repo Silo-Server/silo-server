@@ -1955,10 +1955,13 @@ Everything else about another deployment's backup is unchanged: it needs
 `--accept-lost-credentials` and carries no live credential. The restore
 says which identity the restored server will answer with before anything
 changes (with the reason the backup is not this deployment's, and in the
-`ErrOtherDeployment` refusal) and again when it carries the settings. When
-it takes the backup's identity it leads with the action, before anything
-changes and again at the end: shut down the server the backup came from
-and keep it off. Two servers that answer as one confuse the apps
+`ErrOtherDeployment` refusal) and again when it carries the settings, where
+it says devices sign in by key only when the restore kept app keys (not for
+a backup that predates them, or when the carry fell back to leaving every
+credential out). When it takes the backup's identity it leads with the
+action, before anything changes and again at the end: shut down the server
+the backup came from and keep it off. The journal records the decision, so
+`--recover` repeats that reminder when it finishes the swap. Two servers that answer as one confuse the apps
 ([server-identity.md](server-identity.md#identity)), share a backup prefix,
 and accept each other's app keys, so a key revoked on one keeps working on
 the other. The server cannot detect a twin, so it warns and never refuses.
@@ -2120,14 +2123,18 @@ that holds a bearer secret or a public capability, each one way:
   can't be carried, keep none (`AppKeysLeftOut`), and an account a restore
   set creates has none. A backup taken before the key tables existed
   restores with no keys. Once the keys and the access settings are settled,
-  a full restore lists by name and id each enabled account that holds an
-  app key and has no way to sign in while `auth.app_key_sign_in` or
-  `auth.local_password_login` is off in the restored database: no sign-in
-  link, no password that signs in, and no key that does
+  every full restore lists by name and id each enabled account that held an
+  unrevoked app key when the restore read the backup and the live server
+  (keys the restore then revoked or left out included) and now has no way
+  to sign in under the restored `auth.app_key_sign_in` and
+  `auth.local_password_login`: no sign-in link whose plugin installation is
+  enabled, no password that signs in, and no key that does
   (`StrandedAccounts`, which mirrors `keySignInPolicy` and
-  `localPasswordPolicy`), and says to give each a password or link a
-  sign-in provider account for it. It changes nothing and never fails the
-  restore. What a person sees for what is left out:
+  `localPasswordPolicy`). It says to give each a password or link a sign-in
+  provider account for it. Accounts that had no key are left to the other
+  deployment notice, which already says their links are not carried. It
+  changes nothing and never fails the restore. What a person sees for what
+  is left out:
   - Login sessions: every app signs in again; one with a working key does
     so by itself.
   - Waiting keys: the device asks to enroll again and waits for an admin's

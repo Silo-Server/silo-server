@@ -29,8 +29,9 @@ const (
 		"two servers that answer as one confuse the apps, and an app key revoked on one keeps working on the other."
 	keepOriginalOff = "Keep the server the backup came from shut down: two servers that answer as one confuse the apps, " +
 		"and an app key revoked on one keeps working on the other."
-	identityTaken = "This server now answers as the server the backup came from, so devices that signed in to it with an app key can sign in here."
-	identityKept  = "This server kept its own identity. App keys from the backup will not work here: " +
+	identityTaken       = "This server now answers as the server the backup came from, so devices that signed in to it with an app key can sign in here."
+	identityTakenNoKeys = "This server now answers as the server the backup came from. The restore kept no app keys, so each app signs in another way and enrolls a new key."
+	identityKept        = "This server kept its own identity. App keys from the backup will not work here: " +
 		"restore onto an install where no account has been created to keep them working."
 )
 

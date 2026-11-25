@@ -59,6 +59,10 @@ type journalHeader struct {
 	// recovery never has to open a closed database to find it. Credentials
 	// in it are sealed with SECRET_KEY.
 	Stores *StoreConfig `json:"stores,omitempty"`
+	// TakesBackupIdentity records that the restore gives the server the
+	// backup's identity (deployment.takesBackupIdentity), so a recovery that
+	// finishes the swap repeats the reminder to keep the old server off.
+	TakesBackupIdentity bool `json:"takes_backup_identity,omitempty"`
 }
 
 // journalBlob is recorded before the restored bytes are written, so a

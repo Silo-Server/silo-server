@@ -60,6 +60,14 @@ type SettledAppKeys struct {
 	// OtherServer counts the backup's keys revoked because this server
 	// keeps its own identity (AppKeysRevoked).
 	OtherServer int
+	// Kept is true when the restored database keeps app key rows: a full
+	// restore whose backup has the key tables and that did not fall back to
+	// leaving every credential out.
+	Kept bool
+	// Holders are the accounts that held an unrevoked key, in the backup
+	// or on the live server, when the restore read them, keys it then
+	// revoked or left out included (StrandedAccounts).
+	Holders []int64
 }
 
 // appKeySettle settles app keys around the carry of the two key tables: a
@@ -67,8 +75,10 @@ type SettledAppKeys struct {
 // nothing when the restore keeps no key rows, or when the backup's schema
 // predates the key tables.
 type appKeySettle struct {
-	on   bool
-	keys AppKeyCarry
+	// present is true when the restored schema has both key tables, and on
+	// when the restore also keeps their rows.
+	present, on bool
+	keys        AppKeyCarry
 	// person and device are the live rows of the two tables, as JSON.
 	person, device string
 }
@@ -84,8 +94,30 @@ func newAppKeySettle(tables []secretTable, live []string, keys AppKeyCarry) appK
 			s.device, found = live[i], found+1
 		}
 	}
-	s.on = keys != AppKeysLeftOut && found == 2
+	s.present = found == 2
+	s.on = keys != AppKeysLeftOut && s.present
 	return s
+}
+
+// holders records, before anything changes, the accounts with an
+// unrevoked key in the restored rows or the live ones, and whether the
+// restore keeps key rows.
+func (s appKeySettle) holders(ctx context.Context, tx pgx.Tx, result *CarriedCredentials) error {
+	if !s.present {
+		return nil
+	}
+	result.AppKeys.Kept = s.on
+	rows, err := tx.Query(ctx, `
+		SELECT user_id FROM auth_person_keys WHERE revoked_at IS NULL
+		UNION SELECT user_id FROM auth_device_keys WHERE revoked_at IS NULL
+		UNION SELECT r.user_id FROM json_populate_recordset(NULL::auth_person_keys, $1::json) r WHERE r.revoked_at IS NULL
+		UNION SELECT r.user_id FROM json_populate_recordset(NULL::auth_device_keys, $2::json) r WHERE r.revoked_at IS NULL
+		ORDER BY 1`, s.person, s.device)
+	if err != nil {
+		return err
+	}
+	result.AppKeys.Holders, err = pgx.CollectRows(rows, pgx.RowTo[int64])
+	return err
 }
 
 // appKeyTables are the two key tables and what the restore output calls a

@@ -280,8 +280,9 @@ func allSettings(ctx context.Context, q queryer, keep func(string) bool) (map[st
 // carryServerSpecificSettings gives the restored database the live
 // server's own settings, less the server identity where dep takes the
 // backup's, and says how many changed and whose identity the restored
-// server answers with.
-func carryServerSpecificSettings(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, dep deployment, out io.Writer) error {
+// server answers with. keysKept says whether the restore kept app keys, the
+// only reason a device signs in by key after taking the backup's identity.
+func carryServerSpecificSettings(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, dep deployment, keysKept bool, out io.Writer) error {
 	changed, err := loader.CarryServerSpecificSettings(ctx, dbURL, liveURL, dep.takesBackupIdentity)
 	if err != nil {
 		return fmt.Errorf("keeping this server's own settings: %w", err)
@@ -291,8 +292,10 @@ func carryServerSpecificSettings(ctx context.Context, loader DatabaseLoader, dbU
 	}
 	switch {
 	case dep.same:
-	case dep.takesBackupIdentity:
+	case dep.takesBackupIdentity && keysKept:
 		_, _ = fmt.Fprintln(out, identityTaken)
+	case dep.takesBackupIdentity:
+		_, _ = fmt.Fprintln(out, identityTakenNoKeys)
 	default:
 		_, _ = fmt.Fprintln(out, identityKept)
 	}

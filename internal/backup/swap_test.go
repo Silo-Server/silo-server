@@ -74,6 +74,9 @@ type fakeControl struct {
 	// liveServerID is the live server's identity; "" is the manifest's.
 	// carriedFrom records the live URL each credential carry read from.
 	liveServerID string
+	// noAccounts makes the live server one with no accounts, which takes
+	// another deployment's server identity.
+	noAccounts bool
 	// superuser is what Superuser reports for every database.
 	superuser   bool
 	carriedFrom []string
@@ -290,8 +293,10 @@ func (l fakeLoader) ServerID(context.Context, string) (string, error) {
 	}
 	return l.m.ServerID, nil
 }
-func (l fakeLoader) HasAccounts(context.Context, string) (bool, error) { return true, nil }
-func (l fakeLoader) StrandedAccounts(context.Context, string) ([]string, error) {
+func (l fakeLoader) HasAccounts(context.Context, string) (bool, error) {
+	return !l.ctl.noAccounts, nil
+}
+func (l fakeLoader) StrandedAccounts(context.Context, string, []int64) ([]string, error) {
 	return nil, nil
 }
 func (l fakeLoader) CarryCredentials(_ context.Context, _, liveURL string, _ AppKeyCarry) (CarriedCredentials, error) {
@@ -694,6 +699,27 @@ func TestSwapRecoversFromACrashAtEveryStep(t *testing.T) {
 			}
 			f.wantClosedThroughout()
 		})
+	}
+}
+
+// TestRecoveredMoveRemindsToKeepTheOriginalOff: a restore that takes the
+// backup's server identity and dies after the swap still ends, under
+// --recover, with the reminder to keep the server the backup came from off.
+func TestRecoveredMoveRemindsToKeepTheOriginalOff(t *testing.T) {
+	f := newSwapFixture(t)
+	f.ctl.liveServerID, f.ctl.noAccounts = "new-install", true
+	f.validate.AcceptLostCredentials = true
+	f.ctl.crashAt = "rename " + restoredDB + " silo"
+	if _, crashed := f.restore(); !crashed {
+		t.Fatalf("the restore did not crash\n%s", f.output.String())
+	}
+	f.output.Reset()
+	if err, crashed := f.recover(); err != nil || crashed {
+		t.Fatalf("recover = %v (crashed %v)\n%s", err, crashed, f.output.String())
+	}
+	f.wantSwapped()
+	if !strings.Contains(f.output.String(), keepOriginalOff) {
+		t.Fatalf("the recovery did not remind to keep the original off:\n%s", f.output.String())
 	}
 }
 

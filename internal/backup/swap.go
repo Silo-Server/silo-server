@@ -209,8 +209,9 @@ func RestoreSwap(ctx context.Context, src *Source, loader DatabaseLoader, ctl Co
 		Time: stamp, ServerID: m.ServerID, BackupID: m.ID,
 		LiveDatabase: live, RestoredDatabase: restored, BeforeDatabase: before,
 		LiveOID: liveOID, RestoredOID: restoredOID,
-		PreservePrefix: serverPrefix(m.ServerID) + stamp + "-overwritten-blobs/",
-		Stores:         sealedStores,
+		PreservePrefix:      serverPrefix(m.ServerID) + stamp + "-overwritten-blobs/",
+		Stores:              sealedStores,
+		TakesBackupIdentity: dep.takesBackupIdentity,
 	}, opts.JournalKey)
 	if err != nil {
 		return discard(err)
@@ -221,13 +222,7 @@ func RestoreSwap(ctx context.Context, src *Source, loader DatabaseLoader, ctl Co
 		opts.Journaled(stamp)
 	}
 	sw := &swap{ctl: ctl, j: j, stores: stores, out: out, manifest: m}
-	if err := sw.run(ctx, src, opts.DatabaseOnly); err != nil {
-		return err
-	}
-	if dep.takesBackupIdentity {
-		_, _ = fmt.Fprintln(out, keepOriginalOff)
-	}
-	return nil
+	return sw.run(ctx, src, opts.DatabaseOnly)
 }
 
 // openSwapStores opens the live stores, checks the archive against where its
@@ -297,12 +292,13 @@ func carryLiveState(ctx context.Context, ctl ControlDB, live string, loader Data
 	if !sameDeployment {
 		carryFrom = ""
 	}
-	if err := post.carry(ctx, loader, restoredURL, carryFrom, opts.LiveURL, dep.appKeys(), opts.Cipher); err != nil {
+	keys, err := post.carry(ctx, loader, restoredURL, carryFrom, opts.LiveURL, dep.appKeys(), opts.Cipher)
+	if err != nil {
 		return err
 	}
 	// This server's own settings describe it whichever deployment the
 	// backup came from.
-	if err := post.step("carrying this server's own settings", carryServerSpecificSettings(ctx, loader, restoredURL, opts.LiveURL, dep, out)); err != nil {
+	if err := post.step("carrying this server's own settings", carryServerSpecificSettings(ctx, loader, restoredURL, opts.LiveURL, dep, keys.Kept, out)); err != nil {
 		return err
 	}
 	if err := post.step(stepInterrupt, interruptWork(ctx, loader, restoredURL, opts.LiveURL, out)); err != nil {
@@ -313,7 +309,7 @@ func carryLiveState(ctx context.Context, ctl ControlDB, live string, loader Data
 	}
 	// Once the keys and the sign-in switches are as the restored server will
 	// start.
-	reportStranded(ctx, loader, restoredURL, out)
+	reportStranded(ctx, loader, restoredURL, keys.Holders, out)
 	return nil
 }
 
@@ -683,6 +679,9 @@ func (s *swap) reopen(ctx context.Context) error {
 		return fmt.Errorf("reopening %s: %w", h.LiveDatabase, err)
 	}
 	_ = s.j.step(ctx, stepLiveReopened)
+	if h.TakesBackupIdentity {
+		defer func() { _, _ = fmt.Fprintln(s.out, keepOriginalOff) }()
+	}
 	if s.manifest != nil {
 		printMissing(s.out, s.manifest)
 	}
