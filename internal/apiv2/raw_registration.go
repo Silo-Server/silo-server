@@ -54,13 +54,18 @@ func mediaCrossOrigin(ctx huma.Context, next func(huma.Context)) {
 
 // RawImpliedStatuses lists only failures of the shared authorization gates.
 // Raw handlers declare their own protocol statuses; JSON negotiation and Huma
-// input validation do not run on byte streams.
-func RawImpliedStatuses(class Class, serviceBacked bool) []int {
+// input validation do not run on byte streams. A public operation naming a
+// rate-limit bucket adds 429, as in ImpliedStatuses.
+func RawImpliedStatuses(class Class, serviceBacked, rateLimited bool) []int {
 	if class == ClassPublic {
-		if serviceBacked {
-			return []int{http.StatusServiceUnavailable}
+		var statuses []int
+		if rateLimited {
+			statuses = append(statuses, http.StatusTooManyRequests)
 		}
-		return nil
+		if serviceBacked {
+			statuses = append(statuses, http.StatusServiceUnavailable)
+		}
+		return statuses
 	}
 	statuses := []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusServiceUnavailable}
 	if resolvesProfile(class) {
@@ -202,7 +207,7 @@ func RegisterRaw(reg *Registry, raw RawOperation, handler http.Handler) {
 	if resolvesProfile(op.Class) {
 		op.Parameters = append(op.Parameters, profileHeaderFor(&op), profileTokenHeaderParam())
 	}
-	for _, status := range RawImpliedStatuses(op.Class, op.ServiceBacked) {
+	for _, status := range RawImpliedStatuses(op.Class, op.ServiceBacked, op.RateLimitBucket != "") {
 		key := strconv.Itoa(status)
 		if _, exists := op.Responses[key]; !exists {
 			op.Responses[key] = &huma.Response{Description: http.StatusText(status), Content: map[string]*huma.MediaType{
