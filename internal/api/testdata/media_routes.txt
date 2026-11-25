@@ -253,6 +253,7 @@ GET /api/v2/admin/insights/activity	non-media
 GET /api/v2/admin/insights/bandwidth	non-media
 GET /api/v2/admin/insights/capabilities	non-media
 GET /api/v2/admin/insights/devices	non-media
+GET /api/v2/admin/insights/library	non-media
 GET /api/v2/admin/insights/people	non-media
 GET /api/v2/admin/insights/titles	non-media
 GET /api/v2/admin/insights/titles/{content_id}	non-media
@@ -1338,6 +1339,7 @@ GET /api/v2/admin/insights/activity	non-media
 GET /api/v2/admin/insights/bandwidth	non-media
 GET /api/v2/admin/insights/capabilities	non-media
 GET /api/v2/admin/insights/devices	non-media
+GET /api/v2/admin/insights/library	non-media
 GET /api/v2/admin/insights/people	non-media
 GET /api/v2/admin/insights/titles	non-media
 GET /api/v2/admin/insights/titles/{content_id}	non-media
