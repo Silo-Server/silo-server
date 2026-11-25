@@ -287,27 +287,30 @@ func (s *DeviceLoginService) revokePreapprovalTx(ctx context.Context, tx pgx.Tx,
 	return nil
 }
 
-// checkPollBinding checks a poll's binding secret. For a pre-approved
-// request every attempt first spends one of the request's own attempts,
-// keyed by its device code hash, and a correct secret clears the count.
-// Wrong secrets never change the row, so someone who learned the device code
-// can slow the device's sign-in down but not destroy it.
+// checkPollBinding checks a poll's binding secret. The right secret always
+// passes. For a pre-approved request each wrong secret spends one of the
+// request's own attempts, keyed by its device code hash, and past the budget
+// a wrong secret is answered with the lock instead of a mismatch. The budget
+// never refuses the right secret and wrong secrets never change the row, so
+// someone who learned the device code can neither lock the device out nor
+// destroy its sign-in.
 func (s *DeviceLoginService) checkPollBinding(ctx context.Context, record *deviceLoginRecord, secret string) error {
+	matches := deviceLoginBindingMatches(record.BindingHash, secret)
 	if record.PreapprovedAt == nil || s.preapprovalAttempts == nil {
-		if !deviceLoginBindingMatches(record.BindingHash, secret) {
+		if !matches {
 			return ErrDeviceLoginBindingMismatch
 		}
 		return nil
 	}
 	key := "device_preapproval:" + record.DeviceCodeHash
+	if matches {
+		s.preapprovalAttempts.Reset(ctx, key)
+		return nil
+	}
 	if retryAfter, ok := s.preapprovalAttempts.Reserve(ctx, key); !ok {
 		return &DevicePreapprovalAttemptsError{RetryAfter: retryAfter}
 	}
-	if !deviceLoginBindingMatches(record.BindingHash, secret) {
-		return ErrDeviceLoginBindingMismatch
-	}
-	s.preapprovalAttempts.Reset(ctx, key)
-	return nil
+	return ErrDeviceLoginBindingMismatch
 }
 
 // deviceLoginDeniedResult is the terminal answer to a poll of a request that

@@ -225,11 +225,18 @@ the fingerprint. Nothing on the poll changes for the TV.
   pre-approved request has its own budget of wrong binding secrets, keyed by
   its device code hash: 10 attempts, then 15 minutes locked
   (`ratelimit.DevicePreapprovalPolicy`), counted in Redis when the deployment
-  has it. Every poll spends an attempt before the secret is checked, and a
-  correct secret clears the count. While locked, every poll is 429
-  `rate_limited` with `Retry-After`, the right secret included. Wrong secrets
-  never change the row, so someone who learns a device code can slow the TV's
-  sign-in down but not destroy it.
+  has it. Only a wrong secret spends an attempt. While locked, a wrong secret
+  is 429 `rate_limited` with `Retry-After`. The right secret is never
+  refused by the budget and clears the count, and wrong secrets never change
+  the row, so someone who learns a device code can neither keep the TV out
+  nor destroy its sign-in.
+- **Rolling deploys and rollback.** A node from the release before this one
+  does not know the marker: it would let a bare device code cancel a
+  pre-approved request and would collect one without the provider check
+  above. Clients create pre-approved sign-ins only after
+  `GET /api/v2/auth/device/capability` reports `preapprove`, which an older
+  node never does, and an upgrade should finish before the feature is relied
+  on. Rolling the migration back deletes the waiting pre-approved requests.
 
 `GET /api/v2/auth/device/capability` reports `preapprove: true`.
 

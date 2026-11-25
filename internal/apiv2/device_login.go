@@ -285,7 +285,7 @@ func registerDeviceLogin(reg *Registry) {
 	poll := humaOp(http.MethodPost, Prefix+"/auth/device/poll", "pollDeviceLogin", "device-login",
 		"Poll a pairing request from the device and collect its tokens once approved.")
 	poll.Description = "A request started with binding is polled only with its binding_secret: a poll without it, or with another secret, is 403 device_binding_mismatch and leaves the request unchanged."
-	poll.Description += " A request approved in advance answers 429 rate_limited after too many wrong secrets for its device code, and 503 provider_unavailable while the sign-in provider it was approved through is disabled. A request whose approving account was disabled or deleted answers status denied."
+	poll.Description += " A request approved in advance answers 429 rate_limited to a wrong secret after too many wrong secrets for its device code (the right secret is never refused by that budget), and 503 provider_unavailable while the sign-in provider it was approved through is disabled. A request whose approving account was disabled or deleted answers status denied."
 	poll.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusTooManyRequests, http.StatusServiceUnavailable}
 	Register(reg, Operation{
 		Operation: poll, RetrySafety: RetrySafetyNonRetryable,

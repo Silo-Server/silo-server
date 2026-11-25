@@ -13,6 +13,9 @@ ALTER TABLE device_login_requests
     );
 
 -- +goose Down
+-- A pre-approved row left behind would read as an ordinary approval good for
+-- up to 30 days, which the account could no longer list or withdraw.
+DELETE FROM device_login_requests WHERE preapproved_at IS NOT NULL;
 ALTER TABLE device_login_requests
     DROP CONSTRAINT IF EXISTS device_login_requests_preapproved_bound,
     DROP COLUMN IF EXISTS preapproved_at;

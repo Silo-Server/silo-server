@@ -47,8 +47,10 @@ var QuickConnectCodePolicy = AttemptPolicy{MaxAttempts: 20, Window: 15 * time.Mi
 // pre-approved device sign-in's device code: ten, then fifteen minutes
 // locked. The secret is 32 random bytes, so the budget is not what keeps it
 // from being guessed; it stops someone who learned a device code from
-// polling it without end. A correct secret clears the count. The device
-// sign-in service keys it per request (auth.DeviceLoginService).
+// polling it without end. The device sign-in service keys it per request
+// and never spends or consults it for the correct secret, which clears the
+// count, so the lock cannot be used to keep the device itself out
+// (auth.DeviceLoginService).
 var DevicePreapprovalPolicy = AttemptPolicy{MaxAttempts: 10, Window: 15 * time.Minute}
 
 // SignInNamePolicy bounds password sign-ins per sign-in name: ten attempts,

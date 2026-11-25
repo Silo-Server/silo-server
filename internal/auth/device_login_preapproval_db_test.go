@@ -302,8 +302,9 @@ func TestDevicePreapprovalCapDB(t *testing.T) {
 }
 
 // TestDevicePreapprovalWrongSecretBudgetDB: wrong secrets for one
-// pre-approved request are counted against its device code; past the budget
-// even the right secret waits out the lock, and the request is unchanged.
+// pre-approved request are counted against its device code and locked out
+// past the budget, but the lock never refuses the right secret, so someone
+// who learned the code cannot keep the device out.
 func TestDevicePreapprovalWrongSecretBudgetDB(t *testing.T) {
 	svc, pool, userID, name := deviceLoginTestService(t)
 	budget := &countingAttempts{max: 10, counts: map[string]int{}}
@@ -321,10 +322,14 @@ func TestDevicePreapprovalWrongSecretBudgetDB(t *testing.T) {
 		}
 	}
 	var attempts *DevicePreapprovalAttemptsError
-	if _, err := svc.Poll(t.Context(), created.DeviceCode, secret); !errors.As(err, &attempts) || attempts.RetryAfter <= 0 {
-		t.Fatalf("right secret past the budget: %v", err)
+	if _, err := svc.Poll(t.Context(), created.DeviceCode, wrong); !errors.As(err, &attempts) || attempts.RetryAfter <= 0 {
+		t.Fatalf("wrong secret past the budget: %v", err)
 	}
 	if got := preapprovalStatus(t, pool, created.ID); got != DeviceLoginStatusApproved {
 		t.Fatalf("status %s after the budget ran out", got)
+	}
+	result, err := svc.Poll(t.Context(), created.DeviceCode, secret)
+	if err != nil || result.TokenPair == nil {
+		t.Fatalf("right secret past the budget: %+v, %v", result, err)
 	}
 }
