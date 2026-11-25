@@ -7133,7 +7133,7 @@ export interface paths {
     post?: never;
     /**
      * Revoke one of the caller's login sessions.
-     * @description In demo mode a caller that is not an administrator may revoke only the session making the request; any other session is 403 permission_denied. getLoginSessionCapabilities reports this as revoke_other_sessions.
+     * @description In demo mode a caller that is not an administrator may revoke only the session making the request; any other session of the account is 403 permission_denied, while an unknown session or one of another account is 404 as for every caller. getLoginSessionCapabilities reports this as revoke_other_sessions.
      */
     delete: operations["deleteSession"];
     options?: never;

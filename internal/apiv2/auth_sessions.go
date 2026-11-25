@@ -213,7 +213,7 @@ func registerAuthSessions(reg *Registry) {
 	})
 	del := humaOp(http.MethodDelete, Prefix+"/auth/sessions/{id}", "deleteSession", "auth",
 		"Revoke one of the caller's login sessions.")
-	del.Description = "In demo mode a caller that is not an administrator may revoke only the session making the request; any other session is 403 permission_denied. getLoginSessionCapabilities reports this as revoke_other_sessions."
+	del.Description = "In demo mode a caller that is not an administrator may revoke only the session making the request; any other session of the account is 403 permission_denied, while an unknown session or one of another account is 404 as for every caller. getLoginSessionCapabilities reports this as revoke_other_sessions."
 	// 403: another session, refused in demo mode.
 	del.Errors = []int{http.StatusNotFound, http.StatusForbidden}
 	Register(reg, Operation{Operation: del, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true}, reg.deleteSession)
