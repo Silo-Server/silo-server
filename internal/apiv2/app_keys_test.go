@@ -146,7 +146,8 @@ func TestAppKeyRoutesFollowTheSwitch(t *testing.T) {
 
 // The sealed reply is the only place session tokens leave a key sign-in, and
 // another team's client parses its plaintext: only the reply key's holder can
-// open it, and its fields are the protocol's.
+// open it, and its fields are the protocol's. A signed_in answer also carries
+// the pinned local route the device moves to; approval_required doesn't.
 func TestAppKeySealedReply(t *testing.T) {
 	reply, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
@@ -168,7 +169,7 @@ func TestAppKeySealedReply(t *testing.T) {
 	}{
 		{name: "signed in", tokens: tokens,
 			result: auth.KeySignInResult{Status: appkeys.ReplySignedIn, DeviceID: "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", User: user},
-			want:   `{"status":"signed_in","device_id":"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11","account_id":"4","tokens":{"access_token":"access","refresh_token":"refresh","expires_in":28800,"user":{"id":"4","username":"sam","email":"","role":"user","permissions":[],"download_allowed":false,"password_change_required":false}}}`},
+			want:   `{"status":"signed_in","device_id":"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11","account_id":"4","tokens":{"access_token":"access","refresh_token":"refresh","expires_in":28800,"user":{"id":"4","username":"sam","email":"","role":"user","permissions":[],"download_allowed":false,"password_change_required":false}},"local_route":{"spki_sha256":"n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=","url":"http://192.168.1.20:8080"}}`},
 		{name: "approval required",
 			result: auth.KeySignInResult{Status: appkeys.ReplyApprovalRequired, DeviceID: "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", User: user},
 			want:   `{"status":"approval_required","device_id":"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11","account_id":"4"}`},
@@ -177,7 +178,12 @@ func TestAppKeySealedReply(t *testing.T) {
 			result := tc.result
 			result.ReplyKey, result.Challenge = replyKey, challenge
 			keys := &fakeAppKeys{enabled: true, answer: &handlers.AppKeyAnswer{Result: &result, Tokens: tc.tokens}}
-			rec := do(t, NewHandler(appKeyDeps(keys)), http.MethodPost, Prefix+"/auth/keys/sign-in", testEnvelope, nil)
+			deps := appKeyDeps(keys)
+			deps.ServerConnections = ServerConnections{
+				LocalTLSPin: "n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=",
+				LocalURL:    func() string { return "HTTP://192.168.1.20:8080/" },
+			}
+			rec := do(t, NewHandler(deps), http.MethodPost, Prefix+"/auth/keys/sign-in", testEnvelope, nil)
 			if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-store" {
 				t.Fatalf("status = %d, cache %q: %s", rec.Code, rec.Header().Get("Cache-Control"), rec.Body.String())
 			}

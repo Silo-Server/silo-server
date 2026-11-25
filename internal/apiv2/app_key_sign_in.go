@@ -87,9 +87,13 @@ type appKeyReply struct {
 	Tokens    *TokenPair `json:"tokens,omitempty"`
 	// PersonKeyID is the enrolled person key's ID, on enroll only.
 	PersonKeyID string `json:"person_key_id,omitempty"`
+	// LocalRoute is the pinned local route, on signed_in only, when the
+	// listener has a TLS identity (docs/architecture/app-keys.md, "The pinned
+	// route").
+	LocalRoute *ServerLocalRoute `json:"local_route,omitempty"`
 }
 
-const sealedReplyDescription = " The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens}, where tokens is the login token pair; for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited."
+const sealedReplyDescription = " The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited."
 
 func registerAppKeySignIn(reg *Registry) {
 	challenge := humaOp(http.MethodPost, Prefix+"/auth/keys/challenge", "createAppKeyChallenge", "app-keys",
@@ -187,7 +191,7 @@ func (reg *Registry) signedKeyRequest(ctx context.Context, in *AppKeyEnvelopeInp
 	if err != nil {
 		return nil, appKeyProblem(err)
 	}
-	return sealAppKeyAnswer(answer)
+	return reg.sealAppKeyAnswer(answer)
 }
 
 func (reg *Registry) enrollAppKeys(ctx context.Context, in *EnrollAppKeysInput) (*SealedReplyOutput, error) {
@@ -214,14 +218,35 @@ func (reg *Registry) enrollAppKeys(ctx context.Context, in *EnrollAppKeysInput) 
 	if err != nil {
 		return nil, appKeyProblem(err)
 	}
-	return sealAppKeyAnswer(answer)
+	return reg.sealAppKeyAnswer(answer)
+}
+
+// localRoute is the pinned local route as getServerConnections reports it,
+// or nil when the listener has no TLS identity.
+func (reg *Registry) localRoute() *ServerLocalRoute {
+	connections := reg.deps.ServerConnections
+	if connections.LocalTLSPin == "" {
+		return nil
+	}
+	route := &ServerLocalRoute{SPKISHA256: connections.LocalTLSPin}
+	if connections.LocalURL != nil {
+		if origin, ok := netaccess.NormalizeOrigin(connections.LocalURL()); ok {
+			route.URL = origin
+		}
+	}
+	return route
 }
 
 // sealAppKeyAnswer seals the answer's plaintext to the request's reply key,
-// salted with its challenge.
-func sealAppKeyAnswer(answer *handlers.AppKeyAnswer) (*SealedReplyOutput, error) {
+// salted with its challenge. Every route that answers a signed request with
+// session tokens builds its plaintext here, so a signed_in answer always
+// carries the pinned local route.
+func (reg *Registry) sealAppKeyAnswer(answer *handlers.AppKeyAnswer) (*SealedReplyOutput, error) {
 	result := answer.Result
 	reply := appKeyReply{Status: result.Status, DeviceID: result.DeviceID, PersonKeyID: result.PersonKeyID}
+	if result.Status == appkeys.ReplySignedIn {
+		reply.LocalRoute = reg.localRoute()
+	}
 	if result.User != nil {
 		reply.AccountID = IDFromInt(int64(result.User.ID))
 	}
