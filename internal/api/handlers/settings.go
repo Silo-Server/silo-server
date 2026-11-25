@@ -512,9 +512,10 @@ func (h *SettingsHandler) EffectiveSubtitleAppearance(ctx context.Context, userI
 	return view, nil
 }
 
-// compactSettingJSON renders a stored setting value as compact JSON, so the
-// document reads the same whichever backend stored it (Postgres jsonb adds
-// spaces).
+// compactSettingJSON renders a stored setting value as compact JSON, dropping
+// the spaces Postgres jsonb adds. jsonb also reorders object keys while SQLite
+// keeps them as sent, so the two backends can still return different strings
+// for the same document; compare the values as JSON, not as strings.
 func compactSettingJSON(value json.RawMessage) string {
 	var out bytes.Buffer
 	if err := json.Compact(&out, value); err != nil {
