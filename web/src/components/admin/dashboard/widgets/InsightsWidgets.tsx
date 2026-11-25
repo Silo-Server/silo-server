@@ -91,7 +91,12 @@ function useMetricToggle(): { metric: ViewingTimeMetric; toggle: ReactNode } {
   };
 }
 
-/** The Activity read for the widget's window, or the skeleton or error that stands in for it. */
+/**
+ * The Activity read for the widget's window, or the skeleton or error that
+ * stands in for it. A failed poll keeps the last good data on screen: these
+ * reads poll every 5 or 15 minutes without retrying, so an error shown over
+ * data would stay up until the next poll.
+ */
 function ActivityBody({ children }: { children: (data: AdminInsightsActivity) => ReactNode }) {
   const t = useT();
   const { range } = useWidgetRange();
@@ -99,7 +104,7 @@ function ActivityBody({ children }: { children: (data: AdminInsightsActivity) =>
   if (query.isLoading) {
     return <ChartSkeleton fill />;
   }
-  if (query.error || !query.data) {
+  if (!query.data) {
     return <SectionError message={t("web.admin.dashboard.widgets.insights.loadFailed")} />;
   }
   return <>{children(query.data)}</>;
@@ -217,7 +222,7 @@ export function InsightsLibraryCoverageWidget() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {query.isLoading ? (
           <BarListSkeleton />
-        ) : query.error || !query.data ? (
+        ) : !query.data ? (
           <SectionError message={t("web.admin.dashboard.widgets.insights.loadFailed")} />
         ) : (
           <LibraryCoverageList libraries={query.data.libraries} />

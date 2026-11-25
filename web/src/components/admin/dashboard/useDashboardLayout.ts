@@ -6,6 +6,7 @@ import {
   captureDashboardLayoutSave,
   type DashboardLayoutSaveIntent,
   useAdminDashboardLayout,
+  useDashboardLayoutWrites,
   useResetAdminDashboardLayout,
   useSaveAdminDashboardLayout,
 } from "@/hooks/queries/admin/dashboardLayout";
@@ -303,6 +304,8 @@ export function useDashboardLayout(): DashboardLayout {
   useEffect(clearLegacyStoredLayout, []);
 
   const remote = useAdminDashboardLayout();
+  const { running: layoutWritesRunning, isRunning: isLayoutWriteRunning } =
+    useDashboardLayoutWrites();
   const saveLayout = useSaveAdminDashboardLayout();
   const resetRemoteLayout = useResetAdminDashboardLayout();
 
@@ -441,6 +444,7 @@ export function useDashboardLayout(): DashboardLayout {
   const remoteData = remote.data;
   const remoteSettled = remote.isSuccess;
   const remoteFailed = remote.isError;
+  const remoteFetching = remote.isFetching;
 
   useEffect(() => {
     if (settledRef.current) {
@@ -451,6 +455,15 @@ export function useDashboardLayout(): DashboardLayout {
       if (remoteFailed && (draftRef.current || readStoredDraft(userId, editAuthority))) {
         setServerSaveBlocked(true);
       }
+      return;
+    }
+    // Another page's write may still be on its way, or the refetch it
+    // triggered still running: an Insights card's Add to dashboard is flushed
+    // as that page unmounts, in the same commit that mounts this one. The
+    // cached copy predates that write, so adopting it would drop the change
+    // and leave this page saving against a version the server no longer
+    // holds. Settle on the copy the write leaves behind instead.
+    if (remoteFetching || isLayoutWriteRunning()) {
       return;
     }
     // A draft left by an earlier visit is reconciled with the entries it
@@ -517,6 +530,9 @@ export function useDashboardLayout(): DashboardLayout {
     remoteSettled,
     remoteFailed,
     remoteData,
+    remoteFetching,
+    layoutWritesRunning,
+    isLayoutWriteRunning,
     flushSave,
     scheduleSave,
     entries,

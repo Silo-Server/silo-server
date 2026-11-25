@@ -7,12 +7,20 @@ import { findDashboardWidget } from "@/components/admin/dashboard/registry";
 import type { WidgetId } from "@/components/admin/dashboard/types";
 import { useDashboardLayout } from "@/components/admin/dashboard/useDashboardLayout";
 import { Button } from "@/components/ui/button";
+import { useAdminDashboardLayout } from "@/hooks/queries/admin/dashboardLayout";
 import { useT } from "@/i18n";
 
 import { insightsRangeToWidgetRange, type InsightsRange } from "./insightsHelpers";
 
 interface InsightsDashboardPins {
   isPlaced: (id: WidgetId) => boolean;
+  /**
+   * False until the server layout has loaded, and while saving it is blocked
+   * (a failed save, or a newer layout from another browser). An add then
+   * could not reach the server, so the buttons stay hidden rather than
+   * confirm a change the dashboard never gets.
+   */
+  canAdd: boolean;
   add: (id: WidgetId, range: InsightsRange) => void;
 }
 
@@ -27,11 +35,14 @@ const InsightsDashboardPinsContext = createContext<InsightsDashboardPins | null>
  * of the arrangement and the two would overwrite each other.
  */
 export function InsightsDashboardPinsProvider({ children }: { children: ReactNode }) {
-  const { entries, addWidget, setWidgetRange } = useDashboardLayout();
+  const { entries, addWidget, setWidgetRange, serverSaveBlocked } = useDashboardLayout();
+  const layoutLoaded = useAdminDashboardLayout().isSuccess;
+  const canAdd = layoutLoaded && !serverSaveBlocked;
   const value = useMemo<InsightsDashboardPins>(() => {
     const placed = new Set(entries.map((entry) => entry.id));
     return {
       isPlaced: (id) => placed.has(id),
+      canAdd,
       add: (id, range) => {
         addWidget(id);
         // Open the widget on the window the card was showing when the widget
@@ -42,7 +53,7 @@ export function InsightsDashboardPinsProvider({ children }: { children: ReactNod
         }
       },
     };
-  }, [entries, addWidget, setWidgetRange]);
+  }, [entries, canAdd, addWidget, setWidgetRange]);
   return (
     <InsightsDashboardPinsContext.Provider value={value}>
       {children}
@@ -80,6 +91,9 @@ export function AddToDashboardButton({
         {t("web.admin.insights.addToDashboard.onDashboard")}
       </Link>
     );
+  }
+  if (!pins.canAdd) {
+    return null;
   }
   return (
     <Button

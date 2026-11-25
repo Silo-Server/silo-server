@@ -31,6 +31,7 @@ export function LibraryCoverageList({
   return (
     <BarList
       items={items}
+      max={100}
       seriesIndex={2}
       formatValue={(value) =>
         t("web.admin.insights.library.coverage.playedShare", {

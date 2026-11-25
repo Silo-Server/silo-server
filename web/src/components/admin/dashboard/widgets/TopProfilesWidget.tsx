@@ -69,7 +69,7 @@ export function TopProfilesWidget() {
       <CardContent className="min-h-0 flex-1 overflow-y-auto">
         {query.isLoading ? (
           <BarListSkeleton />
-        ) : query.error ? (
+        ) : query.error && !query.data ? (
           <SectionError message={t("web.admin.dashboard.widgets.topProfiles.loadFailed")} />
         ) : (
           <BarList
