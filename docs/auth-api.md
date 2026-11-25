@@ -334,7 +334,10 @@ than `id` and `current` or ends another session. A session with `false`, a TV th
 with a password after the upgrade included, or with no value and any other platform, is
 ordinary, as are a session an administrator opened to act as the account and an API-key
 caller. During a rolling deploy a server of the previous release inserts sessions with no
-value, so they are judged as sessions from before the column.
+value, so they are judged as sessions from before the column. The limit covers only the
+account's own session list: a device signed in by code on an administrator's account still
+holds that account's administrator powers, including ending any account's sessions, so a code
+on a shared device should not be approved from an administrator's account.
 
 For a limited caller, `listSessions` still answers `200` with every live session of the
 account, because released Apple apps read the session ids to recognize one server saved under
