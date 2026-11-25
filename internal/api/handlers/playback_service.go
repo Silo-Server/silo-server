@@ -649,13 +649,22 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 	// No copy here to finalize: the copy on another replica, if any, finds
 	// the attempt stopped and is dropped without history, so the admin log
 	// is written from the attempt row and the live row that copy synced.
+	// Re-read the attempt after StopAttempt sealed it: another replica may have
+	// committed a replan between ownedAttemptV2 and StopAttempt, and stop
+	// finalization must record the final committed plan rather than the earlier
+	// snapshot.
+	if h.PlanStoreV3 != nil {
+		if latest, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && latest != nil {
+			record = latest
+		}
+	}
 	if accepted == nil {
 		position = playback.PositionUnknown
 	}
 	session := h.attemptSessionV2(ctx, record, position, paused)
 	carried := endWatch(ctx)
 	session.Watch = carried
-	h.fillDetachedSession(ctx, session, record.CreatedAt)
+	fromLiveRow := h.fillDetachedSession(ctx, session, record.CreatedAt)
 	fromRemovedCopy := carried.Measured && session.Watch.Until.Equal(carried.Until)
 	if accepted != nil && (accepted.Sequence > record.LastSequence || !fromRemovedCopy) {
 		// The latest accepted sample: the stop's own, or, when the
@@ -666,9 +675,10 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 		observeEndSample(session, time.Now())
 	}
 	if record.CurrentPlanID != "" {
-		// The attempt holds the plan the last replan committed. The live row
-		// can be gone after a restart, leaving only where the play started.
-		session.Subtitle = playback.SessionSubtitleFromPlanV3(&record.CurrentPlan)
+		// The attempt holds the plan and frozen recipe the last replan
+		// committed. The live row can be gone after a restart, leaving only
+		// where the play started.
+		applyAttemptPlanFacts(session, record, fromLiveRow)
 	}
 	result := h.recordStopHistory(ctx, session, reason)
 	if result.WatchStateErr != nil {

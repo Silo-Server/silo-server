@@ -4971,34 +4971,7 @@ func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *pla
 		SubtitleTrackIndex:            result.SubtitleTransportTrackIndex,
 		SubtitleBurnIn:                result.SubtitleBurnIn,
 	}
-	if result.Plan != nil && (result.Plan.Delivery == playback.DeliveryTranscodeHLSV3 || result.Plan.Delivery == playback.DeliveryRemuxHLSV3) {
-		state.SegmentDuration = playback.DefaultSegmentDuration
-		state.OutputProtocol = playback.OutputProtocolHLS
-		videoCodec := result.TargetVideoCodec
-		if result.Plan.Delivery == playback.DeliveryRemuxHLSV3 {
-			videoCodec = "copy"
-		}
-		state.TargetVideoCodec = videoCodec
-		state.OutputContainer = playback.HLSOutputContainer(playback.TranscodeOpts{
-			TargetCodecVideo: videoCodec,
-			SourceVideoCodec: sourceExecutionMetadataV3(file, result).VideoCodec,
-			CopyVideoMPEGTS:  playback.PlanCopiesVideoAsMPEGTSV3(*result.Plan),
-		})
-	}
-	if result.PlayMethod == playback.PlayTranscode {
-		state.TargetBitrateKbps = result.TargetBitrateKbps
-	}
-	if strings.EqualFold(state.TargetVideoCodec, "copy") {
-		// A copy applies neither target. Report none, as a session rebuilt from
-		// its recipe card does, so the fields do not change on a restart.
-		state.TargetResolution, state.TargetBitrateKbps = "", 0
-	}
-	if result.Plan != nil && result.Plan.Delivery == playback.DeliveryRemuxProgressiveV3 {
-		state.OutputContainer, state.OutputProtocol = playback.OutputContainerFMP4, playback.OutputProtocolHTTP
-	}
-	if result.Plan != nil && result.Plan.Delivery == playback.DeliveryOriginalHTTPV3 && file != nil {
-		state.OutputContainer, state.OutputProtocol = file.Container, playback.OutputProtocolHTTP
-	}
+	applyPlannedOutputToSessionState(&state, file, result)
 	if state.StreamBitrateKbps <= 0 {
 		state.StreamBitrateKbps = result.TargetAudioBitrateKbps
 	}
@@ -5006,6 +4979,41 @@ func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *pla
 		state.StreamBitrateKbps = fileBitrateKbps(file)
 	}
 	return state
+}
+
+func applyPlannedOutputToSessionState(state *playback.SessionStreamState, file *models.MediaFile, result playback.PlannerResultV3) {
+	if result.PlayMethod == playback.PlayTranscode {
+		state.TargetBitrateKbps = result.TargetBitrateKbps
+	}
+	if result.Plan == nil {
+		if strings.EqualFold(state.TargetVideoCodec, "copy") {
+			state.TargetResolution, state.TargetBitrateKbps = "", 0
+		}
+		return
+	}
+	state.PlanID = result.Plan.PlanID
+	if result.Plan.Delivery == playback.DeliveryTranscodeHLSV3 || result.Plan.Delivery == playback.DeliveryRemuxHLSV3 {
+		state.SegmentDuration = playback.DefaultSegmentDuration
+	}
+	sourceContainer := ""
+	if file != nil {
+		sourceContainer = file.Container
+	}
+	out := playback.ResolvePlannedOutputV3(
+		*result.Plan,
+		result.PlayMethod,
+		sourceExecutionMetadataV3(file, result).VideoCodec,
+		result.TargetVideoCodec,
+		sourceContainer,
+	)
+	state.TargetVideoCodec = out.TargetVideoCodec
+	state.OutputProtocol = out.OutputProtocol
+	state.OutputContainer = out.OutputContainer
+	if out.ClearsVideoTarget {
+		// A copy applies neither target. Report none, as a session rebuilt from
+		// its recipe card does, so the fields do not change on a restart.
+		state.TargetResolution, state.TargetBitrateKbps = "", 0
+	}
 }
 
 func (h *PlaybackHandler) updateV3SessionState(ctx context.Context, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, transport preparedTransportV3, mode mediaAuthModeV3) error {

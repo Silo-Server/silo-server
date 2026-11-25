@@ -6601,6 +6601,154 @@
       "body_file": "get_admin_collection_template_job_completed.json"
     },
     {
+      "name": "get_admin_insights_activity_ok",
+      "operation_id": "getAdminInsightsActivity",
+      "scenario": "Administrator insights activity returns summary KPIs, local-timezone buckets, viewing heatmap, and peak concurrent streams.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/insights/activity?range=30d&tz=UTC",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminInsightsActivity",
+      "body_file": "get_admin_insights_activity_ok.json"
+    },
+    {
+      "name": "get_admin_insights_bandwidth_ok",
+      "operation_id": "getAdminInsightsBandwidth",
+      "scenario": "Administrator insights bandwidth returns daily archive + live egress totals and per-node breakdown.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/insights/bandwidth?range=30d&tz=UTC",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminInsightsBandwidth",
+      "body_file": "get_admin_insights_bandwidth_ok.json"
+    },
+    {
+      "name": "get_admin_insights_capabilities_ok",
+      "operation_id": "getAdminInsightsCapabilities",
+      "scenario": "Administrator insights capabilities advertise available Monitor -> Insights tabs and archival datasets.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/insights/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"1d1377f9888815295cf9fd7c24376d588fe12eadf59e46ef9e4cf557c8c04d53\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminInsightsCapabilities",
+      "body_file": "get_admin_insights_capabilities_ok.json"
+    },
+    {
+      "name": "get_admin_insights_devices_ok",
+      "operation_id": "getAdminInsightsDevices",
+      "scenario": "Administrator insights devices returns client x codec direct-play matrix, adaptation reasons, transcode breakdowns, and source vs delivered resolution classes.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/insights/devices?range=30d&tz=UTC&min_sessions=5",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminInsightsDevices",
+      "body_file": "get_admin_insights_devices_ok.json"
+    },
+    {
+      "name": "get_admin_insights_people_ok",
+      "operation_id": "getAdminInsightsPeople",
+      "scenario": "Administrator insights people returns account and nested household profile viewing leaderboards.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/insights/people?range=30d&tz=UTC",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminInsightsPeople",
+      "body_file": "get_admin_insights_people_ok.json"
+    },
+    {
+      "name": "get_admin_insights_title_ok",
+      "operation_id": "getAdminInsightsTitle",
+      "scenario": "Administrator insights title detail returns a series' plays over time, viewers, and episodes.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/insights/titles/series-1?range=30d&tz=UTC",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminInsightsTitle",
+      "body_file": "get_admin_insights_title_ok.json"
+    },
+    {
+      "name": "get_admin_insights_titles_ok",
+      "operation_id": "getAdminInsightsTitles",
+      "scenario": "Administrator insights titles ranks the most watched movies, series and libraries.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/insights/titles?range=30d&tz=UTC&sort=plays&limit=10",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminInsightsTitles",
+      "body_file": "get_admin_insights_titles_ok.json"
+    },
+    {
       "name": "get_admin_item_trickplay_ok",
       "operation_id": "getAdminItemTrickplay",
       "scenario": "An item's two files: one with published previews, one its library could not make previews of.",
@@ -6636,11 +6784,32 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"8e5e419f09c4d6506da92cbfdc72d8ec4f2ae7ca528d216366c0adf84abb8e43\""
+        "ETag": "\"d670d642614086a99de73e1d46549cd0d04475605d4cb63a12f081e6523efc35\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminPlaybackHistoryCapabilities",
       "body_file": "get_admin_playback_history_capabilities_ok.json"
+    },
+    {
+      "name": "get_admin_playback_history_entry_ok",
+      "operation_id": "getAdminPlaybackHistoryEntry",
+      "scenario": "Administrator playback history entry returns delivered route facts and source file metadata for one finalized session.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/playback-history/sess-9007199254740993",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminPlaybackHistoryEntry",
+      "body_file": "get_admin_playback_history_entry_ok.json"
     },
     {
       "name": "get_admin_plugin_capabilities_ok",

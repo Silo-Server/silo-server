@@ -2316,6 +2316,125 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/insights/activity": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read multi-range playback activity, watch time, local-timezone viewing heatmap, and peak concurrent streams. */
+    get: operations["getAdminInsightsActivity"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/insights/bandwidth": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read multi-range server and per-node daily egress volume, peak throughput, and remote vs local session share. */
+    get: operations["getAdminInsightsBandwidth"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/insights/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover Monitor -> Insights tabs and archival datasets supported by this server. */
+    get: operations["getAdminInsightsCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/insights/devices": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read client x source video codec direct-play matrix, adaptation reasons, hardware acceleration, subtitle burn-in, and HDR tone-mapping diagnostics. */
+    get: operations["getAdminInsightsDevices"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/insights/people": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read account and household profile viewing leaderboards over the requested range. */
+    get: operations["getAdminInsightsPeople"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/insights/titles": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Rank the most watched and most popular movies, series and libraries still in the catalog over the requested range. */
+    get: operations["getAdminInsightsTitles"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/insights/titles/{content_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read one movie or series: plays over time, the profiles that played it, and a series' episodes. */
+    get: operations["getAdminInsightsTitle"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/invitations": {
     parameters: {
       query?: never;
@@ -3814,6 +3933,23 @@ export interface paths {
     };
     /** List finalized playback attempts across every account and profile, newest ended first. Each page is one consistent read; later pages read the live log. */
     get: operations["listAdminPlaybackHistory"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/playback-history/{session_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read one finalized playback attempt with its delivered route facts and source file specs. */
+    get: operations["getAdminPlaybackHistoryEntry"];
     put?: never;
     post?: never;
     delete?: never;
@@ -18573,6 +18709,697 @@ export interface components {
        */
       type: "poster" | "backdrop" | "logo";
     };
+    AdminInsightsActivity: {
+      /** @enum {string} */
+      bucket_unit: "day" | "week" | "month";
+      buckets: components["schemas"]["AdminInsightsActivityBucket"][];
+      coverage: components["schemas"]["AdminInsightsCoverage"];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      from: string;
+      heatmap: components["schemas"]["AdminInsightsHeatmapCell"][];
+      peak_streams: components["schemas"]["AdminInsightsPeakStreamsPoint"][];
+      summary: components["schemas"]["AdminInsightsActivitySummary"];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      to: string;
+      tz: string;
+    };
+    AdminInsightsActivityBucket: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      bucket_start: string;
+      /** Format: int64 */
+      direct: number;
+      /** Format: int64 */
+      episodes: number;
+      /**
+       * Format: date
+       * @description Local bucket start date (YYYY-MM-DD in requested tz)
+       */
+      label_date: string;
+      /** Format: int64 */
+      movies: number;
+      /** Format: int64 */
+      other_media: number;
+      /** Format: int64 */
+      plays: number;
+      /** Format: int64 */
+      remux: number;
+      /** Format: int64 */
+      transcode: number;
+      /** Format: int64 */
+      watch_seconds: number;
+    };
+    AdminInsightsActivitySummary: {
+      /** Format: int64 */
+      completed_plays: number;
+      /** Format: double */
+      completion_rate: number;
+      /** Format: int64 */
+      direct_plays: number;
+      /** Format: int64 */
+      episodes: number;
+      /** Format: int64 */
+      measured_watch_seconds: number;
+      /** Format: int64 */
+      movies: number;
+      /** Format: int64 */
+      other_media: number;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      peak_concurrent_at: string | null;
+      /** Format: int64 */
+      peak_concurrent_streams: number;
+      /**
+       * Format: int64
+       * @description Plays that started in the window
+       */
+      plays: number;
+      /** Format: int64 */
+      remux_plays: number;
+      /**
+       * Format: int64
+       * @description Playback sessions that started in the window
+       */
+      sessions: number;
+      /** Format: int64 */
+      transcode_plays: number;
+      /** Format: int64 */
+      unique_accounts: number;
+      /** Format: int64 */
+      unique_profiles: number;
+      /** Format: int64 */
+      watch_seconds: number;
+    };
+    AdminInsightsAdaptationReason: {
+      reason: string;
+      /** Format: int64 */
+      sessions: number;
+      /** Format: double */
+      share_of_adapted: number;
+    };
+    AdminInsightsBandwidth: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      from: string;
+      has_remote_nodes: boolean;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      oldest_metric_at: string | null;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      oldest_route_facts_at: string | null;
+      points: components["schemas"]["AdminInsightsBandwidthPoint"][];
+      sources: components["schemas"]["AdminInsightsEgressSource"][];
+      summary: components["schemas"]["AdminInsightsBandwidthSummary"];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      to: string;
+      tz: string;
+    };
+    AdminInsightsBandwidthPoint: {
+      /** Format: int64 */
+      api_egress_bytes: number;
+      bytes_by_source: {
+        [key: string]: number;
+      };
+      /**
+       * Format: date
+       * @description UTC calendar day (YYYY-MM-DD)
+       */
+      date: string;
+      /** Format: int64 */
+      download_egress_bytes: number;
+      /** Format: int64 */
+      egress_bytes: number;
+      /** Format: int64 */
+      peak_download_kbps: number;
+      /** Format: int64 */
+      peak_egress_kbps: number;
+      peak_kbps_by_source: {
+        [key: string]: number;
+      };
+      /** Format: int64 */
+      playback_egress_bytes: number;
+    };
+    AdminInsightsBandwidthSummary: {
+      /** Format: int64 */
+      active_days: number;
+      /** Format: int64 */
+      api_egress_bytes: number;
+      /** Format: int64 */
+      avg_daily_bytes: number;
+      /** Format: int64 */
+      download_egress_bytes: number;
+      /** Format: int64 */
+      local_sessions: number;
+      /** Format: int64 */
+      node_egress_bytes: number;
+      /** Format: int64 */
+      peak_download_kbps: number;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      peak_egress_at: string | null;
+      /** Format: int64 */
+      peak_egress_kbps: number;
+      /** Format: int64 */
+      playback_egress_bytes: number;
+      /** Format: int64 */
+      remote_sessions: number;
+      /** Format: int64 */
+      total_egress_bytes: number;
+      /** Format: int64 */
+      unknown_location_sessions: number;
+    };
+    AdminInsightsCapabilities: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      available: boolean;
+      /** @description Long-term per-node daily egress archive survives past the 31-day minute-sample window */
+      node_egress_daily: boolean;
+      /** @description Activity, Devices, Titles and title detail accept profile_id together with user_id */
+      profile_filter: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+      /** @description The Titles leaderboard (getAdminInsightsTitles) and title detail (getAdminInsightsTitle) are served */
+      titles: boolean;
+    };
+    AdminInsightsClientCodecCell: {
+      /** Format: double */
+      direct_rate: number;
+      /** Format: int64 */
+      direct_sessions: number;
+      /** Format: int64 */
+      remux_sessions: number;
+      /** Format: int64 */
+      sessions: number;
+      source_video_codec: string;
+      /** Format: int64 */
+      transcode_sessions: number;
+    };
+    AdminInsightsClientMatrixRow: {
+      cells: components["schemas"]["AdminInsightsClientCodecCell"][];
+      client_name: string;
+      device_platform: string;
+      /** Format: double */
+      direct_rate: number;
+      /** Format: int64 */
+      direct_sessions: number;
+      is_jellyfin_client: boolean;
+      /** Format: int64 */
+      remux_sessions: number;
+      /** Format: int64 */
+      total_sessions: number;
+      /** Format: int64 */
+      transcode_sessions: number;
+    };
+    AdminInsightsCoverage: {
+      /**
+       * Format: int64
+       * @description Sessions with measured watch time
+       */
+      measured_sessions: number;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      oldest_history_at: string | null;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      oldest_measured_at: string | null;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      oldest_metric_at: string | null;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      oldest_route_facts_at: string | null;
+      /**
+       * Format: int64
+       * @description Sessions with recorded route facts
+       */
+      route_facts_sessions: number;
+      /**
+       * Format: int64
+       * @description Sessions in scope
+       */
+      total_sessions: number;
+    };
+    AdminInsightsDevices: {
+      adaptation_reasons: components["schemas"]["AdminInsightsAdaptationReason"][];
+      codecs: string[];
+      coverage: components["schemas"]["AdminInsightsCoverage"];
+      /** @description Sessions by delivered resolution class; transcodes recorded before route facts are unknown */
+      delivered_resolutions: components["schemas"]["AdminInsightsLabeledCount"][];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      from: string;
+      hw_accel_breakdown: components["schemas"]["AdminInsightsLabeledCount"][];
+      /** @description Client and platform pairs with at least min_sessions sessions, at most 200 (the ones with the most sessions) */
+      matrix: components["schemas"]["AdminInsightsClientMatrixRow"][];
+      /** @description Sessions delivered at a lower resolution class than their source, by source and delivered class */
+      resolution_changes: components["schemas"]["AdminInsightsResolutionChange"][];
+      /** @description Sessions by source resolution class (480p, 720p, 1080p, 2160p, 4320p, unknown), on the scale media_files.resolution uses */
+      source_resolutions: components["schemas"]["AdminInsightsLabeledCount"][];
+      subtitle_burn_in_codecs: components["schemas"]["AdminInsightsLabeledCount"][];
+      summary: components["schemas"]["AdminInsightsDevicesSummary"];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      to: string;
+      tone_map_breakdown: components["schemas"]["AdminInsightsLabeledCount"][];
+      /** @description Up to 10 clients ranked by transcoded sessions, whatever min_sessions is */
+      top_transcoders: components["schemas"]["AdminInsightsTranscoderRow"][];
+      tz: string;
+    };
+    AdminInsightsDevicesSummary: {
+      /** Format: double */
+      direct_rate: number;
+      /** Format: int64 */
+      direct_sessions: number;
+      /** Format: int64 */
+      hdr_tonemap_hw_sessions: number;
+      /** Format: int64 */
+      hdr_tonemap_sessions: number;
+      /** Format: int64 */
+      hdr_tonemap_sw_sessions: number;
+      /** Format: int64 */
+      hw_transcode_sessions: number;
+      /** Format: int64 */
+      remux_sessions: number;
+      /** Format: int64 */
+      route_facts_sessions: number;
+      /** Format: int64 */
+      subtitle_burn_in_sessions: number;
+      /** Format: int64 */
+      sw_transcode_sessions: number;
+      /** Format: int64 */
+      total_sessions: number;
+      /** Format: int64 */
+      transcode_sessions: number;
+    };
+    AdminInsightsEgressSource: {
+      /** Format: int64 */
+      egress_bytes: number;
+      key: string;
+      /** @enum {string} */
+      kind: "api" | "node";
+      name: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      node_id?: string;
+      node_type: string | null;
+      /** Format: int64 */
+      peak_egress_kbps: number;
+      /** Format: double */
+      share_of_total: number;
+    };
+    AdminInsightsEpisodeRef: {
+      content_id: string;
+      /** Format: int64 */
+      episode_number: number;
+      /** Format: int64 */
+      season_number: number;
+      title: string;
+    };
+    AdminInsightsHeatmapCell: {
+      /**
+       * Format: int64
+       * @description ISO day of week in requested tz: 0=Monday .. 6=Sunday
+       */
+      day_of_week: number;
+      /**
+       * Format: int64
+       * @description Local hour of day (0..23) in requested tz
+       */
+      hour: number;
+      /** Format: int64 */
+      plays: number;
+      /** Format: int64 */
+      watch_seconds: number;
+    };
+    AdminInsightsLabeledCount: {
+      key: string;
+      /** Format: int64 */
+      sessions: number;
+    };
+    AdminInsightsLibraryRow: {
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      library_id: string;
+      name: string;
+      /** Format: int64 */
+      plays: number;
+      /** Format: int64 */
+      viewers: number;
+      /** Format: int64 */
+      watch_seconds: number;
+    };
+    AdminInsightsPeakStreamsPoint: {
+      /**
+       * Format: date
+       * @description UTC calendar day (YYYY-MM-DD)
+       */
+      date: string;
+      /** Format: int64 */
+      peak_direct: number;
+      /** Format: int64 */
+      peak_remux: number;
+      /** Format: int64 */
+      peak_streams: number;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      peak_streams_at: string | null;
+      /** Format: int64 */
+      peak_streams_direct: number;
+      /** Format: int64 */
+      peak_streams_remux: number;
+      /** Format: int64 */
+      peak_streams_transcode: number;
+      /** Format: int64 */
+      peak_transcode: number;
+    };
+    AdminInsightsPeople: {
+      accounts: components["schemas"]["AdminInsightsPersonAccount"][];
+      /** Format: int64 */
+      active_accounts: number;
+      /** Format: int64 */
+      active_profiles: number;
+      coverage: components["schemas"]["AdminInsightsCoverage"];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      from: string;
+      /** Format: int64 */
+      live_accounts: number;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      to: string;
+      /** Format: int64 */
+      total_accounts: number;
+      /** Format: int64 */
+      total_watch_seconds: number;
+      tz: string;
+    };
+    AdminInsightsPersonAccount: {
+      /** Format: int64 */
+      completed_plays: number;
+      /** Format: double */
+      completion_rate: number;
+      /** Format: int64 */
+      direct_plays: number;
+      /** Format: double */
+      direct_rate: number;
+      /** Format: int64 */
+      episodes: number;
+      is_live: boolean;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      last_seen_at: string | null;
+      /** Format: int64 */
+      measured_sessions: number;
+      /**
+       * Format: double
+       * @description Share of the account's sessions with measured watch time
+       */
+      measured_share: number;
+      /** Format: int64 */
+      movies: number;
+      /** Format: int64 */
+      plays: number;
+      profiles: components["schemas"]["AdminInsightsPersonProfile"][];
+      /** Format: int64 */
+      remux_plays: number;
+      role: string;
+      /** Format: int64 */
+      sessions: number;
+      /** @description Client with the most sessions in the window */
+      top_client: string | null;
+      /** Format: int64 */
+      transcode_plays: number;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      user_id: string;
+      username: string;
+      /** Format: int64 */
+      watch_seconds: number;
+    };
+    AdminInsightsPersonProfile: {
+      /** Format: int64 */
+      completed_plays: number;
+      /** Format: double */
+      completion_rate: number;
+      /** Format: int64 */
+      direct_plays: number;
+      is_live: boolean;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      last_seen_at: string | null;
+      /** Format: int64 */
+      measured_sessions: number;
+      /** Format: int64 */
+      plays: number;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      profile_id: string;
+      profile_name: string;
+      /** Format: int64 */
+      remux_plays: number;
+      /** Format: int64 */
+      sessions: number;
+      /** Format: int64 */
+      transcode_plays: number;
+      /** Format: int64 */
+      watch_seconds: number;
+    };
+    AdminInsightsPlaysBucket: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      bucket_start: string;
+      /**
+       * Format: date
+       * @description Local bucket start date (YYYY-MM-DD in requested tz)
+       */
+      label_date: string;
+      /** Format: int64 */
+      plays: number;
+      /** Format: int64 */
+      watch_seconds: number;
+    };
+    AdminInsightsResolutionChange: {
+      /** @description Source resolution class */
+      from: string;
+      /** Format: int64 */
+      sessions: number;
+      /** @description Lower delivered resolution class */
+      to: string;
+    };
+    AdminInsightsTitle: {
+      /** @enum {string} */
+      bucket_unit: "day" | "week" | "month";
+      buckets: components["schemas"]["AdminInsightsPlaysBucket"][];
+      content_id: string;
+      /**
+       * Format: double
+       * @description Movie runtime in seconds; null for series or when unknown
+       */
+      duration_seconds: number | null;
+      /** @description Series: episodes with a play in the window, in season and episode order; empty for movies */
+      episodes: components["schemas"]["AdminInsightsTitleEpisode"][];
+      /** @description More than 500 episodes had a play; episodes holds the first 500 */
+      episodes_truncated: boolean;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      from: string;
+      /** @enum {string} */
+      kind: "movie" | "series";
+      summary: components["schemas"]["AdminInsightsTitleSummary"];
+      title: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      to: string;
+      tz: string;
+      /** @description Profiles with a play in the window, most recent first */
+      viewers: components["schemas"]["AdminInsightsTitleViewer"][];
+      /** @description More than 100 profiles played the title; viewers holds the most recent 100 */
+      viewers_truncated: boolean;
+      /** Format: int64 */
+      year: number | null;
+    };
+    AdminInsightsTitleEpisode: {
+      content_id: string;
+      /** Format: int64 */
+      episode_number: number;
+      /** Format: int64 */
+      plays: number;
+      /** Format: int64 */
+      season_number: number;
+      title: string;
+      /** Format: int64 */
+      viewers: number;
+      /** Format: int64 */
+      watch_seconds: number;
+    };
+    AdminInsightsTitleRow: {
+      /** Format: int64 */
+      completed_plays: number;
+      content_id: string;
+      /**
+       * Format: int64
+       * @description Series: distinct episodes with a play; 0 for movies
+       */
+      episodes: number;
+      /** @enum {string} */
+      kind: "movie" | "series";
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      last_played_at: string | null;
+      /**
+       * Format: int64
+       * @description Plays that started in the window; a series counts its episodes' plays
+       */
+      plays: number;
+      title: string;
+      /**
+       * Format: int64
+       * @description Distinct household profiles with a play
+       */
+      viewers: number;
+      /** Format: int64 */
+      watch_seconds: number;
+      /** Format: int64 */
+      year: number | null;
+    };
+    AdminInsightsTitles: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      from: string;
+      libraries: components["schemas"]["AdminInsightsLibraryRow"][];
+      movies: components["schemas"]["AdminInsightsTitleRow"][];
+      shows: components["schemas"]["AdminInsightsTitleRow"][];
+      /** @enum {string} */
+      sort: "plays" | "watch_time" | "viewers";
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      to: string;
+      tz: string;
+    };
+    AdminInsightsTitleSummary: {
+      /** Format: int64 */
+      completed_plays: number;
+      /** Format: int64 */
+      direct_plays: number;
+      /** Format: int64 */
+      plays: number;
+      /** Format: int64 */
+      remux_plays: number;
+      /** Format: int64 */
+      sessions: number;
+      /** Format: int64 */
+      transcode_plays: number;
+      /** Format: int64 */
+      viewers: number;
+      /** Format: int64 */
+      watch_seconds: number;
+    };
+    AdminInsightsTitleViewer: {
+      /** Format: int64 */
+      completed_plays: number;
+      /**
+       * Format: double
+       * @description Movies: furthest position a session in the window reached; null for series
+       */
+      furthest_position_seconds: number | null;
+      /** @description Series: the episode of the profile's latest play; absent for movies */
+      last_episode?: components["schemas"]["AdminInsightsEpisodeRef"];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      last_played_at: string | null;
+      /** Format: int64 */
+      plays: number;
+      profile_id: string;
+      profile_name: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      user_id: string;
+      username: string;
+      /** Format: int64 */
+      watch_seconds: number;
+    };
+    AdminInsightsTranscoderRow: {
+      client_name: string;
+      device_platform: string;
+      is_jellyfin_client: boolean;
+      /** Format: int64 */
+      total_sessions: number;
+      /** Format: int64 */
+      transcode_sessions: number;
+    };
     AdminInvitation: {
       /**
        * Format: date-time
@@ -19870,6 +20697,14 @@ export interface components {
       lifecycle_seq: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      /** @description The list accepts search, play_method, device_platform, client_name, source_video_codec, subtitle_burn_in, stream_location, adaptation_reason, library_id, started_after and started_before */
+      rich_filters: boolean;
+      /** @description Entries carry delivered route facts, adaptation reasons, and joined source file specs */
+      route_facts: boolean;
+      /** @description The list accepts series_id */
+      series_filter: boolean;
+      /** @description GET /api/v2/admin/playback-history/{session_id} reads one finalized session entry */
+      session_detail: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -19887,6 +20722,8 @@ export interface components {
       page?: components["schemas"]["PageInfo"];
     };
     AdminPlaybackHistoryEntry: {
+      /** @description Canonical reasons why playback adapted away from direct play; empty for direct play or pre-upgrade rows */
+      adaptation_reasons: string[];
       /**
        * @description How the audio stream was delivered when the play ended, with the video_decision values. Null when unknown
        * @enum {string|null}
@@ -19898,6 +20735,8 @@ export interface components {
       client_name: string | null;
       /** @description App version the client reported; null when unknown */
       client_version: string | null;
+      /** @description True when the play originated on the Jellyfin compatibility surface; null on pre-upgrade rows */
+      compat_origin: boolean | null;
       completed: boolean;
       /** @description Device the client declared in X-Silo-Device-Id when playback started (the profile device registry's identity); a Jellyfin play records the DeviceId of its MediaBrowser authorization. Null when unknown */
       device_id: string | null;
@@ -19928,6 +20767,15 @@ export interface components {
        * @description Episode number; null when not an episode
        */
       episode_number: number | null;
+      /** @description True when compat_origin is true or client_name identifies a Jellyfin-ecosystem client */
+      is_jellyfin_client: boolean;
+      /**
+       * @description Library ID owning the media file; null if file was removed
+       * @example 1
+       */
+      library_id: string | null;
+      /** @description Library display name owning the media file; null if file was removed */
+      library_name: string | null;
       /**
        * Format: int64
        * @description Sequence number of the end this row records on the sessions channel: higher than every earlier number for the session, so the row supersedes any live row or session.* event with a lower one. Null on rows recorded before lifecycle numbers existed
@@ -19956,6 +20804,10 @@ export interface components {
       media_title: string;
       /** @description episode, or the catalog item type; empty when unknown */
       media_type: string;
+      /** @description Delivered muxer/container (e.g. fmp4, mpegts); null when unreported */
+      output_container: string | null;
+      /** @description Delivered streaming protocol (e.g. hls, http); null when unreported */
+      output_protocol: string | null;
       /**
        * Format: double
        * @description Seconds the play spent paused between samples
@@ -19970,6 +20822,28 @@ export interface components {
       profile_id: string;
       /** @description Profile display name at the time of playback; the profile id when none was recorded */
       profile_name: string;
+      /** @description API node identity that finalized or synced the session; null on pre-upgrade rows */
+      reporting_node: string | null;
+      /** @description True when delivered route facts were captured at finalization; false on pre-upgrade rows */
+      route_facts_recorded: boolean;
+      /** @description Committed egress placement (e.g. api, proxy, transcode); null when unreported */
+      routing_egress: string | null;
+      /**
+       * @description Stream node ID that served media bytes when offloaded; null otherwise
+       * @example 1
+       */
+      routing_egress_node_id: string | null;
+      /** @description Display name of the egress stream node when still registered; null otherwise */
+      routing_egress_node_name: string | null;
+      /** @description Committed execution placement (e.g. local, remote_transcode); null when unreported */
+      routing_execution: string | null;
+      /**
+       * @description Stream node ID that executed transcoding when offloaded; null otherwise
+       * @example 1
+       */
+      routing_execution_node_id: string | null;
+      /** @description Display name of the execution stream node when still registered; null otherwise */
+      routing_execution_node_name: string | null;
       /**
        * Format: int64
        * @description Episode season; null when not an episode
@@ -19980,6 +20854,28 @@ export interface components {
       /** @description Playback session identifier; unique per attempt */
       session_id: string;
       /**
+       * Format: int64
+       * @description Source media file primary audio channel count; null if unavailable
+       */
+      source_audio_channels: number | null;
+      /** @description Source media file primary audio codec from catalog probe; null if unavailable */
+      source_audio_codec: string | null;
+      /**
+       * Format: int64
+       * @description Source media file overall bitrate in kbps; null if unavailable
+       */
+      source_bitrate_kbps: number | null;
+      /** @description Source media file container format; null if unavailable */
+      source_container: string | null;
+      /** @description Whether the source media file is HDR; null if unavailable */
+      source_hdr: boolean | null;
+      /** @description Source media file resolution label from catalog probe; null if unavailable */
+      source_resolution: string | null;
+      /** @description Source media file video codec from catalog probe; null if file was removed or unprobed */
+      source_video_codec: string | null;
+      /** @description Detailed source video range (e.g. HDR10, DOVI, HLG, SDR); null if unavailable */
+      source_video_range_type: string | null;
+      /**
        * Format: double
        * @description First position, in seconds, the measurement saw: where the play began or resumed
        */
@@ -19989,6 +20885,11 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       started_at: string;
+      /**
+       * @description Negotiated bitrate-policy network classification (local or remote); null when unknown
+       * @enum {string|null}
+       */
+      stream_location: "local" | "remote" | null;
       /** @description The subtitle the play's plan delivered when it ended, in the live session row's shape; null when it showed none, for a Jellyfin-protocol or Audiobookshelf play, and on rows recorded before the server kept it */
       subtitle: {
         /**
@@ -20024,6 +20925,26 @@ export interface components {
          */
         track_id: string;
       } | null;
+      /**
+       * Format: int64
+       * @description Delivered output audio channel count when known; null otherwise
+       */
+      target_audio_channels: number | null;
+      /** @description Delivered output audio codec when audio was transcoded; null otherwise or on pre-upgrade rows */
+      target_audio_codec: string | null;
+      /**
+       * Format: int64
+       * @description Target bitrate cap in kbps when transcoded; null otherwise
+       */
+      target_bitrate_kbps: number | null;
+      /** @description Delivered output resolution when transcoded; null otherwise or on pre-upgrade rows */
+      target_resolution: string | null;
+      /** @description Delivered output video codec when transcoded; null otherwise or on pre-upgrade rows */
+      target_video_codec: string | null;
+      /** @description Effective HDR-to-SDR tone-mapping executor (hardware, software); null when not tone-mapped */
+      tone_map_mode: string | null;
+      /** @description Effective hardware acceleration backend (vaapi, qsv, nvenc, videotoolbox, none); null when not transcoded or unknown */
+      transcode_hw_accel: string | null;
       /**
        * @description Opaque identifier
        * @example 1
@@ -60020,6 +60941,883 @@ export interface operations {
       };
     };
   };
+  getAdminInsightsActivity: {
+    parameters: {
+      query?: {
+        /** @description Inclusive local start date (YYYY-MM-DD in tz), required when range=custom */
+        from_date?: string;
+        /** @description Restrict playback analytics to media belonging to this library */
+        library_id?: string;
+        /** @description Restrict playback analytics to this household profile of user_id; requires user_id because profile ids repeat across accounts */
+        profile_id?: string;
+        /** @description Preset time window or custom */
+        range?: "7d" | "30d" | "90d" | "1y" | "all" | "custom";
+        /** @description Invalidate cached insights aggregates before reading; ignored for scoped API keys */
+        refresh?: boolean;
+        /** @description Inclusive local end date (YYYY-MM-DD in tz), required when range=custom */
+        to_date?: string;
+        /** @description IANA timezone identifier for day/week/month bucketing and heatmap alignment */
+        tz?: string;
+        /** @description Restrict playback analytics to this login account */
+        user_id?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminInsightsActivity"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminInsightsBandwidth: {
+    parameters: {
+      query?: {
+        /** @description Inclusive local start date (YYYY-MM-DD in tz), required when range=custom */
+        from_date?: string;
+        /** @description Preset time window or custom */
+        range?: "7d" | "30d" | "90d" | "1y" | "all" | "custom";
+        /** @description Invalidate cached insights aggregates before reading; ignored for scoped API keys */
+        refresh?: boolean;
+        /** @description Inclusive local end date (YYYY-MM-DD in tz), required when range=custom */
+        to_date?: string;
+        /** @description IANA timezone identifier */
+        tz?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminInsightsBandwidth"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminInsightsCapabilities: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminInsightsCapabilities"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminInsightsDevices: {
+    parameters: {
+      query?: {
+        /** @description Inclusive local start date (YYYY-MM-DD in tz), required when range=custom */
+        from_date?: string;
+        /** @description Restrict device analytics to media belonging to this library */
+        library_id?: string;
+        /** @description Minimum sessions required for a client/platform row to appear in the direct-play matrix */
+        min_sessions?: number;
+        /** @description Restrict device analytics to this household profile of user_id; requires user_id */
+        profile_id?: string;
+        /** @description Preset time window or custom */
+        range?: "7d" | "30d" | "90d" | "1y" | "all" | "custom";
+        /** @description Invalidate cached insights aggregates before reading; ignored for scoped API keys */
+        refresh?: boolean;
+        /** @description Inclusive local end date (YYYY-MM-DD in tz), required when range=custom */
+        to_date?: string;
+        /** @description IANA timezone identifier */
+        tz?: string;
+        /** @description Restrict device analytics to this login account */
+        user_id?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminInsightsDevices"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminInsightsPeople: {
+    parameters: {
+      query?: {
+        /** @description Sort direction */
+        dir?: "asc" | "desc";
+        /** @description Inclusive local start date (YYYY-MM-DD in tz), required when range=custom */
+        from_date?: string;
+        /** @description Restrict people stats to media belonging to this library */
+        library_id?: string;
+        /** @description Maximum accounts to return */
+        limit?: number;
+        /** @description Account offset for pagination */
+        offset?: number;
+        /** @description Preset time window or custom */
+        range?: "7d" | "30d" | "90d" | "1y" | "all" | "custom";
+        /** @description Invalidate cached insights aggregates before reading; ignored for scoped API keys */
+        refresh?: boolean;
+        /** @description Case-insensitive search across account usernames and household profile names */
+        search?: string;
+        /** @description Sort column for accounts */
+        sort?: "watch_time" | "plays" | "direct_pct" | "completion_pct" | "last_seen";
+        /** @description Inclusive local end date (YYYY-MM-DD in tz), required when range=custom */
+        to_date?: string;
+        /** @description IANA timezone identifier */
+        tz?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminInsightsPeople"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminInsightsTitles: {
+    parameters: {
+      query?: {
+        /** @description Inclusive local start date (YYYY-MM-DD in tz), required when range=custom */
+        from_date?: string;
+        /** @description Restrict to plays of media belonging to this library */
+        library_id?: string;
+        /** @description Rows per list (movies, shows, libraries) */
+        limit?: number;
+        /** @description Restrict to plays by this household profile of user_id; requires user_id */
+        profile_id?: string;
+        /** @description Preset time window or custom */
+        range?: "7d" | "30d" | "90d" | "1y" | "all" | "custom";
+        /** @description Invalidate cached insights aggregates before reading; ignored for scoped API keys */
+        refresh?: boolean;
+        /** @description Ranking: plays (most watched), watch_time, or viewers (most popular: distinct profiles with a play) */
+        sort?: "plays" | "watch_time" | "viewers";
+        /** @description Inclusive local end date (YYYY-MM-DD in tz), required when range=custom */
+        to_date?: string;
+        /** @description IANA timezone identifier */
+        tz?: string;
+        /** @description Restrict to plays by this login account */
+        user_id?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminInsightsTitles"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminInsightsTitle: {
+    parameters: {
+      query?: {
+        /** @description Inclusive local start date (YYYY-MM-DD in tz), required when range=custom */
+        from_date?: string;
+        /** @description Restrict to plays of the title's files in this library */
+        library_id?: string;
+        /** @description Restrict to plays by this household profile of user_id; requires user_id */
+        profile_id?: string;
+        /** @description Preset time window or custom */
+        range?: "7d" | "30d" | "90d" | "1y" | "all" | "custom";
+        /** @description Inclusive local end date (YYYY-MM-DD in tz), required when range=custom */
+        to_date?: string;
+        /** @description IANA timezone identifier for bucketing */
+        tz?: string;
+        /** @description Restrict to plays by this login account */
+        user_id?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Movie or series content id; an episode id answers 422 (read its series) */
+        content_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminInsightsTitle"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   listAdminInvitations: {
     parameters: {
       query?: {
@@ -72019,20 +73817,44 @@ export interface operations {
   listAdminPlaybackHistory: {
     parameters: {
       query?: {
+        /** @description Filter to attempts carrying this canonical adaptation reason code */
+        adaptation_reason?: string;
+        /** @description Filter by reported client name (case-insensitive; 'unknown' matches rows without a client name) */
+        client_name?: string;
         /** @description Completion filter; all returns every finalized attempt */
         completed?: "all" | "true" | "false";
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
+        /** @description Filter by reported device platform (case-insensitive; 'unknown' matches rows without a platform) */
+        device_platform?: string;
         /** @description Only attempts that ended at or after this instant (inclusive) */
         ended_after?: string;
         /** @description Only attempts that ended strictly before this instant (exclusive), so windows that share a bound never list an attempt twice */
         ended_before?: string;
+        /** @description Only attempts of media belonging to this library */
+        library_id?: string;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
         /** @description Only attempts of this catalog item */
         media_item_id?: string;
+        /** @description Filter by finalized play method */
+        play_method?: "all" | "direct" | "remux" | "transcode";
         /** @description Only attempts by this household profile */
         profile_id?: string;
+        /** @description Case-insensitive search across media title, series title, account, profile, client, platform, client IP, or session ID */
+        search?: string;
+        /** @description Only attempts of episodes of this series */
+        series_id?: string;
+        /** @description Filter by source media file video codec (case-insensitive; 'unknown' matches rows without a probed video codec) */
+        source_video_codec?: string;
+        /** @description Only attempts that started at or after this instant (inclusive) */
+        started_after?: string;
+        /** @description Only attempts that started strictly before this instant (exclusive) */
+        started_before?: string;
+        /** @description Filter by negotiated stream policy location */
+        stream_location?: "all" | "local" | "remote";
+        /** @description Filter by whether the finalized session used subtitle burn-in */
+        subtitle_burn_in?: "all" | "true" | "false";
         /** @description Only attempts by this login account */
         user_id?: string;
       };
@@ -72054,6 +73876,115 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AdminPlaybackHistoryCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminPlaybackHistoryEntry: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Playback session identifier */
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminPlaybackHistoryEntry"];
         };
       };
       /** @description Bad Request */

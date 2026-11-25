@@ -124,6 +124,7 @@ const AdminHomeRows = lazy(() => import("@/pages/AdminHomeRows"));
 const AdminRequestDiscover = lazy(() => import("@/pages/AdminRequestDiscover"));
 const AdminCollections = lazy(() => import("@/pages/AdminCollections"));
 const AdminPlaybackHistory = lazy(() => import("@/pages/AdminPlaybackHistory"));
+const AdminInsights = lazy(() => import("@/pages/admin-insights/AdminInsights"));
 const AdminMarkerHistory = lazy(() => import("@/pages/AdminMarkerHistory"));
 const AdminMaintenance = lazy(() => import("@/pages/AdminMaintenance"));
 const AdminBackups = lazy(() => import("@/pages/AdminBackups"));
@@ -575,6 +576,7 @@ function AppRoutes() {
                   <Route path="autoscan" element={<AdminAutoscan />} />
                   <Route path="autoscan/activity" element={<AdminAutoscanActivity />} />
                   <Route path="history" element={<AdminPlaybackHistory />} />
+                  <Route path="insights" element={<AdminInsights />} />
                   <Route path="marker-history" element={<AdminMarkerHistory />} />
                   <Route path="history-import" element={<AdminHistoryImport />} />
                   <Route path="users" element={<AdminUsers />} />

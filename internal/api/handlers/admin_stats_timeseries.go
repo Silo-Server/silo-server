@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/dashmetrics"
 )
 
 const (
@@ -37,9 +38,9 @@ const (
 	// minutes would spend megabytes drawing sub-pixel detail nobody can see.
 	adminTimeseriesMaxPoints = 750
 
-	// bytesPerKbpsMinute converts one sampled minute at 1 kbps into bytes:
-	// 1000 bits/s × 60 s ÷ 8 bits per byte.
-	bytesPerKbpsMinute = 1000 * adminTimeseriesResolutionSeconds / 8
+	// bytesPerKbpsMinute reuses dashmetrics.BytesPerKbpsMinute so the sampler
+	// and read queries never drift on the kbps-minute to byte conversion.
+	bytesPerKbpsMinute = dashmetrics.BytesPerKbpsMinute
 )
 
 // timeseriesBucketSeconds picks the display bucket for a window, keeping every

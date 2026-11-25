@@ -1,0 +1,68 @@
+{
+  "from": "2025-12-04T03:04:05.678Z",
+  "to": "2026-01-02T03:04:05.678Z",
+  "tz": "UTC",
+  "bucket_unit": "day",
+  "coverage": {
+    "oldest_history_at": "2025-12-04T03:04:05.678Z",
+    "oldest_measured_at": "2025-12-04T03:04:05.678Z",
+    "oldest_route_facts_at": "2025-12-04T03:04:05.678Z",
+    "oldest_metric_at": "2025-12-04T03:04:05.678Z",
+    "total_sessions": 48,
+    "measured_sessions": 46,
+    "route_facts_sessions": 44
+  },
+  "summary": {
+    "plays": 42,
+    "sessions": 48,
+    "movies": 12,
+    "episodes": 30,
+    "other_media": 0,
+    "watch_seconds": 86400,
+    "measured_watch_seconds": 84000,
+    "completed_plays": 35,
+    "completion_rate": 0.8333,
+    "direct_plays": 30,
+    "remux_plays": 7,
+    "transcode_plays": 5,
+    "unique_accounts": 4,
+    "unique_profiles": 6,
+    "peak_concurrent_streams": 4,
+    "peak_concurrent_at": "2026-01-02T01:04:05.678Z"
+  },
+  "buckets": [
+    {
+      "bucket_start": "2026-01-01T03:04:05.678Z",
+      "label_date": "2026-01-01",
+      "plays": 10,
+      "watch_seconds": 18000,
+      "direct": 7,
+      "remux": 2,
+      "transcode": 1,
+      "movies": 3,
+      "episodes": 7,
+      "other_media": 0
+    }
+  ],
+  "heatmap": [
+    {
+      "day_of_week": 4,
+      "hour": 20,
+      "plays": 8,
+      "watch_seconds": 14400
+    }
+  ],
+  "peak_streams": [
+    {
+      "date": "2026-01-01",
+      "peak_streams": 4,
+      "peak_direct": 3,
+      "peak_remux": 1,
+      "peak_transcode": 1,
+      "peak_streams_direct": 2,
+      "peak_streams_remux": 1,
+      "peak_streams_transcode": 1,
+      "peak_streams_at": "2026-01-02T01:04:05.678Z"
+    }
+  ]
+}

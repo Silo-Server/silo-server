@@ -1,0 +1,59 @@
+{
+  "from": "2025-12-04T03:04:05.678Z",
+  "to": "2026-01-02T03:04:05.678Z",
+  "tz": "UTC",
+  "total_accounts": 1,
+  "active_accounts": 1,
+  "active_profiles": 2,
+  "live_accounts": 1,
+  "total_watch_seconds": 50400,
+  "coverage": {
+    "oldest_history_at": "2025-12-04T03:04:05.678Z",
+    "oldest_measured_at": "2025-12-04T03:04:05.678Z",
+    "oldest_route_facts_at": "2025-12-04T03:04:05.678Z",
+    "oldest_metric_at": "2025-12-04T03:04:05.678Z",
+    "total_sessions": 48,
+    "measured_sessions": 46,
+    "route_facts_sessions": 44
+  },
+  "accounts": [
+    {
+      "user_id": "7",
+      "username": "alex",
+      "role": "admin",
+      "is_live": true,
+      "plays": 24,
+      "sessions": 27,
+      "movies": 8,
+      "episodes": 16,
+      "watch_seconds": 50400,
+      "measured_sessions": 27,
+      "measured_share": 1,
+      "direct_plays": 20,
+      "remux_plays": 2,
+      "transcode_plays": 2,
+      "direct_rate": 0.8333,
+      "completed_plays": 21,
+      "completion_rate": 0.875,
+      "top_client": "Silo Apple",
+      "last_seen_at": "2026-01-02T02:49:05.678Z",
+      "profiles": [
+        {
+          "profile_id": "p-main",
+          "profile_name": "Alex",
+          "is_live": true,
+          "plays": 18,
+          "sessions": 20,
+          "watch_seconds": 40000,
+          "measured_sessions": 20,
+          "direct_plays": 16,
+          "remux_plays": 1,
+          "transcode_plays": 1,
+          "completed_plays": 16,
+          "completion_rate": 0.8889,
+          "last_seen_at": "2026-01-02T02:49:05.678Z"
+        }
+      ]
+    }
+  ]
+}

@@ -3137,6 +3137,13 @@ func main() {
 		defer downloadsStatsProvider.Close()
 		deps.AdminDownloadsStatsProvider = downloadsStatsProvider
 
+		insightsProvider, insightsErr := handlers.NewAdminInsightsProvider(appCtx, deps.DB, deps.EventBus)
+		if insightsErr != nil {
+			log.Fatalf("failed to create admin insights provider: %v", insightsErr)
+		}
+		defer insightsProvider.Close()
+		deps.AdminInsightsProvider = insightsProvider
+
 		// The dashboard metrics sampler is the only writer of concurrent-stream
 		// and egress history. Proxy and transcode nodes serve bytes but do not
 		// own the catalog database, so only the API-facing modes sample. An

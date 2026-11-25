@@ -13,6 +13,7 @@ import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
 import { formatLocale } from "@/lib/appLocale";
 import { useT } from "@/i18n";
+import { widgetRangeToInsightsRange } from "@/pages/admin-insights/insightsHelpers";
 
 const ROW_LIMIT = 8;
 
@@ -51,6 +52,12 @@ export function TopProfilesWidget() {
   return (
     <Card className="h-full">
       <WidgetHeader title={rangeTitle(t("web.admin.dashboard.widgets.topProfiles.title"), range)}>
+        <Link
+          to={`/admin/insights?tab=people&range=${widgetRangeToInsightsRange(range)}`}
+          className="text-muted-foreground hover:text-primary hidden text-[0.6875rem] whitespace-nowrap transition-colors @sm/card-header:inline"
+        >
+          {t("web.admin.dashboard.widgets.openInsights")}
+        </Link>
         <Link
           to="/admin/history"
           className="text-muted-foreground hover:text-primary text-[0.6875rem] whitespace-nowrap transition-colors"

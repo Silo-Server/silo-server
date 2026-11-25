@@ -1774,7 +1774,7 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, adminDashboardLayoutFixtureCases()...)
 	cases = append(cases, catalogItemCollectionsFixtureCases()...)
 	cases = append(cases, directConnectionsFixtureCases()...)
-	return append(cases,
+	cases = append(cases,
 		fixtureCase{name: "get_admin_plugin_capabilities_ok", operationID: "getAdminPluginCapabilities",
 			scenario: "An administrator discovers deployment-managed plugin settings.",
 			method:   http.MethodGet, path: Prefix + "/admin/plugins/capabilities", headers: actingRequestAdmin,
@@ -1788,6 +1788,9 @@ func fixtureCases() []fixtureCase {
 			method:   http.MethodGet, path: "/api/v2/profile/sections/baseline", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ProfileSectionBaseline"},
 	)
+	cases = append(cases, adminPlaybackHistoryDetailFixtureCases()...)
+	cases = append(cases, adminInsightsFixtureCases()...)
+	return cases
 }
 
 // deviceLoginBindingFixtureCases pin the session binding a device-login
@@ -2270,6 +2273,7 @@ func fixtureDeps() Dependencies {
 	deps.SubtitleReads = &fakeSubtitleReads{}
 	deps.AdminSubtitleList = &fakeAdminSubtitleList{}
 	deps.AdminPlaybackHistory = &fakeAdminPlaybackHistory{}
+	deps.AdminInsights = &fakeAdminInsights{}
 	deps.AdminCatalogItems = &fakeAdminCatalogItems{}
 	deps.AdminSubtitleMetadata = fixtureAdminSubtitleMetadata()
 	deps.AdminSubtitleProviderConfiguration = fixtureAdminProviderConfiguration()

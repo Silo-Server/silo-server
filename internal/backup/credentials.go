@@ -564,6 +564,11 @@ func (l PGLoader) CarryCredentials(ctx context.Context, dbURL, liveURL string) (
 			return err
 		}
 		for i, table := range tables {
+			if table.name == "stream_nodes" {
+				if err := reconcileRestoredStreamNodeReferences(ctx, tx, live[i]); err != nil {
+					return fmt.Errorf("stream_nodes historical references: %w", err)
+				}
+			}
 			if err := table.carryInto(ctx, tx, live[i], &result); err != nil {
 				return fmt.Errorf("%s: %w", table.name, err)
 			}

@@ -374,6 +374,7 @@ type Dependencies struct {
 	AdminTopActivityProvider      handlers.AdminTopActivitySource
 	AdminTimeseriesProvider       handlers.AdminTimeseriesSource
 	AdminDownloadsStatsProvider   handlers.AdminDownloadsStatsSource
+	AdminInsightsProvider         handlers.AdminInsightsSource
 
 	// ABSHandler is the Audiobookshelf-compatible HTTP handler. When non-nil
 	// it is mounted at the root router level (not under /api/v1/) so that ABS
@@ -1472,6 +1473,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			playbackHandler = handlers.NewPlaybackHandler(deps.SessionMgr)
 		}
 		playbackHandler.StreamTelemetry = deps.StreamTelemetry
+		playbackHandler.ReportingNode = deps.NodeID
 		playbackHandler.ItemAccess = itemRepo
 		if itemsHandler != nil {
 			playbackHandler.FileNamesVisible = itemsHandler.CanViewFilePaths
@@ -1819,6 +1821,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		adminHandler.TopActivitySource = deps.AdminTopActivityProvider
 		adminHandler.TimeseriesSource = deps.AdminTimeseriesProvider
 		adminHandler.DownloadsStatsSource = deps.AdminDownloadsStatsProvider
+		adminHandler.InsightsSource = deps.AdminInsightsProvider
 		adminHandler.RedisClient = deps.RedisClient
 		adminHandler.RealtimeHub = deps.RealtimeHub
 		adminHandler.AccessGroups = accessGroupStore
@@ -3144,6 +3147,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if adminHandler != nil {
 		v2deps.AdminDashboardInsights = adminHandler
+		v2deps.AdminInsights = adminHandler
 		v2deps.AdminDashboardStats = adminHandler
 		v2deps.AdminDashboardLayout = adminHandler
 		v2deps.AdminDashboardLayoutResets = adminHandler

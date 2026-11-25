@@ -39,6 +39,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
@@ -63,6 +64,14 @@ const (
 	// minutes down before returning them (internal/api/handlers), so a wide
 	// window costs the same on the wire as a narrow one.
 	retentionDays = 31
+
+	// BytesPerKbpsMinute converts one sampled minute at 1 kbps into bytes:
+	// 1000 bits/s * 60 s / 8 bits per byte.
+	BytesPerKbpsMinute = 7500
+
+	// downsampleLockKey serializes the hourly completed-day rollup and prune
+	// across API replicas so only one replica runs the work per tick.
+	downsampleLockKey int64 = 0x53494c4f4441494c // "SILODAIL"
 )
 
 // Sampler writes one dashboard_metric_samples row per minute for as long as it
@@ -77,7 +86,8 @@ type Sampler struct {
 	// lastBucket is the minute the last tick wrote, so a ticker that fires
 	// twice inside one minute does not spend an INSERT that ON CONFLICT would
 	// only discard — which would silently drop the egress bytes it carried.
-	lastBucket time.Time
+	lastBucket       time.Time
+	startupRollupRan bool
 
 	// prevBytes holds the cumulative viewer bytes per telemetry session and
 	// transfer at the previous tick; lastEgressAt is when it was taken.
@@ -161,10 +171,18 @@ func (s *Sampler) sampleOnce(ctx context.Context, at time.Time) {
 	s.sampleShared(ctx)
 	s.sampleProcessEgress(ctx, at)
 
-	// Retention runs in-band rather than as its own timer: the table is tiny
-	// and one DELETE an hour costs less than another goroutine.
-	if at.Minute() == 0 {
-		s.pruneExpired(ctx)
+	// Downsample completed UTC days into dashboard_metric_daily and
+	// dashboard_node_egress_daily on startup and at the top of each hour,
+	// strictly before pruning expired minute samples inside the same
+	// advisory-locked transaction. If the lock is held by another replica or
+	// the rollup fails, pruning is skipped on this tick so unsaved days are
+	// never lost.
+	if !s.startupRollupRan || at.Minute() == 0 {
+		if err := s.downsampleCompletedDays(ctx, at.Minute() == 0); err != nil {
+			slog.WarnContext(ctx, "failed to downsample daily dashboard metrics; skipping prune", "component", component, "error", err)
+			return
+		}
+		s.startupRollupRan = true
 	}
 }
 
@@ -250,17 +268,245 @@ func (s *Sampler) sampleProcessEgress(ctx context.Context, at time.Time) {
 	}
 }
 
-// pruneExpired drops samples older than the retention window.
-func (s *Sampler) pruneExpired(ctx context.Context) {
+// DailyMetricRollupCTEs returns the shared SQL CTEs (`_dm_minutes`,
+// `_dm_stream_peaks`, `_dm_egress_peaks`, `_dm_daily`) that aggregate raw
+// minute samples from dashboard_metric_samples matching `sampleWhere` into one
+// row per UTC calendar day. `bytesParam` is the SQL parameter placeholder for
+// BytesPerKbpsMinute (e.g. "$1" or "$3").
+//
+// Both the sampler's daily archive writer and Insights' live-day read path use
+// this definition so peak-minute splits, timestamps, and byte totals cannot
+// drift apart.
+func DailyMetricRollupCTEs(sampleWhere, bytesParam string) string {
+	return `
+	_dm_minutes AS (
+		SELECT
+			(s.bucket AT TIME ZONE 'UTC')::date AS day,
+			s.bucket,
+			MAX(s.streams_total)     FILTER (WHERE s.source = 'shared') AS streams_total,
+			MAX(s.streams_direct)    FILTER (WHERE s.source = 'shared') AS streams_direct,
+			MAX(s.streams_remux)     FILTER (WHERE s.source = 'shared') AS streams_remux,
+			MAX(s.streams_transcode) FILTER (WHERE s.source = 'shared') AS streams_transcode,
+			COALESCE(SUM(s.egress_kbps), 0)::bigint AS egress_kbps,
+			COALESCE(SUM(s.download_egress_kbps), 0)::bigint AS download_egress_kbps,
+			COALESCE(SUM(s.egress_kbps) FILTER (WHERE s.source LIKE 'proc:%'), 0)::bigint AS api_egress_kbps
+		FROM dashboard_metric_samples s
+		WHERE ` + sampleWhere + `
+		GROUP BY 1, 2
+	),
+	_dm_stream_peaks AS (
+		SELECT DISTINCT ON (day)
+			day,
+			COALESCE(streams_direct, 0)::bigint    AS peak_streams_direct,
+			COALESCE(streams_remux, 0)::bigint     AS peak_streams_remux,
+			COALESCE(streams_transcode, 0)::bigint AS peak_streams_transcode,
+			bucket AS peak_streams_at
+		FROM _dm_minutes
+		WHERE streams_total IS NOT NULL
+		ORDER BY day, streams_total DESC, bucket ASC
+	),
+	_dm_egress_peaks AS (
+		SELECT DISTINCT ON (day)
+			day,
+			bucket AS peak_egress_at
+		FROM _dm_minutes
+		ORDER BY day, egress_kbps DESC, bucket ASC
+	),
+	_dm_daily AS (
+		SELECT
+			m.day,
+			COALESCE(MAX(m.streams_total), 0)::bigint          AS peak_streams,
+			COALESCE(MAX(m.streams_direct), 0)::bigint         AS peak_direct,
+			COALESCE(MAX(m.streams_remux), 0)::bigint          AS peak_remux,
+			COALESCE(MAX(m.streams_transcode), 0)::bigint      AS peak_transcode,
+			COALESCE(sp.peak_streams_direct, 0)::bigint        AS peak_streams_direct,
+			COALESCE(sp.peak_streams_remux, 0)::bigint         AS peak_streams_remux,
+			COALESCE(sp.peak_streams_transcode, 0)::bigint     AS peak_streams_transcode,
+			COALESCE(MAX(m.egress_kbps), 0)::bigint            AS peak_egress_kbps,
+			COALESCE(MAX(m.download_egress_kbps), 0)::bigint   AS peak_download_kbps,
+			(COALESCE(SUM(m.egress_kbps), 0) * ` + bytesParam + `)::bigint          AS egress_bytes,
+			(COALESCE(SUM(m.download_egress_kbps), 0) * ` + bytesParam + `)::bigint AS download_egress_bytes,
+			(COALESCE(SUM(m.api_egress_kbps), 0) * ` + bytesParam + `)::bigint      AS api_egress_bytes,
+			COALESCE(MAX(m.api_egress_kbps), 0)::bigint        AS api_peak_egress_kbps,
+			sp.peak_streams_at,
+			ep.peak_egress_at
+		FROM _dm_minutes m
+		LEFT JOIN _dm_stream_peaks sp ON sp.day = m.day
+		LEFT JOIN _dm_egress_peaks ep ON ep.day = m.day
+		GROUP BY m.day, sp.peak_streams_direct, sp.peak_streams_remux, sp.peak_streams_transcode, sp.peak_streams_at, ep.peak_egress_at
+	)`
+}
+
+// downsampleRolloverGraceDays is how many completed UTC days back the hourly
+// rollup re-aggregates so late samples committed across midnight rollover (or
+// delayed replica flushes) update the archive rather than being permanently
+// missed. Days about to be pruned are also re-aggregated right before delete.
+const downsampleRolloverGraceDays = 2
+
+var downsampleMetricDailySQL = `WITH ` + DailyMetricRollupCTEs(
+	`s.bucket < (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+		AND (
+			s.bucket >= ((date_trunc('day', now() AT TIME ZONE 'UTC') - make_interval(days => $2)) AT TIME ZONE 'UTC')
+			OR s.bucket < ((date_trunc('day', now() AT TIME ZONE 'UTC') - make_interval(days => $3)) AT TIME ZONE 'UTC')
+			OR NOT EXISTS (SELECT 1 FROM dashboard_metric_daily d WHERE d.day = (s.bucket AT TIME ZONE 'UTC')::date)
+		)`,
+	`$1`,
+) + `
+	INSERT INTO dashboard_metric_daily (
+		day, peak_streams, peak_direct, peak_remux, peak_transcode,
+		peak_streams_direct, peak_streams_remux, peak_streams_transcode,
+		peak_egress_kbps, peak_download_kbps,
+		egress_bytes, download_egress_bytes,
+		api_egress_bytes, api_peak_egress_kbps,
+		peak_streams_at, peak_egress_at, updated_at
+	)
+	SELECT
+		day, peak_streams::integer, peak_direct::integer, peak_remux::integer, peak_transcode::integer,
+		peak_streams_direct::integer, peak_streams_remux::integer, peak_streams_transcode::integer,
+		peak_egress_kbps, peak_download_kbps,
+		egress_bytes, download_egress_bytes,
+		api_egress_bytes, api_peak_egress_kbps,
+		peak_streams_at, peak_egress_at, now()
+	FROM _dm_daily
+	ON CONFLICT (day) DO UPDATE SET
+		peak_streams           = GREATEST(dashboard_metric_daily.peak_streams, EXCLUDED.peak_streams),
+		peak_direct            = GREATEST(dashboard_metric_daily.peak_direct, EXCLUDED.peak_direct),
+		peak_remux             = GREATEST(dashboard_metric_daily.peak_remux, EXCLUDED.peak_remux),
+		peak_transcode         = GREATEST(dashboard_metric_daily.peak_transcode, EXCLUDED.peak_transcode),
+		peak_streams_direct    = CASE
+			WHEN EXCLUDED.peak_streams > dashboard_metric_daily.peak_streams
+				OR (EXCLUDED.peak_streams = dashboard_metric_daily.peak_streams
+					AND EXCLUDED.peak_streams_at IS NOT NULL
+					AND (dashboard_metric_daily.peak_streams_at IS NULL OR EXCLUDED.peak_streams_at < dashboard_metric_daily.peak_streams_at))
+			THEN EXCLUDED.peak_streams_direct ELSE dashboard_metric_daily.peak_streams_direct END,
+		peak_streams_remux     = CASE
+			WHEN EXCLUDED.peak_streams > dashboard_metric_daily.peak_streams
+				OR (EXCLUDED.peak_streams = dashboard_metric_daily.peak_streams
+					AND EXCLUDED.peak_streams_at IS NOT NULL
+					AND (dashboard_metric_daily.peak_streams_at IS NULL OR EXCLUDED.peak_streams_at < dashboard_metric_daily.peak_streams_at))
+			THEN EXCLUDED.peak_streams_remux ELSE dashboard_metric_daily.peak_streams_remux END,
+		peak_streams_transcode = CASE
+			WHEN EXCLUDED.peak_streams > dashboard_metric_daily.peak_streams
+				OR (EXCLUDED.peak_streams = dashboard_metric_daily.peak_streams
+					AND EXCLUDED.peak_streams_at IS NOT NULL
+					AND (dashboard_metric_daily.peak_streams_at IS NULL OR EXCLUDED.peak_streams_at < dashboard_metric_daily.peak_streams_at))
+			THEN EXCLUDED.peak_streams_transcode ELSE dashboard_metric_daily.peak_streams_transcode END,
+		peak_egress_kbps       = GREATEST(dashboard_metric_daily.peak_egress_kbps, EXCLUDED.peak_egress_kbps),
+		peak_download_kbps     = GREATEST(dashboard_metric_daily.peak_download_kbps, EXCLUDED.peak_download_kbps),
+		egress_bytes           = GREATEST(dashboard_metric_daily.egress_bytes, EXCLUDED.egress_bytes),
+		download_egress_bytes  = GREATEST(dashboard_metric_daily.download_egress_bytes, EXCLUDED.download_egress_bytes),
+		api_egress_bytes       = GREATEST(dashboard_metric_daily.api_egress_bytes, EXCLUDED.api_egress_bytes),
+		api_peak_egress_kbps   = GREATEST(dashboard_metric_daily.api_peak_egress_kbps, EXCLUDED.api_peak_egress_kbps),
+		peak_streams_at        = CASE
+			WHEN EXCLUDED.peak_streams > dashboard_metric_daily.peak_streams
+				OR (EXCLUDED.peak_streams = dashboard_metric_daily.peak_streams
+					AND EXCLUDED.peak_streams_at IS NOT NULL
+					AND (dashboard_metric_daily.peak_streams_at IS NULL OR EXCLUDED.peak_streams_at < dashboard_metric_daily.peak_streams_at))
+			THEN EXCLUDED.peak_streams_at ELSE dashboard_metric_daily.peak_streams_at END,
+		peak_egress_at         = CASE
+			WHEN EXCLUDED.peak_egress_kbps > dashboard_metric_daily.peak_egress_kbps
+				OR (EXCLUDED.peak_egress_kbps = dashboard_metric_daily.peak_egress_kbps
+					AND EXCLUDED.peak_egress_at IS NOT NULL
+					AND (dashboard_metric_daily.peak_egress_at IS NULL OR EXCLUDED.peak_egress_at < dashboard_metric_daily.peak_egress_at))
+			THEN EXCLUDED.peak_egress_at ELSE dashboard_metric_daily.peak_egress_at END,
+		updated_at             = now()
+	WHERE EXCLUDED.peak_streams > dashboard_metric_daily.peak_streams
+	   OR EXCLUDED.peak_direct > dashboard_metric_daily.peak_direct
+	   OR EXCLUDED.peak_remux > dashboard_metric_daily.peak_remux
+	   OR EXCLUDED.peak_transcode > dashboard_metric_daily.peak_transcode
+	   OR EXCLUDED.peak_egress_kbps > dashboard_metric_daily.peak_egress_kbps
+	   OR EXCLUDED.peak_download_kbps > dashboard_metric_daily.peak_download_kbps
+	   OR EXCLUDED.egress_bytes > dashboard_metric_daily.egress_bytes
+	   OR EXCLUDED.download_egress_bytes > dashboard_metric_daily.download_egress_bytes
+	   OR EXCLUDED.api_egress_bytes > dashboard_metric_daily.api_egress_bytes
+	   OR EXCLUDED.api_peak_egress_kbps > dashboard_metric_daily.api_peak_egress_kbps
+	   OR (EXCLUDED.peak_streams = dashboard_metric_daily.peak_streams
+	       AND EXCLUDED.peak_streams_at IS NOT NULL
+	       AND (dashboard_metric_daily.peak_streams_at IS NULL OR EXCLUDED.peak_streams_at < dashboard_metric_daily.peak_streams_at))
+	   OR (EXCLUDED.peak_egress_kbps = dashboard_metric_daily.peak_egress_kbps
+	       AND EXCLUDED.peak_egress_at IS NOT NULL
+	       AND (dashboard_metric_daily.peak_egress_at IS NULL OR EXCLUDED.peak_egress_at < dashboard_metric_daily.peak_egress_at))
+`
+
+const downsampleNodeEgressDailySQL = `
+	INSERT INTO dashboard_node_egress_daily (day, node_id, node_name, node_type, egress_bytes, peak_egress_kbps, updated_at)
+	SELECT
+		(s.bucket AT TIME ZONE 'UTC')::date AS day,
+		s.node_id,
+		COALESCE(NULLIF(BTRIM(sn.name), ''), '') AS node_name,
+		sn.type AS node_type,
+		(COALESCE(SUM(s.egress_kbps), 0) * $1)::bigint AS egress_bytes,
+		COALESCE(MAX(s.egress_kbps), 0)::bigint        AS peak_egress_kbps,
+		now()
+	FROM dashboard_node_egress_samples s
+	LEFT JOIN stream_nodes sn ON sn.id = s.node_id
+	WHERE s.bucket < (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+	  AND (
+		s.bucket >= ((date_trunc('day', now() AT TIME ZONE 'UTC') - make_interval(days => $2)) AT TIME ZONE 'UTC')
+		OR s.bucket < ((date_trunc('day', now() AT TIME ZONE 'UTC') - make_interval(days => $3)) AT TIME ZONE 'UTC')
+		OR NOT EXISTS (
+			SELECT 1 FROM dashboard_node_egress_daily d
+			WHERE d.day = (s.bucket AT TIME ZONE 'UTC')::date AND d.node_id = s.node_id
+		)
+	  )
+	GROUP BY 1, 2, 3, 4
+	ON CONFLICT (day, node_id) DO UPDATE SET
+		node_name        = COALESCE(NULLIF(BTRIM(dashboard_node_egress_daily.node_name), ''), EXCLUDED.node_name),
+		node_type        = COALESCE(dashboard_node_egress_daily.node_type, EXCLUDED.node_type),
+		egress_bytes     = GREATEST(dashboard_node_egress_daily.egress_bytes, EXCLUDED.egress_bytes),
+		peak_egress_kbps = GREATEST(dashboard_node_egress_daily.peak_egress_kbps, EXCLUDED.peak_egress_kbps),
+		updated_at       = now()
+	WHERE EXCLUDED.egress_bytes > dashboard_node_egress_daily.egress_bytes
+	   OR EXCLUDED.peak_egress_kbps > dashboard_node_egress_daily.peak_egress_kbps
+	   OR (BTRIM(dashboard_node_egress_daily.node_name) = '' AND BTRIM(EXCLUDED.node_name) <> '')
+	   OR (dashboard_node_egress_daily.node_type IS NULL AND EXCLUDED.node_type IS NOT NULL)
+`
+
+// downsampleCompletedDays rolls up every completed UTC calendar day missing
+// from dashboard_metric_daily / dashboard_node_egress_daily (plus recent
+// rollover days and days about to be pruned) and, when prune is true, drops
+// whole UTC days older than the retention window in the same advisory-locked
+// transaction. A replica that does not acquire the lock skips both rollup and
+// prune so no replica can prune samples another replica is still archiving.
+func (s *Sampler) downsampleCompletedDays(ctx context.Context, prune bool) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	var locked bool
+	if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock($1)`, downsampleLockKey).Scan(&locked); err != nil {
+		return err
+	}
+	if !locked {
+		return nil
+	}
+	if err := execDownsampleStatements(ctx, tx, prune); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func execDownsampleStatements(ctx context.Context, tx pgx.Tx, prune bool) error {
+	if _, err := tx.Exec(ctx, downsampleMetricDailySQL, int64(BytesPerKbpsMinute), downsampleRolloverGraceDays, retentionDays); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, downsampleNodeEgressDailySQL, int64(BytesPerKbpsMinute), downsampleRolloverGraceDays, retentionDays); err != nil {
+		return err
+	}
+	if !prune {
+		return nil
+	}
 	for _, table := range []string{"dashboard_metric_samples", "dashboard_node_egress_samples"} {
-		_, err := s.pool.Exec(ctx, `
+		if _, err := tx.Exec(ctx, `
 			DELETE FROM `+table+`
-			WHERE bucket < now() - make_interval(days => $1)
-		`, retentionDays)
-		if err != nil {
-			slog.WarnContext(ctx, "failed to prune dashboard metric samples", "component", component, "table", table, "error", err)
+			WHERE bucket < ((date_trunc('day', now() AT TIME ZONE 'UTC') - make_interval(days => $1)) AT TIME ZONE 'UTC')
+		`, retentionDays); err != nil {
+			return err
 		}
 	}
+	return nil
 }
 
 // sampleBucket truncates a sample time to the minute it belongs to, in UTC.

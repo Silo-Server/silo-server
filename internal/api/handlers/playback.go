@@ -211,6 +211,10 @@ type PlaybackHandler struct {
 	// InstallationID is diagnostics.ServerInstanceID; v2 playback mutations
 	// carry it and are refused when it differs. Empty leaves v2 unconfigured.
 	InstallationID string
+	// ReportingNode identifies this API node on finalized admin playback
+	// history rows when the session itself does not carry one recovered from
+	// playback_sessions_sync.
+	ReportingNode string
 	// WatchTogetherAvailable is set when the room service and authenticated
 	// socket are wired, so capability discovery reflects their dependencies.
 	WatchTogetherAvailable bool
@@ -926,6 +930,16 @@ func fileBitrateKbps(file *models.MediaFile) int {
 	return file.Bitrate
 }
 
+func effectiveMediaFileID(session *playback.Session) int {
+	if session == nil {
+		return 0
+	}
+	if session.MediaFileID > 0 {
+		return session.MediaFileID
+	}
+	return session.RequestedMediaFileID
+}
+
 func requestedMediaFileID(session *playback.Session) int {
 	if session == nil {
 		return 0
@@ -1274,6 +1288,36 @@ func (h *PlaybackHandler) scrobbleEventForStoppedSession(
 	return event, true
 }
 
+func (h *PlaybackHandler) resolveHistoryOutputFormat(
+	ctx context.Context,
+	session *playback.Session,
+	file *models.MediaFile,
+	effFileID int,
+	playMethod playback.PlayMethod,
+) (outputContainer, outputProtocol string) {
+	outputContainer = session.OutputContainer
+	outputProtocol = session.OutputProtocol
+	if playMethod != playback.PlayDirect {
+		return outputContainer, outputProtocol
+	}
+	if outputProtocol == "" {
+		outputProtocol = playback.OutputProtocolHTTP
+	}
+	if outputContainer != "" {
+		return outputContainer, outputProtocol
+	}
+	effFile := file
+	if effFileID > 0 && (effFile == nil || effFile.ID != effFileID) {
+		if loaded, loadErr := h.fileResolver.GetByID(ctx, effFileID); loadErr == nil && loaded != nil {
+			effFile = loaded
+		}
+	}
+	if effFile != nil {
+		outputContainer = effFile.Container
+	}
+	return outputContainer, outputProtocol
+}
+
 func (h *PlaybackHandler) buildAdminHistoryEntry(
 	ctx context.Context,
 	session *playback.Session,
@@ -1323,26 +1367,63 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 		completed = h.playbackThresholdsForFile(ctx, session, file, duration).Watched(session.Position, duration)
 	}
 
+	playMethod := semanticPlayMethod(session)
+	var adaptationReasons []string
+	if playMethod != playback.PlayDirect {
+		adaptationReasons = playback.NormalizeAdaptationReasons(session.AdaptationReasons)
+	}
+	reportingNode := session.ReportingNode
+	if reportingNode == "" {
+		reportingNode = h.ReportingNode
+	}
+	effFileID := effectiveMediaFileID(session)
+	outputContainer, outputProtocol := h.resolveHistoryOutputFormat(ctx, session, file, effFileID, playMethod)
+	var audioTrackIndex *int
+	if session.AudioTrackIndex >= 0 {
+		idx := session.AudioTrackIndex
+		audioTrackIndex = &idx
+	}
+
 	entry := &AdminPlaybackHistoryEntry{
-		SessionID:          session.ID,
-		UserID:             session.UserID,
-		ProfileID:          session.ProfileID,
-		ProfileName:        profileName,
-		MediaItemID:        targetID,
-		MediaFileID:        requestedMediaFileID(session),
-		PlayMethod:         string(semanticPlayMethod(session)),
-		StartedAt:          session.StartedAt.UTC().Format(time.RFC3339Nano),
-		EndedAt:            time.Now().UTC().Format(time.RFC3339Nano),
-		EndPositionSeconds: session.Position,
-		DurationSeconds:    durationPtr,
-		Completed:          completed,
-		ClientIP:           session.ClientIP,
-		Watch:              session.Watch,
-		DeviceID:           session.DeviceID,
-		DevicePlatform:     session.DevicePlatform,
-		ClientName:         session.ClientName,
-		ClientVersion:      session.ClientVersion,
-		Subtitle:           session.Subtitle,
+		SessionID:              session.ID,
+		UserID:                 session.UserID,
+		ProfileID:              session.ProfileID,
+		ProfileName:            profileName,
+		MediaItemID:            targetID,
+		MediaFileID:            requestedMediaFileID(session),
+		EffectiveMediaFileID:   effFileID,
+		AudioTrackIndex:        audioTrackIndex,
+		PlayMethod:             string(playMethod),
+		StartedAt:              session.StartedAt.UTC().Format(time.RFC3339Nano),
+		EndedAt:                time.Now().UTC().Format(time.RFC3339Nano),
+		EndPositionSeconds:     session.Position,
+		DurationSeconds:        durationPtr,
+		Completed:              completed,
+		ClientIP:               session.ClientIP,
+		Watch:                  session.Watch,
+		DeviceID:               session.DeviceID,
+		DevicePlatform:         session.DevicePlatform,
+		ClientName:             session.ClientName,
+		ClientVersion:          session.ClientVersion,
+		Subtitle:               session.Subtitle,
+		TargetVideoCodec:       session.TargetVideoCodec,
+		TargetResolution:       session.TargetResolution,
+		TargetAudioCodec:       session.TargetAudioCodec,
+		TargetAudioChannels:    session.TargetAudioChannels,
+		OutputContainer:        outputContainer,
+		OutputProtocol:         outputProtocol,
+		TargetBitrateKbps:      session.TargetBitrateKbps,
+		TranscodeHWAccel:       session.TranscodeHWAccel,
+		ToneMapMode:            string(session.ToneMapMode),
+		AdaptationReasons:      adaptationReasons,
+		ReportingNode:          reportingNode,
+		StreamLocation:         session.StreamLocation,
+		CompatOrigin:           session.IsJellyfinCompat,
+		RoutingExecution:       session.RoutingExecution,
+		RoutingExecutionNodeID: session.RoutingExecutionNodeID,
+		RoutingEgress:          session.RoutingEgress,
+		RoutingEgressNodeID:    session.RoutingEgressNodeID,
+		RouteFactsRecorded:     true,
 	}
 	// The decisions the live admin row showed for the transport the play
 	// ended on.
@@ -1514,6 +1595,8 @@ func (h *PlaybackHandler) recordAdminEnd(ctx context.Context, session *playback.
 	}
 	entry.EndReason = reason
 	entry.SubtitleAt = subtitleAt
+	// The sweep reads the route facts from the same row as the subtitle.
+	entry.RouteFactsAt = subtitleAt
 	if subtitleAt.IsZero() {
 		h.recordCommittedSubtitle(ctx, session, entry)
 	}
@@ -1771,18 +1854,29 @@ type liveSessionReader interface {
 // built from a Jellyfin play row, which keeps only a pseudo-account) takes
 // the live row's. A start time still unknown after that is startedAt, then
 // now.
-func (h *PlaybackHandler) fillDetachedSession(ctx context.Context, session *playback.Session, startedAt time.Time) {
-	if reader, ok := h.AdminStore.(liveSessionReader); ok {
-		live, err := reader.LiveSession(ctx, session.ID)
-		if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
-			slog.WarnContext(ctx, "failed to read the live row of a detached session", "component", "api", "session", session.ID, "error", err)
-		}
-		if live != nil && session.UserID == 0 {
-			session.UserID, session.ProfileID = live.UserID, live.ProfileID
-		}
-		if live != nil && live.UserID == session.UserID {
-			fillEmptySessionFacts(session, live)
-		}
+// liveSessionOriginReader is liveSessionReader plus whether the row came from
+// the live playback_sessions_sync table rather than the start-time fallback.
+type liveSessionOriginReader interface {
+	LiveSessionWithOrigin(ctx context.Context, sessionID string) (*playback.Session, bool, error)
+}
+
+func (h *PlaybackHandler) fillDetachedSession(ctx context.Context, session *playback.Session, startedAt time.Time) bool {
+	fromLiveRow := false
+	var live *playback.Session
+	var err error
+	if originReader, ok := h.AdminStore.(liveSessionOriginReader); ok {
+		live, fromLiveRow, err = originReader.LiveSessionWithOrigin(ctx, session.ID)
+	} else if reader, ok := h.AdminStore.(liveSessionReader); ok {
+		live, err = reader.LiveSession(ctx, session.ID)
+	}
+	if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
+		slog.WarnContext(ctx, "failed to read the live row of a detached session", "component", "api", "session", session.ID, "error", err)
+	}
+	if live != nil && session.UserID == 0 {
+		session.UserID, session.ProfileID = live.UserID, live.ProfileID
+	}
+	if live != nil && live.UserID == session.UserID {
+		fillEmptySessionFacts(session, live)
 	}
 	if session.Position < 0 {
 		session.Position = 0
@@ -1798,6 +1892,7 @@ func (h *PlaybackHandler) fillDetachedSession(ctx context.Context, session *play
 	if watch, ok := h.savedWatch(ctx, session.ID); ok && (!session.Watch.Measured || watch.Until.After(session.Watch.Until)) {
 		session.Watch = watch
 	}
+	return fromLiveRow
 }
 
 // sessionWatchReader reads the watch-time measurement a session's server
@@ -1890,6 +1985,35 @@ func fillEmptySessionFacts(session, live *playback.Session) {
 		session.TargetVideoCodec = live.TargetVideoCodec
 		session.Subtitle = live.Subtitle
 	}
+	fill(&session.TargetVideoCodec, live.TargetVideoCodec)
+	fill(&session.TargetResolution, live.TargetResolution)
+	fill(&session.TargetAudioCodec, live.TargetAudioCodec)
+	if session.TargetAudioChannels == 0 {
+		session.TargetAudioChannels = live.TargetAudioChannels
+	}
+	fill(&session.OutputContainer, live.OutputContainer)
+	fill(&session.OutputProtocol, live.OutputProtocol)
+	if session.TargetBitrateKbps == 0 {
+		session.TargetBitrateKbps = live.TargetBitrateKbps
+	}
+	fill(&session.TranscodeHWAccel, live.TranscodeHWAccel)
+	if session.ToneMapMode == "" {
+		session.ToneMapMode = live.ToneMapMode
+	}
+	if len(session.AdaptationReasons) == 0 && len(live.AdaptationReasons) > 0 && session.PlayMethod != playback.PlayDirect {
+		session.AdaptationReasons = append([]string(nil), live.AdaptationReasons...)
+	}
+	fill(&session.ReportingNode, live.ReportingNode)
+	fill(&session.PlanID, live.PlanID)
+	fill(&session.StreamLocation, live.StreamLocation)
+	fill(&session.RoutingExecution, live.RoutingExecution)
+	if session.RoutingExecutionNodeID == 0 {
+		session.RoutingExecutionNodeID = live.RoutingExecutionNodeID
+	}
+	fill(&session.RoutingEgress, live.RoutingEgress)
+	if session.RoutingEgressNodeID == 0 {
+		session.RoutingEgressNodeID = live.RoutingEgressNodeID
+	}
 	fill(&session.ClientIP, live.ClientIP)
 	fill(&session.ClientName, live.ClientName)
 	fill(&session.ClientVersion, live.ClientVersion)
@@ -1907,6 +2031,9 @@ func fillEmptySessionFacts(session, live *playback.Session) {
 	}
 	if session.RequestedMediaFileID == 0 {
 		session.RequestedMediaFileID = live.RequestedMediaFileID
+	}
+	if session.AudioTrackIndex == 0 && live.AudioTrackIndex > 0 {
+		session.AudioTrackIndex = live.AudioTrackIndex
 	}
 	if session.TimelineDuration <= 0 {
 		session.TimelineDuration = live.TimelineDuration

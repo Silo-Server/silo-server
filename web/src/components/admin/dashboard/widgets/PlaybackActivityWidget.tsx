@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Link } from "react-router";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { formatTime } from "@/lib/datetime";
@@ -16,6 +17,7 @@ import {
 } from "./playbackActivitySeries";
 import { formatLocale } from "@/lib/appLocale";
 import { useT } from "@/i18n";
+import { widgetRangeToInsightsRange } from "@/pages/admin-insights/insightsHelpers";
 
 /** Playback starts per bucket over the chosen window, stacked by play method. */
 export function PlaybackActivityWidget() {
@@ -56,6 +58,12 @@ export function PlaybackActivityWidget() {
             count_text: total.toLocaleString(formatLocale()),
           })}
         </span>
+        <Link
+          to={`/admin/insights?tab=playback&range=${widgetRangeToInsightsRange(range)}`}
+          className="text-muted-foreground hover:text-primary hidden text-[0.6875rem] whitespace-nowrap transition-colors @md/card-header:inline"
+        >
+          {t("web.admin.dashboard.widgets.openInsights")}
+        </Link>
         <WidgetRangePicker />
       </WidgetHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">

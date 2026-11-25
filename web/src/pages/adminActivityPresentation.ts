@@ -197,7 +197,7 @@ export function decisionBadgeClass(decision: string): string {
  * emits is_jellyfin_client; sessions from servers without the field simply get
  * no pill.
  */
-export function isJellyfinSession(session: AdminSession): boolean {
+export function isJellyfinSession(session: Pick<AdminSession, "is_jellyfin_client">): boolean {
   return session.is_jellyfin_client === true;
 }
 

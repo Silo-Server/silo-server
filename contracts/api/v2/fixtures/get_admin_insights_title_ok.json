@@ -1,0 +1,61 @@
+{
+  "from": "2025-12-04T03:04:05.678Z",
+  "to": "2026-01-02T03:04:05.678Z",
+  "tz": "UTC",
+  "bucket_unit": "day",
+  "content_id": "series-1",
+  "kind": "series",
+  "title": "Severance",
+  "year": null,
+  "duration_seconds": null,
+  "summary": {
+    "plays": 18,
+    "sessions": 21,
+    "viewers": 3,
+    "completed_plays": 16,
+    "watch_seconds": 54000,
+    "direct_plays": 15,
+    "remux_plays": 2,
+    "transcode_plays": 1
+  },
+  "buckets": [
+    {
+      "bucket_start": "2026-01-01T03:04:05.678Z",
+      "label_date": "2026-01-01",
+      "plays": 4,
+      "watch_seconds": 12000
+    }
+  ],
+  "viewers": [
+    {
+      "user_id": "7",
+      "username": "alex",
+      "profile_id": "p-main",
+      "profile_name": "Alex",
+      "plays": 9,
+      "completed_plays": 8,
+      "watch_seconds": 27000,
+      "last_played_at": "2026-01-02T01:34:05.678Z",
+      "furthest_position_seconds": null,
+      "last_episode": {
+        "content_id": "ep-9",
+        "season_number": 1,
+        "episode_number": 9,
+        "title": "The We We Are"
+      }
+    }
+  ],
+  "viewers_truncated": false,
+  "episodes": [
+    {
+      "content_id": "ep-1",
+      "season_number": 1,
+      "episode_number": 1,
+      "title": "Good News About Hell",
+      "plays": 3,
+      "viewers": 3,
+      "watch_seconds": 9000
+    }
+  ],
+  "episodes_truncated": false
+}

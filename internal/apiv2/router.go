@@ -215,6 +215,7 @@ type Dependencies struct {
 	ProfileTransfer               ProfileTransferService
 	AdminDiagnosticReads          AdminDiagnosticReadsService
 	AdminDashboardInsights        AdminDashboardInsightsService
+	AdminInsights                 AdminInsightsService
 	AdminAPIClients               AdminAPIClientsService
 	AdminNodesRead                AdminNodesReadService
 	AdminNodeCommands             AdminNodeCommandsService

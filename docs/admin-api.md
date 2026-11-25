@@ -2268,13 +2268,116 @@ is also null for a server teardown the client never recovered from (an encoder e
 
 `GET /api/v2/admin/playback-history/capabilities` reports `available`, `ended_before`,
 `watch_measurement`, `client_ip`, `device_identity`, `client_identity`,
-`stream_decisions`, `end_reason`, `end_reason_values` and `lifecycle_seq`, for feature
-detection.
+`stream_decisions`, `end_reason`, `end_reason_values`, `lifecycle_seq`, `route_facts`,
+`rich_filters`, `session_detail` and `series_filter`, for feature detection.
+
+Additional optional query parameters filter `GET /api/v2/admin/playback-history` (and are
+bound into the cursor alongside the original filters): `search`, `play_method`
+(`all`, `direct`, `remux`, `transcode`), `device_platform`, `client_name`,
+`source_video_codec`, `subtitle_burn_in` (`all`, `true`, `false`), `stream_location`
+(`all`, `local`, `remote`), `adaptation_reason`, `library_id`, `series_id` (attempts of any
+episode of the series), `started_after` and `started_before`. Each entry also carries delivered route facts captured on finalization
+(`route_facts_recorded`, `target_video_codec`, `target_resolution`, `target_audio_codec`,
+`target_audio_channels`, `output_container`, `output_protocol`, `target_bitrate_kbps`,
+`transcode_hw_accel`, `tone_map_mode`, `adaptation_reasons`, `reporting_node`,
+`stream_location`, `compat_origin`, `is_jellyfin_client`, `routing_execution`,
+`routing_execution_node_id`, `routing_execution_node_name`, `routing_egress`,
+`routing_egress_node_id`, `routing_egress_node_name`) plus joined source file metadata
+(`source_video_codec`, `source_resolution`, `source_audio_codec`, `source_audio_channels`,
+`source_container`, `source_bitrate_kbps`, `source_hdr`, `source_video_range_type`,
+`library_id`, `library_name`). Pre-upgrade rows report `route_facts_recorded: false` and
+null for unrecorded route columns.
+
+`GET /api/v2/admin/playback-history/{session_id}` (`getAdminPlaybackHistoryEntry`) reads
+one finalized entry in the same shape, returning `404 not_found` when no row exists.
 
 The administrator history page and the user detail watch-history tab read this route
 under the authority captured when the query was created, keyed by an opaque authority
 generation, and refuse a page whose account, server, profile or PIN authority changed while
-it was in flight. Both views keep their single-page reading at the 200-entry page ceiling.
+it was in flight. The history page pages through results with `cursor` (25, 50 or 100
+entries a page); a view that sets no `limit` asks for the 200-entry page ceiling.
+History pages share the Insights read limit described under [Insights](#insights).
+
+## Insights
+
+The Monitor -> Insights endpoints sit under `admin:monitor:read` for acting administrators.
+Each tab shares the time-window parameters `range` (`7d`, `30d`, `90d`, `1y`, `all`,
+`custom`; default `30d`), optional local-date bounds `from_date` and `to_date`
+(`YYYY-MM-DD`, required when `range=custom`), IANA `tz` (default `UTC`), and `refresh`
+(ignored for scoped API keys). Out-of-range dates or unknown timezones answer
+`422 validation_failed`. Where a read accepts `profile_id`, it also requires `user_id`:
+profile ids such as `default` repeat across accounts, so `profile_id` alone answers `422`.
+Insights reads and Playback History pages share one limit: each node runs at most three at a
+time, further reads wait for a slot, and a read stops two minutes after it asks for one.
+
+**Plays and sessions.** Every playback history row is one session. Insights groups a
+profile's sessions of one item (a movie or an episode) into viewings: a session continues the
+viewing in progress unless it is the first, starts more than 24 hours after every earlier
+session ended, or starts after an earlier session completed (a completed session that a
+Jellyfin method switch replaced hands its play to a session starting within five minutes). A
+viewing is a **play** when it completed or adds up to at least 30 seconds of watch time. A play
+takes its start time and library from its first session and its play method from its longest
+session; watch time sums every session that started in the window. A session belongs to its
+file's library, or, when the file is gone, to its title's library only if the title belongs to
+exactly one; the `library_id` filter and the library leaderboard both use that rule. Fields
+named `plays` count
+plays; fields named `sessions` count history rows (coverage, Devices, and Bandwidth location
+share are per session, because route facts and measurement are recorded per session). Counts
+are computed from the rows as they stand, so a late or recovered finalization can change a past
+window. The implementation and its edge cases are documented in
+`internal/api/handlers/admin_insights_plays.go`.
+
+- `GET /api/v2/admin/insights/capabilities` (`getAdminInsightsCapabilities`) advertises
+  whether Insights and its long-term per-node egress archive are configured (`available`,
+  `node_egress_daily`), the Titles reads (`titles`), and the `profile_id` filter
+  (`profile_filter`).
+- `GET /api/v2/admin/insights/activity` (`getAdminInsightsActivity`) accepts optional
+  `library_id`, `user_id` and `profile_id` filters and returns window totals (`plays`,
+  `sessions`, completion and play-method counts over plays), auto-bucketed local-timezone
+  series (`day`, `week`, or `month`), a 7×24 local-timezone viewing heatmap
+  (`day_of_week` `0=Monday..6=Sunday`, `hour` `0..23`), server-wide peak concurrent streams
+  unioned from `dashboard_metric_daily` and unarchived `dashboard_metric_samples`, and
+  data-coverage boundaries (`oldest_history_at`, `oldest_measured_at`,
+  `oldest_route_facts_at`, `oldest_metric_at`, `total_sessions`, `measured_sessions`,
+  `route_facts_sessions`).
+- `GET /api/v2/admin/insights/people` (`getAdminInsightsPeople`) accepts optional
+  `library_id`, `search`, `sort` (`watch_time`, `plays`, `direct_pct`, `completion_pct`,
+  `last_seen`), `dir` (`asc`, `desc`), `limit` (1..100), and `offset`, returning account
+  rollups with `total_watch_seconds`, nested household profiles, and live session indicators.
+  An account or profile appears when it has any session in the window.
+- `GET /api/v2/admin/insights/titles` (`getAdminInsightsTitles`) accepts optional
+  `library_id`, `user_id`, `profile_id`, `sort` (`plays`, `watch_time`, `viewers`) and `limit`
+  (1..50, default 10), and ranks movies, series (episodes roll up to their series) and
+  libraries with at least one play; titles no longer in the catalog do not rank. `viewers`
+  counts distinct profiles with a play. A library row counts plays by the library of each
+  play's first session.
+- `GET /api/v2/admin/insights/titles/{content_id}` (`getAdminInsightsTitle`) reads one movie or
+  series with the same window and filters: totals, plays per bucket, the profiles with a play
+  (most recent first, capped at 100, `viewers_truncated`), and a series' episodes with a play
+  (capped at 500, `episodes_truncated`). An episode id answers `422`; an unknown id `404`.
+  Title detail is not cached.
+- `GET /api/v2/admin/insights/devices` (`getAdminInsightsDevices`) accepts optional
+  `library_id`, `user_id`, `profile_id`, and `min_sessions` (default 5), returning, per
+  session, the normalized `(client_name, device_platform)` × source video codec direct-play
+  matrix (at most 200 client and platform pairs, the ones with the most sessions, since clients
+  report their own names), canonical `adaptation_reasons` counts, hardware acceleration and HDR tone-mapping
+  breakdowns, burn-in subtitle codecs, source vs delivered resolution classes
+  (`source_resolutions`, `delivered_resolutions`, `resolution_changes`), and
+  `top_transcoders`, up to 10 clients ranked by transcoded sessions whatever `min_sessions` is
+  (the threshold applies to the matrix only). Resolution classes
+  use the scanner's width-and-height buckets (`480p`, `720p`, `1080p`, `2160p`, `4320p`,
+  `unknown`); a transcode target, stored as its exact output height, is classified with the
+  source's aspect ratio, and transcodes recorded before route facts are `unknown`.
+- `GET /api/v2/admin/insights/bandwidth` (`getAdminInsightsBandwidth`) unions
+  `dashboard_metric_daily` and `dashboard_node_egress_daily` with unarchived live minute
+  samples across the requested UTC calendar date span (exact 7/30/90/365 UTC days for presets;
+  without double-counting archived UTC days, so minute-sample pruning does not change
+  historical totals or peaks) to report multi-year egress volume, API vs. node totals, peak
+  throughput, per-node daily breakdown, and remote vs. local session share. Activity's
+  `peak_streams` series uses the same UTC-day daily rollup union.
+
+The dashboard's Top Titles widget (`getAdminDashboardTopActivity`) counts completed watch
+history rows, not Insights plays, so its numbers differ from the Titles tab's.
 
 ## History imports
 
