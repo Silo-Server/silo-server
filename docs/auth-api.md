@@ -577,6 +577,29 @@ lists the routes one session called in up to the last 24 hours. Both are admin-o
 `api_clients` in
 `GET /api/v2/admin/dashboard/capabilities` advertises them.
 
+## Household profiles
+
+Every profile object the server returns carries `sync_id`: on
+`GET /api/v2/profiles`, on the profile that `createProfile`, `updateProfile`
+and the avatar operations return, and on the admin account-profile routes
+under `/api/v2/admin/users/{id}/profiles`. It is the profile's ID in its
+account's profile set, a lower-case UUID that is the same on every server
+holding the set, or `null` for a profile in no set. An app that signs in to
+several servers lines up one person's profiles across them by it. The ID is
+unique within an account, not across the server.
+
+`PUT /api/v2/profiles/{id}/avatar` (`uploadProfileAvatar`) takes the image in
+the multipart part `avatar` and an optional text part `source_sha256`: the
+SHA-256 of the picture's file as it was first uploaded, on this server or
+another, as 64 lower-case hexadecimal characters. A device copying a profile's
+picture from another server sends the hash that server has for it, so both
+servers name the picture by the same hash. Without the part the server stores
+the SHA-256 of the bytes it received. Any other value is 422
+`validation_failed` at `body.source_sha256`. The server keeps the hash with
+the picture: choosing a preset or deleting the avatar clears it. A picture
+uploaded before the server kept hashes gets the SHA-256 of its stored
+original the first time the hash is needed, and keeps it.
+
 ## Profile PINs
 
 Profile creation stores a requested PIN hash in the same
