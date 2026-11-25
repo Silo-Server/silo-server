@@ -44,6 +44,11 @@ export function InviteAppJoin({
   // focus moves once per answer, never while the person types.
   const [settled, setSettled] = useState(0);
   const handled = useRef(0);
+  // What had focus when the person submitted or renewed. Only an error on
+  // that same field needs the status region: a field that takes focus later
+  // (autoFocus when the form comes back, or the effect below) reads its
+  // error itself.
+  const focusedAtStart = useRef<Element | null>(null);
   // Read by a polite status region when the field with the error already has
   // focus: moving focus there again would not read its description.
   const [announcement, setAnnouncement] = useState("");
@@ -65,8 +70,8 @@ export function InviteAppJoin({
       fieldError?.field === "email"
         ? emailInput.current
         : (usernameInput.current ?? continueButton.current);
-    if (fieldError && target === document.activeElement) {
-      setAnnouncement(fieldError.message);
+    if (target === document.activeElement) {
+      setAnnouncement(fieldError && target === focusedAtStart.current ? fieldError.message : "");
       return;
     }
     setAnnouncement("");
@@ -120,6 +125,7 @@ export function InviteAppJoin({
   async function issue() {
     const controller = lifetime.current;
     if (!controller || controller.signal.aborted) return;
+    focusedAtStart.current = document.activeElement;
     setPending(true);
     setRefusal(null);
     try {
@@ -147,6 +153,7 @@ export function InviteAppJoin({
     if (pending) return;
     const name = username.trim();
     const address = email.trim();
+    focusedAtStart.current = document.activeElement;
     setFieldError(undefined);
     setAnnouncement("");
     if (!name) {

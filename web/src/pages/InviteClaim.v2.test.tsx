@@ -455,6 +455,7 @@ it("keeps focus where the person types after a later refusal", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Too many requests");
   // The submit cleared the email's error; the refusal sent focus to the form.
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Username")));
   expect(email).not.toHaveAccessibleDescription(/already uses/);
   email.focus();
   fireEvent.change(email, { target: { value: "sam2@example.test" } });
@@ -472,4 +473,29 @@ it("announces an error on the field that has focus", async () => {
   fireEvent.submit(username.closest("form")!);
   expect(await screen.findByRole("status")).toHaveTextContent("Choose a username.");
   expect(username).toHaveAccessibleDescription("Choose a username.");
+});
+
+// A renewal from the Open Silo step finds the name taken: the form comes
+// back with focus on the username field, which reads its error once; the
+// status region stays empty.
+it("reads a name taken at renewal once, from the username field", async () => {
+  lookup = async () => json({ ...linkInvitation, app_join: true });
+  let issued = 0;
+  appCode = async () =>
+    ++issued === 1
+      ? json({ ...issuedCode, expires_in: 1 })
+      : problemResponse(409, "conflict", {
+          errors: [{ location: "body.username", code: "duplicate", detail: "taken" }],
+        });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.change(screen.getByLabelText("Username"), { target: { value: "sam" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  const renew = await screen.findByRole("button", { name: "Get a new code" }, { timeout: 3000 });
+  renew.focus();
+  fireEvent.click(renew);
+  const username = await screen.findByLabelText("Username");
+  await waitFor(() => expect(document.activeElement).toBe(username));
+  expect(username).toHaveAccessibleDescription("That username is already in use. Choose another.");
+  expect(screen.getByRole("status")).toHaveTextContent("");
 });
