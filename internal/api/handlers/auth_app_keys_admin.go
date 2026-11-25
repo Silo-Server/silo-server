@@ -44,7 +44,7 @@ func (h *AuthHandler) AdminDenyPendingAppKey(ctx context.Context, userID int, id
 	return ownerError(h.appKeys.AdminDenyPendingKey(ctx, actor, userID, id))
 }
 
-// adminKeyActor is the calling administrator's account, as the neighbouring
+// adminKeyActor is the calling administrator's account, as the neighboring
 // admin login-session and pre-approval operations read it.
 func adminKeyActor(ctx context.Context) (int, error) {
 	claims := apimw.GetClaims(ctx)
