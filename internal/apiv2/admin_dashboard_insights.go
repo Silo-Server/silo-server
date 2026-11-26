@@ -14,7 +14,7 @@ type AdminDashboardInsightsService interface {
 	ReadAdminDownloadsStats(context.Context, int, bool) (*handlers.AdminDownloadsStats, error)
 }
 type AdminDashboardWindowInput struct {
-	Hours   int  `query:"hours" minimum:"1" maximum:"744" default:"24"`
+	Hours   int  `query:"hours" minimum:"1" maximum:"744" default:"24" doc:"Window length in hours (1 to 744, up to 31 days)."`
 	Refresh bool `query:"refresh" default:"false" doc:"Invalidate the cached aggregate before reading; ignored for scoped API keys."`
 }
 type AdminDashboardTopInput struct {
@@ -35,20 +35,20 @@ func cacheRefresh(ctx context.Context, requested bool) bool {
 }
 
 type AdminDashboardTimeseriesPoint struct {
-	T                  Instant                       `json:"t"`
-	Streams            int64                         `json:"streams"`
-	Direct             int64                         `json:"direct"`
-	Remux              int64                         `json:"remux"`
-	Transcode          int64                         `json:"transcode"`
-	EgressKbps         int64                         `json:"egress_kbps"`
-	DownloadEgressKbps int64                         `json:"download_egress_kbps"`
+	T                  Instant                       `json:"t" doc:"Start of the bucket in UTC."`
+	Streams            int64                         `json:"streams" doc:"Peak concurrent playback sessions in the bucket."`
+	Direct             int64                         `json:"direct" doc:"Peak direct-play sessions in the bucket; taken independently of streams and may come from a different minute. Use streams_by_method to stack methods."`
+	Remux              int64                         `json:"remux" doc:"Peak remux sessions in the bucket; taken independently of streams. Use streams_by_method to stack methods."`
+	Transcode          int64                         `json:"transcode" doc:"Peak transcode sessions in the bucket; taken independently of streams. Use streams_by_method to stack methods."`
+	EgressKbps         int64                         `json:"egress_kbps" doc:"Peak viewer-facing Silo egress in kbps for the bucket, summing API stream telemetry and enabled healthy stream nodes with internal relay hops excluded."`
+	DownloadEgressKbps int64                         `json:"download_egress_kbps" doc:"Peak API file-transfer egress subset in kbps (offline and direct downloads, ebook/audiobook fetches, theme audio, bandwidth probes). Proxy nodes do not split downloads out. Past a 2-hour window this peak can come from a different minute than egress_kbps, so do not subtract them to derive playback rate."`
 	EgressBySource     map[string]int64              `json:"egress_by_source" doc:"egress_kbps split by egress_sources key, from the bucket's peak-egress minute. Egress no listed source accounts for, such as minutes sampled before per-source rows existed, is egress_kbps minus the sum of these values."`
 	StreamsByMethod    AdminDashboardStreamsByMethod `json:"streams_by_method" doc:"streams split by play method, from the bucket's peak-streams minute, so the parts add up to no more than streams and can be stacked. direct, remux and transcode on the point are each their own peak and may come from different minutes. Sessions with any other play method are streams minus the sum of these values."`
 }
 type AdminDashboardStreamsByMethod struct {
-	Direct    int64 `json:"direct"`
-	Remux     int64 `json:"remux"`
-	Transcode int64 `json:"transcode"`
+	Direct    int64 `json:"direct" doc:"Direct-play sessions during the bucket's peak-streams minute."`
+	Remux     int64 `json:"remux" doc:"Remux sessions during the bucket's peak-streams minute."`
+	Transcode int64 `json:"transcode" doc:"Transcode sessions during the bucket's peak-streams minute."`
 }
 type AdminDashboardEgressSource struct {
 	Key         string `json:"key" doc:"The key used in a point's egress_by_source: \"api\" or \"node:<node_id>\"."`
@@ -58,14 +58,14 @@ type AdminDashboardEgressSource struct {
 	EgressBytes int64  `json:"egress_bytes" doc:"Data this source served over the whole window, integrated from every sampled minute like the window's egress_bytes. Rank sources by this rather than by the per-point split, which shows only each bucket's peak minute."`
 }
 type AdminDashboardTimeseries struct {
-	ResolutionSeconds   int                             `json:"resolution_seconds"`
-	From                Instant                         `json:"from"`
-	To                  Instant                         `json:"to"`
-	OldestSampleAt      NullableInstant                 `json:"oldest_sample_at"`
-	EgressBytes         int64                           `json:"egress_bytes"`
-	DownloadEgressBytes int64                           `json:"download_egress_bytes"`
+	ResolutionSeconds   int                             `json:"resolution_seconds" doc:"Bucket width in seconds chosen for the requested window (60 for <=2h, 300 for <=48h, 1800 for <=336h, 7200 wider)."`
+	From                Instant                         `json:"from" doc:"Start of the requested window in UTC."`
+	To                  Instant                         `json:"to" doc:"End of the requested window in UTC."`
+	OldestSampleAt      NullableInstant                 `json:"oldest_sample_at" doc:"Timestamp of the oldest retained minute sample, or null until the first sample is written."`
+	EgressBytes         int64                           `json:"egress_bytes" doc:"Total viewer-facing egress served over the window in bytes, integrated from every sampled minute rather than from peak-per-bucket points."`
+	DownloadEgressBytes int64                           `json:"download_egress_bytes" doc:"Total API file-transfer egress over the window in bytes, integrated from every sampled minute; subset of egress_bytes."`
 	EgressSources       []AdminDashboardEgressSource    `json:"egress_sources" doc:"Every source with samples in the window, which covers every key a point's egress_by_source uses; the API source first, then nodes by name."`
-	Points              []AdminDashboardTimeseriesPoint `json:"points"`
+	Points              []AdminDashboardTimeseriesPoint `json:"points" doc:"Sampled buckets in ascending time order; buckets with no sample are omitted rather than zero-filled. Wider buckets report per-column peak minutes."`
 }
 type AdminDashboardTimeseriesOutput struct{ Body AdminDashboardTimeseries }
 type AdminDashboardPlaybackBucket struct {

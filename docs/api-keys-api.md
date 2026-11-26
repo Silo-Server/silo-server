@@ -243,7 +243,7 @@ answers any owner.
 | Area | Paths under `/api/v2` |
 |---|---|
 | Live sessions | `/admin/sessions`, `/admin/sessions/summary`, `/admin/sessions/capabilities`, `/admin/sessions/command-capabilities`, `/events/capabilities` |
-| History and stats | `/admin/playback-history`, `/admin/playback-history/capabilities`, `/admin/stats/timeseries`, `/admin/stats/playback-activity`, `/admin/stats/top-activity`, `/admin/stats/downloads` |
+| History and stats | `/admin/playback-history`, `/admin/playback-history/capabilities`, `/admin/playback-history/{session_id}`, `/admin/stats/timeseries`, `/admin/stats/playback-activity`, `/admin/stats/top-activity`, `/admin/stats/downloads`, `/admin/insights/capabilities`, `/admin/insights/activity`, `/admin/insights/people`, `/admin/insights/devices`, `/admin/insights/bandwidth`, `/admin/insights/titles`, `/admin/insights/titles/{content_id}`, `/admin/insights/library` |
 | Accounts | `/admin/users`, `/admin/users/capabilities`, `/admin/users/{id}`, and `/admin/users/{id}/` `profiles`, `devices`, `ips`, `downloads`, `downloads/summary`, `watch-summary` |
 | Devices and addresses | `/admin/devices`, `/admin/devices/capabilities`, `/admin/ips` |
 | Downloads | `/admin/downloads/entries`, `/admin/downloads/devices`, `/admin/downloads/storage/capabilities`, `/admin/downloads/preparations`, `/admin/downloads/preparations/capabilities` |
@@ -272,7 +272,7 @@ reads withhold details from scoped keys:
 - Nodes are read through `/admin/nodes/summary`, which has no addresses, paths,
   overrides or capability documents. `/admin/nodes` stays outside the scope.
 
-The stats reads ignore `refresh` for scoped keys and answer from the shared
+The stats and insights reads ignore `refresh` for scoped keys and answer from the shared
 cached aggregate, so a polling tool cannot force the aggregate queries.
 
 Unscoped keys and login sessions keep the full documents.

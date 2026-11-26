@@ -351,54 +351,54 @@ type AdminInsightsDevicesOutput struct {
 }
 
 type AdminInsightsBandwidthSummary struct {
-	TotalEgressBytes        int64           `json:"total_egress_bytes"`
-	PlaybackEgressBytes     int64           `json:"playback_egress_bytes"`
-	DownloadEgressBytes     int64           `json:"download_egress_bytes"`
-	APIEgressBytes          int64           `json:"api_egress_bytes"`
-	NodeEgressBytes         int64           `json:"node_egress_bytes"`
-	AvgDailyBytes           int64           `json:"avg_daily_bytes"`
-	PeakEgressKbps          int64           `json:"peak_egress_kbps"`
-	PeakEgressAt            NullableInstant `json:"peak_egress_at"`
-	PeakDownloadKbps        int64           `json:"peak_download_kbps"`
-	ActiveDays              int64           `json:"active_days"`
-	RemoteSessions          int64           `json:"remote_sessions"`
-	LocalSessions           int64           `json:"local_sessions"`
-	UnknownLocationSessions int64           `json:"unknown_location_sessions"`
+	TotalEgressBytes        int64           `json:"total_egress_bytes" doc:"Total viewer-facing egress served across the window in bytes (API servers plus stream nodes, relays excluded)."`
+	PlaybackEgressBytes     int64           `json:"playback_egress_bytes" doc:"Estimated playback egress in bytes (sum of daily max(egress_bytes - download_egress_bytes, 0)). Includes proxy-served downloads because proxy nodes do not split downloads out."`
+	DownloadEgressBytes     int64           `json:"download_egress_bytes" doc:"API file-transfer egress in bytes (offline and direct downloads, ebook/audiobook fetches, theme audio, bandwidth probes)."`
+	APIEgressBytes          int64           `json:"api_egress_bytes" doc:"Total viewer-facing egress served directly by API server processes in bytes."`
+	NodeEgressBytes         int64           `json:"node_egress_bytes" doc:"Total viewer-facing egress served by remote stream nodes in bytes."`
+	AvgDailyBytes           int64           `json:"avg_daily_bytes" doc:"Mean daily egress across active_days in bytes (0 when active_days is 0)."`
+	PeakEgressKbps          int64           `json:"peak_egress_kbps" doc:"Highest sampled minute total egress rate in the window in kbps."`
+	PeakEgressAt            NullableInstant `json:"peak_egress_at" doc:"Timestamp of the peak_egress_kbps minute, or null when no samples exist."`
+	PeakDownloadKbps        int64           `json:"peak_download_kbps" doc:"Highest sampled minute API file-transfer egress rate in the window in kbps."`
+	ActiveDays              int64           `json:"active_days" doc:"UTC calendar days in the window with at least one daily rollup or live metric sample."`
+	RemoteSessions          int64           `json:"remote_sessions" doc:"Playback sessions started in the window classified as remote (count of sessions, not bytes)."`
+	LocalSessions           int64           `json:"local_sessions" doc:"Playback sessions started in the window classified as local (count of sessions, not bytes)."`
+	UnknownLocationSessions int64           `json:"unknown_location_sessions" doc:"Playback sessions started in the window without a recorded local/remote classification."`
 }
 
 type AdminInsightsEgressSource struct {
-	Key            string  `json:"key"`
-	Kind           string  `json:"kind" enum:"api,node"`
-	NodeID         *ID     `json:"node_id,omitempty"`
-	Name           string  `json:"name"`
-	NodeType       *string `json:"node_type" nullable:"true"`
-	EgressBytes    int64   `json:"egress_bytes"`
-	PeakEgressKbps int64   `json:"peak_egress_kbps"`
-	ShareOfTotal   float64 `json:"share_of_total"`
+	Key            string  `json:"key" doc:"Source key used in bytes_by_source and peak_kbps_by_source: \"api\" or \"node:<node_id>\"."`
+	Kind           string  `json:"kind" enum:"api,node" doc:"api covers all API server processes together; node is one stream node."`
+	NodeID         *ID     `json:"node_id,omitempty" doc:"Stream node identifier when kind is node."`
+	Name           string  `json:"name" doc:"Display name; deleted or archived nodes keep a fallback label."`
+	NodeType       *string `json:"node_type" nullable:"true" doc:"Stream node type (proxy or transcode) when known; null for api or removed nodes without a recorded type."`
+	EgressBytes    int64   `json:"egress_bytes" doc:"Total bytes this source served over the window."`
+	PeakEgressKbps int64   `json:"peak_egress_kbps" doc:"Highest sampled minute egress rate for this source in the window in kbps."`
+	ShareOfTotal   float64 `json:"share_of_total" doc:"Fraction of summary.total_egress_bytes served by this source (0 to 1, rounded to 4 decimal places)."`
 }
 
 type AdminInsightsBandwidthPoint struct {
 	Date                string           `json:"date" format:"date" doc:"UTC calendar day (YYYY-MM-DD)"`
-	EgressBytes         int64            `json:"egress_bytes"`
-	PlaybackEgressBytes int64            `json:"playback_egress_bytes"`
-	DownloadEgressBytes int64            `json:"download_egress_bytes"`
-	APIEgressBytes      int64            `json:"api_egress_bytes"`
-	PeakEgressKbps      int64            `json:"peak_egress_kbps"`
-	PeakDownloadKbps    int64            `json:"peak_download_kbps"`
-	BytesBySource       map[string]int64 `json:"bytes_by_source"`
-	PeakKbpsBySource    map[string]int64 `json:"peak_kbps_by_source"`
+	EgressBytes         int64            `json:"egress_bytes" doc:"Total viewer-facing egress served on this UTC day in bytes."`
+	PlaybackEgressBytes int64            `json:"playback_egress_bytes" doc:"Estimated playback egress on this UTC day in bytes (max(egress_bytes - download_egress_bytes, 0))."`
+	DownloadEgressBytes int64            `json:"download_egress_bytes" doc:"API file-transfer egress on this UTC day in bytes."`
+	APIEgressBytes      int64            `json:"api_egress_bytes" doc:"Viewer-facing egress served directly by API server processes on this UTC day in bytes."`
+	PeakEgressKbps      int64            `json:"peak_egress_kbps" doc:"Highest sampled minute total egress rate on this UTC day in kbps."`
+	PeakDownloadKbps    int64            `json:"peak_download_kbps" doc:"Highest sampled minute API file-transfer egress rate on this UTC day in kbps."`
+	BytesBySource       map[string]int64 `json:"bytes_by_source" doc:"Daily egress in bytes keyed by sources[].key (\"api\" or \"node:<node_id>\")."`
+	PeakKbpsBySource    map[string]int64 `json:"peak_kbps_by_source" doc:"Daily peak minute egress in kbps keyed by sources[].key."`
 }
 
 type AdminInsightsBandwidth struct {
-	From               Instant                       `json:"from"`
-	To                 Instant                       `json:"to"`
-	TZ                 string                        `json:"tz"`
-	OldestMetricAt     NullableInstant               `json:"oldest_metric_at"`
-	OldestRouteFactsAt NullableInstant               `json:"oldest_route_facts_at"`
-	HasRemoteNodes     bool                          `json:"has_remote_nodes"`
-	Summary            AdminInsightsBandwidthSummary `json:"summary"`
-	Sources            []AdminInsightsEgressSource   `json:"sources"`
-	Points             []AdminInsightsBandwidthPoint `json:"points"`
+	From               Instant                       `json:"from" doc:"Start of the resolved window in UTC."`
+	To                 Instant                       `json:"to" doc:"End of the resolved window in UTC."`
+	TZ                 string                        `json:"tz" doc:"Requested IANA timezone used to resolve window bounds and session location counts; daily points remain UTC calendar days."`
+	OldestMetricAt     NullableInstant               `json:"oldest_metric_at" doc:"Oldest retained bandwidth metric timestamp across daily archives and live minute samples, or null."`
+	OldestRouteFactsAt NullableInstant               `json:"oldest_route_facts_at" doc:"Oldest session timestamp with recorded route facts (local/remote location), or null."`
+	HasRemoteNodes     bool                          `json:"has_remote_nodes" doc:"True when any stream node is registered or contributed bandwidth in the window."`
+	Summary            AdminInsightsBandwidthSummary `json:"summary" doc:"Window-wide bandwidth totals, peak rates, and session location counts."`
+	Sources            []AdminInsightsEgressSource   `json:"sources" doc:"Per-source totals across the window (API first, then stream nodes by egress_bytes descending)."`
+	Points             []AdminInsightsBandwidthPoint `json:"points" doc:"Daily UTC bandwidth points in ascending date order; days with no samples are omitted."`
 }
 
 type AdminInsightsBandwidthOutput struct {
