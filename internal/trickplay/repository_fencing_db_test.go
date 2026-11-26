@@ -131,3 +131,78 @@ func TestSameOwnerReclaimRejectsPriorAttemptDB(t *testing.T) {
 		})
 	}
 }
+
+// TestFinishMakesRepeatedDamageUnusableDB covers #5088: a failure that blames
+// the file's data backs off, and only damagedAttempts of them in a row, with
+// nothing else between, make the file unusable.
+func TestFinishMakesRepeatedDamageUnusableDB(t *testing.T) {
+	f := newFixture(t)
+	folder := f.library(t, "movies", true)
+	for _, tc := range []struct {
+		name string
+		// D: Damaged, F: Failed, E: lease expired, X: lease expired and taken
+		// back by a regenerate while the file was missing, R: regenerated,
+		// C: file size changed, L: duration changed
+		steps string
+		state string
+	}{
+		{"first verdict backs off", "D", statePending},
+		{"fourth in a row is final", "DDDD", stateUnusable},
+		{"another failure restarts the count", "DDDFDDD", statePending},
+		{"an expired lease restarts the count", "DDDEDDD", statePending},
+		{"an expired lease a regenerate takes back restarts the count", "DDDXDDD", statePending},
+		{"a regenerate restarts the count", "DDDRDDD", statePending},
+		{"a replaced file restarts the count", "DDDCDDD", statePending},
+		{"a changed duration restarts the count", "DDDLDDD", statePending},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := f.file(t, folder, tc.name)
+			f.reconcile(t)
+			for _, step := range tc.steps {
+				switch step {
+				case 'R':
+					if _, err := f.repo.Regenerate(t.Context(), []int{file}); err != nil {
+						t.Fatal(err)
+					}
+					continue
+				case 'C':
+					f.exec(t, `UPDATE public.media_files SET file_size = file_size + 1 WHERE id = $1`, file)
+					continue
+				case 'L':
+					f.exec(t, `UPDATE public.media_files SET duration = duration + 3 WHERE id = $1`, file)
+					continue
+				}
+				f.exec(t, `UPDATE public.media_file_trickplay SET available_at = now() WHERE media_file_id = $1`, file)
+				job, err := f.repo.ClaimFile(t.Context(), file, "server", time.Minute)
+				if err != nil || job == nil {
+					t.Fatalf("claim before %c: %v %v", step, job, err)
+				}
+				switch step {
+				case 'E':
+					f.exec(t, `UPDATE public.media_file_trickplay SET lease_expires_at = now() - interval '1 second' WHERE media_file_id = $1`, file)
+					f.reconcile(t)
+				case 'X':
+					// A missing file is not requeued, so only the reclaim runs.
+					f.exec(t, `UPDATE public.media_file_trickplay SET lease_expires_at = now() - interval '1 second' WHERE media_file_id = $1`, file)
+					f.exec(t, `UPDATE public.media_files SET missing_since = now() WHERE id = $1`, file)
+					if _, err := f.repo.Regenerate(t.Context(), []int{file}); err != nil {
+						t.Fatal(err)
+					}
+					f.exec(t, `UPDATE public.media_files SET missing_since = NULL WHERE id = $1`, file)
+				default:
+					outcome := Damaged
+					if step == 'F' {
+						outcome = Failed
+					}
+					if ok, err := f.repo.Finish(t.Context(), file, job.LeaseToken, outcome, "ffmpeg sampling failed (exit)", 0); err != nil || !ok {
+						t.Fatalf("finish %c: %v %v", step, ok, err)
+					}
+				}
+			}
+			row, _ := f.row(t, file)
+			if row.state != tc.state || (row.state == statePending && row.due) {
+				t.Fatalf("after %s: %+v, want %s and backing off", tc.steps, row, tc.state)
+			}
+		})
+	}
+}

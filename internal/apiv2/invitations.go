@@ -188,6 +188,9 @@ func invitationOf(inv *models.Invitation) AdminInvitation {
 	return out
 }
 func invitationProblem(err error, public bool) *Problem {
+	if p, ok := passwordRuleProblem(err, "password"); ok && public {
+		return p
+	}
 	switch {
 	case errors.Is(err, invitations.ErrNotFound):
 		return NewProblem(TypeNotFound, "Invitation not found or no longer available.")
@@ -310,8 +313,11 @@ func registerInvitations(reg *Registry) {
 			PasswordJoin: view.LocalPasswords, AppJoin: appJoin}}, nil
 	}
 	accept := func(ctx context.Context, token, email, password, userAgent string) (*InvitationAcceptOutput, error) {
-		if len([]byte(password)) > 72 {
-			return nil, NewProblem(TypeValidationFailed, "Password must not exceed 72 bytes.")
+		// The byte limit holds under every policy; the schema's maxLength
+		// counts characters. Refused at the member, in the policy's words.
+		if err := (auth.PasswordPolicy{}).Check(password); errors.Is(err, auth.ErrPasswordTooLong) {
+			p, _ := passwordRuleProblem(err, "password")
+			return nil, p
 		}
 		svc, p := reg.invitationService()
 		if p != nil {

@@ -274,7 +274,8 @@ export function MetadataMatcherQueuesSection({
                   </TableRow>
                   {selected ? (
                     <TableRow className="hover:bg-transparent">
-                      <TableCell colSpan={4} className="bg-muted/30 p-3">
+                      {/* Wrapping lets a long path break instead of widening the table. */}
+                      <TableCell colSpan={4} className="bg-muted/30 p-3 whitespace-normal">
                         {queueDetail(false)}
                       </TableCell>
                     </TableRow>
@@ -371,7 +372,7 @@ export function MetadataMatcherQueuesSection({
   );
 }
 
-/** One library's queue entries with their pager; `touch` wraps paths and enlarges controls. */
+/** One library's queue entries with their pager; `touch` stacks each entry and enlarges controls. */
 function MatcherQueueDetail({
   entries,
   loaded,
@@ -406,16 +407,14 @@ function MatcherQueueDetail({
             <div
               className={cn(
                 "flex gap-2",
-                touch ? "flex-col items-start" : "items-center justify-between",
+                // Baseline keeps the badges on the path's first line when it wraps.
+                touch ? "flex-col items-start" : "items-baseline justify-between",
               )}
             >
-              {touch ? (
-                <CardPath path={path} className="max-w-full min-w-0 text-inherit" />
-              ) : (
-                <code className="min-w-0 truncate font-mono" dir="ltr">
-                  {path}
-                </code>
-              )}
+              <CardPath
+                path={path}
+                className={cn("min-w-0 text-inherit", touch ? "max-w-full" : "flex-1")}
+              />
               <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                 {failureKind ? (
                   <Badge variant="outline">{formatFailureKind(failureKind)}</Badge>

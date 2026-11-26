@@ -142,7 +142,12 @@ function Calendar({
         ),
         selected:
           "rounded-md [&>button]:bg-primary [&>button]:text-primary-foreground [&>button]:hover:bg-primary [&>button]:hover:text-primary-foreground",
-        today: "rounded-md [&>button:not([aria-selected])]:bg-accent",
+        // An outline, not a fill: --accent sits about 1.1:1 on the popover, so a
+        // filled today was invisible. --muted-foreground holds well past 3:1 in
+        // every mode and stays distinct from the selected day's solid fill.
+        // aria-selected is on this cell, not its button.
+        today:
+          "rounded-md [&:not([aria-selected])>button]:border [&:not([aria-selected])>button]:border-muted-foreground",
         outside: "text-muted-foreground",
         disabled: "text-muted-foreground opacity-50",
         hidden: "invisible",

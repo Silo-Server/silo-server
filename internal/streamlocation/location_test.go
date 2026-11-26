@@ -1,12 +1,30 @@
 package streamlocation
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
+
+// A direct path is remote even from a private address, which the address alone
+// would classify as local.
+func TestIsRemoteDirectPrivatePath(t *testing.T) {
+	const ip = "192.168.1.20"
+	if got := FromMetadata(ip, ""); got != Local {
+		t.Fatalf("FromMetadata() = %q, want %q", got, Local)
+	}
+	ctx := netaccess.WithPath(clientip.SetContext(context.Background(), ip), netaccess.Path{Direct: &netaccess.DirectPath{Class: "direct"}})
+	if !IsRemote(ctx) {
+		t.Fatal("IsRemote() = false, want true")
+	}
+	if got := BitrateCap(ctx, 4_000, 2_000); got != 2_000 {
+		t.Fatalf("BitrateCap() = %d, want 2000", got)
+	}
+}
 
 // A forwarder outside the trusted proxies resolves to its own private address;
 // its client may be anywhere, so the request is remote.

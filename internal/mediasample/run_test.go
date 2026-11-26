@@ -97,3 +97,23 @@ func TestRunRejectsInvalidRequestsWithoutStartingFFmpeg(t *testing.T) {
 		t.Fatal("Run accepted a request without a sampling mode")
 	}
 }
+
+// The progress count is the last frame= line ffmpeg logs, including one that
+// starts with the color reset of a colored log; other lines leave it alone.
+func TestProgressParserReadsTheLastFrameCount(t *testing.T) {
+	var p progressParser
+	if p.frames != nil {
+		t.Fatal("count before any line")
+	}
+	for _, line := range []string{
+		"frame=    0 fps=0.0 q=0.0 size=N/A time=N/A",
+		"[Parsed_metadata_4 @ 0x1] frame:3 pts:3 pts_time:0.3",
+		"\x1b[0mframe=   12 fps=0.0 q=-0.0 Lsize=N/A time=00:00:01.20",
+		"frame=",
+	} {
+		p.line(line)
+	}
+	if p.frames == nil || *p.frames != 12 {
+		t.Fatalf("count %v, want 12", p.frames)
+	}
+}

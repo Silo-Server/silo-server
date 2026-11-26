@@ -79,16 +79,16 @@ type RefreshSessionOutput struct {
 
 // LoginSession is one live login session of the caller's account.
 type LoginSession struct {
-	ID             ID              `json:"id" doc:"Session identifier; the value deleteSession takes" example:"6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"`
-	DeviceName     string          `json:"device_name" doc:"Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device" example:"Living Room Apple TV"`
-	IPAddress      string          `json:"ip_address" doc:"Client address recorded at login; empty when unknown" example:"203.0.113.7"`
-	CreatedAt      Instant         `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
-	ExpiresAt      Instant         `json:"expires_at" example:"2026-02-01T03:04:05.678Z"`
-	DeviceID       string          `json:"device_id,omitempty" doc:"Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing" example:"8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"`
-	DevicePlatform string          `json:"device_platform,omitempty" doc:"Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none" example:"tvOS"`
-	LastSeenAt     NullableInstant `json:"last_seen_at" doc:"Most recent authenticated request, coalesced to at most one update per minute; null until recorded" example:"2026-01-02T03:04:05.678Z"`
+	ID             ID              `json:"id" doc:"Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current" example:"6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"`
+	DeviceName     string          `json:"device_name" doc:"Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in" example:"Living Room Apple TV"`
+	IPAddress      string          `json:"ip_address" doc:"Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in" example:"203.0.113.7"`
+	CreatedAt      Instant         `json:"created_at" doc:"When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at" example:"2026-01-02T03:04:05.678Z"`
+	ExpiresAt      Instant         `json:"expires_at" doc:"When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at" example:"2026-02-01T03:04:05.678Z"`
+	DeviceID       string          `json:"device_id,omitempty" doc:"Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in" example:"8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"`
+	DevicePlatform string          `json:"device_platform,omitempty" doc:"Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in" example:"tvOS"`
+	LastSeenAt     NullableInstant `json:"last_seen_at" doc:"Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in" example:"2026-01-02T03:04:05.678Z"`
 	Current        bool            `json:"current" doc:"Whether this is the login session making this request"`
-	DeviceKeyID    *string         `json:"device_key_id" nullable:"true" format:"uuid" doc:"The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session" example:"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11"`
+	DeviceKeyID    *string         `json:"device_key_id" nullable:"true" format:"uuid" doc:"The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in, and on another session's item for a session opened by device sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session" example:"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11"`
 }
 
 // LoginSessionListInput is the listSessions query.
@@ -144,7 +144,7 @@ type SetupServerInput struct {
 	Body    struct {
 		Username             string `json:"username" minLength:"1" maxLength:"254" doc:"Login name of the administrator" example:"admin"`
 		Email                string `json:"email" minLength:"1" maxLength:"254" doc:"Contact email of the administrator" example:"admin@example.test"`
-		Password             string `json:"password" minLength:"8" maxLength:"72" doc:"Account password; at least 8 characters and at most 72 UTF-8 bytes" example:"correct horse battery staple"`
+		Password             string `json:"password" minLength:"8" maxLength:"72" doc:"Account password; at least 8 characters and at most 72 UTF-8 bytes. The server's password policy can require more; getPasswordPolicy describes it" example:"correct horse battery staple"`
 		CreateDefaultProfile bool   `json:"create_default_profile,omitempty" doc:"Also create the household's first profile" example:"true"`
 		DefaultProfileName   string `json:"default_profile_name,omitempty" maxLength:"128" doc:"Name of that profile; the username when empty" example:"Alice"`
 	}
@@ -153,6 +153,21 @@ type SetupServerInput struct {
 // SignupStatus reports whether public invited signup is on.
 type SignupStatus struct {
 	Enabled bool `json:"enabled" doc:"True when signup accepts invite codes" example:"false"`
+}
+
+// PasswordPolicy is the rule set a new local password must meet. It applies
+// to setupServer, signup, changePassword, a password reset and an
+// administrator setting a password; passwords already stored keep working.
+type PasswordPolicy struct {
+	MinimumLength    int  `json:"minimum_length" doc:"Fewest characters a new password may have; never fewer than 8" example:"8"`
+	MaximumBytes     int  `json:"maximum_bytes" doc:"Most UTF-8 bytes a new password may have" example:"72"`
+	RequireUppercase bool `json:"require_uppercase" doc:"Whether a new password needs a capital letter (Unicode category Lu)" example:"false"`
+	RequireSpecial   bool `json:"require_special" doc:"Whether a new password needs a punctuation mark or symbol (Unicode categories P and S); letters, digits and spaces do not count" example:"false"`
+}
+
+// PasswordPolicyOutput is the getPasswordPolicy response.
+type PasswordPolicyOutput struct {
+	Body PasswordPolicy
 }
 
 // SignupStatusOutput is the getSignupStatus response.
@@ -167,7 +182,7 @@ type SignupInput struct {
 	Body    struct {
 		Username             string `json:"username" minLength:"1" maxLength:"254" doc:"Login name" example:"alice"`
 		Email                string `json:"email" minLength:"1" maxLength:"254" doc:"Contact email" example:"alice@example.test"`
-		Password             string `json:"password" minLength:"8" maxLength:"72" doc:"Account password; at least 8 characters and at most 72 UTF-8 bytes" example:"correct horse battery staple"`
+		Password             string `json:"password" minLength:"8" maxLength:"72" doc:"Account password; at least 8 characters and at most 72 UTF-8 bytes. The server's password policy can require more; getPasswordPolicy describes it" example:"correct horse battery staple"`
 		InviteCode           string `json:"invite_code" minLength:"1" maxLength:"128" doc:"An active invite code" example:"WELCOME-2026"`
 		CreateDefaultProfile bool   `json:"create_default_profile,omitempty" doc:"Also create the household's first profile" example:"true"`
 		DefaultProfileName   string `json:"default_profile_name,omitempty" maxLength:"128" doc:"Name of that profile; the username when empty" example:"Alice"`
@@ -205,16 +220,19 @@ func registerAuthSessions(reg *Registry) {
 	// Retry-After; the token was not judged and the client keeps it.
 	refresh.Errors = []int{http.StatusUnauthorized, http.StatusServiceUnavailable}
 	Register(reg, Operation{Operation: refresh, RetrySafety: RetrySafetyDomainIdentity, Class: ClassPublic, ServiceBacked: true}, reg.refreshSession)
+	list := humaOp(http.MethodGet, Prefix+"/auth/sessions", opListSessions, "auth",
+		"List the caller's live login sessions, newest first.")
+	list.Description = sessionReachListDescription
 	Register(reg, Operation{
-		Operation: humaOp(http.MethodGet, Prefix+"/auth/sessions", opListSessions, "auth",
-			"List the caller's live login sessions, newest first."),
-		Class: ClassAuthenticated, ServiceBacked: true,
+		Operation: list,
+		Class:     ClassAuthenticated, ServiceBacked: true,
 	}, func(ctx context.Context, in *LoginSessionListInput) (*LoginSessionCollectionOutput, error) {
 		return reg.listSessions(ctx, cursors, in)
 	})
 	del := humaOp(http.MethodDelete, Prefix+"/auth/sessions/{id}", "deleteSession", "auth",
 		"Revoke one of the caller's login sessions.")
-	del.Errors = []int{http.StatusNotFound}
+	del.Description = sessionReachDeleteDescription
+	del.Errors = []int{http.StatusNotFound, http.StatusForbidden}
 	Register(reg, Operation{Operation: del, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true}, reg.deleteSession)
 	setup := humaOp(http.MethodPost, Prefix+"/auth/setup", "setupServer", "system",
 		"Create the first administrator account and open its session.")
@@ -227,6 +245,11 @@ func registerAuthSessions(reg *Registry) {
 			"Report whether public invited signup is enabled."),
 		Class: ClassPublic, ServiceBacked: true,
 	}, reg.getSignupStatus)
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodGet, Prefix+"/auth/password-policy", "getPasswordPolicy", "auth",
+			"Describe the rules a new password must meet."),
+		Class: ClassPublic, ServiceBacked: true,
+	}, reg.getPasswordPolicy)
 	signup := humaOp(http.MethodPost, Prefix+"/auth/signup", opSignup, "auth",
 		"Create an account from an invite code and open its session.")
 	signup.DefaultStatus = http.StatusCreated
@@ -311,6 +334,13 @@ func (reg *Registry) listSessions(ctx context.Context, cursors *Cursors, in *Log
 		Security:    strconv.Itoa(claims.UserID),
 		Sort:        loginSessionCursorSort,
 		Tiebreaker:  "id",
+	}
+	limited, err := reg.deps.Sessions.SessionLimitedToItself(ctx, claims.SessionID)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	if limited {
+		return reg.limitedLoginSessionPage(ctx, cursors, claims, in)
 	}
 	after, p := decodeLoginSessionCursor(cursors, scope, in.Cursor)
 	if p != nil {
@@ -434,6 +464,22 @@ func (reg *Registry) getSignupStatus(ctx context.Context, _ *struct{}) (*SignupS
 	return &SignupStatusOutput{Body: SignupStatus{Enabled: enabled}}, nil
 }
 
+func (reg *Registry) getPasswordPolicy(ctx context.Context, _ *struct{}) (*PasswordPolicyOutput, error) {
+	if reg.deps.Sessions == nil {
+		return nil, unavailable("account")
+	}
+	policy, err := reg.deps.Sessions.PasswordPolicy(ctx)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	return &PasswordPolicyOutput{Body: PasswordPolicy{
+		MinimumLength:    policy.MinimumLength,
+		MaximumBytes:     auth.MaximumPasswordBytes,
+		RequireUppercase: policy.RequireUppercase,
+		RequireSpecial:   policy.RequireSpecial,
+	}}, nil
+}
+
 func (reg *Registry) signup(ctx context.Context, in *SignupInput) (*TokenPairOutput, error) {
 	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
 		return nil, p
@@ -471,6 +517,10 @@ func invalidEmailProblem(email string) *Problem {
 // (an invite code the store refused) is a validation problem at that member;
 // everything else follows the v1 status.
 func registrationProblem(err error) *Problem {
+	// A password the policy refused reads as on every other password path.
+	if p, ok := passwordRuleProblem(err, "password"); ok {
+		return p
+	}
 	var apiErr *handlers.APIError
 	if errors.As(err, &apiErr) && apiErr.Field != "" {
 		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").

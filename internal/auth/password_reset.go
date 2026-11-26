@@ -46,26 +46,31 @@ func ResetPasswordInTransaction(ctx context.Context, tx pgx.Tx, userID int, newP
 // hook after commit so every replica drops the Jellyfin-compatible sessions it
 // holds in memory.
 func RevokeSignInsInTransaction(ctx context.Context, tx pgx.Tx, userID int) error {
-	return RevokeSignInsForUsersInTransaction(ctx, tx, []int{userID})
+	return revokeSignInsInTransaction(ctx, tx, userID, nil)
 }
 
 // RevokeOtherSignInsInTransaction is RevokeSignInsInTransaction except that
 // keepSessionID, the login session asking for it, stays signed in.
 func RevokeOtherSignInsInTransaction(ctx context.Context, tx pgx.Tx, userID int, keepSessionID string) error {
-	return revokeSignInsInTransaction(ctx, tx, []int{userID}, &keepSessionID)
-}
-
-// RevokeSignInsForUsersInTransaction is RevokeSignInsInTransaction for several
-// accounts at once, in a fixed number of statements however many there are.
-func RevokeSignInsForUsersInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) error {
-	return revokeSignInsInTransaction(ctx, tx, userIDs, nil)
+	return revokeSignInsInTransaction(ctx, tx, userID, &keepSessionID)
 }
 
 // revokeSignInsInTransaction revokes every login session except
-// keepSessionID; nil keeps none.
-func revokeSignInsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int, keepSessionID *string) error {
-	if len(userIDs) == 0 {
-		return nil
+// keepSessionID; nil keeps none. It takes one account: an uninstall deletes
+// an installation's identities in an order of its own, so a transaction that
+// locked several accounts' identities at once could meet it halfway.
+func revokeSignInsInTransaction(ctx context.Context, tx pgx.Tx, userID int, keepSessionID *string) error {
+	userIDs := []int{userID}
+	// Identities, device sign-in requests, then sessions: the order a plugin
+	// uninstall takes them (see lockIdentitiesBeforeSessions). Every caller
+	// holds the account row, which approving and collecting a device sign-in
+	// also lock first, so withdrawing the approvals before the sessions end
+	// leaves no window for a session to approve or a device to collect.
+	if err := lockIdentitiesBeforeSessions(ctx, tx, userID, false); err != nil {
+		return err
+	}
+	if _, err := withdrawDeviceSignInApprovalsInTransaction(ctx, tx, userIDs); err != nil {
+		return err
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE auth_sessions SET revoked_at = NOW()
@@ -76,10 +81,7 @@ func revokeSignInsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int, k
 	if _, err := revokeAudiobookshelfSessionsInTransaction(ctx, tx, userIDs); err != nil {
 		return err
 	}
-	if _, err := deleteJellyfinSessionsInTransaction(ctx, tx, userIDs); err != nil {
-		return err
-	}
-	_, err := withdrawDeviceSignInApprovalsInTransaction(ctx, tx, userIDs)
+	_, err := deleteJellyfinSessionsInTransaction(ctx, tx, userIDs)
 	return err
 }
 

@@ -365,6 +365,30 @@
       "value": "Bu değer aralığın dışında."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "! veya # gibi en az bir özel karakter ekleyin."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "En az bir büyük harf ekleyin."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Bu parola çok uzun."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Bu parola çok kısa."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Oturumunuzun süresi doldu. Tekrar oturum açın."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Parolayla oturum açma kapalıyken kullanıcıların kullanabileceği bir oturum açma sağlayıcısı açık kalmalıdır. OpenID Connect için ayrıca sunucunun genel URL’si gerekir."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8025,6 +8055,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kartlar"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Düzen"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tablo"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -48757,7 +48805,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "İzleme eğilimleri, popüler içerikler, hane etkinliği, cihazlarda oynatma ve bant genişliği."
+      "value": "Canlı akışlar, izleme eğilimleri, popüler içerikler, hane etkinliği, cihazlarda oynatma ve bant genişliği."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -67164,7 +67212,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Yönlendiricinin UPnP, NAT-PMP veya PCP desteğini kontrol eder."
+      "value": "Yönlendiriciden UPnP, NAT-PMP veya PCP ile bağlantı noktası eşlemesi ister."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67173,16 +67221,44 @@
       "value": "Bağlantı noktası eşleme"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Aralık: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " ile "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " arası"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Hazırlık kontrolleri doğrudan oynatmayı başlatmaz."
+      "value": "Bu ayarı açmak doğrudan bağlantı motorunu başlatır. Motor bir UDP bağlantı noktası açar ve “Bağlantı noktası eşleme” açıksa yönlendiriciden bağlantı noktası eşlemesi ister. “Kontrolü çalıştır” yalnızca ana makinenin durumunu okur."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Yönetici tarafından devre dışı bırakıldı"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "İzin verilen aralıkla sınırlandırıldı"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67194,7 +67270,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Doğrudan bağlantı motoru başlatılamadı"
+      "value": "Doğrudan bağlantı motoru durdu veya başlatılamadı"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67225,6 +67301,12 @@
     {
       "type": 0,
       "value": "Geçersiz değer; kapalı olarak uygulanıyor"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Geçersiz değer; varsayılan kullanılıyor"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -78419,6 +78501,20 @@
       "value": "Önce bir oturum açma sağlayıcısını açın. Parolayla oturum açma kapalıyken ve hiçbir sağlayıcı açık değilken yalnızca acil durum yöneticileri oturum açabilir."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Önce sunucunun genel URL’sini ayarlayın. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " sağlayıcısı bu URL olmadan kimsenin oturum açmasını sağlayamaz; bu nedenle parolayla oturum açma kapalıyken yalnızca acil durum yöneticileri oturum açabilir."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -78509,6 +78605,230 @@
       "value": "Kullanıcıların API anahtarı oluşturmasına izin ver"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Parolayla oturum açmayı kapat"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Yalnızca acil durum yöneticileri parolayla oturum açacak. Diğer herkes "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " ile oturum açar."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " sağlayıcısı ilk oturum açmada hesap oluşturur; bu nedenle bu kişilerden biri siz bağlamadan önce bu sağlayıcıyla oturum açarsa yeni ve ayrı bir hesap alır."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Her birini, Kullanıcılar sayfasındaki kendi sayfasından bir "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " hesabına bağlayın."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hesap, bir yönetici bağlayana kadar oturum açamaz"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hesap, bir yönetici bağlayana kadar oturum açamaz"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Bunun hangi hesapları etkilediği kontrol edilemedi. Yine de kapatabilirsiniz."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Parolayla kimlerin oturum açtığı kontrol ediliyor"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " sağlayıcısı oturum açma sırasında bu e-posta adreslerinden birini doğruladığında Silo o kişiyi kendi hesabına bağlar."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hesap e-postayla bağlanır"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hesap e-postayla bağlanır"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tane daha göster"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tane daha göster"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Daha fazla hesap yüklenemedi. Tekrar deneyin."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Bundan sonra da tüm hesaplar oturum açabilir."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Yönetici"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "E-posta eşleştirme kapalı"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "E-posta yok"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Bu işlem kimsenin oturumunu kapatmaz. Zaten oturum açmış kişilerin oturumu açık kalır, API anahtarları çalışmaya devam eder ve yeni cihazları onaylamaya devam edebilirler. Birinin oturumunu kapatmak için "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Kullanıcılar"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " sayfasındaki kendi sayfasından oturumlarını sonlandırın."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Parolayla oturum açma kapatılsın mı?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Tüm hesapları Kullanıcılar sayfasında gör"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -78547,6 +78867,28 @@
     {
       "type": 0,
       "value": " değiştirilemedi."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Parolayla oturum açma kapalı olduğundan acil durum yöneticileri dışında herkes "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ile oturum açıyor. Önce parolayla oturum açmayı yeniden açın, ardından "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " sağlayıcısını kapatın."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -80576,7 +80918,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "İzleme eğilimleri, popüler içerikler, hesaplar, cihazlar ve bant genişliği."
+      "value": "Canlı akışlar, izleme eğilimleri, popüler içerikler, hesaplar, cihazlar ve bant genişliği."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -100292,6 +100634,18 @@
           "value": "İsteğe bağlı"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "İzlenen içerikleri gizle"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Her profil bu koleksiyonu, sayfasında, satırlarında ve içerik sayısında kendi izlediği içerikler olmadan görür. Hiçbir şey kaldırılmaz. İçerik sınırı olan akıllı bir koleksiyon önce içeriklerini seçer, bu yüzden daha az içerik gösterebilir."
     }
   ],
   "web.collections.details.label": [
@@ -120109,6 +120463,16 @@
     {
       "type": 0,
       "value": "Son yayın tarihi"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " alanını kilitle"
     }
   ],
   "web.item.editMetadata.locked": [

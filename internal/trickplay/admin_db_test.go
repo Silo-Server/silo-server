@@ -11,10 +11,11 @@ import (
 func TestAdminRetryKeepsPublishedPreviewsDB(t *testing.T) {
 	f := newFixture(t)
 	for _, retry := range []struct {
-		name    string
-		outcome Outcome
-		state   string
-	}{{"failed", Failed, statePending}, {"unusable", Unusable, stateUnusable}} {
+		name     string
+		outcome  Outcome
+		state    string
+		failures int
+	}{{"failed", Failed, statePending, 1}, {"unusable", Damaged, stateUnusable, damagedAttempts}} {
 		t.Run(retry.name, func(t *testing.T) {
 			folder := f.library(t, "movies", true)
 			fileID := f.file(t, folder, retry.name)
@@ -25,6 +26,7 @@ func TestAdminRetryKeepsPublishedPreviewsDB(t *testing.T) {
 			if _, err := f.repo.Regenerate(t.Context(), []int{fileID}); err != nil {
 				t.Fatal(err)
 			}
+			f.exec(t, `UPDATE public.media_file_trickplay SET failure_count=$2-1, damaged_failures=$2-1 WHERE media_file_id=$1`, fileID, retry.failures)
 			job, err := f.repo.ClaimFile(t.Context(), fileID, "server-b", time.Minute)
 			if err != nil || job == nil {
 				t.Fatalf("claim: %+v %v", job, err)
@@ -38,7 +40,7 @@ func TestAdminRetryKeepsPublishedPreviewsDB(t *testing.T) {
 				t.Fatalf("retained manifest: %+v %v %v", manifest, ok, err)
 			}
 			status, err := NewAdmin(f.pool, identityStore(testStore), nil).ItemStatus(t.Context(), contentID)
-			if err != nil || len(status) != 1 || status[0].State != retry.state || !status[0].Servable || status[0].Failures != 1 || status[0].LastError == "" {
+			if err != nil || len(status) != 1 || status[0].State != retry.state || !status[0].Servable || status[0].Failures != retry.failures || status[0].LastError == "" {
 				t.Fatalf("retained publication status: %+v %v", status, err)
 			}
 		})
@@ -74,7 +76,8 @@ func TestAdminReclassifiesTrackedIneligibleFilesDB(t *testing.T) {
 							t.Fatalf("claim regeneration: %+v %v", job, err)
 						}
 						if state == stateUnusable {
-							if finished, err := f.repo.Finish(t.Context(), file, job.LeaseToken, Unusable, "no video stream", 0); err != nil || !finished {
+							f.exec(t, `UPDATE public.media_file_trickplay SET failure_count=$2, damaged_failures=$2 WHERE media_file_id=$1`, file, damagedAttempts-1)
+							if finished, err := f.repo.Finish(t.Context(), file, job.LeaseToken, Damaged, "no video stream", 0); err != nil || !finished {
 								t.Fatalf("finish regeneration: %v %v", finished, err)
 							}
 						}

@@ -101,6 +101,11 @@ type Result struct {
 	SheetTileHeight int `json:"sheet_tile_height,omitzero"`
 	// Speech holds the speech levels when the request asked for them.
 	Speech *SpeechLevels `json:"speech,omitempty"`
+	// VideoFrames is ffmpeg's own count of the frames the Stats output
+	// received, from its last progress line, when the request asked for
+	// Stats. It tells a span without a frame (zero) from statistics the
+	// log parsers could not read. Nil when ffmpeg printed no count.
+	VideoFrames *int64 `json:"video_frames,omitempty"`
 	// Decoder names the attempt that produced the result: "software", or
 	// "hardware:<accel>".
 	Decoder string `json:"decoder"`
@@ -351,13 +356,14 @@ func (a attemptRun) decode(req Request, inputStart float64) (Result, *AttemptErr
 		handlers = append(handlers, silences.line)
 	}
 	var stats *statsParser
+	var progress progressParser
 	if req.Stats != nil {
 		if req.Samples != nil {
 			stats = newSampledStatsParser(req.statsGraph(a.attempt, a.hw.Accel))
 		} else {
 			stats = newStatsParser(req.statsGraph(a.attempt, a.hw.Accel), req.Window.StartSeconds)
 		}
-		handlers = append(handlers, stats.line)
+		handlers = append(handlers, stats.line, progress.line)
 	}
 	var stdout io.Writer
 	var fingerprint *bytes.Buffer
@@ -386,6 +392,7 @@ func (a attemptRun) decode(req Request, inputStart float64) (Result, *AttemptErr
 	}
 	if stats != nil {
 		result.Frames = stats.result()
+		result.VideoFrames = progress.frames
 	}
 	return result, nil
 }

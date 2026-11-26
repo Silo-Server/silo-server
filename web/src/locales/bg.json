@@ -365,6 +365,30 @@
       "value": "Тази стойност е извън допустимия диапазон."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Включете поне един специален знак, например ! или #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Включете поне една главна буква."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Тази парола е твърде дълга."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Тази парола е твърде кратка."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Сесията ви изтече. Влезте отново."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Докато входът с парола е изключен, трябва да остане включен доставчик за вход, който хората могат да използват. OpenID Connect също изисква публичния URL адрес на сървъра."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -7997,6 +8027,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Карти"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Изглед"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Таблица"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -49345,7 +49393,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Тенденции в гледането, популярни заглавия, активност в домакинството, възпроизвеждане по устройства и трафик."
+      "value": "Потоци на живо, тенденции в гледането, популярни заглавия, активност в домакинството, възпроизвеждане по устройства и трафик."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -67932,7 +67980,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Проверява рутера за поддръжка на UPnP, NAT-PMP или PCP."
+      "value": "Изисква от рутера пренасочване на порт чрез UPnP, NAT-PMP или PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67941,16 +67989,40 @@
       "value": "Пренасочване на портове"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Диапазон: от "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " до "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Проверките за готовност не стартират директно възпроизвеждане."
+      "value": "Включването на тази опция стартира механизма за директни връзки. Той отваря UDP порт и, когато опцията „Пренасочване на портове“ е включена, изисква от рутера пренасочване на порт. Бутонът „Изпълнение на проверка“ само чете състоянието на хоста."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Изключено от администратор"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Ограничено до разрешения диапазон"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67962,7 +68034,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Механизмът за директни връзки не можа да стартира"
+      "value": "Механизмът за директни връзки спря или не можа да стартира"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67993,6 +68065,12 @@
     {
       "type": 0,
       "value": "Невалидна стойност; използва се „Изключено“"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Невалидна стойност; използва се стойността по подразбиране"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -79271,6 +79349,20 @@
       "value": "Първо включете доставчик за вход. Ако входът с парола е изключен и няма включен доставчик, само администраторите за спешен достъп биха могли да влизат."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Първо задайте публичния URL адрес на сървъра. Без него доставчикът "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " не може да осигури вход на никого, така че при изключен вход с парола само администраторите за аварийен достъп биха могли да влизат."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -79361,6 +79453,238 @@
       "value": "Разрешаване на потребителите да създават API ключове"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Изключване на входа с парола"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Само администраторите за аварийен достъп ще влизат с парола. Всички останали влизат чрез доставчика "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Доставчикът "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " създава акаунти при първия вход, така че ако някой от тези хора влезе чрез него, преди акаунтът да бъде свързан, ще получи нов, отделен акаунт."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Свържете всеки от тях с акаунт в "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " от страницата му в „Потребители“."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " акаунт не може да влиза, докато администратор не го свърже"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " акаунта не могат да влизат, докато администратор не ги свърже"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Не можа да се провери кои акаунти са засегнати. Пак можете да изключите входа с парола."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Проверява се кой влиза с парола…"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Когато доставчикът "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " потвърди някой от тези имейли при вход, Silo свързва този човек със съответния акаунт."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " акаунт се свързва по имейл"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " акаунта се свързват по имейл"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване на още "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване на още "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Не можаха да се заредят още акаунти. Опитайте отново."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Всеки акаунт ще може да влиза и след това."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Администратор"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Съпоставянето по имейл е изключено"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Няма имейл"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Това не прекратява ничия сесия. Хората, които вече са влезли, остават влезли, API ключовете им продължават да работят и те пак могат да одобряват нови устройства. За да изведете някого от акаунта, прекратете сесиите му от страницата му в "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Потребители"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Да се изключи ли входът с парола?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Вижте всички акаунти в „Потребители“"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -79395,6 +79719,28 @@
     {
       "type": 0,
       "value": "Не можа да се промени доставчикът "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Входът с парола е изключен, така че всички освен администраторите за аварийен достъп влизат чрез доставчика "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Първо включете отново входа с парола, след което изключете доставчика "
     },
     {
       "type": 1,
@@ -81460,7 +81806,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Тенденции в гледането, популярни заглавия, акаунти, устройства и трафик."
+      "value": "Потоци на живо, тенденции в гледането, популярни заглавия, акаунти, устройства и трафик."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -101520,6 +101866,18 @@
           "value": "По избор"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Скриване на гледаните заглавия"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Всеки профил вижда тази колекция без гледаните от него заглавия – на страницата ѝ, в редовете и в броя на заглавията ѝ. Нищо не се премахва. Интелигентна колекция с ограничение на броя заглавия първо избира заглавията си, затова може да показва по-малко."
     }
   ],
   "web.collections.details.label": [
@@ -121781,6 +122139,16 @@
     {
       "type": 0,
       "value": "Дата на последно излъчване"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Заключване на полето "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

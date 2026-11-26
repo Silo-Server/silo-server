@@ -2384,6 +2384,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/insights/library": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read how much of each movie and TV library was played, titles never started, plays by genre, decade and content rating, and how soon new titles get their first play. */
+    get: operations["getAdminInsightsLibrary"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/insights/people": {
     parameters: {
       query?: never;
@@ -7490,6 +7507,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/auth/password-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Describe the rules a new password must meet. */
+    get: operations["getPasswordPolicy"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/auth/plugin-launch": {
     parameters: {
       query?: never;
@@ -7568,7 +7602,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the caller's live login sessions, newest first. */
+    /**
+     * List the caller's live login sessions, newest first.
+     * @description A session opened by device sign-in (a code a signed-in person approved, Jellyfin Quick Connect, or a remote-playback handoff), and a session from before this rule was recorded whose X-Silo-Device-Platform was tvOS, android-tv or roku, sees only itself in full. It still gets every live session of the account, but another session's item carries only its id and current: device_name and ip_address are empty, device_id and device_platform are absent, last_seen_at is null, and created_at and expires_at repeat the caller's own. For such a caller the page is ordered by id, not newest first, and a cursor from the other kind of caller is invalid_cursor.
+     */
     get: operations["listSessions"];
     put?: never;
     post?: never;
@@ -7588,7 +7625,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Revoke one of the caller's login sessions. */
+    /**
+     * Revoke one of the caller's login sessions.
+     * @description A session opened by device sign-in (see listSessions) may revoke only itself: another session of the account is 403 permission_denied, and a session of another account or an unknown id is 404 as for every caller.
+     */
     delete: operations["deleteSession"];
     options?: never;
     head?: never;
@@ -14649,7 +14689,7 @@ export interface components {
       maximum_password_bytes: number;
       /**
        * Format: int64
-       * @description Fewest characters a new password may have
+       * @description Fewest characters a new password may have. getPasswordPolicy describes the rest of the password policy
        * @example 8
        */
       minimum_password_length: number;
@@ -19342,6 +19382,8 @@ export interface components {
       bucket_unit: "day" | "week" | "month";
       buckets: components["schemas"]["AdminInsightsActivityBucket"][];
       coverage: components["schemas"]["AdminInsightsCoverage"];
+      /** @description Sessions that started in the window by end reason (stopped, terminated, expired, aborted, replaced); unknown covers rows recorded before end reasons were */
+      end_reasons: components["schemas"]["AdminInsightsLabeledCount"][];
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -19358,6 +19400,16 @@ export interface components {
       tz: string;
     };
     AdminInsightsActivityBucket: {
+      /**
+       * Format: int64
+       * @description Distinct accounts with a session that started in the bucket
+       */
+      active_accounts: number;
+      /**
+       * Format: int64
+       * @description Distinct household profiles with a session that started in the bucket
+       */
+      active_profiles: number;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -19434,6 +19486,19 @@ export interface components {
       sessions: number;
       /** Format: double */
       share_of_adapted: number;
+    };
+    AdminInsightsAudioUsage: {
+      /** @description Sessions by audio handling: direct, remux (copied into a new container) or transcode */
+      decisions: components["schemas"]["AdminInsightsLabeledCount"][];
+      /** @description Sessions by delivered channel layout: mono, stereo, surround or unknown */
+      delivered_channels: components["schemas"]["AdminInsightsLabeledCount"][];
+      /** @description Sessions by the played audio track's language */
+      languages: components["schemas"]["AdminInsightsLabeledCount"][];
+      /**
+       * Format: int64
+       * @description Sessions with route facts, the ones that record their audio track
+       */
+      sessions: number;
     };
     AdminInsightsBandwidth: {
       /**
@@ -19522,6 +19587,10 @@ export interface components {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       available: boolean;
+      /** @description Activity carries per-bucket active accounts and profiles and end_reasons; Titles carries least_finished; Devices carries client_versions, protocol_buckets, subtitles and audio; People carries top_profiles */
+      breakdowns: boolean;
+      /** @description The Library read (getAdminInsightsLibrary) is served */
+      library: boolean;
       /** @description Long-term per-node daily egress archive survives past the 31-day minute-sample window */
       node_egress_daily: boolean;
       /** @description Activity, Devices, Titles and title detail accept profile_id together with user_id */
@@ -19565,6 +19634,19 @@ export interface components {
       /** Format: int64 */
       transcode_sessions: number;
     };
+    AdminInsightsClientVersionRow: {
+      client_name: string;
+      client_version: string;
+      device_platform: string;
+      is_jellyfin_client: boolean;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      last_seen_at: string | null;
+      /** Format: int64 */
+      sessions: number;
+    };
     AdminInsightsCoverage: {
       /**
        * Format: int64
@@ -19604,6 +19686,14 @@ export interface components {
     };
     AdminInsightsDevices: {
       adaptation_reasons: components["schemas"]["AdminInsightsAdaptationReason"][];
+      audio: components["schemas"]["AdminInsightsAudioUsage"];
+      /**
+       * @description Bucket size of protocol_buckets
+       * @enum {string}
+       */
+      bucket_unit: "day" | "week" | "month";
+      /** @description Up to 50 reported client versions with the most sessions; sessions without a version are left out */
+      client_versions: components["schemas"]["AdminInsightsClientVersionRow"][];
       codecs: string[];
       coverage: components["schemas"]["AdminInsightsCoverage"];
       /** @description Sessions by delivered resolution class; transcodes recorded before route facts are unknown */
@@ -19616,11 +19706,14 @@ export interface components {
       hw_accel_breakdown: components["schemas"]["AdminInsightsLabeledCount"][];
       /** @description Client and platform pairs with at least min_sessions sessions, at most 200 (the ones with the most sessions) */
       matrix: components["schemas"]["AdminInsightsClientMatrixRow"][];
+      /** @description Sessions per bucket from Silo's own clients and from Jellyfin-protocol clients */
+      protocol_buckets: components["schemas"]["AdminInsightsProtocolBucket"][];
       /** @description Sessions delivered at a lower resolution class than their source, by source and delivered class */
       resolution_changes: components["schemas"]["AdminInsightsResolutionChange"][];
       /** @description Sessions by source resolution class (480p, 720p, 1080p, 2160p, 4320p, unknown), on the scale media_files.resolution uses */
       source_resolutions: components["schemas"]["AdminInsightsLabeledCount"][];
       subtitle_burn_in_codecs: components["schemas"]["AdminInsightsLabeledCount"][];
+      subtitles: components["schemas"]["AdminInsightsSubtitleUsage"];
       summary: components["schemas"]["AdminInsightsDevicesSummary"];
       /**
        * Format: date-time
@@ -19705,6 +19798,65 @@ export interface components {
       /** Format: int64 */
       sessions: number;
     };
+    AdminInsightsLabeledPlays: {
+      key: string;
+      /** Format: int64 */
+      plays: number;
+      /**
+       * Format: int64
+       * @description Distinct played titles behind the plays
+       */
+      titles: number;
+    };
+    AdminInsightsLibrary: {
+      /** @description Up to 15 content ratings by plays */
+      content_ratings: components["schemas"]["AdminInsightsLabeledPlays"][];
+      /** @description Plays by release decade (key is the decade's first year), oldest first, unknown last */
+      decades: components["schemas"]["AdminInsightsLabeledPlays"][];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      from: string;
+      /** @description Up to 20 genres by plays; a title counts in each of its genres */
+      genres: components["schemas"]["AdminInsightsLabeledPlays"][];
+      /** @description Libraries with movies or series, most titles first */
+      libraries: components["schemas"]["AdminInsightsLibraryCoverage"][];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      oldest_history_at: string | null;
+      /** @description Up to 20 titles added in the window with no play yet, newest first */
+      recently_added_unplayed: components["schemas"]["AdminInsightsUnplayedTitle"][];
+      summary: components["schemas"]["AdminInsightsLibrarySummary"];
+      /** @description Titles added in the window by how long they waited for a first play: day, week, month, later or not_yet; sessions holds the title count */
+      time_to_first_play: components["schemas"]["AdminInsightsLabeledCount"][];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      to: string;
+      tz: string;
+    };
+    AdminInsightsLibraryCoverage: {
+      /** Format: int64 */
+      added_titles: number;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      library_id: string;
+      name: string;
+      /** Format: int64 */
+      never_started: number;
+      /** Format: double */
+      played_share: number;
+      /** Format: int64 */
+      played_titles: number;
+      /** Format: int64 */
+      titles: number;
+    };
     AdminInsightsLibraryRow: {
       /**
        * @description Opaque identifier
@@ -19718,6 +19870,40 @@ export interface components {
       viewers: number;
       /** Format: int64 */
       watch_seconds: number;
+    };
+    AdminInsightsLibrarySummary: {
+      /**
+       * Format: int64
+       * @description Titles added in the window that have a play since, up to now
+       */
+      added_played: number;
+      /**
+       * Format: int64
+       * @description Titles first seen in the window
+       */
+      added_titles: number;
+      /**
+       * Format: double
+       * @description Median days from being added to the first play, over titles added in the window that have one
+       */
+      median_days_to_first_play: number | null;
+      /**
+       * Format: int64
+       * @description Titles with no playback session at all, up to now
+       */
+      never_started: number;
+      /** Format: double */
+      played_share: number;
+      /**
+       * Format: int64
+       * @description Titles with a play in the window; a series counts when any episode has one
+       */
+      played_titles: number;
+      /**
+       * Format: int64
+       * @description Distinct movies and series in scope; a title in two libraries counts once
+       */
+      titles: number;
     };
     AdminInsightsPeakStreamsPoint: {
       /**
@@ -19764,6 +19950,8 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       to: string;
+      /** @description Up to 10 household profiles across all accounts with the most plays, whatever the sort, search or page */
+      top_profiles: components["schemas"]["AdminInsightsTopProfile"][];
       /** Format: int64 */
       total_accounts: number;
       /** Format: int64 */
@@ -19865,6 +20053,22 @@ export interface components {
       /** Format: int64 */
       watch_seconds: number;
     };
+    AdminInsightsProtocolBucket: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      bucket_start: string;
+      /** Format: int64 */
+      jellyfin_sessions: number;
+      /**
+       * Format: date
+       * @description Local bucket start date (YYYY-MM-DD in requested tz)
+       */
+      label_date: string;
+      /** Format: int64 */
+      native_sessions: number;
+    };
     AdminInsightsResolutionChange: {
       /** @description Source resolution class */
       from: string;
@@ -19872,6 +20076,23 @@ export interface components {
       sessions: number;
       /** @description Lower delivered resolution class */
       to: string;
+    };
+    AdminInsightsSubtitleUsage: {
+      /** @description Subtitled sessions by delivery: embedded, sidecar, hls_rendition or burn_in */
+      deliveries: components["schemas"]["AdminInsightsLabeledCount"][];
+      /** Format: int64 */
+      forced_sessions: number;
+      /** Format: int64 */
+      hearing_impaired_sessions: number;
+      /** @description Subtitled sessions by subtitle language (ISO 639-1 where one exists, unknown when untagged) */
+      languages: components["schemas"]["AdminInsightsLabeledCount"][];
+      /**
+       * Format: int64
+       * @description Sessions with route facts, the ones that record their subtitle
+       */
+      sessions: number;
+      /** Format: int64 */
+      subtitled_sessions: number;
     };
     AdminInsightsTitle: {
       /** @enum {string} */
@@ -19961,6 +20182,8 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       from: string;
+      /** @description Movies and series with at least 3 plays and at least one left unfinished, lowest completion rate first, up to limit */
+      least_finished: components["schemas"]["AdminInsightsTitleRow"][];
       libraries: components["schemas"]["AdminInsightsLibraryRow"][];
       movies: components["schemas"]["AdminInsightsTitleRow"][];
       shows: components["schemas"]["AdminInsightsTitleRow"][];
@@ -20019,6 +20242,24 @@ export interface components {
       /** Format: int64 */
       watch_seconds: number;
     };
+    AdminInsightsTopProfile: {
+      /** Format: int64 */
+      plays: number;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      profile_id: string;
+      profile_name: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      user_id: string;
+      username: string;
+      /** Format: int64 */
+      watch_seconds: number;
+    };
     AdminInsightsTranscoderRow: {
       client_name: string;
       device_platform: string;
@@ -20027,6 +20268,25 @@ export interface components {
       total_sessions: number;
       /** Format: int64 */
       transcode_sessions: number;
+    };
+    AdminInsightsUnplayedTitle: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      added_at: string;
+      content_id: string;
+      /** @enum {string} */
+      kind: "movie" | "series";
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      library_id: string;
+      library_name: string;
+      title: string;
+      /** Format: int64 */
+      year: number | null;
     };
     AdminInvitation: {
       /**
@@ -24221,6 +24481,9 @@ export interface components {
       /** Format: uri-reference */
       public_url?: string;
       refresh_result?: components["schemas"]["LibraryRefreshJobResult"];
+      /** @description The export job a catalog_import job reads from, when it was queued with export_job_id. Clients format their own label from it. */
+      source_export_job_id?: string;
+      /** @description An import's source as English text: the remote URL, the file name, or "Export job <id>". Prefer source_export_job_id when present. */
       source_label?: string;
       /**
        * Format: date-time
@@ -26386,6 +26649,11 @@ export interface components {
        */
       advisory_source?: "commonsense" | "mdblist";
       /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date
+       */
+      air_date?: string;
+      /**
        * @description On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author
        * @example [
        *       "Frank Herbert"
@@ -26416,6 +26684,12 @@ export interface components {
        * @description The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair
        */
       duration_seconds?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       /** @description Empty, never null */
@@ -26681,6 +26955,12 @@ export interface components {
       effective_version_resolution?: string;
       /** Format: int64 */
       episode_count?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       extras?: components["schemas"]["ItemExtraInfo"][];
@@ -27252,7 +27532,7 @@ export interface components {
        */
       current_password: string;
       /**
-       * @description The replacement; the capability document names the length limits
+       * @description The replacement; getPasswordPolicy describes the rules it must meet
        * @example margin fossil quench hollow
        */
       new_password: string;
@@ -28683,6 +28963,7 @@ export interface components {
       /** @enum {string} */
       feature:
         | "direct"
+        | "engine"
         | "nat_mapping"
         | "nat_hairpin"
         | "ipv4"
@@ -28713,7 +28994,14 @@ export interface components {
         | "no_gateway"
         | "gateway_unsupported"
         | "mapping_varies"
-        | "not_measured";
+        | "not_measured"
+        | "multiple_api_replicas"
+        | "replica_census_unavailable"
+        | "replica_lease_pending"
+        | "replica_lease_held"
+        | "udp_port_invalid"
+        | "udp_port_bind_failed"
+        | "engine_start_failed";
       requested?: string;
       /** @enum {string} */
       state: "on" | "off" | "capped" | "fallback" | "degraded" | "unknown";
@@ -28734,6 +29022,8 @@ export interface components {
       default: string;
       effective: string;
       env: string;
+      max?: string;
+      min?: string;
       reason?: string;
       requested?: string;
     };
@@ -30082,6 +30372,11 @@ export interface components {
        */
       advisory_source?: "commonsense" | "mdblist";
       /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date
+       */
+      air_date?: string;
+      /**
        * @description On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author
        * @example [
        *       "Frank Herbert"
@@ -30112,6 +30407,12 @@ export interface components {
        * @description The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair
        */
       duration_seconds?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       /** @description Empty, never null */
@@ -31620,52 +31921,52 @@ export interface components {
     LoginSession: {
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision
+       * @description When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at
        * @example 2026-01-02T03:04:05.678Z
        */
       created_at: string;
       /** @description Whether this is the login session making this request */
       current: boolean;
       /**
-       * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing
+       * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in
        * @example 8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50
        */
       device_id?: string;
       /**
        * Format: uuid
-       * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
+       * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in, and on another session's item for a session opened by device sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
        * @example 0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11
        */
       device_key_id: string | null;
       /**
-       * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device
+       * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in
        * @example Living Room Apple TV
        */
       device_name: string;
       /**
-       * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none
+       * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in
        * @example tvOS
        */
       device_platform?: string;
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision
+       * @description When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at
        * @example 2026-02-01T03:04:05.678Z
        */
       expires_at: string;
       /**
-       * @description Session identifier; the value deleteSession takes
+       * @description Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current
        * @example 6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c
        */
       id: string;
       /**
-       * @description Client address recorded at login; empty when unknown
+       * @description Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in
        * @example 203.0.113.7
        */
       ip_address: string;
       /**
        * Format: date-time
-       * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded
+       * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in
        * @example 2026-01-02T03:04:05.678Z
        */
       last_seen_at: string | null;
@@ -31691,52 +31992,52 @@ export interface components {
       current_session: {
         /**
          * Format: date-time
-         * @description RFC 3339 instant in UTC with millisecond precision
+         * @description When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at
          * @example 2026-01-02T03:04:05.678Z
          */
         created_at: string;
         /** @description Whether this is the login session making this request */
         current: boolean;
         /**
-         * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing
+         * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in
          * @example 8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50
          */
         device_id?: string;
         /**
          * Format: uuid
-         * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
+         * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in, and on another session's item for a session opened by device sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
          * @example 0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11
          */
         device_key_id: string | null;
         /**
-         * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device
+         * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in
          * @example Living Room Apple TV
          */
         device_name: string;
         /**
-         * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none
+         * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in
          * @example tvOS
          */
         device_platform?: string;
         /**
          * Format: date-time
-         * @description RFC 3339 instant in UTC with millisecond precision
+         * @description When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at
          * @example 2026-02-01T03:04:05.678Z
          */
         expires_at: string;
         /**
-         * @description Session identifier; the value deleteSession takes
+         * @description Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current
          * @example 6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c
          */
         id: string;
         /**
-         * @description Client address recorded at login; empty when unknown
+         * @description Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in
          * @example 203.0.113.7
          */
         ip_address: string;
         /**
          * Format: date-time
-         * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded
+         * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in
          * @example 2026-01-02T03:04:05.678Z
          */
         last_seen_at: string | null;
@@ -33437,6 +33738,30 @@ export interface components {
       telemetry_only: string[];
       /** Format: int64 */
       telemetry_only_truncated: number;
+    };
+    PasswordPolicy: {
+      /**
+       * Format: int64
+       * @description Most UTF-8 bytes a new password may have
+       * @example 72
+       */
+      maximum_bytes: number;
+      /**
+       * Format: int64
+       * @description Fewest characters a new password may have; never fewer than 8
+       * @example 8
+       */
+      minimum_length: number;
+      /**
+       * @description Whether a new password needs a punctuation mark or symbol (Unicode categories P and S); letters, digits and spaces do not count
+       * @example false
+       */
+      require_special: boolean;
+      /**
+       * @description Whether a new password needs a capital letter (Unicode category Lu)
+       * @example false
+       */
+      require_uppercase: boolean;
     };
     PasswordResetCapability: {
       /** @description Whether the current principal may use the capability */
@@ -37780,7 +38105,7 @@ export interface components {
        */
       email: string;
       /**
-       * @description Account password; at least 8 characters and at most 72 UTF-8 bytes
+       * @description Account password; at least 8 characters and at most 72 UTF-8 bytes. The server's password policy can require more; getPasswordPolicy describes it
        * @example correct horse battery staple
        */
       password: string;
@@ -37887,7 +38212,7 @@ export interface components {
        */
       invite_code: string;
       /**
-       * @description Account password; at least 8 characters and at most 72 UTF-8 bytes
+       * @description Account password; at least 8 characters and at most 72 UTF-8 bytes. The server's password policy can require more; getPasswordPolicy describes it
        * @example correct horse battery staple
        */
       password: string;
@@ -38170,7 +38495,7 @@ export interface components {
     };
     SubtitleAppearanceDeviceOverride: {
       /**
-       * @description The subtitle appearance as a JSON document; the server validates only that it is JSON
+       * @description The subtitle appearance as a JSON document; it must satisfy the settings contract's subtitle-appearance schema
        * @example {"fontSize":"xxlarge"}
        */
       value: string;
@@ -39270,6 +39595,11 @@ export interface components {
       title: string;
     };
     WatchDetail: {
+      /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD; sent when episode_labels is air_date
+       */
+      air_date?: string;
       backdrop_thumbhash?: string;
       /**
        * Format: uri-reference
@@ -39290,6 +39620,12 @@ export interface components {
       effective_version_hdr?: boolean;
       /** @description The version resolution the profile last played */
       effective_version_resolution?: string;
+      /**
+       * @description The series' episode labels, as on CatalogItem: air_date means show air_date where the season and episode numbers would go; absent or unknown means show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       intro?: components["schemas"]["WatchMarker"];
@@ -40195,6 +40531,11 @@ export interface components {
        */
       advisory_source?: "commonsense" | "mdblist";
       /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date
+       */
+      air_date?: string;
+      /**
        * @description On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author
        * @example [
        *       "Frank Herbert"
@@ -40227,6 +40568,12 @@ export interface components {
        * @description The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair
        */
       duration_seconds?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       /** @description Empty, never null */
@@ -40435,6 +40782,11 @@ export interface components {
        */
       advisory_source?: "commonsense" | "mdblist";
       /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date
+       */
+      air_date?: string;
+      /**
        * @description On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author
        * @example [
        *       "Frank Herbert"
@@ -40465,6 +40817,12 @@ export interface components {
        * @description The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair
        */
       duration_seconds?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       /** @description Empty, never null */
@@ -62681,6 +63039,129 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AdminInsightsDevices"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminInsightsLibrary: {
+    parameters: {
+      query?: {
+        /** @description Inclusive local start date (YYYY-MM-DD in tz), required when range=custom */
+        from_date?: string;
+        /** @description Restrict playback analytics to media belonging to this library */
+        library_id?: string;
+        /** @description Restrict playback analytics to this household profile of user_id; requires user_id because profile ids repeat across accounts */
+        profile_id?: string;
+        /** @description Preset time window or custom */
+        range?: "7d" | "30d" | "90d" | "1y" | "all" | "custom";
+        /** @description Invalidate cached insights aggregates before reading; ignored for scoped API keys */
+        refresh?: boolean;
+        /** @description Inclusive local end date (YYYY-MM-DD in tz), required when range=custom */
+        to_date?: string;
+        /** @description IANA timezone identifier for day/week/month bucketing and heatmap alignment */
+        tz?: string;
+        /** @description Restrict playback analytics to this login account */
+        user_id?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminInsightsLibrary"];
         };
       };
       /** @description Bad Request */
@@ -105485,6 +105966,71 @@ export interface operations {
       };
     };
   };
+  getPasswordPolicy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PasswordPolicy"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   createPluginLaunch: {
     parameters: {
       query?: never;
@@ -105963,6 +106509,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -141672,6 +142227,8 @@ export interface operations {
         silo_rendition?: "video" | "subtitles";
         /** @description Set with silo_rendition=subtitles by the multivariant playlist of a plan with on-demand renditions (hls_subtitle_renditions_all_v1): the container track number whose WebVTT playlist to answer. */
         silo_track?: string;
+        /** @description Opaque transport generation the plan's HLS URL carries, when the attempt listed hls_transport_marker_v1 in deliveries.hls.features, and the playlist echoes into its URIs; clients must not compose, strip or move it. When the session has a recorded current transport, a request naming a transport a replan replaced answers 404 playback_transport_superseded. A session rebuilt from its recipe (after a server restart, or on a server that did not hold it) has none until its next replan and serves the request as if the marker were absent. Absent, the request is served by the session's current transport. */
+        silo_transport?: string;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
@@ -141800,6 +142357,8 @@ export interface operations {
         silo_rendition?: "video" | "subtitles";
         /** @description Set with silo_rendition=subtitles by the multivariant playlist of a plan with on-demand renditions (hls_subtitle_renditions_all_v1): the container track number whose WebVTT playlist to answer. */
         silo_track?: string;
+        /** @description Opaque transport generation the plan's HLS URL carries, when the attempt listed hls_transport_marker_v1 in deliveries.hls.features, and the playlist echoes into its URIs; clients must not compose, strip or move it. When the session has a recorded current transport, a request naming a transport a replan replaced answers 404 playback_transport_superseded. A session rebuilt from its recipe (after a server restart, or on a server that did not hold it) has none until its next replan and serves the request as if the marker were absent. Absent, the request is served by the session's current transport. */
+        silo_transport?: string;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
@@ -141922,6 +142481,8 @@ export interface operations {
   getPlaybackSegment: {
     parameters: {
       query?: {
+        /** @description Opaque transport generation the plan's HLS URL carries, when the attempt listed hls_transport_marker_v1 in deliveries.hls.features, and the playlist echoes into its URIs; clients must not compose, strip or move it. When the session has a recorded current transport, a request naming a transport a replan replaced answers 404 playback_transport_superseded. A session rebuilt from its recipe (after a server restart, or on a server that did not hold it) has none until its next replan and serves the request as if the marker were absent. Absent, the request is served by the session's current transport. */
+        silo_transport?: string;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */

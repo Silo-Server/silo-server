@@ -155,6 +155,11 @@ func adminAccountTag(ctx context.Context, id int, revision, groupRevision int64)
 	return collectionEditorTag(ctx, "admin-account/group/"+strconv.FormatInt(groupRevision, 10), strconv.Itoa(id), revision)
 }
 func adminAccountError(err error) *Problem {
+	// A password the policy refused is a validation problem at the password
+	// member, as on every other path that sets a password.
+	if p, ok := passwordRuleProblem(err, "password"); ok {
+		return p
+	}
 	switch {
 	case errors.Is(err, auth.ErrNotFound):
 		return NewProblem(TypeNotFound, "Account not found.")

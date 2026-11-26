@@ -365,6 +365,30 @@
       "value": "Ta wartość jest poza zakresem."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Użyj co najmniej jednego znaku specjalnego, np. ! lub #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Użyj co najmniej jednej wielkiej litery."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "To hasło jest za długie."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "To hasło jest za krótkie."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Twoja sesja wygasła. Zaloguj się ponownie."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Gdy logowanie hasłem jest wyłączone, musi pozostać włączony dostawca logowania, z którego mogą korzystać użytkownicy. OpenID Connect wymaga też publicznego adresu URL serwera."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8487,6 +8517,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Karty"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Układ"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabela"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -61641,7 +61689,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Trendy oglądania, popularne tytuły, aktywność domowników, odtwarzanie na urządzeniach i przepustowość."
+      "value": "Strumienie na żywo, trendy oglądania, popularne tytuły, aktywność domowników, odtwarzanie na urządzeniach i przepustowość."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -82950,7 +82998,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Sprawdzaj, czy router obsługuje UPnP, NAT-PMP lub PCP."
+      "value": "Poproś router o mapowanie portu przez UPnP, NAT-PMP lub PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -82959,16 +83007,40 @@
       "value": "Mapowanie portów"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Zakres: od "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " do "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Sprawdzanie gotowości nie uruchamia odtwarzania bezpośredniego."
+      "value": "Włączenie tej opcji uruchamia mechanizm połączeń bezpośrednich. Otwiera on port UDP, a gdy włączone jest mapowanie portów, prosi router o mapowanie portu. Sprawdzanie tylko odczytuje stan hosta."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Wyłączone przez administratora"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Ograniczono do dozwolonego zakresu"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -82980,7 +83052,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Nie udało się uruchomić mechanizmu połączeń bezpośrednich"
+      "value": "Mechanizm połączeń bezpośrednich przestał działać lub nie udało się go uruchomić"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -83011,6 +83083,12 @@
     {
       "type": 0,
       "value": "Nieprawidłowa wartość; ustawiono Wył."
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Nieprawidłowa wartość; używana jest wartość domyślna"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -94591,6 +94669,20 @@
       "value": "Najpierw włącz dostawcę logowania. Przy wyłączonym logowaniu hasłem i bez włączonego dostawcy zalogować się mogliby tylko administratorzy awaryjni."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Najpierw ustaw publiczny adres URL serwera. Bez niego dostawca "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " nie może nikogo zalogować, więc przy wyłączonym logowaniu hasłem zalogować mogliby się tylko administratorzy z dostępem awaryjnym."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -94681,6 +94773,304 @@
       "value": "Zezwalaj użytkownikom na tworzenie kluczy API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Wyłącz logowanie hasłem"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Hasłem będą logować się tylko administratorzy z dostępem awaryjnym. Pozostałe osoby logują się przez dostawcę "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Dostawca "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " tworzy konta przy pierwszym logowaniu, więc jeśli któraś z tych osób zaloguje się przez niego, zanim ją połączysz, otrzyma nowe, osobne konto."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Połącz każde z nich z kontem dostawcy "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " na stronie tego konta w sekcji Użytkownicy."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konto nie może się zalogować, dopóki administrator go nie połączy"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konta nie mogą się zalogować, dopóki administrator ich nie połączy"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " kont nie może się zalogować, dopóki administrator ich nie połączy"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konta nie może się zalogować, dopóki administrator ich nie połączy"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się sprawdzić, których kont to dotyczy. Nadal możesz wyłączyć tę opcję."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Sprawdzanie, kto loguje się hasłem"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Gdy dostawca "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " potwierdzi jeden z tych adresów e-mail podczas logowania, Silo połączy tę osobę z jej kontem."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konto łączy się przez adres e-mail"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konta łączą się przez adres e-mail"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " kont łączy się przez adres e-mail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konta łączy się przez adres e-mail"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pokaż jeszcze "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pokaż jeszcze "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pokaż jeszcze "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pokaż jeszcze "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się wczytać kolejnych kont. Spróbuj ponownie."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Po tej zmianie każde konto nadal będzie mogło się zalogować."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administrator"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Dopasowywanie adresów e-mail wyłączone"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Brak adresu e-mail"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "To nikogo nie wylogowuje. Zalogowane osoby pozostają zalogowane, ich klucze API nadal działają i wciąż mogą zatwierdzać nowe urządzenia. Aby wylogować daną osobę, zakończ jej sesje na jej stronie w sekcji "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Użytkownicy"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Wyłączyć logowanie hasłem?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Zobacz wszystkie konta w sekcji Użytkownicy"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -94715,6 +95105,28 @@
     {
       "type": 0,
       "value": "Nie udało się zmienić dostawcy "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Logowanie hasłem jest wyłączone, więc przez dostawcę "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " logują się wszyscy oprócz administratorów z dostępem awaryjnym. Najpierw włącz ponownie logowanie hasłem, a potem wyłącz dostawcę "
     },
     {
       "type": 1,
@@ -96858,7 +97270,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Trendy oglądania, popularne tytuły, konta, urządzenia i przepustowość."
+      "value": "Strumienie na żywo, trendy oglądania, popularne tytuły, konta, urządzenia i przepustowość."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -121238,6 +121650,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Ukryj obejrzane tytuły"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Każdy profil widzi tę kolekcję bez obejrzanych przez siebie tytułów: na stronie kolekcji, w swoich rzędach i w liczbie tytułów. Nic nie jest usuwane. Inteligentna kolekcja z limitem tytułów najpierw wybiera tytuły, więc może ich pokazywać mniej."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -144127,6 +144551,16 @@
     {
       "type": 0,
       "value": "Data ostatniej emisji"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Zablokuj pole "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

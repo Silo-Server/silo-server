@@ -2,7 +2,9 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -94,4 +96,38 @@ func (f *fakeWatch) ClearResumePosition(_ context.Context, userID int, profileID
 		return nil
 	}
 	return &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Item not found"}
+}
+
+// The player labels a game of a date-labeled series by its air date; a
+// numbered episode's watch detail carries neither member.
+func TestWatchDetailEpisodeLabels(t *testing.T) {
+	game := &catalogpkg.WatchDetail{ContentID: "ep-1", Type: "episode", Title: "Chicago Bulls vs Washington Wizards",
+		SeriesTitle: "NBA", SeasonNumber: 2026, EpisodeNumber: 296, EpisodeLabels: "air_date", AirDate: "2026-11-20"}
+	numbered := *game
+	numbered.EpisodeLabels = ""
+
+	for _, tt := range []struct {
+		name   string
+		detail *catalogpkg.WatchDetail
+		want   map[string]any
+	}{
+		{"date-labeled", game, map[string]any{"episode_labels": "air_date", "air_date": "2026-11-20"}},
+		{"numbered", &numbered, map[string]any{"episode_labels": nil, "air_date": nil}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(watchDetailOf(tt.detail))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatal(err)
+			}
+			for key, want := range tt.want {
+				if got[key] != want {
+					t.Errorf("%s = %v, want %v", key, got[key], want)
+				}
+			}
+		})
+	}
 }

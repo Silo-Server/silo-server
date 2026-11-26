@@ -494,7 +494,9 @@ func (l *sidecarLookup) load(path string) (*parsedNFO, error) {
 // the save.
 func readNFOFile(path string) ([]byte, error) {
 	f, err := fspath.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
-	if errors.Is(err, syscall.ELOOP) {
+	// Linux and macOS report ELOOP for a symlink opened with O_NOFOLLOW;
+	// FreeBSD reports EMLINK.
+	if errors.Is(err, syscall.ELOOP) || errors.Is(err, syscall.EMLINK) {
 		return nil, errNFOReplaced
 	}
 	if err != nil {

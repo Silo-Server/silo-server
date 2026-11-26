@@ -365,6 +365,30 @@
       "value": "Aquest valor és fora de l’interval."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Inclou almenys un caràcter especial, com ara ! o #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Inclou almenys una lletra majúscula."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Aquesta contrasenya és massa llarga."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Aquesta contrasenya és massa curta."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "La sessió ha caducat. Torna a iniciar la sessió."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Mentre l’inici de sessió amb contrasenya estigui desactivat, cal mantenir activat un proveïdor d’inici de sessió que la gent pugui utilitzar. OpenID Connect també necessita l’URL pública del servidor."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8246,6 +8276,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Targetes"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Disposició"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Taula"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -55218,7 +55266,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tendències de visualització, títols populars, activitat de la llar, reproducció als dispositius i amplada de banda."
+      "value": "Transmissions en directe, tendències de visualització, títols populars, activitat de la llar, reproducció als dispositius i amplada de banda."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -74984,7 +75032,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Comprova si l’encaminador admet UPnP, NAT-PMP o PCP."
+      "value": "Demana a l’encaminador una assignació de ports UPnP, NAT-PMP o PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -74993,16 +75041,40 @@
       "value": "Assignació de ports"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Interval: entre "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " i "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Les comprovacions de preparació no inicien la reproducció directa."
+      "value": "En activar aquesta opció, s’inicia el motor de connexió directa: s’obre un port UDP i, si Assignació de ports està activat, es demana a l’encaminador una assignació de ports. Executa la comprovació només llegeix l’estat de l’equip."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Desactivat per l’administrador"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "S’ha ajustat a l’interval permès"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -75014,7 +75086,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "No s’ha pogut iniciar el motor de connexió directa"
+      "value": "El motor de connexió directa s’ha aturat o no s’ha pogut iniciar"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -75045,6 +75117,12 @@
     {
       "type": 0,
       "value": "Valor no vàlid; s’ha desactivat"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Valor no vàlid; s’utilitza el valor per defecte"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -86458,6 +86536,20 @@
       "value": "Activa primer un proveïdor d’inici de sessió. Amb l’inici de sessió amb contrasenya desactivat i cap proveïdor activat, només podrien iniciar la sessió els administradors d’emergència."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Primer defineix l’URL pública del servidor. Sense aquesta URL, ningú no pot iniciar la sessió amb "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "; per tant, amb l’inici de sessió amb contrasenya desactivat, només els administradors d’accés d’emergència podrien iniciar la sessió."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -86548,6 +86640,279 @@
       "value": "Permet que els usuaris creïn claus d’API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Desactiva l’inici de sessió amb contrasenya"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Només els administradors d’accés d’emergència iniciaran la sessió amb contrasenya. La resta inicia la sessió amb "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " crea comptes en el primer inici de sessió; per tant, si alguna d’aquestes persones inicia la sessió amb aquest proveïdor abans que la vinculis, obtindrà un compte nou i independent."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Vincula cadascun a un compte del proveïdor "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " des de la seva pàgina a Usuaris."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " compte no pot iniciar la sessió fins que un administrador el vinculi"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de comptes no poden iniciar la sessió fins que un administrador els vinculi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " comptes no poden iniciar la sessió fins que un administrador els vinculi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "No s’ha pogut comprovar a quins comptes afecta. Pots desactivar-lo igualment."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "S’està comprovant qui inicia la sessió amb contrasenya"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Quan "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " confirmi una d’aquestes adreces electròniques en iniciar la sessió, Silo connectarà aquesta persona amb el seu compte."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " compte es connecta per correu electrònic"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de comptes es connecten per correu electrònic"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " comptes es connecten per correu electrònic"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostra’n "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " més"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostra’n "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " més"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostra’n "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " més"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "No s’han pogut carregar més comptes. Torna-ho a provar."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Tots els comptes encara podran iniciar la sessió després d’aquest canvi."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administrador"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "La coincidència per correu electrònic està desactivada"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Sense correu electrònic"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Això no tanca la sessió de ningú. Qui ja ha iniciat la sessió la manté oberta, les seves claus d’API continuen funcionant i encara pot aprovar dispositius nous. Per tancar la sessió d’algú, finalitza les seves sessions des de la seva pàgina a "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Usuaris"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Vols desactivar l’inici de sessió amb contrasenya?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Consulta tots els comptes a Usuaris"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -86582,6 +86947,28 @@
     {
       "type": 0,
       "value": "No s’ha pogut modificar "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "L’inici de sessió amb contrasenya està desactivat, de manera que tothom, excepte els administradors d’accés d’emergència, inicia la sessió amb "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Primer torna a activar l’inici de sessió amb contrasenya i, després, desactiva "
     },
     {
       "type": 1,
@@ -88646,7 +89033,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tendències de visualització, títols populars, comptes, dispositius i amplada de banda."
+      "value": "Transmissions en directe, tendències de visualització, títols populars, comptes, dispositius i amplada de banda."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -110899,6 +111286,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Amaga els títols vistos"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Cada perfil veu aquesta col·lecció sense els títols que ha vist, a la seva pàgina, a les seves files i al seu recompte. No s’elimina res. Una col·lecció intel·ligent amb un límit de títols tria primer els seus títols, de manera que en pot mostrar menys."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -132502,6 +132901,16 @@
     {
       "type": 0,
       "value": "Data de l’última emissió"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Bloqueja el camp "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

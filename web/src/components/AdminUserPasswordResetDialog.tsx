@@ -8,6 +8,12 @@ import type { AdminUser } from "@/api/types";
 import { getAdminUser, type AdminPasswordReset } from "@/api/v2/adminUsers";
 import { V2ProblemError } from "@/api/v2/request";
 import { useIssuePasswordReset, useUpdateUser } from "@/hooks/queries/admin/users";
+import { usePasswordPolicy } from "@/hooks/queries/account";
+import {
+  newPasswordPolicyProblem,
+  newPasswordRuleHint,
+  passwordErrorMessage,
+} from "@/lib/newPassword";
 import { useT } from "@/i18n";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatDateTime } from "@/lib/datetime";
@@ -25,18 +31,6 @@ import {
 } from "@/components/ui/dialog";
 
 type ResetMethod = "email" | "link" | "password";
-
-/** The server's bounds for a password (auth.ValidateNewPassword). */
-const MIN_PASSWORD_CHARS = 8;
-const MAX_PASSWORD_BYTES = 72;
-
-/** Counts characters (code points) and UTF-8 bytes the way the server does. */
-function passwordFits(password: string): boolean {
-  return (
-    [...password].length >= MIN_PASSWORD_CHARS &&
-    new TextEncoder().encode(password).length <= MAX_PASSWORD_BYTES
-  );
-}
 
 /**
  * Helps a locked-out account back in three ways: email it a single-use reset
@@ -58,6 +52,8 @@ export function AdminUserPasswordResetDialog({
   onClose: () => void;
 }) {
   const t = useT();
+  const passwordPolicy = usePasswordPolicy();
+  const ruleHint = newPasswordRuleHint(passwordPolicy);
   const issue = useIssuePasswordReset();
   const updateUser = useUpdateUser();
   const busy = useRef(false);
@@ -112,9 +108,7 @@ export function AdminUserPasswordResetDialog({
       if (err instanceof V2ProblemError && err.status === 412) {
         setError(t("web.admin.users.page.accountChanged"));
       } else {
-        setError(
-          err instanceof Error ? err.message : t("web.admin.users.passwordResetDialog.setFailed"),
-        );
+        setError(passwordErrorMessage(err, t("web.admin.users.passwordResetDialog.setFailed")));
       }
     } finally {
       busy.current = false;
@@ -136,7 +130,7 @@ export function AdminUserPasswordResetDialog({
   const unconfirmed = result?.delivery === "email" && result.delivery_status !== "sent";
   const done = passwordSet !== null || (result !== null && !unconfirmed);
   const resetURL = result?.reset_url;
-  const passwordValid = passwordFits(password);
+  const passwordValid = newPasswordPolicyProblem(password, passwordPolicy) === null;
   const copyLabel = t("web.admin.users.passwordResetDialog.copyLink");
 
   const primary = {
@@ -302,9 +296,10 @@ export function AdminUserPasswordResetDialog({
                 />
                 <p className="text-muted-foreground text-xs">
                   {t("web.admin.users.passwordResetDialog.passwordRules", {
-                    min: MIN_PASSWORD_CHARS,
-                    max: MAX_PASSWORD_BYTES,
+                    min: passwordPolicy.minimum_length,
+                    max: passwordPolicy.maximum_bytes,
                   })}
+                  {ruleHint ? <> {ruleHint}</> : null}
                 </p>
                 <div className="flex items-center gap-2">
                   <input

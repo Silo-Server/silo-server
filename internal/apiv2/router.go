@@ -1339,10 +1339,16 @@ type SessionService interface {
 	// CurrentLoginSession returns nil, not an error, when the session is no
 	// longer live.
 	CurrentLoginSession(ctx context.Context, userID int, sessionID string) (*models.AuthSession, error)
+	// ListSessionsPageByID and SessionLimitedToItself serve a session that
+	// may see and end only itself (auth.LimitedToItself).
+	ListSessionsPageByID(ctx context.Context, userID int, afterID string, limit int) ([]*models.AuthSession, bool, error)
+	SessionLimitedToItself(ctx context.Context, sessionID string) (bool, error)
 	RevokeSession(ctx context.Context, sessionID string, userID int) error
 	SetupInitialUser(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
 	SignupEnabled(ctx context.Context) (bool, error)
 	Signup(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
+	// PasswordPolicy is the rule set a new password must meet.
+	PasswordPolicy(ctx context.Context) (auth.PasswordPolicy, error)
 	// NetworkSignIn signs in the overlay peer of the request through a
 	// network identity provider.
 	NetworkSignIn(ctx context.Context, in handlers.NetworkSignInInput) (handlers.TokenPairView, error)

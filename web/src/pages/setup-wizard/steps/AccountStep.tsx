@@ -5,10 +5,11 @@ import { toast } from "sonner";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { usePasswordPolicy } from "@/hooks/queries/account";
 import { createProfile } from "@/hooks/queries/profiles";
 import { useT } from "@/i18n";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
-import { newPasswordProblem } from "@/lib/newPassword";
+import { newPasswordHint, newPasswordProblem, passwordErrorMessage } from "@/lib/newPassword";
 
 import { StepFrame, StepSkeleton } from "../StepFrame";
 import { useWizardContext } from "../WizardContext";
@@ -45,6 +46,8 @@ export function AccountStep() {
   const [submitting, setSubmitting] = useState(false);
   const [mismatch, setMismatch] = useState(false);
   const [emailInvalid, setEmailInvalid] = useState(false);
+  // Only the form that creates the first account needs the policy.
+  const passwordPolicy = usePasswordPolicy(!user);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -53,7 +56,7 @@ export function AccountStep() {
     setEmailInvalid(badEmail);
     setMismatch(badMatch);
     if (badEmail || badMatch) return;
-    const passwordProblem = newPasswordProblem(password, confirmPassword);
+    const passwordProblem = newPasswordProblem(password, confirmPassword, passwordPolicy);
     if (passwordProblem) {
       toast.error(passwordProblem);
       return;
@@ -66,7 +69,7 @@ export function AccountStep() {
       // Stay busy: this step unmounts as soon as the account exists.
     } catch (err) {
       setSubmitting(false);
-      toast.error(err instanceof Error ? err.message : t("web.setup.account.createFailed"));
+      toast.error(passwordErrorMessage(err, t("web.setup.account.createFailed")));
     }
   }
 
@@ -140,9 +143,13 @@ export function AccountStep() {
             ) : null}
           </Field>
           <Field id="setup-password" label={t("web.auth.password")}>
+            <p id="setup-password-hint" className="text-muted-foreground text-xs">
+              {newPasswordHint(passwordPolicy)}
+            </p>
             <Input
               id="setup-password"
               type="password"
+              aria-describedby="setup-password-hint"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="new-password"

@@ -830,17 +830,19 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     font-size: 125%;
     --ui-text-scale-factor: 1.25;
   }
+  /* Bolder moves every weight up a step. Tailwind's weight utilities read its
+     --font-weight-* theme variables, so redefining them here reaches every
+     form of the class: `font-medium`, `focus:font-medium`, `md:font-semibold`,
+     `file:font-medium`. */
   html[data-text-weight="strong"] {
     --font-weight-ui: 520;
-    --font-weight-medium-ui: 600;
-    --font-weight-semibold-ui: 700;
-    --font-weight-bold-ui: 800;
+    --font-weight-normal: 520;
+    --font-weight-medium: 600;
+    --font-weight-semibold: 700;
+    --font-weight-bold: 800;
   }
   html[data-text-weight="default"] {
     --font-weight-ui: 400;
-    --font-weight-medium-ui: 500;
-    --font-weight-semibold-ui: 600;
-    --font-weight-bold-ui: 700;
   }
   /* Every token here pushes toward --contrast-boost, never toward white
      directly. Hard-coded white raises contrast on a dark page and destroys it
@@ -909,18 +911,6 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   html[data-high-contrast="true"] .border-border\/80 {
     border-color: var(--border) !important;
   }
-  html[data-text-weight="strong"] .font-normal {
-    font-weight: var(--font-weight-ui, 520) !important;
-  }
-  html[data-text-weight="strong"] .font-medium {
-    font-weight: var(--font-weight-medium-ui, 600) !important;
-  }
-  html[data-text-weight="strong"] .font-semibold {
-    font-weight: var(--font-weight-semibold-ui, 700) !important;
-  }
-  html[data-text-weight="strong"] .font-bold {
-    font-weight: var(--font-weight-bold-ui, 800) !important;
-  }
   /* Buttons are activatable, so they get the activatable cursor. Declared in
      `base` rather than as a utility, so an explicit `cursor-*` class — a
      disabled player control, a non-interactive tooltip target — still wins. */
@@ -949,6 +939,24 @@ html[data-navigation-direction]::view-transition-new(main-content) {
         var(--background)
       );
     min-height: 100dvh;
+  }
+  /* A browser minimum font size raises a button label's line height but not
+     rem, so Button's fixed heights stop fitting it. This floor (one line, plus
+     the borders on bordered variants) grows a text button only when its label
+     no longer fits: at normal settings it is shorter than every size. It lives
+     in the base layer so a caller's min-h-* still wins over it. The 44px touch
+     targets (TOUCH_TARGETS, the admin page header, the item detail stream
+     buttons) win too, so they fold the floor in with max(2.75rem, 1lh + 2px).
+     Icon sizes are left alone. Only Button carries both data-variant and
+     data-size; data-slot is not used because a Radix trigger rendered asChild
+     replaces it. */
+  [data-variant][data-size]:not([data-size^="icon"]) {
+    min-height: 1lh;
+  }
+  [data-variant][data-size]:is([data-variant="outline"], [data-variant="glass"]):not(
+      [data-size^="icon"]
+    ) {
+    min-height: calc(1lh + 2px);
   }
 }
 
@@ -2325,6 +2333,47 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     }
   }
 
+  /* ── Insights refresh ───────────────────────────────────── */
+  /* A region of an Insights tab that still shows the previous result while a
+     new sort, search, or filter loads. The content stays opaque, so its
+     contrast never changes; a sweep along the top edge shows the load, and
+     fades in after 150 ms so a quick response never flickers. */
+  .insight-refreshing {
+    position: relative;
+  }
+  /* Its links mix the new filters with the old result's window, so they wait
+     for the new result. insightRefreshProps blocks Enter on them too. */
+  .insight-refreshing a {
+    pointer-events: none;
+  }
+  .insight-refreshing::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: -0.625rem;
+    height: 2px;
+    border-radius: 9999px;
+    pointer-events: none;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--primary) 50%, transparent) 40%,
+      var(--primary) 50%,
+      color-mix(in srgb, var(--primary) 50%, transparent) 60%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation:
+      fade-in 200ms ease-out 150ms both,
+      scan-accent-sweep 1.6s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .insight-refreshing::before {
+      background: var(--primary);
+      animation: fade-in 200ms ease-out 150ms both;
+    }
+  }
+
   .auth-shell {
     min-height: 100dvh;
     position: relative;
@@ -2504,6 +2553,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 
     .admin-shell .page-header [data-slot="button"] {
       min-height: 2.75rem;
+    }
+
+    .admin-shell .page-header [data-slot="button"]:not([data-size^="icon"]) {
+      min-height: max(2.75rem, calc(1lh + 2px));
     }
   }
 

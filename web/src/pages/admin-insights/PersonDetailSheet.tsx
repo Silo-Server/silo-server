@@ -71,9 +71,15 @@ export function PersonDetailSheet({
     () => (person ? buildInsightsWindowQueryParams(filters, { person }) : undefined),
     [filters, person],
   );
-  const activity = useAdminInsightsActivity(params ?? {}, open);
-  const titles = useAdminInsightsTitles({ ...(params ?? {}), limit: PERSON_TOP_TITLES }, open);
-  const devices = useAdminInsightsDevices({ ...(params ?? {}), min_sessions: 1 }, open);
+  const activity = useAdminInsightsActivity(params ?? {}, { enabled: open });
+  const titles = useAdminInsightsTitles(
+    { ...(params ?? {}), limit: PERSON_TOP_TITLES },
+    { enabled: open },
+  );
+  const devices = useAdminInsightsDevices(
+    { ...(params ?? {}), min_sessions: 1 },
+    { enabled: open },
+  );
 
   const heading = names.name ?? t("web.admin.insights.title");
   const windowLabel = activity.data

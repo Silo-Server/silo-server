@@ -149,6 +149,8 @@ export function watchDetailFromV2(detail: WatchDetailV2): WatchDetail {
     user_data: userDataFromV2(detail.user_data),
     series_id: detail.series_id,
     series_title: detail.series_title,
+    episode_labels: detail.episode_labels,
+    air_date: detail.air_date,
     season_number: detail.season_number,
     episode_number: detail.episode_number,
     effective_subtitle_language: detail.effective_subtitle_language,

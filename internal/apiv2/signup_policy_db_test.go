@@ -17,11 +17,18 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 )
 
-// Model a preflight read that won before the administrator's disable. The
-// durable transaction must judge the current database policy instead.
+// Model a preflight read of signup.enabled that won before the administrator's
+// disable. The durable transaction must judge the current database policy
+// instead. Every other setting reads as unset, so the password policy is the
+// default one.
 type staleSignupSettings struct{}
 
-func (staleSignupSettings) Get(context.Context, string) (string, error) { return "true", nil }
+func (staleSignupSettings) Get(_ context.Context, key string) (string, error) {
+	if key == "signup.enabled" {
+		return "true", nil
+	}
+	return "", nil
+}
 
 func TestSignupCommitPolicyErrorsDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")

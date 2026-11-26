@@ -365,6 +365,30 @@
       "value": "Nilai ini di luar julat."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Sertakan sekurang-kurangnya satu aksara khas, seperti ! atau #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Sertakan sekurang-kurangnya satu huruf besar."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Kata laluan ini terlalu panjang."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Kata laluan ini terlalu pendek."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Sesi anda telah tamat tempoh. Log masuk semula."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Semasa log masuk dengan kata laluan dimatikan, pembekal log masuk yang boleh digunakan oleh pengguna mesti kekal dihidupkan. OpenID Connect juga memerlukan URL awam pelayan."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -7756,6 +7786,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kad"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Susun atur"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Jadual"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -43527,7 +43575,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Trend tontonan, tajuk popular, aktiviti isi rumah, main balik peranti dan lebar jalur."
+      "value": "Strim aktif, trend tontonan, tajuk popular, aktiviti isi rumah, main balik peranti dan lebar jalur."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -60655,7 +60703,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Semak sokongan UPnP, NAT-PMP atau PCP pada penghala."
+      "value": "Minta pemetaan port UPnP, NAT-PMP atau PCP daripada penghala."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -60664,16 +60712,40 @@
       "value": "Pemetaan port"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Julat: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " hingga "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Semakan kesediaan tidak memulakan main terus."
+      "value": "Menghidupkan tetapan ini akan memulakan enjin sambungan terus. Enjin ini membuka port UDP dan, apabila Pemetaan port dihidupkan, meminta pemetaan port daripada penghala. Jalankan semakan hanya membaca keadaan hos."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Dilumpuhkan oleh pentadbir"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Dihadkan kepada julat yang dibenarkan"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -60685,7 +60757,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Enjin sambungan terus tidak dapat dimulakan"
+      "value": "Enjin sambungan terus berhenti atau tidak dapat dimulakan"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -60716,6 +60788,12 @@
     {
       "type": 0,
       "value": "Nilai tidak sah; menggunakan mati"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Nilai tidak sah; menggunakan nilai lalai"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -71787,6 +71865,20 @@
       "value": "Hidupkan pembekal log masuk dahulu. Dengan log masuk kata laluan dimatikan dan tiada pembekal dihidupkan, hanya pentadbir kecemasan boleh log masuk."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Tetapkan URL awam pelayan dahulu. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " tidak dapat membenarkan sesiapa log masuk tanpa URL itu, jadi apabila log masuk dengan kata laluan dimatikan, hanya pentadbir kecemasan yang boleh log masuk."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -71877,6 +71969,213 @@
       "value": "Benarkan pengguna mencipta kunci API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Matikan log masuk dengan kata laluan"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Hanya pentadbir kecemasan akan log masuk dengan kata laluan. Semua orang lain log masuk dengan "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " mencipta akaun semasa log masuk pertama, jadi jika salah seorang daripada mereka log masuk dengan "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " sebelum anda memautkannya, dia akan mendapat akaun baharu yang berasingan."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Pautkan setiap akaun ke akaun "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " dari halamannya dalam Pengguna."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " akaun tidak dapat log masuk sehingga pentadbir memautkannya"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menyemak akaun yang terjejas. Anda masih boleh mematikannya."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Menyemak pengguna yang log masuk dengan kata laluan…"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Apabila "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " mengesahkan salah satu e-mel ini semasa log masuk, Silo menyambungkan orang itu ke akaunnya."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " akaun disambungkan melalui e-mel"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tunjukkan "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " lagi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuatkan lebih banyak akaun. Cuba lagi."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Setiap akaun masih boleh log masuk selepas ini."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Pentadbir"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Padanan e-mel dimatikan"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Tiada e-mel"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Tindakan ini tidak melog keluar sesiapa. Pengguna yang sudah log masuk kekal log masuk, kunci API mereka terus berfungsi dan mereka masih boleh meluluskan peranti baharu. Untuk melog keluar seseorang, tamatkan sesinya dari halamannya dalam "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Pengguna"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Matikan log masuk dengan kata laluan?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Lihat semua akaun dalam Pengguna"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -71911,6 +72210,28 @@
     {
       "type": 0,
       "value": "Tidak dapat mengubah "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Log masuk dengan kata laluan dimatikan, jadi "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ialah cara semua orang kecuali pentadbir kecemasan log masuk. Hidupkan semula log masuk dengan kata laluan dahulu, kemudian matikan "
     },
     {
       "type": 1,
@@ -73909,7 +74230,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Trend tontonan, tajuk popular, akaun, peranti dan lebar jalur."
+      "value": "Strim aktif, trend tontonan, tajuk popular, akaun, peranti dan lebar jalur."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -91697,6 +92018,18 @@
           "value": "Pilihan"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Sembunyikan tajuk yang ditonton"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Setiap profil melihat koleksi ini tanpa tajuk yang sudah ditonton oleh profil itu, di halamannya, dalam barisnya dan dalam kiraannya. Tiada apa yang dialih keluar. Koleksi pintar yang mempunyai had tajuk memilih tajuknya dahulu, jadi koleksi itu mungkin menunjukkan lebih sedikit tajuk."
     }
   ],
   "web.collections.details.label": [
@@ -110442,6 +110775,16 @@
     {
       "type": 0,
       "value": "Tarikh siaran terakhir"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Kunci "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

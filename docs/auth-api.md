@@ -95,9 +95,42 @@ active primary profile. An admin account may also change its password before sel
 but selecting a secondary profile removes that authority. API keys and impersonation sessions can
 never change an account password.
 
-Local passwords are bcrypt hashes. Setup, invited signup, and password changes share the same
-password policy. New passwords must contain at least 8 Unicode characters and be
-no more than 72 UTF-8 bytes, the bcrypt input limit. The caller must prove knowledge of the current
+Local passwords are bcrypt hashes. Setup, invited signup, password changes, password resets and
+passwords an administrator sets share one password policy, which an administrator sets under
+Settings → Sign-in:
+
+| Setting | Default | Rule |
+| --- | --- | --- |
+| `auth.password_min_length` | `8` | Fewest Unicode characters, from 8 to 72. |
+| `auth.password_require_uppercase` | `false` | At least one capital letter (Unicode category `Lu`). |
+| `auth.password_require_special` | `false` | At least one punctuation mark or symbol (Unicode categories `P` and `S`); letters, digits and spaces do not count. |
+
+Every new password is also at most 72 UTF-8 bytes, the bcrypt input limit. The policy is read on
+every check, so a change applies at once on every node. It applies only when a password is chosen;
+passwords already stored keep working. The recovery command
+`silo auth local-login enable -user <name> -temporary-password` sets a temporary password without
+it, and the account then chooses a new one under the policy. A backup
+restore never weakens the live policy.
+
+A refused password returns `422 validation_failed` with one field error at the password member
+(`body.password`, or `body.new_password` for a password change). Its `code` names a rule the
+password breaks, and its `detail` is the English sentence for it, such as "Use at least 12
+characters." When a password breaks several rules, the code names one of them, so a client should
+not rely on which. A translated client shows `error.field.<code>` instead. That text is generic, so
+`password_too_short` doesn't name the minimum; a client that wants to show it reads
+[`getPasswordPolicy`](#get-authpassword-policy-getpasswordpolicy) again. Every operation that sets a password
+except `changePassword` limits it to 8 to 72 characters in its schema, so a password outside that
+range gets `out_of_range` there before the policy runs. `changePassword` accepts 1 to 1024
+characters, so the policy codes cover every length in that range.
+
+| Code | Rule broken |
+| --- | --- |
+| `password_too_short` | Fewer characters than `auth.password_min_length`. |
+| `password_too_long` | More than 72 UTF-8 bytes. |
+| `password_needs_uppercase` | No capital letter while `auth.password_require_uppercase` is on. |
+| `password_needs_special` | No punctuation mark or symbol while `auth.password_require_special` is on. |
+
+To change a password, the caller must prove knowledge of the current
 password. By default, changing the password does not revoke existing login sessions; users can
 review and revoke those separately through the account sessions API. The change can also
 sign the account out everywhere else in the same step; see
@@ -106,6 +139,20 @@ sign the account out everywhere else in the same step; see
 Accounts whose local password login is disabled keep their credential at the external provider and
 cannot use this flow. An administrator can also make a password temporary or issue a reset link;
 see [temporary passwords](#temporary-passwords) and [password reset links](#password-reset-links).
+
+### `GET /auth/password-policy` (`getPasswordPolicy`)
+
+Public, so the setup, signup and password-reset forms can check a password before sending it. The
+server checks it again on every write.
+
+```json
+{
+  "minimum_length": 8,
+  "maximum_bytes": 72,
+  "require_uppercase": false,
+  "require_special": false
+}
+```
 
 ### `GET /account/password/capability` (`getAccountPasswordCapability`)
 
@@ -171,7 +218,7 @@ holding a session but not the password cannot brute-force it.
 | `401` | `authentication_required` | No valid login session. |
 | `403` | `permission_denied` | The active profile is not the primary profile, an administrator selected a secondary profile, or the caller is an API key or "View as user" session. |
 | `409` | `conflict` | The account does not use local password login. |
-| `422` | `validation_failed` | A member is missing, empty, `null` or unknown; the current password did not match (`body.current_password`); or the new password is shorter than 8 characters, longer than 72 UTF-8 bytes, or the same as a temporary password (`body.new_password`). |
+| `422` | `validation_failed` | A member is missing, empty, `null` or unknown; the current password did not match (`body.current_password`); or the new password breaks the [password policy](#account-passwords) or is the same as a temporary password (`body.new_password`). |
 | `429` | `rate_limited` | The `password_change` budget is spent; `Retry-After` says when to try again. |
 | `503` | `dependency_unavailable` | The server has no password service, or password hashing is saturated; `Retry-After` says when to try again. |
 
@@ -228,7 +275,8 @@ They send the `Deprecation` and `Link` headers; no `Sunset` is declared. A link 
 Every unusable link returns the same `404 not_found`, whether it is unknown, expired,
 used, replaced, or outdated by a password or recovery email change, or its account
 is disabled. Changing only the email's letter case preserves the link.
-Invalid passwords return `422 validation_failed` at `body.password` and leave the link
+Invalid passwords return `422 validation_failed` at `body.password`, with a
+[code that names the rule](#account-passwords), and leave the link
 unspent. While password resets are not configured, every link operation returns `409`. Both operations spend the `password_reset` rate-limit budget, 20 requests per
 minute per client IP by default.
 
@@ -321,6 +369,66 @@ The login-session step of the `database_maintenance` scheduled task deletes expi
 login-session rows daily at 05:00 by default. Revoked sessions remain stored until their
 expiry passes. Jellyfin-compatible clients check their login session on
 every request too; cleanup removes only sessions that have already expired.
+
+### Sessions opened by device sign-in
+
+A session opened by device sign-in may sit on a device the account holder doesn't control,
+such as a shared TV, so it sees and ends only itself. `auth_sessions.opened_via` records how
+each session was opened and is the one record the server reads: `device_login` when a device
+sign-in request (a code a signed-in person approved, Jellyfin Quick Connect, or a
+remote-playback handoff) opened it, otherwise `password`, `provider`, `app_key` or
+`impersonation`. `auth.LimitedToItself` decides; the two routes below read it, no other
+request does.
+
+A session is limited to itself when its `opened_via` is `device_login`, whatever its
+platform. Two kinds of session have no `opened_via`:
+
+- One a server of the previous release wrote. That release recorded only
+  `auth_sessions.via_device_sign_in`, `true` for a device sign-in and `false` for any other,
+  and the session is limited when the flag is `true`. The flag answers this one question. A
+  session with `false` and no `opened_via` is ordinary for the session list and is still a
+  session with no record of how it was opened: `false` does not mean a password sign-in, so
+  it may do nothing that needs a recorded `opened_via` (see
+  [app keys](architecture/app-keys.md#who-decides)).
+- One older than both columns. It is limited when its recorded `device_platform` is a TV's:
+  `tvOS`, `android-tv` or `roku`, in any case. That covers TVs signed in by code before
+  either column; an older TV session opened with a password is limited too, which costs
+  nothing because no TV app reads more of the list than `id` and `current` or ends another
+  session.
+
+Every other session is ordinary, a TV that signs in with a password included, as are a
+session an administrator opened to act as the account and an API-key caller.
+
+`via_device_sign_in` is still stored, because a server of the previous release names it in
+every sign-in and must keep working against this database during a rolling deploy or after
+going back a release. The one session insert writes it from `opened_via`, and a check
+constraint (`auth_sessions_opened_via_matches_flag`) refuses a row in which the two disagree.
+A session such a server inserts carries the flag and no `opened_via`, and is judged as the
+first kind above. The column goes when no supported server writes it. The limit covers only the
+account's own session list: a device signed in by code on an administrator's account still
+holds that account's administrator powers, including ending any account's sessions, so a code
+on a shared device should not be approved from an administrator's account.
+
+For a limited caller, `listSessions` still answers `200` with every live session of the
+account, because released Apple apps read the session ids to recognize one server saved under
+two addresses. Its own item and `current_session` are complete. Every other item carries only
+`id` and `current`: `device_name` and `ip_address` are empty strings, `device_id` and
+`device_platform` are absent, `last_seen_at` is null, and `created_at` and `expires_at` repeat
+the caller's own values, since they have no null form. The page is ordered by `id` and the
+cursor holds only the last id, so neither tells which sessions are newer. A cursor minted for
+one kind of caller is `400 invalid_cursor` for the other. `limit` and `page.has_more` behave as
+for any caller.
+
+`deleteSession` from a limited caller ends its own session as for any caller. Another session
+of the account is `403 permission_denied`, with a detail saying a device signed in with a code
+can end only its own session. A session of another account, or an unknown id, is `404
+not_found` exactly as for an ordinary caller: the account check comes first, so the 403 says
+nothing about other accounts' sessions. `POST /auth/logout` is unchanged.
+
+What such a session still learns is how many live sessions the account has and their opaque
+ids. A device sign-in session opened before the column from a device that isn't a TV has no
+recorded mark and stays ordinary until it ends; an account holder ends shared devices'
+sessions from their session list, or an administrator ends all of the account's sessions.
 
 ### Access tokens after a role change
 

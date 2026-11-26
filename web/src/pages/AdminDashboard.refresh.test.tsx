@@ -2,10 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useDashboardInsightsActivity } from "@/hooks/queries/admin/insights";
 import { useAdminStats } from "@/hooks/queries/admin/stats";
 import AdminDashboard from "./AdminDashboard";
 
-const mocks = vi.hoisted(() => ({ request: vi.fn() }));
+const mocks = vi.hoisted(() => ({ request: vi.fn(), withInsightsWidget: false }));
 const profileContext = {
   accessToken: "token",
   authContextVersion: 1,
@@ -52,11 +53,21 @@ vi.mock("@/components/admin/SettingsAttention", () => ({ SettingsAttention: () =
 vi.mock("@/components/AdminSectionCommandDialog", () => ({
   AdminSectionCommandDialog: () => null,
 }));
-// The grid stands in for the stat tiles: it shows what the stats query holds.
+// The grid stands in for the stat tiles: it shows what the stats query holds,
+// and, when a test asks for one, mounts an Insights-backed widget.
+function InsightsWidget() {
+  useDashboardInsightsActivity("week");
+  return null;
+}
 vi.mock("@/components/admin/dashboard/DashboardGrid", () => ({
   DashboardGrid: () => {
     const stats = useAdminStats();
-    return <output aria-label="Total movies">{stats.data?.total_movies ?? "—"}</output>;
+    return (
+      <>
+        <output aria-label="Total movies">{stats.data?.total_movies ?? "—"}</output>
+        {mocks.withInsightsWidget ? <InsightsWidget /> : null}
+      </>
+    );
   },
 }));
 
@@ -76,6 +87,7 @@ describe("AdminDashboard refresh ordering", () => {
     cleanup();
     vi.useRealTimers();
     mocks.request.mockReset();
+    mocks.withInsightsWidget = false;
   });
 
   // Leaving the dashboard and coming back mounts a new page while the first
@@ -129,4 +141,33 @@ describe("AdminDashboard refresh ordering", () => {
       expect(tile.textContent).toBe("222");
     },
   );
+
+  // The server serves its cached Insights while it refreshes them in the
+  // background; a refresh the admin asked for must ask it for fresh data.
+  it("asks the server for fresh Insights when the admin presses Refresh", async () => {
+    mocks.withInsightsWidget = true;
+    const insightsRefresh: boolean[] = [];
+    mocks.request.mockImplementation(
+      (operation: string, args: { query?: { refresh?: boolean } }) => {
+        if (operation === "GET /api/v2/admin/stats") return Promise.resolve({ total_movies: 1 });
+        if (operation === "GET /api/v2/admin/insights/activity") {
+          insightsRefresh.push(Boolean(args.query?.refresh));
+          return Promise.resolve({});
+        }
+        throw new Error(`unexpected ${operation}`);
+      },
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <AdminDashboard />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await vi.waitFor(() => expect(insightsRefresh.length).toBeGreaterThan(0));
+    const before = insightsRefresh.length;
+    fireEvent.click(await screen.findByRole("button", { name: /^refresh$/i }));
+    await vi.waitFor(() => expect(insightsRefresh.slice(before)).toContain(true));
+  });
 });

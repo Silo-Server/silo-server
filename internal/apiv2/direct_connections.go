@@ -44,7 +44,8 @@ type DirectConnectionsListener struct {
 // DirectConnectionsSendBuffer reports a TCP socket's requested and usable granted bytes.
 type DirectConnectionsSendBuffer directconn.SendBuffer
 
-// DirectConnectionsKnob reports a process startup tuning value.
+// DirectConnectionsKnob reports a process startup tuning value, including
+// optional min and max bounds for numeric knobs.
 type DirectConnectionsKnob directconn.Knob
 
 type DirectConnectionsStatusInput struct {

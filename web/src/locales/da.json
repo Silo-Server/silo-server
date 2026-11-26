@@ -365,6 +365,30 @@
       "value": "Denne værdi er uden for det tilladte interval."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Brug mindst ét specialtegn, f.eks. ! eller #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Brug mindst ét stort bogstav."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Denne adgangskode er for lang."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Denne adgangskode er for kort."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Din session er udløbet. Log ind igen."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Mens login med adgangskode er slået fra, skal en loginudbyder, som folk kan bruge, forblive slået til. OpenID Connect kræver også serverens offentlige URL."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8009,6 +8039,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kort"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Layout"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabel"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -49273,7 +49321,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Afspilningstendenser, populære titler, husstandens aktivitet, afspilning på enheder og båndbredde."
+      "value": "Livestreams, afspilningstendenser, populære titler, husstandens aktivitet, afspilning på enheder og båndbredde."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -67688,7 +67736,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Tjek routeren for understøttelse af UPnP, NAT-PMP eller PCP."
+      "value": "Bed routeren om en UPnP-, NAT-PMP- eller PCP-porttilknytning."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67697,16 +67745,40 @@
       "value": "Portmapping"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Interval: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " til "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Parathedstjek starter ikke direkte afspilning."
+      "value": "Når du slår dette til, starter motoren til direkte forbindelser. Den åbner en UDP-port og beder routeren om en porttilknytning, når Porttilknytning er slået til. Kør tjek læser kun værtens tilstand."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Deaktiveret af administrator"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Begrænset til det tilladte interval"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67718,7 +67790,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Motoren til direkte forbindelser kunne ikke starte"
+      "value": "Motoren til direkte forbindelser stoppede eller kunne ikke starte"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67749,6 +67821,12 @@
     {
       "type": 0,
       "value": "Ugyldig værdi; slået fra"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Ugyldig værdi; bruger standardværdien"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -78967,6 +79045,20 @@
       "value": "Slå en loginudbyder til først. Med login med adgangskode slået fra og ingen udbyder slået til ville kun nødadministratorer kunne logge ind."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Angiv først serverens offentlige URL. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " kan ikke logge nogen ind uden den, så med login med adgangskode slået fra ville kun nødadministratorer kunne logge ind."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -79057,6 +79149,242 @@
       "value": "Lad brugere oprette API-nøgler"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Slå login med adgangskode fra"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Kun nødadministratorer logger ind med en adgangskode. Alle andre logger ind med "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " opretter konti ved første login, så hvis en af disse personer logger ind med den, før du har tilknyttet deres konto, får de en ny, separat konto."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Tilknyt hver enkelt til en "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "-konto fra dens side under Brugere."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konto kan ikke logge ind, før en administrator tilknytter den"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konti kan ikke logge ind, før en administrator tilknytter dem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke tjekke, hvilke konti dette påvirker. Du kan stadig slå det fra."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Tjekker, hvem der logger ind med en adgangskode"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Når "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " bekræfter en af disse e-mailadresser ved login, forbinder Silo personen med personens konto."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konto forbindes via e-mail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konti forbindes via e-mail"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " til"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " til"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke indlæse flere konti. Prøv igen."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Alle konti kan stadig logge ind efter dette."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administrator"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "E-mailmatchning er slået fra"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Ingen e-mail"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Dette logger ikke nogen ud. Personer, der allerede er logget ind, forbliver logget ind, deres API-nøgler virker fortsat, og de kan stadig godkende nye enheder. Hvis du vil logge en person ud, skal du afslutte personens sessioner fra vedkommendes side under "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Brugere"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Slå login med adgangskode fra?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Se alle konti under Brugere"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -79099,6 +79427,28 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Login med adgangskode er slået fra, så "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " er den måde, alle undtagen nødadministratorer logger ind på. Slå først login med adgangskode til igen, og slå derefter "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " fra."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -81124,7 +81474,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Afspilningstendenser, populære titler, konti, enheder og båndbredde."
+      "value": "Livestreams, afspilningstendenser, populære titler, konti, enheder og båndbredde."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -101232,6 +101582,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Skjul sete titler"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Hver profil ser denne samling uden de titler, den har set, på samlingens side, i sine rækker og i sit antal. Intet bliver fjernet. En smart samling med en titelgrænse vælger sine titler først, så den kan vise færre."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -121241,6 +121603,16 @@
     {
       "type": 0,
       "value": "Seneste sendedato"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Lås "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

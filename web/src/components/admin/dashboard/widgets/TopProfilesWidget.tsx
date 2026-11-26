@@ -2,12 +2,12 @@ import { useMemo } from "react";
 import { Link } from "react-router";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { useAdminTopActivity } from "@/hooks/queries/admin/dashboardInsights";
+import { useDashboardInsightsPeople } from "@/hooks/queries/admin/insights";
 import { BarList, BarListSkeleton } from "../charts";
 import type { BarListItem } from "../charts";
 import { SectionError } from "../feedback";
 import { formatWatchTime } from "../format";
-import { rangeDays, rangePhrase, rangeTitle } from "../range";
+import { rangePhrase, rangeTitle } from "../range";
 import { useWidgetRange } from "../widgetChrome";
 import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
@@ -18,7 +18,7 @@ import { widgetRangeToInsightsRange } from "@/pages/admin-insights/insightsHelpe
 const ROW_LIMIT = 8;
 
 /**
- * Most active household profiles of the chosen window.
+ * Most active household profiles of the chosen window, by Insights plays.
  *
  * Rows are per profile, not per account: several profiles share one login, so
  * the label carries both when the account name adds anything.
@@ -26,10 +26,10 @@ const ROW_LIMIT = 8;
 export function TopProfilesWidget() {
   const t = useT();
   const { range } = useWidgetRange();
-  const query = useAdminTopActivity(rangeDays(range));
+  const query = useDashboardInsightsPeople(range);
   const items = useMemo<BarListItem[]>(
     () =>
-      (query.data?.profiles ?? []).slice(0, ROW_LIMIT).map((profile) => {
+      (query.data?.top_profiles ?? []).slice(0, ROW_LIMIT).map((profile) => {
         const account =
           profile.username ||
           t("web.admin.dashboard.widgets.topProfiles.userFallback", {
@@ -40,7 +40,7 @@ export function TopProfilesWidget() {
           id: `${profile.user_id}:${profile.profile_id}`,
           label: name === account ? account : `${name} · ${account}`,
           value: profile.plays,
-          secondary: formatWatchTime(profile.total_seconds),
+          secondary: formatWatchTime(profile.watch_seconds),
           to: `/admin/history?user_id=${profile.user_id}${
             profile.profile_id ? `&profile_id=${encodeURIComponent(profile.profile_id)}` : ""
           }`,
@@ -69,7 +69,7 @@ export function TopProfilesWidget() {
       <CardContent className="min-h-0 flex-1 overflow-y-auto">
         {query.isLoading ? (
           <BarListSkeleton />
-        ) : query.error ? (
+        ) : query.error && !query.data ? (
           <SectionError message={t("web.admin.dashboard.widgets.topProfiles.loadFailed")} />
         ) : (
           <BarList

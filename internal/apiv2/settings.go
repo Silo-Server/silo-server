@@ -137,7 +137,7 @@ type EffectiveSubtitleAppearanceInput struct {
 
 // SubtitleAppearanceDeviceOverride is the value a device stores.
 type SubtitleAppearanceDeviceOverride struct {
-	Value string `json:"value" required:"true" doc:"The subtitle appearance as a JSON document; the server validates only that it is JSON" example:"{\"fontSize\":\"xxlarge\"}"`
+	Value string `json:"value" required:"true" doc:"The subtitle appearance as a JSON document; it must satisfy the settings contract's subtitle-appearance schema" example:"{\"fontSize\":\"xxlarge\"}"`
 }
 
 // SubtitleAppearanceDeviceOverrideInput is the
@@ -482,8 +482,7 @@ func (reg *Registry) getEffectiveSubtitleAppearance(ctx context.Context, in *Eff
 	return &EffectiveSubtitleAppearanceOutput{Body: body}, nil
 }
 
-// updateSubtitleAppearanceDeviceOverride stores the override through the
-// same path as v1 PUT /settings/device/subtitle_appearance and answers with
+// updateSubtitleAppearanceDeviceOverride stores the override and answers with
 // the resolved appearance, the canonical representation after the write.
 func (reg *Registry) updateSubtitleAppearanceDeviceOverride(ctx context.Context, in *SubtitleAppearanceDeviceOverrideInput) (*EffectiveSubtitleAppearanceOutput, error) {
 	if reg.deps.Settings == nil {
