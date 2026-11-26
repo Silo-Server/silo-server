@@ -521,8 +521,8 @@ challenge. Every refusal after the code is found returns inside the redeem's
 transaction, so the code's spend rolls back and only the challenge is used up
 (`docs/auth-api.md` has the table). Issuing a join code answers a taken name
 with `duplicate` at `body.username` or `body.email`, whichever clashed. The sealed
-plaintext is the usual `signed_in` answer plus `username`, `person_key_id`
-(the account's person key once the redeem commits) and `person_key`
+plaintext is the usual `signed_in` answer, `person_key_id` naming the
+account's person key once the redeem commits, plus `username` and `person_key`
 (`enrolled`, or `kept` when the account kept a different key). An unknown, spent or expired code, and one whose
 invitation or session can no longer be used, is `app_code_invalid` (404). Of
 two redemptions of one code, on any API processes, exactly one succeeds.
@@ -729,6 +729,57 @@ the challenge, AES-256-GCM. A fake server that relays a device's request to the
 real one can read nothing it gets back, and can't swap the reply key without
 breaking the signature. Refusals are not sealed.
 
+## The person key in a sealed reply
+
+Every `signed_in` sealed reply to one of the person's own device keys
+(`introduce`, `sign-in`, `enroll` and an app code's redeem) carries
+`person_key_id`: the key ID of the account's live person key, or `null` when
+the account has none. "None" follows the key list's rule: no key was enrolled,
+the key was revoked, or it is unrevoked but bound to a sign-in provider
+identity that is gone from the account. The member is absent only from a
+server that does not report it and from the answers that never carry it.
+
+It tells a device which person key this server holds. A device that knows a
+newer person key than the one named, or gets `null`, learns that this server
+holds an older key or none: the server is behind, or the key was changed or
+revoked here.
+
+The value is read inside the transaction that opens the session, after that
+transaction's own writes to the person key (an enroll or a redeem that
+enrolled or kept it, an `introduce` that revoked its vouching key because the
+key's identity was gone, which answers a refusal and never `signed_in`). It is
+a plain read under the account row lock, which every writer of person key rows
+holds, so it is the account's person key as the session commits. One writer
+takes no account lock: a plugin uninstall deletes identities by cascade
+without touching key rows. A provider-bound person key whose identity such an
+uninstall deletes while the session opens can be named in a reply whose
+session commits just after the identity is gone; the next reply says `null`.
+
+Two answers leave the member out:
+
+- `approval_required`: no session opened.
+- Every answer to another app's key, one enrolled through a grant: its redeem
+  and its later sign-ins. That app is not one of the person's devices, and a key
+  ID that changes would tell it the person replaced their key.
+
+An answer to another app's key also carries the account's email as the empty
+string in `tokens.user`, and no `account_created_at` (below), on its redeem,
+its sign-ins and its refreshes. The name and the role stay. The person's email
+is not that app's to read, as the current-user read answers such a session.
+The role there is always `user`: a grant is refused for an administrator's
+account, and promoting an account revokes all its keys.
+
+## The account's creation time
+
+Every answer that carries a token pair for the account carries
+`account_created_at` beside `user`, set where the pair is built, so no path
+leaves it out; the current-user read and the administrator's views do not
+carry it. It is the account's `users.created_at`, RFC 3339 in UTC at the stored
+microsecond precision. Nothing rewrites that column after the account is made,
+and a full restore brings it back exactly. Its JSON form drops trailing zeros
+of the fraction, so it is compared as an instant at microsecond precision,
+never as text. Answers to another app's key leave it out.
+
 ## The pinned route
 
 A `signed_in` sealed reply from `introduce`, `sign-in` and `enroll` (and from
@@ -810,6 +861,37 @@ TLS connection covers all of it.
   use (above).
 - **A provider that can't re-check** bounds key sign-in by age (above) without
   revoking anything.
+
+## Revoked person keys stay revoked
+
+A person key this server has revoked is never enrolled, never vouches and is
+never accepted by a replace again, on any account, while the account that held
+it exists. Every person key insert goes through `insertPersonKeyTx`, whose
+`claimPublicKey` refuses a public key or key ID present in either key table,
+with no condition on `revoked_at` or on the account. `introduce` and the
+profile set check answer a revoked key as an unknown one, and a grant's
+redeem looks up only the account's unrevoked key.
+
+Revoked key rows are kept for as long as the account exists: nothing prunes
+them, and no retention task deletes key rows. Deleting the account deletes its
+key rows (`deleteAccountKeysTx`, and the foreign key's cascade), after which
+that public key may be enrolled again, on any account.
+
+A restore does one of three things with the backup's key rows
+(`internal/backup/credentials_app_keys.go`):
+
+- `AppKeysKept` (a full restore onto the deployment the backup came from, or a
+  server that takes its identity) keeps the live server's rows and the backup's
+  rows the live server lacks, so the revocations on both sides are kept.
+- `AppKeysRevoked` (another deployment's backup onto a server that keeps its
+  own identity) keeps the backup's keys, all revoked, so their public keys stay
+  enrolled once and every revocation is kept.
+- `AppKeysLeftOut` (a separate restore's copy, or a full restore that could not
+  carry the live server's credentials) keeps no key rows at all: every device
+  enrolls again, and no revocation is remembered.
+
+A cleanup job for key rows must not be written without changing this rule
+first.
 
 ## The profile set
 
