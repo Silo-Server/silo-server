@@ -3284,6 +3284,135 @@
       "body_file": "admin_policy_versions_continuation.json"
     },
     {
+      "name": "admin_profile_hidden_clear_ok",
+      "operation_id": "clearAdminUserHiddenProfile",
+      "scenario": "The owner clears a removed profile's hidden mark; it can return with the person's next set if that set still has it, and a push to their phone was queued.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/admin/users/7/profile-set/hidden/6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminProfileSetCleared",
+      "body_file": "admin_profile_hidden_clear_ok.json"
+    },
+    {
+      "name": "admin_profile_override_clear_name_taken",
+      "operation_id": "clearAdminUserProfileOverride",
+      "scenario": "Putting the set's name back would give two profiles one name, so the clear is refused as the owner's own rename would be, and the override stays.",
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v2/admin/users/7/profiles/p-kid/overrides/name",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "If-Match": "\"pso1-fixture\"",
+          "X-Profile-Id": "p-primary"
+        },
+        "body": "{\"state\":\"cleared\"}"
+      },
+      "expected_status": 409,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "admin_profile_override_clear_name_taken.json"
+    },
+    {
+      "name": "admin_profile_override_clear_not_found",
+      "operation_id": "clearAdminUserProfileOverride",
+      "scenario": "A field with no override, such as one the person has since changed themselves.",
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v2/admin/users/7/profiles/p-kid/overrides/pin",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "If-Match": "\"pso1-fixture\"",
+          "X-Profile-Id": "p-primary"
+        },
+        "body": "{\"state\":\"cleared\"}"
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "admin_profile_override_clear_not_found.json"
+    },
+    {
+      "name": "admin_profile_override_clear_ok",
+      "operation_id": "clearAdminUserProfileOverride",
+      "scenario": "The owner clears an override: the set's value is back now, and no push could be queued.",
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v2/admin/users/7/profiles/p-kid/overrides/max_content_rating",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "If-Match": "\"pso1-fixture\"",
+          "X-Profile-Id": "p-primary"
+        },
+        "body": "{\"state\":\"cleared\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminProfileSetCleared",
+      "body_file": "admin_profile_override_clear_ok.json"
+    },
+    {
+      "name": "admin_profile_set_edits_ok",
+      "operation_id": "listAdminUserProfileSetEdits",
+      "scenario": "An account's edits on this server: an owner's override, a profile the owner removed, the person's edit not yet merged, and the settled record of the person's edit over the owner's.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/profile-set/edits",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminProfileSetEdits",
+      "body_file": "admin_profile_set_edits_ok.json"
+    },
+    {
+      "name": "admin_profile_settled_edit_dismiss",
+      "operation_id": "dismissAdminUserSettledProfileEdit",
+      "scenario": "The owner dismisses the record that the person's own change replaced the owner's value.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/admin/users/7/profiles/p-kid/settled-edits/max_content_rating",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {},
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
       "name": "admin_provider_configuration",
       "operation_id": "getAdminSubtitleProviderConfiguration",
       "scenario": "Redacted canonical configuration supplies the captured edit validator.",

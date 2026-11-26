@@ -364,6 +364,9 @@
 ./internal/auth TestIntroduceFailingAfterItsAuditRowLeavesNoneDB
 ./internal/apiv2 TestKeyListCarriesEnrolledAddressDB
 ./migrations TestAppKeyEnrolledIPMigrationUpAndDownPostgres
+./internal/apiv2 TestProfileSetNameConflictOnTheWireDB
+./internal/apiv2 TestClearOverrideNameConflictOnTheWireDB
+./internal/apiv2 TestClearOverridePreconditionDB
 ./internal/auth TestRevokeOwnDeviceKeyRulesDB
 ./internal/auth TestKeySignInLocalPasswordsOffDB
 ./internal/auth TestKeySessionContinuesProviderChainDB
@@ -536,6 +539,7 @@
 ./internal/notifications TestProfileSetWakeSurvivesDeviceRemovalDB
 ./internal/notifications TestProfileSetWakeCapsPhonesDB
 ./internal/notifications TestProfileSetWakeAnswersForItsOwnEditDB
+./internal/notifications TestProfileSetWakeForARequestThatRecordedNothingDB
 ./internal/notifications TestPushEnqueueSkipsTargetsRemovedAfterListingDB
 ./internal/notifications TestPushRetentionSkipsTargetsADeliveryHoldsDB
 ./internal/notifications TestPushRetentionKeepsTheLastChanceForAnExpiredAppleLoginDB
@@ -1312,6 +1316,9 @@
 ./internal/api/handlers TestProfileSetEditsTokenDB
 ./internal/api/handlers TestProfileEditRecorderDB
 ./internal/api/handlers TestProfileSetOwnerOverridesDB
+./internal/api/handlers TestClearProfileSetOverrideDB
+./internal/api/handlers TestClearMirroredSettingDB
+./internal/api/handlers TestOverrideTokenDB
 ./internal/api/handlers TestProfileSetOwnerEditsFollowTheProfileDB
 ./internal/api/handlers TestProfileSetNamesWithOwnerRenamesDB
 ./internal/api/handlers TestProfileSetRefusalOrderDB

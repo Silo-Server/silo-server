@@ -272,6 +272,31 @@ func Move(ctx context.Context, db Executor, account int, from, to string) error 
 	return nil
 }
 
+// ClearOwner deletes the owner's rows of fields on the profile with syncID
+// (FieldRemoval for a removal) and reports how many it deleted. A row the
+// person has since replaced is theirs, and stays. It locks edit rows, so it
+// runs last in its transaction.
+func ClearOwner(ctx context.Context, db Executor, account int, syncID string, fields []string) (int64, error) {
+	tag, err := db.Exec(ctx, `DELETE FROM profile_set_edits WHERE user_id = $1 AND sync_id = $2::uuid AND field = ANY($3::text[]) AND by = 'owner'`,
+		account, syncID, fields)
+	if err != nil {
+		return 0, fmt.Errorf("clearing the owner's edits: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// DismissSettled deletes the settled record of field on the profile with
+// syncID and reports whether there was one. An open row is the person's
+// edit a set has still to see, and stays.
+func DismissSettled(ctx context.Context, db Executor, account int, syncID, field string) (bool, error) {
+	tag, err := db.Exec(ctx, `DELETE FROM profile_set_edits WHERE user_id = $1 AND sync_id = $2::uuid AND field = $3 AND by = 'account' AND settled_at IS NOT NULL`,
+		account, syncID, field)
+	if err != nil {
+		return false, fmt.Errorf("dismissing a settled edit: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // DeleteAccount deletes every edit row of account. Account deletion calls it
 // after deleting the account, in the same transaction.
 func DeleteAccount(ctx context.Context, db Executor, account int) error {

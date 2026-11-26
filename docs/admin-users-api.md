@@ -373,6 +373,105 @@ change the Owner's or another administrator's profiles (403 `permission_denied`
 otherwise), because a primary profile's PIN guards that account's admin access. A profile that is not one of the account's answers 404,
 as does an unknown account. Writes are audited like other admin mutations.
 
+### Profiles from the person's app
+
+A household whose profiles come from the person's app (a profile set, see
+[auth-api.md](auth-api.md#household-profiles)) records edits made on this server.
+An administrator's edit of a field is an override: the person's later sets leave
+it as it is. An administrator deleting such a profile hides it: their sets don't
+bring it back. These routes show those records and end them.
+
+| Route below `/api/v2/admin/users/{id}` | Response |
+| --- | --- |
+| `GET /profile-set/edits` | Every record (`listAdminUserProfileSetEdits`): `{ "edits": [...] }` |
+| `PATCH /profiles/{profile_id}/overrides/{field}` | Clears one override (`clearAdminUserProfileOverride`): body `{ "state": "cleared" }`, `If-Match` the record's `etag`; 200 `{ "applied", "wake_queued" }` |
+| `DELETE /profile-set/hidden/{sync_id}` | Clears one hidden profile (`clearAdminUserHiddenProfile`); 200 `{ "applied": false, "wake_queued" }` |
+| `DELETE /profiles/{profile_id}/settled-edits/{field}` | Dismisses one settled record (`dismissAdminUserSettledProfileEdit`); 204 |
+
+Each record has a `kind`:
+
+- `override`: a field the owner set here.
+- `hidden`: a profile the owner removed here. It has no `profile_id` and no
+  `field`; `profile_name` is the name it had.
+- `unmerged`: the person's own edit here that their app has not merged yet. With
+  no `field`, the person removed that profile. `replaced_owner` is true when it
+  replaced the owner's value.
+- `settled`: the person's edit of a field the owner had set, kept after their app
+  merged it as the record that the owner's value no longer applies.
+
+New kinds may be added. A record also carries `by`, `actor` (`id`, and `username`
+while that account exists), `at` (the last edit of that field), `value` (the value
+in force; for a setting, what the profile resolves to, with `inherited` true when
+the profile has no value of its own), and the person's last set's value as
+`set_value`, or `set_resets` for a setting the set resets. An `override` also
+carries `etag`, the validator a clear of it must send. An override is not a
+lock: the person may change the field here too, and their edit then replaces the
+owner's as `unmerged`, and `settled` once their app merges it.
+
+Clearing an override is a guarded `PATCH` whose body is the state the
+override is put in, `{ "state": "cleared" }`; that is the only state, so the
+operation ends an override and does nothing else, and any other value, an extra
+member or `null` is 422. It requires `If-Match` with the record's `etag`, so the
+clear does what the owner was shown. The `etag` changes whenever what the
+clear would do changes: the set's value of the field and whether the set
+resets it (for a mirrored setting, either key), and `clear_applies`; and
+whenever the override itself is edited again. It is built only from the
+profile row and the edit rows, so it never moves because an inherited value
+changed through the account or an administrator default. The precondition
+exists so that a clear does what the confirmation the owner read said it
+would. `If-Match: *` is the convention's deliberate overwrite: a caller that
+sends it has been shown no confirmation and says outright that it takes
+whatever the person's set holds at that moment. First-party clients never send
+it; the web card always sends the `etag` of the record it showed. A
+missing `If-Match` is 428
+`precondition_required`; one that no longer matches is 412
+`precondition_failed` with the current `ETag`, for example when the person's app
+sent a newer set after the list was read. Nothing is written in either case.
+The `etag` is compared inside the clear's transaction, on the profile rows it
+has locked, so no set lands between the check and the write. Refusals come in
+this order: 404 when there is no override of the field, then 428 or 412, then
+409 for a taken name. The answer is a receipt with no `ETag`.
+
+Clearing an override puts the set's value back at once, in one transaction that
+takes the set's locks, and the set applies to the field again from then on.
+Nothing it writes counts as an edit. A PIN the set sent as digits, or kept, can't
+be put back, because the server never stores digits: the owner's PIN stays until
+the person's app sends a newer set. When the set has no PIN for the profile,
+clearing removes the owner's PIN at once. A picture this server doesn't hold waits for
+its upload. A setting the last set neither names nor resets has no value from
+the set: the clear writes nothing, and the profile keeps the owner's value
+until a set names or resets the key. `clear_applies` on the record and `applied` in the answer say which
+happened. For a setting the settings contract mirrors in another key, clearing
+either key clears both. Putting back a `name` that another profile on the account now has,
+compared trimmed and without case as every profile write compares names, is
+refused with 409 `conflict`, as the owner's own rename to it is: nothing is
+written and the override stays until that profile is renamed. Clearing a hidden profile creates nothing. A newer set
+creates the profile, as a new profile with no history here, only if it has an
+item with that `sync_id` and the household has room for another profile;
+otherwise the item is in `left_off`, or not in the set, and nothing comes back.
+A set that has the item can still be refused as a whole (for example, its name
+is now another profile's on the account), and then nothing is written. If it
+pairs the `sync_id` with a profile of the account outside the set, that
+profile takes the `sync_id` and keeps its history instead.
+`wake_queued` says only that a push was queued, not that the profile returned.
+After a clear of an override or a hidden
+profile commits, the server tries to wake the person's apps with a push, and
+`wake_queued` is true only when this call queued one. It is false with push
+off, with no phone registered, within a minute after an earlier wake of the
+account, while a wake for the account is in flight on this server, and when
+queueing the wake failed or timed out; the
+change then reaches the app the next time it syncs. The hidden-profile clear and the dismissal restore no value,
+so they stay unguarded `DELETE`s. Dismissing a
+settled record changes nothing else and tells no app.
+
+The clears and the dismissal follow the Owner rules above and are audited (see
+[admin-api.md](admin-api.md#account-and-permission-audit-details)) as
+`profile.override_cleared`, `profile.hidden_cleared` and `profile.edit_dismissed`.
+A record that does not exist answers 404, including an override the person has
+since replaced. Where profiles are not kept in PostgreSQL, the list is empty and
+the other three answer 501 `capability_unsupported`. The account capability
+`profile_set_edits` says whether the routes are served.
+
 ### Profile page layouts
 
 An administrator can read and correct one profile's home or library page layout

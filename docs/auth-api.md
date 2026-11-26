@@ -1090,14 +1090,39 @@ or it is `profile_set_stale` with nothing written: read the set, merge the
 marks, and send again. An accepted newer set settles exactly the marks its
 `edits_seen` named and they leave `changed_here` and `deleted_here`; a mark
 recorded after the read stays. A repeat of the held version settles nothing.
-An override stays until the person edits that field on this server, or the
-profile is deleted here. Two settings the settings contract keeps as one
+An override stays until the person edits that field on this server, the
+owner clears it, or the profile is deleted here. Two settings the settings contract keeps as one
 preference under two keys are recorded together, so the person's edit of
 either ends the override on both. An override belongs to its profile: a set that drops
 the profile removes what the owner recorded for it, and an item under a new
 `sync_id` is a new profile with none of the old one's overrides. A profile an
-administrator deleted stays hidden on this server: no operation clears that
-yet.
+administrator deleted stays hidden on this server until an administrator
+clears that.
+
+An administrator sees these records and clears them from the admin routes in
+[admin-users-api.md](admin-users-api.md#profiles-from-the-persons-app).
+Clearing an override (a guarded `PATCH` that must name, in `If-Match`, the
+`etag` the administrator was shown) puts the field back to the value of the
+last accepted set at once, with three exceptions. A PIN the set sent as digits,
+or kept (`{"keep": true}`), stays as the owner set it until a newer set. A
+picture this server doesn't hold waits for its upload. A setting the last set
+neither names nor resets has no value from the set: the clear writes nothing,
+and the profile keeps the owner's value until a set names or resets the key.
+The field leaves `overrides` and the next newer set applies to it. Clearing a
+hidden profile takes it out of `hidden_by_owner` and creates nothing. A newer
+set creates the profile only if it has an item with that `sync_id` and the
+household has room for another profile; otherwise the item is in `left_off`,
+or not in the set, and nothing comes back. A set that has the item can
+still be refused as a whole (for example, its name is now another profile's on
+the account), and then nothing is written. If it pairs the `sync_id` with a
+profile of the account outside the set, that profile takes the `sync_id` and
+keeps its history instead of a new profile being created. After either
+commits, the server wakes the
+person's apps with a push where it can (at most one a minute per account, and
+only with push on, a phone registered and the wake queued in time); otherwise
+the app sees the change
+the next time it syncs. A field that leaves `overrides` without the person's
+own edit was cleared: send a newer set so the server holds the app's value.
 
 ## Profile PINs
 

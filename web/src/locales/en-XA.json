@@ -98224,6 +98224,12 @@
       "value": "⟦Ţĥé åççöûñţ îš åţ îţš þŕöƒîļé ļîɱîţ~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "⟦Çĥåñĝéđ ĥéŕé~~~~~⟧"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -98429,6 +98435,696 @@
     {
       "type": 0,
       "value": "⟦Šåṽé ÞÎÑ~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "⟦Åļļöŵ åĝåîñ~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "⟦Ļéţ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " çöɱé ƀåçķ öñ ţĥîš šéŕṽéŕ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥéîŕ åþþ çåñ åđđ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ƀåçķ ţĥé ñéẋţ ţîɱé îţ šýñçš, åš å ñéŵ þŕöƒîļé ŵîţĥöûţ îţš ĥîšţöŕý öñ ţĥîš šéŕṽéŕ, îƒ îţš þŕöƒîļéš šţîļļ îñçļûđé "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " åñđ ţĥîš åççöûñţ ĥåš ŕööɱ ƒöŕ åñöţĥéŕ þŕöƒîļé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "⟦Åļļöŵ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " åĝåîñ?~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥåţ çĥåñĝé ŵåš åļŕéåđý çļéåŕéđ, öŕ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " çĥåñĝéđ îţ åĝåîñ. Ţĥé ļîšţ îš ûþ ţö đåţé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "⟦Çĥåñĝéđ ƀý "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " öñ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš çĥåñĝé ŵåš ûþđåţéđ åƒţéŕ ýöû öþéñéđ îţ, šö ñöţĥîñĝ ŵåš çļéåŕéđ. Ŕéåđ îţ åĝåîñ îñ ţĥé ļîšţ, ţĥéñ çļéåŕ îţ îƒ ýöû šţîļļ ŵåñţ ţö.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedWhileRunning": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé þŕöƒîļéš çĥåñĝéđ ŵĥîļé ţĥîš ŕåñ, šö ñöţĥîñĝ ŵåš çĥåñĝéđ. Ţĥé ļîšţ îš ûþ ţö đåţé; ţŕý åĝåîñ îƒ ýöû šţîļļ ŵåñţ ţö.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "⟦Çļéåŕ~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "⟦Çļéåŕ åñđ ŕéɱöṽé ÞÎÑ~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "⟦Çļéåŕ ţĥé çĥåñĝé ţö "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " öñ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ’ţ çļéåŕ ţĥé çĥåñĝé.~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " öñ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ĝöéš ƀåçķ ţö ŵĥåţ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " îñĥéŕîţš ñöŵ, åš ţĥéîŕ åþþ åšķš. Çĥåñĝéš ƒŕöɱ ţĥéîŕ åþþ åþþļý ţö îţ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " šţåýš åš îţ îš ûñţîļ ţĥéîŕ åþþ ñéẋţ šéñđš îţ. Åƒţéŕ ţĥåţ, çĥåñĝéš ƒŕöɱ ţĥéîŕ åþþ åþþļý ţö îţ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ĝöéš ƀåçķ ţö ţĥé ṽåļûé ƒŕöɱ ţĥéîŕ åþþ ñöŵ, åñđ çĥåñĝéš ƒŕöɱ ţĥéîŕ åþþ åþþļý ţö îţ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " öñ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ĝöéš ƀåçķ ţö "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": ", ţĥé ṽåļûé ƒŕöɱ ţĥéîŕ åþþ, ñöŵ. Çĥåñĝéš ƒŕöɱ ţĥéîŕ åþþ åþþļý ţö îţ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ķééþš ţĥé ÞÎÑ ýöû šéţ ûñţîļ ţĥéîŕ åþþ ñéẋţ šéñđš öñé. Åƒţéŕ ţĥåţ, çĥåñĝéš ƒŕöɱ ţĥéîŕ åþþ åþþļý ţö îţ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥéîŕ åþþ šéñđš "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ŵîţĥöûţ å ÞÎÑ, šö çļéåŕîñĝ ŕéɱöṽéš ţĥé ÞÎÑ ýöû šéţ, ñöŵ. Åñýöñé ûšîñĝ ţĥîš åççöûñţ çåñ ţĥéñ öþéñ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ŵîţĥöûţ å ÞÎÑ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "⟦Çļéåŕ ţĥé çĥåñĝé ţö "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " öñ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "⟦å đéļéţéđ åççöûñţ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥéšé þŕöƒîļéš çöɱé ƒŕöɱ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "’š åþþ. Å çĥåñĝé ýöû ɱåķé ĥéŕé šţåýš öñ ţĥîš šéŕṽéŕ ûñţîļ ýöû çļéåŕ îţ. Îţ îšñ’ţ å ļöçķ: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " çåñ çĥåñĝé ţĥé šåɱé ţĥîñĝ ĥéŕé ţöö.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "⟦Đîšɱîšš~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "⟦Đîšɱîšš ţĥé ñöţé åƀöûţ "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " öñ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ’ţ đîšɱîšš ţĥé ñöţé.~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "⟦Ķîđš þŕöƒîļé~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "⟦Åĝé ļîɱîţ~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "⟦Çöñţéñţ ŕåţîñĝ ļîɱîţ~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "⟦Ñåɱé~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "⟦Þîçţûŕé~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "⟦ÞÎÑ~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţš~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûîŕé åñ åĝé ŕåţîñĝ~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱöṽéđ öñ ţĥîš šéŕṽéŕ ƀý "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " öñ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ". Ţĥéîŕ åþþ ŵöñ’ţ åđđ îţ ƀåçķ ûñţîļ ýöû åļļöŵ îţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ’ţ ļöåđ ţĥé çĥåñĝéš ɱåđé öñ ţĥîš šéŕṽéŕ.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " çåñ’ţ ĝö ƀåçķ ţö ţĥé ñåɱé "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ƒŕöɱ ţĥéîŕ åþþ, ƀéçåûšé åñöţĥéŕ þŕöƒîļé ĥéŕé ĥåš ţĥåţ ñåɱé. Ŕéñåɱé ţĥåţ þŕöƒîļé ƒîŕšţ, ţĥéñ çļéåŕ ţĥîš åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " çåñ çöɱé ƀåçķ ţĥé ñéẋţ ţîɱé "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "’š åþþ šýñçš, îƒ îţš þŕöƒîļéš šţîļļ îñçļûđé îţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " çåñ çöɱé ƀåçķ ŵĥéñ ţĥéîŕ åþþ ñéẋţ šýñçš, îƒ îţš þŕöƒîļéš šţîļļ îñçļûđé îţ. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "’š þĥöñé ĥåš ƀééñ åšķéđ ţö šýñç.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "⟦Çļéåŕéđ. Îţ ŕéåçĥéš "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "’š åþþ ţĥé ñéẋţ ţîɱé îţ šýñçš.~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "⟦Çļéåŕéđ. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "’š þĥöñé ĥåš ƀééñ åšķéđ ţö šýñç.~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱöṽéđ ƀý "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " öñ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš ŕéþļåçéđ ţĥé ṽåļûé ýöû šéţ.~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "⟦Šéţ ƀý "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " öñ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " çĥåñĝéđ ţĥîš öñ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "; ţĥé ṽåļûé ýöû šéţ ñö ļöñĝéŕ åþþļîéš.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "⟦Çĥåñĝéđ öñ ţĥîš šéŕṽéŕ~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (îñĥéŕîţéđ)~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "⟦Ñö þîçţûŕé~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "⟦Ñöñé~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "⟦Öƒƒ~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "⟦Öñ~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "⟦Çûšţöɱ þîçţûŕé~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ÞÎÑ~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "⟦ÞÎÑ šéţ~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "⟦Åļļöŵéđ~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "⟦Ɓļöçķéđ~~~⟧"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [

@@ -262,6 +262,14 @@ func (w *profileSetTx) MoveEdits(ctx context.Context, from, to string) error {
 	return profileedits.Move(ctx, w.tx, w.userID, from, to)
 }
 
+func (w *profileSetTx) ClearOwnerEdits(ctx context.Context, syncID string, fields []string) (int64, error) {
+	return profileedits.ClearOwner(ctx, w.tx, w.userID, syncID, fields)
+}
+
+func (w *profileSetTx) DismissSettledEdit(ctx context.Context, syncID, field string) (bool, error) {
+	return profileedits.DismissSettled(ctx, w.tx, w.userID, syncID, field)
+}
+
 func (w *profileSetTx) Accept(ctx context.Context, version int64, sha256 []byte) error {
 	if _, err := w.tx.Exec(ctx, `
 		UPDATE users SET profile_set_version = $2, profile_set_sha256 = $3, profile_set_accepted_at = now()

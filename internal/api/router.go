@@ -1322,6 +1322,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		profileHandler.AvatarResolver = deps.ArtworkResolver
 		profileHandler.ArtworkStore = deps.Blobs.Assets
 		profileHandler.SessionsReader = playbackSessionsLoader
+		profileHandler.ProfileSetWaker = deps.ProfileEditsWaker
+		profileHandler.AdminDefaults = adminDefaults
 		personalDataHandler = handlers.NewPersonalDataHandler(deps.UserStoreProvider, itemRepo)
 		if detailSvc != nil {
 			personalDataHandler.SetDetailService(detailSvc)
@@ -2973,6 +2975,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if profileHandler != nil {
 		v2deps.Profiles = profileHandler
 		v2deps.ProfileSet = profileHandler
+		v2deps.ProfileSetEdits = profileHandler
 		profileHandler.JellyfinCompatEnabled = deps.Config != nil && deps.Config.JellyfinCompat.Enabled && deps.Config.JellyfinCompat.Listen != ""
 	}
 	if deps.FolderRepo != nil {

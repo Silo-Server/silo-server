@@ -295,6 +295,9 @@ const (
 	ActionProfileCreated          = "profile.created"
 	ActionProfileUpdated          = "profile.updated"
 	ActionProfileDeleted          = "profile.deleted"
+	ActionProfileOverrideCleared  = "profile.override_cleared"
+	ActionProfileHiddenCleared    = "profile.hidden_cleared"
+	ActionProfileEditDismissed    = "profile.edit_dismissed"
 )
 
 // Target types of domain actions.
@@ -333,5 +336,6 @@ func Actions() []string {
 		ActionAppKeysEnrolled, ActionPersonKeyReplaced, ActionAppCodeIssued, ActionDeviceSignInPreapproved,
 		ActionDeviceKeyIntroduced, ActionAppCodeRedeemed, ActionAppGrantRedeemed,
 		ActionAPIKeyCreated, ActionAPIKeyUpdated, ActionAPIKeyDeleted,
-		ActionProfileCreated, ActionProfileUpdated, ActionProfileDeleted}
+		ActionProfileCreated, ActionProfileUpdated, ActionProfileDeleted,
+		ActionProfileOverrideCleared, ActionProfileHiddenCleared, ActionProfileEditDismissed}
 }
