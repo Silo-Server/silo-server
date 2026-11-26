@@ -47943,6 +47943,14 @@
             ],
             "type": "string"
           },
+          "account_created_at": {
+            "description": "When the account was made: RFC 3339 in UTC at the stored microsecond precision, with trailing zeros of the fraction left out. Nothing rewrites it after the account is made, and a full restore brings it back exactly. Compare it as an instant, never as text. Left out of an answer to another app's key, one enrolled through a grant",
+            "examples": [
+              "2026-03-14T09:26:53.589793Z"
+            ],
+            "format": "date-time",
+            "type": "string"
+          },
           "expires_in": {
             "description": "Access token lifetime in seconds",
             "examples": [
@@ -55531,6 +55539,14 @@
             ],
             "type": "string"
           },
+          "account_created_at": {
+            "description": "When the account was made: RFC 3339 in UTC at the stored microsecond precision, with trailing zeros of the fraction left out. Nothing rewrites it after the account is made, and a full restore brings it back exactly. Compare it as an instant, never as text. Left out of an answer to another app's key, one enrolled through a grant",
+            "examples": [
+              "2026-03-14T09:26:53.589793Z"
+            ],
+            "format": "date-time",
+            "type": "string"
+          },
           "expires_in": {
             "description": "Access token lifetime in seconds",
             "examples": [
@@ -61184,6 +61200,14 @@
             "examples": [
               "eyJhbGciOi..."
             ],
+            "type": "string"
+          },
+          "account_created_at": {
+            "description": "When the account was made: RFC 3339 in UTC at the stored microsecond precision, with trailing zeros of the fraction left out. Nothing rewrites it after the account is made, and a full restore brings it back exactly. Compare it as an instant, never as text. Left out of an answer to another app's key, one enrolled through a grant",
+            "examples": [
+              "2026-03-14T09:26:53.589793Z"
+            ],
+            "format": "date-time",
             "type": "string"
           },
           "expires_in": {

@@ -1,5 +1,6 @@
 {
   "access_token": "acc2",
   "refresh_token": "ref2",
-  "expires_in": 3600
+  "expires_in": 3600,
+  "account_created_at": "2025-03-14T09:26:53.589793Z"
 }
