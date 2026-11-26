@@ -27,7 +27,7 @@ type AdminSessionEgressService interface {
 // AdminPlaybackSessionEgress is a playback session's cumulative viewer egress.
 type AdminPlaybackSessionEgress struct {
 	Bytes      int64   `json:"bytes" minimum:"0" doc:"Bytes Silo has sent to the viewer for this playback session so far, summed across every API server and proxy node; hops between Silo's own nodes are not counted"`
-	MeasuredAt Instant `json:"measured_at" doc:"When the newest of the counting servers last reported; the same on every API server for the same reports. For bytes a proxy node sent, it is when the API server received the node's report, so rates over short intervals jitter. Divide a change in bytes by the change in this, not by the time between polls"`
+	MeasuredAt Instant `json:"measured_at" doc:"When the newest of the counting servers took its count, on that server's clock; the same on every API server for the same reports. Servers report about once a second and their clocks can differ slightly, so rates over short intervals jitter. Divide a change in bytes by the change in this, not by the time between polls"`
 	Series     string  `json:"series" doc:"Opaque token naming the set of servers that make up bytes. Compare bytes only within one series: when it changes, start a new baseline. Within a series, ignore an observation whose measured_at is not newer than the baseline's, and start a new baseline when bytes falls at a newer measured_at"`
 }
 

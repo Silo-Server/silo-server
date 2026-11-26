@@ -2691,10 +2691,10 @@ the server; the web Activity views do not request it.
 - `bytes` sums what every API server and proxy node sent the viewer. A hop
   between Silo's own nodes, such as a transcode node feeding the API server, is
   not counted, so a transcoded session counts once.
-- `measured_at` is when the newest of the servers counting the session last
-  reported. Every API server answers the same instant for the same reports. For
-  bytes a proxy node sent, it is when the API server received the node's report,
-  so rates over short intervals can jitter.
+- `measured_at` is when the newest of the servers counting the session took its
+  count, on that server's clock. Every API server answers the same instant for
+  the same reports. Servers report about once a second and their clocks can
+  differ slightly, so rates over short intervals can jitter.
 - `series` is an opaque token naming the set of servers behind `bytes`. It changes
   when one of them starts or stops counting the session, stops reporting, or
   restarts.

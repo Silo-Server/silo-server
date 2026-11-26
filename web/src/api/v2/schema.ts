@@ -21489,7 +21489,7 @@ export interface components {
       bytes: number;
       /**
        * Format: date-time
-       * @description When the newest of the counting servers last reported; the same on every API server for the same reports. For bytes a proxy node sent, it is when the API server received the node's report, so rates over short intervals jitter. Divide a change in bytes by the change in this, not by the time between polls
+       * @description When the newest of the counting servers took its count, on that server's clock; the same on every API server for the same reports. Servers report about once a second and their clocks can differ slightly, so rates over short intervals jitter. Divide a change in bytes by the change in this, not by the time between polls
        */
       measured_at: string;
       /** @description Opaque token naming the set of servers that make up bytes. Compare bytes only within one series: when it changes, start a new baseline. Within a series, ignore an observation whose measured_at is not newer than the baseline's, and start a new baseline when bytes falls at a newer measured_at */
