@@ -476,12 +476,14 @@ resolver (`TestPluginContentMountsAllReachTheContentHandler`,
 
 - who it is and which profile it acts as: the current user (without the
   account's email, which is the empty string for such a session), the profile
-  list, verifying a profile's PIN, and capability reads. A
-  wrong PIN spends that profile's attempt budget as from any device (five
-  attempts in five minutes), so the app's wrong guesses can lock the profile
-  for the person's own devices for up to five minutes, until a following
-  change counts such a session's attempts separately. The profile list carries every profile's limits, as for
-  any session;
+  list, verifying a profile's PIN, and capability reads. The app's PIN
+  attempts count under its own allowance, per profile and app device key
+  (`ratelimit.GrantedAppPINPolicy`: three attempts, then an hour locked), so
+  signing in again with the same key does not reset them. They never spend
+  the household's count: the app's wrong guesses lock only the app, never the
+  person's own devices. While the household's own devices have locked the
+  profile, the app is refused too, with the same 429 and retry time. The
+  profile list carries every profile's limits, as for any session;
 - reading the catalog, home, libraries, collections, recommendations,
   subtitles, settings and preferences. Reading a person can queue that
   person's metadata refresh when one is due;
@@ -610,7 +612,7 @@ on the account for such a session, and what happens to it then:
 | shuffles | a shuffle of the profile | stays as the profile's; an abandoned one is deleted with other abandoned shuffles |
 | starting playback, theme songs, the bandwidth probe download | a playback attempt bound to its login session, and the play's history row, which carries the client name the app sent | the attempt's media, stream reference and control socket are refused once the session ends, and the stream ends at its idle expiry; the history row stays as the profile's |
 | route events | diagnostics about its own streams, carrying its client name | stay; they grant nothing |
-| verifying a PIN with a wrong guess | spent attempts on the profile's PIN budget | expire within five minutes |
+| verifying a PIN with a wrong guess | spent attempts on the app's own PIN allowance for that profile, which lock only the app | expire within an hour of the attempt that locked it, or of the first attempt when it never locked; a later correct PIN clears them |
 | reading a person | a metadata refresh queued when one is due | runs as any refresh; grants nothing |
 | Watch Together membership, suggestions, votes, member state | the profile's place and choices in a room the person put it in | stay as the profile's; the room socket closes on the session's next authority check |
 | events socket ticket | a short-lived ticket | the socket closes on its next authority check (at most 15 seconds) |
