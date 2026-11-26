@@ -201,6 +201,9 @@ func TestRedisStoreLostDeltaForcesFullResync(t *testing.T) {
 	lost := client.HGetAll(ctx, key).Val()
 	snapshot.Sessions[0].BytesAccepted = 200 // the delta the failover loses
 	publish()
+	if store.needFullResync {
+		t.Fatal("a delta that landed forced a full resync")
+	}
 
 	// The new primary holds the hash as it was before that delta.
 	client.Del(ctx, key)
@@ -208,10 +211,14 @@ func TestRedisStoreLostDeltaForcesFullResync(t *testing.T) {
 		client.HSet(ctx, key, field, value)
 	}
 
-	// Session a has paused: its counters no longer change.
+	// Session a has paused: its counters no longer change. The first publish
+	// is a delta onto the rolled-back hash; the next one must be full.
 	publish()
+	if !store.needFullResync {
+		t.Fatalf("rollback went unnoticed: session a bytes = %d", storedBytes())
+	}
 	publish()
-	if got := storedBytes(); got != 200 {
-		t.Fatalf("session a bytes after the lost delta = %d, want 200", got)
+	if got := storedBytes(); got != 200 || store.needFullResync {
+		t.Fatalf("after the full resync: session a bytes = %d (want 200), resync still pending = %v", got, store.needFullResync)
 	}
 }
