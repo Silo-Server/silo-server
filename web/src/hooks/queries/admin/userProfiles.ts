@@ -180,15 +180,25 @@ export function useAdminUserProfileSetEdits(userId: number, enabled: boolean) {
  * Why the server refused a clear or dismissal that the card explains in
  * words instead of reporting a failure: the record was already gone (cleared
  * by someone else, or the person changed the field again), putting the
- * set's name back would give two profiles one name, or the override changed
- * since the owner was shown it (its etag no longer matches).
+ * set's name back would give two profiles one name, the override changed
+ * since the owner was shown it (its etag no longer matches), or the
+ * profiles kept changing while the action ran (busy).
  */
-export type ProfileSetEditRefusal = "gone" | "nameTaken" | "stale";
+export type ProfileSetEditRefusal = "gone" | "nameTaken" | "stale" | "busy";
 
-export function profileSetEditRefusal(err: unknown): ProfileSetEditRefusal | null {
+/**
+ * The refusal err is. A 409 is a name clash only on a clear of the name
+ * override (nameClear); on every other action it is the profiles changing
+ * while it ran. A name clear that ran out of attempts carries the same
+ * problem type as a clash, so it reads as one.
+ */
+export function profileSetEditRefusal(
+  err: unknown,
+  { nameClear = false }: { nameClear?: boolean } = {},
+): ProfileSetEditRefusal | null {
   if (!(err instanceof V2ProblemError)) return null;
   if (err.status === 404) return "gone";
-  if (err.status === 409) return "nameTaken";
+  if (err.status === 409) return nameClear ? "nameTaken" : "busy";
   if (err.status === 412) return "stale";
   return null;
 }

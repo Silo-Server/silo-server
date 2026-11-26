@@ -96,7 +96,8 @@ type Notice =
   | { kind: "cleared"; hidden: boolean; profile: string; woken: boolean }
   | { kind: "nameTaken"; profile: string; name: string }
   | { kind: "gone" }
-  | { kind: "stale" };
+  | { kind: "stale" }
+  | { kind: "busy" };
 
 /**
  * Changes made on this server to profiles that come from the person's app.
@@ -163,7 +164,9 @@ export function ProfileSetEditsCard({ user, manage }: { user: AdminUser; manage:
         setPending(null);
       },
       onError: (err) => {
-        const refusal = profileSetEditRefusal(err);
+        const refusal = profileSetEditRefusal(err, {
+          nameClear: pending.kind === "override" && edit.field === "name",
+        });
         if (refusal === "nameTaken") {
           setNotice({ kind: "nameTaken", profile: edit.profile_name, name: setValueText(t, edit) });
         } else if (refusal === "gone") {
@@ -172,6 +175,9 @@ export function ProfileSetEditsCard({ user, manage }: { user: AdminUser; manage:
           // The list refetches after every clear; the dialog closes so the
           // owner reads the current record before clearing again.
           setNotice({ kind: "stale" });
+        } else if (refusal === "busy") {
+          // Nothing was written; the list refetches after every clear.
+          setNotice({ kind: "busy" });
         }
         if (refusal !== null) setPending(null);
       },
@@ -207,7 +213,9 @@ export function ProfileSetEditsCard({ user, manage }: { user: AdminUser; manage:
                 { profileId: edit.profile_id ?? "", field: edit.field ?? "" },
                 {
                   onError: (err) => {
-                    if (profileSetEditRefusal(err) === "gone") setNotice({ kind: "gone" });
+                    const refusal = profileSetEditRefusal(err);
+                    if (refusal === "gone") setNotice({ kind: "gone" });
+                    if (refusal === "busy") setNotice({ kind: "busy" });
                   },
                 },
               );
@@ -232,6 +240,7 @@ export function ProfileSetEditsCard({ user, manage }: { user: AdminUser; manage:
 function noticeText(t: Translate, notice: Notice, name: string): string {
   if (notice.kind === "gone") return t(`${P}.alreadyCleared`, { name });
   if (notice.kind === "stale") return t(`${P}.changedSinceOpened`);
+  if (notice.kind === "busy") return t(`${P}.changedWhileRunning`);
   if (notice.kind === "nameTaken") {
     return t(`${P}.nameTaken`, { profile: notice.profile, name: notice.name });
   }

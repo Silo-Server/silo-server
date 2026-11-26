@@ -246,6 +246,61 @@ it("clears again with the refreshed record's etag after a stale refusal", async 
   ]);
 });
 
+// A 409 is a name clash only on a clear of the name override. On the
+// hidden clear, the dismissal, or a clear of another field it means the
+// profiles kept changing while it ran: the card says so, never the name
+// message.
+const busyProblem = () =>
+  new V2ProblemError("clearAdminUserProfileOverride", {
+    type: "https://siloserver.org/docs/api/v2/problems/conflict",
+    title: "Conflict",
+    status: 409,
+  } as never);
+const busySentence = "The profiles changed while this ran, so nothing was changed.";
+
+it("says the profiles changed when a hidden clear answers 409", async () => {
+  mocks.edits = [
+    edit({
+      kind: "hidden",
+      profile_id: undefined,
+      field: undefined,
+      profile_name: "Guest",
+      value: undefined,
+      set_value: undefined,
+      clear_applies: false,
+    }),
+  ];
+  mocks.outcome = busyProblem();
+  render(<ProfileSetEditsCard user={user} manage />);
+  const dialog = await openClear(/Let Guest come back on this server/);
+  await userEvent.click(within(dialog).getByRole("button", { name: "Allow again" }));
+  expect(screen.getByRole("status")).toHaveTextContent(busySentence);
+  expect(screen.queryByText(/can’t go back to the name/)).toBeNull();
+});
+
+it("says the profiles changed when a dismissal answers 409", async () => {
+  mocks.edits = [
+    edit({ kind: "settled", by: "account", actor: { id: "7", username: "sam" } } as never),
+  ];
+  mocks.outcome = busyProblem();
+  render(<ProfileSetEditsCard user={user} manage />);
+  await userEvent.click(
+    screen.getByRole("button", { name: /Dismiss the note about Content rating limit/ }),
+  );
+  expect(screen.getByRole("status")).toHaveTextContent(busySentence);
+  expect(screen.queryByText(/can’t go back to the name/)).toBeNull();
+});
+
+it("says the profiles changed when a clear of another field answers 409", async () => {
+  mocks.edits = [edit({})];
+  mocks.outcome = busyProblem();
+  render(<ProfileSetEditsCard user={user} manage />);
+  const dialog = await openClear(/Clear the change to Content rating limit on Kiddo/);
+  await userEvent.click(within(dialog).getByRole("button", { name: "Clear" }));
+  expect(screen.getByRole("status")).toHaveTextContent(busySentence);
+  expect(screen.queryByText(/can’t go back to the name/)).toBeNull();
+});
+
 // A refused clear is explained, not reported as a failure.
 it("explains a name the server refused to put back", async () => {
   mocks.edits = [edit({ field: "name", value: "Kiddo", set_value: "Kid" })];
