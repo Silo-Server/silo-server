@@ -55,24 +55,27 @@ func (index unseasonedEpisodeIndex) resolve(number int, title string, showOnly b
 		}
 		return matches[0], true
 	}
-	matches := index.byNumber[number]
+	// A file that names more than its show is not a plain season-1 episode:
+	// a later season numbered per season (Show II - 05, Show Final Season -
+	// 05) or an extra the parser read a number from (Show - NCOP 1, Show -
+	// OVA - 01, the recap Show - 05.5). That holds even when only season 1
+	// has the number, since a later season's metadata may not be stored yet.
+	if !showOnly {
+		return nil, false
+	}
 	// Only season 1 reads the same under absolute and per-season numbering,
 	// so an absolute number (Show - 05) names its episode there. A number
 	// found only in a later season exceeds every earlier season's length, so
 	// an absolute reading would place it elsewhere. Requiring season 1 also
 	// defers links while season 1 metadata has not been stored yet.
 	var selected *models.Episode
-	for _, match := range matches {
+	for _, match := range index.byNumber[number] {
 		if match.SeasonNumber == 1 {
 			selected = match
 			break
 		}
 	}
-	// When later seasons share the number, the file may be one of theirs
-	// numbered per season. Such a file names its season beyond the show's
-	// title (Show II - 05, Show Final Season - 05), so a file that names only
-	// its show stays in season 1.
-	if selected == nil || (len(matches) > 1 && !showOnly) {
+	if selected == nil {
 		return nil, false
 	}
 	if !isGenericEpisodeMatchTitle(title) && normalizeTitleForScoring(title) != normalizeTitleForScoring(selected.Title) {

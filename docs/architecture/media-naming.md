@@ -114,11 +114,12 @@ episode number but no known season through `unseasonedEpisodeIndex`
   per-season numbering read the same. Requiring season 1 also defers the link until season 1
   metadata is stored. A non-generic title in the file name must match that episode's title;
   release details such as `(1080p)` are not a title.
-- When later seasons also have that number, the file links to season 1 only when it names no show
-  beyond its series: naming's `EpisodeShowTitle` (the show title the file name gives that its show
-  folder doesn't) is empty or equals the series' title or original title. A later season numbered
-  per season carries more in its name (`Show II - 05`, `Show Final Season - 05`), so such a file
-  stays unlinked.
+- The file links only when it names no show beyond its series: naming's `EpisodeShowTitle` (the
+  show title the file name gives that its show folder doesn't) is empty or equals the series'
+  title or original title. A later season numbered per season carries more in its name
+  (`Show II - 05`, `Show Final Season - 05`), and so do extras whose label precedes a number
+  (`Show - NCOP 1`, `Show - OVA - 01`, the recap `Show - 05.5`); such files stay unlinked even
+  when only season 1 has the number, because a later season may not be stored yet.
 - Nothing derives a cumulative absolute order from season lengths, because stored seasons may be
   incomplete and providers split anime seasons differently. A number past season 1
   (`Show - 105` for an episode of season 3) stays unlinked; mapping it needs the provider's
