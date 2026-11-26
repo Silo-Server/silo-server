@@ -198,6 +198,16 @@ func TestControlSocketMintKeepsAnotherAppToItsStreams(t *testing.T) {
 	if _, _, err := f.handler.Mint(ctx, other, f.session.ID, controlInstallation, refuse); !errors.Is(err, auth.ErrSessionNotAllowed) {
 		t.Fatalf("another app, another device's stream: err = %v", err)
 	}
+	// A failed attempt read is an outage for a caller the rule limits, not
+	// a refusal; a caller the rule doesn't concern mints as before.
+	f.pb.PlanStoreV3 = failingAttemptStore{f.pb.PlanStoreV3}
+	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, controlInstallation, refuse); !errors.Is(err, ErrPlaybackControlSocketUnavailable) {
+		t.Fatalf("another app, attempt unreadable: err = %v", err)
+	}
+	allow := func(context.Context) error { return nil }
+	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, controlInstallation, allow); err != nil {
+		t.Fatalf("an ordinary caller, attempt unreadable: err = %v", err)
+	}
 }
 
 func TestControlSocketHandshakeProofOriginReplayAndStaleBinding(t *testing.T) {

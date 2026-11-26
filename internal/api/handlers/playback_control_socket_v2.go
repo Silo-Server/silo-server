@@ -236,9 +236,17 @@ func (h *PlaybackControlSocketV2) Mint(ctx context.Context, identity evt.SocketI
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	if mayReachOtherDevices != nil && h.startedBy(ctx, playbackSessionID) != identity.SessionID {
-		if err := mayReachOtherDevices(ctx); err != nil {
-			return "", time.Time{}, err
+	if mayReachOtherDevices != nil {
+		starter, readErr := h.startedBy(ctx, playbackSessionID)
+		if readErr != nil || starter != identity.SessionID {
+			if err := mayReachOtherDevices(ctx); err != nil {
+				// A caller the rule limits can't be told whose stream it is
+				// while the read fails: an outage, not a refusal.
+				if readErr != nil {
+					return "", time.Time{}, ErrPlaybackControlSocketUnavailable
+				}
+				return "", time.Time{}, err
+			}
 		}
 	}
 	scope, ok := access.GetScope(validated)
@@ -266,18 +274,22 @@ func (h *PlaybackControlSocketV2) Mint(ctx context.Context, identity evt.SocketI
 }
 
 // startedBy is the login session that started the playback session's
-// durable attempt, or "" when none is recorded or it can't be read (a
-// bridge-started session, an id the store can't name, a store outage).
-func (h *PlaybackControlSocketV2) startedBy(ctx context.Context, playbackSessionID string) string {
+// durable attempt, or "" when none is recorded (a bridge-started session, an
+// id the store can't name, no attempt). A failed read is returned as an
+// error, so it isn't taken for a stream nobody started.
+func (h *PlaybackControlSocketV2) startedBy(ctx context.Context, playbackSessionID string) (string, error) {
 	store := h.Playback.PlanStoreV3
 	if id, err := uuid.Parse(playbackSessionID); store == nil || err != nil || id == uuid.Nil || id.String() != playbackSessionID {
-		return ""
+		return "", nil
 	}
 	attempt, err := store.GetAttemptIdentity(ctx, playbackSessionID)
-	if err != nil || attempt == nil {
-		return ""
+	if errors.Is(err, playback.ErrSessionNotFound) || (err == nil && attempt == nil) {
+		return "", nil
 	}
-	return attempt.LoginSessionID
+	if err != nil {
+		return "", err
+	}
+	return attempt.LoginSessionID, nil
 }
 
 // missingSessionError tells a session that ended from one this replica has not
