@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,19 +45,21 @@ type guestSeatView struct {
 	MemberCount             int    `json:"member_count"`
 }
 
-// TestGuestSeatAnotherAppKeepsOwnDeviceViewDB: a member is the account and
-// profile, so a session another app's key opened can hold the same guest
-// seat as the person's own device. Through the real routes (session
-// lookup, room service on the Postgres room store, ticket and socket
-// handshake), with the room playing and guests allowed to play and pause:
-// while the device's socket is open the app is refused a connection and
-// the device's frames are untouched; once the device has left, the app's
-// join, room read and socket snapshot name no power it is refused, while
-// the device's own room read still says it may control transport, after
-// the app disconnects too, and on its reconnected socket. Regression: the
-// strip followed a flag on the seat, so the person's own device's room read
-// lost transport control while the app held the seat.
-func TestGuestSeatAnotherAppKeepsOwnDeviceViewDB(t *testing.T) {
+// guestSeatRoutes serves the room routes through the real session lookup,
+// the room service on the Postgres room store and the real room socket,
+// with three login sessions by token: tok-host (account A, password),
+// tok-phone (account B, password) and tok-app (account B, opened by
+// another app's grant-enrolled key). All act as profile p-owner.
+type guestSeatRoutes struct {
+	t         *testing.T
+	h         http.Handler
+	server    *httptest.Server
+	roomID    string
+	hostProof string
+}
+
+func newGuestSeatRoutes(t *testing.T) *guestSeatRoutes {
+	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -67,9 +70,6 @@ func TestGuestSeatAnotherAppKeepsOwnDeviceViewDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-
-	// Account A hosts; account B is the guest, with its own password
-	// session and a session its granted app's key opened.
 	name := "guestseat-" + uuid.NewString()[:8]
 	var hostID, guestID int
 	for _, u := range []struct {
@@ -94,22 +94,22 @@ func TestGuestSeatAnotherAppKeepsOwnDeviceViewDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	claims := map[string]*auth.Claims{}
-	session := func(token string, userID int, openedVia string, deviceKey *string) {
+	for _, s := range []struct {
+		token, openedVia string
+		userID           int
+		deviceKey        *string
+	}{{"tok-host", models.SessionOpenedPassword, hostID, nil}, {"tok-phone", models.SessionOpenedPassword, guestID, nil}, {"tok-app", models.SessionOpenedAppKey, guestID, &grantKey}} {
 		id := uuid.NewString()
 		if _, err := pool.Exec(ctx, `INSERT INTO auth_sessions (id, user_id, device_name, expires_at, opened_via, device_key_id)
-			VALUES ($1, $2, 'test', $3, $4, $5::uuid)`, id, userID, time.Now().Add(time.Hour), openedVia, deviceKey); err != nil {
+			VALUES ($1, $2, 'test', $3, $4, $5::uuid)`, id, s.userID, time.Now().Add(time.Hour), s.openedVia, s.deviceKey); err != nil {
 			t.Fatal(err)
 		}
 		// A socket ticket needs an access token with a bounded expiry.
-		claims[token] = &auth.Claims{UserID: userID, Role: "user", SessionID: id, TokenType: auth.TokenTypeAccess,
+		claims[s.token] = &auth.Claims{UserID: s.userID, Role: "user", SessionID: id, TokenType: auth.TokenTypeAccess,
 			RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))}}
 	}
-	session("tok-host", hostID, models.SessionOpenedPassword, nil)
-	session("tok-phone", guestID, models.SessionOpenedPassword, nil)
-	session("tok-app", guestID, models.SessionOpenedAppKey, &grantKey)
 
 	sessions := auth.NewSessionRepository(pool)
-	users := auth.NewUserRepository(pool)
 	rooms := watchtogether.NewService(watchtogether.NewRepository(pool), nil, nil, guestSeatSelections{}, nil, nil)
 	t.Cleanup(rooms.Close)
 	room := handlers.NewWatchTogetherHandler(rooms, nil, watchtogether.NewRoomTokenService("synthetic-guest-seat-secret", time.Hour))
@@ -121,173 +121,182 @@ func TestGuestSeatAnotherAppKeepsOwnDeviceViewDB(t *testing.T) {
 	deps.WatchTogetherCreate, deps.WatchTogetherPolicy, deps.WatchTogetherSelection = room, room, room
 	deps.WatchTogetherJoin, deps.WatchTogetherRoomRead = room, room
 	deps.WatchTogetherSocket = handlers.NewWatchTogetherSocketV2(room, watchtogether.NewRoomSocketCredentialStore(tickets),
-		sessions, users, fakeResolver{}, deps.ActingAdmin, "")
-	h := NewHandler(deps)
-	server := httptest.NewServer(h)
-	t.Cleanup(server.Close)
+		sessions, auth.NewUserRepository(pool), fakeResolver{}, deps.ActingAdmin, "")
+	r := &guestSeatRoutes{t: t, h: NewHandler(deps), roomID: uuid.NewString()}
+	r.server = httptest.NewServer(r.h)
+	t.Cleanup(r.server.Close)
+	return r
+}
 
-	const profile = "p-owner"
-	roomID := uuid.NewString()
-	var hostProof string
-	headers := func(token, proof string) map[string]string {
-		out := with(bearer(token), "X-Profile-Id", profile)
-		if proof != "" {
-			out = with(out, "X-Room-Token", proof)
-		}
-		return out
+func (r *guestSeatRoutes) headers(token, proof string) map[string]string {
+	out := with(bearer(token), "X-Profile-Id", "p-owner")
+	if proof != "" {
+		out = with(out, "X-Room-Token", proof)
 	}
-	call := func(token, proof, method, path, body string) (guestSeatView, string) {
-		t.Helper()
-		rec := do(t, h, method, Prefix+path, body, headers(token, proof))
-		if rec.Code/100 != 2 {
-			t.Fatalf("%s %s %s: status %d: %s", token, method, path, rec.Code, rec.Body.String())
-		}
-		var out struct {
-			Room  guestSeatView `json:"room"`
-			Token string        `json:"room_access_token"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-			t.Fatal(err)
-		}
-		return out.Room, out.Token
+	return out
+}
+
+// call sends a room request and returns the room and its proof.
+func (r *guestSeatRoutes) call(token, proof, method, path, body string) (guestSeatView, string) {
+	r.t.Helper()
+	rec := do(r.t, r.h, method, Prefix+path, body, r.headers(token, proof))
+	if rec.Code/100 != 2 {
+		r.t.Fatalf("%s %s %s: status %d: %s", token, method, path, rec.Code, rec.Body.String())
 	}
-	read := func(token, proof string) guestSeatView {
-		t.Helper()
-		view, _ := call(token, proof, http.MethodGet, "/watch-together/rooms/"+roomID, "")
-		return view
+	var out struct {
+		Room  guestSeatView `json:"room"`
+		Token string        `json:"room_access_token"`
 	}
-	dial := func(token, proof string) *websocket.Conn {
-		t.Helper()
-		rec := do(t, h, http.MethodPost, Prefix+"/watch-together/rooms/"+roomID+"/ws-ticket", "", headers(token, proof))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s ticket: status %d: %s", token, rec.Code, rec.Body.String())
-		}
-		var ticket EventsSocketTicket
-		if err := json.Unmarshal(rec.Body.Bytes(), &ticket); err != nil {
-			t.Fatal(err)
-		}
-		dialer := websocket.Dialer{Subprotocols: []string{watchtogether.RoomSocketProtocol, "silo.ticket." + ticket.Ticket}}
-		conn, resp, err := dialer.DialContext(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+Prefix+"/watch-together/rooms/"+roomID+"/ws", nil)
-		if err != nil {
-			t.Fatalf("%s connect: %v", token, err)
-		}
-		_ = resp.Body.Close()
-		t.Cleanup(func() { _ = conn.Close() })
-		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-		return conn
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		r.t.Fatal(err)
 	}
-	// next reads frames until one of the given types arrives, failing on a
-	// connection_replaced along the way.
-	next := func(conn *websocket.Conn, types ...string) (string, json.RawMessage) {
-		t.Helper()
-		for {
-			var frame struct {
-				Type    string          `json:"type"`
-				Room    json.RawMessage `json:"room"`
-				Code    string          `json:"code"`
-				Message string          `json:"message"`
-			}
-			if err := conn.ReadJSON(&frame); err != nil {
-				t.Fatalf("read %v: %v", types, err)
-			}
-			if frame.Type == "connection_replaced" {
-				t.Fatal("connection replaced")
-			}
-			for _, want := range types {
-				if frame.Type == want {
-					if frame.Type == "error" {
-						raw, _ := json.Marshal(frame)
-						return frame.Type, raw
-					}
-					return frame.Type, frame.Room
-				}
-			}
-		}
+	return out.Room, out.Token
+}
+
+func (r *guestSeatRoutes) read(token, proof string) guestSeatView {
+	r.t.Helper()
+	view, _ := r.call(token, proof, http.MethodGet, "/watch-together/rooms/"+r.roomID, "")
+	return view
+}
+
+// dial asks for a socket ticket and connects with it.
+func (r *guestSeatRoutes) dial(token, proof string) *websocket.Conn {
+	r.t.Helper()
+	rec := do(r.t, r.h, http.MethodPost, Prefix+"/watch-together/rooms/"+r.roomID+"/ws-ticket", "", r.headers(token, proof))
+	if rec.Code != http.StatusOK {
+		r.t.Fatalf("%s ticket: status %d: %s", token, rec.Code, rec.Body.String())
 	}
-	snapshot := func(conn *websocket.Conn) guestSeatView {
-		t.Helper()
-		_, raw := next(conn, "snapshot")
-		var view guestSeatView
-		if err := json.Unmarshal(raw, &view); err != nil {
-			t.Fatal(err)
-		}
-		return view
+	var ticket EventsSocketTicket
+	if err := json.Unmarshal(rec.Body.Bytes(), &ticket); err != nil {
+		r.t.Fatal(err)
 	}
-	// connected waits for the room to count this many connected members
-	// (the host never connects), so a closed socket has reached the room.
-	connected := func(count int) {
-		t.Helper()
-		deadline := time.Now().Add(5 * time.Second)
-		for read("tok-host", hostProof).MemberCount != count {
-			if time.Now().After(deadline) {
-				t.Fatalf("room never counted %d connected members", count)
-			}
+	dialer := websocket.Dialer{Subprotocols: []string{watchtogether.RoomSocketProtocol, "silo.ticket." + ticket.Ticket}}
+	conn, resp, err := dialer.DialContext(r.t.Context(), "ws"+strings.TrimPrefix(r.server.URL, "http")+Prefix+"/watch-together/rooms/"+r.roomID+"/ws", nil)
+	if err != nil {
+		r.t.Fatalf("%s connect: %v", token, err)
+	}
+	_ = resp.Body.Close()
+	r.t.Cleanup(func() { _ = conn.Close() })
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	return conn
+}
+
+// next reads frames until one of types arrives, failing on a
+// connection_replaced along the way. It returns the frame's type and, for a
+// snapshot, its room.
+func (r *guestSeatRoutes) next(conn *websocket.Conn, types ...string) (string, guestSeatView) {
+	r.t.Helper()
+	for {
+		var frame struct {
+			Type string        `json:"type"`
+			Room guestSeatView `json:"room"`
+			Code string        `json:"code"`
+		}
+		if err := conn.ReadJSON(&frame); err != nil {
+			r.t.Fatalf("read %v: %v", types, err)
+		}
+		if frame.Type == "connection_replaced" {
+			r.t.Fatal("connection replaced")
+		}
+		if frame.Type == "error" && frame.Code != "forbidden" {
+			r.t.Fatalf("error frame of code %q", frame.Code)
+		}
+		if slices.Contains(types, frame.Type) {
+			return frame.Type, frame.Room
 		}
 	}
-	wantPowers := func(step string, view guestSeatView, steer bool) {
-		t.Helper()
-		if view.SelfCanControlTransport != steer || view.SelfCanManageRoom || view.InvitePath != "" {
-			t.Errorf("%s: self_can_control_transport %v (want %v), self_can_manage_room %v, invite_path %q",
-				step, view.SelfCanControlTransport, steer, view.SelfCanManageRoom, view.InvitePath)
+}
+
+func (r *guestSeatRoutes) snapshot(conn *websocket.Conn) guestSeatView {
+	r.t.Helper()
+	_, view := r.next(conn, "snapshot")
+	return view
+}
+
+// connected waits for the room to count this many connected members (the
+// host never connects), so a closed socket has reached the room.
+func (r *guestSeatRoutes) connected(count int) {
+	r.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for r.read("tok-host", r.hostProof).MemberCount != count {
+		if time.Now().After(deadline) {
+			r.t.Fatalf("room never counted %d connected members", count)
 		}
 	}
+}
+
+func wantGuestPowers(t *testing.T, step string, view guestSeatView, steer bool) {
+	t.Helper()
+	if view.SelfCanControlTransport != steer || view.SelfCanManageRoom || view.InvitePath != "" {
+		t.Errorf("%s: self_can_control_transport %v (want %v), self_can_manage_room %v, invite_path %q",
+			step, view.SelfCanControlTransport, steer, view.SelfCanManageRoom, view.InvitePath)
+	}
+}
+
+// TestGuestSeatAnotherAppKeepsOwnDeviceViewDB: a member is the account and
+// profile, so a session another app's key opened can hold the same guest
+// seat as the person's own device. Through the real routes (session
+// lookup, room service on the Postgres room store, ticket and socket
+// handshake), with the room playing and guests allowed to play and pause:
+// while the device's socket is open the app is refused a connection and
+// the device's frames are untouched; once the device has left, the app's
+// join, room read and socket snapshot name no power it is refused, while
+// the device's own room read still says it may control transport, after
+// the app disconnects too, and on its reconnected socket. Regression: the
+// strip followed a flag on the seat, so the person's own device's room read
+// lost transport control while the app held the seat.
+func TestGuestSeatAnotherAppKeepsOwnDeviceViewDB(t *testing.T) {
+	r := newGuestSeatRoutes(t)
+	room := "/watch-together/rooms/" + r.roomID
 
 	// 1. Account A hosts a playing room that lets guests play and pause.
-	var created guestSeatView
-	created, hostProof = call("tok-host", "", http.MethodPost, "/watch-together/rooms", `{"room_id":"`+roomID+`","selection_mode":"host_pick"}`)
-	call("tok-host", hostProof, http.MethodPatch, "/watch-together/rooms/"+roomID+"/policy", `{"guest_control_policy":"guest_play_pause"}`)
-	if playing, _ := call("tok-host", hostProof, http.MethodPut, "/watch-together/rooms/"+roomID+"/selection", `{"content_id":"movie-1"}`); playing.Phase != "playing" {
+	created, hostProof := r.call("tok-host", "", http.MethodPost, "/watch-together/rooms", `{"room_id":"`+r.roomID+`","selection_mode":"host_pick"}`)
+	r.hostProof = hostProof
+	r.call("tok-host", hostProof, http.MethodPatch, room+"/policy", `{"guest_control_policy":"guest_play_pause"}`)
+	if playing, _ := r.call("tok-host", hostProof, http.MethodPut, room+"/selection", `{"content_id":"movie-1"}`); playing.Phase != "playing" {
 		t.Fatalf("room phase %q after selection", playing.Phase)
 	}
 	join := `{"code":"` + created.Code + `"}`
 
 	// 2. B's own device joins as the guest profile and connects.
-	_, phoneProof := call("tok-phone", "", http.MethodPost, "/watch-together/join", join)
-	phone := dial("tok-phone", phoneProof)
-	wantPowers("own device's first snapshot", snapshot(phone), true)
+	_, phoneProof := r.call("tok-phone", "", http.MethodPost, "/watch-together/join", join)
+	phone := r.dial("tok-phone", phoneProof)
+	wantGuestPowers(t, "own device's first snapshot", r.snapshot(phone), true)
 
-	// While the device holds the seat, the app is refused a connection and
-	// the device keeps its connection and its view.
-	_, appProof := call("tok-app", "", http.MethodPost, "/watch-together/join", join)
-	refused := dial("tok-app", appProof)
-	if _, raw := next(refused, "error", "snapshot"); !strings.Contains(string(raw), `"code":"forbidden"`) {
-		t.Fatalf("app connected while the device held the seat: %s", raw)
+	// While the device holds the seat, the app is refused a connection
+	// (an error frame of code forbidden) and the device keeps its
+	// connection and its view.
+	_, appProof := r.call("tok-app", "", http.MethodPost, "/watch-together/join", join)
+	if kind, _ := r.next(r.dial("tok-app", appProof), "error", "snapshot"); kind != "error" {
+		t.Fatal("app connected while the device held the seat")
 	}
 	if err := phone.WriteJSON(map[string]any{"type": "ping", "client_sent_at": "synthetic-time"}); err != nil {
 		t.Fatal(err)
 	}
-	for kind := ""; kind != "pong"; {
-		var raw json.RawMessage
-		kind, raw = next(phone, "pong", "snapshot")
-		if kind == "snapshot" {
-			var view guestSeatView
-			if err := json.Unmarshal(raw, &view); err != nil {
-				t.Fatal(err)
-			}
-			wantPowers("own device's snapshot after the refused app", view, true)
-		}
+	for kind, view := r.next(phone, "pong", "snapshot"); kind != "pong"; kind, view = r.next(phone, "pong", "snapshot") {
+		wantGuestPowers(t, "own device's snapshot after the refused app", view, true)
 	}
 
 	// 3. The device's socket closes.
 	_ = phone.Close()
-	connected(0)
+	r.connected(0)
 
 	// 4. The app joins, reads and connects: no refused power anywhere.
-	appJoin, appProof := call("tok-app", "", http.MethodPost, "/watch-together/join", join)
-	wantPowers("app's join", appJoin, false)
-	wantPowers("app's room read", read("tok-app", appProof), false)
-	app := dial("tok-app", appProof)
-	wantPowers("app's socket snapshot", snapshot(app), false)
-	connected(1)
+	appJoin, appProof := r.call("tok-app", "", http.MethodPost, "/watch-together/join", join)
+	wantGuestPowers(t, "app's join", appJoin, false)
+	wantGuestPowers(t, "app's room read", r.read("tok-app", appProof), false)
+	app := r.dial("tok-app", appProof)
+	wantGuestPowers(t, "app's socket snapshot", r.snapshot(app), false)
+	r.connected(1)
 
 	// 5. The device's own room read while the app holds the seat.
-	wantPowers("own device's room read while the app is connected", read("tok-phone", phoneProof), true)
+	wantGuestPowers(t, "own device's room read while the app is connected", r.read("tok-phone", phoneProof), true)
 
 	// 6. The app disconnects; the device reads again without reconnecting.
 	_ = app.Close()
-	connected(0)
-	wantPowers("own device's room read after the app disconnected", read("tok-phone", phoneProof), true)
+	r.connected(0)
+	wantGuestPowers(t, "own device's room read after the app disconnected", r.read("tok-phone", phoneProof), true)
 
 	// 7. The device reconnects.
-	wantPowers("own device's reconnected snapshot", snapshot(dial("tok-phone", phoneProof)), true)
+	wantGuestPowers(t, "own device's reconnected snapshot", r.snapshot(r.dial("tok-phone", phoneProof)), true)
 }
