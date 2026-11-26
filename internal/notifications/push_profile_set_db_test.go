@@ -39,6 +39,83 @@ func profileSetWakeSystem(t *testing.T, pool *pgxpool.Pool, repo *PushDeviceRepo
 	return &System{Settings: sender.settings, pushDeviceRepo: repo, pushSender: sender, logger: slog.Default()}
 }
 
+// wakeHarness reads and ages one test schema's wake attempts and collects
+// what the fake relay received.
+type wakeHarness struct {
+	t       *testing.T
+	pool    *pgxpool.Pool
+	relayed chan relayedWake
+}
+
+func (h wakeHarness) attempts() int {
+	h.t.Helper()
+	var n int
+	if err := h.pool.QueryRow(h.t.Context(), `SELECT count(*) FROM push_delivery_attempts WHERE trigger_type = $1`,
+		PushTriggerProfileSet).Scan(&n); err != nil {
+		h.t.Fatal(err)
+	}
+	return n
+}
+
+// pastTheMinute ages every wake past the debounce interval.
+func (h wakeHarness) pastTheMinute() {
+	h.t.Helper()
+	if _, err := h.pool.Exec(h.t.Context(), `UPDATE push_delivery_attempts SET created_at = created_at - interval '61 seconds'`); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// receive waits for n relay requests, which the waker sends in the background.
+func (h wakeHarness) receive(n int) []relayedWake {
+	h.t.Helper()
+	got := make([]relayedWake, 0, n)
+	deadline := time.After(30 * time.Second)
+	for len(got) < n {
+		select {
+		case wake := <-h.relayed:
+			got = append(got, wake)
+		case <-deadline:
+			h.t.Fatalf("relay got %d wakes, want %d", len(got), n)
+		}
+	}
+	return got
+}
+
+// editThenWake records a name edit of account 7's profile in a request that
+// commits or rolls it back, then wakes with that request's context.
+func (h wakeHarness) editThenWake(node *System, commit bool) bool {
+	h.t.Helper()
+	ctx, req := profileedits.WithRequest(h.t.Context())
+	req.SetActor(7, false, nil)
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if err := profileedits.RecordFields(ctx, tx, 7, "default", []string{profileedits.FieldName}); err != nil {
+		h.t.Fatal(err)
+	}
+	if commit {
+		err = tx.Commit(ctx)
+	} else {
+		err = tx.Rollback(ctx)
+	}
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return node.WakeProfileSetDevices(ctx, 7)
+}
+
+// wakeTogether wakes account 7 from every node at the same moment.
+func wakeTogether(nodes ...*System) []bool {
+	answers := make([]bool, len(nodes))
+	var wg sync.WaitGroup
+	for i, node := range nodes {
+		wg.Go(func() { answers[i] = node.WakeProfileSetDevices(context.Background(), 7) })
+	}
+	wg.Wait()
+	return answers
+}
+
 // An edit to a profile from the account's set wakes each of the account's
 // phones once a minute at most, on every API server, with a background push
 // that shows nothing. Regressions: a push storm when an owner edits several
@@ -53,124 +130,64 @@ func TestProfileSetWakeDebounceDB(t *testing.T) {
 		INSERT INTO user_profiles VALUES (7, 'default', gen_random_uuid())`); err != nil {
 		t.Fatal(err)
 	}
-	apple, android := registerForSession(t, repo, "live")
-	relayed := make(chan relayedWake, 16)
-	nodeA := profileSetWakeSystem(t, pool, repo, nil, relayed)
-	nodeB := profileSetWakeSystem(t, pool, repo, nil, relayed)
-
-	attempts := func() int {
-		t.Helper()
-		var n int
-		if err := pool.QueryRow(ctx, `SELECT count(*) FROM push_delivery_attempts WHERE trigger_type = $1`,
-			PushTriggerProfileSet).Scan(&n); err != nil {
-			t.Fatal(err)
-		}
-		return n
-	}
-	// pastTheMinute ages every wake past the debounce interval.
-	pastTheMinute := func() {
-		t.Helper()
-		if _, err := pool.Exec(ctx, `UPDATE push_delivery_attempts SET created_at = created_at - interval '61 seconds'`); err != nil {
-			t.Fatal(err)
-		}
-	}
-	receive := func(n int) []relayedWake {
-		t.Helper()
-		got := make([]relayedWake, 0, n)
-		deadline := time.After(30 * time.Second)
-		for len(got) < n {
-			select {
-			case wake := <-relayed:
-				got = append(got, wake)
-			case <-deadline:
-				t.Fatalf("relay got %d wakes, want %d", len(got), n)
-			}
-		}
-		return got
-	}
+	registerForSession(t, repo, "live")
+	h := wakeHarness{t: t, pool: pool, relayed: make(chan relayedWake, 16)}
+	nodeA := profileSetWakeSystem(t, pool, repo, nil, h.relayed)
+	nodeB := profileSetWakeSystem(t, pool, repo, nil, h.relayed)
 
 	// Two servers recording at the same moment queue one wake per phone.
-	var wg sync.WaitGroup
-	answers := make([]bool, 2)
-	for i, node := range []*System{nodeA, nodeB} {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			answers[i] = node.WakeProfileSetDevices(ctx, 7)
-		}()
-	}
-	wg.Wait()
-	if !answers[0] || !answers[1] || attempts() != 2 {
-		t.Fatalf("concurrent wakes answered %v with %d attempts, want true, true and 2", answers, attempts())
+	if answers := wakeTogether(nodeA, nodeB); !answers[0] || !answers[1] || h.attempts() != 2 {
+		t.Fatalf("concurrent wakes answered %v with %d attempts, want true, true and 2", answers, h.attempts())
 	}
 	paths := map[string]bool{}
-	for _, wake := range receive(2) {
+	for _, wake := range h.receive(2) {
 		paths[wake.path] = true
 		if wake.body["mode"] != relayModeBackgroundWake || wake.body["collapse_id"] != profileSetCollapseID ||
-			wake.body["delivery_id"] != wake.idempotencyKey || wake.idempotencyKey == "" {
-			t.Errorf("relay request to %s with key %q = mode %v, collapse_id %v, delivery_id %v; want %s, %s and the attempt ID",
-				wake.path, wake.idempotencyKey, wake.body["mode"], wake.body["collapse_id"], wake.body["delivery_id"],
-				relayModeBackgroundWake, profileSetCollapseID)
+			wake.idempotencyKey == "" || wake.body["delivery_id"] != wake.idempotencyKey {
+			t.Errorf("relay request to %s with key %q = %v; want mode %s, collapse_id %s and the attempt ID",
+				wake.path, wake.idempotencyKey, wake.body, relayModeBackgroundWake, profileSetCollapseID)
 		}
 	}
 	if !paths[relayAppleSendPath] || !paths[relayFcmSendPath] {
-		t.Fatalf("relay paths = %v, want the Apple (%s) and Android (%s) phones", paths, apple.id, android.id)
+		t.Fatalf("relay paths = %v, want the Apple and the Android phone", paths)
 	}
 
 	// A second edit inside the minute sends nothing more and still tells the
-	// owner a wake is on its way.
-	if !nodeB.WakeProfileSetDevices(ctx, 7) || attempts() != 2 {
-		t.Fatalf("wake inside the minute: %d attempts, want 2 and a true answer", attempts())
+	// owner a wake is on its way; one after the minute wakes again.
+	if !nodeB.WakeProfileSetDevices(ctx, 7) || h.attempts() != 2 {
+		t.Fatalf("wake inside the minute: %d attempts, want 2 and a true answer", h.attempts())
 	}
-
-	pastTheMinute()
-	if !nodeA.WakeProfileSetDevices(ctx, 7) || attempts() != 4 {
-		t.Fatalf("wake after the minute: %d attempts, want 4 and a true answer", attempts())
+	h.pastTheMinute()
+	if !nodeA.WakeProfileSetDevices(ctx, 7) || h.attempts() != 4 {
+		t.Fatalf("wake after the minute: %d attempts, want 4 and a true answer", h.attempts())
 	}
-	receive(2)
+	h.receive(2)
 
 	// A request whose edit rolled back wakes nothing; one whose edit
 	// committed does.
-	pastTheMinute()
-	for _, commit := range []bool{false, true} {
-		reqCtx, req := profileedits.WithRequest(ctx)
-		req.SetActor(7, false, nil)
-		tx, err := pool.Begin(reqCtx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := profileedits.RecordFields(reqCtx, tx, 7, "default", []string{profileedits.FieldName}); err != nil {
-			t.Fatal(err)
-		}
-		if commit {
-			err = tx.Commit(reqCtx)
-		} else {
-			err = tx.Rollback(reqCtx)
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		want := map[bool]int{false: 4, true: 6}[commit]
-		if got := nodeA.WakeProfileSetDevices(reqCtx, 7); got != commit || attempts() != want {
-			t.Fatalf("wake after an edit that committed=%v answered %v with %d attempts, want %v and %d", commit, got, attempts(), commit, want)
-		}
+	h.pastTheMinute()
+	if h.editThenWake(nodeA, false) || h.attempts() != 4 {
+		t.Fatalf("wake after a rolled-back edit: %d attempts, want 4 and a false answer", h.attempts())
 	}
-	receive(2)
+	if !h.editThenWake(nodeA, true) || h.attempts() != 6 {
+		t.Fatalf("wake after a committed edit: %d attempts, want 6 and a true answer", h.attempts())
+	}
+	h.receive(2)
 
 	// No registered phone, or push off for both platforms: nothing queued,
 	// nothing recorded, no error.
-	pastTheMinute()
-	if nodeA.WakeProfileSetDevices(ctx, 8) || attempts() != 6 {
-		t.Fatalf("wake of an account with no phone: %d attempts, want 6 and a false answer", attempts())
+	h.pastTheMinute()
+	if nodeA.WakeProfileSetDevices(ctx, 8) || h.attempts() != 6 {
+		t.Fatalf("wake of an account with no phone: %d attempts, want 6 and a false answer", h.attempts())
 	}
 	off := profileSetWakeSystem(t, pool, repo, map[string]string{
 		SettingApplePushDeliveryEnabled: "false", SettingAndroidPushDeliveryEnabled: "false",
-	}, relayed)
-	if off.WakeProfileSetDevices(ctx, 7) || attempts() != 6 {
-		t.Fatalf("wake with push off: %d attempts, want 6 and a false answer", attempts())
+	}, h.relayed)
+	if off.WakeProfileSetDevices(ctx, 7) || h.attempts() != 6 {
+		t.Fatalf("wake with push off: %d attempts, want 6 and a false answer", h.attempts())
 	}
 	select {
-	case wake := <-relayed:
+	case wake := <-h.relayed:
 		t.Fatalf("unexpected relay request to %s", wake.path)
 	default:
 	}
