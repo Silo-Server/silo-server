@@ -134,3 +134,87 @@ func TestOriginDecisionDeclarations(t *testing.T) {
 		t.Errorf("own only with check: %v", err)
 	}
 }
+
+// TestRefusedFamiliesNeverReachTheirService: one refused operation or more
+// per family, sent by a session another app's key opened, is answered 403
+// permission_denied and the family's service is never called; the same
+// request from the account's password session reaches it. Each service is a
+// tripwire (an interface value with no implementation) that panics when
+// called, which the router answers 500. Catches a refusal that moves into, or
+// behind, the handler, so the service runs before the session is judged.
+func TestRefusedFamiliesNeverReachTheirService(t *testing.T) {
+	for _, tc := range []struct {
+		family, method, path, body string
+		wire                       func(*Dependencies)
+	}{
+		{"webhook sync", http.MethodPost, "/webhook-sync/connections", `{"provider":"plex","server_name":"Plex","default_profile_id":"p-owner"}`, func(d *Dependencies) {
+			d.WebhookSync = struct{ WebhookSyncService }{}
+			d.WebhookSyncManagement = struct{ WebhookSyncManagementService }{}
+		}},
+		{"webhook sync list", http.MethodGet, "/webhook-sync/connections", "", func(d *Dependencies) {
+			d.WebhookSync = struct{ WebhookSyncService }{}
+			d.WebhookSyncManagement = struct{ WebhookSyncManagementService }{}
+		}},
+		{"notification webhooks", http.MethodPost, "/notifications/webhooks", `{"name":"hook","url":"https://example.test/hook"}`, func(d *Dependencies) {
+			d.NotificationDestinationCreate = struct {
+				NotificationDestinationCreateService
+			}{}
+		}},
+		{"notification webhook list", http.MethodGet, "/notifications/webhooks", "", func(d *Dependencies) {
+			d.NotificationDestinations = struct{ NotificationDestinationService }{}
+		}},
+		{"plugin notification destinations", http.MethodPost, "/notifications/plugin-destinations", `{"plugin_id":"p","capability_id":"c","name":"n"}`, func(d *Dependencies) {
+			d.NotificationPluginDestinations = struct {
+				NotificationPluginDestinationService
+			}{}
+		}},
+		{"notification email address", http.MethodPut, "/notifications/email-preferences/address", `{"verification_id":"6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c","email":"a@example.test"}`, func(d *Dependencies) {
+			d.NotificationEmailVerification = struct {
+				NotificationEmailVerificationService
+			}{}
+		}},
+		{"discord link", http.MethodPost, "/notifications/discord/link/init", `{}`, func(d *Dependencies) {
+			d.NotificationDiscordManagement = struct {
+				NotificationDiscordManagementService
+			}{}
+		}},
+		{"watch-provider link", http.MethodPost, "/watch-providers/trakt/auth/api-key", `{"api_key":"synthetic-token"}`, func(d *Dependencies) {
+			d.WatchProviders = struct{ WatchProviderService }{}
+		}},
+		{"history-import link", http.MethodPost, "/history-imports/plex/auth/pin", "", func(d *Dependencies) {
+			d.HistoryImports = struct{ HistoryImportService }{}
+		}},
+		{"sign-in provider unlink", http.MethodDelete, "/account/identities/4", "", func(d *Dependencies) {
+			d.ExternalSignIn = struct{ ExternalSignInService }{}
+		}},
+		{"password change", http.MethodPost, "/account/password", `{"current_password":"pw","new_password":"margin fossil quench hollow"}`, func(d *Dependencies) {
+			d.Accounts = struct{ AccountService }{}
+		}},
+		{"personal API key list", http.MethodGet, "/api-keys", "", func(d *Dependencies) {
+			d.PersonalAPIKeys = struct{ PersonalAPIKeyService }{}
+		}},
+		{"personal API key revoke", http.MethodDelete, "/api-keys/1", "", func(d *Dependencies) {
+			d.PersonalAPIKeys = struct{ PersonalAPIKeyService }{}
+		}},
+		{"profile create", http.MethodPost, "/profiles", `{"name":"Kid"}`, func(d *Dependencies) { d.Profiles = struct{ ProfileService }{} }},
+		{"profile change", http.MethodPatch, "/profiles/p-kid", `{}`, func(d *Dependencies) { d.Profiles = struct{ ProfileService }{} }},
+		{"profile delete", http.MethodDelete, "/profiles/p-kid", "", func(d *Dependencies) { d.Profiles = struct{ ProfileService }{} }},
+		{"device registry", http.MethodGet, "/devices", "", func(d *Dependencies) { d.DeviceSettings = struct{ DeviceSettingsService }{} }},
+		{"downloads list", http.MethodGet, "/downloads", "", func(d *Dependencies) { d.Downloads = struct{ DownloadRegistryService }{} }},
+		{"downloads create", http.MethodPost, "/downloads", `{"content_id":"movie","media_file_id":"42"}`, func(d *Dependencies) { d.DownloadCreation = struct{ DownloadCreationService }{} }},
+	} {
+		t.Run(tc.family, func(t *testing.T) {
+			deps := parityDeps(false)
+			tc.wire(&deps)
+			h := newTestHandler(t, deps)
+			headers := func(token string) map[string]string { return with(bearer(token), "X-Profile-Id", "p-owner") }
+			p := requireProblem(t, do(t, h, tc.method, Prefix+tc.path, tc.body, headers(grantedAppToken)), TypePermissionDenied)
+			if p.Detail != handlers.SessionNotAllowedDetail {
+				t.Fatalf("another app's session: detail %q", p.Detail)
+			}
+			if rec := do(t, h, tc.method, Prefix+tc.path, tc.body, headers(memberToken)); rec.Code != http.StatusInternalServerError {
+				t.Fatalf("password session did not reach the service: %d %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
