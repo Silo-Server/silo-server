@@ -468,12 +468,20 @@ func (r *UserRepository) SetOwner(ctx context.Context, username string) (*models
 
 // ownershipLock names the advisory lock around moving ownership. The two
 // writers of ownership (TransferOwnership and SetOwner) take it exclusively
-// before any row; a reader that must not see ownership move under it takes
-// it shared (CheckSwitchOffActor, after the settings lock). Neither writer
-// takes the settings lock, and the reader takes no account row, so the lock
-// sits outside every other order: a writer waits here holding nothing, and a
-// reader waits here holding only the settings lock, which no writer wants.
+// before any row. A settings write that could turn the app key switch off
+// takes it shared before the settings lock (LockOwnershipShared), and the
+// Owner check under that write only tries it (CheckSwitchOffActor). So every
+// path takes it first: ownership then account rows (a transfer), ownership
+// then settings (the write), and no path holds an account row or the
+// settings lock while it waits for this lock.
 const ownershipLock = "silo:auth:ownership"
+
+// LockOwnershipShared takes the ownership lock in shared mode for the rest of
+// tx. A settings write that could turn the app key switch off takes it first,
+// before the settings lock.
+func LockOwnershipShared(ctx context.Context, tx pgx.Tx) error {
+	return lockOwnership(ctx, tx, true)
+}
 
 func lockOwnership(ctx context.Context, tx pgx.Tx, shared bool) error {
 	fn := "pg_advisory_xact_lock"

@@ -103,9 +103,11 @@ type DevicePreapproval struct {
 // never stored for a session already revoked.
 
 // preapprovalLiveSQL is the condition on a device_login_requests row r that
-// the session which approved it in advance is live.
+// the session which approved it in advance is live. It reads the statement's
+// clock, not the transaction's start: a collect may wait on the account lock,
+// and an approver that expires meanwhile must read as ended.
 const preapprovalLiveSQL = `EXISTS (SELECT 1 FROM auth_sessions s WHERE s.id = r.preapproved_session_id
-	AND s.revoked_at IS NULL AND s.expires_at > NOW())`
+	AND s.revoked_at IS NULL AND s.expires_at > clock_timestamp())`
 
 // Preapprove approves a sign-in in advance for the device holding the secret
 // behind input.Binding, as approverUserID's account. The request claims in

@@ -158,6 +158,11 @@ func endKeySessionIfSwitchOff(ctx context.Context, pool *pgxpool.Pool, sessionID
 	return ended, err
 }
 
+// ErrOwnershipChanging refuses a switch-off whose transaction could not take
+// the ownership lock because ownership is moving at that moment; the write
+// can be made again.
+var ErrOwnershipChanging = errors.New("the server's ownership is changing; try again")
+
 // CheckSwitchOffActor refuses, with ErrOwnerProtected, turning the app key
 // switch off by anyone but the Owner while the Owner holds a live session a
 // key opened: the sweep would end the Owner's sessions, which only the Owner
@@ -169,10 +174,17 @@ func endKeySessionIfSwitchOff(ctx context.Context, pool *pgxpool.Pool, sessionID
 // between this check and the sweep.
 func CheckSwitchOffActor(ctx context.Context, tx pgx.Tx, actorID int) error {
 	// Ownership can't move between this read and the sweep: its writers
-	// take this lock exclusively (lockOwnership). An account row lock here
-	// would invert the account-then-settings order of every key path.
-	if err := lockOwnership(ctx, tx, true); err != nil {
-		return err
+	// take the ownership lock exclusively. The settings write has taken it
+	// (shared) before the settings lock, so this try succeeds at once. A
+	// write that brought its own transaction without it (a restore) only
+	// tries, never waits here while holding the settings lock, and is refused
+	// with ErrOwnershipChanging while a transfer holds it.
+	var held bool
+	if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock_shared(hashtextextended($1, 0))`, ownershipLock).Scan(&held); err != nil {
+		return fmt.Errorf("locking ownership: %w", err)
+	}
+	if !held {
+		return ErrOwnershipChanging
 	}
 	var refused bool
 	if err := tx.QueryRow(ctx, `SELECT NOT COALESCE((SELECT is_owner FROM users WHERE id = $1), false)
