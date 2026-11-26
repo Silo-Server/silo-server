@@ -1075,7 +1075,9 @@ One wake of an account never overlaps the next. The phones are started in
 the order above, four at a time, under one budget of 30 seconds, half the
 one-minute interval, started when the wake is queued. Each send runs under
 what is left of the budget: its relay requests, its database writes, and its
-wait for the relay credential's lock all give up when the budget ends. One
+wait for the relay credential's lock all give up when the budget ends. That
+lock is shared by every push the server sends; only a wake's wait for it is
+bounded, and every other push waits for it as long as it is held, as before. One
 send can take up to seven relay requests, more than the budget allows, so
 there is no deadline per phone. A slow or dead registration holds one of the
 four slots, and the account's other phones go on in the other three. Four
