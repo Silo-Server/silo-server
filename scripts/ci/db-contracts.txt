@@ -349,6 +349,8 @@
 ./internal/auth TestKeyOperationsRecheckActingProfileDB
 ./internal/auth TestExpiredPendingKeySweepDB
 ./internal/apiv2 TestKeyRoutesRefuseSessionsDB
+./internal/apiv2 TestHouseholdSessionsForAnotherAppDB
+./internal/apiv2 TestWebPushRefusesAnotherAppDB
 ./internal/auth TestRevokeOwnDeviceKeyRulesDB
 ./internal/auth TestKeySignInLocalPasswordsOffDB
 ./internal/auth TestKeySessionContinuesProviderChainDB

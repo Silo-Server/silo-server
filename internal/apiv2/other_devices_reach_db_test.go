@@ -1,0 +1,141 @@
+package apiv2
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"slices"
+	"testing"
+
+	"github.com/google/uuid"
+
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
+)
+
+// TestHouseholdSessionsForAnotherAppDB: the household playback list shows
+// every device's streams in full, so a session another app's key opened
+// gets only the streams its own login session started. Through the real
+// session rule and the real list read: such a session sees its own stream,
+// not the password session's, and not a stream with no recorded login
+// session (a Jellyfin-compatible play); a password session and a device
+// sign-in session of the same account still see all three. Regression: the
+// list ignored how the caller's session was opened, so an app the person
+// allowed read every device's address, client and title.
+func TestHouseholdSessionsForAnotherAppDB(t *testing.T) {
+	profiles := handlers.NewProfileHandler(fakeHouseholds{})
+	d := newKeyRoutesDB(t, func(deps *Dependencies) { deps.Profiles = profiles })
+	ctx, pool, h := t.Context(), d.pool, d.handler
+	// The real list read, on the pool newKeyRoutesDB opened.
+	profiles.SessionsReader = handlers.NewPlaybackSessionsLoader(pool, nil, nil)
+
+	var folder, file int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name) VALUES('movies',$1) RETURNING id`, "reach-"+uuid.NewString()).Scan(&folder); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanup := context.WithoutCancel(ctx)
+		_, _ = pool.Exec(cleanup, `DELETE FROM playback_sessions_sync WHERE user_id = $1`, d.userID)
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = $1`, folder)
+	})
+	if err := pool.QueryRow(ctx, `INSERT INTO media_files(media_folder_id,file_path) VALUES($1,$2) RETURNING id`, folder, "/reach/"+uuid.NewString()+".mkv").Scan(&file); err != nil {
+		t.Fatal(err)
+	}
+	stream := func(loginSession *string) string {
+		t.Helper()
+		id := uuid.NewString()
+		if _, err := pool.Exec(ctx, `INSERT INTO playback_sessions_sync (session_id, user_id, profile_id, media_file_id, play_method, reporting_node, started_at, updated_at, last_sync_at, is_paused)
+			VALUES ($1, $2, 'p-owner', $3, 'direct_play', 'node-1', NOW(), NOW(), NOW(), FALSE)`, id, d.userID, file); err != nil {
+			t.Fatal(err)
+		}
+		if loginSession == nil {
+			return id
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO playback_v3_attempts
+			(playback_attempt_id, session_id, user_id, profile_id, requested_media_file_id, effective_media_file_id,
+			 current_plan_id, current_plan, normalized_request, expires_at, login_session_id)
+			VALUES ($1, $2::uuid, $3, 'p-owner', $4, $4, 'plan-1', '{}', '{}', NOW() + interval '1 hour', $5)`,
+			uuid.NewString(), id, d.userID, file, *loginSession); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	own := stream(&d.claims["tok-app"].SessionID)
+	phone := stream(&d.claims["tok-phone"].SessionID)
+	compat := stream(nil)
+	all := []string{own, phone, compat}
+	slices.Sort(all)
+
+	for _, tc := range []struct {
+		token string
+		want  []string
+	}{
+		{token: "tok-app", want: []string{own}},
+		{token: "tok-phone", want: all},
+		// A device sign-in keeps the whole list: the rule is only for
+		// another app.
+		{token: "tok-tv", want: all},
+	} {
+		t.Run(tc.token, func(t *testing.T) {
+			rec := do(t, h, http.MethodGet, Prefix+"/profiles/household/sessions", "", with(bearer(tc.token), "X-Profile-Id", "p-owner"))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+			}
+			var body PlaybackSessionCollection
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			got := make([]string, 0, len(body.Items))
+			for _, item := range body.Items {
+				got = append(got, string(item.ID))
+			}
+			slices.Sort(got)
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("listed %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWebPushRefusesAnotherAppDB: a profile's web push subscriptions belong
+// to every browser it registered, and subscribing takes an endpoint's
+// registration over, so a session another app's key opened is refused all
+// four routes with 403 permission_denied before the service runs. A
+// password session and a device sign-in session reach the service as
+// before. Regression: the routes ignored how the caller's session was
+// opened, so an app the person allowed listed, removed or took over the
+// person's browser registrations.
+func TestWebPushRefusesAnotherAppDB(t *testing.T) {
+	destinations := new(fakeNotificationDestinations)
+	d := newKeyRoutesDB(t, func(deps *Dependencies) { deps.NotificationDestinations = destinations })
+	subscribe := `{"endpoint":"https://push.example.test/1","keys":{"p256dh":"p","auth":"a"}}`
+	routes := []struct {
+		method, path, body string
+		status             int
+	}{
+		{http.MethodGet, "/notifications/web-push/subscriptions", "", http.StatusOK},
+		{http.MethodPost, "/notifications/web-push/subscriptions", subscribe, http.StatusCreated},
+		{http.MethodPost, "/notifications/web-push/unsubscribe", `{"endpoint":"https://push.example.test/1"}`, http.StatusNoContent},
+		{http.MethodDelete, "/notifications/web-push/subscriptions/row-one", "", http.StatusNoContent},
+	}
+	for _, r := range routes {
+		t.Run(r.method+" "+r.path, func(t *testing.T) {
+			headers := func(token string) map[string]string {
+				return with(bearer(token), "X-Profile-Id", "p-owner")
+			}
+			// The list counts no call; it records the page size it ran with.
+			destinations.limit = 0
+			before := destinations.calls
+			if p := requireProblem(t, do(t, d.handler, r.method, Prefix+r.path, r.body, headers("tok-app")), TypePermissionDenied); p.Detail != handlers.SessionNotAllowedDetail {
+				t.Fatalf("detail = %q", p.Detail)
+			}
+			if destinations.calls != before || destinations.limit != 0 {
+				t.Fatal("the service ran for another app's session")
+			}
+			for _, token := range []string{"tok-phone", "tok-tv"} {
+				if rec := do(t, d.handler, r.method, Prefix+r.path, r.body, headers(token)); rec.Code != r.status {
+					t.Fatalf("%s: status = %d, want %d: %s", token, rec.Code, r.status, rec.Body.String())
+				}
+			}
+		})
+	}
+}
