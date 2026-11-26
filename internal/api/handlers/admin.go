@@ -537,17 +537,33 @@ func (h *AdminHandler) ListAdminUsersPage(ctx context.Context, afterID, limit in
 	return views, hasMore, nil
 }
 
-// localPasswordSwitchOn reads the server-wide local password switch for the
-// views' local_password_allowed (auth.LocalPasswordAllowedFor).
-func (h *AdminHandler) localPasswordSwitchOn(ctx context.Context) (bool, error) {
+// localPasswordAllowed sets each view's local_password_allowed by the rule
+// password sign-in reads (auth.LocalPasswordRefusal): one read of the
+// switch and one query for network providers' refusals per batch.
+func (h *AdminHandler) localPasswordAllowed(ctx context.Context, users []*models.User, views []AdminUserView) error {
 	if h.pool == nil {
-		return true, nil
+		for i := range views {
+			views[i].LocalPasswordAllowed = true
+		}
+		return nil
 	}
+	failed := apiError(http.StatusInternalServerError, "internal_error", "Failed to read the local password setting")
 	on, err := auth.LocalPasswordLoginSwitch(ctx, h.pool)
 	if err != nil {
-		return false, apiError(http.StatusInternalServerError, "internal_error", "Failed to read the local password setting")
+		return failed
 	}
-	return on, nil
+	ids := make([]int, len(users))
+	for i, u := range users {
+		ids[i] = u.ID
+	}
+	refused, err := auth.NetworkRefusedAccounts(ctx, h.pool, ids)
+	if err != nil {
+		return failed
+	}
+	for i, u := range users {
+		views[i].LocalPasswordAllowed = auth.LocalPasswordRefusal(u, on, refused[u.ID]) == nil
+	}
+	return nil
 }
 
 // adminUserViews resolves the effective policy and last activity for a batch
@@ -557,18 +573,14 @@ func (h *AdminHandler) adminUserViews(ctx context.Context, users []*models.User)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve effective policy")
 	}
-	// The rule password sign-in reads, with the switch read once.
-	switchOn, err := h.localPasswordSwitchOn(ctx)
-	if err != nil {
-		return nil, err
-	}
 	resp := make([]AdminUserView, 0, len(users))
 	userIDs := make([]int, 0, len(users))
 	for _, u := range users {
 		userIDs = append(userIDs, u.ID)
-		view := toAdminUserResponse(u, lookupGroupPolicy(policies, u))
-		view.LocalPasswordAllowed = auth.LocalPasswordAllowedFor(u, switchOn)
-		resp = append(resp, view)
+		resp = append(resp, toAdminUserResponse(u, lookupGroupPolicy(policies, u)))
+	}
+	if err := h.localPasswordAllowed(ctx, users, resp); err != nil {
+		return nil, err
 	}
 	lastActive, err := h.loadUserLastActiveAt(ctx, userIDs)
 	if err != nil {

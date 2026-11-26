@@ -322,9 +322,13 @@ only, as a reset link's does. The architecture is in
   no email address is 409 `conflict` and a server without mail 409
   `capability_not_configured`, both before a link is made. A link
   is made only for an account allowed to sign in with a local password on this
-  server (the switch on, or a break-glass account; the account view's
-  `local_password_allowed`), otherwise 409 `provider_sign_in_required`; redeem and
-  set-password check it again.
+  server, by password sign-in's server-and-account-state rule (the account view's
+  `local_password_allowed`): a break-glass account always, any other while the
+  switch is on and no network identity provider refuses it. It leaves out the
+  account's own password sign-in flag, which the link's set-password turns on.
+  Otherwise 409 `provider_sign_in_required` (the switch off) or 403
+  `not_permitted` (a network provider's refusal); redeem and set-password check
+  it again and leave the link or token unspent.
   Audited as `user.sign_in_link_created` with `delivery` and `expires_at`, never
   the token. A new link, a password set by any route, a change of its email address,
   signing the account out everywhere (or out of every other session), disabling it

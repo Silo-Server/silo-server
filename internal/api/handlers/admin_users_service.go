@@ -59,11 +59,11 @@ func (h *AdminHandler) GetAdminAccount(ctx context.Context, id int) (AdminAccoun
 		return AdminAccountView{}, err
 	}
 	view := toAdminUserResponse(snapshot.User, group)
-	switchOn, err := h.localPasswordSwitchOn(ctx)
-	if err != nil {
+	views := []AdminUserView{view}
+	if err := h.localPasswordAllowed(ctx, []*models.User{snapshot.User}, views); err != nil {
 		return AdminAccountView{}, err
 	}
-	view.LocalPasswordAllowed = auth.LocalPasswordAllowedFor(snapshot.User, switchOn)
+	view = views[0]
 	// Last activity is a hint on the account, as on v1 GET /admin/users/{id};
 	// a failed lookup leaves it unknown rather than failing the read.
 	lastActive, err := h.loadUserLastActiveAt(ctx, []int{snapshot.User.ID})

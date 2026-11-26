@@ -37,11 +37,15 @@ var (
 	// unknown, used or expired, and one whose account is disabled: one
 	// answer for each, so a probe learns nothing.
 	ErrSignInLinkInvalid = errors.New("sign-in link unknown, used or expired")
-	// ErrSignInLinkNeedsProvider refuses a sign-in link for an account that
-	// may not sign in with a local password on this server: the switch is
-	// off and the account is not break-glass (localPasswordSwitchAllows). The
-	// link could only give it a way in that skips the sign-in provider.
+	// ErrSignInLinkNeedsProvider refuses a sign-in link while the server's
+	// local password switch is off and the account is not break-glass
+	// (signInLinkPolicy). The link could only give it a way in that skips the
+	// sign-in provider.
 	ErrSignInLinkNeedsProvider = errors.New("this server signs people in through its sign-in provider")
+	// ErrSignInLinkNotPermitted refuses a sign-in link for an account a
+	// network identity provider refuses: password sign-in refuses its
+	// password, so a link would let nobody in.
+	ErrSignInLinkNotPermitted = errors.New("the sign-in provider does not permit this account to sign in")
 	// ErrSignInLinkAccountChanged refuses a link to be emailed when the
 	// account's address changed since the caller read it.
 	ErrSignInLinkAccountChanged = errors.New("the account's email address changed while the link was made")
@@ -51,12 +55,15 @@ var (
 )
 
 // EndSignInLinksTx ends every sign-in link of the account in db, the
-// caller's transaction, which holds the account row: the links, the app codes
-// redeemed links left, and the set-password tokens they handed out, together,
-// so a place that ends a link can't forget one of the three. Whatever ends a
-// link calls it: a new link, a password set by any route (the link's own, a
-// reset, an administrator's, the person's change), signing the account out
-// everywhere, disabling the account and promoting it.
+// caller's transaction: the links, the app codes redeemed links left, and
+// the set-password tokens they handed out, together, so a place that ends a
+// link can't forget one of the three. The caller holds the account row, so
+// the account is locked before the link rows on every path, as a link's
+// redeem takes them. Whatever ends a link calls it: a new link, a password
+// set by any route (the link's own, a reset, an administrator's, the
+// person's change), a change of the account's email address, signing the
+// account out everywhere or out of every other session, disabling the
+// account and promoting it.
 func EndSignInLinksTx(ctx context.Context, db interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }, userID int) error {
@@ -69,24 +76,49 @@ func EndSignInLinksTx(ctx context.Context, db interface {
 	return nil
 }
 
+// signInLinkPolicy refuses a sign-in link for an account that may not sign in
+// with a local password on this server, by password sign-in's own rule
+// (localPasswordPolicy): ErrSignInLinkNeedsProvider while the switch is off,
+// ErrSignInLinkNotPermitted while a network identity provider refuses the
+// account. Break-glass accounts are exempt, as at sign-in. tx holds the
+// settings lock.
+func signInLinkPolicy(ctx context.Context, tx pgx.Tx, user *models.User) error {
+	switch err := localPasswordPolicy(ctx, tx, user); {
+	case errors.Is(err, ErrLocalLoginDisabled):
+		return ErrSignInLinkNeedsProvider
+	case errors.Is(err, ErrNotPermitted):
+		return ErrSignInLinkNotPermitted
+	default:
+		return err
+	}
+}
+
 // endSignInLinksForUpdateTx ends the account's sign-in links when an account
 // update ends them: it sets a password, changes the email address (the link
 // may have been emailed to the old one; compared as sign-in compares
 // addresses) or disables the account. Re-enabling it never brings one back.
 // email is the update's normalized address, nil when it sets none. It runs in
-// the update's transaction, before the update; a failed update rolls it back.
+// the update's transaction, before the update, and locks the account row
+// first when the links end, since not every caller of the update has locked
+// it yet; a failed update rolls it back.
 func endSignInLinksForUpdateTx(ctx context.Context, db interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, id int, input models.UpdateUserInput, email *string) error {
 	ends := input.Password != nil || (input.Enabled != nil && !*input.Enabled)
-	if !ends && email != nil {
-		err := db.QueryRow(ctx, `SELECT email IS DISTINCT FROM $2::citext FROM users WHERE id = $1`, id, *email).Scan(&ends)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("reading the account's email: %w", err)
-		}
+	if !ends && email == nil {
+		return nil
 	}
-	if !ends {
+	// The account row before the link rows; the email compared under it.
+	var emailChanging bool
+	err := db.QueryRow(ctx, `SELECT email IS DISTINCT FROM $2::citext FROM users WHERE id = $1 FOR UPDATE`, id, derefString(email)).Scan(&emailChanging)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("locking the account: %w", err)
+	}
+	if !ends && !emailChanging {
 		return nil
 	}
 	return EndSignInLinksTx(ctx, db, id)
@@ -166,8 +198,9 @@ func CheckSignInLinkIssuer(actor OwnerActor, target *models.User, scopedKey bool
 // ownership move or a promotion that commits first is judged here; the
 // Owner rules and the scoped-key rule are CheckSignInLinkIssuer's. A
 // disabled account is ErrUserDisabled, and an account that may not sign in
-// with a local password on this server (the switch is off and it is not
-// break-glass, the rule sign-in reads) is ErrSignInLinkNeedsProvider.
+// with a local password on this server, by password sign-in's rule
+// (signInLinkPolicy), is ErrSignInLinkNeedsProvider or
+// ErrSignInLinkNotPermitted.
 func (a *AppKeySignIn) IssueSignInLink(ctx context.Context, in SignInLinkIssue) (IssuedSignInLink, error) {
 	token, hash, err := newAppCode()
 	if err != nil {
@@ -192,12 +225,8 @@ func (a *AppKeySignIn) IssueSignInLink(ctx context.Context, in SignInLinkIssue) 
 		if err := lockServerSettings(ctx, tx); err != nil {
 			return err
 		}
-		allowed, err := localPasswordSwitchAllows(ctx, tx, target)
-		if err != nil {
+		if err := signInLinkPolicy(ctx, tx, target); err != nil {
 			return err
-		}
-		if !allowed {
-			return ErrSignInLinkNeedsProvider
 		}
 		// A new link replaces the account's earlier links, their codes and
 		// their set-password tokens.
@@ -278,7 +307,7 @@ func lockSignInLinkAccounts(ctx context.Context, tx pgx.Tx, userID, issuerID int
 // no key. An unknown, used or expired link, and
 // one whose account is disabled, is ErrSignInLinkInvalid; for an account
 // that may not sign in with a local password on this server it is
-// ErrSignInLinkNeedsProvider and stays unspent.
+// signInLinkPolicy's refusal and stays unspent.
 func (a *AppKeySignIn) RedeemSignInLink(ctx context.Context, token string, keysOn bool) (SignInLinkRedemption, error) {
 	hash, ok := appCodeHash(token)
 	if !ok {
@@ -362,10 +391,9 @@ type spentSignInLink struct {
 // lockSignInLinkAccount locks the account a link or its set-password token
 // belongs to, then the settings, and answers the account as locked: a
 // disabled account's link is ErrSignInLinkInvalid, and for an account that
-// may not sign in with a local password on this server (the switch is off
-// and it is not break-glass) the link is ErrSignInLinkNeedsProvider. Holding
-// the settings lock serializes the use with a change of
-// auth.local_password_login.
+// may not sign in with a local password on this server the link is
+// signInLinkPolicy's refusal. Holding the settings lock serializes the use
+// with a change of auth.local_password_login.
 func lockSignInLinkAccount(ctx context.Context, tx pgx.Tx, userID int) (*models.User, error) {
 	user, err := lockEnabledUser(ctx, tx, userID)
 	if errors.Is(err, ErrUserDisabled) || IsNotFound(err) {
@@ -377,12 +405,8 @@ func lockSignInLinkAccount(ctx context.Context, tx pgx.Tx, userID int) (*models.
 	if err := lockServerSettings(ctx, tx); err != nil {
 		return nil, err
 	}
-	allowed, err := localPasswordSwitchAllows(ctx, tx, user)
-	if err != nil {
+	if err := signInLinkPolicy(ctx, tx, user); err != nil {
 		return nil, err
-	}
-	if !allowed {
-		return nil, ErrSignInLinkNeedsProvider
 	}
 	return user, nil
 }

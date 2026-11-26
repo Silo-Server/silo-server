@@ -999,17 +999,22 @@ them sign back in.
 
 **Refused where local passwords can't be used.** A link is allowed for an
 account exactly when that account may sign in with a local password on this
-server, decided by the function password sign-in uses
-(`localPasswordSwitchAllows`): the server-wide `auth.local_password_login`
-switch is on, or the account is break-glass. It does not read the account's
-own `local_password_login_enabled`. Making a link, redeeming one and setting
-its password each check it, and a refused link stays unspent
-(`provider_sign_in_required`, 409): for an ordinary account on a server with
-the switch off, the link could only create a way in that skips the sign-in
-provider, and there the person signs in with the provider on the server's
-site and uses "Open in Silo" (`POST /auth/app-codes`) instead. A break-glass
-administrator, who still signs in with a password while the switch is off,
-gets a link with the password route only, as any administrator does.
+server, decided by password sign-in's own server-and-account-state rule
+(`localPasswordPolicy`, and `LocalPasswordRefusal` for the account view): a
+break-glass account always; any other while the server-wide
+`auth.local_password_login` switch is on and no network identity provider
+refuses the account. The rule leaves out the account's own
+`local_password_login_enabled`, because setting a password with the link turns
+it on. Making a link, redeeming one and setting its password each check it,
+and a refused link or token stays unspent: `provider_sign_in_required` (409)
+while the switch is off, where the link could only create a way in that skips
+the sign-in provider (the person signs in with the provider on the server's
+site and uses "Open in Silo", `POST /auth/app-codes`, instead), and
+`not_permitted` (403) while a network identity provider refuses the account,
+whose password sign-in it refuses anyway. A break-glass administrator, who
+still signs in with a password while the switch is off, gets a link with the
+password route only, as any administrator does. The account view reads the
+rule with one read of the switch and one query for the page's accounts.
 
 ### Sessions that can't manage keys
 

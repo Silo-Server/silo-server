@@ -319,3 +319,88 @@ func TestSignInLinkReplacementStartsUnboundDB(t *testing.T) {
 		t.Fatal("the old person key is still live")
 	}
 }
+
+// A link is allowed only where password sign-in would take the account's
+// password, and a network identity provider's refusal is part of that rule.
+// Making a link for a refused account is refused; a refusal that arrives
+// after the link is made, or after it is redeemed, refuses the next step and
+// leaves the link or its set-password token unspent, and the step works
+// again once the provider permits the person. The account view's
+// local_password_allowed reads the same rule in one query for a page.
+// Regression guard: such an account was offered a link that spent itself,
+// replaced the password and signed the account out, for a password sign-in
+// still refused.
+func TestSignInLinkNetworkRefusalDB(t *testing.T) {
+	env := newKeyEnv(t, "signinlinknet")
+	ctx := t.Context()
+	env.exec(t, `UPDATE plugin_auth_bindings SET capability_id = 'tailscale' WHERE plugin_installation_id = $1`, env.installationID)
+	env.exec(t, `INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id, metadata)
+		VALUES ($1, 'auth_provider.v1', 'tailscale', '{"auth_modes":["network"]}') ON CONFLICT DO NOTHING`, env.installationID)
+	env.exec(t, `UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, env.installationID)
+	env.exec(t, `UPDATE plugin_installations SET enabled = true WHERE id = $1`, env.installationID)
+	refuse := func(t *testing.T, refused bool) {
+		t.Helper()
+		status := CheckStatusActive
+		if refused {
+			status = CheckStatusNotPermitted
+		}
+		env.exec(t, `UPDATE plugin_auth_identities SET last_check_status = $2, pending_refusal = '' WHERE id = $1`, env.identityID, status)
+	}
+	user := env.user
+	issue := func() (IssuedSignInLink, error) {
+		return env.signIn.IssueSignInLink(ctx, SignInLinkIssue{UserID: user.ID, Delivery: "link"})
+	}
+	linkState := func(t *testing.T) (links int, redeemed, tokenUsed bool) {
+		t.Helper()
+		if err := env.pool.QueryRow(ctx, `SELECT count(*), COALESCE(bool_or(redeemed_at IS NOT NULL), false),
+			COALESCE(bool_or(set_password_used_at IS NOT NULL), false) FROM auth_sign_in_links WHERE user_id = $1`, user.ID).Scan(&links, &redeemed, &tokenUsed); err != nil {
+			t.Fatal(err)
+		}
+		return links, redeemed, tokenUsed
+	}
+
+	refuse(t, true)
+	if single, err := networkRefused(ctx, env.pool, user.ID); err != nil || !single {
+		t.Fatalf("networkRefused = %v, %v; want the account refused", single, err)
+	}
+	refused, err := NetworkRefusedAccounts(ctx, env.pool, []int{user.ID})
+	if err != nil || !refused[user.ID] || LocalPasswordRefusal(user, true, refused[user.ID]) == nil {
+		t.Fatalf("view rule = %v, %v; want the account refused", refused, err)
+	}
+	if _, err := issue(); !errors.Is(err, ErrSignInLinkNotPermitted) {
+		t.Fatalf("making a link for a refused account: %v", err)
+	}
+	if links, _, _ := linkState(t); links != 0 {
+		t.Fatalf("a refused make stored %d links", links)
+	}
+
+	refuse(t, false)
+	issued, err := issue()
+	if err != nil {
+		t.Fatalf("make: %v", err)
+	}
+	refuse(t, true)
+	if _, err := env.signIn.RedeemSignInLink(ctx, issued.Token, true); !errors.Is(err, ErrSignInLinkNotPermitted) {
+		t.Fatalf("redeem after a refusal: %v", err)
+	}
+	if _, redeemed, _ := linkState(t); redeemed {
+		t.Fatal("a refused redeem spent the link")
+	}
+	refuse(t, false)
+	got, err := env.signIn.RedeemSignInLink(ctx, issued.Token, true)
+	if err != nil || got.SetPasswordToken == "" {
+		t.Fatalf("redeem once permitted = %+v, %v", got, err)
+	}
+
+	refuse(t, true)
+	if _, err := env.signIn.SetPasswordWithSignInLink(ctx, got.SetPasswordToken, "network refused pw"); !errors.Is(err, ErrSignInLinkNotPermitted) {
+		t.Fatalf("set-password after a refusal: %v", err)
+	}
+	if _, _, used := linkState(t); used {
+		t.Fatal("a refused set-password spent the token")
+	}
+	refuse(t, false)
+	if _, err := env.signIn.SetPasswordWithSignInLink(ctx, got.SetPasswordToken, "network permitted pw"); err != nil {
+		t.Fatalf("set-password once permitted: %v", err)
+	}
+}

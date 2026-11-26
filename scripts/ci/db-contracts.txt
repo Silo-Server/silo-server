@@ -398,6 +398,7 @@
 ./internal/auth TestSignInLinkReplacementAuditDB
 ./internal/auth TestSignInLinkLocalPasswordSwitchDB
 ./internal/auth TestSignInLinkReplacementStartsUnboundDB
+./internal/auth TestSignInLinkNetworkRefusalDB
 ./internal/apiv2 TestCreateSignInLinkAuthorityDB
 ./internal/apiv2 TestCreateSignInLinkNeedsPublicURLDB
 ./internal/apiv2 TestAdminUserLocalPasswordAllowedDB
