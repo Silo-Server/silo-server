@@ -61,6 +61,7 @@ func (am *AuthMiddleware) RequireDirectDownloadAuth(next http.Handler) http.Hand
 		// A link lasts minutes and grants nothing role-gated, so a role
 		// change does not refuse it; the request carries the current role.
 		claims.Role = authority.Role
+		claims.SessionKind = authority.Kind
 		if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 			uid := claims.UserID
 			lc.UserID = &uid

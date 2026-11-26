@@ -58,7 +58,8 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 		profileOptional, _ := op.Metadata[metaProfileOptional].(bool)
 		household, _ := op.Metadata[metaHouseholdGate].(bool)
 		bucket, _ := op.Metadata[metaRateLimitBucket].(string)
-		chain, missing := gateChain(deps, class, permission, demoRestricted, profileOptional, household, bucket)
+		origins, _ := op.Metadata[metaOriginDecisions].(OriginDecisions)
+		chain, missing := gateChain(deps, class, permission, origins, demoRestricted, profileOptional, household, bucket)
 		if op.OperationID == notificationApplePushDisplayOperation {
 			chain, missing = notificationDisplayGateChain(deps)
 		}
@@ -91,7 +92,9 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 }
 
 // gateChain is the ordered gate list for a class. The order is the v1
-// router's authenticated group (internal/api/router.go): auth, then the demo
+// router's authenticated group (internal/api/router.go): auth, then the
+// origin gate (what a session another app's key opened may do, from the
+// operation's OriginDecisions; it has no v1 counterpart), then the demo
 // guard, then the rate limiter, then viewer access, then the class gate. Demo
 // mode denies before the limiter so a refused request never spends
 // rate-limit budget, exactly as on v1. Viewer access runs for every class v1
@@ -103,7 +106,7 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 // request without X-Profile-Id on a household with a limited profile is
 // refused before any permission gate or handler sees it. The second result
 // names the first gate the wiring lacks.
-func gateChain(deps Dependencies, class Class, permission string, demoRestricted, profileOptional, household bool, bucket string) ([]func(http.Handler) http.Handler, string) {
+func gateChain(deps Dependencies, class Class, permission string, origins OriginDecisions, demoRestricted, profileOptional, household bool, bucket string) ([]func(http.Handler) http.Handler, string) {
 	if class == ClassPublic {
 		// A public operation with a named budget runs the per-endpoint
 		// limiter and nothing else; a missing limiter leaves it unlimited,
@@ -116,7 +119,7 @@ func gateChain(deps Dependencies, class Class, permission string, demoRestricted
 	if deps.Auth == nil {
 		return nil, "auth"
 	}
-	chain := []func(http.Handler) http.Handler{deps.Auth.RequireAuth}
+	chain := []func(http.Handler) http.Handler{deps.Auth.RequireAuth, originGate(origins)}
 	if demoRestricted {
 		chain = append(chain, demoGate(deps.DemoSettings))
 	}

@@ -144,6 +144,13 @@ type Operation struct {
 	// DemoRestricted marks a mutation that demo mode refuses to non-admins.
 	// It is refused on reads and on ClassPublic, where no gate runs.
 	DemoRestricted bool
+	// Origins is what a login session opened a given way may do with the
+	// operation (origin_decisions.go). Every operation of class
+	// authenticated, profile scoped or permission gated states a decision
+	// for a session another app's key opened, reads included; the origin
+	// gate enforces a refusal right after authentication. It is refused on
+	// ClassPublic and ClassActingAdmin.
+	Origins OriginDecisions
 	// ProfileOptional, on a ClassProfileScoped operation, accepts an absent
 	// X-Profile-Id: viewer access still resolves and judges a present header,
 	// but the profile-required gate is not run, as on the v1 routes whose
@@ -307,6 +314,7 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	op.Metadata[metaClass] = op.Class
 	op.Metadata[metaPermission] = op.Permission
 	op.Metadata[metaDemoRestricted] = op.DemoRestricted
+	recordOriginDecisions(&op)
 	op.Metadata[metaProfileOptional] = op.ProfileOptional
 	op.Metadata[metaHouseholdGate] = op.HouseholdProfileGate
 	op.Metadata[metaRateLimitBucket] = op.RateLimitBucket
@@ -439,6 +447,9 @@ func checkOperation(op Operation) error {
 	}
 	if op.DemoRestricted && !isMutatingMethod(op.Method) {
 		return fmt.Errorf("demo restriction is inert on %s: only mutations are restricted", op.Method)
+	}
+	if err := checkOriginDecisions(op); err != nil {
+		return err
 	}
 	if op.ProfileOptional && op.Class != ClassProfileScoped {
 		return fmt.Errorf("profile optional is only meaningful on class %s", ClassProfileScoped)
