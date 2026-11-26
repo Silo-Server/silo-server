@@ -18,6 +18,7 @@ import { v2ErrorText } from "@/api/v2/request";
 import { useAdminAppKeys, type AdminAppDeviceKey } from "@/hooks/queries/admin/appKeys";
 import { useAppKeyCapability } from "@/hooks/queries/appKeys";
 import { AppKeyRow, PreapprovalRow, type DevicePreapproval } from "@/components/appKeys/AppKeyRow";
+import { useScrollToDevice } from "@/components/appKeys/useScrollToDevice";
 import { formatDateTime } from "@/lib/datetime";
 import { TOUCH_TARGETS } from "@/lib/touchTargets";
 import { useT } from "@/i18n";
@@ -29,6 +30,8 @@ type Selection =
   | { kind: "withdraw"; preapproval: DevicePreapproval };
 
 const P = "web.admin.users.detail.appKeys";
+/** Text both devices panels say the same way. */
+const S = "web.settings.appKeys";
 
 /** A user or device name inside a translated sentence keeps its own direction. */
 function Name({ children }: { children: string }) {
@@ -45,7 +48,7 @@ export function AdminAppKeysPanel({
   user,
   manageable,
 }: {
-  user: { id: number; username: string };
+  user: { id: number; username: string; enabled?: boolean };
   manageable: boolean;
 }) {
   const t = useT();
@@ -53,6 +56,8 @@ export function AdminAppKeysPanel({
     user.id,
   );
   const capability = useAppKeyCapability().data?.state;
+  // Links from signing out, a password reset or a session row land here.
+  useScrollToDevice(!keys.isPending);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [error, setError] = useState("");
   const heading = useRef<HTMLHeadingElement>(null);
@@ -75,11 +80,11 @@ export function AdminAppKeysPanel({
       switch (selection.kind) {
         case "remove":
           await revokeDevice.mutateAsync(selection.key.id);
-          toast.success(t(`${P}.removed`, { device: <Name>{selection.key.name}</Name> }));
+          toast.success(t(`${S}.removed`, { device: <Name>{selection.key.name}</Name> }));
           break;
         case "deny":
           await deny.mutateAsync(selection.key.id);
-          toast.success(t(`${P}.denied`, { device: <Name>{selection.key.name}</Name> }));
+          toast.success(t(`${S}.denied`, { device: <Name>{selection.key.name}</Name> }));
           break;
         case "person":
           await revokePersonKey.mutateAsync();
@@ -87,12 +92,12 @@ export function AdminAppKeysPanel({
           break;
         case "withdraw":
           await withdraw.mutateAsync(selection.preapproval.id);
-          toast.success(t(`${P}.withdrawn`));
+          toast.success(t(`${S}.withdrawn`));
           break;
       }
       setSelection(null);
     } catch (err) {
-      setError(v2ErrorText(err, t(`${P}.actionFailed`)));
+      setError(v2ErrorText(err, t(`${S}.actionFailed`)));
     }
   }
 
@@ -113,7 +118,7 @@ export function AdminAppKeysPanel({
             tabIndex={-1}
             className="text-lg font-semibold tracking-tight focus:outline-none"
           >
-            {t(`${P}.title`)}
+            {t(`${S}.title`)}
           </h2>
           <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
             {t(`${P}.description`, { username })}
@@ -127,7 +132,7 @@ export function AdminAppKeysPanel({
             void preapprovals.refetch();
           }}
           disabled={keys.isFetching || preapprovals.isFetching}
-          aria-label={t(`${P}.refreshLabel`)}
+          aria-label={t(`${S}.refreshLabel`)}
         >
           <RefreshCw className={keys.isFetching ? "animate-spin" : undefined} aria-hidden="true" />
           {t("web.settings.sessions.refresh")}
@@ -135,13 +140,13 @@ export function AdminAppKeysPanel({
       </div>
       {capability && capability !== "available" && (
         <p className="surface-panel-subtle text-muted-foreground p-3 text-sm">
-          {capability === "disabled" ? t(`${P}.off`) : t(`${P}.unavailable`)}
+          {capability === "disabled" ? t(`${P}.off`) : t(`${S}.unavailable`)}
         </p>
       )}
       {keys.isPending ? (
         <p role="status" className="text-muted-foreground flex items-center gap-2 text-sm">
           <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-          {t(`${P}.loading`)}
+          {t(`${S}.loading`)}
         </p>
       ) : keys.isError ? (
         <div role="alert" className="surface-panel-raised space-y-3 p-5">
@@ -154,7 +159,7 @@ export function AdminAppKeysPanel({
         <p className="text-muted-foreground py-2 text-sm">{t(`${P}.empty`)}</p>
       ) : (
         <>
-          <SettingsGroup title={t(`${P}.personKey.title`)} flush>
+          <SettingsGroup title={t(`${S}.personKey.title`)} flush>
             <div className="flex flex-wrap items-center gap-3 py-2">
               <KeyRound className="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
               <p className="min-w-0 flex-1 basis-60 text-sm">
@@ -218,7 +223,7 @@ export function AdminAppKeysPanel({
             </SettingsGroup>
           )}
           {enrolled.length > 0 && (
-            <SettingsGroup title={t(`${P}.devices.title`)} flush>
+            <SettingsGroup title={t(`${S}.devices.title`)} flush>
               <ul className="mt-3 space-y-2">
                 {enrolled.map((key) => (
                   <AppKeyRow
@@ -243,9 +248,9 @@ export function AdminAppKeysPanel({
             </SettingsGroup>
           )}
           {preapprovals.isError ? (
-            <SettingsGroup title={t(`${P}.preapprovals.title`)} flush>
+            <SettingsGroup title={t(`${S}.preapprovals.title`)} flush>
               <div role="alert" className="space-y-3 py-2 text-sm">
-                <p>{t(`${P}.preapprovals.loadFailed`)}</p>
+                <p>{t(`${S}.preapprovals.loadFailed`)}</p>
                 <Button
                   size="sm"
                   variant="outline"
@@ -259,7 +264,7 @@ export function AdminAppKeysPanel({
           ) : (
             approved.length > 0 && (
               <SettingsGroup
-                title={t(`${P}.preapprovals.title`)}
+                title={t(`${S}.preapprovals.title`)}
                 description={t(`${P}.preapprovals.description`, { username })}
                 flush
               >
@@ -290,7 +295,11 @@ export function AdminAppKeysPanel({
           {!manageable && <p className="text-muted-foreground text-xs">{t(`${P}.ownerOnly`)}</p>}
         </>
       )}
-      <p className="text-muted-foreground text-xs leading-relaxed">{t(`${P}.footnote`)}</p>
+      {/* It says a signed-out device signs back in: not while app key sign-in
+          is off, nor for a disabled account, whose keys are refused. */}
+      {capability === "available" && user.enabled !== false && (
+        <p className="text-muted-foreground text-xs leading-relaxed">{t(`${S}.footnote`)}</p>
+      )}
       <AlertDialog
         open={selection !== null}
         onOpenChange={(next) => {
@@ -326,7 +335,7 @@ export function AdminAppKeysPanel({
                 void confirm();
               }}
             >
-              {pending ? t(`${P}.confirm.working`) : dialog.confirm}
+              {pending ? t(`${S}.confirm.working`) : dialog.confirm}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -344,17 +353,17 @@ function dialogText(
     case "remove": {
       const device = <Name>{selection.key.name}</Name>;
       return {
-        title: t(`${P}.confirm.removeTitle`, { device }),
+        title: t(`${S}.confirm.removeTitle`, { device }),
         description: t(`${P}.confirm.removeDescription`, { device, username }),
-        confirm: t(`${P}.confirm.remove`),
+        confirm: t(`${S}.confirm.remove`),
       };
     }
     case "deny": {
       const device = <Name>{selection.key.name}</Name>;
       return {
-        title: t(`${P}.confirm.denyTitle`, { device }),
+        title: t(`${S}.confirm.denyTitle`, { device }),
         description: t(`${P}.confirm.denyDescription`, { device, username }),
-        confirm: t(`${P}.confirm.deny`),
+        confirm: t(`${S}.confirm.deny`),
       };
     }
     case "person":
@@ -366,9 +375,9 @@ function dialogText(
     case "withdraw": {
       const device = <Name>{selection.preapproval.device_name}</Name>;
       return {
-        title: t(`${P}.confirm.withdrawTitle`, { device }),
+        title: t(`${S}.confirm.withdrawTitle`, { device }),
         description: t(`${P}.confirm.withdrawDescription`, { device, username }),
-        confirm: t(`${P}.confirm.withdraw`),
+        confirm: t(`${S}.confirm.withdraw`),
       };
     }
     default:

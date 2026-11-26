@@ -1,4 +1,5 @@
 import { OpenInSiloSection } from "@/components/appKeys/OpenInSiloSection";
+import { OwnAppKeysPanel } from "@/components/appKeys/OwnAppKeysPanel";
 import { LoginSessionsPanel } from "@/components/sessions/LoginSessionsPanel";
 import { Button } from "@/components/ui/button";
 import { useLoginSessionCapabilities } from "@/hooks/queries/loginSessions";
@@ -21,6 +22,9 @@ export default function SignedInSessions() {
       <>
         <OpenInSiloSection />
         <p role="status">{t("web.settings.signedInSessions.unavailable")}</p>
+        <div className="mt-10">
+          <OwnAppKeysPanel />
+        </div>
       </>
     );
   // Absent from a server that doesn't send it yet: other sessions stay manageable.
@@ -28,6 +32,9 @@ export default function SignedInSessions() {
     <>
       <OpenInSiloSection />
       <LoginSessionsPanel manageOthers={capabilities.data.revoke_other_sessions !== false} />
+      <div className="mt-10">
+        <OwnAppKeysPanel />
+      </div>
     </>
   );
 }
