@@ -29,6 +29,13 @@ WHERE opened_via IS NOT NULL
   AND via_device_sign_in IS DISTINCT FROM (opened_via = 'device_login');
 
 -- +goose Down
--- Nothing to undo here: the values this migration wrote are true of the
--- sessions, and each column's own migration drops it.
-SELECT 1;
+-- No data to undo: the values this migration wrote are true of the sessions,
+-- and each column's own migration drops it.
+--
+-- The check is dropped here as well as in the next migration's down step. A
+-- database that applied this migration's earlier form, which added the check
+-- itself, has no record of the next migration, so rolling it back runs only
+-- this step. Everywhere else the next migration's down step has run first
+-- and this finds nothing.
+ALTER TABLE public.auth_sessions
+    DROP CONSTRAINT IF EXISTS auth_sessions_opened_via_matches_flag;
