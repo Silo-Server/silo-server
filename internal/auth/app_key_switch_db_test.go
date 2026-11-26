@@ -49,7 +49,7 @@ func waitForLockWaiters(t *testing.T, pool *pgxpool.Pool, n int) {
 		if time.Now().After(deadline) {
 			t.Fatalf("%d backends waiting on a lock, want %d", waiting, n)
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // the poll interval; the wait is on pg_stat_activity, an observable lock wait
 	}
 }
 
