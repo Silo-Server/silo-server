@@ -106,6 +106,14 @@ func TestEffectiveSubtitleAppearanceReadsTheCanonicalSetting(t *testing.T) {
 			if got.HasDeviceOverride && got.UpdatedAt == "" {
 				t.Error("a device override carries no updated_at")
 			}
+			// device_id names the override's device and is absent without one.
+			wantDeviceID := ""
+			if tc.wantDevice != "" {
+				wantDeviceID = tc.requestDevice
+			}
+			if got.DeviceID != wantDeviceID {
+				t.Errorf("device_id = %q, want %q", got.DeviceID, wantDeviceID)
+			}
 		})
 	}
 }
