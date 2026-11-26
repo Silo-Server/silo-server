@@ -30,9 +30,6 @@ func registerWatchTogetherSourceFallback(reg *Registry) {
 	op.Errors = []int{409}
 	op.Description = watchTogetherMemberOtherAppRule
 	Register(reg, withOrigins(op, grantedRefusedRoomHost), func(ctx context.Context, in *WatchTogetherSourceFallbackInput) (*WatchTogetherRoomReadOutput, error) {
-		if p := reg.otherDevicesProblem(ctx); p != nil {
-			return nil, p
-		}
 		if reg.deps.WatchTogetherSourceFallback == nil {
 			return nil, unavailable("watch together")
 		}

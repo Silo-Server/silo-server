@@ -26,9 +26,6 @@ func registerWatchTogetherSuggestionPromote(reg *Registry) {
 	op.Errors = []int{409}
 	op.Description = watchTogetherHostOtherAppRule
 	Register(reg, withOrigins(op, grantedRefusedRoomHost), func(ctx context.Context, in *WatchTogetherSuggestionPromoteInput) (*WatchTogetherRoomReadOutput, error) {
-		if p := reg.otherDevicesProblem(ctx); p != nil {
-			return nil, p
-		}
 		svc := reg.deps.WatchTogetherSuggestionPromote
 		if svc == nil {
 			return nil, unavailable("suggestion promotion")

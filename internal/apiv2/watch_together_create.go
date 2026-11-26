@@ -25,9 +25,6 @@ func registerWatchTogetherCreate(reg *Registry) {
 	op.Errors = []int{409}
 	op.Description = watchTogetherHostOtherAppRule
 	Register(reg, withOrigins(op, grantedRefusedRoomHost), func(ctx context.Context, in *WatchTogetherCreateInput) (*WatchTogetherRoomReadOutput, error) {
-		if p := reg.otherDevicesProblem(ctx); p != nil {
-			return nil, p
-		}
 		if reg.deps.WatchTogetherCreate == nil {
 			return nil, unavailable("watch together")
 		}

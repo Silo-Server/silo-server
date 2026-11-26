@@ -94,16 +94,6 @@ func (reg *Registry) otherDevicesRule(ctx context.Context) (string, func(context
 	return claims.SessionID, func(context.Context) error { return auth.ErrSessionNotAllowed }
 }
 
-// otherDevicesProblem refuses a session another app opened with a grant
-// (sessionReachesOtherDevices) with 403 permission_denied.
-func (reg *Registry) otherDevicesProblem(ctx context.Context) *Problem {
-	ok, p := reg.sessionReachesOtherDevices(ctx)
-	if p != nil || ok {
-		return p
-	}
-	return NewProblem(TypePermissionDenied, handlers.SessionNotAllowedDetail)
-}
-
 // appKeyDomain names the capability in its problems.
 const appKeyDomain = "app key sign-in"
 

@@ -119,9 +119,6 @@ func registerOrderedAndroidPush(reg *Registry) {
 	op.MaxBodyBytes = 4096
 	op.Description = nativePushOtherAppRule
 	Register(reg, withOrigins(op, grantedRefusedOtherDevice), func(ctx context.Context, in *AndroidPushRegistrationInput) (*AndroidPushRegistrationOutput, error) {
-		if p := reg.otherDevicesProblem(ctx); p != nil {
-			return nil, p
-		}
 		cmd, err := reg.androidPushCommand(ctx, in.AndroidPushAuthority, in.Body.DeviceID)
 		if err != nil {
 			return nil, err
@@ -140,9 +137,6 @@ func registerOrderedAndroidPush(reg *Registry) {
 	remove.Errors = []int{409}
 	remove.Description = nativePushOtherAppRule
 	Register(reg, withOrigins(remove, grantedRefusedOtherDevice), func(ctx context.Context, in *AndroidPushRemovalInput) (*struct{}, error) {
-		if p := reg.otherDevicesProblem(ctx); p != nil {
-			return nil, p
-		}
 		cmd, err := reg.androidPushCommand(ctx, in.AndroidPushAuthority, in.DeviceID)
 		if err != nil {
 			return nil, err

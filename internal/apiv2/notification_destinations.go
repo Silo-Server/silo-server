@@ -322,9 +322,6 @@ func registerNotificationDestinations(reg *Registry) {
 	subscribe.Summary = "Register or reassign a browser endpoint to the current profile. Send once; replay can replace newer intent or re-enable delivery."
 	subscribe.Description = webPushOtherAppRule
 	Register(reg, withOrigins(subscribe, grantedRefusedOtherDevice), func(ctx context.Context, in *NotificationWebPushSubscribeInput) (*NotificationWebPushSubscribeOutput, error) {
-		if p := reg.otherDevicesProblem(ctx); p != nil {
-			return nil, p
-		}
 		if reg.deps.NotificationDestinations == nil {
 			return nil, unavailable("notification destinations")
 		}
@@ -349,9 +346,6 @@ func registerNotificationDestinations(reg *Registry) {
 	unsubscribe.Summary = "Remove the account's current registration for a browser endpoint. Send once; a retry can delete a newer registration."
 	unsubscribe.Description = webPushOtherAppRule
 	Register(reg, withOrigins(unsubscribe, grantedRefusedOtherDevice), func(ctx context.Context, in *NotificationWebPushUnsubscribeInput) (*struct{}, error) {
-		if p := reg.otherDevicesProblem(ctx); p != nil {
-			return nil, p
-		}
 		if reg.deps.NotificationDestinations == nil {
 			return nil, unavailable("notification destinations")
 		}
@@ -371,9 +365,6 @@ func registerNotificationDestinations(reg *Registry) {
 	op.Summary = "Remove a server subscription belonging to the current profile. Does not unsubscribe the browser or order concurrent registration intents."
 	op.Description = webPushOtherAppRule
 	Register(reg, withOrigins(op, grantedRefusedOtherDevice), func(ctx context.Context, in *NotificationWebPushDeleteInput) (*struct{}, error) {
-		if p := reg.otherDevicesProblem(ctx); p != nil {
-			return nil, p
-		}
 		if reg.deps.NotificationDestinations == nil {
 			return nil, unavailable("notification destinations")
 		}
@@ -392,9 +383,6 @@ func registerNotificationDestinations(reg *Registry) {
 	listWebPush := notificationOperation(http.MethodGet, "/web-push/subscriptions", listNotificationWebPushOperation)
 	listWebPush.Description = webPushOtherAppRule
 	Register(reg, withOrigins(listWebPush, grantedRefusedOtherDevice), func(ctx context.Context, in *NotificationDestinationListInput) (*NotificationWebPushSubscriptionListOutput, error) {
-		if p := reg.otherDevicesProblem(ctx); p != nil {
-			return nil, p
-		}
 		svc := reg.deps.NotificationDestinations
 		if svc == nil {
 			return nil, unavailable("notification destinations")
