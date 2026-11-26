@@ -16,11 +16,14 @@ const (
 		"It still gets every live session of the account, but another session's item carries only its id and current: device_name and ip_address are empty, " +
 		"device_id and device_platform are absent, last_seen_at is null, and created_at and expires_at repeat the caller's own. " +
 		"For such a caller the page is ordered by id, not newest first, and a cursor from the other kind of caller is invalid_cursor."
-	sessionReachDemoListDescription = "In demo mode a caller that is not an administrator gets the same page: demo visitors share one account, so its other sessions are other visitors'. " +
-		"When the server cannot read whether demo mode is on, such a caller gets 500 internal_error rather than the full page, and an API key of such a caller, which has no session of its own, gets 403 permission_denied."
 	sessionReachDeleteDescription = "A session opened by device sign-in (see listSessions) may revoke only itself: " +
 		"another session of the account is 403 permission_denied, and a session of another account or an unknown id is 404 as for every caller."
 )
+
+// sessionReachDemoListDescription adds demo visitors to listSessions'
+// description: they get the page a session limited to itself gets.
+const sessionReachDemoListDescription = "In demo mode a caller that is not an administrator gets the same page: demo visitors share one account, so its other sessions are other visitors'. " +
+	"When the server cannot read whether demo mode is on, such a caller gets 500 internal_error rather than the full page, and an API key of such a caller, which has no session of its own, gets 403 permission_denied."
 
 // loginSessionIDCursorSort is the listSessions order for a session limited
 // to itself (auth.LimitedToItself). It is part of the cursor scope, so a

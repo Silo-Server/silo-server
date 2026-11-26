@@ -43073,7 +43073,7 @@
             "type": "string"
           },
           "revoke_other_sessions": {
-            "description": "Whether deleteSession may revoke the caller's sessions other than the one making the request. False in demo mode for a caller that is not an administrator, and for a session opened by device sign-in (see listSessions); either may still revoke the current session. Both see the account's other sessions in listSessions by id only",
+            "description": "Whether deleteSession may revoke the caller's sessions other than the one making the request. False in demo mode for a caller that is not an administrator, and for a session opened by device sign-in (see listSessions); either may still revoke the current session",
             "type": "boolean"
           },
           "state": {

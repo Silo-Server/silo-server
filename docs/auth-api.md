@@ -27,7 +27,7 @@ devices and playback sessions. All paths below use `/api/v2`.
 | Operation | Authorization and behavior |
 | --- | --- |
 | `GET /auth/sessions/capabilities` (`getLoginSessionCapabilities`) | Authenticated account. Reports `available`, `last_seen`, `admin_management` and `revoke_other_sessions`, with the standard capability state, permission answer and revision. `revoke_other_sessions` is false in [demo mode](#demo-mode) for a caller that is not an administrator, and for a session opened by device sign-in, which may end only itself. |
-| `GET /auth/sessions` (`listSessions`) | Lists the caller's live, unrevoked login sessions, newest first, with cursor pagination. Account-level access does not require profile selection. A session opened by device sign-in, and in [demo mode](#demo-mode) a caller that is not an administrator, sees another session's item by its `id` and `current` only. |
+| `GET /auth/sessions` (`listSessions`) | Lists the caller's live, unrevoked login sessions, newest first, with cursor pagination. Account-level access does not require profile selection. |
 | `DELETE /auth/sessions/{id}` (`deleteSession`) | Revokes a session owned by the caller. Unknown or another account's session returns 404. Ending another session of the same account is 403 `permission_denied` for a session opened by device sign-in, which may end only itself, and in [demo mode](#demo-mode) for a caller that is not an administrator. |
 | `GET /admin/users/{user_id}/login-sessions` (`listAdminUserLoginSessions`) | Acting admin. Lists a selected account's live login sessions. The cursor is bound to the operation, administrator and target account. |
 | `DELETE /admin/users/{user_id}/login-sessions/{session_id}` (`deleteAdminUserLoginSession`) | Acting admin. Revokes one session of the selected account; 204 on success, 404 for an unknown or mismatched session. |
@@ -1097,17 +1097,17 @@ A visitor cannot:
 
 - change the account password (`changePassword`), and so cannot sign the account out
   everywhere either;
-- link or unlink an external sign-in (`createAccountIdentityLinkTicket`,
-  `startAccountIdentityLink`, `completeAccountIdentityLink`,
-  `linkAccountIdentityWithCredentials`, `linkAccountIdentityWithNetwork`,
-  `deleteAccountIdentity`);
-- end another session of the account (`deleteSession` on any other session);
 - see another session of the account in `listSessions` beyond its `id` and `current`: the
   page is the one a [session opened by device sign-in](#sessions-opened-by-device-sign-in)
   gets, ordered by id, and a cursor from before demo mode was switched on or off is
   `400 invalid_cursor`. When the process has never read the setting, `listSessions` is
   `500 internal_error` for such a caller rather than the full page, and a personal API key of
   the account, which has no session of its own, is `403 permission_denied`;
+- link or unlink an external sign-in (`createAccountIdentityLinkTicket`,
+  `startAccountIdentityLink`, `completeAccountIdentityLink`,
+  `linkAccountIdentityWithCredentials`, `linkAccountIdentityWithNetwork`,
+  `deleteAccountIdentity`);
+- end another session of the account (`deleteSession` on any other session);
 - create or revoke personal API keys, or create, change or delete profiles.
 
 External sign-in enforces the same rule where every linking flow attaches its identity, in

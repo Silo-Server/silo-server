@@ -31035,7 +31035,7 @@ export interface components {
       last_seen: boolean;
       /** @description Opaque revision of this document */
       revision: string;
-      /** @description Whether deleteSession may revoke the caller's sessions other than the one making the request. False in demo mode for a caller that is not an administrator, and for a session opened by device sign-in (see listSessions); either may still revoke the current session. Both see the account's other sessions in listSessions by id only */
+      /** @description Whether deleteSession may revoke the caller's sessions other than the one making the request. False in demo mode for a caller that is not an administrator, and for a session opened by device sign-in (see listSessions); either may still revoke the current session */
       revoke_other_sessions: boolean;
       /**
        * @description Support and configuration state, not health
