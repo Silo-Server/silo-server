@@ -98521,6 +98521,12 @@
       "value": "~~~~~~⟧"
     }
   ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš çĥåñĝé ŵåš ûþđåţéđ åƒţéŕ ýöû öþéñéđ îţ, šö ñöţĥîñĝ ŵåš çļéåŕéđ. Ŕéåđ îţ åĝåîñ îñ ţĥé ļîšţ, ţĥéñ çļéåŕ îţ îƒ ýöû šţîļļ ŵåñţ ţö.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.users.detail.profiles.setEdits.clear": [
     {
       "type": 0,

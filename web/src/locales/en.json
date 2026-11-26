@@ -90609,6 +90609,12 @@
       "value": "date"
     }
   ],
+  "web.admin.users.detail.profiles.setEdits.changedSinceOpened": [
+    {
+      "type": 0,
+      "value": "This change was updated after you opened it, so nothing was cleared. Read it again in the list, then clear it if you still want to."
+    }
+  ],
   "web.admin.users.detail.profiles.setEdits.clear": [
     {
       "type": 0,

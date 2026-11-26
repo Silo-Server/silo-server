@@ -17,6 +17,7 @@
       "set_value": "PG",
       "set_resets": false,
       "clear_applies": true,
+      "etag": "\"pso1-fixture\"",
       "replaced_owner": false
     },
     {
@@ -36,6 +37,7 @@
       "set_value": "set",
       "set_resets": false,
       "clear_applies": false,
+      "etag": "\"pso1-fixture-pin\"",
       "replaced_owner": false
     },
     {

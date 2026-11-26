@@ -171,6 +171,43 @@ it("shows a null setting as the setting's unset label", async () => {
   expect(screen.queryByText(/null/)).toBeNull();
 });
 
+// The clear names the override the owner was shown, so the server can
+// refuse it if what clearing does has changed since.
+it("sends the etag of the record the dialog showed", async () => {
+  mocks.edits = [
+    edit({ etag: '"pso1-shown"' } as never),
+    edit({
+      field: "pin",
+      value: "set",
+      set_value: "set",
+      clear_applies: false,
+      etag: '"pso1-other"',
+    } as never),
+  ];
+  render(<ProfileSetEditsCard user={user} manage />);
+  const dialog = await openClear(/Clear the change to Content rating limit on Kiddo/);
+  await userEvent.click(within(dialog).getByRole("button", { name: "Clear" }));
+  expect(mocks.cleared).toEqual([
+    { kind: "override", profileId: "p-kid", field: "max_content_rating", etag: '"pso1-shown"' },
+  ]);
+});
+
+it("says the change was updated when the server refuses a stale clear", async () => {
+  mocks.edits = [edit({ etag: '"pso1-shown"' } as never)];
+  mocks.outcome = new V2ProblemError("clearAdminUserProfileOverride", {
+    type: "https://siloserver.org/docs/api/v2/problems/precondition_failed",
+    title: "Precondition failed",
+    status: 412,
+  } as never);
+  render(<ProfileSetEditsCard user={user} manage />);
+  const dialog = await openClear(/Clear the change to Content rating limit on Kiddo/);
+  await userEvent.click(within(dialog).getByRole("button", { name: "Clear" }));
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "This change was updated after you opened it, so nothing was cleared.",
+  );
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+});
+
 // A refused clear is explained, not reported as a failure.
 it("explains a name the server refused to put back", async () => {
   mocks.edits = [edit({ field: "name", value: "Kiddo", set_value: "Kid" })];

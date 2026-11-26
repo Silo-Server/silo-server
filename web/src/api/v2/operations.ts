@@ -47,8 +47,6 @@ export const v2Operations = {
   "DELETE /api/v2/admin/users/{id}/identities/{identity_id}": "deleteAdminUserIdentity",
   "DELETE /api/v2/admin/users/{id}/profile-set/hidden/{sync_id}": "clearAdminUserHiddenProfile",
   "DELETE /api/v2/admin/users/{id}/profiles/{profile_id}": "deleteAdminUserProfile",
-  "DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/overrides/{field}":
-    "clearAdminUserProfileOverride",
   "DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/sections":
     "resetAdminUserProfileSectionOverrides",
   "DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/settled-edits/{field}":
@@ -642,6 +640,8 @@ export const v2Operations = {
   "PATCH /api/v2/admin/sections/{id}": "updateAdminSection",
   "PATCH /api/v2/admin/subtitles/{id}": "updateAdminSubtitleMetadata",
   "PATCH /api/v2/admin/users/{id}/profiles/{profile_id}": "updateAdminUserProfile",
+  "PATCH /api/v2/admin/users/{id}/profiles/{profile_id}/overrides/{field}":
+    "clearAdminUserProfileOverride",
   "PATCH /api/v2/collections/groups/{id}": "updateCollectionGroup",
   "PATCH /api/v2/collections/{id}": "updateCollection",
   "PATCH /api/v2/devices/{device_id}": "updateDevice",

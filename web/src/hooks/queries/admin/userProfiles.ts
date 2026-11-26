@@ -179,15 +179,17 @@ export function useAdminUserProfileSetEdits(userId: number, enabled: boolean) {
 /**
  * Why the server refused a clear or dismissal that the card explains in
  * words instead of reporting a failure: the record was already gone (cleared
- * by someone else, or the person changed the field again), or putting the
- * set's name back would give two profiles one name.
+ * by someone else, or the person changed the field again), putting the
+ * set's name back would give two profiles one name, or the override changed
+ * since the owner was shown it (its etag no longer matches).
  */
-export type ProfileSetEditRefusal = "gone" | "nameTaken";
+export type ProfileSetEditRefusal = "gone" | "nameTaken" | "stale";
 
 export function profileSetEditRefusal(err: unknown): ProfileSetEditRefusal | null {
   if (!(err instanceof V2ProblemError)) return null;
   if (err.status === 404) return "gone";
   if (err.status === 409) return "nameTaken";
+  if (err.status === 412) return "stale";
   return null;
 }
 
@@ -200,7 +202,7 @@ function failedUnlessExplained(fallback: MessageKey) {
 
 /** What to clear: an override of one field, or a hidden profile. */
 export type ProfileSetClearTarget =
-  | { kind: "override"; profileId: string; field: string }
+  | { kind: "override"; profileId: string; field: string; etag: string }
   | { kind: "hidden"; syncId: string };
 
 export function useClearAdminUserProfileSetEdit(userId: number) {
@@ -220,8 +222,12 @@ export function useClearAdminUserProfileSetEdit(userId: number) {
           profileContext: authority,
         });
       }
-      return v2("DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/overrides/{field}", {
+      // The etag of the override the owner was shown: the server refuses
+      // the clear (412) if what it would do has changed since.
+      return v2("PATCH /api/v2/admin/users/{id}/profiles/{profile_id}/overrides/{field}", {
         path: { id: String(userId), profile_id: target.profileId, field: target.field },
+        body: { state: "cleared" },
+        headers: { "If-Match": target.etag },
         profileContext: authority,
       });
     },

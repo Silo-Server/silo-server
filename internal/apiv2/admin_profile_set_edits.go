@@ -47,6 +47,7 @@ type AdminProfileSetEdit struct {
 	SetValue      ProfileSetValue           `json:"set_value,omitempty" doc:"The field's value in the person's last accepted set, as the set encodes it (pin is set, keep or clear). Absent when the server holds none, or when set_resets is true" example:"\"\""`
 	SetResets     bool                      `json:"set_resets" doc:"For a setting: the person's set resets it, so the profile inherits" example:"false"`
 	ClearApplies  bool                      `json:"clear_applies" doc:"For an override: clearing it puts the set's value back at once. False for a PIN the set sent as digits or kept (this server never stores digits; the owner's PIN stays until the person's app sends a newer set), for a picture this server doesn't hold, and for a field the set never carried" example:"true"`
+	ETag          string                    `json:"etag,omitempty" doc:"Current validator for this override; send it as If-Match when clearing it (clearAdminUserProfileOverride). It changes whenever what the clear would do changes. Present on override records only" example:"\"pso1-mFzDq0dX7eTsc3m6SfN0Lw\""`
 	ReplacedOwner bool                      `json:"replaced_owner" doc:"For an unmerged edit: it replaced a value the owner had set" example:"false"`
 }
 
@@ -83,6 +84,30 @@ type AdminProfileSetFieldInput struct {
 	Field     string `path:"field" maxLength:"200" pattern:"^(name|picture|pin|is_child|max_content_rating|max_advisory_age|require_advisory_age|requests_blocked|settings\\.[a-z0-9_.]+)$" doc:"An item field name or settings.<key>" example:"max_content_rating"`
 }
 
+// AdminProfileOverrideState is the state clearAdminUserProfileOverride puts
+// an override in. It is a state, not a command, with one value: the route
+// ends an override and nothing else.
+type AdminProfileOverrideState struct {
+	State string `json:"state" enum:"cleared" doc:"cleared: the owner's value no longer applies, and the person's set applies to the field again" example:"cleared"`
+}
+
+// AdminProfileOverrideClearInput is the clearAdminUserProfileOverride
+// request.
+type AdminProfileOverrideClearInput struct {
+	ID          ID     `path:"id" doc:"The account" example:"7"`
+	ProfileID   string `path:"profile_id" minLength:"1" maxLength:"128" doc:"A profile of the account" example:"p-kid"`
+	Field       string `path:"field" maxLength:"200" pattern:"^(name|picture|pin|is_child|max_content_rating|max_advisory_age|require_advisory_age|requests_blocked|settings\\.[a-z0-9_.]+)$" doc:"An item field name or settings.<key>" example:"max_content_rating"`
+	IfMatch     string `header:"If-Match"`
+	IfNoneMatch string `header:"If-None-Match"`
+	RawBody     []byte
+	Body        AdminProfileOverrideState
+}
+
+// overrideETag is the validator of an override: its token, opaque.
+func overrideETag(token string) EntityTag {
+	return EntityTag{Opaque: "pso1-" + token}
+}
+
 // AdminProfileSetHiddenInput addresses a profile the owner removed.
 type AdminProfileSetHiddenInput struct {
 	ID     ID     `path:"id" doc:"The account" example:"7"`
@@ -111,16 +136,36 @@ func registerAdminProfileSetEdits(reg *Registry) {
 		return out, nil
 	})
 
-	override := adminAccountOperation(http.MethodDelete, "/{id}/profiles/{profile_id}/overrides/{field}", "clearAdminUserProfileOverride", false)
+	override := adminAccountOperation(http.MethodPatch, "/{id}/profiles/{profile_id}/overrides/{field}", "clearAdminUserProfileOverride", true)
+	override.GuardedReceipt = true
 	override.Summary = "Clear the owner's override of one field of a profile from the account's app."
-	override.Description = "Puts the value of the person's last accepted set back at once, in one transaction, and the set applies to the field again from then on; nothing it writes counts as an edit here. A PIN the set sent as digits, or kept, can't be put back (this server never stores digits): the PIN stays as the owner set it until the person's app sends a newer set. When the set has no PIN for the profile, clearing removes the owner's PIN at once. A picture this server doesn't hold waits for its upload. For a setting the settings contract mirrors in another key, both keys' overrides are cleared. Putting back a name another profile on the account now has (compared trimmed and without case) is refused with 409 conflict, as the owner's own rename to it is, and nothing is written; the override stays. Then the person's apps are told, where a push can be queued (wake_queued). 404 not_found when the profile has no override of the field, including one the person has since replaced." + adminProfileSetEditsRule
+	override.Description = "Takes {\"state\": \"cleared\"}, the only state an override can be put in: this operation ends an override and does nothing else, and a different change to the override would be a new state added on purpose. " +
+		"Requires If-Match with the override's etag from listAdminUserProfileSetEdits, so the clear does what the owner was shown: a missing If-Match is 428 precondition_required, and an etag that no longer matches (the person's app sent a newer set, the value in force changed, or the override was edited since) is 412 precondition_failed with the current ETag. Either way nothing is written and the override stays. " +
+		"The etag is compared inside the clear's transaction, on the profile rows it has locked, so a set can't land between the check and the write. Refusals come in this order: 404 not_found when the profile has no override of the field (including one the person has since replaced), then 428 and 412, then 409 for a name. " +
+		"Puts the value of the person's last accepted set back at once, in one transaction, and the set applies to the field again from then on; nothing it writes counts as an edit here. A PIN the set sent as digits, or kept, can't be put back (this server never stores digits): the PIN stays as the owner set it until the person's app sends a newer set. When the set has no PIN for the profile, clearing removes the owner's PIN at once. A picture this server doesn't hold waits for its upload. For a setting the settings contract mirrors in another key, both keys' overrides are cleared. Putting back a name another profile on the account now has (compared trimmed and without case) is refused with 409 conflict, as the owner's own rename to it is, and nothing is written; the override stays. " +
+		"Answers a receipt: applied, whether the set's value was written now, and wake_queued, whether this call queued a push telling the person's apps after the clear committed. The clears of a hidden profile and of a settled record restore no value, so they stay unguarded DELETEs." + adminProfileSetEditsRule
 	override.Errors = append(override.Errors, http.StatusConflict, http.StatusNotImplemented)
-	Register(reg, override, func(ctx context.Context, in *AdminProfileSetFieldInput) (*AdminProfileSetClearedOutput, error) {
+	Register(reg, override, func(ctx context.Context, in *AdminProfileOverrideClearInput) (*AdminProfileSetClearedOutput, error) {
+		if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
+			return nil, p
+		}
 		svc, id, p := reg.adminProfileSetEditsTarget(ctx, in.ID)
 		if p != nil {
 			return nil, p
 		}
-		res, err := svc.ClearProfileSetOverride(ctx, handlers.ProfileSetClearCommand{UserID: id, ProfileID: in.ProfileID, Field: in.Field})
+		res, err := svc.ClearProfileSetOverride(ctx, handlers.ProfileSetClearCommand{
+			UserID: id, ProfileID: in.ProfileID, Field: in.Field,
+			Precondition: func(token string) error {
+				tag := overrideETag(token)
+				if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, tag); p != nil {
+					if p.Status == http.StatusPreconditionFailed {
+						return StaleVersionProblem(tag)
+					}
+					return p
+				}
+				return nil
+			},
+		})
 		if err != nil {
 			return nil, adminProfileSetEditsProblem(err)
 		}
@@ -196,6 +241,9 @@ func adminProfileSetEditOf(v handlers.ProfileSetEditView) AdminProfileSetEdit {
 		At: NewInstant(v.At), Value: ProfileSetValue(bytes.Clone(v.Value)), Inherited: v.Inherited,
 		SetValue: ProfileSetValue(bytes.Clone(v.SetValue)), SetResets: v.SetResets, ClearApplies: v.ClearApplies,
 		ReplacedOwner: v.ReplacedOwner,
+	}
+	if v.Token != "" {
+		out.ETag = overrideETag(v.Token).String()
 	}
 	if v.Actor.UserID > 0 {
 		out.Actor = &AdminProfileSetEditActor{ID: ID(strconv.Itoa(v.Actor.UserID)), Username: v.Actor.Username}

@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -20,11 +21,11 @@ func adminProfileSetEditFixtureCases() []fixtureCase {
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminProfileSetEdits"},
 		{name: "admin_profile_override_clear_ok", operationID: "clearAdminUserProfileOverride",
 			scenario: "The owner clears an override: the set's value is back now, and no push could be queued.",
-			method:   http.MethodDelete, path: base + "/profiles/p-kid/overrides/max_content_rating", headers: actingRequestAdmin,
+			method:   http.MethodPatch, path: base + "/profiles/p-kid/overrides/max_content_rating", body: `{"state":"cleared"}`, headers: with(actingRequestAdmin, "If-Match", `"pso1-fixture"`),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminProfileSetCleared"},
 		{name: "admin_profile_override_clear_not_found", operationID: "clearAdminUserProfileOverride",
 			scenario: "A field with no override, such as one the person has since changed themselves.",
-			method:   http.MethodDelete, path: base + "/profiles/p-kid/overrides/pin", headers: actingRequestAdmin,
+			method:   http.MethodPatch, path: base + "/profiles/p-kid/overrides/pin", body: `{"state":"cleared"}`, headers: with(actingRequestAdmin, "If-Match", `"pso1-fixture"`),
 			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Problem"},
 		{name: "admin_profile_hidden_clear_ok", operationID: "clearAdminUserHiddenProfile",
 			scenario: "The owner lets a removed profile come back; it returns with the person's next set, and their phone was told.",
@@ -36,7 +37,7 @@ func adminProfileSetEditFixtureCases() []fixtureCase {
 			status: http.StatusNoContent},
 		{name: "admin_profile_override_clear_name_taken", operationID: "clearAdminUserProfileOverride",
 			scenario: "Putting the set's name back would give two profiles one name, so the clear is refused as the owner's own rename would be, and the override stays.",
-			method:   http.MethodDelete, path: base + "/profiles/p-kid/overrides/name", headers: actingRequestAdmin,
+			method:   http.MethodPatch, path: base + "/profiles/p-kid/overrides/name", body: `{"state":"cleared"}`, headers: with(actingRequestAdmin, "If-Match", `"pso1-fixture"`),
 			status: http.StatusConflict, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Problem"},
 	}
 }
@@ -47,9 +48,9 @@ func (fixtureProfileSets) ListProfileSetEdits(context.Context, int) ([]handlers.
 	person := handlers.ProfileSetEditActor{UserID: 7, Username: "sam"}
 	return []handlers.ProfileSetEditView{
 		{Kind: handlers.ProfileSetEditOverride, SyncID: kid, ProfileID: "p-kid", ProfileName: "Kid", Field: "max_content_rating", By: "owner", Actor: admin, At: at,
-			Value: json.RawMessage(`"G"`), SetValue: json.RawMessage(`"PG"`), ClearApplies: true},
+			Value: json.RawMessage(`"G"`), SetValue: json.RawMessage(`"PG"`), ClearApplies: true, Token: "fixture"},
 		{Kind: handlers.ProfileSetEditOverride, SyncID: kid, ProfileID: "p-kid", ProfileName: "Kid", Field: "pin", By: "owner", Actor: admin, At: at,
-			Value: json.RawMessage(`"set"`), SetValue: json.RawMessage(`"set"`)},
+			Value: json.RawMessage(`"set"`), SetValue: json.RawMessage(`"set"`), Token: "fixture-pin"},
 		{Kind: handlers.ProfileSetEditUnmerged, SyncID: kid, ProfileID: "p-kid", ProfileName: "Kid", Field: "settings.playback.audio_language", By: "account", Actor: person, At: at,
 			Value: json.RawMessage(`"en"`), Inherited: true, SetResets: true, ReplacedOwner: true},
 		{Kind: handlers.ProfileSetEditSettled, SyncID: kid, ProfileID: "p-kid", ProfileName: "Kid", Field: "requests_blocked", By: "account", Actor: person, At: at,
@@ -59,6 +60,14 @@ func (fixtureProfileSets) ListProfileSetEdits(context.Context, int) ([]handlers.
 }
 
 func (fixtureProfileSets) ClearProfileSetOverride(_ context.Context, cmd handlers.ProfileSetClearCommand) (handlers.ProfileSetClearResult, error) {
+	if cmd.Field == "max_content_rating" || cmd.Field == "name" {
+		if cmd.Precondition == nil {
+			return handlers.ProfileSetClearResult{}, errors.New("the route sent no precondition")
+		}
+		if err := cmd.Precondition("fixture"); err != nil {
+			return handlers.ProfileSetClearResult{}, err
+		}
+	}
 	if cmd.Field == "name" {
 		return handlers.ProfileSetClearResult{}, &handlers.APIError{Status: http.StatusConflict, Code: "name_conflict", Message: "A profile with this name already exists"}
 	}
@@ -87,7 +96,7 @@ func TestAdminProfileSetEditsAuthority(t *testing.T) {
 	base := Prefix + "/admin/users/7"
 	routes := []struct{ method, path string }{
 		{http.MethodGet, base + "/profile-set/edits"},
-		{http.MethodDelete, base + "/profiles/p-kid/overrides/max_content_rating"},
+		{http.MethodPatch, base + "/profiles/p-kid/overrides/max_content_rating"},
 		{http.MethodDelete, base + "/profile-set/hidden/6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11"},
 		{http.MethodDelete, base + "/profiles/p-kid/settled-edits/max_content_rating"},
 	}
@@ -95,13 +104,13 @@ func TestAdminProfileSetEditsAuthority(t *testing.T) {
 		requireProblem(t, do(t, h, r.method, r.path, "", bearer(memberToken)), TypePermissionDenied)
 	}
 	seen := deps.ProfileSetEdits.(recordingProfileSetEdits).seen
-	if *seen != (handlers.ProfileSetClearCommand{}) {
+	if seen.UserID != 0 || seen.ProfileID != "" || seen.Field != "" || seen.SyncID != "" {
 		t.Fatalf("a member reached the service: %+v", *seen)
 	}
-	if rec := do(t, h, http.MethodDelete, routes[1].path, "", actingRequestAdmin); rec.Code != http.StatusOK || seen.UserID != 7 || seen.ProfileID != "p-kid" {
+	if rec := do(t, h, http.MethodPatch, routes[1].path, `{"state":"cleared"}`, with(actingRequestAdmin, "If-Match", `"pso1-fixture"`)); rec.Code != http.StatusOK || seen.UserID != 7 || seen.ProfileID != "p-kid" {
 		t.Fatalf("clear: %d %s, command %+v", rec.Code, rec.Body, *seen)
 	}
-	requireProblem(t, do(t, h, http.MethodDelete, base+"/profiles/p-kid/overrides/max_playback_quality", "", actingRequestAdmin), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPatch, base+"/profiles/p-kid/overrides/max_playback_quality", `{"state":"cleared"}`, with(actingRequestAdmin, "If-Match", `"pso1-fixture"`)), TypeValidationFailed)
 }
 
 type recordingProfileSetEdits struct {

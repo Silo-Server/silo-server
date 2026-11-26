@@ -95,7 +95,8 @@ type Pending =
 type Notice =
   | { kind: "cleared"; hidden: boolean; profile: string; woken: boolean }
   | { kind: "nameTaken"; profile: string; name: string }
-  | { kind: "gone" };
+  | { kind: "gone" }
+  | { kind: "stale" };
 
 /**
  * Changes made on this server to profiles that come from the person's app.
@@ -149,6 +150,7 @@ export function ProfileSetEditsCard({ user, manage }: { user: AdminUser; manage:
             kind: "override",
             profileId: edit.profile_id ?? "",
             field: edit.field ?? "",
+            etag: edit.etag ?? "",
           } as const);
     clear.mutate(target, {
       onSuccess: (result) => {
@@ -166,6 +168,10 @@ export function ProfileSetEditsCard({ user, manage }: { user: AdminUser; manage:
           setNotice({ kind: "nameTaken", profile: edit.profile_name, name: setValueText(t, edit) });
         } else if (refusal === "gone") {
           setNotice({ kind: "gone" });
+        } else if (refusal === "stale") {
+          // The list refetches after every clear; the dialog closes so the
+          // owner reads the current record before clearing again.
+          setNotice({ kind: "stale" });
         }
         if (refusal !== null) setPending(null);
       },
@@ -225,6 +231,7 @@ export function ProfileSetEditsCard({ user, manage }: { user: AdminUser; manage:
 
 function noticeText(t: Translate, notice: Notice, name: string): string {
   if (notice.kind === "gone") return t(`${P}.alreadyCleared`, { name });
+  if (notice.kind === "stale") return t(`${P}.changedSinceOpened`);
   if (notice.kind === "nameTaken") {
     return t(`${P}.nameTaken`, { profile: notice.profile, name: notice.name });
   }

@@ -6420,14 +6420,14 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /**
-     * Clear the owner's override of one field of a profile from the account's app.
-     * @description Puts the value of the person's last accepted set back at once, in one transaction, and the set applies to the field again from then on; nothing it writes counts as an edit here. A PIN the set sent as digits, or kept, can't be put back (this server never stores digits): the PIN stays as the owner set it until the person's app sends a newer set. When the set has no PIN for the profile, clearing removes the owner's PIN at once. A picture this server doesn't hold waits for its upload. For a setting the settings contract mirrors in another key, both keys' overrides are cleared. Putting back a name another profile on the account now has (compared trimmed and without case) is refused with 409 conflict, as the owner's own rename to it is, and nothing is written; the override stays. Then the person's apps are told, where a push can be queued (wake_queued). 404 not_found when the profile has no override of the field, including one the person has since replaced. Only the server Owner may change the Owner's or another admin account's profiles (403 permission_denied otherwise). 501 capability_unsupported where profiles are not kept in PostgreSQL.
-     */
-    delete: operations["clearAdminUserProfileOverride"];
+    delete?: never;
     options?: never;
     head?: never;
-    patch?: never;
+    /**
+     * Clear the owner's override of one field of a profile from the account's app.
+     * @description Takes {"state": "cleared"}, the only state an override can be put in: this operation ends an override and does nothing else, and a different change to the override would be a new state added on purpose. Requires If-Match with the override's etag from listAdminUserProfileSetEdits, so the clear does what the owner was shown: a missing If-Match is 428 precondition_required, and an etag that no longer matches (the person's app sent a newer set, the value in force changed, or the override was edited since) is 412 precondition_failed with the current ETag. Either way nothing is written and the override stays. The etag is compared inside the clear's transaction, on the profile rows it has locked, so a set can't land between the check and the write. Refusals come in this order: 404 not_found when the profile has no override of the field (including one the person has since replaced), then 428 and 412, then 409 for a name. Puts the value of the person's last accepted set back at once, in one transaction, and the set applies to the field again from then on; nothing it writes counts as an edit here. A PIN the set sent as digits, or kept, can't be put back (this server never stores digits): the PIN stays as the owner set it until the person's app sends a newer set. When the set has no PIN for the profile, clearing removes the owner's PIN at once. A picture this server doesn't hold waits for its upload. For a setting the settings contract mirrors in another key, both keys' overrides are cleared. Putting back a name another profile on the account now has (compared trimmed and without case) is refused with 409 conflict, as the owner's own rename to it is, and nothing is written; the override stays. Answers a receipt: applied, whether the set's value was written now, and wake_queued, whether this call queued a push telling the person's apps after the clear committed. The clears of a hidden profile and of a settled record restore no value, so they stay unguarded DELETEs. Only the server Owner may change the Owner's or another admin account's profiles (403 permission_denied otherwise). 501 capability_unsupported where profiles are not kept in PostgreSQL.
+     */
+    patch: operations["clearAdminUserProfileOverride"];
     trace?: never;
   };
   "/api/v2/admin/users/{id}/profiles/{profile_id}/sections": {
@@ -23049,6 +23049,14 @@ export interface components {
       /** Format: int64 */
       write_bytes?: number;
     };
+    AdminProfileOverrideState: {
+      /**
+       * @description cleared: the owner's value no longer applies, and the person's set applies to the field again
+       * @example cleared
+       * @enum {string}
+       */
+      state: "cleared";
+    };
     AdminProfileSetCleared: {
       /**
        * @description Whether the set's value was written now. Always false for a hidden profile, which comes back with the next newer set
@@ -23080,6 +23088,11 @@ export interface components {
        * @example true
        */
       clear_applies: boolean;
+      /**
+       * @description Current validator for this override; send it as If-Match when clearing it (clearAdminUserProfileOverride). It changes whenever what the clear would do changes. Present on override records only
+       * @example "pso1-mFzDq0dX7eTsc3m6SfN0Lw"
+       */
+      etag?: string;
       /**
        * @description An item field name or settings.<key>, as getProfileSet names it; absent for a removed profile. An open string
        * @example max_content_rating
@@ -98849,7 +98862,11 @@ export interface operations {
   clearAdminUserProfileOverride: {
     parameters: {
       query?: never;
-      header?: {
+      header: {
+        /** @description The resource's current ETag, or "*" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag. */
+        "If-Match": string;
+        /** @description Optional second precondition, evaluated after If-Match succeeds: "*" or any tag matching the current representation is 412 precondition_failed with the current ETag. */
+        "If-None-Match"?: string;
         /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
         "X-Profile-Id"?: string;
         /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
@@ -98865,7 +98882,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminProfileOverrideState"];
+      };
+    };
     responses: {
       /** @description OK */
       200: {
@@ -98921,6 +98942,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Conflict */
       409: {
         headers: {
@@ -98930,8 +98960,46 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Unprocessable Entity */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
         headers: {
           [name: string]: unknown;
         };

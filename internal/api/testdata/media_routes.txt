@@ -535,7 +535,7 @@ POST /api/v2/admin/users/{id}/profiles	non-media
 DELETE /api/v2/admin/users/{id}/profiles/{profile_id}	non-media
 GET /api/v2/admin/users/{id}/profiles/{profile_id}	non-media
 PATCH /api/v2/admin/users/{id}/profiles/{profile_id}	non-media
-DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/overrides/{field}	non-media
+PATCH /api/v2/admin/users/{id}/profiles/{profile_id}/overrides/{field}	non-media
 DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
 GET /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
 PUT /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
@@ -1653,7 +1653,7 @@ POST /api/v2/admin/users/{id}/profiles	non-media
 DELETE /api/v2/admin/users/{id}/profiles/{profile_id}	non-media
 GET /api/v2/admin/users/{id}/profiles/{profile_id}	non-media
 PATCH /api/v2/admin/users/{id}/profiles/{profile_id}	non-media
-DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/overrides/{field}	non-media
+PATCH /api/v2/admin/users/{id}/profiles/{profile_id}/overrides/{field}	non-media
 DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
 GET /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
 PUT /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
