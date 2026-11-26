@@ -671,6 +671,9 @@ func (r *UserRepository) CompareAndSwapPassword(ctx context.Context, id int, exp
 // only keepSessionID, the session that chose the new password.
 func (r *UserRepository) ReplaceTemporaryPassword(ctx context.Context, id int, expectedHash, newPassword, keepSessionID string) error {
 	return r.compareAndSwapPassword(ctx, id, expectedHash, newPassword, func(tx pgx.Tx) error {
+		if err := lockIdentitiesBeforeSessions(ctx, tx, id, false); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE auth_sessions SET revoked_at = NOW()
 			WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL`, id, keepSessionID); err != nil {

@@ -321,6 +321,8 @@
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestPasswordSignInForDB
 ./internal/auth TestCreatePersonalAPIKeyDB
+./internal/auth TestAccountSignInChangesDuringPluginUninstallDB
+./internal/auth TestExpiredSessionCleanupSkipsHeldRequestDB
 ./internal/auth TestAPIKeyCreationRefusesRevokedCredentialDB
 ./internal/auth TestPasswordSignInForRoutesDB
 ./internal/auth TestExternalAccountCannotPreemptInitialSetupDB
