@@ -44,7 +44,12 @@ var (
 type ProfileSetFieldError struct {
 	Location string
 	// Code is the validation code: invalid, required for a member left out,
-	// or name_conflict for a name a profile outside the set already uses.
+	// or name_conflict for a name that two profiles would share: two items of
+	// the set named alike, an item named like a profile outside the set, or
+	// one named like a name the owner gave another of the set's profiles.
+	// A set that names two items alike is well formed; the server alone
+	// decides whether two names are the same, so the clash is judged with
+	// the household, after the version, like any other.
 	Code    string
 	Message string
 }
@@ -147,11 +152,6 @@ func parseProfileSet(set, pairs json.RawMessage, editsSeen string) (*profileSetD
 			return nil, profileSetFieldError(fmt.Sprintf("set.items[%d].sync_id", i), "Two items have this sync_id.")
 		}
 		syncIDs[item.SyncID] = true
-		for _, earlier := range doc.Items {
-			if sameProfileName(earlier.Name, item.Name) {
-				return nil, profileSetFieldError(fmt.Sprintf("set.items[%d].name", i), "Two items have this name.")
-			}
-		}
 		doc.Items = append(doc.Items, item)
 	}
 	if doc.Pairs, err = parseProfileSetPairs(pairs, syncIDs); err != nil {

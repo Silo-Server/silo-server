@@ -25,6 +25,10 @@ type contextKey string
 // claimsKey is the context key for storing JWT claims.
 const claimsKey contextKey = "claims"
 
+// mustChangePasswordKey marks a request AttachSession left anonymous only
+// because its session must change its temporary password.
+const mustChangePasswordKey contextKey = "must_change_password"
+
 // SessionValidator checks a login session on every access-token request.
 // ActiveSession reports whether the session is still active (not revoked or
 // expired) and owned by userID, the account the token names, and returns its
@@ -244,10 +248,17 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 // lets the request through anonymously: a missing, invalid or expired token,
 // a revoked session, an API key, a session restricted to changing its
 // temporary password, or a session check that cannot run all leave it
-// anonymous. It never refuses a request.
+// anonymous. It never refuses a request. A token set aside only because its
+// session must change its temporary password (the token and its session
+// otherwise valid) leaves a mark that SessionMustChangePassword reads, so a
+// route that needs a session can say so instead of "signed out".
 func (am *AuthMiddleware) AttachSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if claims := am.sessionClaims(r); claims != nil {
+		claims, mustChangePassword := am.sessionClaims(r)
+		if mustChangePassword {
+			r = r.WithContext(context.WithValue(r.Context(), mustChangePasswordKey, true))
+		}
+		if claims != nil {
 			profileedits.FromContext(r.Context()).SetActor(claims.UserID, claims.Role == models.RoleAdmin, claims.ImpersonatorUserID)
 			if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 				uid := claims.UserID
@@ -262,32 +273,43 @@ func (am *AuthMiddleware) AttachSession(next http.Handler) http.Handler {
 }
 
 // sessionClaims returns the claims of r's access token when it belongs to an
-// active login session, or nil.
-func (am *AuthMiddleware) sessionClaims(r *http.Request) *auth.Claims {
+// active login session, or nil. mustChangePassword reports a token that
+// passed every check and was set aside only because its session must change
+// its temporary password; its claims are not returned.
+func (am *AuthMiddleware) sessionClaims(r *http.Request) (claims *auth.Claims, mustChangePassword bool) {
 	token, ok := extractBearerToken(r)
 	if !ok || strings.HasPrefix(token, "sa_") {
-		return nil
+		return nil, false
 	}
 	claims, err := am.tokenValidator.ValidateToken(token)
-	if err != nil || claims == nil || claims.UserID <= 0 || claims.TokenType != auth.TokenTypeAccess ||
-		claims.PasswordChangeRequired {
-		return nil
+	if err != nil || claims == nil || claims.UserID <= 0 || claims.TokenType != auth.TokenTypeAccess {
+		return nil, false
 	}
 	authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID, claims.UserID)
 	if err != nil || !active {
-		return nil
+		return nil, false
 	}
 	if authority.IsRemotePlayback() {
 		// Public routes take no profile and no allowlist; the narrowed
 		// claims are not the account's own login session.
 		authority.Narrow(claims)
 	} else if authority.Role != claims.Role {
-		return nil
+		return nil, false
+	}
+	if claims.PasswordChangeRequired {
+		return nil, true
 	}
 	claims.SessionKind = authority.Kind
 	claims.GrantedAppKeyID = authority.GrantedAppKeyID
 	am.sessionLastSeen.Touch(claims.SessionID)
-	return claims
+	return claims, false
+}
+
+// SessionMustChangePassword reports whether AttachSession left the request
+// anonymous only because its session must change its temporary password.
+func SessionMustChangePassword(ctx context.Context) bool {
+	marked, _ := ctx.Value(mustChangePasswordKey).(bool)
+	return marked
 }
 
 // passwordChangeRoutes are the only routes a session holding a temporary

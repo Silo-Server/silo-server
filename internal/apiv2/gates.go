@@ -342,8 +342,7 @@ func (d *denialWriter) problem() *Problem {
 	case apimw.CodePasswordChangeRequired:
 		// Clients route to the password change on this type rather than
 		// treating the refusal as a missing permission.
-		p = NewProblem(TypePasswordChangeRequired,
-			"The account holds a temporary password; change it, then refresh the session.")
+		p = passwordChangeRequiredProblem()
 	case legacyForbiddenCode, legacyDemoRestrictedCode:
 		p = NewProblem(TypePermissionDenied, safeDetail(legacy.Message, "The caller is not permitted to perform this operation."))
 	case TypeNotFound.ID:
@@ -679,4 +678,11 @@ func structuredMediaTypeOK(ct string) bool {
 		}
 	}
 	return true
+}
+
+// passwordChangeRequiredProblem is the 403 for a session that must change its
+// temporary password before anything else.
+func passwordChangeRequiredProblem() *Problem {
+	return NewProblem(TypePasswordChangeRequired,
+		"The account holds a temporary password; change it, then refresh the session.")
 }

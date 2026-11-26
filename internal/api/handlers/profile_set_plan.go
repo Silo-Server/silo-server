@@ -38,6 +38,24 @@ type profileSetPlan struct {
 // the set cannot place its first item on: stored data a set can't apply to.
 var ErrProfileSetNoPrimary = errors.New("the household has profiles but no primary profile")
 
+// checkProfileSetItemNames refuses a set two of whose items have one name,
+// judged on the names the set gives, over all its items: an item left off
+// for the limit or hidden by the owner counts, and so does one whose
+// profile keeps a name the owner gave it here, since clearing that name
+// would bring the clash back with nobody sending anything. The later item is
+// the one refused.
+func checkProfileSetItemNames(doc *profileSetDoc) error {
+	for i, item := range doc.Items {
+		for _, earlier := range doc.Items[:i] {
+			if sameProfileName(earlier.Name, item.Name) {
+				return &ProfileSetFieldError{Location: fmt.Sprintf("set.items[%d].name", i), Code: "name_conflict",
+					Message: "Two items of the set have this name; rename one."}
+			}
+		}
+	}
+	return nil
+}
+
 // planProfileSet maps the set onto rows, pure. The first item is always the
 // primary profile; the rest match a row by sync ID, then by pairs, and are
 // otherwise new. Rows holding a sync ID the set no longer has are removed,
@@ -45,7 +63,9 @@ var ErrProfileSetNoPrimary = errors.New("the household has profiles but no prima
 // is under limit (0 = none); the rest are left off, and nothing is deleted
 // to fit. Names are judged on the household as the set leaves it, names
 // the owner set here kept, and a clash goes in plan.refusal rather than
-// failing the plan. An item after the first whose sync ID the owner
+// failing the plan. Of the refusals, two items of the set named alike
+// comes first, being about the set alone; then the main profile taking a
+// sync ID the owner removed; then a clash with the household. An item after the first whose sync ID the owner
 // removed here, and that no profile here holds, is hidden: its pair, if
 // any, is ignored.
 func planProfileSet(doc *profileSetDoc, rows []userstore.ProfileSetRow, limit int, edits profileSetEdits) (*profileSetPlan, error) {
@@ -77,9 +97,11 @@ func planProfileSet(doc *profileSetDoc, rows []userstore.ProfileSetRow, limit in
 	}
 	claimed := map[string]bool{}
 	isHidden := func(i int) bool { return i > 0 && hidden[doc.Items[i].SyncID] && bySyncID[doc.Items[i].SyncID] == nil }
+	// Two items of one name are refused first: that is about the set alone.
+	plan.refusal = checkProfileSetItemNames(doc)
 	// The main profile can't take a sync ID the owner removed here: the
 	// removal would stop hiding it, and a later set could bring it back.
-	if first := doc.Items[0].SyncID; hidden[first] && bySyncID[first] == nil {
+	if first := doc.Items[0].SyncID; plan.refusal == nil && hidden[first] && bySyncID[first] == nil {
 		plan.refusal = profileSetFieldError("set.items[0].sync_id", "The owner of this server removed the profile with this sync_id here; the main profile can't take it.")
 	}
 	for i, item := range doc.Items {
@@ -167,8 +189,8 @@ func planProfileSetRow(
 // profiles, judged on final, the names the set's profiles will have (each
 // item's name, or the name the owner gave its profile here): a profile of
 // the set named like a profile outside it, or two profiles of the set named
-// alike, which only an owner's rename can cause, since the items' own names
-// are unique. Of two items that clash, the one refused at its name is the one
+// alike, which only an owner's rename can cause, since a set whose items'
+// own names clash was refused before this (checkProfileSetItemNames). Of two items that clash, the one refused at its name is the one
 // whose name comes from the set, since renaming the item the owner renamed
 // changes nothing; the later one when both do. Duplicates among the profiles
 // outside the set are not the set's to judge.
