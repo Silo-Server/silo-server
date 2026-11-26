@@ -71,9 +71,10 @@ func TestRedeemSignInLinkDB(t *testing.T) {
 	})
 
 	// The switch is read inside the redemption: app key sign-in off, or demo
-	// mode on, answers the set-password token only. A caller that couldn't
-	// hand a code out while keys are on is refused and the link stays
-	// unspent.
+	// mode on, answers the set-password token only. Either turned on after
+	// the link was made, and the token still sets the password, as a password
+	// reset link completes in demo mode. A caller that couldn't hand a code
+	// out while keys are on is refused and the link stays unspent.
 	for _, tc := range []struct{ name, key, value string }{
 		{"app key sign-in off", config.AuthAppKeySignInSettingKey, "false"},
 		{"demo mode on", demomode.SettingKey, "true"},
@@ -84,6 +85,9 @@ func TestRedeemSignInLinkDB(t *testing.T) {
 			got, err := env.signIn.RedeemSignInLink(ctx, issued.Token, true)
 			if err != nil || got.AppCode != nil || got.NoCode != NoCodeAppKeysOff || got.SetPasswordToken == "" {
 				t.Fatalf("redeem = %+v, %v", got, err)
+			}
+			if _, err := env.signIn.SetPasswordWithSignInLink(ctx, got.SetPasswordToken, "a fine new password"); err != nil {
+				t.Fatalf("set-password: %v", err)
 			}
 		})
 	}
@@ -466,6 +470,64 @@ func TestRedeemSignInLinkReadsSwitchInTransactionDB(t *testing.T) {
 	got := <-done
 	if got.err != nil || got.got.AppCode != nil || got.got.NoCode != NoCodeAppKeysOff || got.got.SetPasswordToken == "" {
 		t.Fatalf("redeem = %+v, %v; want the set-password token only, app_keys_off", got.got, got.err)
+	}
+}
+
+// App key sign-in turned off after the route admitted a sign-in link code's
+// redeem is the answer's too: the redeem reads the switch under the settings
+// lock, refuses with ErrAppKeysOff before any key or session is written, and
+// the code stays unspent. Regression guard: only the route's read, before the
+// transaction, judged the switch, so this enrolled the keys.
+func TestRedeemSignInLinkCodeReadsSwitchInTransactionDB(t *testing.T) {
+	env := newKeyEnv(t, "signinlinkcodeswitchtx")
+	ctx := t.Context()
+	user := env.localAccount(t, "linkcode-switchtx", models.RoleUser)
+	t.Cleanup(saveSettings(t, env.pool, config.AuthAppKeySignInSettingKey))
+	env.setSetting(t, config.AuthAppKeySignInSettingKey, "true")
+	got, err := env.signIn.RedeemSignInLink(ctx, env.issueLink(t, user).Token, true)
+	if err != nil || got.AppCode == nil {
+		t.Fatalf("link redeem = %+v, %v", got, err)
+	}
+
+	holder, err := env.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // committed below
+	var holderPID uint32
+	if err := holder.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holderPID); err != nil {
+		t.Fatal(err)
+	}
+	if err := lockServerSettings(ctx, holder); err != nil {
+		t.Fatal(err)
+	}
+	person, device := newTestKey(t), newTestKey(t)
+	request := env.request(t, message{purpose: appkeys.PurposeRedeem, signer: person, device: &device, fields: map[string]any{"code": got.AppCode.Code}})
+	done := make(chan error, 1)
+	go func() {
+		_, err := env.signIn.RedeemAppCode(ctx, KeyRedeemRequest{KeyRequest: request, PersonKey: person.pub})
+		done <- err
+	}()
+	waitBlockedBy(t, env, holderPID)
+	if _, err := holder.Exec(ctx, `INSERT INTO server_settings (key, value) VALUES ($1, 'false')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, config.AuthAppKeySignInSettingKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; !errors.Is(err, ErrAppKeysOff) {
+		t.Fatalf("code redeem = %v, want ErrAppKeysOff", err)
+	}
+	var spent bool
+	var keys int
+	if err := env.pool.QueryRow(ctx, `SELECT
+		(SELECT redeemed_at IS NOT NULL FROM auth_app_codes WHERE user_id = $1 AND kind = 'sign_in_link'),
+		(SELECT COUNT(*) FROM auth_person_keys WHERE user_id = $1)`, user.ID).Scan(&spent, &keys); err != nil {
+		t.Fatal(err)
+	}
+	if spent || keys != 0 {
+		t.Fatalf("code spent = %v, person keys = %d; want the code unspent and no key", spent, keys)
 	}
 }
 

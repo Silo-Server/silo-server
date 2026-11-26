@@ -63,7 +63,10 @@ export default function SignInLink() {
   // A second press, or a second render's handler, must not redeem again:
   // the first redeem spent the link.
   const busy = useRef(false);
-  const holding = stage.kind === "redeemed";
+  // From Continue until the answer settles the link may already be spent, so
+  // the page asks before it is left then too; after a handled failure it
+  // holds nothing.
+  const holding = stage.kind === "redeemed" || pending;
   useEffect(() => {
     if (!holding) return;
     const ask = (event: BeforeUnloadEvent) => event.preventDefault();
@@ -197,6 +200,7 @@ export default function SignInLink() {
         {t("web.ui.continue")}
       </Button>
       <SignInHint />
+      <LeaveDialog blocker={leave} />
     </AuthCard>
   );
 }

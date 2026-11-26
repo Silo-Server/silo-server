@@ -340,11 +340,13 @@ only, as a reset link's does. The architecture is in
   `server_address` and `link_allowed` (always `false`) come together while
   `auth.app_key_sign_in` is on, the server is not in demo mode, and the account is
   not an administrator's when the link is redeemed. Otherwise the answer has only
-  `set_password_token` and `no_code_reason`: `app_keys_off`, or `administrator`
-  (a link gives an administrator the password route only and enrolls no key; the
-  person sets a password, signs in on the site and uses `createAppCode` there).
-  The role is the one at redeem: an administrator demoted since the link was made
-  gets a code. `set_password_token` comes with every successful redeem, which
+  `set_password_token` and `no_code_reason`: `administrator` (a link gives an
+  administrator the password route only and enrolls no key; the person sets a
+  password, signs in on the site and uses `createAppCode` there), or
+  `app_keys_off` for an account that is not an administrator's. When both apply,
+  `administrator` is sent. The role is the one at redeem: an administrator
+  demoted since the link was made gets a code when the app-code path is
+  available (app keys on, not demo mode). `set_password_token` comes with every successful redeem, which
   happens only for an account that may sign in with a local password on this
   server (a break-glass account always, so also while the switch is off); it lives
   an hour, never past the link, and works once. The link is spent in the

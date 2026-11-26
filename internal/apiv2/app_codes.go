@@ -175,6 +175,11 @@ func (reg *Registry) redeemAppCode(ctx context.Context, in *RedeemAppCodeInput) 
 		return nil, err
 	}
 	answer, err := svc.RedeemAppCode(withClientDevice(ctx), auth.KeyRedeemRequest{KeyRequest: req, PersonKey: personKey})
+	if errors.Is(err, auth.ErrAppKeysOff) {
+		// The switch went off after appKeysOn admitted the request: the
+		// same refusal.
+		return nil, CapabilityProblem(StateDisabled, appKeyDomain)
+	}
 	if p := appCodeConflict(err); p != nil {
 		return nil, p
 	}

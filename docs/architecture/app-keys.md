@@ -909,7 +909,9 @@ the account are locked in id order before the link is stored, as a reset
 link's issue does, so a promotion or ownership move that commits first is
 judged. A link follows the set-password action: an account a sign-in provider
 manages, with its own password sign-in off, can have its password set by an
-administrator, so it can have a link too. A new or replacing person key and
+administrator, so it can have a link too, as long as it passes the
+local-password rule under "Refused where local passwords can't be used" below
+(a network sign-in provider's refusal stops it). A new or replacing person key and
 its device start unbound (the account's own person key sent again keeps its
 provider binding), and setting a password with it turns the account's local
 sign-in on: an
@@ -921,7 +923,8 @@ their set-password does, and no more quietly. A disabled account gets no link.
 the answer and the email alike, so it opens wherever the person is. A server
 with no public URL refuses to make one (409 `capability_not_configured`), as it
 refuses a reset link; it never falls back to the address the administrator's
-request arrived on. An email goes to the address the account has when the link
+request arrived on. On a server whose public URL is `http://`, a sign-in link
+travels as a password reset link does, without transport protection. An email goes to the address the account has when the link
 is stored: an address changed since the administrator's page read it is
 refused (409 `conflict`), as a reset link's issue refuses it.
 

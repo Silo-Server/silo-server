@@ -58606,7 +58606,7 @@
             "type": "boolean"
           },
           "no_code_reason": {
-            "description": "Present when code is absent, saying why: app_keys_off while auth.app_key_sign_in is off or the server is in demo mode; administrator when the account is an administrator's at the moment of redeeming, where a link gives the password route only (set a password, sign in on the server's site, then use createAppCode from that session). A client that does not know a value treats it as no code",
+            "description": "Present when code is absent, saying why: administrator when the account is an administrator's at the moment of redeeming, where a link gives the password route only (set a password, sign in on the server's site, then use createAppCode from that session); app_keys_off, for an account that is not an administrator's, while auth.app_key_sign_in is off or the server is in demo mode. When both apply, administrator is sent. A client that does not know a value treats it as no code",
             "enum": [
               "app_keys_off",
               "administrator"
@@ -163535,7 +163535,7 @@
     },
     "/api/v2/auth/sign-in-links/redeem": {
       "post": {
-        "description": "The sign-in link page calls this when the person presses Continue, never on load: the link works once. The answer has one of two shapes: code, expires_in, server_address and link_allowed (false) together, with set_password_token when the account may set a password; or set_password_token and no_code_reason alone. The server sends no other shape. In one transaction the link is spent and, on the app-code path (not for an administrator's account, not while app keys are off or the server is in demo mode, read inside that transaction), an app code of its own kind is made for the account; of two redemptions exactly one succeeds. The code enrolls a person key and a device key at redeemAppCode: a new or replacing person key and its device start unbound to any sign-in provider, while the account's own person key sent again keeps its provider binding and its device takes it; the person key replaces a different one the account holds (person_key replaced in the sealed answer), which is revoked with the devices it introduced that wait for approval, while devices already enrolled keep their keys. For an account that is an administrator's at the moment of redeeming (judged under the account lock in the transaction that spends the link, so an account demoted since the link was made gets a code) the answer has only set_password_token and no_code_reason administrator, and no key is enrolled: the person sets a password, signs in on this server's site, and opens the app from there with createAppCode. While auth.app_key_sign_in is off, or the server is in demo mode, the answer has only set_password_token and no_code_reason app_keys_off. An unknown, used or expired link, and one whose account is disabled, is 404 not_found. For an account that may not sign in with a local password on this server (it is not break-glass, and local password sign-in is off or a network sign-in provider refuses it) it is 409 provider_sign_in_required (the switch off) or 403 not_permitted (a network identity provider refuses it), and the link stays unspent. Spends the per-address password_reset rate-limit budget. Audited as user.sign_in_link_redeemed. The response is no-store.",
+        "description": "The sign-in link page calls this when the person presses Continue, never on load: the link works once. The answer has one of two shapes: code, expires_in, server_address and link_allowed (false) together, with set_password_token when the account may set a password; or set_password_token and no_code_reason alone. The server sends no other shape. In one transaction the link is spent and, on the app-code path (not for an administrator's account, not while app keys are off or the server is in demo mode, read inside that transaction), an app code of its own kind is made for the account; of two redemptions exactly one succeeds. The code enrolls a person key and a device key at redeemAppCode: a new or replacing person key and its device start unbound to any sign-in provider, while the account's own person key sent again keeps its provider binding and its device takes it; the person key replaces a different one the account holds (person_key replaced in the sealed answer), which is revoked with the devices it introduced that wait for approval, while devices already enrolled keep their keys. For an account that is an administrator's at the moment of redeeming (judged under the account lock in the transaction that spends the link, so an account demoted since the link was made gets a code when the app-code path is available: app keys on and the server not in demo mode) the answer has only set_password_token and no_code_reason administrator, and no key is enrolled: the person sets a password, signs in on this server's site, and opens the app from there with createAppCode. While auth.app_key_sign_in is off, or the server is in demo mode, the answer for an account that is not an administrator's has only set_password_token and no_code_reason app_keys_off; when both apply, no_code_reason is administrator. An unknown, used or expired link, and one whose account is disabled, is 404 not_found. For an account that may not sign in with a local password on this server (it is not break-glass, and local password sign-in is off or a network sign-in provider refuses it) it is 409 provider_sign_in_required (the switch off) or 403 not_permitted (a network identity provider refuses it), and the link stays unspent. Spends the per-address password_reset rate-limit budget. Audited as user.sign_in_link_redeemed. The response is no-store.",
         "operationId": "redeemSignInLink",
         "requestBody": {
           "content": {
@@ -163656,7 +163656,15 @@
                 }
               }
             },
-            "description": "Too Many Requests"
+            "description": "Too Many Requests",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "500": {
             "content": {
@@ -163676,7 +163684,15 @@
                 }
               }
             },
-            "description": "Service Unavailable"
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "summary": "Trade a sign-in link for a set-password token and, on the app-code path, an app code.",
@@ -163804,7 +163820,15 @@
                 }
               }
             },
-            "description": "Too Many Requests"
+            "description": "Too Many Requests",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "500": {
             "content": {
@@ -163824,7 +163848,15 @@
                 }
               }
             },
-            "description": "Service Unavailable"
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "summary": "Set the account's password with a redeemed sign-in link's token.",

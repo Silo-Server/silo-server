@@ -223,3 +223,36 @@ it("asks before an in-app navigation leaves a held result, and not after the pas
   expect(await screen.findByText("Ordinary login")).toBeTruthy();
   expect(screen.queryByRole("alertdialog")).toBeNull();
 });
+
+// From Continue until the redemption settles the link may already be spent,
+// so navigation is asked about then too; a handled failure holds nothing, and
+// the page lets the person leave.
+it("asks before leaving while the redemption is pending, and not after a handled failure", async () => {
+  let answer: (response: Response) => void = () => {};
+  redeem = () => new Promise<Response>((resolve) => (answer = resolve));
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+  await waitFor(() => expect(redeems()).toHaveLength(1));
+  await act(async () => {
+    void router.navigate("/login");
+  });
+  expect(await screen.findByRole("alertdialog")).toHaveTextContent("Leave this page?");
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(router.state.location.pathname).toBe("/sign-in-link");
+  await act(async () => answer(json(redeemed)));
+  expect(await screen.findByText(redeemed.code)).toBeTruthy();
+
+  cleanup();
+  redeem = () => new Promise<Response>((resolve) => (answer = resolve));
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+  await waitFor(() => expect(redeems()).toHaveLength(2));
+  await act(async () => answer(new Response(null, { status: 500 })));
+  await screen.findByRole("alert");
+  await act(async () => {
+    void router.navigate("/login");
+  });
+  expect(await screen.findByText("Ordinary login")).toBeTruthy();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+});

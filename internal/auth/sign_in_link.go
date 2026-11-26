@@ -53,6 +53,11 @@ var (
 	// ErrSignInLinkAccountChanged refuses a link to be emailed when the
 	// account's address changed since the caller read it.
 	ErrSignInLinkAccountChanged = errors.New("the account's email address changed while the link was made")
+	// ErrAppKeysOff refuses a sign-in link's app code when app key sign-in
+	// went off (or demo mode on) after the route admitted the request, read
+	// inside the redeem's transaction; the code stays unspent. The route
+	// answers it as its own switch refusal.
+	ErrAppKeysOff = errors.New("app key sign-in is off")
 	// ErrScopedKeyAdminCredentials refuses a scoped API key handing out a
 	// way into an administrator's account, as it may not set one's password.
 	ErrScopedKeyAdminCredentials = errors.New("a scoped API key may not change an admin account's credentials")
@@ -526,9 +531,10 @@ func (a *AppKeySignIn) SetPasswordWithSignInLink(ctx context.Context, token, new
 // A new or replacing person key and its device are bound to no provider;
 // the account's own person key sent again keeps its provider binding, and
 // the device enrolled under it takes that binding, as a device it introduces
-// does. An administrator's account is refused. Lock order: the account, the
-// code, the settings or the provider locks, the person key, the device keys
-// and sessions.
+// does. An administrator's account is refused, and so is the code while app
+// key sign-in is off, read under the settings lock. Lock order: the account,
+// the code, the settings lock, the provider locks, the person key, the device
+// keys and sessions.
 func (a *AppKeySignIn) redeemSignInLinkCode(ctx context.Context, req KeyRedeemRequest, payload *appkeys.Payload, hash []byte, code appCodeRow, out *KeySignInResult) (*auditmutation.Entry, error) {
 	binding, err := ownPersonKeyBinding(ctx, a.pool, *code.userID, req.PersonKey)
 	if err != nil {
@@ -551,6 +557,20 @@ func (a *AppKeySignIn) redeemSignInLinkCode(ctx context.Context, req KeyRedeemRe
 		}
 		if err := spendAppCode(ctx, tx, hash); err != nil {
 			return err
+		}
+		// The route read the switch before this transaction; a change
+		// committed since is read here, under the settings lock every settings
+		// write takes, before any key or session is written. The refusal rolls
+		// the spend back. The session and join codes still rely on the route's
+		// read; when every key path re-reads the switch under this lock, this
+		// becomes that one function.
+		if err := lockServerSettings(ctx, tx); err != nil {
+			return err
+		}
+		if on, err := appKeysOnTx(ctx, tx); err != nil {
+			return err
+		} else if !on {
+			return ErrAppKeysOff
 		}
 		chain, err := lockChain(ctx, tx, user, binding)
 		if err != nil {
