@@ -186,7 +186,7 @@ func TestAccountIdentities(t *testing.T) {
 	}
 	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/account/identities", "", nil), TypeAuthenticationRequired)
 	// An account with no identity has nothing to disconnect.
-	if rec := do(t, h, http.MethodGet, Prefix+"/account/identities", "", bearer(adminToken)); !strings.Contains(rec.Body.String(), `{"items":[],"can_unlink":false}`) {
+	if rec := do(t, h, http.MethodGet, Prefix+"/account/identities", "", bearer(adminToken)); !strings.Contains(rec.Body.String(), `{"items":[],"can_unlink":false,"can_link":true}`) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 

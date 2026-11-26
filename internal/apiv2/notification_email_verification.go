@@ -47,7 +47,7 @@ func registerEmailVerification(reg *Registry) {
 	Register(reg, capOp, func(ctx context.Context, _ *CapabilityInput) (*NotificationEmailVerificationCapabilityOutput, error) {
 		svc := reg.deps.NotificationEmailVerification
 		queue := svc != nil && svc.EmailVerificationAvailable()
-		allowed := queue && !demoRestricted(ctx, reg.deps.DemoSettings) && svc.EmailVerificationAllowed(ctx, claimsFrom(ctx).UserID, profileFrom(ctx))
+		allowed := queue && demoAllows(ctx, reg.deps.DemoSettings) && svc.EmailVerificationAllowed(ctx, claimsFrom(ctx).UserID, profileFrom(ctx))
 		return &NotificationEmailVerificationCapabilityOutput{Body: NotificationEmailVerificationCapability{Capability: Capability{Allowed: &allowed}, QueueAvailable: queue, DispatchAvailable: queue && svc.EmailDispatchAvailable(ctx)}}, nil
 	})
 	op := notificationOperation(http.MethodPut, "/email-preferences/address", "requestNotificationEmailVerification")

@@ -272,7 +272,11 @@ func carriedServerSpecific(key string) bool {
 // ServerSpecificSettingKeys lists, sorted, the server-specific settings
 // liveURL holds that CarryServerSpecificSettings gives a restored database
 // and that supply a connection there (suppliesConnection). cipher (nil for
-// none) opens the encrypted ones.
+// none) opens the encrypted ones. The list is only used to leave settings
+// the live server supplies out of the reports of what a restore lost, so it
+// does not follow CarryServerSpecificSettings's keepBackupIdentity: it names
+// the server identity even where the restore keeps the backup's, which no
+// report lists.
 func (l PGLoader) ServerSpecificSettingKeys(ctx context.Context, liveURL string, cipher *secret.Cipher) ([]string, error) {
 	live, err := allSettingsAt(ctx, liveURL, carriedServerSpecific)
 	if err != nil {

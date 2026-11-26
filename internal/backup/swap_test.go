@@ -622,9 +622,6 @@ func (f *swapFixture) wantClosedThroughout() {
 	}
 }
 
-// TestSwapRollsBackInOrder: a failure at each point after the live database
-// closes is rolled back — the rename undone, files put back, the restored
-// database dropped — with the original reopened last.
 // TestSwapNamesItsOwnConnections: the restore reads the live database over
 // connections of its own just before it counts the other clients, and a
 // closed connection stays listed for a moment. Those connections carry the
@@ -646,6 +643,9 @@ func TestSwapNamesItsOwnConnections(t *testing.T) {
 	}
 }
 
+// TestSwapRollsBackInOrder: a failure at each point after the live database
+// closes is rolled back — the rename undone, files put back, the restored
+// database dropped — with the original reopened last.
 func TestSwapRollsBackInOrder(t *testing.T) {
 	tail := []string{"drop " + restoredDB, "allow silo true"}
 	quiesce := []string{"create " + restoredDB, "allow " + restoredDB + " false", "terminate " + restoredDB, "allow silo false", "terminate silo"}

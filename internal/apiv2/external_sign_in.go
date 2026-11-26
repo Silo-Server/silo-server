@@ -94,7 +94,8 @@ type AccountIdentity struct {
 // AccountIdentityCollection is the listAccountIdentities response body.
 type AccountIdentityCollection struct {
 	Collection[AccountIdentity]
-	CanUnlink bool `json:"can_unlink" doc:"Whether deleteAccountIdentity would disconnect an identity now for the profile asking: that profile is the account's household manager (deleteAccountIdentity describes who is), and the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity" example:"true"`
+	CanUnlink bool `json:"can_unlink" doc:"Whether deleteAccountIdentity would disconnect an identity now for the profile asking: that profile is the account's household manager (deleteAccountIdentity describes who is), and the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity, and in demo mode for a caller that is not an administrator" example:"true"`
+	CanLink   bool `json:"can_link" doc:"Whether the caller may link another identity (createAccountIdentityLinkTicket, linkAccountIdentityWithCredentials, linkAccountIdentityWithNetwork): false for an API key or an impersonation session, and in demo mode for a caller that is not an administrator. listAuthProviders names the providers there are to link" example:"true"`
 }
 
 // AccountIdentityCollectionOutput is the listAccountIdentities response.
@@ -379,8 +380,10 @@ func registerExternalSignIn(reg *Registry) {
 			for _, v := range views {
 				items = append(items, accountIdentityOf(v))
 			}
+			// Demo visitors share one account: none may change how it signs in.
+			allows := demoAllows(ctx, reg.deps.DemoSettings)
 			canUnlink := false
-			if len(items) > 0 {
+			if len(items) > 0 && allows {
 				if canUnlink, err = svc.CanUnlinkAccountIdentity(ctx, claims.UserID); err != nil {
 					return nil, serviceProblem(err)
 				}
@@ -395,7 +398,8 @@ func registerExternalSignIn(reg *Registry) {
 					return nil, serviceProblem(err)
 				}
 			}
-			return &AccountIdentityCollectionOutput{Body: AccountIdentityCollection{Collection: NewCollection(items), CanUnlink: canUnlink}}, nil
+			canLink := claims.IsOwnLoginSession() && allows
+			return &AccountIdentityCollectionOutput{Body: AccountIdentityCollection{Collection: NewCollection(items), CanUnlink: canUnlink, CanLink: canLink}}, nil
 		})
 
 	unlink := humaOp(http.MethodDelete, Prefix+"/account/identities/{id}", "deleteAccountIdentity", "account",
@@ -403,7 +407,7 @@ func registerExternalSignIn(reg *Registry) {
 	unlink.Description = "How the account signs in belongs to the whole household, so only the account's household manager may disconnect an identity. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied. Allowed only while the account can still sign in another way: its local password (with local password sign-in on, or as a break-glass account) or another identity; otherwise 409 last_sign_in_method. An API key or an impersonation session is refused with 403 permission_denied."
 	unlink.DefaultStatus = http.StatusNoContent
 	unlink.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict}
-	Register(reg, Operation{Operation: unlink, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent},
+	Register(reg, Operation{Operation: unlink, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent, DemoRestricted: true},
 		func(ctx context.Context, in *AccountIdentityInput) (*struct{}, error) {
 			svc, p := reg.externalSignIn()
 			if p != nil {
@@ -441,7 +445,7 @@ func registerExternalSignIn(reg *Registry) {
 	credentials.Description = "The account re-enters its local password; the credentials plugin then checks the directory username and password, and the identity it answers for is linked to this account with the same rules as other linking: linking turns local password sign-in off unless the account is break-glass, and is audited. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 422 validation_failed at body.password (wrong local password) or at body.directory_password (the directory refused the credentials); 409 local_password_required (the account has no local password sign-in); 403 not_permitted (the directory's group rules); 403 account_disabled (the directory account is disabled, locked or expired); 403 password_expired (the directory password expired); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked (this account already has an identity at the installation); 404 not_found (not an enabled credentials provider, an OAuth one included); 429 rate_limited with Retry-After (the directory username has used its sign-in attempt budget); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports credentials_linking."
 	credentials.DefaultStatus = http.StatusCreated
 	credentials.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable}
-	Register(reg, Operation{Operation: credentials, Class: ClassAuthenticated, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, RateLimitBucket: loginDomain},
+	Register(reg, Operation{Operation: credentials, Class: ClassAuthenticated, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, RateLimitBucket: loginDomain, DemoRestricted: true},
 		func(ctx context.Context, in *AccountIdentityCredentialsLinkInput) (*AccountIdentityOutput, error) {
 			svc, p := reg.externalSignIn()
 			if p != nil {
@@ -477,7 +481,7 @@ func registerExternalSignIn(reg *Registry) {
 	network.Description = "Only a request that arrived through the network identity provider's own network address can link: the provider's plugin says who owns the device that sent it, and that identity is linked to this account after the account re-enters its local password, with the same rules as other linking except one: the account keeps its local password sign-in (audited). While the provider refuses the person at a re-check, that password is refused with not_permitted too, except for a break-glass account; an unavailable or unsupported answer keeps the refusal, which ends when the provider vouches for the person again or the network provider is turned off. listAuthProviders lists the provider, with the device owner's name, only to such a request. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 403 network_identity_required (the request did not come through that provider's network); 422 validation_failed at body.password (wrong local password); 409 local_password_required; 403 not_permitted (the provider refuses this device, for example a tagged device or one its policy leaves out); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked; 404 not_found (not an enabled network identity provider); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports network_sign_in."
 	network.DefaultStatus = http.StatusCreated
 	network.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable}
-	Register(reg, Operation{Operation: network, Class: ClassAuthenticated, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, RateLimitBucket: loginDomain},
+	Register(reg, Operation{Operation: network, Class: ClassAuthenticated, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, RateLimitBucket: loginDomain, DemoRestricted: true},
 		func(ctx context.Context, in *AccountIdentityNetworkLinkInput) (*AccountIdentityOutput, error) {
 			svc, p := reg.externalSignIn()
 			if p != nil {

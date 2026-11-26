@@ -100,6 +100,8 @@ func registerAccount(reg *Registry) {
 		Class:       ClassProfileScoped, ProfileOptional: true, ServiceBacked: true,
 		RateLimitBucket: bucketPasswordChange,
 		Audited:         true,
+		// Demo visitors share one account: a new password locks the others out.
+		DemoRestricted: true,
 	}, reg.changePassword)
 }
 
@@ -119,7 +121,7 @@ func (reg *Registry) getAccountPasswordCapability(ctx context.Context, _ *Capabi
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	allowed := view.ChangePassword
+	allowed := view.ChangePassword && demoAllows(ctx, reg.deps.DemoSettings)
 	out := &AccountPasswordCapabilityOutput{CacheControl: cachePrivateNoCache, Body: AccountPasswordCapability{
 		Capability:              Capability{State: StateAvailable, Allowed: &allowed},
 		RequiresCurrentPassword: view.RequiresCurrentPassword,
