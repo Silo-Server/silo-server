@@ -98,6 +98,7 @@ func TestClearProfileSetOverrideDB(t *testing.T) {
 	c := newClearFixture(t)
 	t.Run("clearing a field puts the set's value back now, and the next set applies to it", c.clearsAField)
 	t.Run("clearing a setting puts the set's value back now", c.clearsASetting)
+	t.Run("clearing a setting the set never sent writes nothing and keeps the owner's value", c.clearsASettingTheSetNeverSent)
 	t.Run("clearing a PIN keeps the owner's PIN until a newer set sends one", c.clearsAPIN)
 	t.Run("clearing a PIN the app has none for removes the owner's PIN", c.clearsAPINTheAppDropped)
 	t.Run("the wake comes once, after the clear commits", c.wakesAfterCommit)
@@ -149,6 +150,27 @@ func (c *clearFixture) clearsASetting(t *testing.T) {
 	value, err := c.store.GetSettingValue(t.Context(), c.audio)
 	if err != nil || value == nil || string(value.Value) != `"en"` || len(c.held(t).Overrides) != 1 {
 		t.Fatalf("setting after the clear = %+v, %v; overrides %+v", value, err, c.held(t).Overrides)
+	}
+}
+
+// clearsASettingTheSetNeverSent: the last set neither names nor resets the
+// key, so it has no value to put back. The clear ends the override, writes
+// nothing, says so (clear_applies and applied false), and the profile keeps
+// the owner's value until a set names or resets the key.
+func (c *clearFixture) clearsASettingTheSetNeverSent(t *testing.T) {
+	subtitles := userstore.SettingIdentity{Key: settingskeys.PlaybackSubtitleLanguage, Scope: "profile", ProfileID: c.kidID}
+	c.mustPutSetting(t, c.admin(), subtitles, `"fr"`)
+	field := "settings." + settingskeys.PlaybackSubtitleLanguage
+	if record := c.record(t, field); record.ClearApplies || record.SetValue != nil || record.SetResets {
+		t.Fatalf("record = %+v; want nothing from the set to put back", record)
+	}
+	res, err := c.clearField(field)
+	if err != nil || res.Applied {
+		t.Fatalf("clear = %+v, %v; want done, not applied", res, err)
+	}
+	value, err := c.store.GetSettingValue(t.Context(), subtitles)
+	if err != nil || value == nil || string(value.Value) != `"fr"` || slices.Contains(overriddenFields(c.held(t), c.kid.syncID()), field) {
+		t.Fatalf("after the clear: setting %+v, %v; overrides %+v", value, err, c.held(t).Overrides)
 	}
 }
 
