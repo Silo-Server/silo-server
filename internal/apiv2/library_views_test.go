@@ -9,6 +9,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
 
@@ -192,3 +193,40 @@ func viewerHeaders() map[string]string { return with(bearer(memberToken), "X-Pro
 // --- stage B admin tests ---
 
 // --- viewer tests ---
+
+// A game of a date-labeled series (Sportarr's S2026E296) carries the label and
+// its air date on the card; a numbered episode carries neither, which clients
+// read as "show the numbers".
+func TestSectionCardEpisodeLabels(t *testing.T) {
+	season, episode := 2026, 296
+	game := handlers.SectionItemView{ContentID: "ep-1", Type: "episode", Title: "Chicago Bulls vs Washington Wizards",
+		SeriesTitle: "NBA", SeasonNumber: &season, EpisodeNumber: &episode, Status: "matched",
+		EpisodeLabels: "air_date", AirDate: "2026-11-20"}
+	numbered := game
+	numbered.EpisodeLabels, numbered.AirDate = "", ""
+
+	for _, tt := range []struct {
+		name string
+		card handlers.SectionItemView
+		want map[string]any
+	}{
+		{"date-labeled", game, map[string]any{"episode_labels": "air_date", "air_date": "2026-11-20"}},
+		{"numbered", numbered, map[string]any{"episode_labels": nil, "air_date": nil}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(catalogItemOfSection(tt.card, ratingsources.Selection{}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatal(err)
+			}
+			for key, want := range tt.want {
+				if got[key] != want {
+					t.Errorf("%s = %v, want %v", key, got[key], want)
+				}
+			}
+		})
+	}
+}

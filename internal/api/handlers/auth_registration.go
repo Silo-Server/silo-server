@@ -142,15 +142,54 @@ func (h *AuthHandler) CurrentLoginSession(ctx context.Context, userID int, sessi
 	return session, nil
 }
 
-// RevokeSession revokes one of the caller's sessions. v1 DELETE
-// /auth/sessions/{id} and v2 deleteSession both call it.
+// ListSessionsPageByID is ListSessionsPage in ascending id order, strictly
+// after afterID: the listing a session limited to itself is served.
+func (h *AuthHandler) ListSessionsPageByID(ctx context.Context, userID int, afterID string, limit int) ([]*models.AuthSession, bool, error) {
+	sessions, err := h.service.GetSessionsPageByID(ctx, userID, afterID, limit+1)
+	if err != nil {
+		return nil, false, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	}
+	if len(sessions) > limit {
+		return sessions[:limit], true, nil
+	}
+	return sessions, false, nil
+}
+
+// SessionLimitedToItself reports whether the caller's login session may see
+// and end only itself (auth.LimitedToItself); false for an API-key caller.
+func (h *AuthHandler) SessionLimitedToItself(ctx context.Context, sessionID string) (bool, error) {
+	limited, err := h.service.SessionLimitedToItself(ctx, sessionID)
+	if err != nil {
+		return false, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	}
+	return limited, nil
+}
+
+// RevokeSession revokes one of the caller's sessions for v2 deleteSession,
+// from the login session the request authenticated with (none for an API
+// key): a session limited to itself may end only itself.
 func (h *AuthHandler) RevokeSession(ctx context.Context, sessionID string, userID int) error {
+	return h.RevokeSessionChecked(ctx, sessionID, userID, nil)
+}
+
+// RevokeSessionChecked is RevokeSession with auth.Service's further check on
+// the caller's own session; v2 deleteSession calls it. The check's error is
+// answered as an internal error here, so a caller that refuses through it
+// keeps its own answer.
+func (h *AuthHandler) RevokeSessionChecked(ctx context.Context, sessionID string, userID int, check func(*models.AuthSession) error) error {
 	if sessionID == "" {
 		return apiError(http.StatusBadRequest, "bad_request", "Session ID is required")
 	}
-	if err := h.service.RevokeSession(ctx, sessionID, userID); err != nil {
+	callerSessionID := ""
+	if claims := apimw.GetClaims(ctx); claims != nil {
+		callerSessionID = claims.SessionID
+	}
+	if err := h.service.RevokeSessionChecked(ctx, callerSessionID, sessionID, userID, check); err != nil {
 		if auth.IsSessionNotFound(err) {
 			return apiError(http.StatusNotFound, "not_found", "Session not found")
+		}
+		if errors.Is(err, auth.ErrSessionOutOfReach) {
+			return apiError(http.StatusForbidden, "permission_denied", "A device signed in with a code can end only its own session.")
 		}
 		return apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
@@ -178,11 +217,11 @@ func (h *AuthHandler) SetupInitialUser(ctx context.Context, in RegistrationInput
 	if in.Username == "" || in.Email == "" || in.Password == "" {
 		return TokenPairView{}, apiError(http.StatusBadRequest, "bad_request", "Username, email, and password are required")
 	}
-	if err := validateRegistrationPassword(in.Password); err != nil {
-		return TokenPairView{}, err
-	}
 	pair, user, err := h.service.SetupInitialUser(ctx, in.Username, in.Email, in.Password, in.CreateDefaultProfile, in.DefaultProfileName, in.DeviceName, in.IP)
 	if err != nil {
+		if apiErr := passwordPolicyError(err, fieldPassword); apiErr != nil {
+			return TokenPairView{}, apiErr
+		}
 		if errors.Is(err, auth.ErrSetupAlreadyComplete) {
 			return TokenPairView{}, apiError(http.StatusUnauthorized, "setup_complete", "Initial setup has already been completed")
 		}
@@ -213,11 +252,11 @@ func (h *AuthHandler) Signup(ctx context.Context, in RegistrationInput) (TokenPa
 	if in.Username == "" || in.Email == "" || in.Password == "" || in.InviteCode == "" {
 		return TokenPairView{}, apiError(http.StatusBadRequest, "bad_request", "Username, email, password, and invite code are required")
 	}
-	if err := validateRegistrationPassword(in.Password); err != nil {
-		return TokenPairView{}, err
-	}
 	pair, user, err := h.service.Signup(ctx, in.Username, in.Email, in.Password, in.InviteCode, in.CreateDefaultProfile, in.DefaultProfileName, in.DeviceName, in.IP)
 	if err != nil {
+		if apiErr := passwordPolicyError(err, fieldPassword); apiErr != nil {
+			return TokenPairView{}, apiErr
+		}
 		switch {
 		case errors.Is(err, auth.ErrSignupDisabled):
 			return TokenPairView{}, apiError(http.StatusForbidden, "signup_disabled", "Public signups are not currently enabled")
@@ -280,13 +319,28 @@ func (h *AuthHandler) PluginLaunchToken(ctx context.Context, claims *auth.Claims
 // PluginAccessCookieName is the cookie the plugin launch issues.
 const PluginAccessCookieName = auth.PluginAccessCookieName
 
-func validateRegistrationPassword(password string) error {
-	switch err := auth.ValidateNewPassword(password); {
-	case errors.Is(err, auth.ErrPasswordTooShort):
-		return &APIError{Status: http.StatusBadRequest, Code: codeWeakPassword, Message: "Password must be at least 8 characters", Field: fieldPassword}
-	case errors.Is(err, auth.ErrPasswordTooLong):
-		return &APIError{Status: http.StatusBadRequest, Code: codePasswordTooLong, Message: "Password must be at most 72 bytes", Field: fieldPassword}
-	default:
-		return err
+// PasswordPolicy reads the server's password policy; a handler without an
+// auth service applies the default one. v2 getPasswordPolicy calls it.
+func (h *AuthHandler) PasswordPolicy(ctx context.Context) (auth.PasswordPolicy, error) {
+	if h.service == nil {
+		return auth.DefaultPasswordPolicy(), nil
 	}
+	return h.service.PasswordPolicy(ctx)
+}
+
+// passwordPolicyError is the API error for a password the policy refused,
+// reported at field, or nil when err is not such a refusal. The message has
+// no full stop, like the handlers' other messages; v2 renders the refusal
+// from its cause.
+func passwordPolicyError(err error, field string) *APIError {
+	message, ok := auth.PasswordRuleMessage(err)
+	if !ok {
+		return nil
+	}
+	message = strings.TrimSuffix(message, ".")
+	code := codeWeakPassword
+	if errors.Is(err, auth.ErrPasswordTooLong) {
+		code = codePasswordTooLong
+	}
+	return (&APIError{Status: http.StatusBadRequest, Code: code, Message: message, Field: field}).WithCause(err)
 }

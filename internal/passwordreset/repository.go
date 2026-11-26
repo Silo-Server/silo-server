@@ -40,7 +40,8 @@ var (
 )
 
 // The account state a link needs, both to be issued and to be used, over the
-// users alias u.
+// users alias u: models.User.HasLocalPassword in SQL (a NULL hash fails the
+// comparison).
 const eligibleAccount = `u.enabled AND u.local_password_login_enabled AND u.password_hash <> ''`
 
 // passwordFingerprint is the digest of the account's current password hash.

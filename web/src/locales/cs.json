@@ -365,6 +365,30 @@
       "value": "Tato hodnota je mimo povolený rozsah."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Použijte alespoň jeden speciální znak, například ! nebo #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Použijte alespoň jedno velké písmeno."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Toto heslo je příliš dlouhé."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Toto heslo je příliš krátké."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Vaše relace vypršela. Přihlaste se znovu."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Když je přihlašování heslem vypnuté, musí zůstat zapnutý poskytovatel přihlášení, kterého mohou uživatelé používat. OpenID Connect navíc potřebuje veřejnou adresu URL serveru."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8511,6 +8541,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Karty"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Rozložení"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabulka"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -61131,7 +61179,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Trendy sledování, nejsledovanější tituly, aktivita domácnosti, přehrávání na zařízeních a šířka pásma."
+      "value": "Živé streamy, trendy sledování, nejsledovanější tituly, aktivita domácnosti, přehrávání na zařízeních a šířka pásma."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -82312,7 +82360,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Zkontrolovat, zda router podporuje UPnP, NAT-PMP nebo PCP."
+      "value": "Požádat router o mapování portu přes UPnP, NAT-PMP nebo PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -82321,16 +82369,40 @@
       "value": "Mapování portů"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Rozsah: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " až "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Kontroly připravenosti nespouštějí přímé přehrávání."
+      "value": "Zapnutím této možnosti se spustí modul přímého připojení. Ten otevře port UDP, a pokud je zapnuta možnost Mapování portů, požádá router o mapování portu. Tlačítko Spustit kontrolu pouze zjišťuje stav hostitele."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Vypnuto správcem"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Omezeno na povolený rozsah"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -82342,7 +82414,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Modul přímého připojení se nepodařilo spustit"
+      "value": "Modul přímého připojení se zastavil nebo ho nebylo možné spustit"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -82373,6 +82445,12 @@
     {
       "type": 0,
       "value": "Neplatná hodnota; použito vypnuto"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Neplatná hodnota; používá se výchozí"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -93921,6 +93999,20 @@
       "value": "Nejprve zapněte poskytovatele přihlášení. Při vypnutém přihlášení heslem a bez zapnutého poskytovatele by se mohli přihlásit jen nouzoví správci."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Nejdříve nastavte veřejnou adresu URL serveru. Poskytovatel "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " bez ní nikoho nepřihlásí, takže při vypnutém přihlašování heslem by se mohli přihlásit jen správci s nouzovým přístupem."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -94011,6 +94103,320 @@
       "value": "Povolit uživatelům vytvářet klíče API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Vypnout přihlašování heslem"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Heslem se budou přihlašovat jen správci s nouzovým přístupem. Všichni ostatní se přihlašují přes poskytovatele "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Poskytovatel "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " vytváří účty při prvním přihlášení. Pokud se přes něj některý z těchto uživatelů přihlásí dřív, než jeho účet propojíte, získá nový, samostatný účet."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Každý z nich propojte s účtem poskytovatele "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " na jeho stránce v sekci Uživatelé."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " účet se nemůže přihlásit, dokud ho správce nepropojí"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " účty se nemohou přihlásit, dokud je správce nepropojí"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " účtu se nemůže přihlásit, dokud je správce nepropojí"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " účtů se nemůže přihlásit, dokud je správce nepropojí"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nepodařilo se ověřit, kterých účtů se to týká. Přihlašování heslem můžete přesto vypnout."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Zjišťování, kdo se přihlašuje heslem"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Když poskytovatel "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " při přihlášení potvrdí některý z těchto e-mailů, Silo daného uživatele propojí s jeho účtem."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " účet se propojí podle e-mailu"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " účty se propojí podle e-mailu"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " účtu se propojí podle e-mailu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " účtů se propojí podle e-mailu"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " další"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " další"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dalšího"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dalších"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Další účty se nepodařilo načíst. Zkuste to znovu."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Po této změně se budou moci přihlásit všechny účty."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Správce"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Propojování podle e-mailu je vypnuté"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Bez e-mailu"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Tím nikoho neodhlásíte. Uživatelé, kteří jsou už přihlášeni, zůstanou přihlášeni, jejich klíče API dál fungují a mohou dál schvalovat nová zařízení. Pokud chcete někoho odhlásit, ukončete jeho relace na jeho stránce v sekci "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Uživatelé"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Vypnout přihlašování heslem?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Zobrazit všechny účty v sekci Uživatelé"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -94053,6 +94459,28 @@
     {
       "type": 0,
       "value": " se nepodařilo změnit."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Přihlašování heslem je vypnuté, takže se všichni kromě správců s nouzovým přístupem přihlašují přes poskytovatele "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Nejdříve znovu zapněte přihlašování heslem a pak vypněte poskytovatele "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -96172,7 +96600,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Trendy sledování, nejsledovanější tituly, účty, zařízení a šířka pásma."
+      "value": "Živé streamy, trendy sledování, nejsledovanější tituly, účty, zařízení a šířka pásma."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -120652,6 +121080,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Skrýt zhlédnuté tituly"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Každý profil uvidí tuto kolekci bez titulů, které už zhlédl – na stránce kolekce, v řádcích i v počtu titulů. Nic se neodebere. Chytrá kolekce s omezením počtu titulů nejprve vybere své tituly, takže jich může zobrazit méně."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -143585,6 +144025,16 @@
     {
       "type": 0,
       "value": "Datum posledního vysílání"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Uzamknout pole "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

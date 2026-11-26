@@ -2,6 +2,7 @@ package intromarkers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -147,6 +148,9 @@ type creditsTailSample struct {
 	// Fingerprint is set when the pass was asked for one; its Points are
 	// empty when the tail has no audio to fingerprint.
 	Fingerprint *Fingerprint
+	// TailErr fails the tail alone when its keyframes could not be read
+	// (see checkTailFrames); the fingerprint stands.
+	TailErr error
 }
 
 // creditsTailSampler runs tail passes. ChromaprintExtractor implements it.
@@ -193,7 +197,7 @@ func (e *ChromaprintExtractor) SampleCreditsTail(ctx context.Context, candidate 
 		return creditsTailSample{}, fmt.Errorf("sampling the credits tail of file %d: %w", candidate.FileID, err)
 	}
 	e.logTailDecoder(ctx, candidate, req, result)
-	sample := creditsTailSample{Tail: creditsTail{Frames: result.Frames, Silences: result.Silences}}
+	sample := creditsTailSample{Tail: creditsTail{Frames: result.Frames, Silences: result.Silences}, TailErr: checkTailFrames(result)}
 	if fingerprint && candidate.hasAudio() {
 		key := creditsFingerprintKey()
 		sample.Fingerprint = &Fingerprint{
@@ -211,4 +215,21 @@ func (e *ChromaprintExtractor) SampleCreditsTail(ctx context.Context, candidate 
 		}
 	}
 	return sample, nil
+}
+
+// errNoTailFrames fails a tail pass that exited cleanly without parsed
+// keyframe statistics although ffmpeg did not report that the window gave
+// none: the log format, not the file, is the likely cause, so the pass is
+// retried later rather than stored as sparse.
+var errNoTailFrames = errors.New("credits tail pass parsed no keyframes")
+
+// checkTailFrames returns errNoTailFrames for a tail pass that has no
+// keyframe statistics unless ffmpeg counted no video frame in its window. A
+// window without a frame (the video ends before it, or it holds no frame a
+// keyframes-only read keeps) is a sparse tail, which the caller stores.
+func checkTailFrames(result mediasample.Result) error {
+	if len(result.Frames) > 0 || (result.VideoFrames != nil && *result.VideoFrames == 0) {
+		return nil
+	}
+	return errNoTailFrames
 }

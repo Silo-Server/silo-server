@@ -365,6 +365,30 @@
       "value": "Nilai ini di luar rentang."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Sertakan setidaknya satu karakter khusus, seperti ! atau #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Sertakan setidaknya satu huruf kapital."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Kata sandi ini terlalu panjang."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Kata sandi ini terlalu pendek."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Sesi Anda sudah kedaluwarsa. Masuk lagi."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Selama masuk dengan kata sandi nonaktif, penyedia masuk yang dapat digunakan orang harus tetap aktif. OpenID Connect juga memerlukan URL publik server."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -7756,6 +7786,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kartu"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Tata letak"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabel"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -43539,7 +43587,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tren menonton, judul teratas, aktivitas rumah tangga, pemutaran per perangkat, dan bandwidth."
+      "value": "Stream aktif, tren menonton, judul teratas, aktivitas rumah tangga, pemutaran per perangkat, dan bandwidth."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -60667,7 +60715,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Periksa dukungan UPnP, NAT-PMP, atau PCP di router."
+      "value": "Minta pemetaan port UPnP, NAT-PMP, atau PCP dari router."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -60676,16 +60724,40 @@
       "value": "Pemetaan port"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Rentang: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " hingga "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Pemeriksaan kesiapan tidak memulai pemutaran langsung."
+      "value": "Mengaktifkan opsi ini akan memulai mesin koneksi langsung. Mesin ini membuka port UDP dan, saat Pemetaan port aktif, meminta pemetaan port dari router. Tombol Jalankan pemeriksaan hanya membaca status host."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Dinonaktifkan oleh administrator"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Dibatasi ke rentang yang diizinkan"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -60697,7 +60769,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Mesin koneksi langsung tidak dapat dimulai"
+      "value": "Mesin koneksi langsung berhenti atau tidak dapat dimulai"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -60728,6 +60800,12 @@
     {
       "type": 0,
       "value": "Nilai tidak valid; dinonaktifkan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Nilai tidak valid; menggunakan default"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -71811,6 +71889,20 @@
       "value": "Aktifkan penyedia masuk terlebih dahulu. Jika masuk dengan kata sandi nonaktif dan tidak ada penyedia yang aktif, hanya admin darurat yang dapat masuk."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Tetapkan URL publik server terlebih dahulu. Tanpa URL itu, "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " tidak dapat memproses masuk siapa pun, sehingga saat masuk dengan kata sandi nonaktif, hanya admin break-glass yang dapat masuk."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -71901,6 +71993,205 @@
       "value": "Izinkan pengguna membuat kunci API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Nonaktifkan masuk dengan kata sandi"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Hanya admin break-glass yang akan masuk dengan kata sandi. Semua orang lainnya masuk dengan "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " membuat akun saat pertama kali masuk, jadi jika salah satu orang ini masuk dengan penyedia itu sebelum Anda menautkannya, mereka akan mendapatkan akun baru yang terpisah."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Tautkan setiap akun ke akun "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " dari halamannya di Pengguna."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " akun tidak dapat masuk sampai admin menautkannya"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memeriksa akun mana yang terdampak. Anda tetap dapat menonaktifkannya."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Memeriksa siapa yang masuk dengan kata sandi"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Saat "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " mengonfirmasi salah satu email ini ketika masuk, Silo menghubungkan orang tersebut ke akunnya."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " akun terhubung melalui email"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tampilkan "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " lainnya"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuat akun lainnya. Coba lagi."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Setiap akun tetap dapat masuk setelah ini."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Admin"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Pencocokan email nonaktif"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Tidak ada email"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Ini tidak mengeluarkan siapa pun. Orang yang sudah masuk tetap masuk, kunci API mereka tetap berfungsi, dan mereka tetap dapat menyetujui perangkat baru. Untuk mengeluarkan seseorang, akhiri sesinya dari halamannya di "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Pengguna"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Nonaktifkan masuk dengan kata sandi?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Lihat semua akun di Pengguna"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -71935,6 +72226,28 @@
     {
       "type": 0,
       "value": "Tidak dapat mengubah "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Masuk dengan kata sandi nonaktif, jadi "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " adalah cara semua orang kecuali admin break-glass untuk masuk. Aktifkan kembali masuk dengan kata sandi terlebih dahulu, lalu nonaktifkan "
     },
     {
       "type": 1,
@@ -73933,7 +74246,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tren menonton, judul teratas, akun, perangkat, dan bandwidth."
+      "value": "Stream aktif, tren menonton, judul teratas, akun, perangkat, dan bandwidth."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -91799,6 +92112,18 @@
           "value": "Opsional"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Sembunyikan judul yang sudah ditonton"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Setiap profil melihat koleksi ini tanpa judul yang sudah ditonton profil tersebut, di halaman koleksi, di barisnya, dan dalam jumlah judulnya. Tidak ada yang dihapus. Koleksi pintar dengan batas judul memilih judulnya terlebih dahulu, sehingga dapat menampilkan lebih sedikit judul."
     }
   ],
   "web.collections.details.label": [
@@ -110556,6 +110881,16 @@
     {
       "type": 0,
       "value": "Tanggal tayang terakhir"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Kunci "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

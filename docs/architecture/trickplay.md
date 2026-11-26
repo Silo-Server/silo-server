@@ -29,7 +29,7 @@ manifest.
 | `pending` | Waiting for `available_at`, then for a server to claim it. |
 | `running` | Leased by `lease_owner` until `lease_expires_at`. |
 | `ready` | The last generation published. |
-| `unusable` | The file cannot yield sheets (`no_stream`, `invalid_data`); it waits until the file changes. |
+| `unusable` | The file cannot yield sheets: four permanent-cause failures in a row (`no_stream`, `invalid_data`); it waits until the file changes. Rows marked `unusable` before `damaged_failures` existed got there on one such failure; the migration leaves them, and only the usual requeues (a changed file, a newer algorithm, an administrator's regenerate) bring them back. |
 
 A row in any state may also carry a published manifest (`revision` and the
 sheet geometry): a regeneration keeps serving the previous sheets until its
@@ -60,9 +60,15 @@ serializes it across servers.
   cannot authorize an earlier attempt. A worker that lost its lease changes
   nothing.
 - A failure backs off 15 minutes, 1 hour, 6 hours, 1 day, then a week. A
-  permanent cause marks the row `unusable`. A cause that is the server's own
-  (a shutdown, no transcode node to run on) returns the row without counting
-  a failure.
+  permanent cause counts and backs off the same way, because storage that
+  serves bad bytes during an outage looks like a damaged file to ffmpeg.
+  `damaged_failures` counts permanent causes among the row's latest
+  failures; the fourth in a row marks the row `unusable`. Any other
+  failure, an expired lease, a changed file (size, hash, or duration, as
+  the stale check compares them), a publish, or a requeue (regenerate,
+  recipe or tone-map change) starts the count again. A cause that is the
+  server's own (a shutdown, no transcode node to run on) returns the row
+  without counting a failure.
 
 `recipe_version` is the newest generation algorithm (`AlgorithmVersion`)
 that has touched a row. A server claims, requeues, and invalidates only rows
@@ -161,7 +167,8 @@ and runs each file at idle CPU and I/O priority:
   waits that long too.
 - A file selected for local extraction that this server cannot read
   (an offline mount) is given back for an hour without counting a failure;
-  `invalid_data` and `no_stream` mark it unusable; any other failure counts and backs off.
+  `invalid_data` and `no_stream` are permanent causes, which back off until
+  the fourth in a row marks it unusable; any other failure counts and backs off.
 - ffmpeg runs are recorded under the `trickplay` subprocess workload.
 
 The Queue Seek Previews task runs a reconcile pass at startup and every 15
@@ -249,7 +256,8 @@ the lease, and the uploads; a node only decodes and tiles
   transient sampling failure also tries another node, followed by local
   extraction in `prefer_transcode_nodes` mode. In `transcode_nodes_only` mode
   it counts against the file when no node makes the sheets. Only a
-  `permanent` sampling failure marks the file unusable, as it would locally.
+  `permanent` sampling failure ends the attempt as a permanent cause, as it
+  would locally.
 - Remote extraction opens the file through a
   [source grant](transcode-nodes.md#source-grants). Minting the grant stats the
   file on the API server, so the API server's media mount must be readable;

@@ -365,6 +365,30 @@
       "value": "Cette valeur est hors limites."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Incluez au moins un caractère spécial, comme ! ou #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Incluez au moins une lettre majuscule."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Ce mot de passe est trop long."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Ce mot de passe est trop court."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Votre session a expiré. Reconnectez-vous."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Tant que la connexion par mot de passe est désactivée, un fournisseur de connexion utilisable doit rester activé. OpenID Connect nécessite aussi l’URL publique du serveur."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8222,6 +8252,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Cartes"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Disposition"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tableau"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -54934,7 +54982,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tendances de visionnage, titres populaires, activité du foyer, lecture par appareil et bande passante."
+      "value": "Flux en direct, tendances de visionnage, titres populaires, activité du foyer, lecture par appareil et bande passante."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -74636,7 +74684,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Vérifier si le routeur prend en charge UPnP, NAT-PMP ou PCP."
+      "value": "Demander au routeur une redirection de port UPnP, NAT-PMP ou PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -74645,16 +74693,40 @@
       "value": "Redirection de ports"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Plage : de "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " à "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Les vérifications de préparation ne lancent pas la lecture directe."
+      "value": "L’activation de cette option démarre le moteur de connexion directe. Il ouvre un port UDP et, quand Redirection de port est activé, demande au routeur une redirection de port. Le bouton Lancer la vérification lit seulement l’état de l’hôte."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Désactivé par l’administrateur"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Valeur ramenée dans la plage autorisée"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -74666,7 +74738,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Impossible de démarrer le moteur de connexion directe"
+      "value": "Le moteur de connexion directe s’est arrêté ou n’a pas pu démarrer"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -74697,6 +74769,12 @@
     {
       "type": 0,
       "value": "Valeur non valide ; option désactivée"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Valeur non valide ; valeur par défaut utilisée"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -86054,6 +86132,20 @@
       "value": "Activez d’abord un fournisseur de connexion. Avec la connexion par mot de passe désactivée et aucun fournisseur activé, seuls les administrateurs de secours pourraient se connecter."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Définissez d’abord l’URL publique du serveur. Sans elle, "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ne peut connecter personne, et sans connexion par mot de passe, seuls les administrateurs de secours pourraient se connecter."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -86144,6 +86236,279 @@
       "value": "Autoriser les utilisateurs à créer des clés API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Désactiver la connexion par mot de passe"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Seuls les administrateurs de secours se connecteront avec un mot de passe. Toutes les autres personnes se connecteront avec "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " crée les comptes à la première connexion : si l’une de ces personnes se connecte avec ce fournisseur avant que vous ne liiez son compte, elle obtient un nouveau compte distinct."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Liez chacun d’eux à un compte "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " depuis sa page dans Utilisateurs."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " compte ne peut pas se connecter tant qu’un administrateur ne l’a pas lié"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de comptes ne peuvent pas se connecter tant qu’un administrateur ne les a pas liés"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " comptes ne peuvent pas se connecter tant qu’un administrateur ne les a pas liés"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Impossible de vérifier les comptes concernés. Vous pouvez quand même la désactiver."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Vérification des personnes qui se connectent avec un mot de passe"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Lorsque "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " confirme l’une de ces adresses e-mail à la connexion, Silo relie cette personne à son compte."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " compte est relié par e-mail"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de comptes sont reliés par e-mail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " comptes sont reliés par e-mail"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afficher "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de plus"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afficher "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de plus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afficher "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de plus"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Impossible de charger plus de comptes. Réessayez."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Tous les comptes pourront toujours se connecter après cette modification."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administrateur"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Correspondance par e-mail désactivée"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Aucune adresse e-mail"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Cette action ne déconnecte personne. Les personnes déjà connectées le restent, leurs clés d’API continuent de fonctionner et elles peuvent toujours approuver de nouveaux appareils. Pour déconnecter quelqu’un, mettez fin à ses sessions depuis sa page dans "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Utilisateurs"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Désactiver la connexion par mot de passe ?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Voir tous les comptes dans Utilisateurs"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -86178,6 +86543,28 @@
     {
       "type": 0,
       "value": "Impossible de modifier "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "La connexion par mot de passe est désactivée : "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " est donc le moyen de connexion de tout le monde, sauf des administrateurs de secours. Réactivez d’abord la connexion par mot de passe, puis désactivez "
     },
     {
       "type": 1,
@@ -88238,7 +88625,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tendances de visionnage, titres populaires, comptes, appareils et bande passante."
+      "value": "Flux en direct, tendances de visionnage, titres populaires, comptes, appareils et bande passante."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -110457,6 +110844,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Masquer les titres vus"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Chaque profil voit cette collection sans les titres qu’il a vus, sur sa page, dans ses rangées et dans son nombre de titres. Rien n’est supprimé. Une collection intelligente avec une limite de titres choisit d’abord ses titres ; elle peut donc en afficher moins."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -131828,6 +132227,16 @@
     {
       "type": 0,
       "value": "Date de dernière diffusion"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Verrouiller "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

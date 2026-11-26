@@ -253,6 +253,7 @@ GET /api/v2/admin/insights/activity	non-media
 GET /api/v2/admin/insights/bandwidth	non-media
 GET /api/v2/admin/insights/capabilities	non-media
 GET /api/v2/admin/insights/devices	non-media
+GET /api/v2/admin/insights/library	non-media
 GET /api/v2/admin/insights/people	non-media
 GET /api/v2/admin/insights/titles	non-media
 GET /api/v2/admin/insights/titles/{content_id}	non-media
@@ -563,6 +564,8 @@ HEAD /api/v2/artwork/*	non-media
 DELETE /api/v2/audio-prefs/{series_id}	non-media
 GET /api/v2/audio-prefs/{series_id}	non-media
 PUT /api/v2/audio-prefs/{series_id}	non-media
+POST /api/v2/auth/app-codes	non-media
+POST /api/v2/auth/app-codes/redeem	non-media
 GET /api/v2/auth/device	non-media
 POST /api/v2/auth/device/approve	non-media
 POST /api/v2/auth/device/approve-handoff	non-media
@@ -587,6 +590,7 @@ GET /api/v2/auth/keys/pending	non-media
 POST /api/v2/auth/keys/pending/{id}/approve	non-media
 POST /api/v2/auth/keys/pending/{id}/deny	non-media
 PUT /api/v2/auth/keys/person	non-media
+GET /api/v2/auth/keys/session	non-media
 POST /api/v2/auth/keys/sign-in	non-media
 POST /api/v2/auth/login	non-media
 POST /api/v2/auth/logout	non-media
@@ -598,6 +602,7 @@ GET /api/v2/auth/oauth/{install_id}/callback	non-media
 POST /api/v2/auth/oauth/{install_id}/init	non-media
 GET /api/v2/auth/oauth/{install_id}/native/start	non-media
 GET /api/v2/auth/oauth/{install_id}/start	non-media
+GET /api/v2/auth/password-policy	non-media
 POST /api/v2/auth/plugin-launch	non-media
 GET /api/v2/auth/provider-logout	non-media
 GET /api/v2/auth/providers	non-media
@@ -769,6 +774,7 @@ GET /api/v2/home/sections	non-media
 GET /api/v2/home/sections/{id}/items	non-media
 GET /api/v2/images/capabilities	non-media
 POST /api/v2/invitations/accept	non-media
+POST /api/v2/invitations/app-code	non-media
 GET /api/v2/invitations/capabilities	non-media
 POST /api/v2/invitations/lookup	non-media
 GET /api/v2/invitations/{token}	non-media
@@ -1365,6 +1371,7 @@ GET /api/v2/admin/insights/activity	non-media
 GET /api/v2/admin/insights/bandwidth	non-media
 GET /api/v2/admin/insights/capabilities	non-media
 GET /api/v2/admin/insights/devices	non-media
+GET /api/v2/admin/insights/library	non-media
 GET /api/v2/admin/insights/people	non-media
 GET /api/v2/admin/insights/titles	non-media
 GET /api/v2/admin/insights/titles/{content_id}	non-media
@@ -1675,6 +1682,8 @@ HEAD /api/v2/artwork/*	non-media
 DELETE /api/v2/audio-prefs/{series_id}	non-media
 GET /api/v2/audio-prefs/{series_id}	non-media
 PUT /api/v2/audio-prefs/{series_id}	non-media
+POST /api/v2/auth/app-codes	non-media
+POST /api/v2/auth/app-codes/redeem	non-media
 GET /api/v2/auth/device	non-media
 POST /api/v2/auth/device/approve	non-media
 POST /api/v2/auth/device/approve-handoff	non-media
@@ -1699,6 +1708,7 @@ GET /api/v2/auth/keys/pending	non-media
 POST /api/v2/auth/keys/pending/{id}/approve	non-media
 POST /api/v2/auth/keys/pending/{id}/deny	non-media
 PUT /api/v2/auth/keys/person	non-media
+GET /api/v2/auth/keys/session	non-media
 POST /api/v2/auth/keys/sign-in	non-media
 POST /api/v2/auth/login	non-media
 POST /api/v2/auth/logout	non-media
@@ -1710,6 +1720,7 @@ GET /api/v2/auth/oauth/{install_id}/callback	non-media
 POST /api/v2/auth/oauth/{install_id}/init	non-media
 GET /api/v2/auth/oauth/{install_id}/native/start	non-media
 GET /api/v2/auth/oauth/{install_id}/start	non-media
+GET /api/v2/auth/password-policy	non-media
 POST /api/v2/auth/plugin-launch	non-media
 GET /api/v2/auth/provider-logout	non-media
 GET /api/v2/auth/providers	non-media
@@ -1881,6 +1892,7 @@ GET /api/v2/home/sections	non-media
 GET /api/v2/home/sections/{id}/items	non-media
 GET /api/v2/images/capabilities	non-media
 POST /api/v2/invitations/accept	non-media
+POST /api/v2/invitations/app-code	non-media
 GET /api/v2/invitations/capabilities	non-media
 POST /api/v2/invitations/lookup	non-media
 GET /api/v2/invitations/{token}	non-media

@@ -437,6 +437,8 @@ export function buildWatchPageProps({
           currentSeason: item.season_number ?? 0,
           currentEpisode: item.episode_number ?? 0,
           episodes: seriesEpisodes ?? [],
+          episodeLabels: item.episode_labels,
+          currentAirDate: item.air_date,
         }
       : undefined,
     resumeHints,

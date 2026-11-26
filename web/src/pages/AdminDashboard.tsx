@@ -9,6 +9,7 @@ import {
   useAdminSessions,
   useAdminStats,
 } from "@/hooks/queries/admin/stats";
+import { markAdminInsightsRefresh } from "@/hooks/queries/admin/insights";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { usePolicyCapability } from "@/hooks/queries/admin/policy";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
@@ -31,7 +32,6 @@ import { useT, type Translate } from "@/i18n";
 const DASHBOARD_WIDGET_QUERY_PREFIXES = [
   adminKeys.dashboardTimeseriesRoot(),
   adminKeys.playbackActivityRoot(),
-  adminKeys.topActivityRoot(),
   adminKeys.downloadsStatsRoot(),
   adminKeys.apiClientsRoot(),
   adminKeys.serverStatus(),
@@ -132,7 +132,10 @@ export default function AdminDashboard() {
   }, [dashboardDataUpdatedAt, hasDashboardData]);
 
   const refreshDashboard = useCallback(
-    async ({ manual }: { manual: boolean }) => {
+    // freshInsights is for the Refresh button only: it asks the server to
+    // drop its cached Insights, where a catch-up on returning to the page
+    // takes what the server's cache serves.
+    async ({ manual, freshInsights = false }: { manual: boolean; freshInsights?: boolean }) => {
       const profileContext = captureProfileRequestContext();
       if (!profileContext) return;
       const order = dashboardRefreshOrder(queryClient);
@@ -142,6 +145,7 @@ export default function AdminDashboard() {
         setIsManualRefreshPending(true);
       }
       try {
+        if (freshInsights) markAdminInsightsRefresh();
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: adminKeys.stats(), refetchType: "none" }),
           queryClient.invalidateQueries({ queryKey: adminKeys.sessions(), refetchType: "none" }),
@@ -154,6 +158,14 @@ export default function AdminDashboard() {
           ...DASHBOARD_WIDGET_QUERY_PREFIXES.map((queryKey) =>
             queryClient.invalidateQueries({ queryKey }),
           ),
+          // Insights-backed widgets pace themselves (dashboardInsightsInterval);
+          // only a refresh the admin asked for, or a return to the tab, re-reads
+          // them. The Refresh button also asks the server for fresh data:
+          // otherwise it serves its cached copy while it refreshes in the
+          // background.
+          ...(manual
+            ? [queryClient.invalidateQueries({ queryKey: adminKeys.insightsRoot() })]
+            : []),
         ]);
         const nextStats = await fetchAdminStats({ refresh: true, profileContext });
         if (!isCapturedProfileAuthorityActive(profileContext)) return;
@@ -284,7 +296,7 @@ export default function AdminDashboard() {
                 size="sm"
                 className="min-w-[8.25rem] justify-center sm:w-auto"
                 onClick={() => {
-                  void refreshDashboard({ manual: true });
+                  void refreshDashboard({ manual: true, freshInsights: true });
                 }}
                 disabled={isManualRefreshPending}
                 aria-busy={isManualRefreshPending}

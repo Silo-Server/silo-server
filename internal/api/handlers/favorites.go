@@ -824,6 +824,7 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 			Overview:          mi.Overview,
 			PosterThumbhash:   mi.PosterThumbhash,
 			BackdropThumbhash: mi.BackdropThumbhash,
+			EpisodeLabels:     mi.EpisodeLabels,
 			UserState:         userStates[mi.ContentID],
 		}
 		images.add(&resp.PosterURL, sizedPosterPath(mi.PosterPath, art.For(imagesize.SlotPoster)), posterHint)
@@ -882,6 +883,10 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 						resp.Year = parent.Year
 						resp.Genres = parent.Genres
 						resp.ContentRating = parent.ContentRating
+						resp.EpisodeLabels = parent.EpisodeLabels
+						if parent.EpisodeLabels != "" && ep.AirDate != nil {
+							resp.AirDate = ep.AirDate.Format(time.DateOnly)
+						}
 						if path := parentLogoPaths[parent.ContentID]; path != "" {
 							logoPaths[ep.ContentID] = path
 						}

@@ -53,11 +53,44 @@ export function formatDayHeading(dateStr: string): string {
   );
 }
 
-/** Returns a short day label like "Mon" and day number like "7". */
-export function formatShortDay(dateStr: string): { label: string; day: number } {
+// Phone-width week-strip buttons fit short weekday names of up to four
+// characters ("Wed", "qua.", "mer.") at every text size; longer ones (pt-PT
+// "segunda", sw "Jumatatu", lv "Ceturtd.", pl "niedz.") run into their
+// neighbours, so those locales use narrow names ("S T Q Q S S D"). Narrow
+// names that repeat (mg "A A T A A Z A") still fit, and the day number below
+// tells the days apart.
+const COMPACT_SHORT_NAME_MAX_LENGTH = 4;
+const compactFormats = new Map<string | undefined, Intl.DateTimeFormat>();
+
+function compactWeekdayFormat(): Intl.DateTimeFormat {
+  const locale = formatLocale();
+  let format = compactFormats.get(locale);
+  if (!format) {
+    const short = new Intl.DateTimeFormat(locale, { weekday: "short" });
+    // 4 January 2026 is a Sunday: the seven days from it are one of each weekday.
+    const fits = Array.from({ length: 7 }, (_, day) =>
+      short.format(new Date(2026, 0, 4 + day)),
+    ).every((name) => [...name].length <= COMPACT_SHORT_NAME_MAX_LENGTH);
+    format = fits ? short : new Intl.DateTimeFormat(locale, { weekday: "narrow" });
+    compactFormats.set(locale, format);
+  }
+  return format;
+}
+
+/**
+ * Returns a short day label like "Mon", the label for a phone-width week strip
+ * (the short one when every weekday's fits, otherwise the narrow "M"), and the
+ * day number like "7".
+ */
+export function formatShortDay(dateStr: string): {
+  label: string;
+  compactLabel: string;
+  day: number;
+} {
   const d = parseDate(dateStr);
   return {
     label: d.toLocaleDateString(formatLocale(), { weekday: "short" }),
+    compactLabel: compactWeekdayFormat().format(d),
     day: d.getDate(),
   };
 }

@@ -406,28 +406,34 @@ func (c *PGControl) NameOf(ctx context.Context, oid uint32) (string, bool, error
 	return name, err == nil, err
 }
 
-// OtherConnections counts client sessions on name that are neither this
-// command's control session nor a connection the restore opened itself.
+// OtherConnections counts the sessions on name that are neither this
+// command's control session, nor a connection the restore opened itself, nor
+// an autovacuum worker.
 //
 // The restore reads and writes the live database over short connections of
 // its own, and the server lists a closed connection's backend in
 // pg_stat_activity until that backend has exited. Counted, one of those
 // refused a restore of a database nothing else was using. They carry the
-// restore's application name (OwnApplicationName), so they are left out by
-// name, without waiting for them to go: every other client is counted the
-// moment it is seen. Background workers, such as autovacuum on the database,
-// are not clients and are left out too.
+// restore's application name (OwnApplicationName), as do the parallel
+// workers of their queries, so they are left out by name, without waiting
+// for them to go: every other session is counted the moment it is seen.
 //
-// A session this role may not inspect counts as a client. A role without
-// pg_read_all_stats sees another role's session with its backend type and
-// application name NULL, and a restore may run as such a role
-// (CheckPrivileges asks only for CREATEDB and ownership), so NULL in either
-// column must never read as "not a client" or "one of ours".
+// Every other backend on the database can write to it, or belongs to a
+// client that can: a client, a parallel worker, a logical replication
+// worker, an extension's background worker, a walsender in database mode.
+// An autovacuum worker connects on its own and writes only what vacuuming
+// and analyzing keep, which the restored database rebuilds.
+//
+// A role without pg_read_all_stats sees another role's session with its
+// backend type NULL, and a restore may run as such a role (CheckPrivileges
+// asks only for CREATEDB and ownership), so a NULL type is counted. Postgres
+// 18 shows such a role the application name; the query still treats a NULL
+// name as another client's.
 func (c *PGControl) OtherConnections(ctx context.Context, name string) (int, error) {
 	var n int
 	err := c.Conn.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
 		WHERE datname = $1 AND pid <> pg_backend_pid()
-			AND coalesce(backend_type, 'client backend') = 'client backend'
+			AND backend_type IS DISTINCT FROM 'autovacuum worker'
 			AND ($2 = '' OR application_name IS DISTINCT FROM $2)`, name, c.own).Scan(&n)
 	return n, err
 }

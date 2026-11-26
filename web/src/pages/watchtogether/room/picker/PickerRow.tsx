@@ -22,6 +22,8 @@ export interface PickerCard {
   poster_url?: string;
   poster_thumbhash?: string;
   library_id?: number;
+  /** A series' episode labels: "air_date" labels its episodes by date. */
+  episode_labels?: string;
 }
 
 export function PosterTile({

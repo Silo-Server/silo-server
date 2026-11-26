@@ -2384,6 +2384,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/insights/library": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read how much of each movie and TV library was played, titles never started, plays by genre, decade and content rating, and how soon new titles get their first play. */
+    get: operations["getAdminInsightsLibrary"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/insights/people": {
     parameters: {
       query?: never;
@@ -6834,6 +6851,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/auth/app-codes": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Issue an app code that lets the Silo app enroll its keys on the signed-in account.
+     * @description Send an empty JSON object. The Open in Silo action on a server's site: the app redeems the code (redeemAppCode) to enroll a person key and its device key on this account, which take this session's provider identity. A code whose session has ended by then no longer works. Only the account's own login session issues one: an API key, an administrator acting as the account, a remote-playback session, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that (getAppKeySessionAccess says whether it would). Works with local password sign-in off from a session the server's sign-in provider opened; that is how a person gets the app on such a server. The redeem doesn't check the main profile's PIN again: the code was issued to the verified main profile and ends with the session that issued it. 409 capability_disabled while auth.app_key_sign_in is off. The code lives ten minutes and works once. The response is no-store. server_address is where the app should connect, not proof of which server answers there: the redeem's signed server_id and the origin rule are. It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile of the account is 403 main_profile_required, and an X-Profile-Id that names no profile of the account is 404 not_found. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 main_profile_required. On this operation 403 permission_denied means the session itself may not do this, whatever profile it names. The operation checks the profile again once it holds the account: if the profile's PIN changed, it stopped being the main profile, or it was being written at that moment, the answer is 403 profile_verification_required with nothing changed, and the request is made again: an operation whose body carries a signed envelope (enrollAppKeys) needs a new challenge and a newly signed envelope, since the first challenge is spent; every other operation is sent again as it was.
+     */
+    post: operations["createAppCode"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/app-codes/redeem": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Enroll a person key and a device key with an app code and open the device's login session.
+     * @description message is a redeem envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig; the app code is in its payload. A join code creates the invited account, with no password and the invitation's access, enrolls both keys and marks the invitation accepted, in one transaction. A session code enrolls the keys on the account that issued it, with that session's provider identity: person_key is enrolled when the account has none and replaces a different one (the old one is revoked; devices already enrolled keep their keys, devices waiting on it are refused). Keys from a code start active, also on an administrator's account. The sealed plaintext adds username (the account's name) and person_key: enrolled, or replaced. 404 app_code_invalid: the code is unknown, used or expired, its invitation was revoked, replaced or accepted since, or the session that issued it ended. 409 conflict has two causes, told apart by errors[0].code: duplicate (at body.message.payload) means the reserved name or email was taken since, and the person gets a new code from the page with another name; key_enrolled means a public key is already enrolled on this server, at body.person_key for the person key or body.message.payload for the device key, and the app makes that key again and redeems the same code on a new challenge. Every refusal after the code is looked up rolls the code back, so it stays good for its ten minutes; the challenge is spent once the signature verifies. 409 provider_sign_in_required: a join code while local password sign-in is off. A malformed payload field is 422 at body.message.payload. Spends the per-address key_sign_in rate-limit budget. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status: signed_in, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity). Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
+     */
+    post: operations["redeemAppCode"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/auth/device": {
     parameters: {
       query?: never;
@@ -7000,7 +7057,7 @@ export interface paths {
     post?: never;
     /**
      * Revoke a device sign-in approved in advance; the device's next poll answers denied.
-     * @description Only the account's own signed-in session: an API key, a session an administrator opened as the account, a remote-playback session, or a session opened by device sign-in or by another app's key is 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that.
+     * @description Only the account's own signed-in session: an API key, a session an administrator opened as the account, a remote-playback session, or a session opened by device sign-in or by another app's key is 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. Refused in demo mode for a caller who is not an administrator.
      */
     delete: operations["revokeDevicePreapproval"];
     options?: never;
@@ -7019,7 +7076,7 @@ export interface paths {
     put?: never;
     /**
      * Approve a device sign-in in advance for the device holding the secret behind a fingerprint.
-     * @description Only the account's own signed-in session: an API key, a session an administrator opened as the account, a remote-playback session, or a session opened by device sign-in or by another app's key is 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. The sign-in is single use and lasts 30 days. An account has at most 20 waiting; another is 409 conflict. Refused in demo mode for a caller who is not an administrator, and the capability then reports preapprove false. It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile of the account is 403 main_profile_required, and an X-Profile-Id that names no profile of the account is 404 not_found. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 main_profile_required. On this operation 403 permission_denied means the session itself may not do this, whatever profile it names. The operation checks the profile again once it holds the account: if the profile's PIN changed, it stopped being the main profile, or it was being written at that moment, the answer is 403 profile_verification_required with nothing changed, and the request is made again (enrollAppKeys on a new challenge, since the first is spent).
+     * @description Only the account's own signed-in session: an API key, a session an administrator opened as the account, a remote-playback session, or a session opened by device sign-in or by another app's key is 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. The sign-in is single use and lasts 30 days. An account has at most 20 waiting; another is 409 conflict. Refused in demo mode for a caller who is not an administrator, and the capability then reports preapprove false. It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile of the account is 403 main_profile_required, and an X-Profile-Id that names no profile of the account is 404 not_found. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 main_profile_required. On this operation 403 permission_denied means the session itself may not do this, whatever profile it names. The operation checks the profile again once it holds the account: if the profile's PIN changed, it stopped being the main profile, or it was being written at that moment, the answer is 403 profile_verification_required with nothing changed, and the request is made again: an operation whose body carries a signed envelope (enrollAppKeys) needs a new challenge and a newly signed envelope, since the first challenge is spent; every other operation is sent again as it was.
      */
     post: operations["preapproveDeviceLogin"];
     delete?: never;
@@ -7190,7 +7247,7 @@ export interface paths {
     put?: never;
     /**
      * Enroll a person key and a device key on the signed-in account and open a session bound to the device key.
-     * @description Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. When the account has no person key, person_key is registered and takes the provider identity of the session that enrolls it. When person_key is the account's person key already, it is reused as it is, binding unchanged. A different person key on the account is 409 conflict, and so is a device key already enrolled on this server. The new device key takes the session's provider identity. The sealed plaintext adds person_key_id; the client drops the session it called with. Keys enrolled here start active, also on an administrator's account, so enroll never answers approval_required. A malformed payload field is 422 at body.message.payload. It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile of the account is 403 main_profile_required, and an X-Profile-Id that names no profile of the account is 404 not_found. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 main_profile_required. On this operation 403 permission_denied means the session itself may not do this, whatever profile it names. The operation checks the profile again once it holds the account: if the profile's PIN changed, it stopped being the main profile, or it was being written at that moment, the answer is 403 profile_verification_required with nothing changed, and the request is made again (enrollAppKeys on a new challenge, since the first is spent). A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status: signed_in, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity). Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
+     * @description Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. When the account has no person key, person_key is registered and takes the provider identity of the session that enrolls it. When person_key is the account's person key already, it is reused as it is, binding unchanged. A different person key on the account is 409 conflict, and so is a device key already enrolled on this server. The new device key takes the session's provider identity. The sealed plaintext adds person_key_id; the client drops the session it called with. Keys enrolled here start active, also on an administrator's account, so enroll never answers approval_required. A malformed payload field is 422 at body.message.payload. It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile of the account is 403 main_profile_required, and an X-Profile-Id that names no profile of the account is 404 not_found. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 main_profile_required. On this operation 403 permission_denied means the session itself may not do this, whatever profile it names. The operation checks the profile again once it holds the account: if the profile's PIN changed, it stopped being the main profile, or it was being written at that moment, the answer is 403 profile_verification_required with nothing changed, and the request is made again: an operation whose body carries a signed envelope (enrollAppKeys) needs a new challenge and a newly signed envelope, since the first challenge is spent; every other operation is sent again as it was. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status: signed_in, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity). Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
      */
     post: operations["enrollAppKeys"];
     delete?: never;
@@ -7250,7 +7307,7 @@ export interface paths {
     put?: never;
     /**
      * Approve a device waiting to sign in to the signed-in administrator account.
-     * @description Only the account's own login session: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. Send an empty JSON object. The key becomes active: the device's next signInWithAppKey, on a new challenge, opens a session if it passes the usual sign-in checks. The account must still be an enabled administrator (403 permission_denied otherwise). Approving an active key changes nothing; a key that is unknown, denied, revoked or past its 24 hours is 404 not_found. 409 capability_disabled while auth.app_key_sign_in is off. It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile of the account is 403 main_profile_required, and an X-Profile-Id that names no profile of the account is 404 not_found. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 main_profile_required. On this operation 403 permission_denied means the session itself may not do this, whatever profile it names. The operation checks the profile again once it holds the account: if the profile's PIN changed, it stopped being the main profile, or it was being written at that moment, the answer is 403 profile_verification_required with nothing changed, and the request is made again (enrollAppKeys on a new challenge, since the first is spent).
+     * @description Only the account's own login session: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. Send an empty JSON object. The key becomes active: the device's next signInWithAppKey, on a new challenge, opens a session if it passes the usual sign-in checks. The account must still be an enabled administrator (403 permission_denied otherwise). Approving an active key changes nothing; a key that is unknown, denied, revoked or past its 24 hours is 404 not_found. 409 capability_disabled while auth.app_key_sign_in is off. It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile of the account is 403 main_profile_required, and an X-Profile-Id that names no profile of the account is 404 not_found. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 main_profile_required. On this operation 403 permission_denied means the session itself may not do this, whatever profile it names. The operation checks the profile again once it holds the account: if the profile's PIN changed, it stopped being the main profile, or it was being written at that moment, the answer is 403 profile_verification_required with nothing changed, and the request is made again: an operation whose body carries a signed envelope (enrollAppKeys) needs a new challenge and a newly signed envelope, since the first challenge is spent; every other operation is sent again as it was.
      */
     post: operations["approvePendingAppKey"];
     delete?: never;
@@ -7289,9 +7346,29 @@ export interface paths {
     get?: never;
     /**
      * Replace the signed-in account's person key.
-     * @description Only the account's own login session: an API key and an administrator acting as the account are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. A session opened by device sign-in or by another app's key is refused too. The old person key is revoked: new devices need the new one, and devices already enrolled keep their own keys. A device the old key introduced that is still waiting for approval is denied with it. Sending the current key again changes nothing; a public key enrolled anywhere else on this server is 409 conflict. 409 capability_disabled while auth.app_key_sign_in is off. It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile of the account is 403 main_profile_required, and an X-Profile-Id that names no profile of the account is 404 not_found. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 main_profile_required. On this operation 403 permission_denied means the session itself may not do this, whatever profile it names. The operation checks the profile again once it holds the account: if the profile's PIN changed, it stopped being the main profile, or it was being written at that moment, the answer is 403 profile_verification_required with nothing changed, and the request is made again (enrollAppKeys on a new challenge, since the first is spent).
+     * @description Only the account's own login session: an API key and an administrator acting as the account are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. A session opened by device sign-in or by another app's key is refused too. The old person key is revoked: new devices need the new one, and devices already enrolled keep their own keys. A device the old key introduced that is still waiting for approval is denied with it. Sending the current key again changes nothing; a public key enrolled anywhere else on this server is 409 conflict. 409 capability_disabled while auth.app_key_sign_in is off. It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile of the account is 403 main_profile_required, and an X-Profile-Id that names no profile of the account is 404 not_found. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 main_profile_required. On this operation 403 permission_denied means the session itself may not do this, whatever profile it names. The operation checks the profile again once it holds the account: if the profile's PIN changed, it stopped being the main profile, or it was being written at that moment, the answer is 403 profile_verification_required with nothing changed, and the request is made again: an operation whose body carries a signed envelope (enrollAppKeys) needs a new challenge and a newly signed envelope, since the first challenge is spent; every other operation is sent again as it was.
      */
     put: operations["replacePersonKey"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/keys/session": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Describe what the caller's login session may do with the account's app keys.
+     * @description So a page can tell, before it asks, whether this session may list or manage keys, and whether signing in again would help. Answers while auth.app_key_sign_in is off; read getAppKeyCapability for the switch. approve follows the X-Profile-Id the request declares.
+     */
+    get: operations["getAppKeySessionAccess"];
+    put?: never;
     post?: never;
     delete?: never;
     options?: never;
@@ -7510,6 +7587,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/auth/password-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Describe the rules a new password must meet. */
+    get: operations["getPasswordPolicy"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/auth/plugin-launch": {
     parameters: {
       query?: never;
@@ -7588,7 +7682,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the caller's live login sessions, newest first. */
+    /**
+     * List the caller's live login sessions, newest first.
+     * @description A session opened by device sign-in (a code a signed-in person approved, Jellyfin Quick Connect, or a remote-playback handoff), and a session from before this rule was recorded whose X-Silo-Device-Platform was tvOS, android-tv or roku, sees only itself in full. It still gets every live session of the account, but another session's item carries only its id and current: device_name and ip_address are empty, device_id and device_platform are absent, last_seen_at is null, and created_at and expires_at repeat the caller's own. For such a caller the page is ordered by id, not newest first, and a cursor from the other kind of caller is invalid_cursor.
+     */
     get: operations["listSessions"];
     put?: never;
     post?: never;
@@ -7608,7 +7705,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Revoke one of the caller's login sessions. */
+    /**
+     * Revoke one of the caller's login sessions.
+     * @description In demo mode a caller that is not an administrator may revoke only the session making the request; any other session of the account is 403 permission_denied, while an unknown session or one of another account is 404 as for every caller. getLoginSessionCapabilities reports this as revoke_other_sessions. A session opened by device sign-in (see listSessions) may revoke only itself: another session of the account is 403 permission_denied, and a session of another account or an unknown id is 404 as for every caller.
+     */
     delete: operations["deleteSession"];
     options?: never;
     head?: never;
@@ -9864,6 +9964,26 @@ export interface paths {
     put?: never;
     /** Create the invited account through an invitation link. */
     post: operations["acceptInvitationLink"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/invitations/app-code": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start joining through the Silo app with an invitation link.
+     * @description The invite page calls this when the person chooses to join with the Silo app. It checks the invitation as acceptInvitationLink does, reserves the account name and answers an app code for the app to redeem (redeemAppCode); the invitation stays open, and nothing is created until the app redeems the code. A second code from the same invitation replaces the first, which stops working. An emailed invitation's account takes its address as name and email; for an invitation with no address (email_required in the lookup) username is required and email optional. An unknown, used, revoked or expired invitation is 404 not_found. A name or email another account holds, or another unspent code reserves, is 409 conflict with errors[0] {code: duplicate, location: body.username or body.email}, naming the field that clashed. A missing username is 422 at body.username, and so is a username containing @ that isn't the email the same request gives (it could be someone else's address); an invalid email is 422 at body.email. An invitation that creates a profile on a server whose profile store can't create it in the same transaction is 501 capability_unsupported, as accept answers (acceptance_available and app_join are false in the lookup). With local password sign-in off on this server the answer is 409 provider_sign_in_required: an invitation never creates an account whose only way in is its app keys there; the person signs in with the server's provider on its site instead and uses createAppCode. 409 capability_disabled while auth.app_key_sign_in is off. Spends the per-address invitation rate-limit budget, which the lookup shares: 20 a minute with a burst of 10 by default, and each code and each renewal spends one. The code lives ten minutes, never past the invitation's expiry, and works once. The response is no-store. server_address is where the app should connect, not proof of which server answers there: the redeem's signed server_id and the origin rule are.
+     */
+    post: operations["createInvitationAppCode"];
     delete?: never;
     options?: never;
     head?: never;
@@ -14539,7 +14659,12 @@ export interface components {
     };
     AccountIdentityCollection: {
       /**
-       * @description Whether deleteAccountIdentity would disconnect an identity now for the profile asking: that profile is the account's household manager (deleteAccountIdentity describes who is), and the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity
+       * @description Whether the caller may link another identity (createAccountIdentityLinkTicket, linkAccountIdentityWithCredentials, linkAccountIdentityWithNetwork): false for an API key or an impersonation session, and in demo mode for a caller that is not an administrator. listAuthProviders names the providers there are to link
+       * @example true
+       */
+      can_link: boolean;
+      /**
+       * @description Whether deleteAccountIdentity would disconnect an identity now for the profile asking: that profile is the account's household manager (deleteAccountIdentity describes who is), and the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity, and in demo mode for a caller that is not an administrator
        * @example true
        */
       can_unlink: boolean;
@@ -14649,7 +14774,7 @@ export interface components {
       maximum_password_bytes: number;
       /**
        * Format: int64
-       * @description Fewest characters a new password may have
+       * @description Fewest characters a new password may have. getPasswordPolicy describes the rest of the password policy
        * @example 8
        */
       minimum_password_length: number;
@@ -19344,6 +19469,8 @@ export interface components {
       bucket_unit: "day" | "week" | "month";
       buckets: components["schemas"]["AdminInsightsActivityBucket"][];
       coverage: components["schemas"]["AdminInsightsCoverage"];
+      /** @description Sessions that started in the window by end reason (stopped, terminated, expired, aborted, replaced); unknown covers rows recorded before end reasons were */
+      end_reasons: components["schemas"]["AdminInsightsLabeledCount"][];
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -19360,6 +19487,16 @@ export interface components {
       tz: string;
     };
     AdminInsightsActivityBucket: {
+      /**
+       * Format: int64
+       * @description Distinct accounts with a session that started in the bucket
+       */
+      active_accounts: number;
+      /**
+       * Format: int64
+       * @description Distinct household profiles with a session that started in the bucket
+       */
+      active_profiles: number;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -19436,6 +19573,19 @@ export interface components {
       sessions: number;
       /** Format: double */
       share_of_adapted: number;
+    };
+    AdminInsightsAudioUsage: {
+      /** @description Sessions by audio handling: direct, remux (copied into a new container) or transcode */
+      decisions: components["schemas"]["AdminInsightsLabeledCount"][];
+      /** @description Sessions by delivered channel layout: mono, stereo, surround or unknown */
+      delivered_channels: components["schemas"]["AdminInsightsLabeledCount"][];
+      /** @description Sessions by the played audio track's language */
+      languages: components["schemas"]["AdminInsightsLabeledCount"][];
+      /**
+       * Format: int64
+       * @description Sessions with route facts, the ones that record their audio track
+       */
+      sessions: number;
     };
     AdminInsightsBandwidth: {
       /**
@@ -19524,6 +19674,10 @@ export interface components {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       available: boolean;
+      /** @description Activity carries per-bucket active accounts and profiles and end_reasons; Titles carries least_finished; Devices carries client_versions, protocol_buckets, subtitles and audio; People carries top_profiles */
+      breakdowns: boolean;
+      /** @description The Library read (getAdminInsightsLibrary) is served */
+      library: boolean;
       /** @description Long-term per-node daily egress archive survives past the 31-day minute-sample window */
       node_egress_daily: boolean;
       /** @description Activity, Devices, Titles and title detail accept profile_id together with user_id */
@@ -19567,6 +19721,19 @@ export interface components {
       /** Format: int64 */
       transcode_sessions: number;
     };
+    AdminInsightsClientVersionRow: {
+      client_name: string;
+      client_version: string;
+      device_platform: string;
+      is_jellyfin_client: boolean;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      last_seen_at: string | null;
+      /** Format: int64 */
+      sessions: number;
+    };
     AdminInsightsCoverage: {
       /**
        * Format: int64
@@ -19606,6 +19773,14 @@ export interface components {
     };
     AdminInsightsDevices: {
       adaptation_reasons: components["schemas"]["AdminInsightsAdaptationReason"][];
+      audio: components["schemas"]["AdminInsightsAudioUsage"];
+      /**
+       * @description Bucket size of protocol_buckets
+       * @enum {string}
+       */
+      bucket_unit: "day" | "week" | "month";
+      /** @description Up to 50 reported client versions with the most sessions; sessions without a version are left out */
+      client_versions: components["schemas"]["AdminInsightsClientVersionRow"][];
       codecs: string[];
       coverage: components["schemas"]["AdminInsightsCoverage"];
       /** @description Sessions by delivered resolution class; transcodes recorded before route facts are unknown */
@@ -19618,11 +19793,14 @@ export interface components {
       hw_accel_breakdown: components["schemas"]["AdminInsightsLabeledCount"][];
       /** @description Client and platform pairs with at least min_sessions sessions, at most 200 (the ones with the most sessions) */
       matrix: components["schemas"]["AdminInsightsClientMatrixRow"][];
+      /** @description Sessions per bucket from Silo's own clients and from Jellyfin-protocol clients */
+      protocol_buckets: components["schemas"]["AdminInsightsProtocolBucket"][];
       /** @description Sessions delivered at a lower resolution class than their source, by source and delivered class */
       resolution_changes: components["schemas"]["AdminInsightsResolutionChange"][];
       /** @description Sessions by source resolution class (480p, 720p, 1080p, 2160p, 4320p, unknown), on the scale media_files.resolution uses */
       source_resolutions: components["schemas"]["AdminInsightsLabeledCount"][];
       subtitle_burn_in_codecs: components["schemas"]["AdminInsightsLabeledCount"][];
+      subtitles: components["schemas"]["AdminInsightsSubtitleUsage"];
       summary: components["schemas"]["AdminInsightsDevicesSummary"];
       /**
        * Format: date-time
@@ -19707,6 +19885,65 @@ export interface components {
       /** Format: int64 */
       sessions: number;
     };
+    AdminInsightsLabeledPlays: {
+      key: string;
+      /** Format: int64 */
+      plays: number;
+      /**
+       * Format: int64
+       * @description Distinct played titles behind the plays
+       */
+      titles: number;
+    };
+    AdminInsightsLibrary: {
+      /** @description Up to 15 content ratings by plays */
+      content_ratings: components["schemas"]["AdminInsightsLabeledPlays"][];
+      /** @description Plays by release decade (key is the decade's first year), oldest first, unknown last */
+      decades: components["schemas"]["AdminInsightsLabeledPlays"][];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      from: string;
+      /** @description Up to 20 genres by plays; a title counts in each of its genres */
+      genres: components["schemas"]["AdminInsightsLabeledPlays"][];
+      /** @description Libraries with movies or series, most titles first */
+      libraries: components["schemas"]["AdminInsightsLibraryCoverage"][];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      oldest_history_at: string | null;
+      /** @description Up to 20 titles added in the window with no play yet, newest first */
+      recently_added_unplayed: components["schemas"]["AdminInsightsUnplayedTitle"][];
+      summary: components["schemas"]["AdminInsightsLibrarySummary"];
+      /** @description Titles added in the window by how long they waited for a first play: day, week, month, later or not_yet; sessions holds the title count */
+      time_to_first_play: components["schemas"]["AdminInsightsLabeledCount"][];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      to: string;
+      tz: string;
+    };
+    AdminInsightsLibraryCoverage: {
+      /** Format: int64 */
+      added_titles: number;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      library_id: string;
+      name: string;
+      /** Format: int64 */
+      never_started: number;
+      /** Format: double */
+      played_share: number;
+      /** Format: int64 */
+      played_titles: number;
+      /** Format: int64 */
+      titles: number;
+    };
     AdminInsightsLibraryRow: {
       /**
        * @description Opaque identifier
@@ -19720,6 +19957,40 @@ export interface components {
       viewers: number;
       /** Format: int64 */
       watch_seconds: number;
+    };
+    AdminInsightsLibrarySummary: {
+      /**
+       * Format: int64
+       * @description Titles added in the window that have a play since, up to now
+       */
+      added_played: number;
+      /**
+       * Format: int64
+       * @description Titles first seen in the window
+       */
+      added_titles: number;
+      /**
+       * Format: double
+       * @description Median days from being added to the first play, over titles added in the window that have one
+       */
+      median_days_to_first_play: number | null;
+      /**
+       * Format: int64
+       * @description Titles with no playback session at all, up to now
+       */
+      never_started: number;
+      /** Format: double */
+      played_share: number;
+      /**
+       * Format: int64
+       * @description Titles with a play in the window; a series counts when any episode has one
+       */
+      played_titles: number;
+      /**
+       * Format: int64
+       * @description Distinct movies and series in scope; a title in two libraries counts once
+       */
+      titles: number;
     };
     AdminInsightsPeakStreamsPoint: {
       /**
@@ -19766,6 +20037,8 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       to: string;
+      /** @description Up to 10 household profiles across all accounts with the most plays, whatever the sort, search or page */
+      top_profiles: components["schemas"]["AdminInsightsTopProfile"][];
       /** Format: int64 */
       total_accounts: number;
       /** Format: int64 */
@@ -19867,6 +20140,22 @@ export interface components {
       /** Format: int64 */
       watch_seconds: number;
     };
+    AdminInsightsProtocolBucket: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      bucket_start: string;
+      /** Format: int64 */
+      jellyfin_sessions: number;
+      /**
+       * Format: date
+       * @description Local bucket start date (YYYY-MM-DD in requested tz)
+       */
+      label_date: string;
+      /** Format: int64 */
+      native_sessions: number;
+    };
     AdminInsightsResolutionChange: {
       /** @description Source resolution class */
       from: string;
@@ -19874,6 +20163,23 @@ export interface components {
       sessions: number;
       /** @description Lower delivered resolution class */
       to: string;
+    };
+    AdminInsightsSubtitleUsage: {
+      /** @description Subtitled sessions by delivery: embedded, sidecar, hls_rendition or burn_in */
+      deliveries: components["schemas"]["AdminInsightsLabeledCount"][];
+      /** Format: int64 */
+      forced_sessions: number;
+      /** Format: int64 */
+      hearing_impaired_sessions: number;
+      /** @description Subtitled sessions by subtitle language (ISO 639-1 where one exists, unknown when untagged) */
+      languages: components["schemas"]["AdminInsightsLabeledCount"][];
+      /**
+       * Format: int64
+       * @description Sessions with route facts, the ones that record their subtitle
+       */
+      sessions: number;
+      /** Format: int64 */
+      subtitled_sessions: number;
     };
     AdminInsightsTitle: {
       /** @enum {string} */
@@ -19963,6 +20269,8 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       from: string;
+      /** @description Movies and series with at least 3 plays and at least one left unfinished, lowest completion rate first, up to limit */
+      least_finished: components["schemas"]["AdminInsightsTitleRow"][];
       libraries: components["schemas"]["AdminInsightsLibraryRow"][];
       movies: components["schemas"]["AdminInsightsTitleRow"][];
       shows: components["schemas"]["AdminInsightsTitleRow"][];
@@ -20021,6 +20329,24 @@ export interface components {
       /** Format: int64 */
       watch_seconds: number;
     };
+    AdminInsightsTopProfile: {
+      /** Format: int64 */
+      plays: number;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      profile_id: string;
+      profile_name: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      user_id: string;
+      username: string;
+      /** Format: int64 */
+      watch_seconds: number;
+    };
     AdminInsightsTranscoderRow: {
       client_name: string;
       device_platform: string;
@@ -20029,6 +20355,25 @@ export interface components {
       total_sessions: number;
       /** Format: int64 */
       transcode_sessions: number;
+    };
+    AdminInsightsUnplayedTitle: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      added_at: string;
+      content_id: string;
+      /** @enum {string} */
+      kind: "movie" | "series";
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      library_id: string;
+      library_name: string;
+      title: string;
+      /** Format: int64 */
+      year: number | null;
     };
     AdminInvitation: {
       /**
@@ -24319,6 +24664,9 @@ export interface components {
       /** Format: uri-reference */
       public_url?: string;
       refresh_result?: components["schemas"]["LibraryRefreshJobResult"];
+      /** @description The export job a catalog_import job reads from, when it was queued with export_job_id. Clients format their own label from it. */
+      source_export_job_id?: string;
+      /** @description An import's source as English text: the remote URL, the file name, or "Export job <id>". Prefer source_export_job_id when present. */
       source_label?: string;
       /**
        * Format: date-time
@@ -25471,6 +25819,29 @@ export interface components {
       description: string;
       name: string;
     };
+    AppCode: {
+      /**
+       * @description The app code: base64url of 32 random bytes. Good for one redeemAppCode within expires_in seconds
+       * @example 8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA
+       */
+      code: string;
+      /**
+       * Format: int64
+       * @description Seconds the code stays good: ten minutes, or less when the invitation expires sooner
+       * @example 600
+       */
+      expires_in: number;
+      /**
+       * @description Whether a page may put this code in a link (the join link). True only for a join code whose redeem creates an account with no administrative power. When false, show the server address and the code as text to type in the app, and never build a link, a scannable link or anything a device could open from them: a link can be received by an app other than Silo, which would redeem the code first. Always false for createAppCode
+       * @example true
+       */
+      link_allowed: boolean;
+      /**
+       * @description The server address the app connects to, which a page shows with the code or puts in the link: server.public_url when the request arrived on that address (so a path prefix survives), otherwise the address the request arrived on
+       * @example https://media.example.com
+       */
+      server_address: string;
+    };
     AppDeviceKey: {
       /**
        * @description For a key a grant enrolled, the name of the account whose person key signed the grant; null otherwise
@@ -25650,6 +26021,28 @@ export interface components {
       devices: components["schemas"]["AppDeviceKey"][];
       /** @description The account's person key; absent when it has none */
       person_key?: components["schemas"]["AppPersonKey"];
+    };
+    AppKeySessionAccess: {
+      /**
+       * @description Whether this session may approve a waiting device: manage, and the request acts as the household's verified main profile
+       * @example false
+       */
+      approve: boolean;
+      /**
+       * @description Whether this session may list the account's app keys and waiting devices (listAppKeys, listPendingAppKeys) and deny a waiting device
+       * @example true
+       */
+      list: boolean;
+      /**
+       * @description Whether this session may enroll and replace keys, issue an app code (createAppCode) and make the account's other changes that lead to lasting access; the main-profile rule still applies to each
+       * @example true
+       */
+      manage: boolean;
+      /**
+       * @description Whether signing in again in this browser would give a session that may: true for a session opened by device sign-in, or before this server recorded how sessions open, when the account has a local password the server accepts or a sign-in provider account. False for an administrator acting as the account, an API key, a remote-playback session and a session another app opened with a grant
+       * @example false
+       */
+      sign_in_again: boolean;
     };
     ApplePushRegistrationBody: {
       /** @enum {string} */
@@ -26439,6 +26832,11 @@ export interface components {
        */
       advisory_source?: "commonsense" | "mdblist";
       /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date
+       */
+      air_date?: string;
+      /**
        * @description On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author
        * @example [
        *       "Frank Herbert"
@@ -26469,6 +26867,12 @@ export interface components {
        * @description The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair
        */
       duration_seconds?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       /** @description Empty, never null */
@@ -26734,6 +27138,12 @@ export interface components {
       effective_version_resolution?: string;
       /** Format: int64 */
       episode_count?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       extras?: components["schemas"]["ItemExtraInfo"][];
@@ -27305,7 +27715,7 @@ export interface components {
        */
       current_password: string;
       /**
-       * @description The replacement; the capability document names the length limits
+       * @description The replacement; getPasswordPolicy describes the rules it must meet
        * @example margin fossil quench hollow
        */
       new_password: string;
@@ -28736,6 +29146,7 @@ export interface components {
       /** @enum {string} */
       feature:
         | "direct"
+        | "engine"
         | "nat_mapping"
         | "nat_hairpin"
         | "ipv4"
@@ -28766,7 +29177,14 @@ export interface components {
         | "no_gateway"
         | "gateway_unsupported"
         | "mapping_varies"
-        | "not_measured";
+        | "not_measured"
+        | "multiple_api_replicas"
+        | "replica_census_unavailable"
+        | "replica_lease_pending"
+        | "replica_lease_held"
+        | "udp_port_invalid"
+        | "udp_port_bind_failed"
+        | "engine_start_failed";
       requested?: string;
       /** @enum {string} */
       state: "on" | "off" | "capped" | "fallback" | "degraded" | "unknown";
@@ -28787,6 +29205,8 @@ export interface components {
       default: string;
       effective: string;
       env: string;
+      max?: string;
+      min?: string;
       reason?: string;
       requested?: string;
     };
@@ -30135,6 +30555,11 @@ export interface components {
        */
       advisory_source?: "commonsense" | "mdblist";
       /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date
+       */
+      air_date?: string;
+      /**
        * @description On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author
        * @example [
        *       "Frank Herbert"
@@ -30165,6 +30590,12 @@ export interface components {
        * @description The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair
        */
       duration_seconds?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       /** @description Empty, never null */
@@ -30801,6 +31232,14 @@ export interface components {
       email?: string;
       password: string;
     };
+    InvitationAppCodeInputBody: {
+      /** @description An optional email address for an invitation with no address of its own; ignored for an emailed invitation */
+      email?: string;
+      /** @description The token from the invitation link's fragment */
+      token: string;
+      /** @description The account name the person chose. Required when the lookup reports email_required; an emailed invitation's account takes its address instead, and this is ignored */
+      username?: string;
+    };
     InvitationCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed?: boolean;
@@ -30843,6 +31282,8 @@ export interface components {
     };
     InvitationLookup: {
       acceptance_available: boolean;
+      /** @description Whether the invitation can be claimed through the Silo app here (createInvitationAppCode): app key sign-in is on, the server has local password sign-in on, and acceptance_available is true. */
+      app_join: boolean;
       /** @description The address the invitation is bound to; empty when email_required is true. */
       email: string;
       /** @description True when the invitation is bound to no address, as for one created with delivery=link: the invitee enters their address at accept. */
@@ -30855,6 +31296,8 @@ export interface components {
       inviter_name: string;
       /** @description The inviter's note; empty when none. */
       note: string;
+      /** @description Whether the invitation can be claimed with a password here (acceptInvitationLink): false while the server has local password sign-in off. */
+      password_join: boolean;
       server_name: string;
       show_tour: boolean;
     };
@@ -31661,52 +32104,52 @@ export interface components {
     LoginSession: {
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision
+       * @description When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at
        * @example 2026-01-02T03:04:05.678Z
        */
       created_at: string;
       /** @description Whether this is the login session making this request */
       current: boolean;
       /**
-       * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing
+       * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in
        * @example 8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50
        */
       device_id?: string;
       /**
        * Format: uuid
-       * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
+       * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in, and on another session's item for a session opened by device sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
        * @example 0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11
        */
       device_key_id: string | null;
       /**
-       * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device
+       * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in
        * @example Living Room Apple TV
        */
       device_name: string;
       /**
-       * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none
+       * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in
        * @example tvOS
        */
       device_platform?: string;
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision
+       * @description When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at
        * @example 2026-02-01T03:04:05.678Z
        */
       expires_at: string;
       /**
-       * @description Session identifier; the value deleteSession takes
+       * @description Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current
        * @example 6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c
        */
       id: string;
       /**
-       * @description Client address recorded at login; empty when unknown
+       * @description Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in
        * @example 203.0.113.7
        */
       ip_address: string;
       /**
        * Format: date-time
-       * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded
+       * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in
        * @example 2026-01-02T03:04:05.678Z
        */
       last_seen_at: string | null;
@@ -31721,6 +32164,8 @@ export interface components {
       last_seen: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      /** @description Whether deleteSession may revoke the caller's sessions other than the one making the request. False in demo mode for a caller that is not an administrator, and for a session opened by device sign-in (see listSessions); either may still revoke the current session */
+      revoke_other_sessions: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -31732,52 +32177,52 @@ export interface components {
       current_session: {
         /**
          * Format: date-time
-         * @description RFC 3339 instant in UTC with millisecond precision
+         * @description When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at
          * @example 2026-01-02T03:04:05.678Z
          */
         created_at: string;
         /** @description Whether this is the login session making this request */
         current: boolean;
         /**
-         * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing
+         * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in
          * @example 8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50
          */
         device_id?: string;
         /**
          * Format: uuid
-         * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
+         * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in, and on another session's item for a session opened by device sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
          * @example 0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11
          */
         device_key_id: string | null;
         /**
-         * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device
+         * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in
          * @example Living Room Apple TV
          */
         device_name: string;
         /**
-         * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none
+         * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in
          * @example tvOS
          */
         device_platform?: string;
         /**
          * Format: date-time
-         * @description RFC 3339 instant in UTC with millisecond precision
+         * @description When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at
          * @example 2026-02-01T03:04:05.678Z
          */
         expires_at: string;
         /**
-         * @description Session identifier; the value deleteSession takes
+         * @description Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current
          * @example 6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c
          */
         id: string;
         /**
-         * @description Client address recorded at login; empty when unknown
+         * @description Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in
          * @example 203.0.113.7
          */
         ip_address: string;
         /**
          * Format: date-time
-         * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded
+         * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in
          * @example 2026-01-02T03:04:05.678Z
          */
         last_seen_at: string | null;
@@ -33478,6 +33923,30 @@ export interface components {
       telemetry_only: string[];
       /** Format: int64 */
       telemetry_only_truncated: number;
+    };
+    PasswordPolicy: {
+      /**
+       * Format: int64
+       * @description Most UTF-8 bytes a new password may have
+       * @example 72
+       */
+      maximum_bytes: number;
+      /**
+       * Format: int64
+       * @description Fewest characters a new password may have; never fewer than 8
+       * @example 8
+       */
+      minimum_length: number;
+      /**
+       * @description Whether a new password needs a punctuation mark or symbol (Unicode categories P and S); letters, digits and spaces do not count
+       * @example false
+       */
+      require_special: boolean;
+      /**
+       * @description Whether a new password needs a capital letter (Unicode category Lu)
+       * @example false
+       */
+      require_uppercase: boolean;
     };
     PasswordResetCapability: {
       /** @description Whether the current principal may use the capability */
@@ -36490,6 +36959,15 @@ export interface components {
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
     };
+    RedeemAppCodeInputBody: {
+      /** @description A redeem envelope signed with the private half of person_key, with device_sig; the app code is in its payload */
+      message: components["schemas"]["AppKeyEnvelope"];
+      /**
+       * @description The person key being enrolled: base64url of its 65-byte uncompressed P-256 point
+       * @example BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q
+       */
+      person_key: string;
+    };
     RefreshedTokens: {
       /**
        * @description Bearer access token
@@ -37584,6 +38062,7 @@ export interface components {
        */
       url?: string;
     };
+    SessionAppCodeInputBody: Record<string, never>;
     SettingConstraint: {
       /**
        * @description How the policy narrows the value; one of the settings contract's constraint kinds
@@ -37811,7 +38290,7 @@ export interface components {
        */
       email: string;
       /**
-       * @description Account password; at least 8 characters and at most 72 UTF-8 bytes
+       * @description Account password; at least 8 characters and at most 72 UTF-8 bytes. The server's password policy can require more; getPasswordPolicy describes it
        * @example correct horse battery staple
        */
       password: string;
@@ -37918,7 +38397,7 @@ export interface components {
        */
       invite_code: string;
       /**
-       * @description Account password; at least 8 characters and at most 72 UTF-8 bytes
+       * @description Account password; at least 8 characters and at most 72 UTF-8 bytes. The server's password policy can require more; getPasswordPolicy describes it
        * @example correct horse battery staple
        */
       password: string;
@@ -38201,7 +38680,7 @@ export interface components {
     };
     SubtitleAppearanceDeviceOverride: {
       /**
-       * @description The subtitle appearance as a JSON document; the server validates only that it is JSON
+       * @description The subtitle appearance as a JSON document; it must satisfy the settings contract's subtitle-appearance schema
        * @example {"fontSize":"xxlarge"}
        */
       value: string;
@@ -39301,6 +39780,11 @@ export interface components {
       title: string;
     };
     WatchDetail: {
+      /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD; sent when episode_labels is air_date
+       */
+      air_date?: string;
       backdrop_thumbhash?: string;
       /**
        * Format: uri-reference
@@ -39321,6 +39805,12 @@ export interface components {
       effective_version_hdr?: boolean;
       /** @description The version resolution the profile last played */
       effective_version_resolution?: string;
+      /**
+       * @description The series' episode labels, as on CatalogItem: air_date means show air_date where the season and episode numbers would go; absent or unknown means show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       intro?: components["schemas"]["WatchMarker"];
@@ -40226,6 +40716,11 @@ export interface components {
        */
       advisory_source?: "commonsense" | "mdblist";
       /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date
+       */
+      air_date?: string;
+      /**
        * @description On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author
        * @example [
        *       "Frank Herbert"
@@ -40258,6 +40753,12 @@ export interface components {
        * @description The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair
        */
       duration_seconds?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       /** @description Empty, never null */
@@ -40466,6 +40967,11 @@ export interface components {
        */
       advisory_source?: "commonsense" | "mdblist";
       /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date
+       */
+      air_date?: string;
+      /**
        * @description On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author
        * @example [
        *       "Frank Herbert"
@@ -40496,6 +41002,12 @@ export interface components {
        * @description The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair
        */
       duration_seconds?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       /** @description Empty, never null */
@@ -62712,6 +63224,129 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AdminInsightsDevices"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminInsightsLibrary: {
+    parameters: {
+      query?: {
+        /** @description Inclusive local start date (YYYY-MM-DD in tz), required when range=custom */
+        from_date?: string;
+        /** @description Restrict playback analytics to media belonging to this library */
+        library_id?: string;
+        /** @description Restrict playback analytics to this household profile of user_id; requires user_id because profile ids repeat across accounts */
+        profile_id?: string;
+        /** @description Preset time window or custom */
+        range?: "7d" | "30d" | "90d" | "1y" | "all" | "custom";
+        /** @description Invalidate cached insights aggregates before reading; ignored for scoped API keys */
+        refresh?: boolean;
+        /** @description Inclusive local end date (YYYY-MM-DD in tz), required when range=custom */
+        to_date?: string;
+        /** @description IANA timezone identifier for day/week/month bucketing and heatmap alignment */
+        tz?: string;
+        /** @description Restrict playback analytics to this login account */
+        user_id?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminInsightsLibrary"];
         };
       };
       /** @description Bad Request */
@@ -101642,6 +102277,308 @@ export interface operations {
       };
     };
   };
+  createAppCode: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SessionAppCodeInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AppCode"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          /** @description Seconds to wait before asking again. */
+          "Retry-After"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          /** @description Seconds to wait before asking again. */
+          "Retry-After"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  redeemAppCode: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RedeemAppCodeInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SealedReply"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          /** @description Seconds to wait before asking again, on a fresh challenge. */
+          "Retry-After"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          /** @description Seconds to wait before asking again, on a fresh challenge. */
+          "Retry-After"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getDeviceLogin: {
     parameters: {
       query?: {
@@ -104530,6 +105467,113 @@ export interface operations {
       };
     };
   };
+  getAppKeySessionAccess: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AppKeySessionAccess"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   signInWithAppKey: {
     parameters: {
       query?: never;
@@ -105578,6 +106622,71 @@ export interface operations {
       };
     };
   };
+  getPasswordPolicy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PasswordPolicy"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   createPluginLaunch: {
     parameters: {
       query?: never;
@@ -106056,6 +107165,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -126777,6 +127895,129 @@ export interface operations {
       };
     };
   };
+  createInvitationAppCode: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["InvitationAppCodeInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AppCode"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getInvitationCapabilities: {
     parameters: {
       query?: never;
@@ -141642,6 +142883,8 @@ export interface operations {
         silo_rendition?: "video" | "subtitles";
         /** @description Set with silo_rendition=subtitles by the multivariant playlist of a plan with on-demand renditions (hls_subtitle_renditions_all_v1): the container track number whose WebVTT playlist to answer. */
         silo_track?: string;
+        /** @description Opaque transport generation the plan's HLS URL carries, when the attempt listed hls_transport_marker_v1 in deliveries.hls.features, and the playlist echoes into its URIs; clients must not compose, strip or move it. When the session has a recorded current transport, a request naming a transport a replan replaced answers 404 playback_transport_superseded. A session rebuilt from its recipe (after a server restart, or on a server that did not hold it) has none until its next replan and serves the request as if the marker were absent. Absent, the request is served by the session's current transport. */
+        silo_transport?: string;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
@@ -141770,6 +143013,8 @@ export interface operations {
         silo_rendition?: "video" | "subtitles";
         /** @description Set with silo_rendition=subtitles by the multivariant playlist of a plan with on-demand renditions (hls_subtitle_renditions_all_v1): the container track number whose WebVTT playlist to answer. */
         silo_track?: string;
+        /** @description Opaque transport generation the plan's HLS URL carries, when the attempt listed hls_transport_marker_v1 in deliveries.hls.features, and the playlist echoes into its URIs; clients must not compose, strip or move it. When the session has a recorded current transport, a request naming a transport a replan replaced answers 404 playback_transport_superseded. A session rebuilt from its recipe (after a server restart, or on a server that did not hold it) has none until its next replan and serves the request as if the marker were absent. Absent, the request is served by the session's current transport. */
+        silo_transport?: string;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
@@ -141892,6 +143137,8 @@ export interface operations {
   getPlaybackSegment: {
     parameters: {
       query?: {
+        /** @description Opaque transport generation the plan's HLS URL carries, when the attempt listed hls_transport_marker_v1 in deliveries.hls.features, and the playlist echoes into its URIs; clients must not compose, strip or move it. When the session has a recorded current transport, a request naming a transport a replan replaced answers 404 playback_transport_superseded. A session rebuilt from its recipe (after a server restart, or on a server that did not hold it) has none until its next replan and serves the request as if the marker were absent. Absent, the request is served by the session's current transport. */
+        silo_transport?: string;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */

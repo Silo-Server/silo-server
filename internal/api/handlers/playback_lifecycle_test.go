@@ -28,6 +28,10 @@ func (s *lifecycleTestStore) SetLifecyclePaused(_ context.Context, id string, pa
 	return LifecycleTransition{SessionID: id, Seq: s.seq, At: time.Now(), State: lifecycleState(paused)}, true, nil
 }
 
+func (s *lifecycleTestStore) ConfirmLifecyclePause(_ context.Context, id string, paused bool, _ int64) (LifecycleTransition, bool, error) {
+	return s.SetLifecyclePaused(context.Background(), id, paused)
+}
+
 func (s *lifecycleTestStore) RecordEnd(ctx context.Context, entry AdminPlaybackHistoryEntry, _ string) (LifecycleTransition, bool, error) {
 	s.seq++
 	_ = s.RecordHistory(ctx, entry)

@@ -13,6 +13,8 @@ import {
 
 interface EpisodeCardCaptionProps {
   episode: EpisodeListItem;
+  /** The series' episode labels; "air_date" drops the S01E02 code. */
+  episodeLabels?: string;
   /** Spoiler protection leaves the description out; the title and metadata stay. */
   hideOverview: boolean;
   isCurrent?: boolean;
@@ -29,13 +31,14 @@ interface EpisodeCardCaptionProps {
  */
 export default function EpisodeCardCaption({
   episode,
+  episodeLabels,
   hideOverview,
   isCurrent = false,
   badges,
   notice,
 }: EpisodeCardCaptionProps) {
   useAppLanguage();
-  const { prefix, title } = episodeCardTitleParts(episode);
+  const { prefix, title } = episodeCardTitleParts(episode, episodeLabels);
   const metadata = episodeCardMetadata(episode);
   const overview = hideOverview ? "" : (episode.overview?.trim() ?? "");
   const showsTranslationLabel =
@@ -66,7 +69,7 @@ export default function EpisodeCardCaption({
               </span>
             )}
           </span>
-          <span className="sr-only">{episodeCardSpokenTitle(episode)}</span>
+          <span className="sr-only">{episodeCardSpokenTitle(episode, episodeLabels)}</span>
         </p>
         {badges && <span className="flex shrink-0 items-center gap-2">{badges}</span>}
       </div>

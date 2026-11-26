@@ -365,6 +365,30 @@
       "value": "Dieser Wert liegt außerhalb des zulässigen Bereichs."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Verwende mindestens ein Sonderzeichen, zum Beispiel ! oder #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Verwende mindestens einen Großbuchstaben."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Dieses Passwort ist zu lang."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Dieses Passwort ist zu kurz."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Deine Sitzung ist abgelaufen. Melde dich erneut an."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Solange die Anmeldung mit Passwort deaktiviert ist, muss ein Anmeldeanbieter aktiviert bleiben, den Personen nutzen können. OpenID Connect benötigt außerdem die öffentliche URL des Servers."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -7989,6 +8019,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Karten"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Layout"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabelle"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -49089,7 +49137,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Wiedergabetrends, beliebte Titel, Aktivität im Haushalt, Wiedergabe auf Geräten und Bandbreite."
+      "value": "Live-Streams, Wiedergabetrends, beliebte Titel, Aktivität im Haushalt, Wiedergabe auf Geräten und Bandbreite."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -67532,7 +67580,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Prüfe, ob der Router UPnP, NAT-PMP oder PCP unterstützt."
+      "value": "Fordert beim Router eine Portweiterleitung per UPnP, NAT-PMP oder PCP an."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67541,16 +67589,40 @@
       "value": "Port-Mapping"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Bereich: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " bis "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Bereitschaftsprüfungen starten keine direkte Wiedergabe."
+      "value": "Wenn du diese Option aktivierst, startet die Engine für direkte Verbindungen. Sie öffnet einen UDP-Port und fordert beim Router eine Portweiterleitung an, wenn „Portweiterleitung“ aktiviert ist. „Prüfung ausführen“ liest nur den Zustand des Hosts aus."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Von einem Admin deaktiviert"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Auf den zulässigen Bereich begrenzt"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67562,7 +67634,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Die Engine für direkte Verbindungen konnte nicht gestartet werden"
+      "value": "Die Engine für direkte Verbindungen wurde beendet oder konnte nicht gestartet werden"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67593,6 +67665,12 @@
     {
       "type": 0,
       "value": "Ungültiger Wert; Aus wird verwendet"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Ungültiger Wert; Standardwert wird verwendet"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -78871,6 +78949,20 @@
       "value": "Aktiviere zuerst einen Anmeldeanbieter. Wäre die Anmeldung mit Passwort aus und kein Anbieter aktiv, könnten sich nur Notfall-Admins anmelden."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Lege zuerst die öffentliche URL des Servers fest. Ohne sie kann "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " niemanden anmelden, sodass sich bei deaktivierter Anmeldung mit Passwort nur Notfall-Admins anmelden könnten."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -78961,6 +79053,234 @@
       "value": "Benutzern das Erstellen von API-Schlüsseln erlauben"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Anmeldung mit Passwort deaktivieren"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Nur Notfall-Admins melden sich dann mit einem Passwort an. Alle anderen melden sich mit "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " an."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " erstellt Konten bei der ersten Anmeldung. Meldet sich eine dieser Personen damit an, bevor du sie verknüpfst, erhält sie ein neues, separates Konto."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Verknüpfe jedes davon auf seiner Seite unter „Benutzer“ mit einem "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "-Konto."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " Konto kann sich erst anmelden, wenn ein Admin es verknüpft"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " Konten können sich erst anmelden, wenn ein Admin sie verknüpft"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Es konnte nicht geprüft werden, welche Konten betroffen sind. Du kannst die Anmeldung mit Passwort trotzdem deaktivieren."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Es wird geprüft, wer sich mit einem Passwort anmeldet"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Wenn "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " bei der Anmeldung eine dieser E-Mail-Adressen bestätigt, verbindet Silo die Person mit ihrem Konto."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " Konto wird per E-Mail verbunden"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " Konten werden per E-Mail verbunden"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " weiteres anzeigen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " weitere anzeigen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Weitere Konten konnten nicht geladen werden. Versuche es erneut."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Alle Konten können sich danach weiterhin anmelden."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Admin"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "E-Mail-Abgleich ist deaktiviert"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Keine E-Mail"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Dadurch wird niemand abgemeldet. Wer bereits angemeldet ist, bleibt angemeldet, API-Schlüssel funktionieren weiter, und neue Geräte können weiterhin freigegeben werden. Um jemanden abzumelden, beende die Sitzungen der Person auf ihrer Seite unter "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Benutzer"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Anmeldung mit Passwort deaktivieren?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Alle Konten unter „Benutzer“ ansehen"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -78999,6 +79319,28 @@
     {
       "type": 0,
       "value": " konnte nicht geändert werden."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Die Anmeldung mit Passwort ist deaktiviert, daher melden sich alle außer Notfall-Admins mit "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " an. Aktiviere zuerst die Anmeldung mit Passwort wieder und deaktiviere dann "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -81024,7 +81366,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Wiedergabetrends, beliebte Titel, Konten, Geräte und Bandbreite."
+      "value": "Live-Streams, Wiedergabetrends, beliebte Titel, Konten, Geräte und Bandbreite."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -100840,6 +101182,18 @@
           "value": "Optional"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Gesehene Titel ausblenden"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Jedes Profil sieht diese Sammlung ohne die Titel, die es gesehen hat: auf ihrer Seite, in ihren Reihen und in ihrer Anzahl. Es wird nichts entfernt. Eine intelligente Sammlung mit Titelbegrenzung wählt zuerst ihre Titel aus und zeigt daher eventuell weniger an."
     }
   ],
   "web.collections.details.label": [
@@ -120821,6 +121175,16 @@
     {
       "type": 0,
       "value": "Letzte Ausstrahlung"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " sperren"
     }
   ],
   "web.item.editMetadata.locked": [

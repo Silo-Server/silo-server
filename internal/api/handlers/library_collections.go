@@ -2176,6 +2176,7 @@ func (h *LibraryCollectionHandler) itemListResponseOf(ctx context.Context, item 
 		AdvisoryAge:       item.AdvisoryAge,
 		AdvisorySource:    item.AdvisorySource,
 		Status:            item.Status,
+		EpisodeLabels:     item.EpisodeLabels,
 		RatingIMDB:        item.RatingIMDB,
 		ImdbID:            item.ImdbID,
 		TmdbID:            item.TmdbID,
@@ -2186,6 +2187,10 @@ func (h *LibraryCollectionHandler) itemListResponseOf(ctx context.Context, item 
 	}
 	resp.PosterURL = h.presignURLCtx(ctx, cardThumbnailPath(item.PosterPath), "card")
 	resp.BackdropURL = h.presignURLCtx(ctx, cardThumbnailPath(item.BackdropPath), "card")
+	if item.Type == itemTypeEpisode && item.EpisodeLabels != "" && item.ReleaseDate != nil {
+		// An episode row's release date is its air date.
+		resp.AirDate = *item.ReleaseDate
+	}
 	return resp
 }
 

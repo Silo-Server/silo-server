@@ -182,7 +182,7 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (*IssueResult, error
 	if err != nil {
 		return nil, err
 	}
-	if !user.LocalPasswordLoginEnabled || user.PasswordHash == "" {
+	if !user.HasLocalPassword() {
 		return nil, auth.ErrPasswordLoginDisabled
 	}
 	if !user.Enabled {
@@ -297,7 +297,7 @@ func (s *Service) sendRequested(ctx context.Context, login string) error {
 	if err != nil {
 		return fmt.Errorf("looking up account: %w", err)
 	}
-	if !user.Enabled || !user.LocalPasswordLoginEnabled || user.PasswordHash == "" {
+	if !user.Enabled || !user.HasLocalPassword() {
 		return nil
 	}
 	if _, err := auth.ValidateEmail(user.Email); errors.Is(err, auth.ErrInvalidEmail) {
@@ -372,7 +372,7 @@ func (s *Service) Complete(ctx context.Context, token, password, deviceName, ip 
 		return nil, nil, ErrNotFound
 	}
 	// Validate first: a rejected password must not spend the link.
-	if err := auth.ValidateNewPassword(password); err != nil {
+	if err := auth.CheckNewPassword(ctx, s.settings, password); err != nil {
 		return nil, nil, err
 	}
 	user, err := s.repo.Complete(ctx, auth.HashLinkToken(token), password)

@@ -365,6 +365,30 @@
       "value": "Šī vērtība ir ārpus pieļaujamā diapazona."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Iekļaujiet vismaz vienu speciālo rakstzīmi, piemēram, ! vai #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Iekļaujiet vismaz vienu lielo burtu."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Šī parole ir pārāk gara."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Šī parole ir pārāk īsa."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Jūsu sesijas derīguma termiņš ir beidzies. Pierakstieties vēlreiz."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Kamēr pierakstīšanās ar paroli ir izslēgta, ir jāpaliek ieslēgtam pierakstīšanās nodrošinātājam, ko lietotāji var izmantot. OpenID Connect nodrošinātājam ir nepieciešams arī servera publiskais URL."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8306,6 +8336,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kartītes"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Izkārtojums"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabula"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -56033,7 +56081,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Skatīšanās tendences, populārākie vienumi, mājsaimniecības aktivitāte, atskaņošana ierīcēs un joslas platums."
+      "value": "Tiešraides straumes, skatīšanās tendences, populārākie vienumi, mājsaimniecības aktivitāte, atskaņošana ierīcēs un joslas platums."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -76047,7 +76095,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Pārbauda, vai maršrutētājs atbalsta UPnP, NAT-PMP vai PCP."
+      "value": "Pieprasīt no maršrutētāja UPnP, NAT-PMP vai PCP portu kartēšanu."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -76056,16 +76104,40 @@
       "value": "Portu kartēšana"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Diapazons: no "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " līdz "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Gatavības pārbaudes nesāk tiešo atskaņošanu."
+      "value": "Ieslēdzot šo iestatījumu, tiek palaists tiešo savienojumu dzinējs. Tas atver UDP portu un, ja ir ieslēgts iestatījums „Portu kartēšana”, pieprasa no maršrutētāja portu kartēšanu. Poga „Palaist pārbaudi” tikai nolasa resursdatora stāvokli."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Atspējojis administrators"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Vērtība ierobežota līdz atļautajam diapazonam"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -76077,7 +76149,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Neizdevās palaist tiešo savienojumu dzinēju"
+      "value": "Tiešo savienojumu dzinējs apstājās, vai to neizdevās palaist"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -76108,6 +76180,12 @@
     {
       "type": 0,
       "value": "Nederīga vērtība; iestatījums izslēgts"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Nederīga vērtība; tiek izmantota noklusējuma vērtība"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -87529,6 +87607,20 @@
       "value": "Vispirms ieslēdziet pierakstīšanās nodrošinātāju. Ja pierakstīšanās ar paroli ir izslēgta un neviens nodrošinātājs nav ieslēgts, pierakstīties varētu tikai ārkārtas piekļuves administratori."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Vispirms iestatiet servera publisko URL. Bez tā nodrošinātājs "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " nevar nevienu pierakstīt, tāpēc, ja pierakstīšanās ar paroli ir izslēgta, pierakstīties varētu tikai ārkārtas piekļuves administratori."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -87619,6 +87711,271 @@
       "value": "Atļaut lietotājiem izveidot API atslēgas"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Izslēgt pierakstīšanos ar paroli"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Ar paroli pierakstīsies tikai ārkārtas piekļuves administratori. Visi pārējie pierakstās, izmantojot "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Nodrošinātājs "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " izveido kontus pirmajā pierakstīšanās reizē, tāpēc, ja kāds no šiem lietotājiem pierakstīsies ar šo nodrošinātāju, pirms jūs viņu sasaistāt, viņam tiks izveidots jauns, atsevišķs konts."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Sasaistiet katru no tiem ar "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " kontu tā lapā sadaļā „Lietotāji”."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konti nevar pierakstīties, kamēr administrators tos nesasaista"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konts nevar pierakstīties, kamēr administrators to nesasaista"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konti nevar pierakstīties, kamēr administrators tos nesasaista"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās pārbaudīt, kurus kontus tas ietekmē. Pierakstīšanos ar paroli joprojām var izslēgt."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Notiek pārbaude, kuri lietotāji pierakstās ar paroli"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Kad nodrošinātājs "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " pierakstīšanās laikā apstiprina kādu no šīm e-pasta adresēm, Silo savieno šo lietotāju ar viņa kontu."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konti tiek savienoti pēc e-pasta adreses"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konts tiek savienots pēc e-pasta adreses"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konti tiek savienoti pēc e-pasta adreses"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt vēl "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt vēl "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt vēl "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās ielādēt citus kontus. Mēģiniet vēlreiz."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Pēc šīs izmaiņas visi konti joprojām varēs pierakstīties."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administrators"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "E-pasta saskaņošana ir izslēgta"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Nav e-pasta adreses"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Šī darbība nevienu neizraksta. Lietotāji, kuri jau ir pierakstījušies, paliek pierakstīti, viņu API atslēgas turpina darboties, un viņi joprojām var apstiprināt jaunas ierīces. Lai kādu izrakstītu, pārtrauciet šī lietotāja sesijas viņa lapā sadaļā "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Lietotāji"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Vai izslēgt pierakstīšanos ar paroli?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Skatīt visus kontus sadaļā „Lietotāji”"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -87661,6 +88018,28 @@
     {
       "type": 0,
       "value": "”."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Pierakstīšanās ar paroli ir izslēgta, tāpēc visi, izņemot ārkārtas piekļuves administratorus, pierakstās, izmantojot "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Vispirms atkal ieslēdziet pierakstīšanos ar paroli un pēc tam izslēdziet nodrošinātāju "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -89761,7 +90140,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Skatīšanās tendences, populārākie vienumi, konti, ierīces un joslas platums."
+      "value": "Tiešraides straumes, skatīšanās tendences, populārākie vienumi, konti, ierīces un joslas platums."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -112267,6 +112646,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Paslēpt noskatītos vienumus"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Katram profilam šī kolekcija tiek rādīta bez šajā profilā noskatītajiem vienumiem: kolekcijas lapā, rindās un vienumu skaitā. Nekas netiek noņemts. Viedā kolekcija ar vienumu skaita ierobežojumu vispirms atlasa vienumus, tāpēc tajā var būt mazāk vienumu."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -134233,6 +134624,20 @@
     {
       "type": 0,
       "value": "Pēdējās pārraides datums"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Bloķēt lauku „"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "”"
     }
   ],
   "web.item.editMetadata.locked": [

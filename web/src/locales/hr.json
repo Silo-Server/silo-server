@@ -365,6 +365,30 @@
       "value": "Ova je vrijednost izvan raspona."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Uključite barem jedan poseban znak, primjerice ! ili #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Uključite barem jedno veliko slovo."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Ova je lozinka predugačka."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Ova je lozinka prekratka."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Vaša je sesija istekla. Prijavite se ponovno."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Dok je prijava lozinkom isključena, mora ostati uključen pružatelj prijave kojim se korisnici mogu služiti. OpenID Connect također treba javni URL poslužitelja."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8250,6 +8280,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kartice"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Raspored"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tablica"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -55186,7 +55234,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Trendovi gledanja, popularni naslovi, aktivnost u kućanstvu, reprodukcija na uređajima i propusnost."
+      "value": "Streamovi uživo, trendovi gledanja, popularni naslovi, aktivnost u kućanstvu, reprodukcija na uređajima i propusnost."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -74984,7 +75032,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Provjerava podržava li usmjerivač UPnP, NAT-PMP ili PCP."
+      "value": "Traži od usmjerivača mapiranje priključka putem protokola UPnP, NAT-PMP ili PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -74993,16 +75041,40 @@
       "value": "Mapiranje portova"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Raspon: od "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " do "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Provjere spremnosti ne pokreću izravnu reprodukciju."
+      "value": "Uključivanjem ove postavke pokreće se mehanizam izravnih veza. On otvara UDP priključak i, kada je „Mapiranje priključaka“ uključeno, traži od usmjerivača mapiranje priključka. „Pokreni provjeru“ samo čita stanje hosta."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Onemogućio administrator"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Ograničeno na dopušteni raspon"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -75014,7 +75086,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Mehanizam izravnih veza nije se mogao pokrenuti"
+      "value": "Mehanizam izravnih veza zaustavio se ili se nije mogao pokrenuti"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -75045,6 +75117,12 @@
     {
       "type": 0,
       "value": "Nevaljana vrijednost; postavka je isključena"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Nevažeća vrijednost; koristi se zadana"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -86450,6 +86528,20 @@
       "value": "Najprije uključite pružatelja prijave. Ako je prijava lozinkom isključena i nijedan pružatelj nije uključen, mogli bi se prijaviti samo administratori za hitni pristup."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Najprije postavite javni URL poslužitelja. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " bez njega ne može nikoga prijaviti, pa bi se uz isključenu prijavu lozinkom mogli prijaviti samo administratori za hitni pristup."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -86540,6 +86632,271 @@
       "value": "Dopusti korisnicima izradu API ključeva"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Isključi prijavu lozinkom"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Lozinkom će se prijavljivati samo administratori za hitni pristup. Svi ostali prijavljuju se putem pružatelja "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Pružatelj "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " izrađuje račune pri prvoj prijavi, pa ako se neka od ovih osoba prijavi putem njega prije nego što je povežete, dobit će novi, zasebni račun."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Svaki od njih povežite s računom pružatelja "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " na njegovoj stranici u odjeljku Korisnici."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " račun se ne može prijaviti dok ga administrator ne poveže"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " računa se ne mogu prijaviti dok ih administrator ne poveže"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " računa se ne može prijaviti dok ih administrator ne poveže"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nije moguće provjeriti na koje račune ovo utječe. Prijavu lozinkom i dalje možete isključiti."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Provjerava se tko se prijavljuje lozinkom"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Kada pružatelj "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " pri prijavi potvrdi jednu od ovih adresa e-pošte, Silo tu osobu povezuje s njezinim računom."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " račun se povezuje putem e-pošte"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " računa se povezuju putem e-pošte"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " računa se povezuje putem e-pošte"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži još "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži još "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži još "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Nije moguće učitati više računa. Pokušajte ponovno."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Nakon ovoga svaki se račun i dalje može prijaviti."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administrator"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Podudaranje po e-pošti je isključeno"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Nema e-pošte"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Ovo nikoga ne odjavljuje. Osobe koje su već prijavljene ostaju prijavljene, njihovi API ključevi i dalje rade, a i dalje mogu odobravati nove uređaje. Da biste nekoga odjavili, završite sesije te osobe na njezinoj stranici u odjeljku "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Korisnici"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Isključiti prijavu lozinkom?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Pogledajte sve račune u odjeljku Korisnici"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -86574,6 +86931,28 @@
     {
       "type": 0,
       "value": "Nije moguće promijeniti "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Prijava lozinkom je isključena, pa se svi osim administratora za hitni pristup prijavljuju putem pružatelja "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Najprije ponovno uključite prijavu lozinkom, a zatim isključite pružatelja "
     },
     {
       "type": 1,
@@ -88646,7 +89025,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Trendovi gledanja, popularni naslovi, računi, uređaji i propusnost."
+      "value": "Streamovi uživo, trendovi gledanja, popularni naslovi, računi, uređaji i propusnost."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -110919,6 +111298,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Sakrij pogledane naslove"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Svaki profil vidi ovu kolekciju bez naslova koje je pogledao, na stranici kolekcije, u njezinim retcima i u broju naslova. Ništa se ne uklanja. Pametna kolekcija s ograničenjem broja naslova najprije odabire naslove, pa može prikazati manje."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -132487,6 +132878,16 @@
     {
       "type": 0,
       "value": "Datum zadnjeg emitiranja"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Zaključaj polje "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

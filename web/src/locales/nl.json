@@ -365,6 +365,30 @@
       "value": "Deze waarde valt buiten het bereik."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Gebruik minstens één speciaal teken, zoals ! of #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Gebruik minstens één hoofdletter."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Dit wachtwoord is te lang."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Dit wachtwoord is te kort."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Je sessie is verlopen. Log opnieuw in."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Als inloggen met een wachtwoord uit staat, moet er een inlogprovider aan blijven die mensen kunnen gebruiken. OpenID Connect heeft ook de openbare URL van de server nodig."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -7977,6 +8007,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kaarten"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Weergave"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabel"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -49005,7 +49053,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Kijktrends, populaire titels, activiteit in het huishouden, afspelen per apparaat en bandbreedte."
+      "value": "Livestreams, kijktrends, populaire titels, activiteit in het huishouden, afspelen per apparaat en bandbreedte."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -67432,7 +67480,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Controleer of de router UPnP, NAT-PMP of PCP ondersteunt."
+      "value": "Vraag de router om een UPnP-, NAT-PMP- of PCP-poorttoewijzing."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67441,16 +67489,40 @@
       "value": "Poorttoewijzing"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Bereik: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " tot "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Gereedheidscontroles starten geen direct afspelen."
+      "value": "Als je dit aanzet, start de engine voor directe verbindingen. Die opent een UDP-poort en vraagt de router om een poorttoewijzing als Poorttoewijzing aan staat. Controle uitvoeren leest alleen de status van de host."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Uitgeschakeld door beheerder"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Begrensd tot het toegestane bereik"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67462,7 +67534,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "De engine voor directe verbindingen kan niet starten"
+      "value": "De engine voor directe verbindingen is gestopt of kan niet starten"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67493,6 +67565,12 @@
     {
       "type": 0,
       "value": "Ongeldige waarde; staat uit"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Ongeldige waarde; de standaardwaarde wordt gebruikt"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -78703,6 +78781,20 @@
       "value": "Zet eerst een provider voor inloggen aan. Met inloggen met wachtwoord uit en geen provider aan, kunnen alleen break-glass-admins inloggen."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Stel eerst de openbare URL van de server in. Zonder die URL kan "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " niemand laten inloggen, dus als inloggen met een wachtwoord uit staat, kunnen alleen break-glass-beheerders nog inloggen."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -78793,6 +78885,242 @@
       "value": "Gebruikers API-sleutels laten maken"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Inloggen met wachtwoord uitschakelen"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Alleen break-glass-beheerders loggen nog in met een wachtwoord. Alle anderen loggen in met "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " maakt accounts aan bij de eerste keer inloggen. Als een van deze personen daarmee inlogt voordat je die persoon koppelt, krijgt die een nieuw, apart account."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Koppel elk account aan een "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "-account via de pagina ervan in Gebruikers."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " account kan pas inloggen als een beheerder het koppelt"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " accounts kunnen pas inloggen als een beheerder ze koppelt"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Kan niet controleren welke accounts dit betreft. Je kunt het toch uitschakelen."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Controleren wie met een wachtwoord inlogt"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Als "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " bij het inloggen een van deze e-mailadressen bevestigt, koppelt Silo die persoon aan het bijbehorende account."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " account wordt gekoppeld via e-mail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " accounts worden gekoppeld via e-mail"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nog "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tonen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nog "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tonen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Kan niet meer accounts laden. Probeer het opnieuw."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Elk account kan hierna nog steeds inloggen."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Beheerder"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Koppelen via e-mail staat uit"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Geen e-mail"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Hiermee wordt niemand uitgelogd. Wie al is ingelogd, blijft ingelogd, API-sleutels blijven werken en die personen kunnen nog steeds nieuwe apparaten goedkeuren. Om iemand uit te loggen, beëindig je diens sessies via de pagina van die persoon in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Gebruikers"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Inloggen met wachtwoord uitschakelen?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Alle accounts bekijken in Gebruikers"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -78835,6 +79163,28 @@
     {
       "type": 0,
       "value": " niet wijzigen."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Inloggen met een wachtwoord staat uit, dus iedereen behalve break-glass-beheerders logt in via "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Schakel eerst inloggen met een wachtwoord weer in en schakel daarna "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " uit."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -80852,7 +81202,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Kijktrends, populaire titels, accounts, apparaten en bandbreedte."
+      "value": "Livestreams, kijktrends, populaire titels, accounts, apparaten en bandbreedte."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -100624,6 +100974,18 @@
           "value": "Optioneel"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Bekeken titels verbergen"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Elk profiel ziet deze collectie zonder de titels die het heeft bekeken, op de pagina, in de rijen en in het aantal. Er wordt niets verwijderd. Een slimme collectie met een titellimiet kiest eerst de titels, dus kan er minder tonen."
     }
   ],
   "web.collections.details.label": [
@@ -120623,6 +120985,16 @@
     {
       "type": 0,
       "value": "Laatste uitzenddatum"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " vergrendelen"
     }
   ],
   "web.item.editMetadata.locked": [

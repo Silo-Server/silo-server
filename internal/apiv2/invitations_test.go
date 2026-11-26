@@ -29,6 +29,22 @@ type fakeInvitations struct {
 	acceptEmail                       string
 	emailDelivery                     bool
 	resendDelivery                    *invitations.Delivery
+	// appCode is the last IssueAppCode request; appCodeErr its answer.
+	appCode    *invitations.AppCodeRequest
+	appCodeErr error
+	// localPasswordsOff reports local password sign-in off in Lookup.
+	localPasswordsOff bool
+}
+
+func (f *fakeInvitations) IssueAppCode(_ context.Context, in invitations.AppCodeRequest) (auth.IssuedAppCode, error) {
+	f.writes++
+	f.appCode = &in
+	if f.appCodeErr != nil {
+		return auth.IssuedAppCode{}, f.appCodeErr
+	}
+	issued := testIssuedAppCode()
+	issued.LinkAllowed = f.row.Role == models.RoleUser
+	return issued, nil
 }
 
 func fixtureInvitations() *fakeInvitations {
@@ -42,7 +58,7 @@ func (f *fakeInvitations) Lookup(_ context.Context, token string) (*invitations.
 	if token == "expired" || token == "revoked" || token == "consumed" {
 		return nil, invitations.ErrNotFound
 	}
-	return &invitations.LookupResult{Email: f.row.Email, EmailRequired: f.row.Email == "", Note: f.row.Note, InviterName: f.row.InvitedByName, ServerName: "Server", ExpiresAt: f.row.ExpiresAt, ShowTour: true, CreateProfile: f.row.CreateProfile}, f.lookupErr
+	return &invitations.LookupResult{Email: f.row.Email, EmailRequired: f.row.Email == "", Note: f.row.Note, InviterName: f.row.InvitedByName, ServerName: "Server", ExpiresAt: f.row.ExpiresAt, ShowTour: true, CreateProfile: f.row.CreateProfile, LocalPasswords: !f.localPasswordsOff}, f.lookupErr
 }
 func (f *fakeInvitations) AcceptInvitation(_ context.Context, token, email, _, _, _ string) (handlers.InvitationAcceptanceView, error) {
 	f.writes++
@@ -243,7 +259,12 @@ func TestInvitationUnconfiguredAndPasswordBounds(t *testing.T) {
 	h = invitationTestHandler(f)
 	for _, password := range []string{"short", strings.Repeat("界", 25)} {
 		body, _ := json.Marshal(map[string]string{"password": password})
-		requireProblem(t, do(t, h, http.MethodPost, Prefix+"/invitations/token/accept", string(body), nil), TypeValidationFailed)
+		rec := do(t, h, http.MethodPost, Prefix+"/invitations/token/accept", string(body), nil)
+		requireProblem(t, rec, TypeValidationFailed)
+		// Every password refusal is at the member, as the contract states.
+		if !strings.Contains(rec.Body.String(), `"location":"body.password"`) {
+			t.Errorf("%d-byte password: refusal not at body.password: %s", len(password), rec.Body.String())
+		}
 	}
 	if f.writes != 0 {
 		t.Fatal("invalid password reached acceptance")

@@ -29,9 +29,9 @@ devices and playback sessions. All paths below use `/api/v2`.
 
 | Operation | Authorization and behavior |
 | --- | --- |
-| `GET /auth/sessions/capabilities` (`getLoginSessionCapabilities`) | Authenticated account. Reports `available`, `last_seen`, and `admin_management`, with the standard capability state, permission answer and revision. |
+| `GET /auth/sessions/capabilities` (`getLoginSessionCapabilities`) | Authenticated account. Reports `available`, `last_seen`, `admin_management` and `revoke_other_sessions`, with the standard capability state, permission answer and revision. `revoke_other_sessions` is false in [demo mode](#demo-mode) for a caller that is not an administrator, and for a session opened by device sign-in, which may end only itself. |
 | `GET /auth/sessions` (`listSessions`) | Lists the caller's live, unrevoked login sessions, newest first, with cursor pagination. Account-level access does not require profile selection. |
-| `DELETE /auth/sessions/{id}` (`deleteSession`) | Revokes a session owned by the caller. Unknown or another account's session returns 404. |
+| `DELETE /auth/sessions/{id}` (`deleteSession`) | Revokes a session owned by the caller. Unknown or another account's session returns 404. Ending another session of the same account is 403 `permission_denied` for a session opened by device sign-in, which may end only itself, and in [demo mode](#demo-mode) for a caller that is not an administrator. |
 | `GET /admin/users/{user_id}/login-sessions` (`listAdminUserLoginSessions`) | Acting admin. Lists a selected account's live login sessions. The cursor is bound to the operation, administrator and target account. |
 | `DELETE /admin/users/{user_id}/login-sessions/{session_id}` (`deleteAdminUserLoginSession`) | Acting admin. Revokes one session of the selected account; 204 on success, 404 for an unknown or mismatched session. |
 | `DELETE /admin/users/{user_id}/login-sessions` (`deleteAdminUserLoginSessions`) | Acting admin. Revokes all live sessions of the selected account and returns `{ "revoked": N }`. Repeating an account-wide request returns zero when no live sessions remain. |
@@ -95,9 +95,42 @@ active primary profile. An admin account may also change its password before sel
 but selecting a secondary profile removes that authority. API keys and impersonation sessions can
 never change an account password.
 
-Local passwords are bcrypt hashes. Setup, invited signup, and password changes share the same
-password policy. New passwords must contain at least 8 Unicode characters and be
-no more than 72 UTF-8 bytes, the bcrypt input limit. The caller must prove knowledge of the current
+Local passwords are bcrypt hashes. Setup, invited signup, password changes, password resets and
+passwords an administrator sets share one password policy, which an administrator sets under
+Settings → Sign-in:
+
+| Setting | Default | Rule |
+| --- | --- | --- |
+| `auth.password_min_length` | `8` | Fewest Unicode characters, from 8 to 72. |
+| `auth.password_require_uppercase` | `false` | At least one capital letter (Unicode category `Lu`). |
+| `auth.password_require_special` | `false` | At least one punctuation mark or symbol (Unicode categories `P` and `S`); letters, digits and spaces do not count. |
+
+Every new password is also at most 72 UTF-8 bytes, the bcrypt input limit. The policy is read on
+every check, so a change applies at once on every node. It applies only when a password is chosen;
+passwords already stored keep working. The recovery command
+`silo auth local-login enable -user <name> -temporary-password` sets a temporary password without
+it, and the account then chooses a new one under the policy. A backup
+restore never weakens the live policy.
+
+A refused password returns `422 validation_failed` with one field error at the password member
+(`body.password`, or `body.new_password` for a password change). Its `code` names a rule the
+password breaks, and its `detail` is the English sentence for it, such as "Use at least 12
+characters." When a password breaks several rules, the code names one of them, so a client should
+not rely on which. A translated client shows `error.field.<code>` instead. That text is generic, so
+`password_too_short` doesn't name the minimum; a client that wants to show it reads
+[`getPasswordPolicy`](#get-authpassword-policy-getpasswordpolicy) again. Every operation that sets a password
+except `changePassword` limits it to 8 to 72 characters in its schema, so a password outside that
+range gets `out_of_range` there before the policy runs. `changePassword` accepts 1 to 1024
+characters, so the policy codes cover every length in that range.
+
+| Code | Rule broken |
+| --- | --- |
+| `password_too_short` | Fewer characters than `auth.password_min_length`. |
+| `password_too_long` | More than 72 UTF-8 bytes. |
+| `password_needs_uppercase` | No capital letter while `auth.password_require_uppercase` is on. |
+| `password_needs_special` | No punctuation mark or symbol while `auth.password_require_special` is on. |
+
+To change a password, the caller must prove knowledge of the current
 password. By default, changing the password does not revoke existing login sessions; users can
 review and revoke those separately through the account sessions API. The change can also
 sign the account out everywhere else in the same step; see
@@ -106,6 +139,20 @@ sign the account out everywhere else in the same step; see
 Accounts whose local password login is disabled keep their credential at the external provider and
 cannot use this flow. An administrator can also make a password temporary or issue a reset link;
 see [temporary passwords](#temporary-passwords) and [password reset links](#password-reset-links).
+
+### `GET /auth/password-policy` (`getPasswordPolicy`)
+
+Public, so the setup, signup and password-reset forms can check a password before sending it. The
+server checks it again on every write.
+
+```json
+{
+  "minimum_length": 8,
+  "maximum_bytes": 72,
+  "require_uppercase": false,
+  "require_special": false
+}
+```
 
 ### `GET /account/password/capability` (`getAccountPasswordCapability`)
 
@@ -129,7 +176,9 @@ version. It supports ETag revalidation and uses `Cache-Control: private, no-cach
 `allowed` is true only when the caller may change the password: an access-token
 session, not an API key or "View as user", acting as the account's primary profile,
 or as an administrator with no profile selected. A session holding a temporary
-password is always allowed. The policy fields describe the server contract even when
+password is exempt from the profile rule, since it cannot select a profile.
+[Demo mode](#demo-mode) comes first: there `allowed` is false for every caller that is not an
+administrator, a temporary-password session included. The policy fields describe the server contract even when
 `allowed` is false. A server without a password service reports `state`
 `not_configured`, with `allowed` and `sign_out_other_sessions` false.
 `sign_out_other_sessions` says whether the change accepts that member; a server that
@@ -171,7 +220,7 @@ holding a session but not the password cannot brute-force it.
 | `401` | `authentication_required` | No valid login session. |
 | `403` | `permission_denied` | The active profile is not the primary profile, an administrator selected a secondary profile, or the caller is an API key or "View as user" session. |
 | `409` | `conflict` | The account does not use local password login. |
-| `422` | `validation_failed` | A member is missing, empty, `null` or unknown; the current password did not match (`body.current_password`); or the new password is shorter than 8 characters, longer than 72 UTF-8 bytes, or the same as a temporary password (`body.new_password`). |
+| `422` | `validation_failed` | A member is missing, empty, `null` or unknown; the current password did not match (`body.current_password`); or the new password breaks the [password policy](#account-passwords) or is the same as a temporary password (`body.new_password`). |
 | `429` | `rate_limited` | The `password_change` budget is spent; `Retry-After` says when to try again. |
 | `503` | `dependency_unavailable` | The server has no password service, or password hashing is saturated; `Retry-After` says when to try again. |
 
@@ -202,6 +251,10 @@ After `POST /account/password` succeeds, refresh the tokens: the access token ke
 the restriction until it is replaced, and the refreshed pair no longer carries it.
 The change revokes every other session of the account, since each was opened with
 the temporary password.
+In [demo mode](#demo-mode) an account that is not an administrator cannot change its
+password, a temporary one included, so such an account can only read `GET /account/me` and
+sign out until an administrator sets it a regular password or turns demo mode off. Don't give
+a demo's shared account a temporary password.
 An administrator impersonating the account is not restricted. Jellyfin and
 Audiobookshelf compatible sign-ins refuse an account holding a temporary password,
 because those clients cannot run the change; the account signs in to Silo first.
@@ -228,7 +281,8 @@ They send the `Deprecation` and `Link` headers; no `Sunset` is declared. A link 
 Every unusable link returns the same `404 not_found`, whether it is unknown, expired,
 used, replaced, or outdated by a password or recovery email change, or its account
 is disabled. Changing only the email's letter case preserves the link.
-Invalid passwords return `422 validation_failed` at `body.password` and leave the link
+Invalid passwords return `422 validation_failed` at `body.password`, with a
+[code that names the rule](#account-passwords), and leave the link
 unspent. While password resets are not configured, every link operation returns `409`. Both operations spend the `password_reset` rate-limit budget, 20 requests per
 minute per client IP by default.
 
@@ -316,11 +370,75 @@ nothing authorizes on them.
 
 `DELETE /api/v2/auth/sessions/{id}` revokes a session owned by the caller's account and returns
 `204 No Content`. A missing session or one owned by another account returns `404 not_found`.
+In [demo mode](#demo-mode) a caller that is not an administrator may revoke only the session
+making the request; another session of the same account is `403 permission_denied`. A missing
+session or another account's is still `404 not_found`: ownership is checked first, in the
+revocation's transaction.
 
 The login-session step of the `database_maintenance` scheduled task deletes expired
 login-session rows daily at 05:00 by default. Revoked sessions remain stored until their
 expiry passes. Jellyfin-compatible clients check their login session on
 every request too; cleanup removes only sessions that have already expired.
+
+### Sessions opened by device sign-in
+
+A session opened by device sign-in may sit on a device the account holder doesn't control,
+such as a shared TV, so it sees and ends only itself. `auth_sessions.opened_via` records how
+each session was opened and is the one record the server reads: `device_login` when a device
+sign-in request (a code a signed-in person approved, Jellyfin Quick Connect, or a
+remote-playback handoff) opened it, otherwise `password`, `provider`, `app_key` or
+`impersonation`. `auth.LimitedToItself` decides; the two routes below read it, no other
+request does.
+
+A session is limited to itself when its `opened_via` is `device_login`, whatever its
+platform. Two kinds of session have no `opened_via`:
+
+- One a server of the previous release wrote. That release recorded only
+  `auth_sessions.via_device_sign_in`, `true` for a device sign-in and `false` for any other,
+  and the session is limited when the flag is `true`. The flag answers this one question. A
+  session with `false` and no `opened_via` is ordinary for the session list and is still a
+  session with no record of how it was opened: `false` does not mean a password sign-in, so
+  it may do nothing that needs a recorded `opened_via` (see
+  [app keys](architecture/app-keys.md#who-decides)).
+- One older than both columns. It is limited when its recorded `device_platform` is a TV's:
+  `tvOS`, `android-tv` or `roku`, in any case. That covers TVs signed in by code before
+  either column; an older TV session opened with a password is limited too, which costs
+  nothing because no TV app reads more of the list than `id` and `current` or ends another
+  session.
+
+Every other session is ordinary, a TV that signs in with a password included, as are a
+session an administrator opened to act as the account and an API-key caller.
+
+`via_device_sign_in` is still stored, because a server of the previous release names it in
+every sign-in and must keep working against this database during a rolling deploy or after
+going back a release. The one session insert writes it from `opened_via`, and a check
+constraint (`auth_sessions_opened_via_matches_flag`) refuses a row in which the two disagree.
+A session such a server inserts carries the flag and no `opened_via`, and is judged as the
+first kind above. The column goes when no supported server writes it. The limit covers only the
+account's own session list: a device signed in by code on an administrator's account still
+holds that account's administrator powers, including ending any account's sessions, so a code
+on a shared device should not be approved from an administrator's account.
+
+For a limited caller, `listSessions` still answers `200` with every live session of the
+account, because released Apple apps read the session ids to recognize one server saved under
+two addresses. Its own item and `current_session` are complete. Every other item carries only
+`id` and `current`: `device_name` and `ip_address` are empty strings, `device_id` and
+`device_platform` are absent, `last_seen_at` is null, and `created_at` and `expires_at` repeat
+the caller's own values, since they have no null form. The page is ordered by `id` and the
+cursor holds only the last id, so neither tells which sessions are newer. A cursor minted for
+one kind of caller is `400 invalid_cursor` for the other. `limit` and `page.has_more` behave as
+for any caller.
+
+`deleteSession` from a limited caller ends its own session as for any caller. Another session
+of the account is `403 permission_denied`, with a detail saying a device signed in with a code
+can end only its own session. A session of another account, or an unknown id, is `404
+not_found` exactly as for an ordinary caller: the account check comes first, so the 403 says
+nothing about other accounts' sessions. `POST /auth/logout` is unchanged.
+
+What such a session still learns is how many live sessions the account has and their opaque
+ids. A device sign-in session opened before the column from a device that isn't a TV has no
+recorded mark and stays ordinary until it ends; an account holder ends shared devices'
+sessions from their session list, or an administrator ends all of the account's sessions.
 
 ### Access tokens after a role change
 
@@ -1029,12 +1147,16 @@ operation contract.
 
 | Operation | Credential | Notes |
 | --- | --- | --- |
-| `GET /auth/keys/capability` (`getAppKeyCapability`) | none | `state` is `available` while `auth.app_key_sign_in` is on, `disabled` while it is off, and `not_configured` on a server started without a database for app keys. `protocol` is `silo-sync-v1` and `server_id` is the identity every signed payload names. `introduce`, `sign_in`, `enroll` and `grants` are `true`; `profile_set` is `true` where profiles are kept in PostgreSQL ([The profile set](#the-profile-set)); `app_codes` and `sign_in_links` are `false` on this server. `signature_suites` is `["ES256"]` and `sealed_reply_suites` is `["P256-HKDF-SHA256-AES256GCM"]`. Conditional like every capability document (`ETag`, `If-None-Match`). |
+| `GET /auth/keys/capability` (`getAppKeyCapability`) | none | `state` is `available` while `auth.app_key_sign_in` is on, `disabled` while it is off, and `not_configured` on a server started without a database for app keys. `protocol` is `silo-sync-v1` and `server_id` is the identity every signed payload names. `introduce`, `sign_in`, `enroll`, `app_codes` and `grants` are `true`; `profile_set` is `true` where profiles are kept in PostgreSQL ([The profile set](#the-profile-set)); `sign_in_links` is `false` on this server. `signature_suites` is `["ES256"]` and `sealed_reply_suites` is `["P256-HKDF-SHA256-AES256GCM"]`. Conditional like every capability document (`ETag`, `If-None-Match`). |
 | `POST /auth/keys/challenge` (`createAppKeyChallenge`) | none | Body `{}`. Answers `challenge` (base64url of 32 bytes), `expires_in` (120), `server_id` and `server_time` (Unix seconds). A challenge works for one signed request within two minutes, on any API process. |
 | `POST /auth/keys/introduce` (`introduceAppKey`) | an `introduce` envelope signed by the account's person key, with `device_sig` | Enrolls the payload's `device_key` and opens a session. For an administrator's account the key is stored waiting and the sealed answer is `approval_required`. An account holds at most 10 waiting keys inside their 24 hours: one more is 409 `conflict`, after the challenge is spent. A waiting key past its 24 hours doesn't count, and a retention task later revokes it. |
 | `POST /auth/keys/sign-in` (`signInWithAppKey`) | a `sign-in` envelope signed by an enrolled device key, without `device_sig` | Opens a session. A waiting key answers `approval_required`; see below. |
 | `POST /auth/keys/enroll` (`enrollAppKeys`) | the account's own login session acting as the household's main profile (see below), and `{ "person_key", "message" }` where `message` is an `enroll` envelope signed with that person key, with `device_sig` | Registers the person key when the account has none, taking the session's provider binding; when `person_key` is already the account's person key it is reused as it is, binding unchanged. Enrolls the device key, which takes the session's provider binding, then opens a session bound to it. A different person key on the account, or a device key already enrolled on this server, is 409 `conflict`. The sealed plaintext adds `person_key_id` (the person key's `kid`); the client drops the session it called with. A malformed payload field is 422 at `body.message.payload`. |
 | `POST /auth/grants/redeem` (`redeemAppKeyGrant`) | a `grant-redeem` envelope signed by the app's own key (the grant's `app_key`), without `device_sig` | Enrolls another app's key with a grant the account's person key signed, and opens the app's session. The key is listed with `kind` `app`, `enrolled_by` `grant` and `allowed_by`. Refused for an administrator's account. See "Grants" below. |
+| `POST /invitations/app-code` (`createInvitationAppCode`) | none; the invitation `token` in the body | Body `{ "token", "username", "email" }`. Starts a join through the Silo app and answers `{ "code", "expires_in", "server_address" }`; see "App codes" below. |
+| `POST /auth/app-codes` (`createAppCode`) | the account's own login session acting as the household's main profile | Body `{}`. Answers `{ "code", "expires_in", "server_address" }` for "Open in Silo"; see "App codes" below. |
+| `POST /auth/app-codes/redeem` (`redeemAppCode`) | `{ "person_key", "message" }` where `message` is a `redeem` envelope signed with that person key, with `device_sig`, the app code in its payload | Enrolls both keys and opens the device key's session. The sealed plaintext adds `username` and `person_key` (`enrolled` or `replaced`). 404 `app_code_invalid` for an unknown, used or expired code. |
+| `GET /auth/keys/session` (`getAppKeySessionAccess`) | any login session | `{ "list", "manage", "approve", "sign_in_again" }`: what this session may do with the account's keys, and whether signing in again would help. Answers while the switch is off. |
 | `GET /auth/keys` (`listAppKeys`) | the account's own login session, opened by password, provider or the person's own device key | `person_key` (`kid`, `enrolled_at`; absent when the account has none) and `devices[]` (`id`, `kid`, `kind` `device`\|`app`, `name`, `platform`, `status` `active`\|`pending`, `enrolled_by` `introduce`\|`session`\|`app-code`\|`grant`, `allowed_by`, `enrolled_at`, `last_used_at`), newest first. Revoked and denied keys are left out, and so is a waiting key older than 24 hours, without anyone denying or revoking it. `last_used_at` is the last time the key opened a session: a key enrolled and not used since shows it equal to `enrolled_at`, and a key waiting for approval shows `null`. |
 | `DELETE /auth/keys/devices/{id}` (`revokeAppDeviceKey`) | the account's own login session | 204. Revokes the key and ends every session it opened. A device may revoke its own key, which ends the session making the request. 404 for a key that isn't the account's. |
 | `PUT /auth/keys/person` (`replacePersonKey`) | the account's own login session acting as the household's main profile | Body `{ "person_key" }`, unsigned. Answers `{ "person_key_id": "<kid>" }`. The old person key is revoked; devices already enrolled keep their keys, and a device the old key introduced that is still waiting for approval is denied with it. Sending the current key again changes nothing. |
@@ -1177,11 +1299,11 @@ account is 403 `permission_denied`.
 | Route | Password, provider, own device key | Device sign-in (a TV) | Another app's key (grant) | No record of how it opened | Admin acting as the account, API key, remote playback |
 | --- | --- | --- | --- | --- | --- |
 | `GET /auth/keys`, `GET /auth/keys/pending`, `POST /auth/keys/pending/{id}/deny` | allowed | refused | refused | refused | refused |
-| `POST /auth/keys/enroll`, `PUT /auth/keys/person`, `POST /auth/keys/pending/{id}/approve`, `POST /auth/device/preapprove` | main profile only | refused | refused | refused | refused |
+| `POST /auth/keys/enroll`, `PUT /auth/keys/person`, `POST /auth/app-codes`, `POST /auth/keys/pending/{id}/approve`, `POST /auth/device/preapprove` | main profile only | refused | refused | refused | refused |
 | `DELETE /auth/keys/devices/{id}` | allowed | refused | its own key only | refused | refused |
 
 **The household's main profile.** `enroll`, `PUT /auth/keys/person`,
-`pending/{id}/approve` and `POST /auth/device/preapprove` create lasting access
+`POST /auth/app-codes`, `pending/{id}/approve` and `POST /auth/device/preapprove` create lasting access
 to the account every profile shares, so only the household's main profile may
 call them. Approving a device sign-in that is waiting now keeps no profile
 rule. `X-Profile-Id` must
@@ -1207,22 +1329,117 @@ them apart by the problem type, never by the detail text:
 `main_profile_required` is also what the session form of `PUT /profiles/set`
 answers for a request that isn't acting as the main profile.
 
-Each of the four checks the named profile a second time once it holds the
+Each of these checks the named profile a second time once it holds the
 account, and answers 403 `profile_verification_required` if the profile's PIN
 changed in between, the profile is no longer the main one, or another write to
 the profile is in progress. Nothing was changed, and the request can be made
 again. For `enroll` that means a new challenge and a newly signed envelope:
-the first challenge is spent once its signature verifies. The other three are
+the first challenge is spent once its signature verifies. The others are
 sent again as they were. If the second try gets `profile_verification_required`
 too, verify the profile's PIN again for a new `X-Profile-Token`; if it gets
 `main_profile_required`, the profile is no longer the main one. A profile without
 a PIN can get the first answer too, when a PIN was added or the profile was
 being written at that moment.
 
+**Codes and links.** Both issuing operations answer `link_allowed`. When it is
+true (only an ordinary invitation's code: redeeming it creates an account with
+no administrator power) a page may put the code in the join link. When it is
+false, a client shows the server address and the code as text for the person
+to type, and never builds a link, a scannable link or anything a device could
+open from them: a link can be received by an app other than Silo, which would
+redeem the code first. For an ordinary invitation that risk is accepted (the
+intercepting app gets a new, empty account the invited person notices at
+once); for an administrator's invitation or a session code it is not.
+
+**App codes.** A server's web page hands the Silo app a one-time code, and
+the app redeems it to enroll its keys (`docs/architecture/app-keys.md`, "App
+codes"). A code is base64url of 32 random bytes, good once for ten minutes, and
+never past its invitation's expiry. `server_address` is what the page puts in
+the link that opens the app, `silo://join#v1.<base64url of server_address>.<code>`
+or the same fragment after `https://siloserver.org/join`: `server.public_url`
+when the request arrived on that address's origin, otherwise the address the
+request arrived on.
+
+- `POST /invitations/app-code` is the invite page's "Join with the Silo app". It
+  checks the invitation as `acceptInvitationLink` does (404 `not_found` for an
+  unknown, used, revoked or expired one) and reserves the account name; the
+  invitation stays open, and a second code from it replaces the first. An
+  emailed invitation's account takes its address as name and email; for one
+  with no address `username` is required (422 at `body.username`) and `email`
+  optional (422 at `body.email` when malformed). A username containing `@`
+  that isn't the email the same request gives is 422 at `body.username`. A
+  name or email already held, or reserved by another unspent code, is 409
+  `conflict` with `errors[0]` `{ "code": "duplicate", "location":
+  "body.username" }` or `"body.email"`, naming the field that clashed. A
+  code that is expired, or whose invitation was accepted, revoked, resent or
+  has expired, reserves nothing: it is deleted when another code asks for its
+  name or email. An invitation that creates a profile the store can't create in the same
+  transaction is 501 `capability_unsupported`, as accept answers. While local password
+  sign-in is off it is 409 `provider_sign_in_required`: an invitation never
+  creates an account whose only way in is its keys. Spends the `invitation`
+  budget (20 a minute with a burst of 10 by default), which the page shares
+  between the lookup, each code and each renewal.
+- `POST /auth/app-codes` is "Open in Silo". Its code reaches an existing
+  account, so a page shows it as text to type and never puts it in the join
+  link or any other link: an app that receives a link before Silo does could
+  redeem it, and the server can't tell a typed code from a lifted one. Its
+  answer's `link_allowed` is always false. Refused (403 `permission_denied`)
+  for an API key, an administrator acting as the account, a remote-playback
+  session, a session opened by device sign-in or by another app's key, and a
+  session older than the record of how sessions open. The keys take this
+  session's provider identity, so it works with local password sign-in off
+  from a provider sign-in. A code whose session ends before it is redeemed is
+  `app_code_invalid`.
+- `POST /auth/app-codes/redeem`, for a join code, creates the account with no
+  password (`password_hash` NULL, local password sign-in off for the account),
+  enrolls both keys and marks the invitation accepted in one transaction;
+  409 `conflict` with `errors[0].code` `duplicate` if the name was taken since, 409 `provider_sign_in_required`
+  if local password sign-in was turned off since, 404 `app_code_invalid` if the
+  invitation was revoked, replaced or accepted since. For a session code it
+  enrolls the device key on that account, enrolling `person_key` when the
+  account has none and replacing a different one (the old one is revoked,
+  devices already enrolled keep their keys). Keys from a code start active,
+  also on an administrator's account. Of two redemptions of one code exactly
+  one succeeds.
+
+Redeem's two 409 `conflict` answers have different remedies, so an app reads
+`errors[0].code`, never the detail:
+
+| `errors[0].code` | `errors[0].location` | Meaning | What the app does |
+| --- | --- | --- | --- |
+| `duplicate` | `body.message.payload` | The account name or email the join reserved was taken since the code was issued. | Send the person back to the server's page to choose another name and get a new code. |
+| `key_enrolled` | `body.person_key` or `body.message.payload` (the device key) | This server already holds that public key. | Make that key again, get a new challenge and redeem the same code. |
+
+What a refusal of `redeemAppCode` uses up. The challenge is spent once the
+envelope's signature verifies, whatever is refused after that. The code is
+spent only when the redeem succeeds: every refusal after the code is found
+rolls it back, so it stays good until it expires.
+
+| Answer | Challenge | Code |
+| --- | --- | --- |
+| 409 `capability_disabled`, 429 `rate_limited`, 413, 400 `malformed_request`, 422 at the envelope's shape or `person_key` | not spent | not spent |
+| 401 `signature_invalid` because the signature doesn't verify by `person_key` | not spent | not spent |
+| 401 `signature_invalid` after the signature verified (`kid` isn't `person_key`'s ID, wrong `server_id` or purpose, outside `iat` and `exp`), 422 at `body.message.payload`, 403 `origin_mismatch` | spent | not spent |
+| 401 `challenge_invalid` | (already unusable) | not spent |
+| 404 `app_code_invalid` | spent | unknown, used or expired already. A code whose session ended, or whose invitation was accepted, revoked, resent or expired, can't succeed; a join code like that is deleted once another code is issued for its name or email, and answers the same |
+| 409 `conflict` (`duplicate` or `key_enrolled`), 409 `provider_sign_in_required`, 501 `capability_unsupported`, 403 `permission_denied` (the account is disabled), 503 | spent | not spent |
+| 200 | spent | spent |
+
+A session code is not checked against the main profile's PIN again at redeem:
+it was issued to the verified main profile and ends with the session that
+issued it. `server_address` is where the app connects, not proof of which
+server answers; the signed `server_id` and the origin rule are.
+
+The invitation lookup (`lookupInvitationLink`) reports `password_join` (a
+password claim works here: local password sign-in is on) and `app_join` (a
+Silo app claim works here: app key sign-in and local password sign-in are both
+on, and `acceptance_available` is true), so the page offers only what works.
+
 **Switch.** While `auth.app_key_sign_in` is off the challenge, `introduce`,
-`sign-in`, `enroll`, `POST /auth/grants/redeem`, `PUT /auth/keys/person`,
-`pending/{id}/approve` and the signed form of `PUT /api/v2/profiles/set` answer
-409 `capability_disabled`. The capability,
+`sign-in`, `enroll`, `POST /auth/grants/redeem`, both app code issues, app
+code redemption, `PUT /auth/keys/person`, `pending/{id}/approve` and the signed
+form of `PUT /api/v2/profiles/set` answer 409 `capability_disabled`, and the
+invitation lookup reports `app_join: false`. The capability,
 `GET /auth/keys` and its deletes, `GET /auth/keys/pending` and
 `pending/{id}/deny` stay open. A server in demo
 mode (`demo.enabled`) behaves as if the switch were off, for administrators
@@ -1232,8 +1449,8 @@ there, so no key is enrolled on it and none signs in. For the same reason
 an administrator, and the device login capability reports `preapprove: false`.
 
 **Rate limits.** `createAppKeyChallenge` spends the per-address
-`key_challenge` budget and `introduce`, `sign-in`, `enroll` and grant redemption the
-`key_sign_in` budget, each 60 a minute with a burst of 20 by default
+`key_challenge` budget and `introduce`, `sign-in`, `enroll`, grant redemption,
+`createAppCode` and app code redemption the `key_sign_in` budget, each 60 a minute with a burst of 20 by default
 (`ratelimit.auth.key_challenge.*`, `ratelimit.auth.key_sign_in.*`).
 
 Server setting: `auth.app_key_sign_in` (default `true`). It is read on each
@@ -1260,7 +1477,7 @@ linking rule whether or not `network_sign_in` is served.
 | `GET /auth/providers` (`listAuthProviders`) | none | Leaves `local` out while `auth.local_password_login` is off. `password_login` says whether any listed provider takes a password; apps and TVs hide the password form when it is false. An `oauth` provider carries `native_start_path`, the native start's path below the server base, while OAuth sign-in is served (a public URL is configured). Apps append `native_start_path` to their own saved server base URL and never open another origin; an `oauth` provider without it offers no native sign-in. A `network` provider is listed only to a request that came through its own overlay from a device it vouches for, with `network_sign_in_path` and `network_identity` (`display_name`, `username`: who owns the device, for a "Continue as" label); it is never `default`. Clients ignore modes they do not know. |
 | `POST /auth/network/{id}/sign-in` (`signInWithNetworkIdentity`) | none; the request must come through the network provider's own overlay listener | Signs in the owner of the requesting device through network provider installation `{id}` (`mode: network`, such as the Tailscale plugin). Body: `{}` with `Content-Type: application/json`. Answers the same token pair as `login`. Refusals: 403 `network_identity_required` (the request did not come through that provider's overlay), 403 `not_permitted` (the provider refuses the device: unknown, tagged, or left out by its policy; or the account's OIDC or LDAP provider refuses the account), 403 `account_required`, 403 `permission_denied` (the account is disabled), 409 `email_in_use` or `identity_linked_elsewhere`, 404 `not_found` (not an enabled network provider), 503 `provider_unavailable`, 415 without a JSON body, 429. Spends the `login` rate-limit budget. |
 | `POST /auth/login` (`login`) | none | Without `provider`, the name is routed: an account with local password sign-in signs in locally (and is refused with `local_login_disabled` while the server switch is off, never sent to the directory), any other name goes to the enabled LDAP plugin. A name that has used its attempt budget, or a client over the `login` rate-limit budget, is 429 `rate_limited` ([Sign-in attempts per name](#sign-in-attempts-per-name)). |
-| `GET /account/identities` (`listAccountIdentities`) | signed-in account; `X-Profile-Id` optional | The caller's linked identities: provider, username, email, `linked_at`, `last_sign_in_at`, and `last_checked_at` (the provider's latest answer about the identity, from a sign-in or a re-check). Every profile on the account may read the list. `can_unlink` says whether `deleteAccountIdentity` would disconnect an identity now for the profile `X-Profile-Id` names, or for a request that names none: it is false for a profile that is not the household manager, and when the identity is the account's last way to sign in. Clients show the disconnect control only while it is true. A named profile passes the usual viewer gate, so a PIN-protected profile without `X-Profile-Token` is 403 `profile_verification_required`. |
+| `GET /account/identities` (`listAccountIdentities`) | signed-in account; `X-Profile-Id` optional | The caller's linked identities: provider, username, email, `linked_at`, `last_sign_in_at`, and `last_checked_at` (the provider's latest answer about the identity, from a sign-in or a re-check). Every profile on the account may read the list. `can_unlink` says whether `deleteAccountIdentity` would disconnect an identity now for the profile `X-Profile-Id` names, or for a request that names none: it is false for a profile that is not the household manager, and when the identity is the account's last way to sign in. Clients show the disconnect control only while it is true. `can_link` says whether the caller may link another identity: false for an API key or a "View as user" session. In [demo mode](#demo-mode) both are false for a caller that is not an administrator. A named profile passes the usual viewer gate, so a PIN-protected profile without `X-Profile-Token` is 403 `profile_verification_required`. |
 | `POST /account/identities/link-credentials` (`linkAccountIdentityWithCredentials`) | the account's own login session | Links the directory (LDAP) identity. Body, all required and non-null: `installation_id` (the credentials provider from `listAuthProviders`), `password` (the account's local password, 1 to 1024 characters), `username` (directory username, 1 to 256) and `directory_password` (1 to 1024). Answers 201, `Location: /api/v2/account/identities`, and the linked identity as `listAccountIdentities` shows it. Refusals: 422 `validation_failed` at `body.password` (wrong local password) or `body.directory_password` (the directory refused the credentials); 409 `local_password_required`; 403 `not_permitted`, `account_disabled` (the directory account is disabled, locked or expired) or `password_expired`; 403 `permission_denied` (the Silo account is disabled, or an API key or impersonation session); 409 `identity_linked_elsewhere` or `already_linked`; 404 `not_found` (not an enabled credentials provider); 503 `provider_unavailable`; 429. Spends the `login` rate-limit budget. Linking turns local password sign-in off unless the account is break-glass. |
 | `POST /account/identities/link-network` (`linkAccountIdentityWithNetwork`) | the account's own login session, through the network provider's overlay | Links the network identity of the requesting device. Body, required and non-null: `installation_id` (the network provider from `listAuthProviders`) and `password` (the account's local password). Answers 201 like `linkAccountIdentityWithCredentials`. Refusals: 403 `network_identity_required`, 422 `validation_failed` at `body.password`, 409 `local_password_required`, 403 `not_permitted`, 403 `permission_denied`, 409 `identity_linked_elsewhere` or `already_linked`, 404 `not_found`, 503 `provider_unavailable`, 429. Spends the `login` rate-limit budget. Unlike other linking, the account keeps its local password sign-in, which answers 403 `not_permitted` while the provider refuses the person (break-glass accounts excepted). |
 | `DELETE /account/identities/{id}` (`deleteAccountIdentity`) | the account's own login session, acting as the household manager | How the account signs in belongs to the whole household, and the account cannot always link a disconnected identity again by itself (self-service linking needs the local password), so only the household manager may disconnect one: `X-Profile-Id` names the account's primary profile, with `X-Profile-Token` from `verifyProfilePIN` when that profile has a PIN. A named profile passes the usual viewer gate first: an unknown profile ID gets 404 `not_found`, and a PIN-protected profile without its token, primary or not, gets 403 `profile_verification_required`. A profile that passes the gate and is not the primary one gets 403 `permission_denied`, on an admin account too. A request without `X-Profile-Id` is accepted only from an admin account while no profile on the account has a PIN, a maturity limit, or library restrictions; otherwise it gets 403 `permission_denied`. Refused with 409 `last_sign_in_method` unless the account can still sign in with its local password or another identity. API keys and impersonation sessions get 403 `permission_denied`. |
@@ -1422,7 +1639,9 @@ Server settings: `auth.local_password_login` (default `true`; turning it off
 needs a break-glass admin; while it is off, `signup` and `acceptInvitation`
 are refused with 403 `local_login_disabled` and `getSignupStatus` reports
 signup off), `auth.email_auto_match` (default `false`; matches ordinary
-accounts only, never an admin, the Owner or a break-glass account),
+accounts only, never an admin, the Owner or a break-glass account; in
+[demo mode](#demo-mode) it matches no account on the server, not only the
+shared demo account),
 `auth.provider_recheck_interval` (default `12h`, 5m to 30d: how old the
 provider's last answer about an identity may be before a refresh asks again),
 `auth.provider_recheck_outage_policy` (`fail_open`, the default, keeps a
@@ -1513,6 +1732,76 @@ Native clients must distinguish failed credential exchanges from an expired
 bearer on an authenticated read, retain refresh concurrency protection, and
 preserve the selected account and profile during device handoff.
 
+
+## Demo mode
+
+With the `demo.enabled` server setting on, every visitor signs in to one shared account that
+is not an administrator. Demo mode refuses that account any change one visitor could use to
+lock out, sign out or take over the others. An operation marked demo-restricted
+(`DemoRestricted` in `internal/apiv2`, `x-silo-demo-restricted` in the OpenAPI document)
+answers a caller that is not an administrator `403 permission_denied` with the detail "This
+action is not available in demo mode." Reads are never restricted, and administrators are
+never restricted.
+
+Every request reads `demo.enabled` (one setting read, no time-based cache), through one
+`demomode.Setting` per process shared by every surface that enforces demo mode. Only the
+stored value `true`, compared untrimmed, turns demo mode on. When a read fails, the error is
+logged and the last value this process read is used: a server that is not a demo keeps
+working, and a demo server keeps its demo refusal. Each API replica remembers its own value.
+Only a process that has never read the setting can't tell whether it is a demo, and then it
+fails closed without claiming to be one: a non-administrator's demo-restricted change is
+`500 internal_error`, `deleteSession` on another session is `500 internal_error` (the caller's
+own session still ends, and a session opened by device sign-in gets its usual `403`, because
+that rule is judged first), and the capability answers below say no. An administrator's request
+does not read the setting.
+
+A visitor can:
+
+- browse, play, and sign out (`logout`, or `deleteSession` on the session making the request);
+- approve or deny a device sign-in (`approveDeviceLogin`, `approveDeviceHandoff`,
+  `denyDeviceLogin`, and Jellyfin Quick Connect `POST /QuickConnect/Authorize`), which is how a
+  visitor tries a TV app.
+
+A visitor cannot:
+
+- change the account password (`changePassword`), and so cannot sign the account out
+  everywhere either;
+- link or unlink an external sign-in (`createAccountIdentityLinkTicket`,
+  `startAccountIdentityLink`, `completeAccountIdentityLink`,
+  `linkAccountIdentityWithCredentials`, `linkAccountIdentityWithNetwork`,
+  `deleteAccountIdentity`);
+- end another session of the account (`deleteSession` on any other session);
+- create or revoke personal API keys, or create, change or delete profiles.
+
+External sign-in enforces the same rule where every linking flow attaches its identity, in
+account resolution: a linking flow that ends on an account that is not an administrator while
+demo mode is on, including one started before demo mode was turned on, is refused with
+`not_permitted` and attaches nothing. Email auto-match (`auth.email_auto_match`) does not apply
+in demo mode, as when it is off, so a provider sign-in whose verified email equals the demo
+account's goes on as an unmatched one: account creation refuses the taken email
+(`409 email_in_use`) where the binding's `auto_provision` is on, and the sign-in is
+`account_required` where it is off. Matching applies to no account in demo mode, not only the
+shared demo account. Demo mode is read before resolution's transaction; a process that has
+never read it fails the link and matches nothing.
+
+The capability answers clients read before offering these actions say no to a visitor:
+`getAccountPasswordCapability` `allowed`, `getLoginSessionCapabilities`
+`revoke_other_sessions`, and `listAccountIdentities` `can_link` and `can_unlink`.
+
+The Jellyfin-compatible listener serves no password change, identity linking, or revocation of
+another session; its `POST /Sessions/Logout` ends only the calling session. On the
+Audiobookshelf-compatible listener (beta), signing out normally revokes every token of the
+account and profile and closes their playback sessions; in demo mode, for an account that is
+not an administrator, it revokes only the caller's own credentials: the presented access token,
+and the refresh token the request carries (the `x-refresh-token` header or the `refresh_token`
+cookie) when it verifies as one of the same account and profile. It closes no playback session
+(none records which token opened it). A refresh token the request does not carry stays live
+until it expires. When the account's role can't be read, or the process has never read the
+setting, sign-out takes the demo path. An expired access token revokes nothing.
+
+`TestDemoModeCoversAccountOperations` in `internal/apiv2` fails when an operation tagged
+`account`, `api-keys`, `auth`, `device-login`, `notifications` or `profiles` that a
+non-administrator can call is neither demo-restricted nor listed, with its reason, as allowed.
 
 ## Policy discovery
 

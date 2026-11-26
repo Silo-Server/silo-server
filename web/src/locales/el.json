@@ -365,6 +365,30 @@
       "value": "Αυτή η τιμή είναι εκτός εύρους."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Συμπεριλάβετε τουλάχιστον έναν ειδικό χαρακτήρα, όπως ! ή #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Συμπεριλάβετε τουλάχιστον ένα κεφαλαίο γράμμα."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Αυτός ο κωδικός πρόσβασης είναι πολύ μεγάλος."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Αυτός ο κωδικός πρόσβασης είναι πολύ σύντομος."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Η περίοδος σύνδεσής σας έληξε. Συνδεθείτε ξανά."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Όσο η σύνδεση με κωδικό πρόσβασης είναι απενεργοποιημένη, πρέπει να παραμένει ενεργός ένας πάροχος σύνδεσης που μπορούν να χρησιμοποιήσουν οι χρήστες. Το OpenID Connect χρειάζεται επίσης το δημόσιο URL του διακομιστή."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8005,6 +8035,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Κάρτες"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Διάταξη"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Πίνακας"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -49469,7 +49517,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Τάσεις παρακολούθησης, δημοφιλείς τίτλοι, δραστηριότητα του νοικοκυριού, αναπαραγωγή ανά συσκευή και εύρος ζώνης."
+      "value": "Ζωντανές ροές, τάσεις παρακολούθησης, δημοφιλείς τίτλοι, δραστηριότητα του νοικοκυριού, αναπαραγωγή ανά συσκευή και εύρος ζώνης."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -67988,7 +68036,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Ελέγχει τον δρομολογητή για υποστήριξη UPnP, NAT-PMP ή PCP."
+      "value": "Ζητά από τον δρομολογητή αντιστοίχιση θύρας UPnP, NAT-PMP ή PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67997,16 +68045,40 @@
       "value": "Αντιστοίχιση θυρών"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Εύρος: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " έως "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Οι έλεγχοι ετοιμότητας δεν ξεκινούν απευθείας αναπαραγωγή."
+      "value": "Η ενεργοποίηση αυτής της ρύθμισης εκκινεί τη μηχανή απευθείας συνδέσεων. Η μηχανή ανοίγει μια θύρα UDP και, όταν η επιλογή «Αντιστοίχιση θύρας» είναι ενεργή, ζητά από τον δρομολογητή αντιστοίχιση θύρας. Η «Εκτέλεση ελέγχου» μόνο διαβάζει την κατάσταση του κεντρικού υπολογιστή."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Απενεργοποιήθηκε από διαχειριστή"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Περιορίστηκε στο επιτρεπόμενο εύρος"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -68018,7 +68090,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Δεν ήταν δυνατή η εκκίνηση της μηχανής απευθείας συνδέσεων"
+      "value": "Η μηχανή απευθείας συνδέσεων σταμάτησε ή δεν ήταν δυνατή η εκκίνησή της"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -68049,6 +68121,12 @@
     {
       "type": 0,
       "value": "Μη έγκυρη τιμή – χρησιμοποιείται «Ανενεργό»"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Μη έγκυρη τιμή, χρησιμοποιείται η προεπιλογή"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -79323,6 +79401,20 @@
       "value": "Ενεργοποιήστε πρώτα έναν πάροχο σύνδεσης. Με τη σύνδεση με κωδικό πρόσβασης ανενεργή και χωρίς ενεργό πάροχο, μόνο οι διαχειριστές έκτακτης ανάγκης θα μπορούσαν να συνδεθούν."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Ορίστε πρώτα το δημόσιο URL του διακομιστή. Χωρίς αυτό, ο πάροχος "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " δεν μπορεί να συνδέσει κανέναν, οπότε με τη σύνδεση με κωδικό πρόσβασης απενεργοποιημένη θα μπορούσαν να συνδεθούν μόνο οι διαχειριστές έκτακτης ανάγκης."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -79413,6 +79505,246 @@
       "value": "Δημιουργία κλειδιών API από χρήστες"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Απενεργοποίηση σύνδεσης με κωδικό πρόσβασης"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Μόνο οι διαχειριστές έκτακτης ανάγκης θα συνδέονται με κωδικό πρόσβασης. Όλοι οι άλλοι συνδέονται με τον πάροχο "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Ο πάροχος "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " δημιουργεί λογαριασμούς κατά την πρώτη σύνδεση, οπότε αν κάποιος από αυτούς τους χρήστες συνδεθεί μέσω αυτού πριν από τη συσχέτιση, θα αποκτήσει νέο, ξεχωριστό λογαριασμό."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Συσχετίστε κάθε λογαριασμό με έναν λογαριασμό του παρόχου "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " από τη σελίδα του στην ενότητα «Χρήστες»."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " λογαριασμός δεν μπορεί να συνδεθεί μέχρι να τον συσχετίσει ένας διαχειριστής"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " λογαριασμοί δεν μπορούν να συνδεθούν μέχρι να τους συσχετίσει ένας διαχειριστής"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατός ο έλεγχος των λογαριασμών που επηρεάζονται. Μπορείτε και πάλι να την απενεργοποιήσετε."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Έλεγχος των χρηστών που συνδέονται με κωδικό πρόσβασης"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Όταν ο πάροχος "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " επιβεβαιώνει ένα από αυτά τα email κατά τη σύνδεση, το Silo συνδέει τον χρήστη με τον λογαριασμό του."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " λογαριασμός συνδέεται μέσω email"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " λογαριασμοί συνδέονται μέσω email"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ακόμη"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ακόμη"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η φόρτωση περισσότερων λογαριασμών. Δοκιμάστε ξανά."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Όλοι οι λογαριασμοί θα μπορούν να συνδέονται και μετά από αυτό."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Διαχειριστής"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Η αντιστοίχιση email είναι απενεργοποιημένη"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Χωρίς email"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Αυτό δεν αποσυνδέει κανέναν. Όσοι έχουν ήδη συνδεθεί δεν αποσυνδέονται, τα κλειδιά API τους εξακολουθούν να λειτουργούν και μπορούν ακόμη να εγκρίνουν νέες συσκευές. Για να αποσυνδέσετε κάποιον χρήστη, τερματίστε τις περιόδους σύνδεσής του από τη σελίδα του στην ενότητα "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Χρήστες"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Απενεργοποίηση της σύνδεσης με κωδικό πρόσβασης;"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Εμφάνιση όλων των λογαριασμών στην ενότητα «Χρήστες»"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -79447,6 +79779,28 @@
     {
       "type": 0,
       "value": "Δεν ήταν δυνατή η αλλαγή του παρόχου "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Η σύνδεση με κωδικό πρόσβασης είναι απενεργοποιημένη, επομένως μέσω του παρόχου "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " συνδέονται όλοι εκτός από τους διαχειριστές έκτακτης ανάγκης. Ενεργοποιήστε πρώτα ξανά τη σύνδεση με κωδικό πρόσβασης και, στη συνέχεια, απενεργοποιήστε τον πάροχο "
     },
     {
       "type": 1,
@@ -81512,7 +81866,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Τάσεις παρακολούθησης, δημοφιλείς τίτλοι, λογαριασμοί, συσκευές και εύρος ζώνης."
+      "value": "Ζωντανές ροές, τάσεις παρακολούθησης, δημοφιλείς τίτλοι, λογαριασμοί, συσκευές και εύρος ζώνης."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -101628,6 +101982,18 @@
           "value": "Προαιρετικό"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Απόκρυψη παρακολουθημένων τίτλων"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Κάθε προφίλ βλέπει αυτή τη συλλογή χωρίς τους τίτλους που έχει παρακολουθήσει, στη σελίδα της συλλογής, στις γραμμές της και στο πλήθος των τίτλων της. Δεν αφαιρείται τίποτα. Μια έξυπνη συλλογή με όριο τίτλων επιλέγει πρώτα τους τίτλους της, οπότε μπορεί να εμφανίζει λιγότερους."
     }
   ],
   "web.collections.details.label": [
@@ -121911,6 +122277,20 @@
     {
       "type": 0,
       "value": "Ημερομηνία τελευταίας προβολής"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Κλείδωμα του πεδίου «"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "»"
     }
   ],
   "web.item.editMetadata.locked": [

@@ -1458,12 +1458,37 @@ func (f *fakeSessionService) ListSessionsPage(_ context.Context, userID int, aft
 	return page, false, nil
 }
 
-func (f *fakeSessionService) RevokeSession(_ context.Context, sessionID string, _ int) error {
+// ListSessionsPageByID and SessionLimitedToItself: the fake's caller is never
+// limited to itself; the Postgres tests cover that listing.
+func (f *fakeSessionService) ListSessionsPageByID(context.Context, int, string, int) ([]*models.AuthSession, bool, error) {
+	return nil, false, f.err
+}
+
+func (f *fakeSessionService) SessionLimitedToItself(context.Context, string) (bool, error) {
+	return false, f.err
+}
+
+func (f *fakeSessionService) RevokeSession(ctx context.Context, sessionID string, userID int) error {
+	return f.RevokeSessionChecked(ctx, sessionID, userID, nil)
+}
+
+// fakeSessionOwners are the sessions RevokeSessionChecked knows: s1 and s9
+// are account 1's (memberToken is s1), s2 is account 2's.
+var fakeSessionOwners = map[string]int{"s1": 1, "s9": 1, "s2": 2}
+
+// RevokeSessionChecked answers like the real seam: an unknown session or
+// another account's is not found, before check runs.
+func (f *fakeSessionService) RevokeSessionChecked(_ context.Context, sessionID string, userID int, check func(*models.AuthSession) error) error {
 	if f.err != nil {
 		return f.err
 	}
-	if sessionID != "s1" && sessionID != "s9" {
+	if owner, ok := fakeSessionOwners[sessionID]; !ok || owner != userID {
 		return &handlers.APIError{Status: 404, Code: "not_found", Message: "Session not found"}
+	}
+	if check != nil {
+		if err := check(&models.AuthSession{ID: sessionID, UserID: userID}); err != nil {
+			return &handlers.APIError{Status: 500, Code: "internal_error", Message: "An unexpected error occurred"}
+		}
 	}
 	f.revoked = append(f.revoked, sessionID)
 	return nil
@@ -1481,6 +1506,10 @@ func (f *fakeSessionService) SetupInitialUser(_ context.Context, in handlers.Reg
 }
 
 func (f *fakeSessionService) SignupEnabled(context.Context) (bool, error) { return f.signupOn, f.err }
+
+func (f *fakeSessionService) PasswordPolicy(context.Context) (auth.PasswordPolicy, error) {
+	return auth.DefaultPasswordPolicy(), f.err
+}
 
 func (f *fakeSessionService) Signup(_ context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error) {
 	if f.err != nil {

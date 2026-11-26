@@ -269,6 +269,128 @@ func TestPlaybackLifecycleOrderAndStartStateDB(t *testing.T) {
 	}
 }
 
+// TestConfirmedPauseLifecycleDB pins the pause a native player confirms over
+// its control socket: it moves the lifecycle row at once, so the admin list
+// shows it before the next progress report, but never over progress the
+// attempt accepted after the confirmation was received, even progress that
+// commits while the confirmation waits on the attempt row, and never on an
+// expired attempt or a stopped session.
+func TestConfirmedPauseLifecycleDB(t *testing.T) {
+	ctx, pool, account := lifecycleTestDB(t)
+	store := NewPGPlaybackAdminStore(pool, nil)
+	file := lifecycleTestFile(t, ctx, pool)
+	started := time.Now().UTC()
+	native := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO playback_v3_attempts
+		(playback_attempt_id, session_id, user_id, profile_id, requested_media_file_id, effective_media_file_id,
+		 current_plan_id, current_plan, normalized_request, expires_at, last_sequence, last_sample)
+		VALUES ($1, $2::uuid, $3, 'p-1', $4, $4, 'plan-1', '{}', '{}', NOW() + interval '1 hour', 1,
+		 '{"sequence":1,"position":30,"is_paused":false}')`, uuid.NewString(), native, account, file); err != nil {
+		t.Fatal(err)
+	}
+	start, ok, err := store.StartLifecycle(ctx, LifecycleStart{SessionID: native, Frontend: LifecycleFrontendNative, UserID: account, ProfileID: "p-1", MediaFileID: file, RequestedMediaFileID: file, StartedAt: started})
+	if err != nil || !ok {
+		t.Fatalf("start: %v %v", ok, err)
+	}
+	state := func() string {
+		t.Helper()
+		var s string
+		if err := pool.QueryRow(ctx, `SELECT state FROM playback_session_lifecycle WHERE session_id = $1`, native).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+
+	pause, ok, err := store.ConfirmLifecyclePause(ctx, native, true, 1)
+	if err != nil || !ok || pause.State != LifecyclePaused || pause.Seq <= start.Seq {
+		t.Fatalf("confirmed pause = %+v ok=%v err=%v; want paused above %d", pause, ok, err, start.Seq)
+	}
+	if _, ok, _ := store.ConfirmLifecyclePause(ctx, native, true, 1); ok {
+		t.Fatal("a repeated confirmation was announced")
+	}
+
+	if _, ok, err := store.ConfirmLifecyclePause(ctx, native, false, 1); err != nil || !ok || state() != LifecyclePlaying {
+		t.Fatalf("confirmed resume: ok=%v err=%v state=%s", ok, err, state())
+	}
+
+	// Progress the player sent after a pause confirmation was received at
+	// sequence 1 (sequence 2, still playing, so ApplyProgress leaves the
+	// lifecycle row alone) holds the attempt row while that confirmation
+	// waits on it: the newer sample decides.
+	progress, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = progress.Rollback(context.Background()) }()
+	if _, err := progress.Exec(ctx, `UPDATE playback_v3_attempts SET last_sequence = 2,
+		last_sample = '{"sequence":2,"position":31,"is_paused":false}' WHERE session_id = $1::uuid`, native); err != nil {
+		t.Fatal(err)
+	}
+	confirmed := make(chan bool, 1)
+	go func() {
+		_, ok, err := store.ConfirmLifecyclePause(context.Background(), native, true, 1)
+		if err != nil {
+			t.Error(err)
+		}
+		confirmed <- ok
+	}()
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		var waiting int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND query LIKE '%playback_v3_attempts%FOR SHARE%'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the confirmation never waited on the attempt row")
+		}
+		<-time.After(10 * time.Millisecond)
+	}
+	if err := progress.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if <-confirmed || state() != LifecyclePlaying {
+		t.Fatalf("a confirmation received before newer progress overrode it: state %s", state())
+	}
+
+	// A confirmation received after that progress applies.
+	if _, ok, err := store.ConfirmLifecyclePause(ctx, native, true, 2); err != nil || !ok || state() != LifecyclePaused {
+		t.Fatalf("confirmation at the latest sequence: ok=%v err=%v state=%s", ok, err, state())
+	}
+	requireExpiredAttemptIgnoresConfirmation(t, ctx, pool, store, native, state)
+	if _, _, err := store.RecordEnd(ctx, AdminPlaybackHistoryEntry{
+		SessionID: native, UserID: account, ProfileID: "p-1", MediaFileID: file, PlayMethod: "direct_play",
+		StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(time.Minute).Format(time.RFC3339Nano), EndReason: PlaybackEndStopped,
+	}, LifecycleFrontendNative); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.ConfirmLifecyclePause(ctx, native, false, 2); err != nil || ok || state() != LifecycleStopped {
+		t.Fatalf("a stopped session resumed: ok=%v err=%v state=%s", ok, err, state())
+	}
+}
+
+// requireExpiredAttemptIgnoresConfirmation expires the paused session's
+// attempt and checks a resume confirmation leaves the row paused: an attempt
+// past its lease accepts no progress, and no confirmation either, since the
+// sweep is about to end it. It renews the lease afterwards, so later checks
+// exercise their own guard.
+func requireExpiredAttemptIgnoresConfirmation(t *testing.T, ctx context.Context, pool *pgxpool.Pool, store *PGPlaybackAdminStore, sessionID string, state func() string) {
+	t.Helper()
+	setExpiry := func(interval string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `UPDATE playback_v3_attempts SET expires_at = NOW() + $2::interval WHERE session_id = $1::uuid`, sessionID, interval); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setExpiry("-1 second")
+	if _, ok, err := store.ConfirmLifecyclePause(ctx, sessionID, false, 2); err != nil || ok || state() != LifecyclePaused {
+		t.Fatalf("an expired attempt resumed: ok=%v err=%v state=%s", ok, err, state())
+	}
+	setExpiry("1 hour")
+}
+
 // TestLifecycleSweepSelectsWhatItCanEndDB pins that sessions still active
 // never fill the sweep's batch: a hundred unheld sessions with fresh
 // progress are left out, and the abandoned one behind them is selected.

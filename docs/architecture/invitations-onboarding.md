@@ -18,8 +18,21 @@ address is a legal, unambiguous username). To make that natural on the apps,
 lookup misses and the input parses as an email address
 (`internal/auth/provider.go`).
 
+**Joining through the Silo app.** Where app key sign-in and local password
+sign-in are both on, the invite page also offers "Join with the Silo app"
+(`docs/architecture/app-keys.md`, "App codes"). The page asks for a username
+when the invitation has no address (an email is then optional), and
+`POST /invitations/app-code` checks the invitation as accept does, reserves the
+name and returns a ten-minute app code. Nothing else changes until the app
+redeems the code: then one transaction claims the invitation through the same
+claim accept uses, creates the account with no password and the invitation's
+access, and enrolls the app's keys. An emailed invitation's account takes its
+address as name and email, as with a password. The lookup's `password_join` and
+`app_join` say which paths work, and the invitation email's wording fits both.
+
 **No user row exists until accept.** A typo'd address cannot squat a username
-or linger as a ghost account. `Send` refuses addresses that already have an
+or linger as a ghost account. An app code's reservation lasts ten minutes and
+creates nothing; the account insert at redeem decides who gets a name. `Send` refuses addresses that already have an
 account, checking both the email and username columns (the address is the
 future username).
 

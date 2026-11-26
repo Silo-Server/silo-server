@@ -365,6 +365,30 @@
       "value": "此值超出范围。"
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "请至少包含一个特殊字符，例如!或#。"
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "请至少包含一个大写字母。"
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "此密码过长。"
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "此密码过短。"
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "你的会话已过期。请重新登录。"
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "密码登录关闭期间，必须保持至少一个可供用户使用的登录提供商处于开启状态。OpenID Connect还需要服务器的公共URL。"
     }
   ],
   "error.snapshot_request_conflict": [
@@ -7812,6 +7842,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "卡片"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "布局"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "表格"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -43911,7 +43959,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "观看趋势、热门作品、家庭活动、设备播放和带宽。"
+      "value": "实时串流、观看趋势、热门作品、家庭活动、设备播放和带宽。"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -61211,7 +61259,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "检查路由器是否支持UPnP、NAT-PMP或PCP。"
+      "value": "向路由器请求UPnP、NAT-PMP或PCP端口映射。"
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -61220,16 +61268,40 @@
       "value": "端口映射"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "范围："
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": "到"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "就绪检查不会启动直连播放。"
+      "value": "开启此项会启动直连引擎。它会打开一个UDP端口，并在“端口映射”开启时向路由器请求端口映射。“运行检查”只会读取主机的状态。"
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "已被管理员停用"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "已调整到允许范围内"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -61241,7 +61313,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "直连引擎无法启动"
+      "value": "直连引擎已停止或无法启动"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -61272,6 +61344,12 @@
     {
       "type": 0,
       "value": "值无效；按关闭处理"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "值无效，正在使用默认值"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -72419,6 +72497,20 @@
       "value": "请先开启一个登录提供商。如果关闭密码登录且未开启任何提供商，将只有应急管理员能登录。"
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "请先设置服务器的公共URL。没有它，"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "无法让任何人登录；关闭密码登录后，只有应急管理员能够登录。"
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -72509,6 +72601,205 @@
       "value": "允许用户创建API密钥"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "关闭密码登录"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "只有应急管理员可以使用密码登录。其他所有人都将使用"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "登录。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "会在首次登录时创建账户。因此，如果其中有人在你关联之前使用它登录，他们会获得一个新的独立账户。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "请在用户中打开每个账户的页面，将其关联到"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "账户。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "个账户在管理员关联之前无法登录"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "无法检查此操作会影响哪些账户。你仍然可以关闭它。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "正在检查哪些人使用密码登录"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "当"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "在登录时确认其中某个电子邮件地址后，Silo会将此人连接到其账户。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "个账户通过电子邮件连接"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "再显示"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "个"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "无法加载更多账户。请重试。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "此操作后，所有账户仍可登录。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "管理员"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "电子邮件匹配已关闭"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "无电子邮件"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "此操作不会让任何人退出登录。已登录的人将保持登录状态，他们的API密钥仍可使用，并且仍可批准新设备。如需让某人退出登录，请在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "用户"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中打开其页面并结束其会话。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "关闭密码登录？"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "在用户中查看所有账户"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -72543,6 +72834,28 @@
     {
       "type": 0,
       "value": "无法更改"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "密码登录已关闭，因此除应急管理员外，所有人都通过"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "登录。请先重新开启密码登录，然后再关闭"
     },
     {
       "type": 1,
@@ -74553,7 +74866,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "观看趋势、热门作品、账户、设备和带宽。"
+      "value": "实时串流、观看趋势、热门作品、账户、设备和带宽。"
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -92541,6 +92854,18 @@
           "value": "可选"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "隐藏已观看的作品"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "每个个人资料看到的此合集都不包含它已观看的作品，在合集页面、行和数量中都是如此。不会移除任何内容。设有作品数量上限的智能合集会先选出作品，因此显示的作品可能更少。"
     }
   ],
   "web.collections.details.label": [
@@ -111308,6 +111633,16 @@
     {
       "type": 0,
       "value": "最后播出日期"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "锁定"
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

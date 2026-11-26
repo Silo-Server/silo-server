@@ -5131,6 +5131,28 @@
       "body_file": "create_admin_user_identity_ok.json"
     },
     {
+      "name": "create_app_code_ok",
+      "operation_id": "createAppCode",
+      "scenario": "Open in Silo from a signed-in browser acting as the household's main profile.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/app-codes",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AppCode",
+      "body_file": "create_app_code_ok.json"
+    },
+    {
       "name": "create_app_key_challenge_ok",
       "operation_id": "createAppKeyChallenge",
       "scenario": "An app asks for a challenge to sign, and the server clock to stamp the payload's iat and exp from.",
@@ -5191,6 +5213,24 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/PersonalCollection",
       "body_file": "create_collection_with_description_ok.json"
+    },
+    {
+      "name": "create_invitation_app_code_ok",
+      "operation_id": "createInvitationAppCode",
+      "scenario": "The invite page starts a join through the Silo app for an invitation with no address: the name is reserved and the app code comes back with the server address the link carries.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/invitations/app-code",
+        "body": "{\"token\":\"invitation-token\",\"username\":\"sam\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AppCode",
+      "body_file": "create_invitation_app_code_ok.json"
     },
     {
       "name": "create_library_ok",
@@ -6837,7 +6877,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"1d1377f9888815295cf9fd7c24376d588fe12eadf59e46ef9e4cf557c8c04d53\""
+        "ETag": "\"ea9d806298fc07f74f668bef1fafe6cb0204503eb347122814111a4e25688ccc\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminInsightsCapabilities",
@@ -6863,6 +6903,27 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminInsightsDevices",
       "body_file": "get_admin_insights_devices_ok.json"
+    },
+    {
+      "name": "get_admin_insights_library_ok",
+      "operation_id": "getAdminInsightsLibrary",
+      "scenario": "Administrator insights library returns per-library coverage, plays by genre, decade and rating, and how soon new titles get a first play.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/insights/library?range=30d&tz=UTC",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminInsightsLibrary",
+      "body_file": "get_admin_insights_library_ok.json"
     },
     {
       "name": "get_admin_insights_people_ok",
@@ -7042,11 +7103,31 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"121f63457137cd6a176835232f8cba5f8dd428a3ecba8e977b58356d08ebadc1\""
+        "ETag": "\"686475112d924935f7eb5684de280110b3f1b178a65b4f2ffbbe6fac3ca4d033\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AppKeyCapability",
       "body_file": "get_app_key_capability_ok.json"
+    },
+    {
+      "name": "get_app_key_session_access_ok",
+      "operation_id": "getAppKeySessionAccess",
+      "scenario": "A browser session opened by password: it may list and manage the account's app keys, and signing in again would change nothing.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/keys/session",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AppKeySessionAccess",
+      "body_file": "get_app_key_session_access_ok.json"
     },
     {
       "name": "get_audio_preference_not_found",
@@ -8624,6 +8705,23 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/OverlayConfig",
       "body_file": "get_overlay_config_ok.json"
+    },
+    {
+      "name": "get_password_policy_ok",
+      "operation_id": "getPasswordPolicy",
+      "scenario": "The rules a new password must meet, before login: setup, signup and a password reset read them.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/password-policy"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PasswordPolicy",
+      "body_file": "get_password_policy_ok.json"
     },
     {
       "name": "get_person_authentication_required",
@@ -12822,7 +12920,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"199ed1b146458dcd278850dd6857e5640e7dbc8742e67275bdbaf314cac391bd\""
+        "ETag": "\"87c6873910b3902dcdaa26155253dec9a0b58fc68c14f9e26b5898d087c4c233\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/LoginSessionCapabilities",

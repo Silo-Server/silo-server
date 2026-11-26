@@ -331,11 +331,6 @@ func (a *Analyzer) movieTail(ctx context.Context, candidate Candidate, deadline 
 	if ctx.Err() != nil {
 		return nil, false, false
 	}
-	// As with episodes, a clean run without keyframes points at the log
-	// format rather than the file, so it is retried later.
-	if sampleErr == nil && len(sampledTail.Frames) == 0 {
-		sampleErr = errNoTailFrames
-	}
 	usable, err := a.settleUnusableCreditsTail(ctx, candidate, spec, sampledTail, sampleErr)
 	switch {
 	case err != nil:

@@ -14,6 +14,7 @@ export function adminTaskJobFromV2(job: components["schemas"]["AdminTaskJob"]): 
     request_payload: {
       library_ids: job.library_ids,
       source_label: job.source_label,
+      source_export_job_id: job.source_export_job_id,
       library_id: job.library_id,
       library_name: job.library_name,
     },

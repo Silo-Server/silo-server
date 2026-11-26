@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Check } from "lucide-react";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useT, type MessageKey, type Translate } from "@/i18n";
@@ -256,24 +256,27 @@ export function RoomRail(props: {
       <aside className="border-border/60 hidden min-h-0 w-80 shrink-0 border-s md:flex md:flex-col">
         <RoomRailBody {...props} />
       </aside>
-      <div className="border-border/60 flex items-center gap-3 border-t px-4 py-2 md:hidden">
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="flex min-w-0 flex-1 items-center gap-3 text-start text-sm"
-          aria-label={t("web.watchTogether.rail.openLabel")}
-        >
-          <span className="font-semibold">
-            {t("web.watchTogether.rail.peopleCount", {
-              count: props.room?.member_count ?? 0,
-            })}
-          </span>
-          <span className="text-muted-foreground truncate text-xs">
-            {latest ? <ActivityLine entry={latest} /> : t("web.watchTogether.rail.activity")}
-          </span>
-        </button>
-      </div>
+      {/* The bar's button is the sheet's trigger, so focus returns to it when
+          the sheet closes. */}
       <Sheet open={open} onOpenChange={setOpen}>
+        <div className="border-border/60 flex items-center gap-3 border-t px-4 py-2 md:hidden">
+          <SheetTrigger asChild>
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 items-center gap-3 text-start text-sm"
+              aria-label={t("web.watchTogether.rail.openLabel")}
+            >
+              <span className="font-semibold">
+                {t("web.watchTogether.rail.peopleCount", {
+                  count: props.room?.member_count ?? 0,
+                })}
+              </span>
+              <span className="text-muted-foreground truncate text-xs">
+                {latest ? <ActivityLine entry={latest} /> : t("web.watchTogether.rail.activity")}
+              </span>
+            </button>
+          </SheetTrigger>
+        </div>
         <SheetContent side="bottom" className="h-[70vh] p-0">
           <SheetTitle className="sr-only">{t("web.watchTogether.rail.sheetTitle")}</SheetTitle>
           <RoomRailBody {...props} />

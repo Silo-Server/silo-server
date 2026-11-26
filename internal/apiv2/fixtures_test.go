@@ -1775,6 +1775,10 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, adminDashboardLayoutFixtureCases()...)
 	cases = append(cases, catalogItemCollectionsFixtureCases()...)
 	cases = append(cases, directConnectionsFixtureCases()...)
+	cases = append(cases, fixtureCase{name: "get_password_policy_ok", operationID: "getPasswordPolicy",
+		scenario: "The rules a new password must meet, before login: setup, signup and a password reset read them.",
+		method:   http.MethodGet, path: "/api/v2/auth/password-policy",
+		status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PasswordPolicy"})
 	cases = append(cases,
 		fixtureCase{name: "get_admin_plugin_capabilities_ok", operationID: "getAdminPluginCapabilities",
 			scenario: "An administrator discovers deployment-managed plugin settings.",
@@ -1799,8 +1803,29 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, appKeyFixtureCases()...)
 	cases = append(cases, profileSetFixtureCases()...)
 	cases = append(cases, adminAppKeyFixtureCases()...)
+	cases = append(cases, appCodeFixtureCases()...)
 	cases = append(cases, adminProfileSetEditFixtureCases()...)
 	return cases
+}
+
+// appCodeFixtureCases pin what a server's page reads to hand the Silo app an
+// app code, and the session answer it decides with.
+func appCodeFixtureCases() []fixtureCase {
+	return []fixtureCase{
+		{name: "create_invitation_app_code_ok", operationID: "createInvitationAppCode",
+			scenario: "The invite page starts a join through the Silo app for an invitation with no address: the name is reserved and the app code comes back with the server address the link carries.",
+			method:   http.MethodPost, path: "/api/v2/invitations/app-code", body: `{"token":"invitation-token","username":"sam"}`,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AppCode"},
+		{name: "create_app_code_ok", operationID: "createAppCode",
+			scenario: "Open in Silo from a signed-in browser acting as the household's main profile.",
+			method:   http.MethodPost, path: "/api/v2/auth/app-codes", body: `{}`,
+			headers: mainProfile(adminToken),
+			status:  http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AppCode"},
+		{name: "get_app_key_session_access_ok", operationID: "getAppKeySessionAccess",
+			scenario: "A browser session opened by password: it may list and manage the account's app keys, and signing in again would change nothing.",
+			method:   http.MethodGet, path: "/api/v2/auth/keys/session", headers: bearer(memberToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AppKeySessionAccess"},
+	}
 }
 
 // appKeyFixtureCases pin the app key shapes apps decode. A sealed reply is
@@ -1844,21 +1869,22 @@ func appKeyFixtureCases() []fixtureCase {
 func fixtureAppKeys() *fakeAppKeys {
 	created := fixedTime()
 	used := created.Add(time.Hour)
-	return &fakeAppKeys{enabled: true, err: auth.ErrKeySignatureInvalid, grantErr: auth.ErrGrantInvalid, keys: auth.OwnAppKeys{
-		Person: &models.AppPersonKey{KeyID: "PgujdSfBbNNyXngLWCsOgw", CreatedAt: created},
-		Devices: []*models.AppDeviceKey{
-			{ID: "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", KeyID: "zT321tSgcB7emUH9k0B0oA", Kind: models.DeviceKeyKindDevice, Name: "Sam's iPhone", Platform: "ios",
-				Status: models.DeviceKeyStatusActive, EnrolledVia: models.AppKeyEnrolledIntroduce, CreatedAt: created, LastUsedAt: &used},
+	return &fakeAppKeys{enabled: true, err: auth.ErrKeySignatureInvalid, grantErr: auth.ErrGrantInvalid,
+		sessionAccess: auth.SessionKeyAccess{List: true, Manage: true}, keys: auth.OwnAppKeys{
+			Person: &models.AppPersonKey{KeyID: "PgujdSfBbNNyXngLWCsOgw", CreatedAt: created},
+			Devices: []*models.AppDeviceKey{
+				{ID: "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", KeyID: "zT321tSgcB7emUH9k0B0oA", Kind: models.DeviceKeyKindDevice, Name: "Sam's iPhone", Platform: "ios",
+					Status: models.DeviceKeyStatusActive, EnrolledVia: models.AppKeyEnrolledIntroduce, CreatedAt: created, LastUsedAt: &used},
+				{ID: "5b1d7f0e-6a57-4d0c-8a59-0f3f3a0f4a10", KeyID: "iX--ofJySUkUOsEpPo17PQ", Kind: models.DeviceKeyKindDevice, Name: "Sam's iPad", Platform: "ipados",
+					Status: models.DeviceKeyStatusPending, EnrolledVia: models.AppKeyEnrolledAppCode, CreatedAt: created},
+				{ID: "9e0b6c1d-3f2a-4b7e-8c5d-1a2b3c4d5e6f", KeyID: "Qm9vay1wbGF5ZXIta2V5MQ", Kind: models.DeviceKeyKindApp, Name: "Example Player", Platform: "android",
+					Status: models.DeviceKeyStatusActive, EnrolledVia: models.AppKeyEnrolledGrant, CreatedAt: created, LastUsedAt: &used},
+			},
+			AllowedBy: "sam",
+		}, pending: []*models.AppDeviceKey{
 			{ID: "5b1d7f0e-6a57-4d0c-8a59-0f3f3a0f4a10", KeyID: "iX--ofJySUkUOsEpPo17PQ", Kind: models.DeviceKeyKindDevice, Name: "Sam's iPad", Platform: "ipados",
-				Status: models.DeviceKeyStatusPending, EnrolledVia: models.AppKeyEnrolledAppCode, CreatedAt: created},
-			{ID: "9e0b6c1d-3f2a-4b7e-8c5d-1a2b3c4d5e6f", KeyID: "Qm9vay1wbGF5ZXIta2V5MQ", Kind: models.DeviceKeyKindApp, Name: "Example Player", Platform: "android",
-				Status: models.DeviceKeyStatusActive, EnrolledVia: models.AppKeyEnrolledGrant, CreatedAt: created, LastUsedAt: &used},
-		},
-		AllowedBy: "sam",
-	}, pending: []*models.AppDeviceKey{
-		{ID: "5b1d7f0e-6a57-4d0c-8a59-0f3f3a0f4a10", KeyID: "iX--ofJySUkUOsEpPo17PQ", Kind: models.DeviceKeyKindDevice, Name: "Sam's iPad", Platform: "ipados",
-			Status: models.DeviceKeyStatusPending, EnrolledVia: models.AppKeyEnrolledIntroduce, CreatedAt: created},
-	}}
+				Status: models.DeviceKeyStatusPending, EnrolledVia: models.AppKeyEnrolledIntroduce, CreatedAt: created},
+		}}
 }
 
 // deviceLoginBindingFixtureCases pin the session binding a device-login
@@ -2424,7 +2450,8 @@ func generateFixtures(t *testing.T) map[string][]byte {
 		}
 		// Absolute discovery URLs and origins in published fixtures use a
 		// reserved test host.
-		if p := r.URL.Path; p == Prefix+"/playback/capabilities" || p == Prefix+"/system/info" {
+		if p := r.URL.Path; p == Prefix+"/playback/capabilities" || p == Prefix+"/system/info" ||
+			p == Prefix+"/invitations/app-code" || p == Prefix+"/auth/app-codes" {
 			r.Host = "api.example.test"
 		}
 		for k, v := range c.headers {

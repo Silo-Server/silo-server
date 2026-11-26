@@ -20,7 +20,7 @@ recoveries, not heartbeat requests. Progress counters exclude heartbeat loops.
 | Autoscan | `autoscan_webhook_deliveries`, one delivery; `scan_runs` for admitted scans | Scheduled poll/retry task attempts and intake queue depth/age. Delivery rows can fan out to several scans; count them separately. |
 | Movie/series matching | `movie_match_queue` / `series_root_match_queue`, pending file/root | Shared queued/running counts from claim tokens, plus matching task duration/progress. Retry gates and terminal match policy stay in metadata repositories. Empty candidates are a domain result, not necessarily a failed scheduled task. |
 | Metadata refresh | Admin job, scheduled task, or library ingest | Admin/task attempt metrics and metadata dependency spans. Admin terminal state is read after durable writes. |
-| Images | `metadata_image_cache_jobs`, one cache job; cache/backfill/repair scheduled tasks | Shared depth/age plus task attempts and S3 calls. Failed delivery/lease recovery retain existing retry policy. |
+| Images | `metadata_image_cache_jobs`, one cache job; cache/backfill/repair scheduled tasks | Shared depth/age plus task attempts and S3 calls. Queued depth includes delayed retries; queued age covers only due jobs (`next_attempt_at` reached), so repeated deferrals for a full artwork store or a missing local mount show in depth, not age. Failed delivery/lease recovery retain existing retry policy. |
 | Search index | `catalog_search_index_events`, one unprocessed event | Shared pending depth/oldest event and scheduled sync/rebuild attempts. Includes delayed retry events. |
 | Chapters | Chapter-backfill scheduled task; remote extraction call | Task duration/outcome and authenticated node dependency span. Selected chapters and media paths are excluded from labels. |
 | Intro/credits | Detection/contribution scheduled task | Task attempts/progress; FFmpeg process completion accounting for transcode/probe owners. Queue eligibility remains marker service state. |
@@ -51,7 +51,10 @@ API processes sample the fixed queries in `internal/workmetrics/queues.go` every
 30 seconds. Each query has a two-second deadline including pool wait. No query
 runs in a scrape. Query errors immediately suppress depth/age values and increment
 `sample_errors_total`; samples older than 90 seconds also suppress those values.
-Available empty queues export zero depth and no oldest timestamp.
+Available empty queues export zero depth and no oldest timestamp. The images
+queue also omits its queued oldest timestamp while every queued job waits for a
+later retry. Depth that keeps growing there can still mean a full artwork store
+or a missing local mount.
 
 Each API replica observes the same database. Attach a `cluster` scrape label and
 use `max by (cluster, queue, state)` for depth and `min` for the oldest request timestamp. Use `sum` only for per-process

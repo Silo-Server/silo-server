@@ -60,6 +60,10 @@ func TestKeyOperationsRecheckActingProfileDB(t *testing.T) {
 		{"approve a waiting device", func(acting ActingProfile) error {
 			return env.signIn.ApprovePendingKey(ctx, claims, waiting, acting)
 		}},
+		{"issue an app code", func(acting ActingProfile) error {
+			_, err := env.signIn.IssueSessionAppCode(ctx, claims, acting)
+			return err
+		}},
 		// Last: a new person key refuses the devices the old one introduced.
 		{"replace the person key", func(acting ActingProfile) error {
 			return env.signIn.ReplacePersonKey(ctx, claims, replacement.pub, acting)

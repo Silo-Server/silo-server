@@ -39,7 +39,7 @@ License 2.0, through the `mediabunny` npm package.
 
 ## Shunpike and Network Forks
 
-Shunpike (`github.com/Silo-Server/shunpike`) is licensed under the BSD
+Shunpike (`github.com/darthShadow/shunpike`) is licensed under the BSD
 3-Clause License:
 
 ```text
@@ -73,8 +73,8 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-Shunpike uses the Silo-Server forks of quic-go and Tailscale
-(`github.com/Silo-Server/quic-go` and `github.com/Silo-Server/tailscale`).
+Shunpike uses the darthShadow forks of quic-go and Tailscale
+(`github.com/darthShadow/quic-go` and `github.com/darthShadow/tailscale`).
 The forks retain the upstream module paths and licenses: quic-go is
 MIT-licensed and Tailscale is BSD-3-Clause-licensed. Their patch inventories
 are in each fork's `PATCHES.md`. The resolved versions and sources are

@@ -18,6 +18,7 @@ type AdminInsightsService interface {
 	ReadAdminInsightsBandwidth(context.Context, handlers.AdminInsightsBandwidthQuery, bool) (*handlers.AdminInsightsBandwidth, error)
 	ReadAdminInsightsTitles(context.Context, handlers.AdminInsightsTitlesQuery, bool) (*handlers.AdminInsightsTitles, error)
 	ReadAdminInsightsTitle(context.Context, handlers.AdminInsightsTitleQuery) (*handlers.AdminInsightsTitle, error)
+	ReadAdminInsightsLibrary(context.Context, handlers.AdminInsightsWindowQuery, bool) (*handlers.AdminInsightsLibrary, error)
 }
 
 // AdminInsightsCapabilities reports whether Monitor -> Insights and its
@@ -28,6 +29,8 @@ type AdminInsightsCapabilities struct {
 	NodeEgressDaily bool `json:"node_egress_daily" doc:"Long-term per-node daily egress archive survives past the 31-day minute-sample window"`
 	Titles          bool `json:"titles" doc:"The Titles leaderboard (getAdminInsightsTitles) and title detail (getAdminInsightsTitle) are served"`
 	ProfileFilter   bool `json:"profile_filter" doc:"Activity, Devices, Titles and title detail accept profile_id together with user_id"`
+	Library         bool `json:"library" doc:"The Library read (getAdminInsightsLibrary) is served"`
+	Breakdowns      bool `json:"breakdowns" doc:"Activity carries per-bucket active accounts and profiles and end_reasons; Titles carries least_finished; Devices carries client_versions, protocol_buckets, subtitles and audio; People carries top_profiles"`
 }
 
 type AdminInsightsCapabilitiesOutput struct {
@@ -141,16 +144,18 @@ type AdminInsightsActivitySummary struct {
 }
 
 type AdminInsightsActivityBucket struct {
-	BucketStart  Instant `json:"bucket_start"`
-	LabelDate    string  `json:"label_date" format:"date" doc:"Local bucket start date (YYYY-MM-DD in requested tz)"`
-	Plays        int64   `json:"plays"`
-	WatchSeconds int64   `json:"watch_seconds"`
-	Direct       int64   `json:"direct"`
-	Remux        int64   `json:"remux"`
-	Transcode    int64   `json:"transcode"`
-	Movies       int64   `json:"movies"`
-	Episodes     int64   `json:"episodes"`
-	OtherMedia   int64   `json:"other_media"`
+	BucketStart    Instant `json:"bucket_start"`
+	LabelDate      string  `json:"label_date" format:"date" doc:"Local bucket start date (YYYY-MM-DD in requested tz)"`
+	Plays          int64   `json:"plays"`
+	WatchSeconds   int64   `json:"watch_seconds"`
+	Direct         int64   `json:"direct"`
+	Remux          int64   `json:"remux"`
+	Transcode      int64   `json:"transcode"`
+	Movies         int64   `json:"movies"`
+	Episodes       int64   `json:"episodes"`
+	OtherMedia     int64   `json:"other_media"`
+	ActiveAccounts int64   `json:"active_accounts" doc:"Distinct accounts with a session that started in the bucket"`
+	ActiveProfiles int64   `json:"active_profiles" doc:"Distinct household profiles with a session that started in the bucket"`
 }
 
 type AdminInsightsHeatmapCell struct {
@@ -182,6 +187,7 @@ type AdminInsightsActivity struct {
 	Buckets     []AdminInsightsActivityBucket   `json:"buckets"`
 	Heatmap     []AdminInsightsHeatmapCell      `json:"heatmap"`
 	PeakStreams []AdminInsightsPeakStreamsPoint `json:"peak_streams"`
+	EndReasons  []AdminInsightsLabeledCount     `json:"end_reasons" doc:"Sessions that started in the window by end reason (stopped, terminated, expired, aborted, replaced); unknown covers rows recorded before end reasons were"`
 }
 
 type AdminInsightsActivityOutput struct {
@@ -238,6 +244,16 @@ type AdminInsightsPeople struct {
 	TotalWatchSeconds int64                        `json:"total_watch_seconds"`
 	Coverage          AdminInsightsCoverage        `json:"coverage"`
 	Accounts          []AdminInsightsPersonAccount `json:"accounts"`
+	TopProfiles       []AdminInsightsTopProfile    `json:"top_profiles" doc:"Up to 10 household profiles across all accounts with the most plays, whatever the sort, search or page"`
+}
+
+type AdminInsightsTopProfile struct {
+	UserID       ID     `json:"user_id"`
+	Username     string `json:"username"`
+	ProfileID    ID     `json:"profile_id"`
+	ProfileName  string `json:"profile_name"`
+	Plays        int64  `json:"plays"`
+	WatchSeconds int64  `json:"watch_seconds"`
 }
 
 type AdminInsightsPeopleOutput struct {
@@ -315,6 +331,11 @@ type AdminInsightsDevices struct {
 	DeliveredResolutions []AdminInsightsLabeledCount     `json:"delivered_resolutions" doc:"Sessions by delivered resolution class; transcodes recorded before route facts are unknown"`
 	ResolutionChanges    []AdminInsightsResolutionChange `json:"resolution_changes" doc:"Sessions delivered at a lower resolution class than their source, by source and delivered class"`
 	TopTranscoders       []AdminInsightsTranscoderRow    `json:"top_transcoders" doc:"Up to 10 clients ranked by transcoded sessions, whatever min_sessions is"`
+	BucketUnit           string                          `json:"bucket_unit" enum:"day,week,month" doc:"Bucket size of protocol_buckets"`
+	ClientVersions       []AdminInsightsClientVersionRow `json:"client_versions" doc:"Up to 50 reported client versions with the most sessions; sessions without a version are left out"`
+	ProtocolBuckets      []AdminInsightsProtocolBucket   `json:"protocol_buckets" doc:"Sessions per bucket from Silo's own clients and from Jellyfin-protocol clients"`
+	Subtitles            AdminInsightsSubtitleUsage      `json:"subtitles"`
+	Audio                AdminInsightsAudioUsage         `json:"audio"`
 }
 
 type AdminInsightsTranscoderRow struct {
@@ -406,13 +427,14 @@ type AdminInsightsLibraryRow struct {
 }
 
 type AdminInsightsTitles struct {
-	From      Instant                   `json:"from"`
-	To        Instant                   `json:"to"`
-	TZ        string                    `json:"tz"`
-	Sort      string                    `json:"sort" enum:"plays,watch_time,viewers"`
-	Movies    []AdminInsightsTitleRow   `json:"movies"`
-	Shows     []AdminInsightsTitleRow   `json:"shows"`
-	Libraries []AdminInsightsLibraryRow `json:"libraries"`
+	From          Instant                   `json:"from"`
+	To            Instant                   `json:"to"`
+	TZ            string                    `json:"tz"`
+	Sort          string                    `json:"sort" enum:"plays,watch_time,viewers"`
+	Movies        []AdminInsightsTitleRow   `json:"movies"`
+	Shows         []AdminInsightsTitleRow   `json:"shows"`
+	Libraries     []AdminInsightsLibraryRow `json:"libraries"`
+	LeastFinished []AdminInsightsTitleRow   `json:"least_finished" doc:"Movies and series with at least 3 plays and at least one left unfinished, lowest completion rate first, up to limit"`
 }
 
 type AdminInsightsTitlesOutput struct {
@@ -529,6 +551,7 @@ func registerAdminInsights(reg *Registry) {
 	registerAdminInsightsBandwidth(reg)
 	registerAdminInsightsTitles(reg)
 	registerAdminInsightsTitle(reg)
+	registerAdminInsightsLibrary(reg)
 }
 
 // insightsWindowQueryOf validates the shared row filters of a v2 Insights read.
@@ -563,6 +586,8 @@ func registerAdminInsightsCapabilities(reg *Registry) {
 		out.Body.NodeEgressDaily = available
 		out.Body.Titles = available
 		out.Body.ProfileFilter = available
+		out.Body.Library = available
+		out.Body.Breakdowns = available
 		return out, nil
 	})
 }
@@ -600,11 +625,13 @@ func adminInsightsActivityOf(res *handlers.AdminInsightsActivity) AdminInsightsA
 		Buckets:     make([]AdminInsightsActivityBucket, 0, len(res.Buckets)),
 		Heatmap:     make([]AdminInsightsHeatmapCell, 0, len(res.Heatmap)),
 		PeakStreams: make([]AdminInsightsPeakStreamsPoint, 0, len(res.PeakStreams)),
+		EndReasons:  adminInsightsLabeledCountsOf(res.EndReasons),
 	}
 	for _, b := range res.Buckets {
 		body.Buckets = append(body.Buckets, AdminInsightsActivityBucket{
 			BucketStart: NewInstant(b.BucketStart), LabelDate: b.LabelDate, Plays: b.Plays, WatchSeconds: b.WatchSeconds,
 			Direct: b.Direct, Remux: b.Remux, Transcode: b.Transcode, Movies: b.Movies, Episodes: b.Episodes, OtherMedia: b.OtherMedia,
+			ActiveAccounts: b.ActiveAccounts, ActiveProfiles: b.ActiveProfiles,
 		})
 	}
 	for _, c := range res.Heatmap {
@@ -650,6 +677,13 @@ func adminInsightsPeopleOf(res *handlers.AdminInsightsPeople) AdminInsightsPeopl
 		TotalWatchSeconds: res.TotalWatchSeconds,
 		Coverage:          adminInsightsCoverageOf(res.Coverage),
 		Accounts:          make([]AdminInsightsPersonAccount, 0, len(res.Accounts)),
+		TopProfiles:       make([]AdminInsightsTopProfile, 0, len(res.TopProfiles)),
+	}
+	for _, p := range res.TopProfiles {
+		body.TopProfiles = append(body.TopProfiles, AdminInsightsTopProfile{
+			UserID: IDFromInt(int64(p.UserID)), Username: p.Username, ProfileID: ID(p.ProfileID), ProfileName: p.ProfileName,
+			Plays: p.Plays, WatchSeconds: p.WatchSeconds,
+		})
 	}
 	for _, acc := range res.Accounts {
 		profiles := make([]AdminInsightsPersonProfile, 0, len(acc.Profiles))
@@ -707,6 +741,33 @@ func adminInsightsDevicesOf(res *handlers.AdminInsightsDevices) AdminInsightsDev
 		DeliveredResolutions: adminInsightsLabeledCountsOf(res.DeliveredResolutions),
 		ResolutionChanges:    make([]AdminInsightsResolutionChange, 0, len(res.ResolutionChanges)),
 		TopTranscoders:       make([]AdminInsightsTranscoderRow, 0, len(res.TopTranscoders)),
+		BucketUnit:           res.BucketUnit,
+		ClientVersions:       make([]AdminInsightsClientVersionRow, 0, len(res.ClientVersions)),
+		ProtocolBuckets:      make([]AdminInsightsProtocolBucket, 0, len(res.ProtocolBuckets)),
+		Subtitles: AdminInsightsSubtitleUsage{
+			Sessions: res.Subtitles.Sessions, SubtitledSessions: res.Subtitles.SubtitledSessions,
+			ForcedSessions: res.Subtitles.ForcedSessions, HearingImpairedSessions: res.Subtitles.HearingImpairedSessions,
+			Languages:  adminInsightsLabeledCountsOf(res.Subtitles.Languages),
+			Deliveries: adminInsightsLabeledCountsOf(res.Subtitles.Deliveries),
+		},
+		Audio: AdminInsightsAudioUsage{
+			Sessions:          res.Audio.Sessions,
+			Languages:         adminInsightsLabeledCountsOf(res.Audio.Languages),
+			Decisions:         adminInsightsLabeledCountsOf(res.Audio.Decisions),
+			DeliveredChannels: adminInsightsLabeledCountsOf(res.Audio.DeliveredChannels),
+		},
+	}
+	for _, v := range res.ClientVersions {
+		body.ClientVersions = append(body.ClientVersions, AdminInsightsClientVersionRow{
+			ClientName: v.ClientName, DevicePlatform: v.DevicePlatform, ClientVersion: v.ClientVersion,
+			IsJellyfinClient: v.IsJellyfinClient, Sessions: v.Sessions, LastSeenAt: destinationInstant(v.LastSeenAt),
+		})
+	}
+	for _, b := range res.ProtocolBuckets {
+		body.ProtocolBuckets = append(body.ProtocolBuckets, AdminInsightsProtocolBucket{
+			BucketStart: NewInstant(b.BucketStart), LabelDate: b.LabelDate,
+			NativeSessions: b.NativeSessions, JellyfinSessions: b.JellyfinSessions,
+		})
 	}
 	for _, r := range res.TopTranscoders {
 		body.TopTranscoders = append(body.TopTranscoders, AdminInsightsTranscoderRow(r))
@@ -847,7 +908,8 @@ func adminInsightsTitlesOf(res *handlers.AdminInsightsTitles) AdminInsightsTitle
 	body := AdminInsightsTitles{
 		From: NewInstant(res.From), To: NewInstant(res.To), TZ: res.TZ, Sort: res.Sort,
 		Movies: adminInsightsTitleRowsOf(res.Movies), Shows: adminInsightsTitleRowsOf(res.Shows),
-		Libraries: make([]AdminInsightsLibraryRow, 0, len(res.Libraries)),
+		Libraries:     make([]AdminInsightsLibraryRow, 0, len(res.Libraries)),
+		LeastFinished: adminInsightsTitleRowsOf(res.LeastFinished),
 	}
 	for _, lib := range res.Libraries {
 		body.Libraries = append(body.Libraries, AdminInsightsLibraryRow{
