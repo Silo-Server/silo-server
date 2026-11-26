@@ -111,7 +111,9 @@ A refused password returns `422 validation_failed` with one field error at the p
 (`body.password`, or `body.new_password` for a password change). Its `code` names a rule the
 password breaks, and its `detail` is the English sentence for it, such as "Use at least 12
 characters." When a password breaks several rules, the code names one of them, so a client should
-not rely on which. A translated client shows `error.field.<code>` instead. A password outside the
+not rely on which. A translated client shows `error.field.<code>` instead. That text is generic, so
+`password_too_short` doesn't name the minimum; a client that wants to show it reads
+[`getPasswordPolicy`](#get-authpassword-policy-getpasswordpolicy) again. A password outside the
 schema's 8 to 72 characters is refused before the policy runs, with code `out_of_range`.
 
 | Code | Rule broken |
