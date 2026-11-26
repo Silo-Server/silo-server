@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
@@ -62,7 +61,7 @@ func sessionCheckUnavailable(op string, err error) error {
 }
 
 const (
-	MinimumPasswordLength = 8
+	MinimumPasswordLength = config.PasswordMinLengthFloor
 	MaximumPasswordBytes  = 72
 )
 
@@ -1010,7 +1009,7 @@ func (s *Service) SetupInitialUser(
 	defaultProfileName string,
 	deviceName, ip string,
 ) (*TokenPair, *models.User, error) {
-	if err := ValidateNewPassword(password); err != nil {
+	if err := CheckNewPassword(ctx, s.settings, password); err != nil {
 		return nil, nil, err
 	}
 
@@ -1076,7 +1075,7 @@ func (s *Service) Signup(
 	defaultProfileName string,
 	deviceName, ip string,
 ) (*TokenPair, *models.User, error) {
-	if err := ValidateNewPassword(password); err != nil {
+	if err := CheckNewPassword(ctx, s.settings, password); err != nil {
 		return nil, nil, err
 	}
 	// Check global signup toggle.
@@ -1559,7 +1558,11 @@ func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, cur
 	if err != nil {
 		return fmt.Errorf("getting user: %w", err)
 	}
-	if err := validatePasswordChange(ctx, user, currentPassword, newPassword); err != nil {
+	policy, err := s.PasswordPolicy(ctx)
+	if err != nil {
+		return err
+	}
+	if err := validatePasswordChange(ctx, user, policy, currentPassword, newPassword); err != nil {
 		return err
 	}
 
@@ -1582,7 +1585,7 @@ func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, cur
 	return nil
 }
 
-func validatePasswordChange(ctx context.Context, user *models.User, currentPassword, newPassword string) error {
+func validatePasswordChange(ctx context.Context, user *models.User, policy PasswordPolicy, currentPassword, newPassword string) error {
 	if !user.HasLocalPassword() {
 		return ErrPasswordLoginDisabled
 	}
@@ -1593,7 +1596,7 @@ func validatePasswordChange(ctx context.Context, user *models.User, currentPassw
 	if !ok {
 		return ErrCurrentPasswordInvalid
 	}
-	if err := ValidateNewPassword(newPassword); err != nil {
+	if err := policy.Check(newPassword); err != nil {
 		return err
 	}
 	if user.PasswordChangeRequired && newPassword == currentPassword {
@@ -1602,17 +1605,9 @@ func validatePasswordChange(ctx context.Context, user *models.User, currentPassw
 	return nil
 }
 
-// ValidateNewPassword applies the shared local credential policy before a new
-// account or password is persisted. The minimum counts characters; bcrypt
-// limits the UTF-8 encoding to 72 bytes.
-func ValidateNewPassword(password string) error {
-	if utf8.RuneCountInString(password) < MinimumPasswordLength {
-		return ErrPasswordTooShort
-	}
-	if len(password) > MaximumPasswordBytes {
-		return ErrPasswordTooLong
-	}
-	return nil
+// PasswordPolicy reads the server's current password policy.
+func (s *Service) PasswordPolicy(ctx context.Context) (PasswordPolicy, error) {
+	return LoadPasswordPolicy(ctx, s.settings)
 }
 
 // GetSessionsPage returns one keyset page of the user's live sessions; see
@@ -1643,11 +1638,37 @@ func (s *Service) LoginSessionActive(ctx context.Context, sessionID string) (boo
 // RevokeSession revokes a specific session. It verifies the session belongs
 // to the given user before revoking.
 func (s *Service) RevokeSession(ctx context.Context, sessionID string, userID int) error {
+	return s.revokeSession(ctx, sessionID, userID, func(*models.AuthSession) error { return nil })
+}
+
+// RevokeSessionChecked is RevokeSessionFrom with a further check on the
+// loaded session, run after the ownership and reach checks in the same
+// transaction. An error from check leaves the session live and is returned
+// unchanged.
+func (s *Service) RevokeSessionChecked(ctx context.Context, callerSessionID, sessionID string, userID int, check func(*models.AuthSession) error) error {
+	limited, err := s.SessionLimitedToItself(ctx, callerSessionID)
+	if err != nil {
+		return err
+	}
+	return s.revokeSession(ctx, sessionID, userID, func(session *models.AuthSession) error {
+		if limited && session.ID != callerSessionID {
+			return ErrSessionOutOfReach
+		}
+		if check != nil {
+			return check(session)
+		}
+		return nil
+	})
+}
+
+// revokeSession revokes one of userID's sessions; a session of another
+// account is ErrSessionNotFound before reach judges the locked session.
+func (s *Service) revokeSession(ctx context.Context, sessionID string, userID int, reach func(*models.AuthSession) error) error {
 	return s.sessions.revokeChecked(ctx, sessionID, func(session *models.AuthSession) error {
 		if session.UserID != userID {
 			return ErrSessionNotFound
 		}
-		return nil
+		return reach(session)
 	}, func(tx pgx.Tx, session *models.AuthSession) (*auditmutation.Entry, error) {
 		return auditmutation.RecordMutation(ctx, tx, auditmutation.ActionLoginSessionRevoked, auditmutation.TargetUser,
 			strconv.Itoa(session.UserID), http.StatusNoContent, auditmutation.Removed(auditFieldLoginSession, session.ID))

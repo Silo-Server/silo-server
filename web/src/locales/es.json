@@ -365,6 +365,30 @@
       "value": "Este valor está fuera del rango permitido."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Incluye al menos un carácter especial, como ! o #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Incluye al menos una letra mayúscula."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Esta contraseña es demasiado larga."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Esta contraseña es demasiado corta."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Tu sesión caducó. Vuelve a iniciar sesión."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Mientras el inicio de sesión con contraseña esté desactivado, debe seguir activado un proveedor de inicio de sesión que la gente pueda usar. OpenID Connect también necesita la URL pública del servidor."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8246,6 +8276,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Tarjetas"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Diseño"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabla"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -55190,7 +55238,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tendencias de visualización, títulos más vistos, actividad del hogar, reproducción por dispositivo y ancho de banda."
+      "value": "Transmisiones en directo, tendencias de visualización, títulos más vistos, actividad del hogar, reproducción por dispositivo y ancho de banda."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -74880,7 +74928,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Comprueba si el router admite UPnP, NAT-PMP o PCP."
+      "value": "Solicita al router una asignación de puertos UPnP, NAT-PMP o PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -74889,16 +74937,40 @@
       "value": "Asignación de puertos"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Rango: de "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " a "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Las comprobaciones de preparación no inician la reproducción directa."
+      "value": "Al activar esta opción se inicia el motor de conexión directa. Abre un puerto UDP y, si Asignación de puertos está activada, solicita al router una asignación de puertos. Ejecutar comprobación solo lee el estado del host."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Desactivado por el administrador"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Ajustado al rango permitido"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -74910,7 +74982,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "No se pudo iniciar el motor de conexión directa"
+      "value": "El motor de conexión directa se detuvo o no se pudo iniciar"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -74941,6 +75013,12 @@
     {
       "type": 0,
       "value": "Valor no válido; se usa desactivado"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Valor no válido; se usa el predeterminado"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -86330,6 +86408,20 @@
       "value": "Activa primero un proveedor de inicio de sesión. Con el inicio de sesión con contraseña desactivado y ningún proveedor activado, solo podrían iniciar sesión los administradores de emergencia."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Primero establece la URL pública del servidor. Sin ella, nadie puede iniciar sesión con "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", así que, con el inicio de sesión con contraseña desactivado, solo podrían iniciar sesión los administradores de emergencia."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -86420,6 +86512,279 @@
       "value": "Permitir que los usuarios creen claves de API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Desactivar el inicio de sesión con contraseña"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Solo los administradores de emergencia iniciarán sesión con contraseña. Todos los demás inician sesión con "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " crea cuentas en el primer inicio de sesión, así que si una de estas personas inicia sesión con él antes de que la vincules, obtendrá una cuenta nueva e independiente."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Vincula cada una a una cuenta de "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " desde su página en Usuarios."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " cuenta no puede iniciar sesión hasta que un administrador la vincule"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de cuentas no pueden iniciar sesión hasta que un administrador las vincule"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " cuentas no pueden iniciar sesión hasta que un administrador las vincule"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "No se pudo comprobar a qué cuentas afecta. Aun así, puedes desactivarlo."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Comprobando quién inicia sesión con contraseña"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Cuando "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " confirma uno de estos correos electrónicos al iniciar sesión, Silo conecta a esa persona con su cuenta."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " cuenta se conecta por correo electrónico"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de cuentas se conectan por correo electrónico"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " cuentas se conectan por correo electrónico"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrar "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " más"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrar "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " más"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrar "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " más"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "No se pudieron cargar más cuentas. Vuelve a intentarlo."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Todas las cuentas podrán seguir iniciando sesión después de esto."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administrador"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "La coincidencia por correo electrónico está desactivada"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Sin correo electrónico"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Esto no cierra la sesión de nadie. Quienes ya tienen la sesión iniciada la mantienen, sus claves de API siguen funcionando y aún pueden aprobar dispositivos nuevos. Para cerrar la sesión de alguien, finaliza sus sesiones desde su página en "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Usuarios"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "¿Desactivar el inicio de sesión con contraseña?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Ver todas las cuentas en Usuarios"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -86454,6 +86819,28 @@
     {
       "type": 0,
       "value": "No se pudo cambiar "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "El inicio de sesión con contraseña está desactivado, así que "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " es la forma en que todos, excepto los administradores de emergencia, inician sesión. Primero vuelve a activar el inicio de sesión con contraseña y luego desactiva "
     },
     {
       "type": 1,
@@ -88526,7 +88913,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tendencias de visualización, títulos más vistos, cuentas, dispositivos y ancho de banda."
+      "value": "Transmisiones en directo, tendencias de visualización, títulos más vistos, cuentas, dispositivos y ancho de banda."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -110743,6 +111130,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Ocultar títulos vistos"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Cada perfil ve esta colección sin los títulos que ya vio, en su página, en sus filas y en su recuento. No se elimina nada. Una colección inteligente con límite de títulos elige primero sus títulos, así que puede mostrar menos."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -132188,6 +132587,16 @@
     {
       "type": 0,
       "value": "Fecha del último episodio"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Bloquear "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

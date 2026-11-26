@@ -147,6 +147,9 @@ type PasswordResetCompleteOutput struct {
 }
 
 func passwordResetProblem(err error) *Problem {
+	if p, ok := passwordRuleProblem(err, "password"); ok {
+		return p
+	}
 	var apiErr *handlers.APIError
 	switch {
 	case errors.As(err, &apiErr):
@@ -167,19 +170,33 @@ func passwordResetProblem(err error) *Problem {
 		return NewProblem(TypeCapabilityNotConfigured, "Email is not configured; share a reset link instead.")
 	case errors.Is(err, passwordreset.ErrNoLinkBase):
 		return NewProblem(TypeCapabilityNotConfigured, "Reset links need the server's public URL; set it in the server settings.")
-	case errors.Is(err, auth.ErrPasswordTooShort):
-		return passwordMemberProblem("Use at least 8 characters.")
-	case errors.Is(err, auth.ErrPasswordTooLong):
-		return passwordMemberProblem("Use at most 72 bytes.")
 	case errors.Is(err, passwordhash.ErrBusy):
 		return passwordHashBusyProblem()
 	}
 	return NewProblem(TypeInternalError, "Unable to process the password reset.")
 }
 
-func passwordMemberProblem(detail string) *Problem {
+// passwordRuleProblem renders a password the policy refused as a validation
+// problem at member: the code names the rule it broke, and the detail is the
+// rule's English sentence. ok is false when err is not such a refusal.
+func passwordRuleProblem(err error, member string) (*Problem, bool) {
+	detail, ok := auth.PasswordRuleMessage(err)
+	if !ok {
+		return nil, false
+	}
+	code := codeInvalid
+	switch {
+	case errors.Is(err, auth.ErrPasswordTooShort):
+		code = codePasswordTooShort
+	case errors.Is(err, auth.ErrPasswordTooLong):
+		code = codePasswordTooLong
+	case errors.Is(err, auth.ErrPasswordNeedsUppercase):
+		code = codePasswordNeedsUppercase
+	case errors.Is(err, auth.ErrPasswordNeedsSpecial):
+		code = codePasswordNeedsSpecial
+	}
 	return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-		WithErrors(ProblemError{Location: locationBody + ".password", Code: codeInvalid, Detail: detail})
+		WithErrors(ProblemError{Location: locationBody + "." + member, Code: code, Detail: detail}), true
 }
 
 func (reg *Registry) passwordResets() (PasswordResetService, *Problem) {

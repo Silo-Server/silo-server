@@ -295,6 +295,27 @@ func TestProcessReleasesOnShutdown(t *testing.T) {
 	}
 }
 
+// TestProcessRecordsADamagedVerdict covers #5088: a run that blames the
+// file's data, here or on a node, ends Damaged, which the queue backs off
+// before it gives up on the file.
+func TestProcessRecordsADamagedVerdict(t *testing.T) {
+	local := &mediasample.Error{Reason: mediasample.ReasonExit, Attempts: []mediasample.AttemptError{{
+		Reason: mediasample.ReasonExit, Err: errors.New("exit status 183"),
+		StderrTail: "Error opening input files: Invalid data found when processing input",
+	}}}
+	fromNode := &ExtractError{Reason: string(mediasample.ReasonInvalidData), Permanent: true, Message: "moov atom not found"}
+	for name, err := range map[string]error{"local": local, "node": fromNode} {
+		t.Run(name, func(t *testing.T) {
+			q := newFakeQueue()
+			s := testService(q, &fakeStore{}, &fakeExtractor{err: err}, fakeSettings{})
+			s.process(t.Context(), testJob(9, 600))
+			if got, ok := q.finished[9]; !ok || got.outcome != Damaged {
+				t.Fatalf("finished %+v %v, want Damaged", got, ok)
+			}
+		})
+	}
+}
+
 // TestHeartbeatLossCancelsWork refuses the lease renewal while a run is in
 // progress: the run must stop, and the service must not record an outcome
 // on a row another server now holds.

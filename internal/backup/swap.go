@@ -19,9 +19,9 @@ type ControlDB interface {
 	OID(ctx context.Context, name string) (oid uint32, found bool, err error)
 	// NameOf returns the current name of the database with oid.
 	NameOf(ctx context.Context, oid uint32) (name string, found bool, err error)
-	// OtherConnections counts client sessions on name other than this
-	// command's: not the control session, and not a connection made under
-	// OwnApplicationName.
+	// OtherConnections counts the sessions on name other than this
+	// command's (the control session and connections made under
+	// OwnApplicationName) and autovacuum workers.
 	OtherConnections(ctx context.Context, name string) (int, error)
 	// OwnApplicationName is the application name the restore gives its own
 	// connections to the live database so OtherConnections can leave them
@@ -175,6 +175,14 @@ func RestoreSwap(ctx context.Context, src *Source, loader DatabaseLoader, ctl Co
 	if err != nil || !found {
 		return discard(fmt.Errorf("reading %s's oid: %w", restored, errors.Join(err, errIf(!found, "not found"))))
 	}
+	// The live server's own settings replace the backup's after the
+	// post-load steps clear what they cannot keep, so those steps do not
+	// report them. Read before the load, so this connection has long ended
+	// when carryLiveState checks the live database is idle.
+	liveOwn, err := loader.ServerSpecificSettingKeys(ctx, opts.LiveURL, opts.Cipher)
+	if err != nil {
+		return discard(fmt.Errorf("reading this server's own settings: %w", err))
+	}
 	_, _ = fmt.Fprintf(out, "Restoring into %s…\n", restored)
 	if err := loader.Load(ctx, restoredURL, src.path(DumpName)); err != nil {
 		return discard(err)
@@ -193,11 +201,12 @@ func RestoreSwap(ctx context.Context, src *Source, loader DatabaseLoader, ctl Co
 		}
 	}
 	post := newPostLoad(m, opts.Validate, out)
+	post.liveOwn = liveOwn
 	// New signing keys first, so the lost-settings pass does not list them.
 	if err := post.step(stepSigningKeys, rotateSigningSecrets(ctx, loader, restoredURL, opts.Cipher, out)); err != nil {
 		return discard(err)
 	}
-	if err := post.step(stepLostSettings, clearLostSettings(ctx, loader, restoredURL, m, opts.Validate, opts.Cipher, out)); err != nil {
+	if err := post.step(stepLostSettings, clearLostSettings(ctx, loader, restoredURL, m, opts.Validate, opts.Cipher, post.liveOwn, out)); err != nil {
 		return discard(err)
 	}
 	if err := carryLiveState(ctx, ctl, live, loader, restoredURL, opts, dep, m.CreatedAt, post); err != nil {

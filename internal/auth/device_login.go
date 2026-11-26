@@ -736,6 +736,11 @@ func (s *DeviceLoginService) approvingProviderChain(ctx context.Context, tx pgx.
 	if !user.Enabled {
 		return sessionProviderChain{}, ErrUserDisabled
 	}
+	// Identities before the approving session and the device row, in the
+	// order revocation and an uninstall take them (lockIdentitiesBeforeSessions).
+	if err := lockIdentitiesBeforeSessions(ctx, tx, approverUserID, false); err != nil {
+		return sessionProviderChain{}, err
+	}
 	claims := ClaimsFromContext(ctx)
 	if claims == nil {
 		// Trusted internal callers can approve directly as the account.
@@ -934,7 +939,9 @@ func (s *DeviceLoginService) deviceLoginSession(record *deviceLoginRecord, user 
 		// would have ended the approver's.
 		IdentityID:    record.ApprovedIdentityID,
 		ProviderSince: record.ApprovedProviderSince,
-		OpenedVia:     models.SessionOpenedDeviceLogin,
+		// Device sign-in, Quick Connect and the remote-playback handoff all
+		// open their session here; LimitedToItself reads this.
+		OpenedVia: models.SessionOpenedDeviceLogin,
 	}
 	claims := Claims{
 		UserID:                 user.ID,
@@ -1080,8 +1087,16 @@ func (s *DeviceLoginService) poll(ctx context.Context, deviceCode, bindingSecret
 	if err != nil {
 		return nil, fmt.Errorf("load approved user: %w", err)
 	}
-	// Before the device row, in the order an uninstall locks them.
+	// Identities before the device row and the new session, in the order
+	// revocation and an uninstall take them (lockIdentitiesBeforeSessions).
+	// A pre-approved request's own identity is taken first, with the
+	// stronger lock a provider sign-in takes: asking for it after the
+	// shared lock on the same row would be an upgrade, which can deadlock
+	// with an uninstall waiting between the two.
 	identityErr := lockPreapprovalIdentity(ctx, tx, preview, user.ID)
+	if err := lockIdentitiesBeforeSessions(ctx, tx, approverID, false); err != nil {
+		return nil, err
+	}
 
 	record, err := s.getByDeviceCodeTx(ctx, tx, deviceCode)
 	if err != nil {
@@ -1659,11 +1674,14 @@ func NewDeviceLoginRetention(pool *pgxpool.Pool) *DeviceLoginRetention {
 }
 
 // DeleteExpired removes requests that expired more than a day ago, whatever
-// their status.
+// their status. It skips rows another transaction holds, such as a plugin
+// uninstall clearing their identity, and removes them on a later run, so it
+// never waits and cannot deadlock with one.
 func (r *DeviceLoginRetention) DeleteExpired(ctx context.Context) (int, error) {
 	tag, err := r.pool.Exec(ctx, `
 		DELETE FROM device_login_requests
-		WHERE expires_at < NOW() - make_interval(secs => $1)
+		WHERE id IN (SELECT id FROM device_login_requests
+			WHERE expires_at < NOW() - make_interval(secs => $1) FOR UPDATE SKIP LOCKED)
 	`, deviceLoginRetention.Seconds())
 	if err != nil {
 		return 0, fmt.Errorf("deleting expired device sign-in requests: %w", err)

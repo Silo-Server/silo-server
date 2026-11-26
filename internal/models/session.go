@@ -65,7 +65,10 @@ type AuthSession struct {
 	// the key ends the session.
 	DeviceKeyID *string
 	// OpenedVia is how the session was opened, one of the SessionOpened
-	// values; written once at creation.
+	// values; written once at creation. It is the one record of that:
+	// auth_sessions.via_device_sign_in, which a server of the previous
+	// release reads and writes, is stored from it (SessionOpenedDeviceLogin
+	// or not) and a check constraint keeps the two equal.
 	OpenedVia string
 }
 

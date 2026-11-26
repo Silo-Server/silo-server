@@ -89,12 +89,15 @@ func manifestVariable(name, value string, minSavingPerURI int) (definition, refe
 
 // syntheticManifestQuery returns the header line, URI suffix, and minimum HLS
 // version for a playlist the server builds whose segmentCount URIs all end in
-// ?rawQuery.
+// ?rawQuery. As in a rewritten playlist, only a credential-sized query is
+// substituted: a short one (the silo_transport marker alone, on a
+// header-authenticated plan) stays literal however long the title, so a client
+// without EXT-X-DEFINE support keeps the playlist version it was served before.
 func syntheticManifestQuery(segmentCount int, rawQuery string) (definition, suffix string, minVersion int) {
 	if rawQuery == "" {
 		return "", "", 0
 	}
-	definition, reference := manifestVariable(manifestQueryVariable, rawQuery, 1)
+	definition, reference := manifestVariable(manifestQueryVariable, rawQuery, minRewrittenURISavings)
 	if definition == "" || int64(segmentCount)*int64(len(rawQuery)-len(reference)) < minManifestQuerySubstitutionSavings {
 		return "", "?" + rawQuery, 0
 	}

@@ -296,6 +296,10 @@ type ItemDetail struct {
 
 	// Series-specific.
 	SeasonCount *int `json:"season_count,omitempty"`
+	// EpisodeLabels is the series' models.EpisodeLabelsAirDate choice, on the
+	// series and on its seasons and episodes. Not part of the frozen v1
+	// contract; apiv2 emits it.
+	EpisodeLabels string `json:"-"`
 	// EpisodeMetadataIncomplete is the series row's flag that some episodes
 	// still lack metadata, so item detail can request a refresh without
 	// reading the row again. Not part of any JSON contract.
@@ -747,27 +751,31 @@ type SeasonUserData struct {
 
 // WatchDetail is the playback-oriented payload for /watch/{id}.
 type WatchDetail struct {
-	ContentID                       string                            `json:"content_id"`
-	Type                            string                            `json:"type"`
-	Title                           string                            `json:"title"`
-	Year                            int                               `json:"year,omitempty"`
-	Overview                        string                            `json:"overview,omitempty"`
-	EffectiveSubtitleLanguage       string                            `json:"-"`
-	HasEffectiveSubtitleLang        bool                              `json:"-"`
-	EffectiveSubtitleMode           string                            `json:"-"`
-	HasEffectiveSubtitleMode        bool                              `json:"-"`
-	EffectiveShowForcedSubtitles    bool                              `json:"-"`
-	HasEffectiveShowForcedSubtitles bool                              `json:"-"`
-	Versions                        []FileVersion                     `json:"versions"`
-	PlaybackVariants                []PlaybackVariant                 `json:"playback_variants,omitempty"`
-	Subtitles                       []SubtitleInfo                    `json:"subtitles"`
-	Intro                           *Marker                           `json:"intro,omitempty"`
-	Credits                         *Marker                           `json:"credits,omitempty"`
-	Recap                           *Marker                           `json:"recap,omitempty"`
-	Preview                         *Marker                           `json:"preview,omitempty"`
-	UserData                        *SeasonUserData                   `json:"user_data,omitempty"`
-	SeriesID                        string                            `json:"series_id,omitempty"`
-	SeriesTitle                     string                            `json:"series_title,omitempty"`
+	ContentID                       string            `json:"content_id"`
+	Type                            string            `json:"type"`
+	Title                           string            `json:"title"`
+	Year                            int               `json:"year,omitempty"`
+	Overview                        string            `json:"overview,omitempty"`
+	EffectiveSubtitleLanguage       string            `json:"-"`
+	HasEffectiveSubtitleLang        bool              `json:"-"`
+	EffectiveSubtitleMode           string            `json:"-"`
+	HasEffectiveSubtitleMode        bool              `json:"-"`
+	EffectiveShowForcedSubtitles    bool              `json:"-"`
+	HasEffectiveShowForcedSubtitles bool              `json:"-"`
+	Versions                        []FileVersion     `json:"versions"`
+	PlaybackVariants                []PlaybackVariant `json:"playback_variants,omitempty"`
+	Subtitles                       []SubtitleInfo    `json:"subtitles"`
+	Intro                           *Marker           `json:"intro,omitempty"`
+	Credits                         *Marker           `json:"credits,omitempty"`
+	Recap                           *Marker           `json:"recap,omitempty"`
+	Preview                         *Marker           `json:"preview,omitempty"`
+	UserData                        *SeasonUserData   `json:"user_data,omitempty"`
+	SeriesID                        string            `json:"series_id,omitempty"`
+	SeriesTitle                     string            `json:"series_title,omitempty"`
+	// EpisodeLabels and AirDate let the v2 player label an episode of a
+	// date-labeled series by its air date. Not part of the frozen v1 contract.
+	EpisodeLabels                   string                            `json:"-"`
+	AirDate                         string                            `json:"-"`
 	SeasonNumber                    int                               `json:"season_number,omitempty"`
 	EpisodeNumber                   int                               `json:"episode_number,omitempty"`
 	EffectiveSubtitleTrackSignature *userstore.SubtitleTrackSignature `json:"effective_subtitle_track_signature,omitempty"`
@@ -2634,6 +2642,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		AirTime:                    item.AirTime,
 		AirTimezone:                item.AirTimezone,
 		ShowStatus:                 item.ShowStatus,
+		EpisodeLabels:              item.EpisodeLabels,
 		PosterThumbhash:            item.PosterThumbhash,
 		BackdropThumbhash:          item.BackdropThumbhash,
 		SeasonCount:                item.SeasonCount,
@@ -3720,6 +3729,7 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 		BackdropThumbhash:          series.BackdropThumbhash,
 		SeriesID:                   season.SeriesID,
 		SeriesTitle:                series.Title,
+		EpisodeLabels:              series.EpisodeLabels,
 		SeasonNumber:               &seasonNumber,
 		EpisodeCount:               &episodeCount,
 		IsSpecials:                 season.SeasonNumber == 0,
@@ -3858,6 +3868,7 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 		BackdropThumbhash:          series.BackdropThumbhash,
 		SeriesID:                   episode.SeriesID,
 		SeriesTitle:                series.Title,
+		EpisodeLabels:              series.EpisodeLabels,
 		SeasonNumber:               &seasonNumber,
 		SeasonID:                   episode.SeasonID,
 		EpisodeNumber:              &episodeNumber,
@@ -4057,6 +4068,10 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 		}
 		detail.SeriesTitle = series.Title
 		detail.Year = series.Year
+		detail.EpisodeLabels = series.EpisodeLabels
+		if episode.AirDate != nil {
+			detail.AirDate = episode.AirDate.Format(time.DateOnly)
+		}
 		if !filter.OmitWatchArtwork {
 			detail.BackdropThumbhash = series.BackdropThumbhash
 			detail.BackdropURL = s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSizeFor(imagesize.SlotBackdrop)))

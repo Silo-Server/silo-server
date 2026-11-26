@@ -994,3 +994,29 @@ describe("SignInSettings account matching", () => {
     expect(screen.getByRole("switch", { name: "Match existing accounts by email" })).toBeVisible();
   });
 });
+
+describe("SignInSettings password rules", () => {
+  it("edits the minimum length and the capital and special character rules", async () => {
+    const user = userEvent.setup();
+    state.values["auth.password_min_length"] = "8";
+    state.values["auth.password_require_uppercase"] = "false";
+    state.values["auth.password_require_special"] = "true";
+    mount();
+    expect(state.keys).toEqual(
+      expect.arrayContaining([
+        "auth.password_min_length",
+        "auth.password_require_uppercase",
+        "auth.password_require_special",
+      ]),
+    );
+
+    const minimum = screen.getByLabelText("Minimum password length");
+    expect(minimum).toHaveValue(8);
+    await user.type(minimum, "2");
+    expect(state.setValue).toHaveBeenLastCalledWith("auth.password_min_length", "82");
+
+    expect(screen.getByRole("switch", { name: "Require a special character" })).toBeChecked();
+    await user.click(screen.getByRole("switch", { name: "Require a capital letter" }));
+    expect(state.setValue).toHaveBeenLastCalledWith("auth.password_require_uppercase", "true");
+  });
+});

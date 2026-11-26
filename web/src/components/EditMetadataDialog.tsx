@@ -242,14 +242,18 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
     refreshMutation.mutate({ item, mode: "reset" });
   }
 
+  // A field row passes its label, so a screen reader names the toggle after
+  // its field and reads whether it is locked from aria-pressed.
   function renderLockIcon(fieldName: string) {
     const metadataField = fieldLockMap?.[fieldName];
-    if (metadataField === undefined) return null;
+    if (metadataField === undefined) return undefined;
     const isLocked = lockedFields.has(metadataField);
-    return (
+    return (label: string) => (
       <button
         type="button"
         onClick={() => toggleLock(metadataField)}
+        aria-label={t("web.item.editMetadata.lockField", { field: label })}
+        aria-pressed={isLocked}
         className={cn(
           "inline-flex items-center gap-1 text-[0.625rem] transition-colors",
           // Unlocked keeps 3:1 on the dialog surface (the icon is the only visible
@@ -883,7 +887,7 @@ function FieldRow({
   children,
 }: {
   label: string;
-  lockIcon?: React.ReactNode;
+  lockIcon?: (label: string) => React.ReactNode;
   children: (id: string) => React.ReactNode;
 }) {
   const id = useId();
@@ -893,7 +897,7 @@ function FieldRow({
         <Label htmlFor={id} className="text-muted-foreground text-[0.75rem] font-medium">
           {label}
         </Label>
-        {lockIcon}
+        {lockIcon?.(label)}
       </div>
       {children(id)}
     </div>

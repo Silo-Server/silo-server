@@ -41,7 +41,9 @@
       "transcode": 1,
       "movies": 3,
       "episodes": 7,
-      "other_media": 0
+      "other_media": 0,
+      "active_accounts": 3,
+      "active_profiles": 4
     }
   ],
   "heatmap": [
@@ -63,6 +65,20 @@
       "peak_streams_remux": 1,
       "peak_streams_transcode": 1,
       "peak_streams_at": "2026-01-02T01:04:05.678Z"
+    }
+  ],
+  "end_reasons": [
+    {
+      "key": "stopped",
+      "sessions": 39
+    },
+    {
+      "key": "expired",
+      "sessions": 6
+    },
+    {
+      "key": "unknown",
+      "sessions": 3
     }
   ]
 }

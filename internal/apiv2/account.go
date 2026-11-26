@@ -44,7 +44,7 @@ type AccountOutput struct {
 type AccountPasswordCapability struct {
 	Capability
 	RequiresCurrentPassword bool `json:"requires_current_password" doc:"Whether changePassword needs current_password; always true today" example:"true"`
-	MinimumPasswordLength   int  `json:"minimum_password_length" doc:"Fewest characters a new password may have" example:"8"`
+	MinimumPasswordLength   int  `json:"minimum_password_length" doc:"Fewest characters a new password may have. getPasswordPolicy describes the rest of the password policy" example:"8"`
 	MaximumPasswordBytes    int  `json:"maximum_password_bytes" doc:"Most UTF-8 bytes a new password may have" example:"72"`
 	SignOutOtherSessions    bool `json:"sign_out_other_sessions" doc:"Whether changePassword accepts sign_out_other_sessions. A server that omits this field rejects the member with 422, so send it only when this is true" example:"true"`
 }
@@ -62,7 +62,7 @@ type ChangePasswordInput struct {
 	RawBody []byte
 	Body    struct {
 		CurrentPassword      string `json:"current_password" minLength:"1" maxLength:"1024" doc:"The password in use" example:"correct horse battery staple"`
-		NewPassword          string `json:"new_password" minLength:"1" maxLength:"1024" doc:"The replacement; the capability document names the length limits" example:"margin fossil quench hollow"`
+		NewPassword          string `json:"new_password" minLength:"1" maxLength:"1024" doc:"The replacement; getPasswordPolicy describes the rules it must meet" example:"margin fossil quench hollow"`
 		SignOutOtherSessions bool   `json:"sign_out_other_sessions,omitempty" doc:"Also sign the account out everywhere except this session, in the same transaction: its other login sessions (including View as user sessions it opened or that view it), its Jellyfin- and Audiobookshelf-compatible sessions, and device sign-ins it approved that were not collected yet. API keys are kept. False or omitted signs nothing else out" example:"false"`
 	}
 }
@@ -100,6 +100,8 @@ func registerAccount(reg *Registry) {
 		Class:       ClassProfileScoped, ProfileOptional: true, ServiceBacked: true,
 		RateLimitBucket: bucketPasswordChange,
 		Audited:         true,
+		// Demo visitors share one account: a new password locks the others out.
+		DemoRestricted: true,
 	}, reg.changePassword)
 }
 
@@ -119,7 +121,7 @@ func (reg *Registry) getAccountPasswordCapability(ctx context.Context, _ *Capabi
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	allowed := view.ChangePassword
+	allowed := view.ChangePassword && demoAllows(ctx, reg.deps.DemoSettings)
 	out := &AccountPasswordCapabilityOutput{CacheControl: cachePrivateNoCache, Body: AccountPasswordCapability{
 		Capability:              Capability{State: StateAvailable, Allowed: &allowed},
 		RequiresCurrentPassword: view.RequiresCurrentPassword,
@@ -163,6 +165,9 @@ func (reg *Registry) changePassword(ctx context.Context, in *ChangePasswordInput
 // dependency_unavailable (v1 503 password_change_unavailable); everything
 // else follows the v1 status (403 permission_denied, 409 conflict).
 func passwordProblem(err error) *Problem {
+	if p, ok := passwordRuleProblem(err, "new_password"); ok {
+		return p
+	}
 	var apiErr *handlers.APIError
 	if errors.As(err, &apiErr) {
 		if apiErr.Field != "" {

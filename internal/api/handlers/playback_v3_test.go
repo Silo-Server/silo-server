@@ -5244,3 +5244,131 @@ func TestPlaybackV2EditionAliasFallback(t *testing.T) {
 		})
 	}
 }
+
+// A replan that starts a new HLS transport under the same session id publishes
+// a stream URL naming that transport, and the superseded plan's playlist URLs
+// stop serving: the old player gets a terminal answer instead of seek-restarting
+// the transport its replacement is about to play.
+func TestReplanPlaybackV2SupersedesThePreviousTransportsURLs(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	manager := playback.NewSessionManager(0, 0)
+	handler := newKeyedPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
+		{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, Available: true},
+	}))
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	stubCopySeekAnchorV3(handler)
+
+	start := v3HandlerStartRequest()
+	start.ClientFeatures = append(start.ClientFeatures, playback.FeatureHeaderAuthenticatedMediaV3)
+	start.ClientPlaybackContext.Deliveries = map[string]playback.DeliveryCapabilityV3{playback.DeliveryClassHLSV3: {
+		Enabled: true, SupportedOnDevice: true, Containers: []string{"hls"},
+		VideoCodecs: []string{"h264"}, AudioDecodeCodecs: []string{"aac"}, Features: []string{playback.FeatureHLSTransportMarkerV3},
+	}}
+	started := startPlayableDecisionV2(t, handler, marshalV3StartRequest(t, start))
+	t.Cleanup(func() {
+		if ts := handler.tm.GetTranscodeSession(started.SessionID); ts != nil {
+			_ = ts.Close()
+		}
+	})
+	transportMarker := func(streamURL string) string {
+		t.Helper()
+		parsed, err := url.Parse(streamURL)
+		if err != nil || !strings.HasSuffix(parsed.Path, "/master.m3u8") {
+			t.Fatalf("stream URL = %q, want an HLS playlist (parse error %v)", streamURL, err)
+		}
+		marker := parsed.Query().Get(playback.TransportQueryParam)
+		session, err := manager.GetSession(started.SessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if marker == "" || marker != playback.TransportMarker(session.ID, session.TransportGeneration) {
+			t.Fatalf("stream URL %q marker = %q, session transport generation = %q", streamURL, marker, session.TransportGeneration)
+		}
+		return marker
+	}
+	before := transportMarker(started.PlaybackPlan.Stream.URL)
+
+	replanned := replanPlaybackDecisionV2(t, handler, started.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion:       playback.ProtocolV3,
+		Operation:             playback.ReplanOperationQualityChangeV3,
+		QualityPreference:     "720p-medium",
+		PlaybackAttemptID:     start.PlaybackAttemptID,
+		ReplanRequestID:       "superseded-transport-replan-0001",
+		FailedPlanID:          started.PlaybackPlan.PlanID,
+		PlanAttemptID:         "superseded-transport-attempt-0001",
+		PlanAttemptKey:        started.PlaybackPlan.PlanAttemptKey,
+		AttemptCount:          1,
+		PositionSeconds:       12,
+		SelectedTracks:        started.PlaybackPlan.SelectedTracks,
+		Capabilities:          start.Capabilities,
+		ClientPlaybackContext: start.ClientPlaybackContext,
+	})
+	if replanned.PlaybackPlan == nil {
+		t.Fatalf("replan terminal = %#v", replanned.Terminal)
+	}
+	after := transportMarker(replanned.PlaybackPlan.Stream.URL)
+	if after == before {
+		t.Fatalf("replan kept transport marker %q; the test needs a replan that starts a new transport", after)
+	}
+
+	requireSuperseded := func(marker string) {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		req := playbackTestRequest(http.MethodGet, "/api/v2/playback/transcode/"+started.SessionID+"/segment/seg_00072.ts?"+playback.TransportQueryParam+"="+marker,
+			nil, map[string]string{"session_id": started.SessionID, "name": "seg_00072.ts"})
+		handler.HandleGetTranscodeSegment(rr, req)
+		if rr.Code != http.StatusNotFound || !strings.Contains(rr.Body.String(), playback.TransportSupersededCode) {
+			t.Fatalf("superseded segment status = %d body = %s, want 404 %s", rr.Code, rr.Body.String(), playback.TransportSupersededCode)
+		}
+	}
+	requireSuperseded(before)
+
+	// Leaving HLS altogether supersedes the last HLS transport too: its player
+	// must not revive the transcode from the recipe its URLs carry.
+	direct := start.ClientPlaybackContext
+	direct.Deliveries = map[string]playback.DeliveryCapabilityV3{playback.DeliveryClassOriginalHTTPV3: {Enabled: true, SupportedOnDevice: true}}
+	directPlan := replanPlaybackDecisionV2(t, handler, started.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion:       playback.ProtocolV3,
+		Operation:             playback.ReplanOperationQualityChangeV3,
+		QualityPreference:     "original",
+		PlaybackAttemptID:     start.PlaybackAttemptID,
+		ReplanRequestID:       "superseded-transport-replan-0002",
+		FailedPlanID:          replanned.PlaybackPlan.PlanID,
+		PlanAttemptID:         "superseded-transport-attempt-0002",
+		PlanAttemptKey:        replanned.PlaybackPlan.PlanAttemptKey,
+		AttemptCount:          1,
+		PositionSeconds:       30,
+		SelectedTracks:        replanned.PlaybackPlan.SelectedTracks,
+		Capabilities:          start.Capabilities,
+		ClientPlaybackContext: direct,
+	})
+	if directPlan.PlaybackPlan == nil || directPlan.PlaybackPlan.Delivery != playback.DeliveryOriginalHTTPV3 {
+		t.Fatalf("direct replan = %#v", directPlan)
+	}
+	requireSuperseded(after)
+	if handler.tm.GetTranscodeSession(started.SessionID) != nil {
+		t.Fatal("a superseded HLS request revived a transcode after the move to direct play")
+	}
+}
+
+// A replan that reuses the running HLS transport republishes the URL the
+// current player holds. When the session lost its recorded generation (a
+// session rebuilt after an API restart), the reused transport must still name
+// that URL's transport, or the server would refuse the player it just kept.
+func TestReusedHLSTransportKeepsTheMarkerOfTheURLItRepublishes(t *testing.T) {
+	const sessionID = "6f8a2c1e-0b3d-4e5f-9a7b-1c2d3e4f5a6b"
+	streamURL := "/api/v2/playback/transcode/" + sessionID + "/master.m3u8?" + playback.TransportQueryParam + "=planaaaaaaaa-cccc1111"
+	for _, recorded := range []string{"", sessionID + "-planaaaaaaaa-cccc1111"} {
+		transport := reusedHLSTransportV3(&playback.Session{ID: sessionID, TransportGeneration: recorded}, streamURL)
+		parsed, err := url.Parse(transport.url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if transport.generation == "" || playback.TransportSuperseded(sessionID, transport.generation, parsed.Query()) {
+			t.Fatalf("recorded generation %q: reused transport generation %q does not match the URL it republishes", recorded, transport.generation)
+		}
+	}
+}

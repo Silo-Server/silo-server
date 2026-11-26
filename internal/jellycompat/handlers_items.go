@@ -2238,10 +2238,10 @@ func (h *ItemsHandler) browseEpisodes(ctx context.Context, session *Session, rep
 	return episodes, result.Total, nil
 }
 
-// episodeOnlyBrowser returns the episode browse when query lists Episode alone
-// and no Ids, which the media_items browse and favorites cannot serve.
+// episodeOnlyBrowser returns the episode browse when query lists Episode alone,
+// which the media_items browse and favorites cannot serve. Ids narrow it.
 func (h *ItemsHandler) episodeOnlyBrowser(query itemsQuery) (episodeBrowser, bool) {
-	if len(query.specificIDs) > 0 || !slices.Equal(query.itemTypes, []string{compatEpisodeType}) || (query.mediaTypesExplicit && !query.mediaTypesSet["video"]) {
+	if !slices.Equal(query.itemTypes, []string{compatEpisodeType}) || (query.mediaTypesExplicit && !query.mediaTypesSet["video"]) {
 		return nil, false
 	}
 	repo, ok := h.episodeRepo.(episodeBrowser)
@@ -2251,8 +2251,9 @@ func (h *ItemsHandler) episodeOnlyBrowser(query itemsQuery) (episodeBrowser, boo
 // handleEpisodeBrowse serves an /Items browse for Episode alone, such as
 // IncludeItemTypes=Episode&Recursive=true. The media_items browse holds no
 // episodes, so this pages the episodes of every series (or of the ParentId
-// library). An episode's Jellyfin SortName is its season and episode number,
-// so a SortName sort keeps the series, season and episode order.
+// library, series, or season). An episode's Jellyfin SortName is its season
+// and episode number, so a SortName sort keeps the series, season and episode
+// order.
 func (h *ItemsHandler) handleEpisodeBrowse(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, repo episodeBrowser) {
 	limit := query.limit
 	if query.countOnly {
@@ -2271,10 +2272,17 @@ func (h *ItemsHandler) handleEpisodeBrowse(w http.ResponseWriter, r *http.Reques
 }
 
 // browseEpisodeItems pages the episodes of every series (or of the ParentId
-// library) that match query, from offset for up to limit rows; a zero limit
-// only counts them. ok is false when the ParentId library is outside the
-// session's libraries, so no episode can match.
+// library, series, or season) that match query, from offset for up to limit
+// rows; a zero limit only counts them. Ids narrow it. ok is false when no
+// episode can match: the ParentId library is outside the session's libraries,
+// or ParentId names a collection.
 func (h *ItemsHandler) browseEpisodeItems(ctx context.Context, session *Session, query itemsQuery, repo episodeBrowser, offset, limit int) ([]upstreamListItem, map[string]compatEpisodeTarget, int, bool, error) {
+	// Only an Ids lookup reaches here with a collection ParentId. The episode
+	// browse can't match a collection's members, so it lists no episodes rather
+	// than named episodes outside the collection.
+	if query.parentCollectionID != "" {
+		return nil, nil, 0, false, nil
+	}
 	access, filters := h.episodeBrowseFilters(ctx, session, query)
 	// The access filter checks each episode's series, so a ParentId library is
 	// intersected with the session's libraries before episodes are matched to it.
@@ -2282,13 +2290,18 @@ func (h *ItemsHandler) browseEpisodeItems(ctx context.Context, session *Session,
 		return nil, nil, 0, false, nil
 	}
 	filters.LibraryID = query.parentLibraryID
+	// /Shows/{id}/Episodes shares episodeBrowseFilters but has no Ids filter in
+	// Jellyfin, so only this browse applies them.
+	filters.ContentIDs = query.specificIDs
 	// Name still sorts by episode title, as Jellyfin's NameComparer does.
 	if filters.Sort == catalog.BrowseSortTitle && query.sortByKey == sortKeySortName {
 		filters.Sort = ""
 	}
 	filters.Offset = offset
 	filters.Limit = limit
-	episodes, total, err := h.browseEpisodes(ctx, session, repo, "", "", nil, "", filters, access, query.enableTotalRecordCount)
+	// Only an Ids lookup reaches here with a series or season ParentId, whose
+	// episodes it keeps.
+	episodes, total, err := h.browseEpisodes(ctx, session, repo, query.parentItemID, query.parentSeasonID, nil, "", filters, access, query.enableTotalRecordCount)
 	if err != nil {
 		return nil, nil, 0, false, err
 	}
@@ -2307,15 +2320,15 @@ func (h *ItemsHandler) browseEpisodeItems(ctx context.Context, session *Session,
 }
 
 // mixedEpisodeBrowser returns the episode browse when a search lists Episode
-// beside other types, such as IncludeItemTypes=Episode,Movie, and no Ids. The
-// media_items browse serves the other types but holds no episodes (#4257). As
-// in Jellyfin, a type filter at the user root and an IncludeItemTypes that
-// names Episode under a library ParentId search recursively even without
-// Recursive. A non-recursive library browse whose Episode comes only from an
-// ExcludeItemTypes filter lists the library's direct children, which are never
-// episodes.
+// beside other types, such as IncludeItemTypes=Episode,Movie; Ids narrow both
+// parts. The media_items browse serves the other types but holds no episodes
+// (#4257, #4546). As in Jellyfin, a type filter at the user root and an
+// IncludeItemTypes that names Episode under a library ParentId search
+// recursively even without Recursive. A non-recursive library browse whose
+// Episode comes only from an ExcludeItemTypes filter lists the library's
+// direct children, which are never episodes.
 func (h *ItemsHandler) mixedEpisodeBrowser(query itemsQuery) (episodeBrowser, bool) {
-	if (!query.recursive && query.parentLibraryID > 0 && !query.includesEpisode) || len(query.specificIDs) > 0 || len(query.itemTypes) < 2 || !slices.Contains(query.itemTypes, compatEpisodeType) || !query.allowsVideo() {
+	if (!query.recursive && query.parentLibraryID > 0 && !query.includesEpisode) || len(query.itemTypes) < 2 || !slices.Contains(query.itemTypes, compatEpisodeType) || !query.allowsVideo() {
 		return nil, false
 	}
 	repo, ok := h.episodeRepo.(episodeBrowser)
@@ -3037,6 +3050,12 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
 	if repo, ok := h.episodeOnlyBrowser(query); ok {
 		h.handleEpisodeBrowse(w, r, session, query, repo)
+		return
+	}
+	// Favorites below come from media_items, which holds no episodes, so a list
+	// naming Episode beside other types takes the mixed browse (#4546).
+	if _, ok := h.mixedEpisodeBrowser(query); ok {
+		h.handleBrowseItems(w, r, session, query)
 		return
 	}
 	// Client requested specific types (e.g. Playlist, BoxSet, Video) that all

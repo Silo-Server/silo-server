@@ -22,6 +22,29 @@ SDK's `docs/auth-provider.md`.
   to one account.
 - Upgrading a plugin keeps its installation id, so links survive. Uninstalling
   removes the installation and its identity rows; the accounts stay.
+- Lock order with a plugin uninstall. An uninstall reaches device sign-in
+  requests and login sessions only through the `ON DELETE SET NULL` actions of
+  the identities it deletes, and those rows belong to the identity's account.
+  So a transaction that writes more than one of an account's requests or
+  sessions locks the account row, then the account's identities
+  (`lockIdentitiesBeforeSessions`, or the identity `FOR UPDATE` where a path
+  works on one identity), and only then those rows: the uninstall waits at the
+  identities, or the transaction waits for it. Revocation also withdraws device
+  sign-in approvals before it revokes sessions. Revoking app keys follows the
+  same rule, since a session a key opened carries the identity the key was
+  bound to: the account's identities, then the key rows, then those sessions. Today the uninstall's cascade
+  clears requests before sessions; that follows from the names Postgres gave
+  the two foreign keys' triggers, and nothing relies on it. These paths take
+  one account at a time: an uninstall deletes an installation's identities in
+  an order of its own, and an account holds at most one of them.
+- Every other writer of those rows writes one row, writes only sessions that
+  carry no identity (impersonation sessions), deletes an account created in
+  the same request, or never waits (the expired-session and expired-request
+  cleanups skip rows another transaction holds and delete them on a later
+  run). Deleting a profile is the exception: it clears several requests
+  approved for the profile without taking the identities. `signInRowWriters`
+  in `internal/auth/signin_rows_writers_test.go` lists every writer with its
+  rule, and the test fails on one it does not list.
 
 ## Plugin answers
 
@@ -45,15 +68,24 @@ SDK's `docs/auth-provider.md`.
 
 One order, shared by OIDC and LDAP, in one database transaction under an
 advisory lock on (installation, subject), so concurrent first sign-ins on any
-node create one account:
+node create one account. Demo mode is read before that transaction, through
+the server's shared `demomode.Setting`, so a failed read never aborts it: a
+failed read uses the last value the process read, and a process that has
+never read it refuses a linking flow onto an account that is not an
+administrator and matches no email.
 
 1. **Linked identity.** Sign in its account. A disabled account is refused.
 2. **Linking flow** (a signed-in account linking the provider): link to that
    account. An identity linked to another account is refused with
-   `identity_linked_elsewhere`.
+   `identity_linked_elsewhere`. In demo mode (`demo.enabled`), where every
+   visitor shares one account, a flow that ends on an account that is not an
+   administrator is refused with `not_permitted` (`ErrDemoRestricted`) and
+   attaches nothing, including a flow started before demo mode was turned on.
 3. **Email auto-match.** Only when `auth.email_auto_match` is on (off by
-   default) and the provider said `email_verified` is true; unset counts as
-   false. Link to the account holding that email if it is an ordinary account
+   default), demo mode is off, and the provider said `email_verified` is true;
+   unset counts as false. In demo mode matching applies to no account on the
+   server, as when it is off, so such a sign-in goes on to creation below.
+   Link to the account holding that email if it is an ordinary account
    (role `user`, not the Owner, not break-glass) with no identity at this
    installation. An email the provider asserts never hands it an admin: when
    an admin, the Owner or a break-glass account holds the email, creation

@@ -61,7 +61,7 @@ export function NowPlayingWidget() {
           {t("web.admin.dashboard.widgets.nowPlaying.idle")}
         </div>
         <Link
-          to="/admin/activity"
+          to="/admin/insights"
           className="text-muted-foreground hover:text-primary shrink-0 text-[0.6875rem] transition-colors"
         >
           {t("web.admin.dashboard.widgets.nowPlaying.viewActivity")}
@@ -78,7 +78,7 @@ export function NowPlayingWidget() {
         </div>
         {sessions.length > 0 && (
           <Link
-            to="/admin/activity"
+            to="/admin/insights"
             className="text-muted-foreground hover:text-primary text-[0.6875rem] transition-colors"
           >
             {t("web.admin.dashboard.widgets.nowPlaying.viewAll", {

@@ -10,11 +10,7 @@ import { FieldGroup } from "./FieldGroup";
 import { MarkerTasksCard } from "./MarkerTasksCard";
 import { SettingField } from "./SettingField";
 import { MARKER_KEYS } from "./playbackSettings.keys";
-import {
-  lazyPlaybackCarriedByStorage,
-  markerSources,
-  useMarkerSourceDraft,
-} from "./useMarkerSourceDraft";
+import { markerSources } from "./useMarkerSourceDraft";
 
 /** The Skip markers group on Playback settings. */
 export function MarkerSettingsGroup({
@@ -32,21 +28,18 @@ export function MarkerSettingsGroup({
   const markerMode = form.getValue("markers.mode") || "both";
   const { online: onlineMarkersEnabled, local: localMarkersEnabled } = markerSources(markerMode);
   const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
-  const showLazyPlayback =
-    markerMode !== "off" && (!onlineMarkersEnabled || onlineMarkerStorage === "stored");
-  const markerDraft = useMarkerSourceDraft(form);
+  // Lazy playback looks stored online markers up at playback and runs local
+  // detection there. On-demand online markers are looked up at playback
+  // either way, so only online-only on-demand leaves it nothing to change.
+  const lazyPlaybackOnline = onlineMarkersEnabled && onlineMarkerStorage === "stored";
+  const showLazyPlayback = localMarkersEnabled || lazyPlaybackOnline;
   // Each marker row the source would hide stays in view, marked as changed,
-  // while it holds an unsaved edit. Lazy playback staged by choosing on-demand
-  // storage is shown by that choice and taken back with it, so it keeps no
-  // row of its own.
+  // while it holds an unsaved edit.
   const detectIntrosKept = !localMarkersEnabled && form.isDirty("markers.detect_intros");
   const detectCreditsKept = !localMarkersEnabled && form.isDirty("markers.detect_credits");
   const detectionWorkersKept = !localMarkersEnabled && form.isDirty("markers.detection_workers");
   const onlineStorageKept = !onlineMarkersEnabled && form.isDirty("markers.online_storage");
-  const lazyPlaybackKept =
-    !showLazyPlayback &&
-    form.isDirty("markers.lazy_playback") &&
-    !lazyPlaybackCarriedByStorage(form);
+  const lazyPlaybackKept = !showLazyPlayback && form.isDirty("markers.lazy_playback");
 
   // Detection behavior lives here; which online providers answer a lookup,
   // and on what terms, is provider configuration and lives with the other
@@ -78,7 +71,7 @@ export function MarkerSettingsGroup({
           { value: "online", label: t("web.admin.settings.playback.markers.modeOnline") },
         ]}
         value={markerMode}
-        onChange={(value) => markerDraft.setMarkerMode(value)}
+        onChange={(value) => form.setValue("markers.mode", value)}
         restartRequired={restartKeys.has("markers.mode")}
       />
 
@@ -123,7 +116,7 @@ export function MarkerSettingsGroup({
             },
           ]}
           value={onlineMarkerStorage}
-          onChange={markerDraft.setOnlineStorage}
+          onChange={(value) => form.setValue("markers.online_storage", value)}
           restartRequired={restartKeys.has("markers.online_storage")}
         />
       )}
@@ -134,14 +127,14 @@ export function MarkerSettingsGroup({
           dirty={lazyPlaybackKept}
           type="toggle"
           description={
-            onlineMarkersEnabled
-              ? markerMode === "both"
+            onlineMarkersEnabled && !localMarkersEnabled
+              ? t("web.admin.settings.playback.markers.lazyPlaybackOnline")
+              : lazyPlaybackOnline
                 ? t("web.admin.settings.playback.markers.lazyPlaybackBoth")
-                : t("web.admin.settings.playback.markers.lazyPlaybackOnline")
-              : t("web.admin.settings.playback.markers.lazyPlaybackLocal")
+                : t("web.admin.settings.playback.markers.lazyPlaybackLocal")
           }
           value={form.getValue("markers.lazy_playback") || "true"}
-          onChange={markerDraft.setLazyPlayback}
+          onChange={(value) => form.setValue("markers.lazy_playback", value)}
           restartRequired={restartKeys.has("markers.lazy_playback")}
         />
       )}

@@ -11,7 +11,9 @@
  * trigger wrapping it replaces its `data-slot`.
  */
 export const TOUCH_TARGETS = [
-  "max-lg:[&_[data-variant][data-size]:not([data-size=xs]):not([data-variant=link])]:min-h-11",
+  // Text buttons keep Button's minimum-font-size floor (one line plus borders, in app.css).
+  "max-lg:[&_[data-variant][data-size]:not([data-size=xs]):not([data-variant=link]):not([data-size^=icon])]:min-h-[max(2.75rem,calc(1lh+2px))]",
+  "max-lg:[&_[data-variant][data-size^=icon]]:min-h-11",
   "max-lg:[&_[data-variant][data-size^=icon]]:min-w-11",
   "max-lg:[&_:is([data-slot=input],[data-slot=select-trigger],[data-slot=slider],[data-slot=dropdown-menu-item],[data-slot=select-item])]:min-h-11",
   "max-lg:[&_:is([data-variant][data-size=xs],[data-variant=link][data-size],[data-slot=switch],[data-slot=checkbox])]:relative",

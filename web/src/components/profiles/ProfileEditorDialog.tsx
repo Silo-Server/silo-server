@@ -405,8 +405,13 @@ function ProfileEditorForm({
               </AvatarFallback>
             </Avatar>
             <div className="text-center">
-              {/* wrap-anywhere breaks a long one-word name instead of widening the dialog. */}
-              <div className="text-sm font-medium wrap-anywhere">
+              {/* wrap-anywhere breaks a long one-word name instead of widening the dialog.
+                  dir="auto" keeps a name's own reading order ("56 Days" in Arabic);
+                  the translated placeholder keeps the page's direction. */}
+              <div
+                dir={draft.name.trim() ? "auto" : undefined}
+                className="text-sm font-medium wrap-anywhere"
+              >
                 {draft.name.trim() || t("web.profiles.editor.preview")}
               </div>
               <div className="text-muted-foreground text-xs">

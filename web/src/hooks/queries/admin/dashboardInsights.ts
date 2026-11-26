@@ -7,12 +7,7 @@ import {
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
 import { v2 } from "@/api/v2/request";
-import type {
-  AdminDownloadsStats,
-  AdminPlaybackActivity,
-  AdminTimeseries,
-  AdminTopActivity,
-} from "@/api/types";
+import type { AdminDownloadsStats, AdminPlaybackActivity, AdminTimeseries } from "@/api/types";
 import { adminKeys } from "../keys";
 
 /**
@@ -27,11 +22,8 @@ import { adminKeys } from "../keys";
 
 /** Just under the dashboard's 60s refresh cadence. */
 const SAMPLED_SERIES_STALE_TIME = 55_000;
-/** Seven-day rollups move slowly; the server caches them for 5 minutes too. */
-const TOP_ACTIVITY_STALE_TIME = 5 * 60_000;
 
 export const DEFAULT_INSIGHT_HOURS = 24;
-export const DEFAULT_TOP_ACTIVITY_DAYS = 7;
 export const DEFAULT_DOWNLOADS_TOP_LIMIT = 10;
 
 // Mirrors the server-side clamps (internal/api/handlers/admin_stats_*.go). The
@@ -42,8 +34,6 @@ const MIN_HOURS = 1;
 // 744 hours is 31 days: the sampler's retention window, and the widest window
 // the endpoints answer.
 const MAX_HOURS = 744;
-const MIN_DAYS = 1;
-const MAX_DAYS = 30;
 const MIN_DOWNLOADS_TOP_LIMIT = 1;
 const MAX_DOWNLOADS_TOP_LIMIT = 25;
 
@@ -57,11 +47,6 @@ function clampWindow(value: number, min: number, max: number, fallback: number):
 /** Hours window accepted by the timeseries and playback-activity endpoints. */
 function normalizeInsightHours(hours: number = DEFAULT_INSIGHT_HOURS): number {
   return clampWindow(hours, MIN_HOURS, MAX_HOURS, DEFAULT_INSIGHT_HOURS);
-}
-
-/** Days window accepted by the top-activity endpoint. */
-function normalizeTopActivityDays(days: number = DEFAULT_TOP_ACTIVITY_DAYS): number {
-  return clampWindow(days, MIN_DAYS, MAX_DAYS, DEFAULT_TOP_ACTIVITY_DAYS);
 }
 
 /** Top-list size accepted by the downloads stats endpoint. */
@@ -110,19 +95,6 @@ export function useAdminPlaybackActivity(hours: number = DEFAULT_INSIGHT_HOURS) 
         }),
       ),
     staleTime: SAMPLED_SERIES_STALE_TIME,
-  });
-}
-
-/** Most-played titles and most-active profiles over the last `days`. */
-export function useAdminTopActivity(days: number = DEFAULT_TOP_ACTIVITY_DAYS) {
-  const window = normalizeTopActivityDays(days);
-  return useQuery({
-    queryKey: adminKeys.topActivity(window),
-    queryFn: (): Promise<AdminTopActivity> =>
-      readDashboardInsight((profileContext) =>
-        v2("GET /api/v2/admin/stats/top-activity", { profileContext, query: { days: window } }),
-      ),
-    staleTime: TOP_ACTIVITY_STALE_TIME,
   });
 }
 

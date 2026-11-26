@@ -138,6 +138,20 @@ describe("FeaturesStep keeps unsaved edits in view", () => {
     expect(saved.current).toEqual({ "markers.online_storage": "on_demand" });
   });
 
+  it("saves on-demand storage without turning lazy playback on", async () => {
+    settings.current = {
+      ...settings.current,
+      "markers.mode": "both",
+      "markers.lazy_playback": "false",
+    };
+    render(<FeaturesStep />);
+    await userEvent.click(screen.getByRole("combobox", { name: "Save online markers" }));
+    await userEvent.click(screen.getByRole("option", { name: "Fetch when needed" }));
+    await continueStep();
+
+    expect(saved.current).toEqual({ "markers.online_storage": "on_demand" });
+  });
+
   it("saves nothing after push is turned off and on again", async () => {
     // Only one platform delivers; the switch reads on.
     settings.current["notifications.android_push_delivery_enabled"] = "false";

@@ -308,6 +308,7 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		Runtime:              int(response.GetItem().GetRuntime()),
 		Genres:               append([]string(nil), response.GetItem().GetGenres()...),
 		Keywords:             keywordsFromPluginMetadata(response.GetItem().GetMetadata()),
+		EpisodeLabels:        episodeLabelsFromPluginMetadata(req.ContentType, response.GetItem().GetMetadata()),
 		Studios:              append([]string(nil), response.GetItem().GetStudios()...),
 		Networks:             append([]string(nil), response.GetItem().GetNetworks()...),
 		Countries:            append([]string(nil), response.GetItem().GetCountries()...),
@@ -798,6 +799,16 @@ func movieDateFromPluginMetadata(contentType string, value *structpb.Struct, key
 		return ""
 	}
 	return date
+}
+
+// episodeLabelsFromPluginMetadata reads a series' metadata.episode_labels, the
+// provider's request for how clients label its episodes (see
+// models.EpisodeLabelsAirDate).
+func episodeLabelsFromPluginMetadata(contentType string, value *structpb.Struct) string {
+	if contentType != "series" || value == nil {
+		return ""
+	}
+	return models.NormalizeEpisodeLabels(value.GetFields()["episode_labels"].GetStringValue())
 }
 
 func keywordsFromPluginMetadata(value *structpb.Struct) []string {

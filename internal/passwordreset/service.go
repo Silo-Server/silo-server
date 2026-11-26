@@ -372,7 +372,7 @@ func (s *Service) Complete(ctx context.Context, token, password, deviceName, ip 
 		return nil, nil, ErrNotFound
 	}
 	// Validate first: a rejected password must not spend the link.
-	if err := auth.ValidateNewPassword(password); err != nil {
+	if err := auth.CheckNewPassword(ctx, s.settings, password); err != nil {
 		return nil, nil, err
 	}
 	user, err := s.repo.Complete(ctx, auth.HashLinkToken(token), password)

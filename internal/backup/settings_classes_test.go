@@ -6,12 +6,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
 	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
@@ -157,6 +159,53 @@ func TestOutboundBundlesCoverTheirConsumers(t *testing.T) {
 			if unitOf(key) < 0 {
 				t.Errorf("route setting %s is in no outbound unit", key)
 			}
+		}
+	}
+}
+
+// TestOnlyAConnectionIsSupplied: a replace reports the live server's
+// setting as supplied only when it is a connection the restored server can
+// use; a job binding only names a provider, and a value this key cannot
+// open is not readable there.
+func TestOnlyAConnectionIsSupplied(t *testing.T) {
+	cipher, err := secret.New([]byte("supplied-connection-test-key-0123456789"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := secret.New([]byte("another-servers-key-0123456789abcdefgh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seal := func(c *secret.Cipher, key, value string) string {
+		sealed, err := c.Encrypt(value, secret.SettingsAAD(key))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sealed
+	}
+	noProviders, _, _ := config.PlanAIProviderConversion(nil)
+	provider := `{"version":2,"providers":[{"id":"p","type":"custom","name":"P","base_url":"http://ai.invalid/v1","capabilities":["chat"]}]}`
+	connected := `{"active":"a","accounts":[{"client_id":"a","refresh_token":"r"}]}`
+	for _, tc := range []struct {
+		name, key, value string
+		cipher           *secret.Cipher
+		want             bool
+	}{
+		{"providers", config.AIProvidersSettingKey, seal(cipher, config.AIProvidersSettingKey, provider), cipher, true},
+		{"unreadable providers", config.AIProvidersSettingKey, seal(cipher, config.AIProvidersSettingKey, "not json"), cipher, false},
+		{"no providers", config.AIProvidersSettingKey, seal(cipher, config.AIProvidersSettingKey, noProviders[config.AIProvidersSettingKey]), cipher, false},
+		{"connected ChatGPT", chatgpt.CredentialsKey, seal(cipher, chatgpt.CredentialsKey, connected), cipher, true},
+		{"disconnected ChatGPT", chatgpt.CredentialsKey, seal(cipher, chatgpt.CredentialsKey,
+			`{"active":"","has_connected":true,"accounts":[{"client_id":"a","refresh_token":"r","needs_login":true}]}`), cipher, false},
+		{"ChatGPT under another key", chatgpt.CredentialsKey, seal(other, chatgpt.CredentialsKey, connected), cipher, false},
+		{"ChatGPT without a key", chatgpt.CredentialsKey, seal(cipher, chatgpt.CredentialsKey, connected), nil, false},
+		{"stale text binding", config.AITextProviderSettingKey, "custom-gone", cipher, false},
+		{"relay key", settingPushRelayKey, seal(cipher, settingPushRelayKey, "relay"), cipher, true},
+		{"empty", catalog.SearchSettingMeilisearchAPIKey, " ", cipher, false},
+		{"plain value", "server.public_url", "https://silo.invalid", nil, true},
+	} {
+		if got := suppliesConnection(tc.key, tc.value, tc.cipher); got != tc.want {
+			t.Errorf("%s: suppliesConnection = %t, want %t", tc.name, got, tc.want)
 		}
 	}
 }

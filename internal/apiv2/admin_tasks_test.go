@@ -564,3 +564,23 @@ func TestTaskExecutionErrorMessage(t *testing.T) {
 		})
 	}
 }
+
+// An import queued from an export job reports that job's ID, so a client can
+// name the source in its own language instead of showing source_label.
+func TestCatalogImportJobReportsSourceExportJob(t *testing.T) {
+	payload, err := json.Marshal(adminjob.CatalogImportRequest{SourceBucket: "b", SourceKey: "k", SourceLabel: "Export job 42", SourceExportJobID: "42"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := &models.AdminJob{ID: "import", JobType: adminjob.JobTypeCatalogImport, Status: adminjob.StatusCompleted, RequestedAt: fixedTime(), RequestPayload: payload}
+	deps, _ := libraryDeps(t)
+	deps.AdminTaskJobs = &fakeStorageTransitionJobs{job: job}
+	h := newTestHandler(t, deps)
+
+	var body AdminTaskJob
+	response := do(t, h, http.MethodGet, Prefix+"/admin/jobs/import", "", bearer(adminToken))
+	decodeJSON(t, response.Body, &body)
+	if response.Code != http.StatusOK || body.SourceExportJobID != "42" || body.SourceLabel != "Export job 42" {
+		t.Fatalf("import from export job: %d %s", response.Code, response.Body)
+	}
+}

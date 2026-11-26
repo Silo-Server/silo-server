@@ -615,6 +615,23 @@ func (h *PlaybackHandler) signStreamClaims(claims streamtoken.Claims) string {
 	return token
 }
 
+// markerNamesLiveNodeTransportV3 reports whether a request whose
+// silo_transport differs from this copy's generation names a node transport
+// of the session that still runs. Without session affinity, this replica's
+// copy can miss a replan another replica made onto a transcode node (#4601):
+// it keeps its own generation while the client's current player names the
+// node transport, and the serve handler relays that player to the node.
+// Every teardown and replan deletes a node transport's stored recipe before
+// stopping it, so a stored recipe marks the transport current. A copy with a
+// node or local runtime of its own never relays, so it keeps the refusal.
+func (h *PlaybackHandler) markerNamesLiveNodeTransportV3(r *http.Request, session *playback.Session) bool {
+	if session.TranscodeNodeURL != "" || h.tm.GetTranscodeSession(session.ID) != nil {
+		return false
+	}
+	marker := r.URL.Query().Get(playback.TransportQueryParam)
+	return marker != "" && h.storedTransportNodeV3(r, session, session.ID+"-"+marker) != ""
+}
+
 // loadTranscodeServeSession resolves the playback Session for the transcode
 // manifest/segment serve routes while keeping stream-token verification off the
 // hot path. A V3 session that negotiated header-authenticated media requires a
@@ -648,6 +665,12 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 		// forbidden. No token verification on this hot path.
 		if requestUserID != 0 && session.UserID != requestUserID {
 			return nil, playback.SessionForbidden, nil, nil, nil
+		}
+		// A request from a superseded plan's playlist must not drive the
+		// current transport: no wait, restart, relay or reconstruct.
+		if playback.TransportSuperseded(session.ID, session.TransportGeneration, r.URL.Query()) &&
+			!h.markerNamesLiveNodeTransportV3(r, session) {
+			return nil, playback.SessionUnavailable, nil, nil, errPlaybackTransportSuperseded
 		}
 		// A non-API or incomplete route is returned to the handler for the
 		// committed-egress guard below. Do not rebuild a local runtime first:
@@ -2361,7 +2384,7 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 		return
 	case playback.SessionUnavailable:
-		if writePlaybackSessionEndedError(w, reconstructErr) || writeNativeRouteBindingErrorV3(w, reconstructErr) {
+		if writePlaybackTransportSupersededError(w, reconstructErr) || writePlaybackSessionEndedError(w, reconstructErr) || writeNativeRouteBindingErrorV3(w, reconstructErr) {
 			return
 		}
 		if writePlaybackToneMapExecutionError(w, reconstructErr) {
@@ -2471,7 +2494,9 @@ func writePlaybackToneMapExecutionError(w http.ResponseWriter, err error) bool {
 // rule as the manifest endpoint above.
 //
 // Errors: 404 (playback_session_not_found / not_found) when the session is
-// missing or cannot be reconstructed, or the segment does not exist; 503
+// missing or cannot be reconstructed, or the segment does not exist; 404
+// (playback_transport_superseded) when the URL's silo_transport names a
+// transport a replan replaced; 503
 // (unavailable) while the transcode is temporarily unavailable; and — for
 // tone-map execution failures — 422 (unsupported) with an
 // X-Silo-Tone-Map-Execution-Error header of source_revision_changed or
@@ -2502,7 +2527,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 		return
 	case playback.SessionUnavailable:
-		if writePlaybackSessionEndedError(w, reconstructErr) || writeNativeRouteBindingErrorV3(w, reconstructErr) {
+		if writePlaybackTransportSupersededError(w, reconstructErr) || writePlaybackSessionEndedError(w, reconstructErr) || writeNativeRouteBindingErrorV3(w, reconstructErr) {
 			return
 		}
 		if writePlaybackToneMapExecutionError(w, reconstructErr) {

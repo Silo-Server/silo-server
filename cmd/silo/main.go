@@ -28,11 +28,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/darthShadow/shunpike/engine"
+	"github.com/darthShadow/shunpike/engine/n4"
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/quic-go/quic-go/http3"
 	"github.com/redis/go-redis/v9"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -69,6 +72,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/database"
 	"github.com/Silo-Server/silo-server/internal/database/pglock"
 	"github.com/Silo-Server/silo-server/internal/database/queryattr"
+	"github.com/Silo-Server/silo-server/internal/demomode"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 	"github.com/Silo-Server/silo-server/internal/directconn"
 	"github.com/Silo-Server/silo-server/internal/downloads"
@@ -1567,6 +1571,7 @@ func main() {
 	// startup completes.
 	var ipResolver *clientip.Resolver
 	var directConn *directconn.Service
+	var rootHandler http.Handler
 	// Assigned below when recommendations start; nil (a no-op) otherwise.
 	var settingsRecWorker *recommendations.Worker
 	// Assigned below with the marker plugin providers; nil without plugins.
@@ -1585,6 +1590,7 @@ func main() {
 	// Set when shutdown begins; /api/v1/ready fails from then on.
 	var shuttingDown atomic.Bool
 	deps := api.Dependencies{
+		DemoMode:                     demomode.New(settingsRepo),
 		ShuttingDown:                 shuttingDown.Load,
 		AdminDefaults:                adminDefaults,
 		SubtitlePlaySync:             subtitlePlaySync,
@@ -3237,8 +3243,46 @@ func main() {
 	}
 	ipResolver = clientip.NewResolver(trustedCIDRs)
 	deps.ClientIPResolver = ipResolver
-	if mode == "" || mode == "integrated" || mode == "api" {
-		directConn = directconn.New(appCtx, directconn.Config{Settings: settingsRepo, Logger: slog.Default(), Tuning: tuningCfg, Adjustments: adjustments, HeldAtStart: netadmin.Current().HeldAtStart})
+	var apiReplicaPresence *cache.APIReplicaPresence
+	apiHost := mode == "" || mode == "integrated" || mode == "api"
+	// Redis is configured but unusable when its client failed to build; the direct
+	// gate then fails closed instead of reading it as a deployment without Redis.
+	directRedisUnavailable := apiRedisErr != nil
+	var directRedis *redis.Client
+	if apiHost && !directRedisUnavailable {
+		// The presence writes and the engine lease bound each call with a deadline,
+		// which only a deadline-enabled client honors at the socket.
+		var directRedisErr error
+		directRedis, directRedisErr = cache.NewDeadlineRedisClientForRole(cfg.Redis, "api")
+		if directRedisErr != nil {
+			slog.Warn("redis client init failed; direct connections stay off", "error", directRedisErr)
+			directRedisUnavailable = true
+		} else if directRedis != nil {
+			defer func() { _ = cache.CloseRedisClient(directRedis) }()
+		}
+	}
+	if apiHost {
+		apiReplicaPresence = cache.NewAPIReplicaPresence(directRedis, nodeID)
+		if err := apiReplicaPresence.Register(appCtx); err != nil {
+			slog.WarnContext(appCtx, "api replica presence unavailable", "component", "directconn", "error", err)
+		}
+	}
+	if apiHost {
+		// Direct shutdown drains HTTP/3 before releasing the lease and engine.
+		directConn = directconn.New(context.WithoutCancel(appCtx), directconn.Config{
+			SecretKey: bc.SecretKey, Settings: settingsRepo, Logger: slog.Default(), Tuning: tuningCfg,
+			Adjustments: adjustments, HeldAtStart: netadmin.Current().HeldAtStart, ReplicaPresence: apiReplicaPresence, RedisClient: directRedis,
+			RedisUnavailable: directRedisUnavailable,
+			// Separate API processes share the engine lease only through Redis; a
+			// single integrated process has no one to share it with.
+			RequireRedis: mode == "api",
+			// The router depends on directConn: no engine starts before
+			// HandlerReady, after rootHandler exists.
+			AwaitHandler: true,
+			ServerFactory: func(e *engine.Engine, policy n4.Policy) *http3.Server {
+				return directconn.NewHTTP3Server(e, lanTLS.HTTP3Config(), policy, nodeID, rootHandler)
+			},
+		})
 		deps.DirectConnections = directConn
 		// Subscribe before the initial read: Subscribe returns once Redis
 		// confirms it, so a change another replica commits after that point
@@ -3478,7 +3522,7 @@ func main() {
 				if deps.OnUserSessionsRevoked != nil {
 					deps.OnUserSessionsRevoked(ctx, userID)
 				}
-			}).WithSecretCipher(dataCipher)
+			}).WithSecretCipher(dataCipher).WithDemoSettings(deps.DemoMode)
 		authProviderRegistry = auth.NewPluginProviderRegistry(auth.PluginProviderRegistryConfig{
 			Bindings:   pluginRuntimeConfigStore,
 			NeedsSetup: auth.NewUserRepository(deps.DB).NeedsSetup,
@@ -4023,10 +4067,11 @@ func main() {
 		}
 		absScopeResolver := newViewerResolver(absUserRepo, nil)
 		absHDeps := audiobooks.ABSHandlerDeps{
-			Pool:     deps.DB,
-			Items:    absItemRepo,
-			Files:    deps.FileRepo,
-			Settings: settingsRepo,
+			Pool:         deps.DB,
+			Items:        absItemRepo,
+			Files:        deps.FileRepo,
+			Settings:     settingsRepo,
+			DemoSettings: deps.DemoMode,
 			Auth: &audiobooks.SiloCredValidator{
 				Auth:        absAuthSvc,
 				Pool:        deps.DB,
@@ -4154,7 +4199,10 @@ func main() {
 
 	// Step 8: Build the handler the primary port serves — the API router and
 	// frontend. Metrics use a separate opt-in listener; see newRootHandler.
-	rootHandler := newRootHandler(router)
+	rootHandler = newRootHandler(router)
+	if directConn != nil {
+		directConn.HandlerReady()
+	}
 	stopMetricsListener, err := startMetricsListener(true)
 	if err != nil {
 		log.Fatalf("metrics listener: %v", err)
@@ -4555,9 +4603,7 @@ func main() {
 		}
 		if pluginService != nil {
 			pluginService.StartResidents(appCtx)
-			if mode == "api" {
-				warnOnMultipleAPIReplicas(appCtx, cache.NewAPIReplicaPresence(apiRedisClient, nodeID), pluginService)
-			}
+			warnOnMultipleAPIReplicas(appCtx, apiReplicaPresence, pluginService)
 		}
 	}
 	jellyfinListenResult := startCompatServer(appCtx, compatSrv, tcpcongestion.ListenerJellyfin, opts, errCh)
@@ -4635,9 +4681,18 @@ func main() {
 	}
 
 	// 1. Stop accepting new requests.
+	var directShutdown sync.WaitGroup
+	if directConn != nil {
+		directShutdown.Go(func() {
+			if shutdownErr := directConn.Shutdown(shutdownCtx); shutdownErr != nil {
+				slog.Error("direct connections shutdown error", "error", shutdownErr)
+			}
+		})
+	}
 	if shutdownErr := srv.Shutdown(shutdownCtx); shutdownErr != nil {
 		slog.Error("HTTP shutdown error", "error", shutdownErr)
 	}
+	directShutdown.Wait()
 	if compatSrv != nil {
 		if shutdownErr := compatSrv.Shutdown(shutdownCtx); shutdownErr != nil {
 			slog.Error("jellyfin compat shutdown error", "error", shutdownErr)

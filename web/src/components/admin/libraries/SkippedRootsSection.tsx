@@ -17,7 +17,7 @@ import {
 } from "@/components/admin/libraries/DiagnosticsListParts";
 import {
   pathLeaf,
-  useWideDiagnosticsTableLayout,
+  useWideTableLayout,
   usePagination,
   useSort,
 } from "@/components/admin/libraries/diagnosticsListState";
@@ -53,7 +53,7 @@ export function SkippedRootsSection({
   onStatusChange?: (status: { count: number | undefined; isError?: boolean }) => void;
 } = {}) {
   const t = useT();
-  const showTable = useWideDiagnosticsTableLayout();
+  const showTable = useWideTableLayout();
   const [open, setOpen] = useState(false);
   const isOpen = embedded || open;
   const [search, setSearch] = useState("");

@@ -1,19 +1,60 @@
+import type { MouseEvent } from "react";
+
+import type { WidgetRange } from "@/components/admin/dashboard/types";
 import type { Translate } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
 import { formatDateTime, preferredDateLocale } from "@/lib/datetime";
+import { cn } from "@/lib/utils";
 import type { MessageKey } from "@/locales/keys";
 
-export const INSIGHTS_TABS = ["playback", "titles", "people", "devices", "bandwidth"] as const;
+export const INSIGHTS_TABS = [
+  "activity",
+  "playback",
+  "titles",
+  "library",
+  "people",
+  "devices",
+  "bandwidth",
+] as const;
 export type InsightsTab = (typeof INSIGHTS_TABS)[number];
+/** The live streams tab, which the page opens on when the URL names no tab. */
+export const DEFAULT_INSIGHTS_TAB: InsightsTab = "activity";
 
 export const INSIGHTS_RANGES = ["7d", "30d", "90d", "1y", "all", "custom"] as const;
 export type InsightsRange = (typeof INSIGHTS_RANGES)[number];
 
-/** Maps a Dashboard widget range (`hour`/`day`/`week`/`month`) to the closest Insights range preset. */
-export function widgetRangeToInsightsRange(
-  range: "hour" | "day" | "week" | "month",
-): InsightsRange {
-  return range === "month" ? "30d" : "7d";
+/** The Insights preset closest to a dashboard widget range; sub-week ranges open the 7-day view. */
+export function widgetRangeToInsightsRange(range: WidgetRange): Exclude<InsightsRange, "custom"> {
+  switch (range) {
+    case "month":
+      return "30d";
+    case "quarter":
+      return "90d";
+    case "year":
+      return "1y";
+    case "all":
+      return "all";
+    default:
+      return "7d";
+  }
+}
+
+/** The dashboard widget range for an Insights preset; a custom range has none. */
+export function insightsRangeToWidgetRange(range: InsightsRange): WidgetRange | undefined {
+  switch (range) {
+    case "7d":
+      return "week";
+    case "30d":
+      return "month";
+    case "90d":
+      return "quarter";
+    case "1y":
+      return "year";
+    case "all":
+      return "all";
+    default:
+      return undefined;
+  }
 }
 
 export interface InsightsFilterState {
@@ -62,10 +103,9 @@ export function parseInsightsUrlState(
   defaultTz: string,
 ): InsightsFilterState {
   const rawTab = searchParams.get("tab");
-  const normalizedTab = rawTab === "activity" ? "playback" : rawTab;
-  const tab: InsightsTab = INSIGHTS_TABS.includes(normalizedTab as InsightsTab)
-    ? (normalizedTab as InsightsTab)
-    : "playback";
+  const tab: InsightsTab = INSIGHTS_TABS.includes(rawTab as InsightsTab)
+    ? (rawTab as InsightsTab)
+    : DEFAULT_INSIGHTS_TAB;
 
   const rawRange = searchParams.get("range");
   const range: InsightsRange = INSIGHTS_RANGES.includes(rawRange as InsightsRange)
@@ -364,5 +404,30 @@ export function formatHwAccelLabel(
       return "VideoToolbox";
     default:
       return key.toUpperCase();
+  }
+}
+
+/**
+ * Props for a region that shows the previous result while a new sort, search,
+ * or filter loads. The region stays opaque and shows a sweep along its top
+ * edge (`.insight-refreshing` in app.css). Its links stop working until the
+ * new result lands, for the mouse and for Enter alike, because they mix the
+ * new filters with the old result's window. Buttons stay live, so a second
+ * sort or toggle still works.
+ */
+export function insightRefreshProps(refreshing: boolean, className?: string) {
+  return {
+    "aria-busy": refreshing || undefined,
+    className: cn(refreshing && "insight-refreshing", className),
+    onClickCapture: refreshing ? blockLinkActivation : undefined,
+  };
+}
+
+// Enter on a focused link fires a click, so this covers the keyboard too.
+// Capture runs before the router link's own handler, which skips navigation
+// once the default is prevented.
+function blockLinkActivation(event: MouseEvent) {
+  if (event.target instanceof Element && event.target.closest("a")) {
+    event.preventDefault();
   }
 }

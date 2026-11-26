@@ -1381,6 +1381,26 @@ func TestTranscodeThrottlerIgnoresOutputFromAnEarlierGeneration(t *testing.T) {
 	}
 }
 
+// A header-authenticated plan's URL carries no credential, only the short
+// silo_transport marker. However long the title, the playlists the server
+// builds keep that query literal on every URI, so a player without
+// EXT-X-DEFINE support (AetherEngine) is not served a version 8 playlist it
+// cannot resolve.
+func TestShortQueryStaysLiteralOnLongSyntheticPlaylists(t *testing.T) {
+	rawQuery := TransportQueryParam + "=0123456789ab-89abcdef"
+	session := &TranscodeSession{opts: TranscodeOpts{TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, TotalDuration: 4 * 60 * 60}}
+	manifest, err := session.BuildPlaybackManifest("segment/", rawQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(manifest, []byte("#EXT-X-DEFINE")) || bytes.Contains(manifest, []byte("#EXT-X-VERSION:8")) {
+		t.Fatal("a short query switched a synthetic playlist to EXT-X-DEFINE")
+	}
+	if got := bytes.Count(manifest, []byte("?"+rawQuery+"\n")); got != 7200 {
+		t.Fatalf("%d segment URIs carry the literal query, want 7200", got)
+	}
+}
+
 // A client that has fetched all but at most one produced segment is waiting
 // on the encoder: its stall says nothing about the link. A running encoder
 // that is ahead of the client, or one that has finished, is not. A segment

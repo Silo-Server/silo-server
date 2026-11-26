@@ -277,13 +277,17 @@ func (h *Handler) handleABSStatus(w http.ResponseWriter, _ *http.Request) {
 // user.accessToken / user.refreshToken; GET /me never carries those.
 // mayDownload is the account's download permission (Handler.mayDownload), so
 // clients that read permissions.download hide offline save when it is false;
-// the /download route enforces it either way.
-func absUserObject(userID, displayName, token, defaultLibraryID string, mayDownload bool, now time.Time) map[string]any {
+// the /download route enforces it either way. mediaProgress is the caller's
+// progress rows (Handler.userMediaProgress); nil emits an empty list.
+func absUserObject(userID, displayName, token, defaultLibraryID string, mayDownload bool, mediaProgress []map[string]any, now time.Time) map[string]any {
 	name := displayName
 	if name == "" {
 		name = userID
 	}
 	nowMs := now.UnixMilli()
+	if mediaProgress == nil {
+		mediaProgress = []map[string]any{}
+	}
 	return map[string]any{
 		"id":                              userID,
 		"username":                        name,
@@ -293,7 +297,7 @@ func absUserObject(userID, displayName, token, defaultLibraryID string, mayDownl
 		"librariesAccessible":             []any{},
 		"itemTagsAccessible":              []any{},
 		"itemTagsSelected":                []any{},
-		"mediaProgress":                   []any{},
+		"mediaProgress":                   mediaProgress,
 		"bookmarks":                       []any{},
 		"seriesHideFromContinueListening": []any{},
 		"isOldToken":                      false,
@@ -338,7 +342,8 @@ func (h *Handler) loginEnvelope(
 	defaultLibraryID := VirtualLibraryID
 	// Fresh authentication has an explicit principal, without bearer middleware
 	// context. Resolve that principal and omit metadata when its scope is unknown.
-	access, err := h.accessFilterForAuth(ctx, a)
+	access, accessErr := h.accessFilterForAuth(ctx, a)
+	err := accessErr
 	var libs []AudiobookLibrary
 	if err == nil {
 		libs, err = h.deps.MediaStore.ListAudiobookLibraries(ctx, access)
@@ -356,7 +361,11 @@ func (h *Handler) loginEnvelope(
 		libraryMaps = append(libraryMaps, audiobookLibraryMap(lib))
 	}
 
-	user := absUserObject(a.UserID, displayName, accessToken, defaultLibraryID, h.mayDownload(ctx, a.UserID), now)
+	var progress []map[string]any
+	if accessErr == nil {
+		progress = h.userMediaProgress(ctx, a, access)
+	}
+	user := absUserObject(a.UserID, displayName, accessToken, defaultLibraryID, h.mayDownload(ctx, a.UserID), progress, now)
 
 	// Real ABS (v2.26+) ALWAYS sets user.accessToken; modern clients read it
 	// from exactly res.user.accessToken. The x-return-tokens header gates ONLY
@@ -702,9 +711,10 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 
 // handleLogout — POST /logout (and /api/logout, /abs/api/logout, /abs/api/auth/logout)
 //
-// Mounted OUTSIDE the bearerAuth group so a client whose access token has
-// expired — the most common "I want to sign out" moment — can still revoke
-// their JTI without first re-authenticating.
+// Mounted OUTSIDE the bearerAuth group, so sign-out needs only a token that
+// parses, not an authenticated request. ParseToken rejects an expired token,
+// so a client whose access token has expired revokes nothing here; the
+// response is the same 200 either way.
 //
 // Real ABS returns HTTP 200 with { redirect_url } (null for local auth), NOT
 // an empty 204 — a strict client decodes the body and would fail on 204. It
@@ -750,6 +760,23 @@ func (h *Handler) revokeLogoutPrincipal(r *http.Request) {
 		slog.DebugContext(r.Context(), "abs logout: parse failed", "component", "audiobooks", "err", err)
 		return
 	}
+	if restricted, err := h.demoRestricted(r.Context(), claims.UserID); err != nil || restricted {
+		// Demo visitors share one account and profile: end only the
+		// caller's own credentials, the presented access token and the
+		// refresh token the request carries, if any. No playback session
+		// records which token opened it, so none is closed. A setting this
+		// process has never read, or a role that can't be read, is treated
+		// the same way.
+		for _, jti := range []string{claims.JTI, presentedRefreshJTI(r, secret, claims)} {
+			if jti == "" {
+				continue
+			}
+			if err := h.deps.TokenStore.RevokeTokenByJTI(r.Context(), jti); err != nil {
+				slog.WarnContext(r.Context(), "abs logout: revoke token failed", "component", "audiobooks", "jti", jti, "err", err)
+			}
+		}
+		return
+	}
 	if err := h.deps.TokenStore.RevokeTokensForPrincipal(r.Context(), claims.UserID, claims.ProfileID); err != nil {
 		slog.WarnContext(r.Context(), "abs logout: revoke principal tokens failed", "component", "audiobooks", "jti", claims.JTI, "user", claims.UserID, "err", err)
 		return
@@ -760,4 +787,57 @@ func (h *Handler) revokeLogoutPrincipal(r *http.Request) {
 		}
 	}
 	slog.DebugContext(r.Context(), "abs logout: revoked principal tokens", "component", "audiobooks", "jti", claims.JTI, "user", claims.UserID)
+}
+
+// presentedRefreshJTI is the JTI of the refresh token a sign-out carries, in
+// the x-refresh-token header or the refresh_token cookie as on
+// /auth/refresh, when it verifies as a refresh token of the same account and
+// profile as the access token; otherwise "". Possession makes it the
+// caller's own, so revoking it needs no record of which access token it was
+// issued with.
+func presentedRefreshJTI(r *http.Request, secret []byte, access *Claims) string {
+	raw := strings.TrimSpace(r.Header.Get("x-refresh-token"))
+	if raw == "" {
+		if c, err := r.Cookie("refresh_token"); err == nil {
+			raw = strings.TrimSpace(c.Value)
+		}
+	}
+	if raw == "" {
+		return ""
+	}
+	refresh, err := ParseToken(secret, raw)
+	if err != nil || refresh.Type != tokenTypeRefresh || refresh.UserID != access.UserID || refresh.ProfileID != access.ProfileID {
+		return ""
+	}
+	return refresh.JTI
+}
+
+// DemoSettingsReader reads one server setting (demo.enabled).
+type DemoSettingsReader interface {
+	Get(ctx context.Context, key string) (string, error)
+}
+
+// demoRestricted reports whether demo mode is on and userID is not an
+// administrator; demo visitors share one account, so its sign-out ends only
+// the presented token. A nil AccountIsAdmin counts every account as not an
+// administrator. An error means it could not be told; the caller restricts.
+func (h *Handler) demoRestricted(ctx context.Context, userID string) (bool, error) {
+	if h.deps.DemoSettings == nil {
+		return false, nil
+	}
+	enabled, err := h.deps.DemoSettings.Get(ctx, "demo.enabled")
+	if err != nil {
+		return true, err
+	}
+	if enabled != "true" {
+		return false, nil
+	}
+	if h.deps.AccountIsAdmin == nil {
+		return true, nil
+	}
+	admin, err := h.deps.AccountIsAdmin(ctx, userID)
+	if err != nil {
+		return true, err
+	}
+	return !admin, nil
 }

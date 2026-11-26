@@ -219,6 +219,10 @@ const (
 	advisorySourceColumn = "advisory_source"
 )
 
+// episodeLabelsColumn is the series' episode-label choice, shared by the item
+// and browse select lists.
+const episodeLabelsColumn = "episode_labels"
+
 // Served-path columns of the banner, thumb, clear art and disc slots, shared
 // by the item select lists in this package.
 const (
@@ -239,6 +243,7 @@ var itemColumnNames = []string{
 	"metadata_s3_path", "metadata_etag", "season_count",
 	"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
 	"show_status",
+	episodeLabelsColumn,
 	"matched_at", "last_refreshed", "refresh_failures",
 	"episode_metadata_incomplete", "episode_metadata_last_checked_at", "locked_fields", "status", "created_at", "updated_at",
 	advisoryAgeColumn, advisorySourceColumn,
@@ -370,6 +375,7 @@ func scanItem(row pgx.Row) (*models.MediaItem, error) {
 		&item.AirTime,
 		&item.AirTimezone,
 		&item.ShowStatus,
+		&item.EpisodeLabels,
 		&item.MatchedAt,
 		&item.LastRefreshed,
 		&item.RefreshFailures,
@@ -450,6 +456,7 @@ func listItemScanDests(item *models.MediaItem) []any {
 		&item.AirTime,
 		&item.AirTimezone,
 		&item.ShowStatus,
+		&item.EpisodeLabels,
 		&item.MatchedAt,
 		&item.LastRefreshed,
 		&item.RefreshFailures,
@@ -691,7 +698,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			advisory_age, advisory_source,
 			banner_path, banner_source_path, banner_thumbhash, thumb_path, thumb_source_path, thumb_thumbhash,
 			clearart_path, clearart_source_path, disc_path, disc_source_path,
-			digital_release_date, physical_release_date
+			digital_release_date, physical_release_date,
+			episode_labels
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			$9, $10, $11, $12,
@@ -707,7 +715,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			$49, $50,
 			$51, $52, $53, $54, $55, $56,
 			$57, $58, $59, $60,
-			$61, $62
+			$61, $62,
+			$63
 		)`
 	conflict := `
 		ON CONFLICT (content_id) DO NOTHING`
@@ -752,6 +761,7 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			air_time = EXCLUDED.air_time,
 			air_timezone = EXCLUDED.air_timezone,
 			show_status = EXCLUDED.show_status,
+			episode_labels = EXCLUDED.episode_labels,
 			matched_at = EXCLUDED.matched_at,
 			last_refreshed = EXCLUDED.last_refreshed,
 			refresh_failures = EXCLUDED.refresh_failures,
@@ -833,6 +843,7 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 		item.DiscSourcePath,
 		item.DigitalReleaseDate,
 		item.PhysicalReleaseDate,
+		item.EpisodeLabels,
 	)
 	if err != nil {
 		return false, fmt.Errorf("writing media item: %w", err)

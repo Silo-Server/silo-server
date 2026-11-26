@@ -21,6 +21,8 @@ import (
 )
 
 type fakePasswordResets struct {
+	// policy is the server's password policy; the zero value is the default.
+	policy    auth.PasswordPolicy
 	caps      passwordreset.Capabilities
 	issued    *passwordreset.IssueInput
 	issueErr  error
@@ -83,7 +85,7 @@ func (f *fakePasswordResets) CompletePasswordReset(_ context.Context, token, pas
 	if token != "live" && token != "sign-in-required" {
 		return handlers.PasswordResetCompletionView{}, passwordreset.ErrNotFound
 	}
-	if err := auth.ValidateNewPassword(password); err != nil {
+	if err := f.policy.Check(password); err != nil {
 		return handlers.PasswordResetCompletionView{}, err
 	}
 	f.completed++
@@ -160,6 +162,13 @@ func TestPublicPasswordReset(t *testing.T) {
 	}
 	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/password-resets/spent/complete", `{"password":"password123"}`, nil), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/password-resets/live/complete", `{"password":"short"}`, nil), TypeValidationFailed)
+	// A stricter policy names the rule at the member, not a 500.
+	f.policy = auth.PasswordPolicy{MinimumLength: 12, RequireSpecial: true}
+	special := requireProblem(t, do(t, h, http.MethodPost, Prefix+"/password-resets/live/complete", `{"password":"password1234"}`, nil), TypeValidationFailed)
+	if len(special.Errors) != 1 || special.Errors[0].Location != "body.password" || special.Errors[0].Code != codePasswordNeedsSpecial || special.Errors[0].Detail != "Include at least one special character, such as ! or #." {
+		t.Fatalf("policy errors = %+v", special.Errors)
+	}
+	f.policy = auth.PasswordPolicy{}
 	if f.completed != 2 {
 		t.Fatalf("completed %d resets, want 2", f.completed)
 	}
@@ -357,5 +366,25 @@ func TestTemporaryPasswordSessionIsConfined(t *testing.T) {
 	}
 	if me := do(t, h, http.MethodGet, Prefix+"/account/me", "", restricted); me.Code != http.StatusOK {
 		t.Fatal(me.Code, me.Body.String())
+	}
+}
+
+// A refused password names the rule it broke in the field code, so a
+// translated client can say which, also when a handler error carries it.
+func TestPasswordRuleProblemNamesTheRule(t *testing.T) {
+	policy := auth.PasswordPolicy{MinimumLength: 12, RequireUppercase: true, RequireSpecial: true}
+	for password, want := range map[string]string{
+		"short":                 codePasswordTooShort,
+		strings.Repeat("x", 73): codePasswordTooLong,
+		"lowercase-only-1":      codePasswordNeedsUppercase,
+		"Uppercase1234":         codePasswordNeedsSpecial,
+	} {
+		refusal := policy.Check(password)
+		detail, _ := auth.PasswordRuleMessage(refusal)
+		wrapped := (&handlers.APIError{Status: http.StatusBadRequest, Code: "weak_password", Message: "refused", Field: "new_password"}).WithCause(refusal)
+		p := passwordProblem(wrapped)
+		if len(p.Errors) != 1 || p.Errors[0] != (ProblemError{Location: "body.new_password", Code: want, Detail: detail}) {
+			t.Errorf("%q: errors = %+v, want code %s", password, p.Errors, want)
+		}
 	}
 }

@@ -195,6 +195,13 @@ func TestAdminAccountCreateAndErrors(t *testing.T) {
 	}
 	f.err = auth.ErrDuplicate
 	requireProblem(t, do(t, h, http.MethodPost, path, body, actingRequestAdmin), TypeConflict)
+	// A password the policy refuses is named at the password member, as on
+	// every other path that sets a password.
+	f.err = auth.PasswordPolicy{RequireUppercase: true}.Check("new-password")
+	refused := requireProblem(t, do(t, h, http.MethodPost, path, body, actingRequestAdmin), TypeValidationFailed)
+	if len(refused.Errors) != 1 || refused.Errors[0].Location != "body.password" || refused.Errors[0].Code != codePasswordNeedsUppercase || refused.Errors[0].Detail != "Include at least one capital letter." {
+		t.Fatalf("policy errors = %+v", refused.Errors)
+	}
 	f.err = errors.New("storage down")
 	requireProblem(t, do(t, h, http.MethodGet, path+"/7", "", actingRequestAdmin), TypeInternalError)
 	f.err = auth.ErrNotFound

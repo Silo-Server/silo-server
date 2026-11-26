@@ -2,13 +2,9 @@ package handlers
 
 import (
 	"cmp"
-	"context"
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
-
-	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -93,55 +89,37 @@ func insightsResolutionLines(label string) (int, bool) {
 	return n, true
 }
 
-// queryInsightsResolutions fills the source and delivered resolution
-// breakdowns and the downscale pairs. It groups the window's sessions by the
-// raw facts and classifies them here, so the classifier stays the scanner's.
-func queryInsightsResolutions(ctx context.Context, tx pgx.Tx, whereSQL string, whereArgs []any, out *AdminInsightsDevices) error {
-	rows, err := tx.Query(ctx, `
-		SELECT
-			COALESCE(mf.resolution, ''),
-			CASE WHEN (mf.video_tracks->0->>'width') ~ '^[0-9]{1,5}$' THEN (mf.video_tracks->0->>'width')::int ELSE 0 END,
-			CASE WHEN (mf.video_tracks->0->>'height') ~ '^[0-9]{1,5}$' THEN (mf.video_tracks->0->>'height')::int ELSE 0 END,
-			LOWER(BTRIM(h.play_method)), LOWER(BTRIM(COALESCE(h.video_decision, ''))),
-			LOWER(BTRIM(COALESCE(h.target_video_codec, ''))), COALESCE(h.target_resolution, ''),
-			h.route_facts_recorded,
-			COUNT(*)::bigint
-		FROM admin_playback_history h
-		LEFT JOIN media_files mf ON mf.id = COALESCE(h.effective_media_file_id, h.media_file_id)
-		LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
-		WHERE `+whereSQL+`
-		GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
-	`, whereArgs...)
-	if err != nil {
-		return fmt.Errorf("querying insights resolutions: %w", err)
+type insightsResolutionChangeKey struct{ from, to string }
+
+// insightsResolutionTally fills the source and delivered resolution
+// breakdowns and the downscale pairs from sessions grouped by their raw facts,
+// classifying them here so the classifier stays the scanner's.
+type insightsResolutionTally struct {
+	source, delivered map[string]int64
+	changes           map[insightsResolutionChangeKey]int64
+}
+
+func newInsightsResolutionTally() *insightsResolutionTally {
+	return &insightsResolutionTally{
+		source: make(map[string]int64), delivered: make(map[string]int64),
+		changes: make(map[insightsResolutionChangeKey]int64),
 	}
-	defer rows.Close()
-	source := make(map[string]int64)
-	delivered := make(map[string]int64)
-	type change struct{ from, to string }
-	changes := make(map[change]int64)
-	for rows.Next() {
-		var label, method, videoDecision, targetCodec, target string
-		var width, height int
-		var routeFacts bool
-		var sessions int64
-		if err := rows.Scan(&label, &width, &height, &method, &videoDecision, &targetCodec, &target, &routeFacts, &sessions); err != nil {
-			return fmt.Errorf("scanning insights resolutions: %w", err)
-		}
-		src := insightsSourceResolutionClass(label, width, height)
-		dst := insightsDeliveredResolutionClass(method, videoDecision, targetCodec, target, routeFacts, src, width, height)
-		source[src] += sessions
-		delivered[dst] += sessions
-		if srcRank, dstRank := insightsResolutionClassRank[src], insightsResolutionClassRank[dst]; srcRank > 0 && dstRank > 0 && dstRank < srcRank {
-			changes[change{src, dst}] += sessions
-		}
+}
+
+func (r *insightsResolutionTally) add(label string, width, height int, method, videoDecision, targetCodec, target string, routeFacts bool, sessions int64) {
+	src := insightsSourceResolutionClass(label, width, height)
+	dst := insightsDeliveredResolutionClass(method, videoDecision, targetCodec, target, routeFacts, src, width, height)
+	r.source[src] += sessions
+	r.delivered[dst] += sessions
+	if srcRank, dstRank := insightsResolutionClassRank[src], insightsResolutionClassRank[dst]; srcRank > 0 && dstRank > 0 && dstRank < srcRank {
+		r.changes[insightsResolutionChangeKey{src, dst}] += sessions
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	out.SourceResolutions = sortedResolutionCounts(source)
-	out.DeliveredResolutions = sortedResolutionCounts(delivered)
-	for c, n := range changes {
+}
+
+func (r *insightsResolutionTally) finish(out *AdminInsightsDevices) {
+	out.SourceResolutions = sortedResolutionCounts(r.source)
+	out.DeliveredResolutions = sortedResolutionCounts(r.delivered)
+	for c, n := range r.changes {
 		out.ResolutionChanges = append(out.ResolutionChanges, AdminInsightsResolutionChange{From: c.from, To: c.to, Sessions: n})
 	}
 	slices.SortFunc(out.ResolutionChanges, func(a, b AdminInsightsResolutionChange) int {
@@ -153,7 +131,6 @@ func queryInsightsResolutions(ctx context.Context, tx pgx.Tx, whereSQL string, w
 		}
 		return cmp.Compare(insightsResolutionClassRank[b.To], insightsResolutionClassRank[a.To])
 	})
-	return nil
 }
 
 // sortedResolutionCounts orders classes from highest to lowest resolution,

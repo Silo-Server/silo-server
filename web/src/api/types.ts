@@ -880,6 +880,10 @@ export interface BrowseItem {
   advisory_source?: string;
   status: "pending" | "matched" | "unmatched" | "ambiguous";
   show_status?: string;
+  /** "air_date" when the series labels episodes by date; see formatEpisodeLabel. */
+  episode_labels?: string;
+  /** An episode card's air date, sent when episode_labels is air_date. */
+  air_date?: string | null;
   rating_imdb: number | null;
   rating_tmdb?: number | null;
   rating_rt_critic?: number | null;
@@ -1292,6 +1296,8 @@ export interface ItemDetail {
   first_air_date: string | null;
   // Publication/airing status ("Ongoing", "Completed", "Continuing", "Ended").
   show_status?: string;
+  /** "air_date" when the series (or the series of this season or episode) labels episodes by date. */
+  episode_labels?: string;
   last_air_date: string | null;
   air_time?: string | null;
   air_timezone?: string | null;
@@ -1352,6 +1358,10 @@ export interface ItemDetail {
 
 export interface WatchDetail {
   content_id: string;
+  /** "air_date" when the episode's series labels episodes by date. */
+  episode_labels?: string;
+  /** The episode's air date, sent when episode_labels is air_date. */
+  air_date?: string | null;
   type: string;
   title: string;
   year?: number;
@@ -2826,6 +2836,8 @@ export interface AdminSession {
   updated_at: string;
   position_seconds: number;
   is_paused: boolean;
+  /** Number of the session's last lifecycle transition; absent before lifecycle numbers existed. */
+  lifecycle_seq?: number | null;
   has_playback_control?: boolean;
   client_ip?: string;
   /** Server classification used to select the local or remote stream bitrate policy. */
@@ -4683,6 +4695,10 @@ export interface SectionItem {
   advisory_source?: string;
   status: "pending" | "matched" | "unmatched" | "ambiguous";
   show_status?: string;
+  /** "air_date" when the series labels episodes by date; see formatEpisodeLabel. */
+  episode_labels?: string;
+  /** An episode card's air date, sent when episode_labels is air_date. */
+  air_date?: string | null;
   rating_imdb: number | null;
   rating_tmdb?: number | null;
   rating_rt_critic?: number | null;
@@ -5260,32 +5276,6 @@ export interface AdminPlaybackActivity {
   buckets: AdminPlaybackActivityBucket[];
   reliability: AdminPlaybackReliability;
   profiles_active_24h: number;
-}
-
-// GET /admin/stats/top-activity. Episodes are rolled up to their series, so a
-// title's media_item_id is a series content id for TV.
-export interface AdminTopTitle {
-  media_item_id: string;
-  title: string;
-  media_type: string;
-  plays: number;
-  total_seconds: number;
-}
-
-export interface AdminTopProfile {
-  user_id: string | number; // v2 IDs are opaque strings; bridge fixtures retain numbers.
-  username: string;
-  profile_id: string;
-  profile_name: string;
-  plays: number;
-  total_seconds: number;
-}
-
-export interface AdminTopActivity {
-  days: number;
-  limit: number;
-  titles: AdminTopTitle[];
-  profiles: AdminTopProfile[];
 }
 
 // GET /admin/stats/timeseries. One point per sampled minute; minutes the

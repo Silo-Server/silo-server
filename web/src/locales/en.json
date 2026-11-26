@@ -377,6 +377,30 @@
       "value": "This value is out of range."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Include at least one special character, such as ! or #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Include at least one capital letter."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "This password is too long."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "This password is too short."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -627,6 +651,12 @@
     {
       "type": 0,
       "value": "Your session expired. Sign in again."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "While password sign-in is off, a sign-in provider people can use has to stay on. OpenID Connect also needs the server's public URL."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8021,6 +8051,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Cards"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Layout"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Table"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -49470,7 +49518,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Watch trends, top titles, household activity, device playback, and bandwidth."
+      "value": "Live streams, watch trends, top titles, household activity, device playback, and bandwidth."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -67869,7 +67917,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Check the router for UPnP, NAT-PMP, or PCP support."
+      "value": "Ask the router for a UPnP, NAT-PMP, or PCP port mapping."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67878,16 +67926,40 @@
       "value": "Port mapping"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Range: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " to "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Readiness checks do not start direct playback."
+      "value": "Turning this on starts the direct connection engine. It opens a UDP port and, when Port mapping is on, asks the router for a port mapping. Run check only reads the host's state."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Disabled by administrator"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Clamped to the allowed range"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67899,7 +67971,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "The direct connection engine could not start"
+      "value": "The direct connection engine stopped or could not start"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67930,6 +68002,12 @@
     {
       "type": 0,
       "value": "Invalid value; using off"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Invalid value; using the default"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -79144,6 +79222,20 @@
       "value": "Turn on a sign-in provider first. With password sign-in off and no provider on, only break-glass admins could sign in."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Set the server's public URL first. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " can't sign anyone in without it, so with password sign-in off only break-glass admins could sign in."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -79234,6 +79326,242 @@
       "value": "Let users create API keys"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Turn off password sign-in"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Only break-glass admins will sign in with a password. Everyone else signs in with "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " creates accounts at first sign-in, so if one of these people signs in with it before you link them, they get a new, separate account."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Link each one to a "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " account from its page in Users."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " account can't sign in until an admin links it"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " accounts can't sign in until an admin links them"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't check which accounts this affects. You can still turn it off."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Checking who signs in with a password"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "When "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " confirms one of these emails at sign-in, Silo connects that person to their account."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " account connects by email"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " accounts connect by email"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Show "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " more"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Show "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " more"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load more accounts. Try again."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Every account can still sign in after this."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Admin"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Email matching is off"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "No email"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "This doesn't sign anyone out. People who are already signed in stay signed in, their API keys keep working, and they can still approve new devices. To sign someone out, end their sessions from their page in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Users"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Turn off password sign-in?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "See every account in Users"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -79276,6 +79604,28 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Password sign-in is off, so "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " is how everyone except break-glass admins signs in. Turn password sign-in back on first, then turn "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " off."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -81297,7 +81647,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Watch trends, top titles, accounts, devices, and bandwidth."
+      "value": "Live streams, watch trends, top titles, accounts, devices, and bandwidth."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -101885,6 +102235,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Hide watched titles"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Each profile sees this collection without the titles it has watched, on its page, in its rows and in its count. Nothing is removed. A smart collection with a title limit picks its titles first, so it can show fewer."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -122024,6 +122386,16 @@
     {
       "type": 0,
       "value": "Last Air Date"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Lock "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

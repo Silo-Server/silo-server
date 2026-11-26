@@ -92,6 +92,17 @@ func writePlaybackSessionEndedError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
+var errPlaybackTransportSuperseded = errors.New("playback transport superseded")
+
+func writePlaybackTransportSupersededError(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, errPlaybackTransportSuperseded) {
+		return false
+	}
+	w.Header().Set(playback.ErrorHeader, playback.TransportSupersededCode)
+	writeError(w, http.StatusNotFound, playback.TransportSupersededCode, playback.TransportSupersededMessage)
+	return true
+}
+
 func preflightPlaybackFile(
 	ctx context.Context,
 	file *models.MediaFile,

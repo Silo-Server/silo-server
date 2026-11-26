@@ -616,6 +616,38 @@ source's `name`. They are built from the episode's stored rating columns by the
 same rules as a title page, so a stored 0 (unrated) or a value off the 0-10
 scale is left out, and an episode with no rating omits the field.
 
+## Episodes labeled by air date
+
+Some series number their episodes only so they sort: Sportarr gives a league's
+games `S2026E296`. Such a series carries `episode_labels: "air_date"`, and a
+client shows the episode's `air_date` (a calendar date, no time zone) where it
+would show the season and episode numbers. Sorting, next up and playback still
+use the numbers. An undated episode keeps its numbers, and an absent
+`episode_labels` means numbers, so a client needs no capability check. Later
+releases may add values; a client treats a value it doesn't know as absent and
+shows the numbers.
+
+The value comes from the series' metadata provider: a plugin's series
+`MetadataItem.metadata` sets `episode_labels` (`air_date` is the only value; any
+other is ignored). It is stored on the series. Identify, Reset to Provider and
+a Complete Refresh take it from the new answer, so matching a Sportarr league
+to a numbered show brings the numbers back. Other refreshes, "Replace all
+metadata" included, keep it when the providers send none, as they keep any
+other value the providers leave out. A refresh fills only empty episode dates, so
+an episode date a provider has since corrected takes "Replace all metadata".
+
+`episode_labels` appears on:
+
+- item detail of the series, and of its seasons and episodes (the series' value)
+- series and episode cards of home and library sections, Watch Tonight and
+  recommendation rows, catalog browse and search, library and personal
+  collections, favorites, the watchlist, watch history, Watch Together pickers
+  and the shuffle `next` card; their episode cards also carry `air_date`.
+  Season cards don't carry it.
+- watch detail (`getWatchDetail`) of an episode, with its `air_date`
+
+`/api/v1` and the Jellyfin-compatible API are unchanged.
+
 ## External IDs on cards
 
 Movie and series cards carry `imdb_id`, `tmdb_id`, and `tvdb_id`, the same IDs

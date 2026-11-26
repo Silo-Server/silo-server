@@ -284,8 +284,9 @@
     [data-compact-mobile] .detail-stream-actions {
       gap: 8px;
     }
+    /* max() keeps Button's minimum-font-size floor (one line plus borders). */
     [data-compact-mobile] .detail-stream-actions button {
-      min-height: 44px;
+      min-height: max(44px, calc(1lh + 2px));
     }
     .detail-mobile-menu-actions {
       display: block;
