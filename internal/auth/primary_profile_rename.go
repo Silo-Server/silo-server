@@ -39,8 +39,9 @@ func updatePreviousUsername(ctx context.Context, db interface {
 // A primary profile from a profile set keeps its name: the set names it.
 //
 // The caller holds the account's profile locks (pgstore.LockAccountForImport),
-// which every other writer of a profile's name takes before it reads the
-// names, so the names read here stay true until this transaction ends.
+// which a profile create, a profile rename, the profile set and the owner's
+// clear of a name take before they read the names, so none of them changes a
+// name between this read and the end of this transaction.
 //
 // The account row is already locked, and a writer that does not take those
 // locks may hold the primary profile's row and then wait for the account
