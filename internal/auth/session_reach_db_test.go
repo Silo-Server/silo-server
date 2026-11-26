@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"os"
@@ -349,7 +350,11 @@ func TestSessionOpenedViaReconcileMigrationDB(t *testing.T) {
 // session for the session list, and still one with no record of how it was
 // opened, which may not manage or read the account's keys. false is not
 // "opened with a password"; it could as well be an administrator acting as
-// the account. A recorded opened_via decides both questions.
+// the account. A recorded opened_via decides both questions. A session a
+// device key opened is limited when another app's grant enrolled the key,
+// or when its key row is missing (fail closed), and not when the key is the
+// person's own. Regression: another app's session read every session of the
+// account and could end any.
 func TestFlagOnlySessionUnlocksNothingDB(t *testing.T) {
 	env := newRecheckEnv(t, "flag_only", "")
 	ctx := t.Context()
@@ -358,14 +363,17 @@ func TestFlagOnlySessionUnlocksNothingDB(t *testing.T) {
 	for _, tc := range []struct {
 		label      string
 		stored     openedSession
+		keyVia     string
 		limited    bool
 		manageKeys bool
 	}{
-		{"flag false, no opened_via", openedSession{"", &no}, false, false},
-		{"flag true, no opened_via", openedSession{"", &yes}, true, false},
-		{"neither", openedSession{"", nil}, false, false},
-		{"opened with a password", openedSession{models.SessionOpenedPassword, &no}, false, true},
-		{"opened by device sign-in", openedSession{models.SessionOpenedDeviceLogin, &yes}, true, false},
+		{"flag false, no opened_via", openedSession{"", &no}, "", false, false},
+		{"flag true, no opened_via", openedSession{"", &yes}, "", true, false},
+		{"neither", openedSession{"", nil}, "", false, false},
+		{"opened with a password", openedSession{models.SessionOpenedPassword, &no}, "", false, true},
+		{"opened by device sign-in", openedSession{models.SessionOpenedDeviceLogin, &yes}, "", true, false},
+		{"opened by another app's key", openedSession{models.SessionOpenedAppKey, &no}, models.AppKeyEnrolledGrant, true, false},
+		{"opened by the person's own key", openedSession{models.SessionOpenedAppKey, &no}, models.AppKeyEnrolledSession, false, true},
 	} {
 		t.Run(tc.label, func(t *testing.T) {
 			id := uuid.NewString()
@@ -376,6 +384,12 @@ func TestFlagOnlySessionUnlocksNothingDB(t *testing.T) {
 			t.Cleanup(func() {
 				_, _ = env.pool.Exec(context.WithoutCancel(ctx), `DELETE FROM auth_sessions WHERE id = $1`, id)
 			})
+			if tc.keyVia != "" {
+				keyID := storeSessionDeviceKey(t, env.pool, env.user.ID, id, tc.keyVia)
+				t.Cleanup(func() {
+					_, _ = env.pool.Exec(context.WithoutCancel(ctx), `DELETE FROM auth_device_keys WHERE id = $1`, keyID)
+				})
+			}
 			limited, err := sessions.limitedToItself(ctx, id)
 			if err != nil || limited != tc.limited {
 				t.Fatalf("limited to itself = %v, %v, want %v", limited, err, tc.limited)
@@ -392,4 +406,27 @@ func TestFlagOnlySessionUnlocksNothingDB(t *testing.T) {
 			}
 		})
 	}
+}
+
+// storeSessionDeviceKey stores an active device key enrolled through
+// enrolledVia, records it as the key that opened sessionID, and returns its
+// id.
+func storeSessionDeviceKey(t *testing.T, pool *pgxpool.Pool, userID int, sessionID, enrolledVia string) string {
+	t.Helper()
+	publicKey := make([]byte, 65)
+	if _, err := rand.Read(publicKey); err != nil {
+		t.Fatal(err)
+	}
+	keyID, kind := uuid.NewString(), "device"
+	if enrolledVia == models.AppKeyEnrolledGrant {
+		kind = "app"
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO auth_device_keys (id, user_id, public_key, key_id, kind, name, enrolled_via)
+		VALUES ($1, $2, $3, $1::text, $4, 'Key '||$1::text, $5)`, keyID, userID, publicKey, kind, enrolledVia); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE auth_sessions SET device_key_id = $2 WHERE id = $1`, sessionID, keyID); err != nil {
+		t.Fatal(err)
+	}
+	return keyID
 }
