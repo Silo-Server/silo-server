@@ -394,6 +394,11 @@ func TestGetProfileSetETag(t *testing.T) {
 	if again := do(t, h, http.MethodGet, Prefix+"/profiles/set", "", map[string]string{"Authorization": "Bearer " + memberToken, "If-None-Match": tag}); again.Code != http.StatusNotModified {
 		t.Fatalf("matching If-None-Match = %d, want 304", again.Code)
 	}
+	// A compressing intermediary rewrites the tag to its weak form; the
+	// comparison is weak, so it still matches.
+	if weak := do(t, h, http.MethodGet, Prefix+"/profiles/set", "", map[string]string{"Authorization": "Bearer " + memberToken, "If-None-Match": "W/" + tag}); weak.Code != http.StatusNotModified {
+		t.Fatalf("weak If-None-Match = %d, want 304", weak.Code)
+	}
 	if other := do(t, h, http.MethodGet, Prefix+"/profiles/set", "", map[string]string{"Authorization": "Bearer " + memberToken, "If-None-Match": `"ps1-other"`}); other.Code != http.StatusOK {
 		t.Fatalf("another If-None-Match = %d, want 200", other.Code)
 	}
