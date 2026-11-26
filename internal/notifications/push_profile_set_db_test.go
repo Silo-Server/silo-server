@@ -380,33 +380,90 @@ func TestProfileSetWakeIsNeverClaimedDB(t *testing.T) {
 	h.assertNeverClaimed(repo, "delivered")
 }
 
-// One phone's slow relay call costs the other phones nothing, and no wake row
-// outlives its send in flight: the phone whose send ran out of time is
-// recorded failed, and the next phone is still sent. Regression: every phone
-// shared one deadline, so a slow relay left later phones unsent and their
-// rows in flight, counted as queued, until the daily retention run.
-func TestProfileSetWakeSlowPhoneDB(t *testing.T) {
+// A wake ends within its budget, however the relay behaves: with a relay
+// that never answers and more phones than the budget reaches, every row
+// ends failed as out of time, none in flight. Regression: a wake sent each
+// phone under its own long deadline, so one account's wake could run for
+// over half an hour while the next one started.
+func TestProfileSetWakeEndsWithinItsBudgetDB(t *testing.T) {
 	repo, pool := loginSessionPushDB(t)
 	registerForSession(t, repo, "live")
-	defer func(previous time.Duration) { profileSetPhoneTimeout = previous }(profileSetPhoneTimeout)
-	profileSetPhoneTimeout = 200 * time.Millisecond
+	registerAndroid(t, repo, "android-extra", 1, false)
+	defer func(previous time.Duration) { profileSetWakeBudget = previous }(profileSetWakeBudget)
+	profileSetWakeBudget = 300 * time.Millisecond
 
 	var calls atomic.Int32
 	node := profileSetWakeSystem(t, pool, repo, nil, nil)
 	node.pushSender.client = &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if calls.Add(1) == 1 {
-			<-req.Context().Done() // the first phone's relay call hangs
-			return nil, req.Context().Err()
-		}
-		return relayResponse(http.StatusOK, `{"request_id":"r","status":"accepted"}`), nil
+		calls.Add(1)
+		<-req.Context().Done() // the relay never answers
+		return nil, req.Context().Err()
 	})}
+	started := time.Now()
 	if !node.WakeProfileSetDevices(t.Context(), 7) {
 		t.Fatal("wake answered false")
 	}
+	outOfTime := PushOutcomeFailed + ":wake_out_of_time"
+	waitForWakeRows(t, pool, outOfTime, outOfTime, outOfTime)
+	if elapsed := time.Since(started); elapsed > profileSetWakeBudget+profileSetFinalizeTimeout {
+		t.Fatalf("the wake took %v, want at most its budget %v plus the final write's %v", elapsed, profileSetWakeBudget, profileSetFinalizeTimeout)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("relay calls = %d, want 1: the phones after the first are past the budget", calls.Load())
+	}
+}
 
-	waitForWakeRows(t, pool, PushOutcomeDelivered+":", PushOutcomeFailed+":wake_send_timed_out")
-	if calls.Load() != 2 {
-		t.Fatalf("relay calls = %d, want 2: the second phone must still be sent", calls.Load())
+// A wake for an account does not start while the previous one is still in
+// flight on this server, and starts again once it ends. Regression: nothing
+// kept one account's wakes apart but the relay answering in time.
+func TestProfileSetWakeWaitsForTheWakeInFlightDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	registerAndroid(t, repo, "android-held", 1, false)
+	h := wakeHarness{t: t, pool: pool}
+	held, release := make(chan struct{}, 1), make(chan struct{})
+	var calls atomic.Int32
+	node := profileSetWakeSystem(t, pool, repo, nil, nil)
+	node.pushSender.client = &http.Client{Transport: relayRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		if calls.Add(1) == 1 {
+			held <- struct{}{}
+			<-release // the first wake's send stays in flight until the test lets it go
+		}
+		return relayResponse(http.StatusOK, `{"request_id":"r","status":"accepted"}`), nil
+	})}
+
+	if !node.WakeProfileSetDevices(t.Context(), 7) {
+		t.Fatal("first wake answered false")
+	}
+	<-held
+	h.pastTheMinute() // the account's limit no longer holds the next wake back
+	if !node.WakeProfileSetDevices(t.Context(), 7) || h.attempts() != 1 || calls.Load() != 1 {
+		t.Fatalf("wake while one is in flight: %d rows, %d relay calls; want it covered by the one in flight (true, 1, 1)", h.attempts(), calls.Load())
+	}
+
+	close(release)
+	deadline := time.After(30 * time.Second)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for node.profileSetWakeInFlight(7) {
+		select {
+		case <-deadline:
+			t.Fatal("the first wake never ended")
+		case <-poll.C:
+		}
+	}
+	h.pastTheMinute()
+	if !node.WakeProfileSetDevices(t.Context(), 7) || h.attempts() != 2 {
+		t.Fatalf("wake after the first ended: %d rows, want 2", h.attempts())
+	}
+	waitForWakeRows(t, pool, PushOutcomeDelivered+":", PushOutcomeDelivered+":")
+}
+
+// One wake of an account ends before the account's limit lets the next one
+// start. Regression: a budget raised past the interval, or an interval
+// lowered under the budget, would let an account's wakes overlap.
+func TestProfileSetWakeBudgetIsShorterThanTheInterval(t *testing.T) {
+	if profileSetWakeBudget <= 0 || profileSetWakeBudget >= profileSetWakeInterval {
+		t.Fatalf("wake budget %v, want more than zero and less than the interval %v", profileSetWakeBudget, profileSetWakeInterval)
 	}
 }
 

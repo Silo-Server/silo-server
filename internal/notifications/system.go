@@ -97,6 +97,10 @@ type System struct {
 	pushDeviceRepo              *PushDeviceRepository
 	pushDispatcher              *PushDispatcher
 	pushSender                  *pushSender
+	// wakesInFlight marks the accounts with a profile set wake in flight on
+	// this server (claimProfileSetWake); wakesMu guards it.
+	wakesMu       sync.Mutex
+	wakesInFlight map[int]struct{}
 	// serverChannelWorker sweeps release_events into admin broadcast posts;
 	// nil without the at-rest cipher.
 	serverChannelWorker *serverChannelWorker

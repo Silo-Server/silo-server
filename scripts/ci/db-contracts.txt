@@ -510,7 +510,8 @@
 # it one row at a time, before session cleanup removes its evidence.
 ./internal/notifications TestProfileSetWakeDebounceDB
 ./internal/notifications TestProfileSetWakeIsNeverClaimedDB
-./internal/notifications TestProfileSetWakeSlowPhoneDB
+./internal/notifications TestProfileSetWakeEndsWithinItsBudgetDB
+./internal/notifications TestProfileSetWakeWaitsForTheWakeInFlightDB
 ./internal/notifications TestProfileSetWakePanickingSendDB
 ./internal/notifications TestProfileSetWakeSurvivesDeviceRemovalDB
 ./internal/notifications TestProfileSetWakeCapsPhonesDB
