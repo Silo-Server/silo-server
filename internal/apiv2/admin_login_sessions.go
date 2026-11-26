@@ -31,7 +31,7 @@ type LoginSessionCapabilities struct {
 	// RevokeOtherSessions is false in demo mode for a caller that is not an
 	// administrator, and for a session limited to itself (opened by device
 	// sign-in): deleteSession then ends only the caller's own session.
-	RevokeOtherSessions bool `json:"revoke_other_sessions" doc:"Whether deleteSession may revoke the caller's sessions other than the one making the request. False in demo mode for a caller that is not an administrator, and for a session opened by device sign-in (see listSessions); either may still revoke the current session"`
+	RevokeOtherSessions bool `json:"revoke_other_sessions" doc:"Whether deleteSession may revoke the caller's sessions other than the one making the request. False in demo mode for a caller that is not an administrator, and for a session opened by device sign-in (see listSessions); either may still revoke the current session. Both see the account's other sessions in listSessions by id only"`
 }
 
 func registerLoginSessionCapabilities(reg *Registry) {

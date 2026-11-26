@@ -27,7 +27,7 @@ devices and playback sessions. All paths below use `/api/v2`.
 | Operation | Authorization and behavior |
 | --- | --- |
 | `GET /auth/sessions/capabilities` (`getLoginSessionCapabilities`) | Authenticated account. Reports `available`, `last_seen`, `admin_management` and `revoke_other_sessions`, with the standard capability state, permission answer and revision. `revoke_other_sessions` is false in [demo mode](#demo-mode) for a caller that is not an administrator, and for a session opened by device sign-in, which may end only itself. |
-| `GET /auth/sessions` (`listSessions`) | Lists the caller's live, unrevoked login sessions, newest first, with cursor pagination. Account-level access does not require profile selection. |
+| `GET /auth/sessions` (`listSessions`) | Lists the caller's live, unrevoked login sessions, newest first, with cursor pagination. Account-level access does not require profile selection. A session opened by device sign-in, and in [demo mode](#demo-mode) a caller that is not an administrator, sees another session's item by its `id` and `current` only. |
 | `DELETE /auth/sessions/{id}` (`deleteSession`) | Revokes a session owned by the caller. Unknown or another account's session returns 404. Ending another session of the same account is 403 `permission_denied` for a session opened by device sign-in, which may end only itself, and in [demo mode](#demo-mode) for a caller that is not an administrator. |
 | `GET /admin/users/{user_id}/login-sessions` (`listAdminUserLoginSessions`) | Acting admin. Lists a selected account's live login sessions. The cursor is bound to the operation, administrator and target account. |
 | `DELETE /admin/users/{user_id}/login-sessions/{session_id}` (`deleteAdminUserLoginSession`) | Acting admin. Revokes one session of the selected account; 204 on success, 404 for an unknown or mismatched session. |
@@ -248,6 +248,7 @@ The change revokes every other session of the account, since each was opened wit
 the temporary password.
 In [demo mode](#demo-mode) an account that is not an administrator cannot change its
 password, a temporary one included, so such an account can only read `GET /account/me` and
+`GET /account/password/capability` (which answers `allowed: false`), refresh its tokens, and
 sign out until an administrator sets it a regular password or turns demo mode off. Don't give
 a demo's shared account a temporary password.
 An administrator impersonating the account is not restricted. Jellyfin and
@@ -406,6 +407,8 @@ the caller's own values, since they have no null form. The page is ordered by `i
 cursor holds only the last id, so neither tells which sessions are newer. A cursor minted for
 one kind of caller is `400 invalid_cursor` for the other. `limit` and `page.has_more` behave as
 for any caller.
+In [demo mode](#demo-mode) a caller that is not an administrator gets this same page, since
+the account's other sessions are other visitors'.
 
 `deleteSession` from a limited caller ends its own session as for any caller. Another session
 of the account is `403 permission_denied`, with a detail saying a device signed in with a code
@@ -1099,6 +1102,12 @@ A visitor cannot:
   `linkAccountIdentityWithCredentials`, `linkAccountIdentityWithNetwork`,
   `deleteAccountIdentity`);
 - end another session of the account (`deleteSession` on any other session);
+- see another session of the account in `listSessions` beyond its `id` and `current`: the
+  page is the one a [session opened by device sign-in](#sessions-opened-by-device-sign-in)
+  gets, ordered by id, and a cursor from before demo mode was switched on or off is
+  `400 invalid_cursor`. When the process has never read the setting, `listSessions` is
+  `500 internal_error` for such a caller rather than the full page, and a personal API key of
+  the account, which has no session of its own, is `403 permission_denied`;
 - create or revoke personal API keys, or create, change or delete profiles.
 
 External sign-in enforces the same rule where every linking flow attaches its identity, in
@@ -1106,8 +1115,11 @@ account resolution: a linking flow that ends on an account that is not an admini
 demo mode is on, including one started before demo mode was turned on, is refused with
 `not_permitted` and attaches nothing. Email auto-match (`auth.email_auto_match`) does not apply
 in demo mode, as when it is off, so a provider sign-in whose verified email equals the demo
-account's goes on as an unmatched one: account creation refuses the taken email
-(`409 email_in_use`) where the binding's `auto_provision` is on, and the sign-in is
+account's goes on as an unmatched one: account creation refuses the taken email where the
+binding's `auto_provision` is on (`409 email_in_use` on the JSON sign-ins, `login` through a
+directory provider and `signInWithNetworkIdentity`; the browser redirect flow carries no status
+and reports `reason=email_in_use` on `/login?error=oauth_failed`, or `error=email_in_use` on a
+native app's redirect), and the sign-in is
 `account_required` where it is off. Matching applies to no account in demo mode, not only the
 shared demo account. Demo mode is read before resolution's transaction; a process that has
 never read it fails the link and matches nothing.

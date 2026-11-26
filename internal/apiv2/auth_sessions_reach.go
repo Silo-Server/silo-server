@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 )
 
@@ -15,6 +16,8 @@ const (
 		"It still gets every live session of the account, but another session's item carries only its id and current: device_name and ip_address are empty, " +
 		"device_id and device_platform are absent, last_seen_at is null, and created_at and expires_at repeat the caller's own. " +
 		"For such a caller the page is ordered by id, not newest first, and a cursor from the other kind of caller is invalid_cursor."
+	sessionReachDemoListDescription = "In demo mode a caller that is not an administrator gets the same page: demo visitors share one account, so its other sessions are other visitors'. " +
+		"When the server cannot read whether demo mode is on, such a caller gets 500 internal_error rather than the full page, and an API key of such a caller, which has no session of its own, gets 403 permission_denied."
 	sessionReachDeleteDescription = "A session opened by device sign-in (see listSessions) may revoke only itself: " +
 		"another session of the account is 403 permission_denied, and a session of another account or an unknown id is 404 as for every caller."
 )
@@ -90,4 +93,22 @@ func (reg *Registry) limitedLoginSessionPage(ctx context.Context, cursors *Curso
 	out := &LoginSessionCollectionOutput{Body: LoginSessionCollection{Collection: Paginated(items, next)}}
 	out.Body.CurrentSession.Value = &own
 	return out, nil
+}
+
+// demoVisitorListing reports whether listSessions answers the caller with
+// limitedLoginSessionPage because demo mode restricts it. Demo visitors share
+// one account, so its other sessions are other visitors': each sees them as a
+// session limited to itself does. A setting that can't be read refuses, as
+// deleteSession does, rather than fall back to the full page; so does a
+// restricted caller with no session of its own (an API key), which has no
+// item of its own to show in full.
+func demoVisitorListing(ctx context.Context, settings apimw.DemoSettingsReader, claims *auth.Claims) (bool, *Problem) {
+	restricted, err := demoRestricted(ctx, settings)
+	if err != nil {
+		return false, serviceProblem(err)
+	}
+	if restricted && claims.SessionID == "" {
+		return false, demoRestrictedProblem()
+	}
+	return restricted, nil
 }
