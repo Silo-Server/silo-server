@@ -34,9 +34,8 @@ var allowedSideWrites = map[string]string{
 	"device_login_requests_auth_session_id_fkey": "deleting a session nulls the request that produced it: session row, " +
 		"then request row, the order every path takes",
 	"device_login_requests_preapproved_session_id_fkey": "deleting a session nulls the requests it approved in advance: " +
-		"session row, then request row, the order every path takes. The hourly expired-session cleanup and an " +
-		"account-wide revoke of the same account can still meet over such a pair; the cleanup skips locked " +
-		"sessions and its job runs again",
+		"session row, then request row, the order every path takes; the expired-session cleanup skips a session " +
+		"whose request row another transaction holds",
 	// Actions when a key is deleted.
 	"auth_device_keys_person_key_fkey": "only deleting an account deletes person keys, under the account lock and " +
 		"after its device keys",

@@ -33,7 +33,8 @@ func TestKeySessionSweepMissedEndsAtRefreshDB(t *testing.T) {
 			if saved == nil {
 				_, _ = d.pool.Exec(context.Background(), `DELETE FROM server_settings WHERE key = $1`, key)
 			} else {
-				_, _ = d.pool.Exec(context.Background(), `UPDATE server_settings SET value = $2 WHERE key = $1`, key, *saved)
+				_, _ = d.pool.Exec(context.Background(), `INSERT INTO server_settings (key, value) VALUES ($1, $2)
+				ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, key, *saved)
 			}
 		})
 	}

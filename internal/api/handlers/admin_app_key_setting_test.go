@@ -53,7 +53,8 @@ func newSwitchWriteFixture(t *testing.T) *switchWriteFixture {
 			if value == nil {
 				_, _ = pool.Exec(context.Background(), `DELETE FROM server_settings WHERE key = $1`, key)
 			} else {
-				_, _ = pool.Exec(context.Background(), `UPDATE server_settings SET value = $2 WHERE key = $1`, key, *value)
+				_, _ = pool.Exec(context.Background(), `INSERT INTO server_settings (key, value) VALUES ($1, $2)
+				ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, key, *value)
 			}
 		}
 	})
@@ -213,7 +214,8 @@ func TestAppKeysOffJudgedOnTheBatchLocalSettingDB(t *testing.T) {
 		if savedLocal == nil {
 			_, _ = f.pool.Exec(context.Background(), `DELETE FROM server_settings WHERE key = $1`, config.AuthLocalPasswordLoginSettingKey)
 		} else {
-			_, _ = f.pool.Exec(context.Background(), `UPDATE server_settings SET value = $2 WHERE key = $1`, config.AuthLocalPasswordLoginSettingKey, *savedLocal)
+			_, _ = f.pool.Exec(context.Background(), `INSERT INTO server_settings (key, value) VALUES ($1, $2)
+				ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, config.AuthLocalPasswordLoginSettingKey, *savedLocal)
 		}
 	})
 	// A break-glass admin, so turning local passwords off passes its own

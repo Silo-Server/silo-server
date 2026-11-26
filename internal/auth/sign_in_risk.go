@@ -217,13 +217,17 @@ func SignInSettingsOf(local, publicURL string) SignInSettings {
 	return SignInSettings{localOn: settingBool(local, true), publicURL: publicURL}
 }
 
+// storedSignInSettings reads both settings in one statement, so a read never
+// mixes a value from before a settings write with one from after it.
 func storedSignInSettings(ctx context.Context, db dbQuerier) (SignInSettings, error) {
-	local, err := localPasswordLoginAllowed(ctx, db)
-	if err != nil {
-		return SignInSettings{}, err
+	var local, publicURL string
+	if err := db.QueryRow(ctx, `SELECT
+			COALESCE((SELECT value FROM server_settings WHERE key = $1), ''),
+			COALESCE((SELECT value FROM server_settings WHERE key = $2), '')`,
+		config.AuthLocalPasswordLoginSettingKey, config.ServerPublicURLSettingKey).Scan(&local, &publicURL); err != nil {
+		return SignInSettings{}, fmt.Errorf("reading the sign-in settings: %w", err)
 	}
-	publicURL, err := readServerSetting(ctx, db, config.ServerPublicURLSettingKey)
-	return SignInSettings{localOn: local, publicURL: publicURL}, err
+	return SignInSettings{localOn: settingBool(local, true), publicURL: strings.TrimSpace(publicURL)}, nil
 }
 
 // accountsAtRisk is AccountsAtRisk under settings, and reports whether any
