@@ -51,6 +51,9 @@ type MatchCandidate struct {
 	// the conflict; otherwise the key remains quarantined through persistence.
 	ConflictingProviderIDKeys []string `json:"-"`
 	titleRank                 int
+	// providerRanks holds this work's position in each provider's own search
+	// results, keyed by provider slug; 0 is the provider's first result.
+	providerRanks map[string]int
 }
 
 var canonicalCandidateIDKeys = []string{"tmdb", "tvdb", "imdb"}
@@ -303,6 +306,7 @@ func NormalizeCandidatesForLanguage(results []SearchResult, contentType, languag
 
 	ordered := make([]string, 0)
 	buckets := make(map[string]*bucket)
+	providerResultCounts := make(map[string]int)
 
 	for _, sr := range results {
 		sr.ProviderIDs = sanitizeCandidateProviderIDs(sr.ProviderIDs)
@@ -336,6 +340,7 @@ func NormalizeCandidatesForLanguage(results []SearchResult, contentType, languag
 					ContentType:          contentType,
 					ProviderIDs:          make(map[string]string),
 					ConfirmedProviderIDs: make(map[string]string),
+					providerRanks:        make(map[string]int),
 					ImageURL:             sr.ImageURL,
 					Overview:             sr.Overview,
 				},
@@ -370,6 +375,13 @@ func NormalizeCandidatesForLanguage(results []SearchResult, contentType, languag
 		if sr.Provider != "" {
 			b.sources[sr.Provider] = true
 			provider := strings.ToLower(strings.TrimSpace(sr.Provider))
+			// Results arrive in each provider's own order, so counting them per
+			// provider recovers that order across merged buckets.
+			rank := providerResultCounts[provider]
+			providerResultCounts[provider]++
+			if _, ranked := b.candidate.providerRanks[provider]; !ranked {
+				b.candidate.providerRanks[provider] = rank
+			}
 			if slices.Contains(canonicalCandidateIDKeys, provider) && strings.TrimSpace(sr.ProviderIDs[provider]) != "" {
 				value := strings.TrimSpace(sr.ProviderIDs[provider])
 				if existing := b.confirmedIDValues[provider]; existing != "" && existing != value {
@@ -1005,7 +1017,75 @@ func tieBreakWinner(hints *MatchHints, scoredCandidates []scoredMatchCandidate) 
 	if winner, ok := duplicateTieBreakWinner(hints, scoredCandidates); ok {
 		return winner, true
 	}
-	return providerOrderExactTieBreakWinner(hints, scoredCandidates)
+	if winner, ok := providerOrderExactTieBreakWinner(hints, scoredCandidates); ok {
+		return winner, true
+	}
+	return providerFirstResultTieBreakWinner(hints, scoredCandidates)
+}
+
+// providerFirstResultTieBreakWinner settles a tie between movies that all
+// carry the folder's exact title, year and type, as when TMDB lists a
+// well-known film beside smaller productions of the same name and year. The
+// folder offers nothing else to tell them apart, so the winner is the first
+// result of the provider that returned them all, which ranks its own results
+// (TMDB by popularity). The tie stays ambiguous when any tied candidate is a
+// weaker match, when that provider listed something else first, or when two
+// such providers put different films first. Series are left to episode
+// validation.
+func providerFirstResultTieBreakWinner(hints *MatchHints, scoredCandidates []scoredMatchCandidate) (*MatchCandidate, bool) {
+	if hints == nil || !isMovieTypeAlias(strings.ToLower(strings.TrimSpace(hints.Type))) {
+		return nil, false
+	}
+	contenders := topTieGroup(scoredCandidates)
+	if len(contenders) < 2 {
+		return nil, false
+	}
+	for _, contender := range contenders {
+		if !exactTitleYearTypeMatch(hints, contender.candidate) {
+			return nil, false
+		}
+	}
+
+	winner := -1
+	for provider := range contenders[0].candidate.providerRanks {
+		if nonCorroboratingSources[provider] {
+			continue
+		}
+		first, returnedAll := providerFirstContender(provider, contenders)
+		if !returnedAll {
+			continue
+		}
+		if first < 0 {
+			return nil, false // the provider listed another film first
+		}
+		if winner >= 0 && winner != first {
+			return nil, false // providers disagree on their first film
+		}
+		winner = first
+	}
+	if winner < 0 {
+		return nil, false
+	}
+	chosen := contenders[winner].candidate
+	chosen.MatchReasons = append(slices.Clone(chosen.MatchReasons), "provider_first_result")
+	return &chosen, true
+}
+
+// providerFirstContender reports whether provider returned every contender
+// and, if it did, which contender was its first result (-1 when its first
+// result is not among them).
+func providerFirstContender(provider string, contenders []scoredMatchCandidate) (int, bool) {
+	first := -1
+	for i, contender := range contenders {
+		rank, ok := contender.candidate.providerRanks[provider]
+		if !ok {
+			return -1, false
+		}
+		if rank == 0 {
+			first = i
+		}
+	}
+	return first, true
 }
 
 func logScoredMatchCandidates(hints *MatchHints, scoredCandidates []scoredMatchCandidate) {
