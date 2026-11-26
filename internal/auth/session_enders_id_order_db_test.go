@@ -124,72 +124,69 @@ func (e *keyEnv) requireLocksInIDOrder(t *testing.T, sessions []string, end func
 func TestSessionEndersLockInIDOrderDB(t *testing.T) {
 	env := newKeyEnv(t, "idorder")
 	t.Cleanup(saveSettings(t, env.pool, config.AuthAppKeySignInSettingKey))
-	ctx := t.Context()
-	session := func(userID int, via string, deviceKey *string, impersonator *int) func(*testing.T, string) {
-		return func(t *testing.T, id string) {
-			s := models.AuthSession{ID: id, UserID: userID, DeviceName: "device", ExpiresAt: time.Now().Add(time.Hour),
-				OpenedVia: via, DeviceKeyID: deviceKey, ImpersonatorUserID: impersonator}
-			if impersonator != nil {
-				now := time.Now()
-				s.ImpersonationStartedAt = &now
-			}
-			if err := env.svc.sessions.Create(t.Context(), s); err != nil {
-				t.Fatal(err)
-			}
-		}
+	cases := env.idOrderCases()
+	for i, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			env.setSetting(t, config.AuthAppKeySignInSettingKey, "true")
+			c.run(t, fmt.Sprintf("idorder-%d", i))
+		})
 	}
+}
+
+// idOrderCase is one session ender of TestSessionEndersLockInIDOrderDB.
+type idOrderCase struct {
+	name string
+	run  func(t *testing.T, label string)
+}
+
+// idOrderCases gives each ender eight sessions of the kinds it takes.
+func (e *keyEnv) idOrderCases() []idOrderCase {
 	keyed := func(t *testing.T, label string) (*models.User, string) {
-		user := env.localAccount(t, label, models.RoleUser)
-		_, _, enrolled := env.enroll(t, user)
+		user := e.localAccount(t, label, models.RoleUser)
+		_, _, enrolled := e.enroll(t, user)
 		return user, enrolled.DeviceID
 	}
-	inAccount := func(userID int, end func(context.Context, pgx.Tx) error) func(context.Context) error {
-		return env.inAccountTx(userID, end)
-	}
-	cases := []struct {
-		name string
-		run  func(t *testing.T, label string)
-	}{
+	return []idOrderCase{
 		{"the switch-off sweep", func(t *testing.T, label string) {
 			user, key := keyed(t, label)
-			ids := env.storeSessions(t, 8, session(user.ID, models.SessionOpenedAppKey, &key, nil))
-			env.requireLocksInIDOrder(t, ids, func(ctx context.Context) error { return switchOff(ctx, env.pool) })
+			ids := e.storeSessions(t, 8, e.sessionOf(user.ID, models.SessionOpenedAppKey, &key, nil))
+			e.requireLocksInIDOrder(t, ids, func(ctx context.Context) error { return switchOff(ctx, e.pool) })
 		}},
 		{"ending all of an account's sessions", func(t *testing.T, label string) {
-			user := env.localAccount(t, label, models.RoleUser)
-			ids := env.storeSessions(t, 8, session(user.ID, models.SessionOpenedPassword, nil, nil))
-			env.requireLocksInIDOrder(t, ids, inAccount(user.ID, func(ctx context.Context, tx pgx.Tx) error {
+			user := e.localAccount(t, label, models.RoleUser)
+			ids := e.storeSessions(t, 8, e.sessionOf(user.ID, models.SessionOpenedPassword, nil, nil))
+			e.requireLocksInIDOrder(t, ids, e.inAccountTx(user.ID, func(ctx context.Context, tx pgx.Tx) error {
 				return revokeSignInsInTransaction(ctx, tx, user.ID, nil)
 			}))
 		}},
 		{"the administrator ending all of an account's sessions", func(t *testing.T, label string) {
-			user := env.localAccount(t, label, models.RoleUser)
-			admin := env.localAccount(t, label+"-admin", models.RoleAdmin)
-			ids := env.storeSessions(t, 8, session(user.ID, models.SessionOpenedPassword, nil, nil))
-			env.requireLocksInIDOrder(t, ids, func(ctx context.Context) error {
-				_, err := env.svc.sessions.RevokeAsAdmin(ctx, admin.ID, user.ID, nil)
+			user := e.localAccount(t, label, models.RoleUser)
+			admin := e.localAccount(t, label+"-admin", models.RoleAdmin)
+			ids := e.storeSessions(t, 8, e.sessionOf(user.ID, models.SessionOpenedPassword, nil, nil))
+			e.requireLocksInIDOrder(t, ids, func(ctx context.Context) error {
+				_, err := e.svc.sessions.RevokeAsAdmin(ctx, admin.ID, user.ID, nil)
 				return err
 			})
 		}},
 		{"revoking one device key", func(t *testing.T, label string) {
 			user, key := keyed(t, label)
-			ids := env.storeSessions(t, 8, session(user.ID, models.SessionOpenedAppKey, &key, nil))
-			env.requireLocksInIDOrder(t, ids, func(ctx context.Context) error {
-				return NewAppKeyRepository(env.pool).RevokeDeviceKey(ctx, user.ID, key)
+			ids := e.storeSessions(t, 8, e.sessionOf(user.ID, models.SessionOpenedAppKey, &key, nil))
+			e.requireLocksInIDOrder(t, ids, func(ctx context.Context) error {
+				return NewAppKeyRepository(e.pool).RevokeDeviceKey(ctx, user.ID, key)
 			})
 		}},
 		{"revoking an account's keys", func(t *testing.T, label string) {
 			user, key := keyed(t, label)
-			ids := env.storeSessions(t, 8, session(user.ID, models.SessionOpenedAppKey, &key, nil))
-			env.requireLocksInIDOrder(t, ids, inAccount(user.ID, func(ctx context.Context, tx pgx.Tx) error {
+			ids := e.storeSessions(t, 8, e.sessionOf(user.ID, models.SessionOpenedAppKey, &key, nil))
+			e.requireLocksInIDOrder(t, ids, e.inAccountTx(user.ID, func(ctx context.Context, tx pgx.Tx) error {
 				return revokeAccountKeysTx(ctx, tx, user.ID)
 			}))
 		}},
 		{"unlinking an identity", func(t *testing.T, _ string) {
-			_, enrolled := env.enrollFromProvider(t)
-			ids := env.storeSessions(t, 8, session(env.user.ID, models.SessionOpenedAppKey, &enrolled.DeviceID, nil))
-			env.requireLocksInIDOrder(t, ids, inAccount(env.user.ID, func(ctx context.Context, tx pgx.Tx) error {
-				return revokeIdentityKeysTx(ctx, tx, env.user.ID, env.identityID)
+			_, enrolled := e.enrollFromProvider(t)
+			ids := e.storeSessions(t, 8, e.sessionOf(e.user.ID, models.SessionOpenedAppKey, &enrolled.DeviceID, nil))
+			e.requireLocksInIDOrder(t, ids, e.inAccountTx(e.user.ID, func(ctx context.Context, tx pgx.Tx) error {
+				return revokeIdentityKeysTx(ctx, tx, e.user.ID, e.identityID)
 			}))
 		}},
 		{"deleting an account", func(t *testing.T, label string) {
@@ -197,46 +194,56 @@ func TestSessionEndersLockInIDOrderDB(t *testing.T) {
 			// password one: deleting the keys locks only theirs.
 			user, key := keyed(t, label)
 			n := 0
-			ids := env.storeSessions(t, 8, func(t *testing.T, id string) {
+			ids := e.storeSessions(t, 8, func(t *testing.T, id string) {
 				n++
 				if n%2 == 0 {
-					session(user.ID, models.SessionOpenedPassword, nil, nil)(t, id)
+					e.sessionOf(user.ID, models.SessionOpenedPassword, nil, nil)(t, id)
 				} else {
-					session(user.ID, models.SessionOpenedAppKey, &key, nil)(t, id)
+					e.sessionOf(user.ID, models.SessionOpenedAppKey, &key, nil)(t, id)
 				}
 			})
-			env.requireLocksInIDOrder(t, ids, func(ctx context.Context) error {
-				_, err := NewUserRepository(env.pool).MutateAdminAccount(ctx, user.ID, -1, nil,
+			e.requireLocksInIDOrder(t, ids, func(ctx context.Context) error {
+				_, err := NewUserRepository(e.pool).MutateAdminAccount(ctx, user.ID, -1, nil,
 					func(*models.User, pgx.Tx) (bool, error) { return true, nil })
 				return err
 			})
 		}},
 		{"replacing a temporary password", func(t *testing.T, label string) {
-			user := env.localAccount(t, label, models.RoleUser)
+			user := e.localAccount(t, label, models.RoleUser)
 			keep := uuid.NewString()
-			session(user.ID, models.SessionOpenedPassword, nil, nil)(t, keep)
-			ids := env.storeSessions(t, 8, session(user.ID, models.SessionOpenedPassword, nil, nil))
+			e.sessionOf(user.ID, models.SessionOpenedPassword, nil, nil)(t, keep)
+			ids := e.storeSessions(t, 8, e.sessionOf(user.ID, models.SessionOpenedPassword, nil, nil))
 			var hash string
-			if err := env.pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id = $1`, user.ID).Scan(&hash); err != nil {
+			if err := e.pool.QueryRow(t.Context(), `SELECT password_hash FROM users WHERE id = $1`, user.ID).Scan(&hash); err != nil {
 				t.Fatal(err)
 			}
-			env.requireLocksInIDOrder(t, ids, func(ctx context.Context) error {
-				return NewUserRepository(env.pool).ReplaceTemporaryPassword(ctx, user.ID, hash, "a new long password 9", keep)
+			e.requireLocksInIDOrder(t, ids, func(ctx context.Context) error {
+				return NewUserRepository(e.pool).ReplaceTemporaryPassword(ctx, user.ID, hash, "a new long password 9", keep)
 			})
 		}},
 		{"ending sessions viewing as an account after a role change", func(t *testing.T, label string) {
-			user := env.localAccount(t, label, models.RoleUser)
-			admin := env.localAccount(t, label+"-admin", models.RoleAdmin)
-			ids := env.storeSessions(t, 8, session(user.ID, models.SessionOpenedImpersonation, nil, &admin.ID))
-			env.requireLocksInIDOrder(t, ids, inAccount(user.ID, func(ctx context.Context, tx pgx.Tx) error {
+			user := e.localAccount(t, label, models.RoleUser)
+			admin := e.localAccount(t, label+"-admin", models.RoleAdmin)
+			ids := e.storeSessions(t, 8, e.sessionOf(user.ID, models.SessionOpenedImpersonation, nil, &admin.ID))
+			e.requireLocksInIDOrder(t, ids, e.inAccountTx(user.ID, func(ctx context.Context, tx pgx.Tx) error {
 				return endImpersonationsInvolving(ctx, tx, user.ID)
 			}))
 		}},
 	}
-	for i, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			env.setSetting(t, config.AuthAppKeySignInSettingKey, "true")
-			c.run(t, fmt.Sprintf("idorder-%d", i))
-		})
+}
+
+// sessionOf stores a session for userID, opened via via, with the device key
+// and impersonator given, under the id it is called with.
+func (e *keyEnv) sessionOf(userID int, via string, deviceKey *string, impersonator *int) func(*testing.T, string) {
+	return func(t *testing.T, id string) {
+		s := models.AuthSession{ID: id, UserID: userID, DeviceName: "device", ExpiresAt: time.Now().Add(time.Hour),
+			OpenedVia: via, DeviceKeyID: deviceKey, ImpersonatorUserID: impersonator}
+		if impersonator != nil {
+			now := time.Now()
+			s.ImpersonationStartedAt = &now
+		}
+		if err := e.svc.sessions.Create(t.Context(), s); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

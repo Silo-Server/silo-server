@@ -41,7 +41,7 @@ func (h *AdminHandler) checkAppKeySetting(ctx context.Context, tx pgx.Tx, actorI
 	}
 	if err := auth.CheckSwitchOffActor(ctx, tx, actorID); err != nil {
 		if errors.Is(err, auth.ErrOwnershipChanging) {
-			return &APIError{Status: http.StatusConflict, Code: "conflict", Message: "The server's ownership is changing. Save again."}
+			return &APIError{Status: http.StatusConflict, Code: codeConflict, Message: "The server's ownership is changing. Save again."}
 		}
 		return ownerError(err)
 	}

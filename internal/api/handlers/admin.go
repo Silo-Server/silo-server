@@ -1656,6 +1656,9 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 // codeInternalError is the API error code of a server-side failure.
 const codeInternalError = "internal_error"
 
+// codeConflict is the error code of a write to make again.
+const codeConflict = "conflict"
+
 // ApplyAdminSettingsInTx writes values through the admin settings write path
 // (the same normalization, validation, and settings lock) inside the caller's
 // transaction. Nothing is published until the caller runs publish after its
@@ -1889,7 +1892,7 @@ func (h *AdminHandler) updateAdminSetting(ctx context.Context, tx pgx.Tx, key, v
 	req := updateSettingRequest{Value: value}
 
 	if h.SettingsRepo == nil {
-		return AdminSettingUpdateResult{}, nil, &APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Settings store not configured"}
+		return AdminSettingUpdateResult{}, nil, &APIError{Status: http.StatusInternalServerError, Code: codeInternalError, Message: "Settings store not configured"}
 	}
 
 	if key == "" {
@@ -2231,7 +2234,7 @@ func (h *AdminHandler) updateAdminSetting(ctx context.Context, tx pgx.Tx, key, v
 		return AdminSettingUpdateResult{}, nil, &APIError{Status: http.StatusBadRequest, Code: validationCode, Message: validationErr.Error()}
 	}
 	if err != nil {
-		return AdminSettingUpdateResult{}, nil, &APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to update setting"}
+		return AdminSettingUpdateResult{}, nil, &APIError{Status: http.StatusInternalServerError, Code: codeInternalError, Message: "Failed to update setting"}
 	}
 	restartRequired := effectiveChanged && config.RestartRequired(key)
 	publish := func(ctx context.Context) {

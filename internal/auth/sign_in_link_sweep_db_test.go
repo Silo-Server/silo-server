@@ -23,25 +23,6 @@ import (
 func TestSignInLinkCodeRedeemAgainstSweepDB(t *testing.T) {
 	env := newKeyEnv(t, "linkcodesweep")
 	t.Cleanup(saveSettings(t, env.pool, config.AuthAppKeySignInSettingKey))
-	backendBlockedBy := func(t *testing.T, ctx context.Context, holder uint32) uint32 {
-		t.Helper()
-		for {
-			var pid uint32
-			err := env.pool.QueryRow(ctx, `SELECT pid FROM pg_stat_activity
-				WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid)) LIMIT 1`, holder).Scan(&pid)
-			if err == nil {
-				return pid
-			}
-			if !errors.Is(err, pgx.ErrNoRows) {
-				t.Fatal(err)
-			}
-			select {
-			case <-ctx.Done():
-				t.Fatal("nothing waited on the held lock")
-			case <-time.After(10 * time.Millisecond):
-			}
-		}
-	}
 	for _, sweepFirst := range []bool{true, false} {
 		name := "the redeem first"
 		if sweepFirst {
@@ -78,48 +59,9 @@ func TestSignInLinkCodeRedeemAgainstSweepDB(t *testing.T) {
 				t.Fatal(err)
 			}
 			if sweepFirst {
-				// The settings write, sweep included, holding the lock.
-				if err := lockServerSettings(ctx, holder); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := holder.Exec(ctx, `INSERT INTO server_settings (key, value) VALUES ($1, 'false')
-					ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, config.AuthAppKeySignInSettingKey); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := EndAppKeySessionsTx(ctx, holder); err != nil {
-					t.Fatal(err)
-				}
-				go redeem()
-				backendBlockedBy(t, ctx, holderPID)
-				if err := holder.Commit(ctx); err != nil {
-					t.Fatal(err)
-				}
-				if err := <-redeemed; !errors.Is(err, ErrAppKeysOff) {
-					t.Fatalf("redeem after the sweep = %v, want ErrAppKeysOff", err)
-				}
+				sweepThenRedeem(t, ctx, env, holder, holderPID, redeem, redeemed)
 			} else {
-				if _, err := holder.Exec(ctx, `SELECT 1 FROM auth_person_keys WHERE user_id = $1 AND revoked_at IS NULL FOR UPDATE`, user.ID); err != nil {
-					t.Fatal(err)
-				}
-				go redeem()
-				redeemPID := backendBlockedBy(t, ctx, holderPID)
-				var shared bool
-				if err := env.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks
-					WHERE pid = $1 AND locktype = 'advisory' AND mode = 'ShareLock' AND granted)`, redeemPID).Scan(&shared); err != nil || !shared {
-					t.Fatalf("the redeem holds the settings lock shared = %v (%v)", shared, err)
-				}
-				swept := make(chan error, 1)
-				go func() { swept <- switchOff(ctx, env.pool) }()
-				backendBlockedBy(t, ctx, redeemPID)
-				if err := holder.Rollback(ctx); err != nil {
-					t.Fatal(err)
-				}
-				if err := <-redeemed; err != nil {
-					t.Fatalf("redeem before the sweep = %v", err)
-				}
-				if err := <-swept; err != nil {
-					t.Fatalf("switch-off = %v", err)
-				}
+				redeemThenSweep(t, ctx, env, holder, holderPID, user.ID, redeem, redeemed)
 			}
 			var live int
 			if err := env.pool.QueryRow(ctx, `SELECT COUNT(*) FROM auth_sessions
@@ -130,5 +72,81 @@ func TestSignInLinkCodeRedeemAgainstSweepDB(t *testing.T) {
 				t.Fatalf("%d key sessions alive with app keys off", live)
 			}
 		})
+	}
+}
+
+// backendBlockedBy answers a backend of this database waiting on a lock the
+// backend holder holds, waiting for one until ctx ends.
+func backendBlockedBy(t *testing.T, ctx context.Context, env *keyEnv, holder uint32) uint32 {
+	t.Helper()
+	for {
+		var pid uint32
+		err := env.pool.QueryRow(ctx, `SELECT pid FROM pg_stat_activity
+			WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid)) LIMIT 1`, holder).Scan(&pid)
+		if err == nil {
+			return pid
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatal(err)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("nothing waited on the held lock")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+// sweepThenRedeem turns app keys off in holder, the settings write with its
+// sweep, starts the redeem, and commits once the redeem waits on the
+// settings lock: the redeem must be refused with ErrAppKeysOff.
+func sweepThenRedeem(t *testing.T, ctx context.Context, env *keyEnv, holder pgx.Tx, holderPID uint32, redeem func(), redeemed <-chan error) {
+	t.Helper()
+	if err := lockServerSettings(ctx, holder); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec(ctx, `INSERT INTO server_settings (key, value) VALUES ($1, 'false')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, config.AuthAppKeySignInSettingKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EndAppKeySessionsTx(ctx, holder); err != nil {
+		t.Fatal(err)
+	}
+	go redeem()
+	backendBlockedBy(t, ctx, env, holderPID)
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-redeemed; !errors.Is(err, ErrAppKeysOff) {
+		t.Fatalf("redeem after the sweep = %v, want ErrAppKeysOff", err)
+	}
+}
+
+// redeemThenSweep holds the account's person key row in holder, starts the
+// redeem, which waits there holding the settings lock shared, starts the
+// switch-off, which waits on the redeem, then lets both finish.
+func redeemThenSweep(t *testing.T, ctx context.Context, env *keyEnv, holder pgx.Tx, holderPID uint32, userID int, redeem func(), redeemed <-chan error) {
+	t.Helper()
+	if _, err := holder.Exec(ctx, `SELECT 1 FROM auth_person_keys WHERE user_id = $1 AND revoked_at IS NULL FOR UPDATE`, userID); err != nil {
+		t.Fatal(err)
+	}
+	go redeem()
+	redeemPID := backendBlockedBy(t, ctx, env, holderPID)
+	var shared bool
+	if err := env.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks
+		WHERE pid = $1 AND locktype = 'advisory' AND mode = 'ShareLock' AND granted)`, redeemPID).Scan(&shared); err != nil || !shared {
+		t.Fatalf("the redeem holds the settings lock shared = %v (%v)", shared, err)
+	}
+	swept := make(chan error, 1)
+	go func() { swept <- switchOff(ctx, env.pool) }()
+	backendBlockedBy(t, ctx, env, redeemPID)
+	if err := holder.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-redeemed; err != nil {
+		t.Fatalf("redeem before the sweep = %v", err)
+	}
+	if err := <-swept; err != nil {
+		t.Fatalf("switch-off = %v", err)
 	}
 }
