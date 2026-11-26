@@ -12,6 +12,7 @@ import { isNotFoundProblem, V2ProblemError } from "@/api/v2/request";
 import { AdminUserDeleteDialog } from "@/components/AdminUserDeleteDialog";
 import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
 import { AdminUserPasswordResetDialog } from "@/components/AdminUserPasswordResetDialog";
+import { AdminUserSignInLinkDialog } from "@/components/AdminUserSignInLinkDialog";
 import { AdminUserSignIn } from "@/components/admin/AdminUserSignIn";
 import { LoginSessionsPanel } from "@/components/sessions/LoginSessionsPanel";
 import { AdminAppKeysPanel } from "@/components/admin/AdminAppKeysPanel";
@@ -84,6 +85,7 @@ function AdminUserDetailPage() {
   const transferOwnership = useTransferOwnership();
   const [confirmImpersonateOpen, setConfirmImpersonateOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
+  const [signInLinkOpen, setSignInLinkOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [disableOpen, setDisableOpen] = useState(false);
@@ -228,6 +230,9 @@ function AdminUserDetailPage() {
             selectTab("sign-in");
             setPasswordOpen(true);
           }}
+          onCreateSignInLink={
+            capabilities.data?.sign_in_links ? () => setSignInLinkOpen(true) : undefined
+          }
           onTransfer={() => setTransferOpen(true)}
           onDisable={() => setDisableOpen(true)}
           onEnable={() => void setEnabled(true)}
@@ -315,6 +320,13 @@ function AdminUserDetailPage() {
             linkAvailable={capabilities.data?.password_reset_link === true}
             profileContext={authority}
             onClose={() => setResetOpen(false)}
+          />
+        )}
+        {signInLinkOpen && (
+          <AdminUserSignInLinkDialog
+            user={account}
+            emailAvailable={capabilities.data?.sign_in_link_email === true}
+            onClose={() => setSignInLinkOpen(false)}
           />
         )}
         {deleteEditor && (

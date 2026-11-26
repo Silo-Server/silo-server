@@ -283,11 +283,11 @@ func (reg *Registry) createAdminUserPasswordReset(ctx context.Context, in *Admin
 	if result == nil {
 		return nil, passwordResetProblem(err)
 	}
-	out := AdminPasswordReset{Delivery: in.Body.Delivery, DeliveryStatus: "not_requested", ResetURL: result.URL, ExpiresAt: NewInstant(result.ExpiresAt)}
+	out := AdminPasswordReset{Delivery: in.Body.Delivery, DeliveryStatus: deliveryNotRequested, ResetURL: result.URL, ExpiresAt: NewInstant(result.ExpiresAt)}
 	if delivery == passwordreset.DeliveryEmail {
-		out.DeliveryStatus = "sent"
+		out.DeliveryStatus = deliverySent
 		if err != nil || !result.EmailSent {
-			out.DeliveryStatus = "failed_or_unknown"
+			out.DeliveryStatus = deliveryFailedOrUnknown
 		}
 	}
 	return &AdminPasswordResetOutput{Body: out}, nil

@@ -493,6 +493,7 @@ type Dependencies struct {
 	AdminInviteCodes                   AdminInviteCodeService
 	Invitations                        InvitationService
 	PasswordResets                     PasswordResetService
+	SignInLinks                        SignInLinkService
 	AdminSubtitleProviderConfiguration AdminSubtitleProviderConfigurationService
 	// PersonalCollections manages a profile's own collections and groups
 	// (*handlers.CollectionHandler).

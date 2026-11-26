@@ -122,26 +122,48 @@ func (p *LocalProvider) Authenticate(ctx context.Context, creds Credentials) (*m
 // password: ErrLocalLoginDisabled while the server-wide switch is off, and
 // ErrNotPermitted while a network identity provider refuses the account's
 // person (networkRefused). Break-glass accounts are exempt so the server can
-// always be recovered.
+// always be recovered. It is the server-and-account-state part of password
+// sign-in's refusal, and sign-in links read it too (LocalPasswordRefusal).
+// It does not read the account's own local_password_login_enabled, which
+// sign-in checks with the password itself and a link's set-password turns on.
 func localPasswordPolicy(ctx context.Context, db rowQuerier, user *models.User) error {
 	if user.BreakGlass {
 		return nil
 	}
-	allowed, err := localPasswordLoginAllowed(ctx, db)
+	on, err := localPasswordLoginAllowed(ctx, db)
 	if err != nil {
 		return err
 	}
-	if !allowed {
+	refused := false
+	if on {
+		if refused, err = networkRefused(ctx, db, user.ID); err != nil {
+			return err
+		}
+	}
+	return LocalPasswordRefusal(user, on, refused)
+}
+
+// LocalPasswordRefusal is localPasswordPolicy for values already read: the
+// server-wide switch (LocalPasswordLoginSwitch) and whether a network
+// identity provider refuses the account (NetworkRefusedAccounts), so a list
+// of accounts reads each once. nil when the account may sign in with a local
+// password on this server.
+func LocalPasswordRefusal(user *models.User, switchOn, networkRefused bool) error {
+	switch {
+	case user.BreakGlass:
+		return nil
+	case !switchOn:
 		return ErrLocalLoginDisabled
-	}
-	refused, err := networkRefused(ctx, db, user.ID)
-	if err != nil {
-		return err
-	}
-	if refused {
+	case networkRefused:
 		return ErrNotPermitted
 	}
 	return nil
+}
+
+// LocalPasswordLoginSwitch reads the server-wide auth.local_password_login
+// switch.
+func LocalPasswordLoginSwitch(ctx context.Context, db rowQuerier) (bool, error) {
+	return localPasswordLoginAllowed(ctx, db)
 }
 
 // checkLocalPassword resolves the sign-in name (see LookupLogin) and checks

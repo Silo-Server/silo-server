@@ -15,7 +15,7 @@ import (
 
 // redeemCode redeems code with a new device key signed by person. A
 // successful redeem's person_key_id is the account's person key, and it is
-// person's key exactly when the answer is enrolled: a client tells whether
+// person's key exactly when the answer is enrolled or replaced: a client tells whether
 // the account holds the key it sent by the ID alone.
 func (e *keyEnv) redeemCode(t *testing.T, person testKey, code string) (*KeySignInResult, testKey, error) {
 	t.Helper()
@@ -39,6 +39,10 @@ func (e *keyEnv) redeemCode(t *testing.T, person testKey, code string) (*KeySign
 	case PersonKeyKept:
 		if sent {
 			t.Fatalf("kept, but person_key_id is the sent key %q", result.PersonKeyID)
+		}
+	case PersonKeyReplaced:
+		if !sent {
+			t.Fatalf("replaced, but person_key_id %q is not the sent key %q", result.PersonKeyID, person.pub.KeyID())
 		}
 	default:
 		t.Fatalf("person key status = %q", result.PersonKeyStatus)
@@ -391,7 +395,7 @@ func TestRedeemAppCodeKeyEnrolledDB(t *testing.T) {
 			if !errors.As(err, &enrolled) || enrolled.Member != tc.member {
 				t.Fatalf("redeem = %v, want %s named as enrolled", err, tc.member)
 			}
-			if err := redeem(t, issued.Code, newTestKey(t), newTestKey(t)); err != nil {
+			if _, _, err := env.redeemCode(t, newTestKey(t), issued.Code); err != nil {
 				t.Fatalf("the same code with the keys made again: %v", err)
 			}
 		})

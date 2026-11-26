@@ -42,6 +42,7 @@ export function makeAdminUser(overrides: Partial<AdminUser> = {}): AdminUser {
     password_change_required: false,
     is_owner: false,
     break_glass: false,
+    local_password_allowed: true,
     effective_policy: {
       library_ids: null,
       max_playback_quality: "",

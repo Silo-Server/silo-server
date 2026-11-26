@@ -1,5 +1,5 @@
 {
-  "revision": "53c6ed012b27b28ecb5c3de13e79b1c4aa2e86e74dfd6445b73ec4836e5e4618",
+  "revision": "7c89f50988132993d9bed97a92a85417ad9776d15df214f38ee31ef392bcac3b",
   "state": "available",
   "allowed": true,
   "available": true,
@@ -13,6 +13,8 @@
   "ownership_transfer": true,
   "account_devices": true,
   "login_sessions": true,
+  "sign_in_links": true,
+  "sign_in_link_email": true,
   "app_keys": true,
   "watch_summary": true,
   "account_downloads": true,

@@ -8,8 +8,17 @@ import { useT } from "@/i18n";
 
 type StepProps<Code extends AppCode> = {
   appCode: Code;
-  onRenew: () => void;
-  renewing: boolean;
+  /** Gets a new code once this one expires; without it, expiredNote says what to do. */
+  onRenew?: () => void;
+  renewing?: boolean;
+  /**
+   * When the code expires, in milliseconds since the epoch: the time the
+   * code was issued plus expires_in, kept by the caller so a step mounted
+   * again never restarts the clock. Defaults to expires_in from mounting.
+   */
+  expiresAt?: number;
+  /** What an expired code's step says when there is no renewal. */
+  expiredNote?: string;
 };
 
 /**
@@ -19,8 +28,10 @@ type StepProps<Code extends AppCode> = {
  * The person may have to install the app first, so the step stays until the
  * code expires, and then offers a new one. Nothing fires automatically: the
  * page can't tell whether the app is installed, and a custom-scheme link only
- * works reliably when tapped. Only a join code goes in a link: an app that
- * intercepts it gets a new, empty account, which the invited person notices.
+ * works reliably when tapped. Only a join code the server allows in a link
+ * (link_allowed) goes in one, which an administrator's invitation is not: an
+ * app that intercepts it gets a new, empty account with no administrative
+ * power, which the invited person notices.
  */
 export function JoinLinkStep({ appCode, onRenew, renewing }: StepProps<LinkableJoinAppCode>) {
   const t = useT();
@@ -78,7 +89,13 @@ export function JoinCodeStep({ appCode, onRenew, renewing }: StepProps<JoinAppCo
  * scannable link: a link can be received by an app other than Silo, which
  * would redeem the code first and get a key on this existing account.
  */
-export function SessionCodeStep({ appCode, onRenew, renewing }: StepProps<SessionAppCode>) {
+export function SessionCodeStep({
+  appCode,
+  onRenew,
+  renewing,
+  expiresAt,
+  expiredNote,
+}: StepProps<SessionAppCode>) {
   const t = useT();
   return (
     <AppCodeStep
@@ -86,6 +103,8 @@ export function SessionCodeStep({ appCode, onRenew, renewing }: StepProps<Sessio
       appCode={appCode}
       onRenew={onRenew}
       renewing={renewing}
+      expiresAt={expiresAt}
+      expiredNote={expiredNote}
       title={t("web.settings.openInSilo.codeTitle")}
       instructions={t("web.settings.openInSilo.codeInstructions")}
     >
@@ -120,14 +139,17 @@ function CodeToType({ appCode }: { appCode: AppCode }) {
 function AppCodeStep({
   appCode,
   onRenew,
-  renewing,
+  renewing = false,
+  expiresAt,
+  expiredNote,
   title,
   instructions,
   children,
 }: StepProps<AppCode> & { title: string; instructions: string; children: ReactNode }) {
   const t = useT();
   const headingId = useId();
-  const [expired, setExpired] = useState(false);
+  const [deadline] = useState(() => expiresAt ?? Date.now() + appCode.expires_in * 1000);
+  const [expired, setExpired] = useState(() => deadline <= Date.now());
   const section = useRef<HTMLElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const renew = useRef<HTMLButtonElement>(null);
@@ -138,12 +160,15 @@ function AppCodeStep({
   // renewal button rather than falling back to the page.
   const focusRenew = useRef(false);
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      focusRenew.current = section.current?.contains(document.activeElement) ?? false;
-      setExpired(true);
-    }, appCode.expires_in * 1000);
+    const timer = window.setTimeout(
+      () => {
+        focusRenew.current = section.current?.contains(document.activeElement) ?? false;
+        setExpired(true);
+      },
+      Math.max(0, deadline - Date.now()),
+    );
     return () => window.clearTimeout(timer);
-  }, [appCode.expires_in]);
+  }, [deadline]);
   useEffect(() => {
     if (expired && focusRenew.current) renew.current?.focus();
   }, [expired]);
@@ -162,15 +187,19 @@ function AppCodeStep({
       {expired ? (
         <div role="status" className="space-y-3">
           <p>{t("web.auth.appCode.expired")}</p>
-          <Button
-            ref={renew}
-            type="button"
-            className="w-full"
-            onClick={onRenew}
-            disabled={renewing}
-          >
-            {t("web.auth.appCode.renew")}
-          </Button>
+          {onRenew ? (
+            <Button
+              ref={renew}
+              type="button"
+              className="w-full"
+              onClick={onRenew}
+              disabled={renewing}
+            >
+              {t("web.auth.appCode.renew")}
+            </Button>
+          ) : (
+            expiredNote && <p className="text-muted-foreground text-sm">{expiredNote}</p>
+          )}
         </div>
       ) : (
         <>
