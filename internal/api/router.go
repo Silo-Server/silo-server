@@ -41,6 +41,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/demomode"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -241,7 +242,12 @@ type Dependencies struct {
 	// SignInAttempts bounds password sign-ins per sign-in name, shared with
 	// the Jellyfin and Audiobookshelf sign-ins so every surface counts against
 	// one budget. Nil gets a process-local limiter.
-	SignInAttempts   *ratelimit.SignInLimiter
+	SignInAttempts *ratelimit.SignInLimiter
+	// DemoMode reads demo.enabled for every surface that enforces demo mode
+	// (the v2 gate, external sign-in, the Audiobookshelf-compatible
+	// sign-out), remembering the last value read for when a read fails.
+	// Nil reads the settings store directly.
+	DemoMode         *demomode.Setting
 	ClientIPResolver *clientip.Resolver
 	// NetworkAccess is the ingress-token registry and provider status cache
 	// for network access provider plugins on this host. The token middleware
@@ -4089,6 +4095,9 @@ func v2Dependencies(
 	}
 	if settings != nil {
 		out.DemoSettings = settings
+		if deps.DemoMode != nil {
+			out.DemoSettings = deps.DemoMode
+		}
 		out.CatalogSettings = settings
 		var declared ratingsources.DeclaredFunc
 		if deps.DB != nil {

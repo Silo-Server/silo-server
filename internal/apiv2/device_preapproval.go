@@ -83,10 +83,12 @@ func registerDevicePreapprovals(reg *Registry) {
 	Register(reg, Operation{Operation: list, Class: ClassAuthenticated, ServiceBacked: true}, reg.listDevicePreapprovals)
 	revoke := humaOp(http.MethodDelete, Prefix+"/auth/device/preapprovals/{id}", "revokeDevicePreapproval", "device-login",
 		"Revoke a device sign-in approved in advance; the device's next poll answers denied.")
-	revoke.Description = preapprovalSessionRule
+	// A demo's visitors share one account: withdrawing a sign-in someone
+	// else approved is refused like approving one in advance.
+	revoke.Description = preapprovalSessionRule + " Refused in demo mode for a caller who is not an administrator."
 	revoke.DefaultStatus = http.StatusNoContent
 	revoke.Errors = []int{http.StatusForbidden, http.StatusNotFound}
-	Register(reg, Operation{Operation: revoke, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true}, reg.revokeDevicePreapproval)
+	Register(reg, Operation{Operation: revoke, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, DemoRestricted: true}, reg.revokeDevicePreapproval)
 
 	root := "/{user_id}/device-preapprovals"
 	adminList := adminAccountOperation(http.MethodGet, root, "listAdminUserDevicePreapprovals", false)

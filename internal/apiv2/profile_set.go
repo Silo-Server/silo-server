@@ -320,8 +320,14 @@ func (reg *Registry) putProfileSet(ctx context.Context, in *ProfileSetPutInput) 
 	// Demo mode refuses a set before the forms split: with no session the
 	// caller is never an administrator, so every signed set is refused while
 	// demo mode is on, as the ordinary profile writes are.
-	if demoRestricted(ctx, reg.deps.DemoSettings) {
-		return nil, NewProblem(TypePermissionDenied, "This action is not available in demo mode.")
+	// A demo setting that was never read refuses the set too, as the demo
+	// gate does for every restricted change.
+	restricted, demoErr := demoRestricted(ctx, reg.deps.DemoSettings)
+	if demoErr != nil {
+		return nil, serviceProblem(demoErr)
+	}
+	if restricted {
+		return nil, demoRestrictedProblem()
 	}
 	body := in.Body
 	signed := body.KeyID != nil || body.Payload != nil || body.Sig != nil
