@@ -463,8 +463,9 @@ another app the person allowed (the session kind the authentication lookup puts 
 claims, the grant-enrolled key of `SessionOrigin`). A device signed in by code is not limited
 on them. Every operation also states what such a session may do with it, and a refused one is
 answered by the gate before its handler; see
-[app keys](architecture/app-keys.md#what-a-granted-app-can-do). The surfaces whose handlers
-check:
+[app keys](architecture/app-keys.md#what-a-granted-app-can-do). The gate also removes the
+device such a session declares, so it records no device registry entry and no connection
+record. What each surface gives such a session:
 
 - `listHouseholdSessions` (`GET /profiles/household/sessions`) gives such a session only the
   playback sessions its own login session started, in full. Every other entry is left out,
@@ -472,31 +473,34 @@ check:
   Jellyfin-compatible or Audiobookshelf-compatible surface, or before the record). The item
   shape is unchanged.
 - The web push routes (`listNotificationWebPushSubscriptions`, `subscribeNotificationWebPush`,
-  `unsubscribeNotificationWebPush`, `deleteNotificationWebPushSubscription`) refuse it with
-  403 `permission_denied` before anything is read or written: a profile's subscriptions
+  `unsubscribeNotificationWebPush`, `deleteNotificationWebPushSubscription`) are refused to it
+  by the gate with 403 `permission_denied`, before anything is read or written: a profile's subscriptions
   belong to every browser it registered, and subscribing takes an endpoint's registration
   over.
 - Reporting progress (`updatePlaybackProgress`), stopping (`stopPlayback`), replanning
-  (`replanPlayback`) and minting a control ticket (`createPlaybackControlSocketTicket`) check
-  the account and profile, and for such a session also that its own login session started
-  the playback session: another login session's stream, or one with no recorded login
+  (`replanPlayback`), reporting a route event (`reportPlaybackRouteEvent`), minting a control
+  ticket (`createPlaybackControlSocketTicket`) and fetching the stream's media (the original
+  file, the HLS manifest and segments, subtitle sidecars and fonts) check the account and
+  profile, and for such a session also that its own login session started the playback
+  session: another login session's stream, or one with no recorded login
   session, is 403 `permission_denied`. Progress, stop and replan read the attempt anyway, and
   ask the rule only when the stream's login session is not the caller's, so a client acting
   on its own stream adds no query there. Minting a control ticket adds one read of the
-  attempt for every caller. Replan refuses as unavailable when that read fails, for every
-  caller with a login session, not only such a session; the replan would read the attempt
-  again and fail anyway.
+  attempt for every caller. Replan refuses such a session as unavailable when that read
+  fails; for every other caller a failed read falls through to the route's own answer. A
+  replan for an attempt that does not exist answers 404 `session_not_found` and starts no
+  transport. The media routes read the attempt only for such a session.
 - The native push writes (`registerPushDevice`, `unregisterPushDevice`,
-  `registerApplePushDevice`, `resetApplePushInstallation`) refuse it with 403
-  `permission_denied` before anything is read or written. A registration with no ordered
+  `registerApplePushDevice`, `resetApplePushInstallation`) are refused to it by the gate with
+  403 `permission_denied`, before anything is read or written. A registration with no ordered
   record yet (a legacy Android one, or an Apple installation after a reset) is bound only to
   the account and device id, and a reset needs no installation key, so the session could
   remove or take over another device's registration. Its own app could receive nothing through
   them: the Apple topic and the Android relay are the first-party apps'. The session-less
   retirements stay as they are; they need the installation key.
 - Watch Together: a room's host is the account and profile, so such a session acting as the
-  host's profile would steer the room of the person's own device. It is refused creating a
-  room and every host operation (`createWatchTogetherRoom`, `closeWatchTogetherRoom`,
+  host's profile would steer the room of the person's own device. The gate refuses it
+  creating a room and every host operation (`createWatchTogetherRoom`, `closeWatchTogetherRoom`,
   `startWatchTogetherRoomPlayback`, `stopWatchTogetherRoomPlayback`,
   `updateWatchTogetherRoomPolicy`, `selectWatchTogetherRoomItem`,
   `updateWatchTogetherRoomSelectionMode`, `stageWatchTogetherRoomItem`,
@@ -521,6 +525,12 @@ check:
 
 The refusals carry the same detail as the key routes' refusal of a session that may not make
 a change.
+
+Two answers change for such a session beyond those surfaces. `getCurrentUser` answers
+`email` as the empty string, the shape's "none set". `getDeviceLogin`, a public lookup that
+attaches a session when one is sent, refuses it with 403 `permission_denied`: approving and
+denying a device sign-in are refused to it, and with its session attached it would look up
+the account's Quick Connect codes.
 
 ### Access tokens after a role change
 
