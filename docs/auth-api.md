@@ -1058,6 +1058,14 @@ Nothing is recorded for the set's own writes, a backup restore, a profile
 import, or a change to the main profile's name when the account's username
 changes: a main profile from a set keeps its name then.
 
+After a recorded edit commits, the server sends each of the account's
+registered phones a background push, at most one a minute per account, so the
+app can read `GET /profiles/set` without waiting to be opened. The push shows
+nothing and does not name the profile that changed; see
+[Profile set wake](notifications-push-api.md#profile-set-wake). A server with
+push delivery off sends none, and the app learns of the edit when it next
+reads the set.
+
 In `GET /profiles/set`:
 
 - `items[].changed_here`: the profile's recorded fields, `{ field, at, by }`,

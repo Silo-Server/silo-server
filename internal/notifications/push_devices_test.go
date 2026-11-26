@@ -646,6 +646,7 @@ func noLoginsPushDB(t *testing.T) (*PushDeviceRepository, *pgxpool.Pool) {
 		CREATE TABLE api_keys (LIKE public.api_keys INCLUDING ALL);
 		CREATE TABLE push_devices (LIKE public.push_devices INCLUDING ALL);
 		CREATE TABLE push_delivery_attempts (LIKE public.push_delivery_attempts INCLUDING ALL);
+		CREATE TABLE push_profile_set_wakes (LIKE public.push_profile_set_wakes INCLUDING ALL);
 		ALTER TABLE push_delivery_attempts ADD FOREIGN KEY (push_device_id) REFERENCES push_devices(id) ON DELETE CASCADE;
 		CREATE TABLE apple_push_installations (LIKE public.apple_push_installations INCLUDING ALL);
 		CREATE TABLE android_push_installations (LIKE public.android_push_installations INCLUDING ALL)`); err != nil {
