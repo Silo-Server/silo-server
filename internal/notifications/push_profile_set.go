@@ -65,8 +65,9 @@ var profileSetWakeBudget = profileSetWakeInterval / 2
 // request only two phones would be reached. Four lets a slow phone hold one
 // slot while the person's other phones go on, and keeps one wake to a
 // quarter of the 16 workers the push dispatcher already sends through the
-// same relay with; the relay's per-deployment allowance (1,000 requests in
-// 10 seconds) leaves room for many wakes at once.
+// same relay with. One wake makes at most about 83 relay requests (20 phones,
+// up to four posts each, and up to three credential requests), never more
+// than four at once, once a minute per account.
 const profileSetWakeConcurrency = 4
 
 // A wake is sent once and never retried: the next edit or the app opening

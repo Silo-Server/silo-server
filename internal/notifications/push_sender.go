@@ -174,9 +174,9 @@ type pushSender struct {
 
 	// renewLock serializes credential renewal and replacement in this
 	// process; lastRelayReplacement is guarded by it. It is a one-slot
-	// channel rather than a mutex so a send waiting for it gives up when its
-	// context ends (lockRenew): a profile set wake's sends wait under the
-	// wake's budget.
+	// channel rather than a mutex so that a profile set wake's send can give
+	// up waiting when the wake's budget ends (renewWait); every other send
+	// waits for it as long as it takes, as for a mutex.
 	renewLock            chan struct{}
 	lastRelayReplacement time.Time
 
@@ -205,14 +205,26 @@ func newPushSender(devices *PushDeviceRepository, deliveries *DeliveryRepository
 	}
 }
 
-// lockRenew takes renewLock, or gives up with ctx's error when ctx ends
+// renewWait is the context attempt's send waits for renewLock under: the
+// send's own for a profile set wake, which gives up when the wake's budget
+// ends, and one that never ends for every other attempt, which waits as long
+// as the lock is held, as it did for a mutex. What runs after the lock is
+// taken keeps the send's own context.
+func renewWait(ctx context.Context, attempt PushDeliveryAttempt) context.Context {
+	if attempt.TriggerType == PushTriggerProfileSet {
+		return ctx
+	}
+	return context.WithoutCancel(ctx)
+}
+
+// lockRenew takes renewLock, or gives up with wait's error when wait ends
 // first.
-func (s *pushSender) lockRenew(ctx context.Context) error {
+func (s *pushSender) lockRenew(wait context.Context) error {
 	select {
 	case s.renewLock <- struct{}{}:
 		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	case <-wait.Done():
+		return wait.Err()
 	}
 }
 
@@ -316,14 +328,15 @@ func (s *pushSender) finalize(ctx context.Context, attempt PushDeliveryAttempt, 
 func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token string) (result pushSendResult) {
 	ctx, finishObservation := telemetry.StartDependency(ctx, "notifications", "worker", "push")
 	defer func() { finishObservation(deliveryObservationError(ctx, result.OK)) }()
-	credential, err := s.prepareRelayCredential(ctx)
+	wait := renewWait(ctx, attempt)
+	credential, err := s.prepareRelayCredential(ctx, wait)
 	if err != nil {
 		return pushSendResult{HTTPStatus: http.StatusServiceUnavailable, Message: err.Error(), UpstreamReason: "relay_credential_unavailable"}
 	}
 	target, identityKnown := s.relayTarget(ctx, device)
 	result = s.sendWithCapability(ctx, attempt, device, token, target, credential.RelayURL, credential.APIKey)
 	if result.HTTPStatus == http.StatusUnauthorized {
-		recovered, err := s.recoverRelayCredential(ctx, credential, result.UpstreamReason)
+		recovered, err := s.recoverRelayCredential(ctx, wait, credential, result.UpstreamReason)
 		if err != nil {
 			if result.UpstreamReason == relayCodeDeploymentDisabled {
 				return result
@@ -369,8 +382,10 @@ func (s *pushSender) relayTarget(ctx context.Context, device *PushDevice) (targe
 // never fewer than the UTF-16 units the relay counts.
 func relayTargetID(id string) bool { return id != "" && len(id) <= 128 }
 
-func (s *pushSender) prepareRelayCredential(ctx context.Context) (PushRelayCredential, error) {
-	if err := s.lockRenew(ctx); err != nil {
+// prepareRelayCredential waits for renewLock under wait (renewWait) and
+// does the rest under ctx.
+func (s *pushSender) prepareRelayCredential(ctx, wait context.Context) (PushRelayCredential, error) {
+	if err := s.lockRenew(wait); err != nil {
 		return PushRelayCredential{}, err
 	}
 	defer s.unlockRenew()
@@ -444,8 +459,10 @@ func (s *pushSender) registerRelayCredential(ctx context.Context, relayURL strin
 // recoverRelayCredential answers a relay 401 for the capability that was just
 // sent: an expired capability is renewed, and any other rejection is healed
 // by registering a fresh deployment.
-func (s *pushSender) recoverRelayCredential(ctx context.Context, failed PushRelayCredential, code string) (PushRelayCredential, error) {
-	if err := s.lockRenew(ctx); err != nil {
+// It waits for renewLock under wait (renewWait) and does the rest under
+// ctx.
+func (s *pushSender) recoverRelayCredential(ctx, wait context.Context, failed PushRelayCredential, code string) (PushRelayCredential, error) {
+	if err := s.lockRenew(wait); err != nil {
 		return PushRelayCredential{}, err
 	}
 	defer s.unlockRenew()

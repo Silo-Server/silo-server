@@ -145,7 +145,7 @@ func TestPushSenderProactivelyRenewsOnceConcurrently(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			credential, err := sender.prepareRelayCredential(context.Background())
+			credential, err := sender.prepareRelayCredential(context.Background(), context.Background())
 			if err != nil || credential.APIKey != "renewed.capability" {
 				t.Errorf("credential = %+v, err = %v", credential, err)
 			}
@@ -171,13 +171,13 @@ func TestPushSenderMigratesOnlyLegacyRelayKeys(t *testing.T) {
 		registrations++
 		return relayResponse(http.StatusOK, credentialJSON("deployment-migrated", "modern.capability", time.Now().Add(30*24*time.Hour))), nil
 	})}
-	credential, err := sender.prepareRelayCredential(context.Background())
+	credential, err := sender.prepareRelayCredential(context.Background(), context.Background())
 	if err != nil || credential.APIKey != "modern.capability" || registrations != 1 {
 		t.Fatalf("credential = %+v, registrations = %d, err = %v", credential, registrations, err)
 	}
 
 	// A modern capability is never replaced merely because it is modern.
-	credential, err = sender.prepareRelayCredential(context.Background())
+	credential, err = sender.prepareRelayCredential(context.Background(), context.Background())
 	if err != nil || credential.APIKey != "modern.capability" || registrations != 1 {
 		t.Fatalf("second prepare = %+v, registrations = %d, err = %v", credential, registrations, err)
 	}
@@ -201,7 +201,7 @@ func TestPushSenderHealsCredentialParkedByOlderServer(t *testing.T) {
 		return relayResponse(http.StatusOK, credentialJSON("deployment-fresh", "fresh.capability", time.Now().Add(30*24*time.Hour))), nil
 	})}
 
-	credential, err := sender.prepareRelayCredential(context.Background())
+	credential, err := sender.prepareRelayCredential(context.Background(), context.Background())
 	if err != nil || credential.APIKey != "fresh.capability" || registrations != 1 {
 		t.Fatalf("credential = %+v, registrations = %d, err = %v", credential, registrations, err)
 	}
