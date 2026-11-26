@@ -577,7 +577,7 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 		}
 		slog.ErrorContext(ctx, "profile create failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences").WithCause(err)
 	}
 
 	// Fetch the created profile directly by ID (no race condition).
@@ -740,7 +740,7 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		}
 		slog.ErrorContext(ctx, "profile update failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences").WithCause(err)
 	}
 	// A new or removed PIN starts with a clean attempt count, so a manager
 	// who resets a locked profile's PIN can use the new one straight away.

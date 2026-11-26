@@ -7,14 +7,16 @@ import (
 	"hash/fnv"
 	"strconv"
 
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 const settingMutationAdvisoryClass int32 = 0x534d5554 // "SMUT"
 
 type postgresSettingMutationWriter struct {
-	exec   preferenceSettingsExecutor
-	userID int
+	exec     preferenceSettingsExecutor
+	userID   int
+	defaults settingsresolve.ServerSettings
 }
 
 var _ userstore.SettingMutationTransactioner = (*PostgresUserStore)(nil)
@@ -50,7 +52,7 @@ func (s *PostgresUserStore) WithSettingMutationTransaction(
 		}
 	}
 
-	writer := &postgresSettingMutationWriter{exec: tx, userID: s.userID}
+	writer := &postgresSettingMutationWriter{exec: tx, userID: s.userID, defaults: s.adminDefaults}
 	if err := fn(writer); err != nil {
 		return err
 	}
@@ -72,14 +74,14 @@ func (w *postgresSettingMutationWriter) UpsertSettingValue(
 	id userstore.SettingIdentity,
 	value json.RawMessage,
 ) (*userstore.SettingValue, error) {
-	return upsertSettingValue(ctx, w.exec, w.userID, id, value)
+	return upsertSettingValue(ctx, w.exec, w.userID, w.defaults, id, value)
 }
 
 func (w *postgresSettingMutationWriter) DeleteSettingValue(
 	ctx context.Context,
 	id userstore.SettingIdentity,
 ) (bool, error) {
-	return deleteSettingValue(ctx, w.exec, w.userID, id)
+	return deleteSettingValue(ctx, w.exec, w.userID, w.defaults, id)
 }
 
 func (w *postgresSettingMutationWriter) UpdateProfile(
@@ -96,7 +98,7 @@ func (w *postgresSettingMutationWriter) CompareAndSetSettingValue(
 	value json.RawMessage,
 	expectedRevision int64,
 ) (*userstore.SettingValue, error) {
-	return compareAndSetSettingValue(ctx, w.exec, w.userID, id, value, expectedRevision)
+	return compareAndSetSettingValue(ctx, w.exec, w.userID, w.defaults, id, value, expectedRevision)
 }
 
 func (w *postgresSettingMutationWriter) GetSettingMutation(

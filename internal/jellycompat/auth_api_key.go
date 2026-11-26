@@ -12,6 +12,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/profileedits"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -140,6 +141,8 @@ func (a *AdminAPIKeyAuthenticator) authenticate(r *http.Request) adminAPIKeyAuth
 	if !res.ok {
 		return res
 	}
+	// validate admitted only an administrator's key.
+	profileedits.FromContext(r.Context()).SetActor(apiKey.UserID, true, nil)
 	if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 		uid := apiKey.UserID
 		lc.UserID = &uid

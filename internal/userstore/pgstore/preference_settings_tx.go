@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -26,6 +27,8 @@ type preferenceSettingsExecutor interface {
 type preferenceSettingsTx struct {
 	exec   preferenceSettingsExecutor
 	userID int
+	// defaults is the store's administrator defaults (adminDefaults).
+	defaults settingsresolve.ServerSettings
 }
 
 var _ userstore.PreferenceSettingsTransactioner = (*PostgresUserStore)(nil)
@@ -69,7 +72,7 @@ func (s *PostgresUserStore) WithPreferenceSettingsTransaction(
 		return fmt.Errorf("locking preference settings transaction: %w", err)
 	}
 
-	if err := fn(&preferenceSettingsTx{exec: tx, userID: s.userID}); err != nil {
+	if err := fn(&preferenceSettingsTx{exec: tx, userID: s.userID, defaults: s.adminDefaults}); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -230,11 +233,11 @@ func (tx *preferenceSettingsTx) UpsertSettingValue(
 	id userstore.SettingIdentity,
 	value json.RawMessage,
 ) (*userstore.SettingValue, error) {
-	return upsertSettingValue(ctx, tx.exec, tx.userID, id, value)
+	return upsertSettingValue(ctx, tx.exec, tx.userID, tx.defaults, id, value)
 }
 
 func (tx *preferenceSettingsTx) DeleteSettingValue(ctx context.Context, id userstore.SettingIdentity) (bool, error) {
-	return deleteSettingValue(ctx, tx.exec, tx.userID, id)
+	return deleteSettingValue(ctx, tx.exec, tx.userID, tx.defaults, id)
 }
 
 func (tx *preferenceSettingsTx) CheckProfilePINRevision(ctx context.Context, id string, revision int64) (bool, error) {

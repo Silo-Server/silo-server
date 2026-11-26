@@ -10,8 +10,16 @@
   "awaiting_libraries": [],
   "awaiting_pictures": [],
   "awaiting_pins": [],
-  "hidden_by_owner": [],
-  "overrides": [],
+  "hidden_by_owner": [
+    "6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11"
+  ],
+  "overrides": [
+    {
+      "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "field": "max_content_rating",
+      "value": "PG"
+    }
+  ],
   "skipped_settings": [
     {
       "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e",

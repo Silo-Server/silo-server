@@ -11936,12 +11936,12 @@ export interface paths {
     };
     /**
      * Read the account's profile set as this server holds it.
-     * @description The same sessions as putProfileSet's session form may read it, without the main profile's PIN. An account that never took a set answers version 0, no items, and every profile in local_only. changed_here, deleted_here and overrides are always empty today. Strong ETag; If-None-Match answers 304. 501 capability_unsupported where profiles are not kept in PostgreSQL.
+     * @description The same sessions as putProfileSet's session form may read it, without the main profile's PIN. An account that never took a set answers version 0, no items, and every profile in local_only. changed_here and deleted_here list edits made on this server outside a set: by account for the account's own sessions, by owner for an administrator. The next accepted newer set settles the account ones (a repeat of the held version settles nothing); edits_token names them: it changes when one is added, settled, or replaced by an owner's edit of the same field, and with no other owner's edit. overrides lists the owner's values, which a set leaves as they are until the account edits that field here, or, for a setting the settings contract mirrors in another key, either key of the pair; hidden_by_owner lists profiles the owner removed, which a set does not bring back. Strong ETag; If-None-Match answers 304. 501 capability_unsupported where profiles are not kept in PostgreSQL.
      */
     get: operations["getProfileSet"];
     /**
      * Make the account's household profiles match a versioned profile set.
-     * @description Makes the account's household profiles match a versioned set, in one transaction. The body is either a signed profile-set envelope ({kid, payload, sig}, signed by the account's person key on a challenge from createAppKeyChallenge; with or without a login session), or {set, pairs?, edits_seen?} over the account's own login session acting as its main profile (X-Profile-Id), with X-Profile-Token when that profile has a PIN. The signed form is refused for an administrator's account (403 permission_denied) and while auth.app_key_sign_in is off (409 capability_disabled); the session form takes neither rule. A session form that is not acting as the main profile is 403 main_profile_required. Sessions opened by device sign-in, by another app's key, or by an administrator acting as the account, remote-playback handoffs, and sessions older than the record of how sessions open are 403 permission_denied; an API key carries no login session and is 401 authentication_required. In demo mode a non-administrator is 403 permission_denied in both forms. The first item is the main profile; items match profiles by sync_id, then by pairs, and are otherwise created in set order up to the household's profile limit (the rest are left_off; nothing is deleted to fit). A profile holding a sync_id the set no longer has is deleted with everything that belongs to it; a profile with no sync_id that pairs does not name is left alone. Only a newer version changes anything: an older version, the same version with other content, the same version whose PINs differ from the stored ones, and a set without the person's latest edits (edits_seen) are 409 profile_set_stale; the same version and content again answers 200 and writes nothing. A set that changes the main profile's PIN ends every X-Profile-Token minted for its old PIN, the caller's included. A malformed member is 422 validation_failed at its member, the same location, code and detail in both forms (a signed set's members are reported at body.set, as the session form's are); a new item named like a profile outside the set is 422 with code name_conflict. Limited per account by the profile_set rate-limit budget (the session's account, or the one a verified signature names), with a per-address budget ten times that spent first; 429 rate_limited with Retry-After from either. The signed form also spends its challenge, and has spent it when a 422 or the account's limit refuses the set: the next try needs a new challenge and a newly signed envelope. A body over 256 KiB is 413 payload_too_large. 501 capability_unsupported where profiles are not kept in PostgreSQL.
+     * @description Makes the account's household profiles match a versioned set, in one transaction. The body is either a signed profile-set envelope ({kid, payload, sig}, signed by the account's person key on a challenge from createAppKeyChallenge; with or without a login session), or {set, pairs?, edits_seen?} over the account's own login session acting as its main profile (X-Profile-Id), with X-Profile-Token when that profile has a PIN. The signed form is refused for an administrator's account (403 permission_denied) and while auth.app_key_sign_in is off (409 capability_disabled); the session form takes neither rule. A session form that is not acting as the main profile is 403 main_profile_required. Sessions opened by device sign-in, by another app's key, or by an administrator acting as the account, remote-playback handoffs, and sessions older than the record of how sessions open are 403 permission_denied; an API key carries no login session and is 401 authentication_required. In demo mode a non-administrator is 403 permission_denied in both forms. The first item is the main profile; items match profiles by sync_id, then by pairs, and are otherwise created in set order up to the household's profile limit (the rest are left_off; nothing is deleted to fit). A profile holding a sync_id the set no longer has is deleted with everything that belongs to it; a profile with no sync_id that pairs does not name is left alone. Only a newer version changes anything: an older version, the same version with other content, the same version whose PINs differ from the stored ones (a PIN the owner set here is not compared), and a newer set whose edits_seen is not getProfileSet's current edits_token while that token is not empty are 409 profile_set_stale, with nothing written; the same version and content again answers 200 and writes nothing. A field the owner set on this server is left as it is and listed in overrides; an item the owner removed here is not created or paired and is listed in hidden_by_owner. An accepted newer set settles the account's edits its edits_seen named. A set that changes the main profile's PIN ends every X-Profile-Token minted for its old PIN, the caller's included. Refusals come in this order: a malformed set (422), then a stale one (409 profile_set_stale), then a set the household can't map (pairs), then the held version again (a no-op, never refused for what only a write would do), then what a set that will write would do (422 name_conflict, item 0 taking a sync_id the owner removed). A malformed member is 422 validation_failed at its member, the same location, code and detail in both forms (a signed set's members are reported at body.set, as the session form's are); a new item named like a profile outside the set is 422 with code name_conflict. Limited per account by the profile_set rate-limit budget (the session's account, or the one a verified signature names), with a per-address budget ten times that spent first; 429 rate_limited with Retry-After from either. The signed form also spends its challenge, and has spent it when a 422 or the account's limit refuses the set: the next try needs a new challenge and a newly signed envelope. A body over 256 KiB is 413 payload_too_large. 501 capability_unsupported where profiles are not kept in PostgreSQL.
      */
     put: operations["putProfileSet"];
     post?: never;
@@ -35436,7 +35436,7 @@ export interface components {
       awaiting_pictures: string[];
       /** @description Profiles created from keep that still have no PIN */
       awaiting_pins: string[];
-      /** @description Profiles the owner removed on this server; always empty today */
+      /** @description Items the owner removed on this server; the set did not bring them back */
       hidden_by_owner: string[];
       /**
        * @description Whether signing in on the Jellyfin-compatible surface with the bare account name (no #profile) picks a profile, as the account's profiles stand after the set: true when exactly one profile is named like the account, or else exactly one profile has no PIN. Absent while that surface is off
@@ -35445,7 +35445,7 @@ export interface components {
       jellyfin_bare_name_sign_in?: boolean;
       /** @description Items not applied because of the household's profile limit, in set order */
       left_off: string[];
-      /** @description Values the owner set on this server; always empty today */
+      /** @description Values the owner set on this server for the set's profiles; the set left them as they are */
       overrides: components["schemas"]["ProfileSetOverride"][];
       /** @description This server's ID for each profile it holds from the set, in set order */
       profiles: components["schemas"]["ProfileSetMember"][];
@@ -35487,17 +35487,22 @@ export interface components {
        * @enum {string}
        */
       by: "account" | "owner";
-      /** @example name */
+      /**
+       * @description An item field name, or settings.<key>. An open string: new item fields and settings keys will appear, and an app ignores or carries through one it doesn't know
+       * @example name
+       */
       field: string;
     };
     ProfileSetHeld: {
-      /** @description Profiles of the set deleted on this server outside a set; always empty today */
+      /** @description Profiles of the set deleted on this server outside a set. Every removal on record, including sync_ids the set no longer carries */
       deleted_here: components["schemas"]["ProfileSetDeletion"][];
       /**
-       * @description Names the person's own edits on this server that no set has settled; empty when there are none. A set sends it back as edits_seen
-       * @example
+       * @description Names the person's own edits on this server that no set has settled (the by account entries of changed_here and deleted_here); empty when there are none. A newer set must send it back as edits_seen while it is not empty
+       * @example e1.mFzDq0dX7eTsc3m6SfN0Lw1o2s0kHqgV
        */
       edits_token: string;
+      /** @description Profiles the owner removed on this server; a set does not bring them back. Every removal on record, including sync_ids the set no longer carries */
+      hidden_by_owner: string[];
       items: components["schemas"]["ProfileSetHeldItem"][];
       /**
        * @description Whether signing in on the Jellyfin-compatible surface with the bare account name (no #profile) picks a profile as the account's profiles now stand: true when exactly one profile is named like the account, or else exactly one profile has no PIN. Absent while that surface is off
@@ -35506,7 +35511,7 @@ export interface components {
       jellyfin_bare_name_sign_in?: boolean;
       /** @description Profiles on this account that are not part of the set */
       local_only: components["schemas"]["ProfileSetLocal"][];
-      /** @description Values the owner set on this server; always empty today */
+      /** @description Values the owner set on this server; a set leaves them as they are */
       overrides: components["schemas"]["ProfileSetOverride"][];
       /**
        * Format: int64
@@ -35516,7 +35521,7 @@ export interface components {
       version: number;
     };
     ProfileSetHeldItem: {
-      /** @description Fields edited on this server outside a set since the last set it accepted; always empty today */
+      /** @description Fields edited on this server outside a set and not yet settled: by account until the next accepted newer set settles them, by owner until the owner's value is replaced */
       changed_here: components["schemas"]["ProfileSetFieldChange"][];
       /** @example true */
       has_pin: boolean;
@@ -35586,7 +35591,7 @@ export interface components {
     };
     ProfileSetOverride: {
       /**
-       * @description An item field name, or settings.<key>
+       * @description An item field name, or settings.<key>. An open string: new item fields and settings keys will appear, and an app ignores or carries through one it doesn't know
        * @example max_content_rating
        */
       field: string;
@@ -35595,8 +35600,8 @@ export interface components {
        * @example 0f8fad5b-d9cb-469f-a165-70867728950e
        */
       sync_id: string;
-      /** @description Any JSON value. */
-      value: unknown;
+      /** @description The value this server holds, as a set item encodes it. pin is "set" or "clear", never a PIN. Absent for a setting the owner reset, which has no profile value here, and in the putProfileSet answer for a picture naming an upload this server kept no hash for */
+      value?: unknown;
     };
     ProfileSetPair: {
       /**

@@ -35,6 +35,8 @@ func TestUserRepositoryUsernameChangeRenamesPrimaryProfileDB(t *testing.T) {
 		primary     string
 		other       string
 		wantPrimary string
+		// synced gives the primary a profile set sync ID.
+		synced bool
 	}{
 		{
 			name: "untouched primary follows", key: "a", oldUsername: ident("a", "old"), newUsername: ident("a", "new"),
@@ -64,12 +66,22 @@ func TestUserRepositoryUsernameChangeRenamesPrimaryProfileDB(t *testing.T) {
 			name: "account without a username", key: "f", newUsername: ident("f", "new"),
 			primary: "Viewer", other: "Kid", wantPrimary: "Viewer",
 		},
+		{
+			// A main profile from a profile set takes its name from the set.
+			name: "primary from a profile set keeps its name", key: "s", oldUsername: ident("s", "old"), newUsername: ident("s", "new"),
+			primary: ident("s", "old"), other: "Kid", wantPrimary: ident("s", "old"), synced: true,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			id := insertPrimaryProfileRenameUser(t, ctx, pool, tc.oldUsername, ident(tc.key, "mail")+"@example.invalid")
 			insertPrimaryProfileRenameProfile(t, ctx, pool, id, "primary", tc.primary, true)
 			insertPrimaryProfileRenameProfile(t, ctx, pool, id, "other", tc.other, false)
+			if tc.synced {
+				if _, err := pool.Exec(ctx, `UPDATE user_profiles SET sync_id = gen_random_uuid(), sync_position = 0 WHERE user_id = $1 AND is_primary`, id); err != nil {
+					t.Fatal(err)
+				}
+			}
 
 			newUsername := tc.newUsername
 			if _, err := users.MutateAdminAccount(ctx, id, -1, &models.UpdateUserInput{Username: &newUsername},

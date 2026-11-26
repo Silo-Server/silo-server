@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/profileedits"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -239,6 +240,7 @@ func attributeActivity(r *http.Request, session *Session) {
 	if session == nil {
 		return
 	}
+	profileedits.FromContext(r.Context()).SetActor(session.StreamAppUserID, false, nil)
 	if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 		uid := session.StreamAppUserID
 		lc.UserID = &uid

@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/jackc/pgx/v5"
+	"github.com/Silo-Server/silo-server/internal/profileedits"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 var ErrAdminUserRevision = errors.New("administrator account revision changed")
@@ -47,6 +50,14 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 	if _, err = tx.Exec(ctx, `LOCK TABLE access_groups IN SHARE MODE`); err != nil {
 		return AdminUserSnapshot{}, err
 	}
+	// A deletion takes the account's profile locks before its row, as every
+	// profile writer and the profile set take them first, so it runs before
+	// or after them, never between a write and the edit it records.
+	if input == nil {
+		if err = pgstore.LockAccountForImport(ctx, tx, id); err != nil {
+			return AdminUserSnapshot{}, err
+		}
+	}
 	current, err := adminUserSnapshot(tx.QueryRow(ctx, `SELECT `+allColumns+`, admin_revision FROM users WHERE id=$1 FOR UPDATE`, id))
 	if err != nil {
 		return AdminUserSnapshot{}, err
@@ -79,6 +90,11 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 	}
 	if input == nil {
 		_, err = tx.Exec(ctx, `DELETE FROM users WHERE id=$1`, id)
+		if err == nil {
+			// After the account, so the delete sees every edit a writer it
+			// waited on committed; the table has no foreign key to cascade.
+			err = profileedits.DeleteAccount(ctx, tx, id)
+		}
 	} else {
 		err = updateUser(ctx, tx, id, *input, passwordHash)
 		if err == nil {

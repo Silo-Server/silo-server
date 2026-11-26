@@ -1,3 +1,18 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "getProfileSet",
+      "change_id": "response-property-became-optional",
+      "fingerprint": "1737980ef91522234639e9573f15288d4b117daf3b80c402168d93dc7b884df6",
+      "reason": "overrides[].value is absent for a setting the owner reset, because null is a real value for some settings. overrides was always empty before this change, so no client reads value yet.",
+      "approved_in": "#5315"
+    },
+    {
+      "operation_id": "putProfileSet",
+      "change_id": "response-property-became-optional",
+      "fingerprint": "6eb7d2e0f6fe33b6e2d74c48d0a94a16e3db8d9f2ddb0fb69a83a3632363df17",
+      "reason": "overrides[].value is absent for a setting the owner reset, because null is a real value for some settings. overrides was always empty before this change, so no client reads value yet.",
+      "approved_in": "#5315"
+    }
+  ]
 }

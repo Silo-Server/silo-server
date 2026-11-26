@@ -5,9 +5,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func (s *PostgresUserStore) CollectionOrderRevision(ctx context.Context) (int64, error) {

@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/profileedits"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
@@ -58,6 +59,8 @@ type Dependencies struct {
 	// ActivityLogWriter records compat requests in the same activity log as the
 	// native API, attributed to the compat session's account. Nil disables it.
 	ActivityLogWriter activitylog.Writer
+	// ProfileEditsWaker is the native API's (Dependencies.ProfileEditsWaker).
+	ProfileEditsWaker profileedits.Waker
 	// NodeID stamps activity log entries with the serving node.
 	NodeID string
 	// StreamTelemetry is the local observation-only registry shared with the

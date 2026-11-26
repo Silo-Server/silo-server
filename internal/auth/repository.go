@@ -744,20 +744,6 @@ func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, exp
 	return ErrCurrentPasswordInvalid
 }
 
-// Delete removes a user by their ID.
-func (r *UserRepository) Delete(ctx context.Context, id int) error {
-	tag, err := r.pool.Exec(ctx, "DELETE FROM users WHERE id = $1", id)
-	if err != nil {
-		return fmt.Errorf("deleting user: %w", err)
-	}
-
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-
-	return nil
-}
-
 // List returns all users ordered by ID ascending.
 func (r *UserRepository) List(ctx context.Context) ([]*models.User, error) {
 	query := `SELECT ` + allColumns + ` FROM users ORDER BY id ASC`
