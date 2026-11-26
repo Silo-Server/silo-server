@@ -63,7 +63,7 @@ type AdminAccountCapabilitiesOutputBody struct {
 	OwnershipTransfer    bool `json:"ownership_transfer" doc:"Whether transferAdminUserOwnership can make another enabled admin the server Owner"`
 	AccountDevices       bool `json:"account_devices" doc:"Whether listAdminUserDevices can list an account's registered devices"`
 	LoginSessions        bool `json:"login_sessions" doc:"Whether administrators can inspect and revoke a user's login sessions; separate from playback sessions and device registrations"`
-	SignInLinks          bool `json:"sign_in_links" doc:"Whether createAdminUserSignInLink can make sign-in links: the server's public URL is set. For one account, read its local_password_allowed: a link is made exactly where it is true"`
+	SignInLinks          bool `json:"sign_in_links" doc:"Whether createAdminUserSignInLink can make sign-in links: the server's public URL is set. For one account, read its local_password_allowed, which says whether the account passes the local-password rule a link needs; this member says whether the server has what every link needs besides"`
 	SignInLinkEmail      bool `json:"sign_in_link_email" doc:"Whether createAdminUserSignInLink can also email the link: sign_in_links, and a mail server is configured"`
 	AppKeys              bool `json:"app_keys" doc:"Whether listAdminUserAppKeys, revokeAdminUserDeviceKey, revokeAdminUserPersonKey and denyAdminUserPendingKey are served. Read the app key capability (getAppKeyCapability) for whether keys sign in now"`
 	WatchSummary         bool `json:"watch_summary" doc:"Whether getAdminUserWatchSummary can total an account's finalized plays"`

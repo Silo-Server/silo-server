@@ -909,8 +909,10 @@ the account are locked in id order before the link is stored, as a reset
 link's issue does, so a promotion or ownership move that commits first is
 judged. A link follows the set-password action: an account a sign-in provider
 manages, with its own password sign-in off, can have its password set by an
-administrator, so it can have a link too. The link's keys start unbound, and
-setting a password with it turns the account's local sign-in on: an
+administrator, so it can have a link too. A new or replacing person key and
+its device start unbound (the account's own person key sent again keeps its
+provider binding), and setting a password with it turns the account's local
+sign-in on: an
 administrator's link takes the account out from under its provider exactly as
 their set-password does, and no more quietly. A disabled account gets no link.
 
@@ -939,7 +941,13 @@ table holds one link per account bound to a fingerprint of the current
 password, so it can't serve an account with no password, and a sign-in link
 there would cancel a pending reset link and the reverse. Only SHA-256 digests
 of the link token and the set-password token are stored. The hourly retention
-step deletes links past their expiry; the table is left out of backups.
+step deletes links past their expiry; the table is left out of backups. Ending
+a link deletes its row and the account's link codes with it
+(`EndSignInLinksTx`), so a link's history is not in these tables but in the
+audit log: `user.sign_in_link_created` (by its maker, with the delivery and
+expiry), and `user.sign_in_link_redeemed`, `user.app_code_redeemed` and
+`user.person_key_replaced`, which name the link's `sign_in_link_id`, the last
+two with the account that made it.
 
 **Redeeming.** The link is marked redeemed in the transaction that makes the
 app code; of two redemptions exactly one succeeds. Unknown, used, expired and

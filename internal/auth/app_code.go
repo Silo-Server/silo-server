@@ -380,9 +380,12 @@ func spendAppCode(ctx context.Context, tx pgx.Tx, hash []byte) error {
 // when the account has none, and an account holding a different one keeps
 // it, with the device key enrolled under the account's key (a person who
 // lost every other device replaces it afterwards with ReplacePersonKey).
-// A sign-in link's code enrolls both keys on its account, unbound to any
-// provider, and its person key replaces a different one the account holds
-// (redeemSignInLinkCode); it is refused for an administrator's account. Keys
+// A sign-in link's code enrolls both keys on its account: a new or replacing
+// person key and its device start unbound to any provider, while the
+// account's own provider-bound person key sent again keeps its binding and
+// the new device takes it. Its person key replaces a different one the
+// account holds (redeemSignInLinkCode); it is refused for an administrator's
+// account. Keys
 // from a code start active, also on an administrator's account: the code
 // came from the account's own session or its invitation.
 func (a *AppKeySignIn) RedeemAppCode(ctx context.Context, req KeyRedeemRequest) (*KeySignInResult, error) {
