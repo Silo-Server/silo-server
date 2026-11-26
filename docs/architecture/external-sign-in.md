@@ -35,6 +35,19 @@ SDK's `docs/auth-provider.md`.
   the two foreign keys' triggers, and nothing relies on it. These paths take
   one account at a time: an uninstall deletes an installation's identities in
   an order of its own, and an account holds at most one of them.
+- The uninstall also holds the server-settings lock (the sign-in provider
+  guard) while it deletes. Its order is: the bindings lock, the installation
+  row, the settings lock, then the installation's identities taken
+  `FOR UPDATE NOWAIT` in id order, then the delete and its cascade. Unlinking
+  an identity (`UnlinkOwn`) and deleting an account lock an identity first and
+  then wait for the settings lock; an account update that ends sessions takes
+  the settings lock first and then the identities. So the uninstall never
+  waits for an identity while it holds the settings lock: if one is held, it
+  rolls the whole attempt back, releasing the settings lock, and tries again
+  a bounded number of times within well under a second, then answers busy
+  (`plugins.ErrInstallationBusy`, 503 `dependency_unavailable` with
+  `Retry-After`) with nothing changed. `TestUninstallAddsNoLockCycleDB` stages
+  each of those paths against it, each side first.
 - Every other writer of those rows writes one row, writes only sessions that
   carry no identity (impersonation sessions), deletes an account created in
   the same request, or never waits (the expired-session and expired-request

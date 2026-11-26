@@ -764,6 +764,71 @@ func (s *InstallationStore) Delete(ctx context.Context, id int) error {
 // caller stops the plugin there, so a refused delete never stopped it and its
 // files go only once it no longer runs.
 func (s *InstallationStore) DeleteThen(ctx context.Context, id int, afterCommit func()) error {
+	installation, err := s.deleteWithIdentityRetry(ctx, id)
+	if err != nil {
+		return err
+	}
+	if afterCommit != nil {
+		afterCommit()
+	}
+
+	if _, inTx := s.pool.(pgx.Tx); !inTx {
+		if err := s.archiveCache.retire(installation, nil); err != nil {
+			slog.WarnContext(ctx, "remove uninstalled plugin files", "component", "plugins", "installation_id", id, "error", err)
+		}
+	}
+
+	return nil
+}
+
+// ErrInstallationBusy answers an uninstall that found the plugin's sign-in
+// identities held by another change on every bounded attempt: nothing was
+// changed, and repeating it in a moment succeeds.
+var ErrInstallationBusy = errors.New("the plugin's sign-in identities are being changed; try again")
+
+// sqlStateLockNotAvailable is Postgres's lock_not_available, what NOWAIT
+// answers when a row is already locked.
+const sqlStateLockNotAvailable = "55P03"
+
+// errIdentitiesHeld is one attempt finding an identity row already locked.
+var errIdentitiesHeld = errors.New("plugin identities are locked")
+
+// Uninstall attempts and the pause between them. The whole retry stays well
+// under a second, so an admin request answers promptly either way.
+const (
+	deleteIdentityAttempts = 3
+	deleteIdentityBackoff  = 50 * time.Millisecond
+)
+
+// deleteWithIdentityRetry runs the delete transaction, retrying a bounded
+// number of times when the installation's identities are held. The delete
+// holds the server-settings lock (signInGuard) and its cascade removes the
+// installation's plugin_auth_identities rows; an unlink and an account delete
+// lock an identity first and then wait for the settings lock. To add no lock
+// cycle with them the delete never waits for an identity while it holds the
+// settings lock: it takes them with NOWAIT, in id order, before the DELETE,
+// and rolls the whole transaction back (releasing the settings lock) if one
+// is held.
+func (s *InstallationStore) deleteWithIdentityRetry(ctx context.Context, id int) (*Installation, error) {
+	for attempt := 1; ; attempt++ {
+		installation, err := s.deleteOnce(ctx, id)
+		if !errors.Is(err, errIdentitiesHeld) {
+			return installation, err
+		}
+		if attempt == deleteIdentityAttempts {
+			return nil, ErrInstallationBusy
+		}
+		timer := time.NewTimer(time.Duration(attempt) * deleteIdentityBackoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *InstallationStore) deleteOnce(ctx context.Context, id int) (*Installation, error) {
 	var installation *Installation
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if err := lockAuthBindings(ctx, tx); err != nil {
@@ -791,25 +856,19 @@ func (s *InstallationStore) DeleteThen(ctx context.Context, id int, afterCommit 
 		if err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, `SELECT id FROM plugin_auth_identities WHERE plugin_installation_id = $1
+			ORDER BY id FOR UPDATE NOWAIT`, id); err != nil {
+			if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == sqlStateLockNotAvailable {
+				return errIdentitiesHeld
+			}
+			return fmt.Errorf("locking plugin identities: %w", err)
+		}
 		if _, err := tx.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, id); err != nil {
 			return fmt.Errorf("deleting plugin installation: %w", err)
 		}
 		return guard.finish(ctx, tx)
 	})
-	if err != nil {
-		return err
-	}
-	if afterCommit != nil {
-		afterCommit()
-	}
-
-	if _, inTx := s.pool.(pgx.Tx); !inTx {
-		if err := s.archiveCache.retire(installation, nil); err != nil {
-			slog.WarnContext(ctx, "remove uninstalled plugin files", "component", "plugins", "installation_id", id, "error", err)
-		}
-	}
-
-	return nil
+	return installation, err
 }
 
 func (s *InstallationStore) replaceCapabilities(

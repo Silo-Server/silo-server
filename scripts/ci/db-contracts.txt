@@ -332,6 +332,7 @@
 ./internal/auth TestLocalPasswordOffCountsOpenIDConnectLinkOnlyWithPublicURLDB
 ./internal/auth TestEnableAccountLocalLoginDB
 ./internal/auth TestBreakGlassWithoutPasswordIsNotCountedDB
+./internal/auth TestUninstallAddsNoLockCycleDB
 ./internal/auth TestLocalPasswordOffKeepsOpenSessionsDB
 ./internal/auth TestSignInProviderGuardDB
 ./internal/auth TestSignInProviderGuardSerializesWithSettingsSaveDB

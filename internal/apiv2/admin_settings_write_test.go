@@ -12,6 +12,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
 type fakeAdminSettingsWrite struct {
@@ -173,6 +174,15 @@ func TestLocalLoginRefusalProblemTypes(t *testing.T) {
 func TestPluginWriteSignInProviderRefusal(t *testing.T) {
 	p, ok := errors.AsType[*Problem](adminPluginMutationProblem(fmt.Errorf("disabling: %w", auth.ErrSignInProviderRequired)))
 	if !ok || p.Type != TypeSignInProviderRequired.URI() || p.Status != http.StatusConflict {
+		t.Fatalf("problem = %+v", p)
+	}
+}
+
+// An uninstall that found the plugin's sign-in identities busy changed
+// nothing; clients get the server-busy answer with a retry delay, and repeat.
+func TestPluginUninstallBusyIsRetryable(t *testing.T) {
+	p, ok := errors.AsType[*Problem](adminPluginMutationProblem(plugins.ErrInstallationBusy))
+	if !ok || p.Type != TypeDependencyUnavailable.URI() || p.Status != http.StatusServiceUnavailable || p.headers.Get("Retry-After") == "" {
 		t.Fatalf("problem = %+v", p)
 	}
 }

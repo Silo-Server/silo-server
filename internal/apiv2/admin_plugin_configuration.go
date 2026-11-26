@@ -125,6 +125,8 @@ func adminPluginMutationProblem(err error) error {
 		return NewProblem(TypeConflict, "Built-in host providers cannot be modified.")
 	case errors.Is(err, plugins.ErrAuthBindingIneligible):
 		return NewProblem(TypeConflict, "An enabled sign-in binding is incompatible with this plugin release. Disable or update the binding before enabling the plugin or replacing the release.")
+	case errors.Is(err, plugins.ErrInstallationBusy):
+		return NewProblem(TypeDependencyUnavailable, "This plugin's sign-in accounts are being changed right now, so it was not uninstalled. Try again in a moment.").WithRetryAfter(1)
 	case errors.Is(err, auth.ErrSignInProviderRequired):
 		return NewProblem(TypeSignInProviderRequired, "Password sign-in is off, and this is the last sign-in provider people can use. Turn password sign-in back on first. Break-glass administrators can sign in with a password either way.")
 	case errors.Is(err, plugins.ErrAuthProviderAlreadyEnabled):

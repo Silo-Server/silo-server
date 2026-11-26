@@ -147,9 +147,9 @@ func registerAdminPluginLifecycle(reg *Registry) {
 		}
 		return reg.adminPluginInstallationOutput(reg.deps.AdminPluginLifecycle.RestartAdminPluginInstallation(ctx, id))
 	})
-	remove := op(http.MethodDelete, "/{id}", "deleteAdminPluginInstallation", "Delete the installation row (configuration, bindings and archives cascade), then stop the plugin and remove its files. Row delete and file removal are not one transaction and a repeat finds no row: a later 404 is not this caller's receipt; never automatically retry. Uninstalling the last OIDC or LDAP provider people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required, and the plugin keeps running.", RetrySafetyNonRetryable)
+	remove := op(http.MethodDelete, "/{id}", "deleteAdminPluginInstallation", "Delete the installation row (configuration, bindings and archives cascade), then stop the plugin and remove its files. Row delete and file removal are not one transaction and a repeat finds no row: a later 404 is not this caller's receipt; never automatically retry. Uninstalling the last OIDC or LDAP provider people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required, and the plugin keeps running. While another request is changing the sign-in accounts of this plugin, the uninstall changes nothing and answers 503 dependency_unavailable with Retry-After; repeat it then.", RetrySafetyNonRetryable)
 	remove.DefaultStatus = http.StatusNoContent
-	remove.Errors = append(remove.Errors, http.StatusNotFound, http.StatusConflict)
+	remove.Errors = append(remove.Errors, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable)
 	Register(reg, remove, func(ctx context.Context, in *AdminPluginInstallationIDInput) (*struct{}, error) {
 		if reg.deps.AdminPluginLifecycle == nil {
 			return nil, unavailable("plugin lifecycle")
