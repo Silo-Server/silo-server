@@ -865,6 +865,15 @@ Clients use capability documents to decide whether a feature exists. The server 
 contract digest are for diagnostics, support, cache identity, and last-resort compatibility
 messages; they are not substitutes for feature detection.
 
+A capability document's permission answer (`allowed`) never reports as allowed an action whose
+operations are all refused to the session asking. The rule is applied in one place, the shared
+capability adapter (`prepareCapabilityOperation`): a capability that describes such actions names
+their operations (`x-silo-capability-for` in the document), and for a session of a kind the
+per-operation decisions judge (`x-silo-origin-decisions`) the answer is false when every named
+operation is refused to that kind. Every other caller gets the capability's own answer. Today one
+kind is judged, a session another app's key opened; a second kind inherits the rule with no new
+code.
+
 `links.identity` points at `GET /api/v2/system/identity`, the one public per-deployment value:
 a stable `server_id` every API process answers at every address. It is self-asserted and
 authorizes nothing; the signed-in `GET /api/v2/system/connections` capability document lists the
