@@ -105,3 +105,48 @@ func TestProvisionAppliesDeclarationThatLeavesNoSignInProviderDB(t *testing.T) {
 		t.Fatalf("with the provider on: detail = %q", got)
 	}
 }
+
+// TestSignInWarningOnlyOnPluginsThatCanBeTheProviderDB: the warning asks for
+// the sign-in provider back, so only a plugin with an OIDC or LDAP binding
+// carries it; a plugin that only provides network identity never can be
+// that provider.
+func TestSignInWarningOnlyOnPluginsThatCanBeTheProviderDB(t *testing.T) {
+	previous := signInCheck
+	t.Cleanup(func() { RegisterSignInCheck(previous) })
+	RegisterSignInCheck(func(context.Context, SignInQuerier, int) (bool, error) { return false, nil })
+	pool := builtinGuardTestPool(t)
+	ctx := t.Context()
+	suffix := strings.ReplaceAll(t.Name(), "/", "-")
+	install := func(plugin, capability, modes string) {
+		t.Helper()
+		var id int
+		if err := pool.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
+			VALUES ($1, '0', '/nonexistent/'||$1, true, 'manual', 'plugin') RETURNING id`, plugin).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM plugin_installations WHERE id = $1`, id) })
+		if _, err := pool.Exec(ctx, `INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id, metadata)
+			VALUES ($1, 'auth_provider.v1', $2, jsonb_build_object('auth_modes', jsonb_build_array($3::text)))`, id, capability, modes); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO plugin_auth_bindings (plugin_installation_id, capability_id, enabled) VALUES ($1, $2, false)`, id, capability); err != nil {
+			t.Fatal(err)
+		}
+	}
+	signIn, network := "sign-in-"+suffix, "network-"+suffix
+	install(signIn, "oidc", "oauth2")
+	install(network, "tailnet", "network")
+
+	statuses, err := withSignInWarning(ctx, pool, []ProvisionStatus{
+		{PluginID: signIn, State: "applied"}, {PluginID: network, State: "applied"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statuses[0].Detail != SignInProviderWarning {
+		t.Errorf("sign-in plugin detail = %q, want the warning", statuses[0].Detail)
+	}
+	if statuses[1].Detail != "" {
+		t.Errorf("network identity plugin detail = %q, want none", statuses[1].Detail)
+	}
+}

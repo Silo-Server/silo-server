@@ -143,8 +143,9 @@ func logProvisionSignIn(ctx context.Context, tx pgx.Tx) error {
 }
 
 // withSignInWarning adds SignInProviderWarning, when it is true at read time,
-// to the status of each provisioned plugin with a sign-in binding that has
-// no other detail. Worked out on every read, it ends as soon as password
+// to the status of each provisioned plugin with an OIDC or LDAP binding that
+// has no other detail. A plugin with only a network identity binding can
+// never be the provider the warning asks for, so it gets none. Worked out on every read, it ends as soon as password
 // sign-in is turned back on, by a break-glass admin or the recovery command,
 // or a provider becomes usable, without waiting for the next apply.
 func withSignInWarning(ctx context.Context, db SignInQuerier, statuses []ProvisionStatus) ([]ProvisionStatus, error) {
@@ -156,7 +157,8 @@ func withSignInWarning(ctx context.Context, db SignInQuerier, statuses []Provisi
 		return statuses, err
 	}
 	rows, err := db.Query(ctx, `SELECT DISTINCT i.plugin_id FROM plugin_installations i
-		JOIN plugin_auth_bindings b ON b.plugin_installation_id = i.id`)
+		JOIN plugin_auth_bindings b ON b.plugin_installation_id = i.id
+		WHERE NOT `+AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id"))
 	if err != nil {
 		return statuses, err
 	}

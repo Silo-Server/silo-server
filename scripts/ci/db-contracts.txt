@@ -333,6 +333,7 @@
 ./internal/auth TestSignInProviderGuardSerializesWithSettingsSaveDB
 ./internal/auth TestServerWithoutUsableProviderCanStillBeRepairedAndManagedDB
 ./internal/plugins TestProvisionAppliesDeclarationThatLeavesNoSignInProviderDB
+./internal/plugins TestSignInWarningOnlyOnPluginsThatCanBeTheProviderDB
 ./internal/api/handlers TestLocalLoginSettingRequiresBreakGlassDB
 ./internal/api/handlers TestPluginDisableAndUninstallRefusedBeforeStopDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
