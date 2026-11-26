@@ -1099,10 +1099,13 @@ A visitor cannot:
   everywhere either;
 - see another session of the account in `listSessions` beyond its `id` and `current`: the
   page is the one a [session opened by device sign-in](#sessions-opened-by-device-sign-in)
-  gets, ordered by id, and a cursor from before demo mode was switched on or off is
-  `400 invalid_cursor`. When the process has never read the setting, `listSessions` is
-  `500 internal_error` for such a caller rather than the full page, and a personal API key of
-  the account, which has no session of its own, is `403 permission_denied`;
+  gets, ordered by id. A visitor whose page changes when demo mode is switched on or off gets
+  `400 invalid_cursor` for a cursor from before the switch; a session opened by device sign-in
+  gets the reduced page either way, so its cursor stays valid. When the process has never read
+  the setting, `listSessions` is `500 internal_error` rather than the full page for a visitor
+  whose page depends on demo mode (a session opened by device sign-in gets its reduced page
+  without reading it), and a personal API key of the account, which has no session of its
+  own, is `403 permission_denied`;
 - link or unlink an external sign-in (`createAccountIdentityLinkTicket`,
   `startAccountIdentityLink`, `completeAccountIdentityLink`,
   `linkAccountIdentityWithCredentials`, `linkAccountIdentityWithNetwork`,

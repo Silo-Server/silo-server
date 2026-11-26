@@ -23,7 +23,7 @@ const (
 // sessionReachDemoListDescription adds demo visitors to listSessions'
 // description: they get the page a session limited to itself gets.
 const sessionReachDemoListDescription = "In demo mode a caller that is not an administrator gets the same page: demo visitors share one account, so its other sessions are other visitors'. " +
-	"When the server cannot read whether demo mode is on, such a caller gets 500 internal_error rather than the full page, and an API key of such a caller, which has no session of its own, gets 403 permission_denied."
+	"When the server has never read whether demo mode is on, such a caller gets 500 internal_error rather than the full page, unless its session was opened by device sign-in, which gets the reduced page without reading the setting; an API key of such a caller, which has no session of its own, gets 403 permission_denied."
 
 // loginSessionIDCursorSort is the listSessions order for a session limited
 // to itself (auth.LimitedToItself). It is part of the cursor scope, so a
