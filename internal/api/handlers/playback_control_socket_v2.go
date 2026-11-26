@@ -236,18 +236,8 @@ func (h *PlaybackControlSocketV2) Mint(ctx context.Context, identity evt.SocketI
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	if mayReachOtherDevices != nil {
-		starter, readErr := h.startedBy(ctx, playbackSessionID)
-		if readErr != nil || starter != identity.SessionID {
-			if err := mayReachOtherDevices(ctx); err != nil {
-				// A caller the rule limits can't be told whose stream it is
-				// while the read fails: an outage, not a refusal.
-				if readErr != nil {
-					return "", time.Time{}, ErrPlaybackControlSocketUnavailable
-				}
-				return "", time.Time{}, err
-			}
-		}
+	if err := h.refuseOtherStream(ctx, identity, playbackSessionID, mayReachOtherDevices); err != nil {
+		return "", time.Time{}, err
 	}
 	scope, ok := access.GetScope(validated)
 	if !ok {
@@ -273,21 +263,44 @@ func (h *PlaybackControlSocketV2) Mint(ctx context.Context, identity evt.SocketI
 	return ticket, expiry, nil
 }
 
+// refuseOtherStream asks mayReachOtherDevices, when set, before the caller
+// takes the control lane of a stream its own login session did not start. A
+// caller the rule limits gets ErrPlaybackControlSocketUnavailable while the
+// attempt can't be read: whose stream it is is unknown, an outage rather
+// than a refusal. A caller the rule doesn't concern is unaffected either way.
+func (h *PlaybackControlSocketV2) refuseOtherStream(ctx context.Context, identity evt.SocketIdentity, playbackSessionID string, mayReachOtherDevices func(context.Context) error) error {
+	if mayReachOtherDevices == nil {
+		return nil
+	}
+	starter, readErr := h.startedBy(ctx, playbackSessionID)
+	if errors.Is(readErr, playback.ErrSessionNotFound) {
+		starter, readErr = "", nil
+	}
+	if readErr == nil && starter == identity.SessionID {
+		return nil
+	}
+	err := mayReachOtherDevices(ctx)
+	if err != nil && readErr != nil {
+		return ErrPlaybackControlSocketUnavailable
+	}
+	return err
+}
+
 // startedBy is the login session that started the playback session's
-// durable attempt, or "" when none is recorded (a bridge-started session, an
-// id the store can't name, no attempt). A failed read is returned as an
-// error, so it isn't taken for a stream nobody started.
+// durable attempt: "" when none is recorded (a bridge-started session, an id
+// the store can't name), playback.ErrSessionNotFound when there is no
+// attempt, and the store's error when the read fails.
 func (h *PlaybackControlSocketV2) startedBy(ctx context.Context, playbackSessionID string) (string, error) {
 	store := h.Playback.PlanStoreV3
-	if id, err := uuid.Parse(playbackSessionID); store == nil || err != nil || id == uuid.Nil || id.String() != playbackSessionID {
+	if store == nil || validatePlaybackSessionID(playbackSessionID) != nil {
 		return "", nil
 	}
 	attempt, err := store.GetAttemptIdentity(ctx, playbackSessionID)
-	if errors.Is(err, playback.ErrSessionNotFound) || (err == nil && attempt == nil) {
-		return "", nil
-	}
 	if err != nil {
 		return "", err
+	}
+	if attempt == nil {
+		return "", nil
 	}
 	return attempt.LoginSessionID, nil
 }
