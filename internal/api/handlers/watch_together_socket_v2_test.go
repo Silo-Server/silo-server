@@ -374,3 +374,52 @@ func TestRoomSocketV2KeepsAnotherAppFromHosting(t *testing.T) {
 		t.Fatal("an ordinary member's transport request was refused as another app's")
 	}
 }
+
+// TestRoomSocketV2CarriesTheOtherAppMarkToTheConnection: the mark a mint
+// records for a session another app opened must reach the connection loop,
+// or its transport requests would be served. Through a real handshake, such
+// a member's transport_request answers the other-app refusal; an ordinary
+// member's gets the room's own answer.
+func TestRoomSocketV2CarriesTheOtherAppMarkToTheConnection(t *testing.T) {
+	for _, otherApp := range []bool{true, false} {
+		h, _, _ := roomSocketHandler(t)
+		server := roomSocketServer(t, h)
+		proof, _, err := h.Room.TokenService.Mint(watchtogether.RoomTokenClaims{RoomID: "room", UserID: 7, ProfileID: "profile"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "user", ProfileID: "profile", AccessExpiresAt: time.Now().Add(time.Minute)}
+		ticket, _, err := h.MintRoomSocket(t.Context(), "room", proof, identity, otherApp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dialer := websocket.Dialer{Subprotocols: []string{watchtogether.RoomSocketProtocol, eventsTicketProtocolPrefix + ticket}}
+		conn, resp, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+"/rooms/room/ws", http.Header{"Origin": []string{server.URL}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if err = conn.WriteJSON(map[string]any{"type": "transport_request", "action": "play"}); err != nil {
+			t.Fatal(err)
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		var message string
+		for message == "" {
+			_, body, err := conn.ReadMessage()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var frame map[string]any
+			if err = json.Unmarshal(body, &frame); err != nil {
+				t.Fatal(err)
+			}
+			if frame["type"] == "error" {
+				message, _ = frame["message"].(string)
+			}
+		}
+		_ = conn.Close()
+		if refused := message == errOtherAppTransport.Error(); refused != otherApp {
+			t.Fatalf("another app %v: transport answered %q", otherApp, message)
+		}
+	}
+}
