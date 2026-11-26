@@ -1,6 +1,8 @@
 package plugins
 
 import (
+	"context"
+	"errors"
 	"slices"
 	"testing"
 
@@ -10,7 +12,8 @@ import (
 // TestStopAfterDisableKeepsANewerEnable stages a disable whose stop runs late:
 // the disable commits, an enable commits and launches the plugin, then the
 // disable's stop runs. The plugin stays running, since its row is enabled. A
-// row still disabled, or gone after an uninstall, is stopped.
+// row still disabled, gone after an uninstall, or that cannot be read is
+// stopped.
 func TestStopAfterDisableKeepsANewerEnable(t *testing.T) {
 	ctx := t.Context()
 	newService := func(t *testing.T) (*Service, *fakeServiceInstallationStore, *fakeServiceHost) {
@@ -55,6 +58,18 @@ func TestStopAfterDisableKeepsANewerEnable(t *testing.T) {
 		}
 	})
 
+	t.Run("row cannot be read", func(t *testing.T) {
+		service, store, host := newService(t)
+		service.installations = failingReadStore{store}
+		err := service.StopUnlessEnabled(ctx, 3)
+		if !errors.Is(err, errRowRead) {
+			t.Fatalf("StopUnlessEnabled = %v, want the read error", err)
+		}
+		if !slices.Equal(host.stopped, []int{3}) {
+			t.Fatalf("stopped %v, want [3]: an unread row must not keep the plugin running", host.stopped)
+		}
+	})
+
 	t.Run("uninstalled", func(t *testing.T) {
 		service, store, host := newService(t)
 		store.mu.Lock()
@@ -67,4 +82,13 @@ func TestStopAfterDisableKeepsANewerEnable(t *testing.T) {
 			t.Fatalf("stopped %v, want [3]", host.stopped)
 		}
 	})
+}
+
+var errRowRead = errors.New("database unreachable")
+
+// failingReadStore is the installation store with every row read failing.
+type failingReadStore struct{ *fakeServiceInstallationStore }
+
+func (failingReadStore) GetByID(context.Context, int) (*Installation, error) {
+	return nil, errRowRead
 }

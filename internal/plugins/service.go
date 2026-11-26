@@ -845,11 +845,14 @@ func (s *Service) Stop(installationID int) error {
 }
 
 // StopUnlessEnabled stops installation id's process after a change that
-// disabled or removed it committed, unless the row, read again under the
-// runtime lock, is enabled: an enable that committed and launched in between
-// is newer than the change that asked for the stop, so its process stays.
-// Every launch takes the same lock, so none can slip between the read and
-// the stop.
+// disabled or removed it committed. It keeps the process only when the row,
+// read again under the runtime lock, is read and enabled: an enable that
+// committed and launched in between is newer than the change that asked for
+// the stop. Every launch takes the same lock, so none can slip between the
+// read and the stop. A row that is gone is stopped, and so is one that could
+// not be read: a disabled or removed plugin left answering is worse than an
+// enabled one briefly down, which its next call or reconcile starts again.
+// The read's error is returned after the stop, for the caller to log.
 func (s *Service) StopUnlessEnabled(ctx context.Context, installationID int) error {
 	lock := s.runtimeLock(installationID)
 	lock.Lock()
@@ -858,10 +861,15 @@ func (s *Service) StopUnlessEnabled(ctx context.Context, installationID int) err
 	if err == nil && installation.Enabled {
 		return nil
 	}
+	stopErr := s.stopRuntime(installationID)
 	if err != nil && !errors.Is(err, ErrInstallationNotFound) {
+		// A plugin that was not running is no failure; the read still is.
+		if stopErr != nil && !errors.Is(stopErr, pluginhost.ErrClientNotFound) {
+			return errors.Join(err, stopErr)
+		}
 		return err
 	}
-	return s.stopRuntime(installationID)
+	return stopErr
 }
 
 // stopRuntime stops a process with its lock held.

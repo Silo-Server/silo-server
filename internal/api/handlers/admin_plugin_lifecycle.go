@@ -37,11 +37,12 @@ const lifecycleCommitTimeout = 30 * time.Second
 
 // stopAfterCommit stops installation id's plugin once a change that disables
 // or removes it has committed, through the service or stopForTest. The
-// service stops it only if the row is still disabled or gone, so an enable
-// that committed since keeps its process (Service.StopUnlessEnabled). The
-// read is detached from the request: the change already holds. A failure is
-// logged: the row already says the plugin is off, and reconciliation on every
-// node stops a process whose row no longer runs.
+// service keeps it running only when it reads the row and finds it enabled,
+// so an enable that committed since keeps its process; a row that is gone or
+// cannot be read is stopped (Service.StopUnlessEnabled). The read is detached
+// from the request: the change already holds. A failure, including a failed
+// read, is logged: the row already says the plugin is off, and reconciliation
+// on every node stops a process whose row no longer runs.
 func (h *PluginHandler) stopAfterCommit(ctx context.Context, id int) {
 	stop := h.stopForTest
 	if stop == nil {
