@@ -26,6 +26,13 @@ func TestSQLiteUnmarkKeepsHistory(t *testing.T) {
 	storetest.RunPlayFinishedAfterUnmark(t, newConformanceStore)
 }
 
+// TestSQLiteImportedCompletionAfterSameSecondPartial runs the same-second
+// import conformance test against the SQLite backend; the Postgres backend
+// runs it in internal/userstore/pgstore.
+func TestSQLiteImportedCompletionAfterSameSecondPartial(t *testing.T) {
+	storetest.RunImportedCompletionAfterSameSecondPartial(t, newConformanceStore)
+}
+
 func TestSQLiteDatedMarkWatchedBatchAtomic(t *testing.T) {
 	storetest.RunDatedMarkWatchedBatch(t, newConformanceStore(t))
 }

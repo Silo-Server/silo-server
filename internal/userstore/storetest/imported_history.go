@@ -103,3 +103,73 @@ func ImportedHistoryConcurrent(t *testing.T, store userstore.UserStore) {
 		t.Fatalf("race visible rows=%d err=%v", len(rows), err)
 	}
 }
+
+// RunImportedCompletionAfterSameSecondPartial checks that an imported
+// completion is kept when a partial play of the same item landed earlier in
+// the same second, while a replay of either is still recognized (#5366).
+func RunImportedCompletionAfterSameSecondPartial(t *testing.T, newStore func(*testing.T) userstore.UserStore) {
+	t.Helper()
+	ctx := t.Context()
+	const profileID = "same-second-p"
+	store := newStore(t)
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: profileID, Name: profileID}); err != nil {
+		t.Fatal(err)
+	}
+	second := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	add := func(item string, offset time.Duration, completed bool) bool {
+		t.Helper()
+		created, err := store.AddHistoryIfMissing(ctx, userstore.WatchHistoryEntry{
+			ProfileID: profileID, MediaItemID: item, WatchedAt: second.Add(offset).Format(time.RFC3339Nano),
+			DurationSeconds: 600, Completed: completed, Source: userstore.WatchHistorySourceImport,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return created
+	}
+	completedRows := func(item string) (all, completed int) {
+		t.Helper()
+		rows, err := store.ListHistory(ctx, profileID, 100, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range rows {
+			if row.MediaItemID != item {
+				continue
+			}
+			all++
+			if row.Completed {
+				completed++
+			}
+		}
+		return all, completed
+	}
+
+	// A partial stop, then the completion half a second later.
+	if !add("stop-then-played", 100*time.Millisecond, false) {
+		t.Fatal("partial stop was not recorded")
+	}
+	if add("stop-then-played", 100*time.Millisecond, false) {
+		t.Fatal("a replayed partial stop was recorded again")
+	}
+	if !add("stop-then-played", 600*time.Millisecond, true) {
+		t.Fatal("completion in the same second as a partial stop was not recorded")
+	}
+	if add("stop-then-played", 600*time.Millisecond, true) || add("stop-then-played", 100*time.Millisecond, false) {
+		t.Fatal("a replayed import was recorded again")
+	}
+	if all, completed := completedRows("stop-then-played"); all != 2 || completed != 1 {
+		t.Fatalf("history rows=%d completed=%d, want 2 and 1", all, completed)
+	}
+
+	// A partial stop after a completion in the same second adds nothing.
+	if !add("played-then-stop", 100*time.Millisecond, true) {
+		t.Fatal("completion was not recorded")
+	}
+	if add("played-then-stop", 600*time.Millisecond, false) {
+		t.Fatal("partial stop in the same second as a completion was recorded")
+	}
+	if all, completed := completedRows("played-then-stop"); all != 1 || completed != 1 {
+		t.Fatalf("history rows=%d completed=%d, want 1 and 1", all, completed)
+	}
+}

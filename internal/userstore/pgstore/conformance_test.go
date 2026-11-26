@@ -67,6 +67,17 @@ func TestPostgresUnmarkKeepsHistory(t *testing.T) {
 	storetest.RunPlayFinishedAfterUnmark(t, newUnmarkStore)
 }
 
+// TestPostgresImportedCompletionAfterSameSecondPartial runs the same-second
+// import conformance test against the Postgres backend; the SQLite backend
+// runs it in internal/userdb. Skips unless SILO_TEST_DATABASE_URL is set.
+func TestPostgresImportedCompletionAfterSameSecondPartial(t *testing.T) {
+	pool := testPool(t)
+	storetest.RunImportedCompletionAfterSameSecondPartial(t, func(t *testing.T) userstore.UserStore {
+		// Deleting the user cascades to every user-scoped table.
+		return newStore(pool, seedTestUser(t, pool, "conf-same-second-import"))
+	})
+}
+
 // TestPostgresAtomicJellycompatProgress runs the leaf UserData edit conformance
 // test against the Postgres backend; the SQLite backend runs it in
 // internal/userdb. A trigger scoped to this test's user rejects position 321.
