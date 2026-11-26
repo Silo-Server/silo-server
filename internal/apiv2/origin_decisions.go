@@ -446,19 +446,24 @@ func (reg *Registry) capabilityPermitted(governed []string) func(context.Context
 		return nil
 	}
 	return func(ctx context.Context) bool {
-		kind := judgedKind(claimsFrom(ctx))
-		if kind == "" {
+		return reg.permittedFor(judgedKind(claimsFrom(ctx)), governed)
+	}
+}
+
+// permittedFor reports whether a kind of session may use at least one of the
+// governed operations; every operation is open to an unjudged session ("").
+func (reg *Registry) permittedFor(kind auth.SessionKind, governed []string) bool {
+	if kind == "" {
+		return true
+	}
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	for _, id := range governed {
+		if d := reg.origins[id].decisionFor(kind); d != nil && d.Verdict != VerdictRefused {
 			return true
 		}
-		reg.mu.Lock()
-		defer reg.mu.Unlock()
-		for _, id := range governed {
-			if d := reg.origins[id].decisionFor(kind); d != nil && d.Verdict != VerdictRefused {
-				return true
-			}
-		}
-		return false
 	}
+	return false
 }
 
 // capabilityMember is one permission member of a response a judged kind of
@@ -552,6 +557,13 @@ var capabilityMembers = map[string]capabilityMember{
 // read's top level: false when the caller's kind of session is refused every
 // operation it names, else true (the handler's own answer then stands).
 func (reg *Registry) memberPermitted(ctx context.Context, key string) bool {
-	permitted := reg.capabilityPermitted(capabilityMembers[key].governs)
-	return permitted == nil || permitted(ctx)
+	return reg.memberPermittedFor(judgedKind(claimsFrom(ctx)), key)
+}
+
+// memberPermittedFor is memberPermitted for a kind of session named outright,
+// for an answer whose session is not the request's own (a sealed reply opens
+// one).
+func (reg *Registry) memberPermittedFor(kind auth.SessionKind, key string) bool {
+	governed := capabilityMembers[key].governs
+	return len(governed) == 0 || reg.permittedFor(kind, governed)
 }

@@ -378,9 +378,13 @@ func (reg *Registry) sealAppKeyAnswer(answer *handlers.AppKeyAnswer) (*SealedRep
 	}
 	if answer.Tokens != nil {
 		tokens := tokenPairFromView(*answer.Tokens)
+		var kind auth.SessionKind
 		if result.GrantedApp {
-			tokens = grantedAppTokenPair(tokens)
+			kind = auth.SessionKindGrantedApp
+			// Like its refreshes (handlers.RefreshedTokensView).
+			tokens.AccountCreatedAt = nil
 		}
+		tokens.User = reg.accountForSession(answer.Tokens.User, kind)
 		reply.Tokens = &tokens
 	}
 	plaintext, _ := json.Marshal(reply)
@@ -406,24 +410,6 @@ func personKeyIDMember(result *auth.KeySignInResult) json.RawMessage {
 	}
 	member, _ := json.Marshal(result.PersonKeyID)
 	return member
-}
-
-// grantedAppTokenPair is a token pair as an answer to another app's key
-// (one enrolled through a grant) carries it: everything such an answer
-// leaves out of the pair is left out here. Its refreshes leave out
-// account_created_at too (handlers.RefreshedTokensView).
-func grantedAppTokenPair(tokens TokenPair) TokenPair {
-	tokens.User = grantedAppAccount(tokens.User)
-	tokens.AccountCreatedAt = nil
-	return tokens
-}
-
-// grantedAppAccount is the account as a session another app's key opened
-// reads it: the person's email is not that app's to read, so it is the
-// shape's "none set". The name, role and the rest stay.
-func grantedAppAccount(account Account) Account {
-	account.Email = ""
-	return account
 }
 
 // appKeyKnownOrigins is the origins a signed origin may be on this request,

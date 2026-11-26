@@ -71,7 +71,7 @@ type TokenPair struct {
 
 // tokenPairFromView is the token pair every answer carrying one gives;
 // account_created_at is set here, so no path can leave it out.
-// grantedAppTokenPair removes what a granted app's answer leaves out.
+// A sealed reply to another app's key removes it (sealAppKeyAnswer).
 func tokenPairFromView(v handlers.TokenPairView) TokenPair {
 	return TokenPair{AccessToken: v.AccessToken, RefreshToken: v.RefreshToken, ExpiresIn: v.ExpiresIn, User: accountFromView(v.User),
 		AccountCreatedAt: accountCreatedAt(v.User.CreatedAt)}
