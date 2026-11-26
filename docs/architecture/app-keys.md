@@ -789,8 +789,22 @@ the account row on every edit. Deleting an account deletes its rows after the
 account, in the same transaction, at both deletion sites.
 
 After a request that recorded an edit, the middleware calls the server's
-waker for each account that got one, to tell the person's apps; it calls it
-for a write that rolled back too. No waker is wired yet, so nothing is sent.
+waker for each account that got one, and the owner's routes that clear an
+override or a hidden profile call it after they commit. The waker queues a
+`background_wake` push for each of the account's registered phones
+(`internal/notifications/push_profile_set.go`). It wakes only for an edit that
+committed: the request remembers the first edit revision it recorded per
+account, and the waker checks that a row at or above it exists, so a write
+that rolled back sends nothing. At most one wake goes out a minute per
+account, on every API server: the check for a wake in the last minute and the
+insert of the new attempts run in one transaction under a per-account
+advisory lock, and the attempt rows are the state, so two servers recording
+at once queue one wake and no server keeps a timer. A second edit inside the
+minute queues nothing. The waker answers whether a wake was queued or already
+was inside the minute; with push off or no registered phone it answers false
+and writes nothing. It never fails the edit: errors are logged, the send runs
+in the background, and an attempt it doesn't finish is sent by the push retry
+sweep.
 
 **Mapping.** The first item is always the main profile, which the set never
 creates, deletes or swaps; a set naming the main profile's `sync_id` anywhere
@@ -913,6 +927,9 @@ API process is spent once on any of them, and a revocation on one ends the
 sessions every node checks. The switch and the local-password setting are read
 from `server_settings` on each request. The rate-limit budgets follow the
 rate limiter's backend (cluster-wide with Redis).
+The profile set wake's one-a-minute limit holds across API processes
+through a Postgres advisory lock and the attempt rows (see
+[The profile set](#the-profile-set)).
 
 ## The switch
 
