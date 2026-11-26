@@ -275,8 +275,11 @@ func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAtt
 	}
 	_ = s.devices.RecordPushFailure(ctx, device.ID, code, result.TerminalDevice)
 
+	// A profile set wake is sent once: the next edit or the app opening
+	// repairs a missed one, and a retrying row is one any server's sweep
+	// would claim (push_profile_set.go).
 	delay, more := pushRetryDelayWithHint(attemptNumber, result.RetryAfter)
-	if more && !result.TerminalDevice && retryableHTTPStatus(result.HTTPStatus) {
+	if more && !result.TerminalDevice && retryableHTTPStatus(result.HTTPStatus) && attempt.TriggerType != PushTriggerProfileSet {
 		nextRetry := time.Now().Add(delay)
 		return s.finalize(ctx, attempt, PushOutcomeRetrying, result.UpstreamReason, result.Message, statusPtr, result.RelayRequestID, &nextRetry)
 	}

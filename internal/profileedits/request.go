@@ -167,6 +167,10 @@ func ActorFor(ctx context.Context, account int) (Actor, bool) {
 // It reports whether a wake was queued for at least one device. A nil
 // Waker queues nothing. Called with a request's context after an edit, it
 // wakes only when the edit committed (Request.FirstRevision).
+//
+// A caller that needs the answer, to word a message, calls it after its
+// write commits and waits for it: the server's waker returns once the wake is
+// queued, within five seconds, and sends it in the background.
 type Waker func(ctx context.Context, userID int) bool
 
 // Wake calls w, answering false for a nil Waker.
@@ -178,20 +182,26 @@ func (w Waker) Wake(ctx context.Context, userID int) bool {
 }
 
 // Middleware gives each request a holder, and after the handler returns
-// wakes every account that got an edit. It calls the waker for an edit whose
-// transaction rolled back too; the waker reads FirstRevision from the
-// context and wakes only when an edit committed.
+// wakes every account that got an edit. The wakes run on their own goroutine,
+// detached from the request's cancellation, so the response never waits for
+// them; the waker bounds its own work. It calls the waker for an edit whose
+// transaction rolled back too; the waker reads FirstRevision from the context
+// and wakes only when an edit committed.
 func Middleware(wake Waker) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx, req := WithRequest(r.Context())
 			next.ServeHTTP(w, r.WithContext(ctx))
-			if wake == nil {
+			accounts := req.Accounts()
+			if wake == nil || len(accounts) == 0 {
 				return
 			}
-			for _, account := range req.Accounts() {
-				wake.Wake(ctx, account)
-			}
+			wakeCtx := context.WithoutCancel(ctx)
+			go func() {
+				for _, account := range accounts {
+					wake.Wake(wakeCtx, account)
+				}
+			}()
 		})
 	}
 }

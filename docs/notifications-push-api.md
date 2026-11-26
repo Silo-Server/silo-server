@@ -195,10 +195,9 @@ uses them as evidence, and only to stop push to the account's own registrations.
 
 ## Profile set wake
 
-When a profile from an account's profile set changes on this server (an edit
-the server records, or an administrator clearing an override or a hidden
-profile; see [Edits made on this server](auth-api.md#edits-made-on-this-server)),
-the server wakes every registered, enabled phone of the account whose login is
+When the server records an edit to a profile from an account's profile set
+(see [Edits made on this server](auth-api.md#edits-made-on-this-server)), it
+wakes every registered, enabled phone of the account whose login is
 live, on the platforms whose push delivery is on. The app should read
 `GET /api/v2/profiles/set` when woken.
 
@@ -217,8 +216,10 @@ The relay request is the one an alert uses, with:
 
 The push carries nothing else and shows nothing. The server sends at most one
 wake a minute per account, across all API servers; an edit inside that minute
-sends nothing more. Attempts are recorded with trigger `profile_set` and
-follow the ordinary retry schedule. Finished ones are deleted after seven days.
+sends nothing more, and the app learns of it from the next wake or when it
+opens. Attempts are recorded with trigger `profile_set`. A wake is sent once
+and never retried: a missed one is repaired by the next edit or by the app
+opening. Wake attempts are deleted after seven days.
 Apple delivers background pushes at its discretion and not at all to an app the
 person force-quit, so an app must still read the set when it opens.
 

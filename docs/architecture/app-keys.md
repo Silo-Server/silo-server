@@ -971,8 +971,9 @@ the account row on every edit. Deleting an account deletes its rows after the
 account, in the same transaction, at both deletion sites.
 
 After a request that recorded an edit, the middleware calls the server's
-waker for each account that got one, and the owner's routes that clear an
-override or a hidden profile call it after they commit. The waker queues a
+waker for each account that got one, on its own goroutine so the response
+never waits for it. A caller that needs the answer calls the waker after its
+write commits and gets it within five seconds. The waker queues a
 `background_wake` push for each of the account's registered phones
 (`internal/notifications/push_profile_set.go`). It wakes only for an edit that
 committed: the request remembers the first edit revision it recorded per
@@ -982,11 +983,22 @@ account, on every API server: the check for a wake in the last minute and the
 insert of the new attempts run in one transaction under a per-account
 advisory lock, and the attempt rows are the state, so two servers recording
 at once queue one wake and no server keeps a timer. A second edit inside the
-minute queues nothing. The waker answers whether a wake was queued or already
-was inside the minute; with push off or no registered phone it answers false
-and writes nothing. It never fails the edit: errors are logged, the send runs
-in the background, and an attempt it doesn't finish is sent by the push retry
-sweep.
+minute queues nothing; the phone learns of it from the next wake or when the
+app opens.
+
+The waker answers true when it queued a wake, or one was queued inside the
+minute, even if that earlier send failed: the phone has been told, or will
+be within the minute, and a failed send is repaired when the app opens. With
+push off or no registered phone it answers false and writes nothing. It never
+fails the edit: errors are logged and the send runs in the background.
+
+A wake is sent once and never retried. Its attempt row is inserted in flight,
+as `retrying` with no `next_retry_at`, and the send records `delivered` or
+`failed`. No claim query selects any of those, so no server's retry sweep,
+including one of the previous release that would send it as an alert, ever
+picks a wake up. A send cut short by a stopping process leaves the row in
+flight; notification retention marks it failed after ten minutes and deletes
+wake rows after seven days.
 
 **Mapping.** The first item is always the main profile, which the set never
 creates, deletes or swaps; a set naming the main profile's `sync_id` anywhere

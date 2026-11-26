@@ -28,8 +28,8 @@ type RetentionStats struct {
 	// UnboundPushRegistrationsDeleted counts registrations from before
 	// login_session_id whose device has no live login.
 	UnboundPushRegistrationsDeleted int64
-	// ProfileSetWakesDeleted counts finished profile set wake attempts past
-	// their retention.
+	// ProfileSetWakesDeleted counts profile set wake attempts past their
+	// retention.
 	ProfileSetWakesDeleted   int64
 	DiscordLinkStatesDeleted int64
 	// Email verification outbox: payloads dropped from terminal rows whose
@@ -137,7 +137,7 @@ func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 		if err != nil {
 			return stats, fmt.Errorf("prune unbound push registrations: %w", err)
 		}
-		if stats.ProfileSetWakesDeleted, err = s.pushDeviceRepo.DeleteOldProfileSetWakes(ctx); err != nil {
+		if stats.ProfileSetWakesDeleted, err = s.pushDeviceRepo.RetireProfileSetWakes(ctx); err != nil {
 			return stats, fmt.Errorf("prune profile set wakes: %w", err)
 		}
 	}

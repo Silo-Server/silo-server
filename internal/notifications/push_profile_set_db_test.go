@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/profileedits"
@@ -225,4 +226,100 @@ func TestRelayModeFollowsTheTrigger(t *testing.T) {
 			}
 		}
 	}
+}
+
+// assertNeverClaimed ages every wake row past each claim query's time
+// threshold and checks that no claim query returns one: a server of the
+// previous release would send a claimed wake as a visible alert.
+func (h wakeHarness) assertNeverClaimed(repo *PushDeviceRepository, state string) {
+	h.t.Helper()
+	ctx := h.t.Context()
+	rows, err := h.pool.Query(ctx, `UPDATE push_delivery_attempts
+		SET attempted_at = attempted_at - interval '2 hours', created_at = created_at - interval '2 hours'
+		WHERE trigger_type = $1 RETURNING id`, PushTriggerProfileSet)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil || len(ids) == 0 {
+		h.t.Fatalf("wake rows %s: %v (err %v), want some", state, ids, err)
+	}
+	claimed, err := repo.ClaimDuePushAttempts(ctx, 100)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	for _, id := range ids {
+		byID, err := repo.ClaimPushAttemptByID(ctx, id)
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		claimed = append(claimed, byID...)
+	}
+	if len(claimed) != 0 {
+		h.t.Fatalf("claim queries returned wakes %s: %+v", state, claimed)
+	}
+}
+
+// waitForOutcome waits until every wake row has outcome, as the background
+// send records it.
+func (h wakeHarness) waitForOutcome(outcome string) {
+	h.t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var other int
+		if err := h.pool.QueryRow(h.t.Context(), `SELECT count(*) FROM push_delivery_attempts
+			WHERE trigger_type = $1 AND (outcome <> $2 OR next_retry_at IS NOT NULL)`,
+			PushTriggerProfileSet, outcome).Scan(&other); err != nil {
+			h.t.Fatal(err)
+		}
+		if other == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			h.t.Fatalf("%d wake rows not %s with no next retry", other, outcome)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// No claim query, on this release or the previous one (they share these
+// queries), ever returns a wake: not while its send is in flight, not after
+// a relay failure that would retry an alert, not once delivered. Regression:
+// a wake left pending or retrying is claimed by a previous-release server's
+// sweep and reaches the phone as an alert whose display fetch answers 404.
+func TestProfileSetWakeIsNeverClaimedDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	registerForSession(t, repo, "live")
+	h := wakeHarness{t: t, pool: pool}
+	arrived, gate := make(chan struct{}, 4), make(chan int)
+	node := profileSetWakeSystem(t, pool, repo, nil, nil)
+	node.pushSender.client = &http.Client{Transport: relayRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		arrived <- struct{}{}
+		status := <-gate
+		return relayResponse(status, `{"request_id":"r","status":"accepted"}`), nil
+	})}
+
+	if !node.WakeProfileSetDevices(t.Context(), 7) {
+		t.Fatal("first wake answered false")
+	}
+	<-arrived // the first phone's send is in flight; the second waits behind it
+	h.assertNeverClaimed(repo, "in flight")
+	gate <- http.StatusServiceUnavailable
+	<-arrived
+	gate <- http.StatusServiceUnavailable
+	h.waitForOutcome(PushOutcomeFailed)
+	h.assertNeverClaimed(repo, "after a retryable relay failure")
+
+	if !node.WakeProfileSetDevices(t.Context(), 7) {
+		t.Fatal("wake after the minute answered false")
+	}
+	for range 2 {
+		<-arrived
+		gate <- http.StatusOK
+	}
+	if _, err := pool.Exec(t.Context(), `DELETE FROM push_delivery_attempts WHERE outcome = $1`, PushOutcomeFailed); err != nil {
+		t.Fatal(err)
+	}
+	h.waitForOutcome(PushOutcomeDelivered)
+	h.assertNeverClaimed(repo, "delivered")
 }
