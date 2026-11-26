@@ -28,7 +28,7 @@ func TestProvisionAppliesDeclarationThatLeavesNoSignInProviderDB(t *testing.T) {
 		AuthBinding: &ProvisionAuthBinding{CapabilityID: "login", Enabled: new(false)},
 	})
 	checks := 0
-	RegisterSignInCheck(func(ctx context.Context, db SignInQuerier, _ int) (bool, error) {
+	RegisterSignInCheck(func(ctx context.Context, db SignInQuerier) (bool, error) {
 		checks++
 		var works bool
 		err := db.QueryRow(ctx, `SELECT COALESCE((SELECT value = 'true' FROM server_settings WHERE key = $1), true)
@@ -113,7 +113,7 @@ func TestProvisionAppliesDeclarationThatLeavesNoSignInProviderDB(t *testing.T) {
 func TestSignInWarningOnlyOnPluginsThatCanBeTheProviderDB(t *testing.T) {
 	previous := signInCheck
 	t.Cleanup(func() { RegisterSignInCheck(previous) })
-	RegisterSignInCheck(func(context.Context, SignInQuerier, int) (bool, error) { return false, nil })
+	RegisterSignInCheck(func(context.Context, SignInQuerier) (bool, error) { return false, nil })
 	pool := builtinGuardTestPool(t)
 	ctx := t.Context()
 	suffix := strings.ReplaceAll(t.Name(), "/", "-")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -15,11 +16,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
-// TestPluginDisableAndUninstallRefusedBeforeStopDB: with password sign-in
-// off, disabling or uninstalling the last provider people can sign in with
-// is refused before the plugin is stopped. Without the check up front, the
-// plugin stops, the write's own check refuses, and the handler restarts it:
-// sign-in drops for everyone meanwhile.
+// TestPluginDisableAndUninstallRefusedBeforeStopDB: disable and uninstall
+// write first and stop the plugin only once the write has committed, so a
+// refused change (the last provider people can sign in with, while password
+// sign-in is off) never stops it, and a permitted one stops it with the row
+// already changed. Stopping first would leave the provider stopped, and
+// sign-in down for everyone, whenever the write is then refused.
 func TestPluginDisableAndUninstallRefusedBeforeStopDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -75,14 +77,27 @@ func TestPluginDisableAndUninstallRefusedBeforeStopDB(t *testing.T) {
 	}
 
 	var stopped []int
+	// rowAtStop records whether the row was still there and enabled when the
+	// plugin was stopped.
+	var rowAtStop []string
 	h := &PluginHandler{
 		installations: plugins.NewInstallationStore(pool),
+		configs:       plugins.NewRuntimeConfigStore(pool, nil),
 		service:       &plugins.Service{},
 		stopForTest: func(installationID int) error {
 			stopped = append(stopped, installationID)
+			var enabled *bool
+			_ = pool.QueryRow(context.Background(), `SELECT enabled FROM plugin_installations WHERE id = $1`, installationID).Scan(&enabled)
+			switch {
+			case enabled == nil:
+				rowAtStop = append(rowAtStop, "gone")
+			case *enabled:
+				rowAtStop = append(rowAtStop, "enabled")
+			default:
+				rowAtStop = append(rowAtStop, "disabled")
+			}
 			return nil
 		},
-		startForTest: func(int) error { return nil },
 	}
 	if _, err := h.UpdateAdminPluginInstallation(ctx, id, PluginInstallationUpdateInput{Enabled: new(false)}); !errors.Is(err, auth.ErrSignInProviderRequired) {
 		t.Fatalf("disable = %v, want ErrSignInProviderRequired", err)
@@ -92,5 +107,23 @@ func TestPluginDisableAndUninstallRefusedBeforeStopDB(t *testing.T) {
 	}
 	if len(stopped) != 0 {
 		t.Fatalf("refused changes stopped installations %v", stopped)
+	}
+
+	// With password sign-in on, both are allowed and stop the plugin only
+	// after the row changed.
+	set(config.AuthLocalPasswordLoginSettingKey, "true")
+	// The response is built from the plugin's manifest, which this test row
+	// has none of; the change itself is what is checked.
+	if _, err := h.UpdateAdminPluginInstallation(ctx, id, PluginInstallationUpdateInput{Enabled: new(false)}); errors.Is(err, auth.ErrSignInProviderRequired) {
+		t.Fatalf("disable with password sign-in on = %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE plugin_installations SET enabled = true WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.DeleteAdminPluginInstallation(ctx, id); err != nil {
+		t.Fatalf("uninstall with password sign-in on = %v", err)
+	}
+	if want := []string{"disabled", "gone"}; !slices.Equal(rowAtStop, want) {
+		t.Fatalf("row when the plugin stopped = %v, want %v", rowAtStop, want)
 	}
 }

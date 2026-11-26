@@ -194,10 +194,14 @@ ordered against each other.
   after the write in its transaction (`plugins.signInGuard`), and are refused
   only when sign-in worked for everyone before and does not after: a server
   already without a usable provider can still manage its plugins, and a write
-  that makes a provider usable is always allowed. Disable and uninstall also
-  check before the plugin stops. Plugin writes take the server-settings lock after their own
-  bindings and installation locks, and the settings save takes only the
-  settings lock, so the two directions serialize without deadlock.
+  that makes a provider usable is always allowed. Disable and uninstall write
+  first and stop the plugin only once that write has committed (uninstall
+  stops it before removing its files), so a refused one never stopped the
+  provider; the stop runs after the locks are released, and reconciliation
+  on every node stops a process whose row no longer runs it if that stop
+  fails. Plugin writes take the server-settings lock after their own bindings
+  and installation locks, and the settings save takes only the settings lock,
+  so the two directions serialize without deadlock.
   Deployment provisioning applies the operator's declared configuration and is
   never refused for this: it runs the same check, and a declaration that
   leaves no provider is applied with a warning in the log

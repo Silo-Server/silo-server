@@ -52,7 +52,7 @@ const (
 var signInRowWriters = map[string]string{
 	// The uninstall itself: installation, then identities (cascade), then
 	// device sign-in requests and sessions (SET NULL).
-	"internal/plugins/installation.go:Delete": "the uninstall",
+	"internal/plugins/installation.go:DeleteThen": "the uninstall",
 
 	"internal/auth/admin_users.go:MutateAdminAccount":                          identitiesFirst,
 	"internal/auth/password_reset.go:revokeSignInsInTransaction":               identitiesFirst,

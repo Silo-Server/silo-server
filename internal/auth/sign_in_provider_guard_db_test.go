@@ -59,9 +59,6 @@ func TestSignInProviderGuardDB(t *testing.T) {
 		{"disable the installation", func(e *signInGuardEnv) error {
 			return e.installs.Update(context.Background(), e.oidc, plugins.UpdateInstallationInput{Enabled: new(false)})
 		}},
-		{"check before uninstalling", func(e *signInGuardEnv) error {
-			return e.installs.CheckSignInProviderRemoval(context.Background(), e.oidc)
-		}},
 		{"uninstall", func(e *signInGuardEnv) error {
 			return e.installs.Delete(context.Background(), e.oidc)
 		}},
@@ -209,11 +206,7 @@ func TestServerWithoutUsableProviderCanStillBeRepairedAndManagedDB(t *testing.T)
 			return e.installs.Update(ctx, plain(t, e, true), plugins.UpdateInstallationInput{Enabled: new(false)})
 		},
 		"uninstall a plugin without sign-in": func(t *testing.T, e *signInGuardEnv) error {
-			id := plain(t, e, true)
-			if err := e.installs.CheckSignInProviderRemoval(ctx, id); err != nil {
-				return err
-			}
-			return e.installs.Delete(ctx, id)
+			return e.installs.Delete(ctx, plain(t, e, true))
 		},
 		"update the release of a plugin without sign-in": func(t *testing.T, e *signInGuardEnv) error {
 			return e.installs.Update(ctx, plain(t, e, true), plugins.UpdateInstallationInput{Capabilities: []plugins.Capability{

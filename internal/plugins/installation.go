@@ -756,6 +756,14 @@ func (s *InstallationStore) repairArchive(ctx context.Context, original *Install
 }
 
 func (s *InstallationStore) Delete(ctx context.Context, id int) error {
+	return s.DeleteThen(ctx, id, nil)
+}
+
+// DeleteThen deletes installation id like Delete, and runs afterCommit once
+// the delete has committed and before the plugin's files are removed: the
+// caller stops the plugin there, so a refused delete never stopped it and its
+// files go only once it no longer runs.
+func (s *InstallationStore) DeleteThen(ctx context.Context, id int, afterCommit func()) error {
 	var installation *Installation
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if err := lockAuthBindings(ctx, tx); err != nil {
@@ -790,6 +798,9 @@ func (s *InstallationStore) Delete(ctx context.Context, id int) error {
 	})
 	if err != nil {
 		return err
+	}
+	if afterCommit != nil {
+		afterCommit()
 	}
 
 	if _, inTx := s.pool.(pgx.Tx); !inTx {

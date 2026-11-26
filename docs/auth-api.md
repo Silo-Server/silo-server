@@ -999,8 +999,9 @@ provider is refused with 409 `sign_in_provider_required`: turning off its
 binding (`updateAdminPluginAuthBinding`), disabling its installation
 (`updateAdminPluginInstallation`), uninstalling it
 (`deleteAdminPluginInstallation`), or clearing `server.public_url` when it is
-the only provider and uses OpenID Connect. Disable and uninstall are refused
-before the plugin stops. Turn password sign-in back on first; break-glass
+the only provider and uses OpenID Connect. Disable and uninstall save the
+change first and stop the plugin only after it commits, so a refused one never
+stops it. Turn password sign-in back on first; break-glass
 admins can sign in with a password either way. Only a change that takes the
 last provider away is refused: a server already without one (after
 provisioning, a restore, or a switch-off from before this check) can still

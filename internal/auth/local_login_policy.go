@@ -224,7 +224,7 @@ func CheckLocalLoginSettingChange(ctx context.Context, db dbQuerier, before, aft
 		if before.PublicURL == after.PublicURL {
 			return nil
 		}
-		usable, err := signInProviderEnabled(ctx, db, before.PublicURL, 0)
+		usable, err := signInProviderEnabled(ctx, db, before.PublicURL)
 		if err != nil || !usable {
 			return err
 		}
@@ -238,13 +238,13 @@ func CheckLocalLoginSettingChange(ctx context.Context, db dbQuerier, before, aft
 			return ErrBreakGlassRequired
 		}
 	}
-	return requireSignInProvider(ctx, db, after.PublicURL, 0)
+	return requireSignInProvider(ctx, db, after.PublicURL)
 }
 
 // requireSignInProvider answers ErrSignInProviderRequired unless a provider
-// other than installation removing can sign people in.
-func requireSignInProvider(ctx context.Context, db plugins.SignInQuerier, publicURL string, removing int) error {
-	enabled, err := signInProviderEnabled(ctx, db, publicURL, removing)
+// can sign people in.
+func requireSignInProvider(ctx context.Context, db plugins.SignInQuerier, publicURL string) error {
+	enabled, err := signInProviderEnabled(ctx, db, publicURL)
 	if err != nil {
 		return err
 	}
@@ -259,10 +259,10 @@ func init() {
 }
 
 // signInWorksForEveryone is the check plugin writes and the provisioning
-// status use: local password sign-in is on, or an OIDC or LDAP provider other
-// than installation removing can sign people in. A plugin write holds the
+// status use: local password sign-in is on, or an OIDC or LDAP provider can
+// sign people in. A plugin write holds the
 // server-settings lock while it asks (see plugins.signInGuard).
-func signInWorksForEveryone(ctx context.Context, db plugins.SignInQuerier, removing int) (bool, error) {
+func signInWorksForEveryone(ctx context.Context, db plugins.SignInQuerier) (bool, error) {
 	allowed, err := localPasswordLoginAllowed(ctx, db)
 	if err != nil || allowed {
 		return allowed, err
@@ -271,7 +271,7 @@ func signInWorksForEveryone(ctx context.Context, db plugins.SignInQuerier, remov
 	if err != nil {
 		return false, err
 	}
-	return signInProviderEnabled(ctx, db, publicURL, removing)
+	return signInProviderEnabled(ctx, db, publicURL)
 }
 
 // signInProviderEnabled reports whether an OIDC or LDAP sign-in provider can
@@ -279,15 +279,14 @@ func signInWorksForEveryone(ctx context.Context, db plugins.SignInQuerier, remov
 // that is not a network identity binding, whose mode is served. A network
 // provider signs in only people on its network, and an OAuth provider signs
 // nobody in without a public URL (OAuthSignInServed), so neither counts. A
-// credentials (directory) provider needs no public URL. Installation
-// removing (0 for none) is treated as gone.
-func signInProviderEnabled(ctx context.Context, db plugins.SignInQuerier, publicURL string, removing int) (bool, error) {
+// credentials (directory) provider needs no public URL.
+func signInProviderEnabled(ctx context.Context, db plugins.SignInQuerier, publicURL string) (bool, error) {
 	rows, err := db.Query(ctx, `SELECT COALESCE((SELECT c.metadata->'auth_modes' FROM plugin_capabilities c
 			WHERE c.plugin_installation_id = b.plugin_installation_id AND c.capability_type = 'auth_provider.v1'
 				AND c.capability_id = b.capability_id), '[]'::jsonb)
 		FROM plugin_installations p
 		JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND `+primarySignInBindingSQL("b")+`
-		WHERE p.enabled AND p.id <> $1`, removing)
+		WHERE p.enabled`)
 	if err != nil {
 		return false, fmt.Errorf("checking for an enabled sign-in provider: %w", err)
 	}

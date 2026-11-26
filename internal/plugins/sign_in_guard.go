@@ -35,11 +35,10 @@ type SignInQuerier = provisionConfigQuery
 
 // SignInCheck answers whether everyone can still sign in: local password
 // sign-in is on, or an OIDC or LDAP provider people can use is on.
-// Installation removing (0 for none) is treated as gone.
 //
 // The auth package owns the rule (which providers can sign people in) and
 // registers it; plugins cannot import auth.
-type SignInCheck func(ctx context.Context, db SignInQuerier, removing int) (bool, error)
+type SignInCheck func(ctx context.Context, db SignInQuerier) (bool, error)
 
 var signInCheck SignInCheck
 
@@ -49,11 +48,11 @@ func RegisterSignInCheck(check SignInCheck) {
 	signInCheck = check
 }
 
-func signInWorks(ctx context.Context, db SignInQuerier, removing int) (bool, error) {
+func signInWorks(ctx context.Context, db SignInQuerier) (bool, error) {
 	if signInCheck == nil {
 		return true, nil
 	}
-	return signInCheck(ctx, db, removing)
+	return signInCheck(ctx, db)
 }
 
 // lockSignInSettings takes the server-settings lock, which the settings save
@@ -81,7 +80,7 @@ func beginSignInGuard(ctx context.Context, tx pgx.Tx) (signInGuard, error) {
 	if err := lockSignInSettings(ctx, tx); err != nil {
 		return signInGuard{}, err
 	}
-	worked, err := signInWorks(ctx, tx, 0)
+	worked, err := signInWorks(ctx, tx)
 	return signInGuard{workedBefore: worked}, err
 }
 
@@ -89,7 +88,7 @@ func (g signInGuard) finish(ctx context.Context, tx pgx.Tx) error {
 	if !g.workedBefore {
 		return nil
 	}
-	works, err := signInWorks(ctx, tx, 0)
+	works, err := signInWorks(ctx, tx)
 	if err != nil {
 		return err
 	}
@@ -97,33 +96,6 @@ func (g signInGuard) finish(ctx context.Context, tx pgx.Tx) error {
 		return ErrSignInProviderRequired
 	}
 	return nil
-}
-
-// CheckSignInProviderRemoval answers whether disabling or uninstalling
-// installation id would be refused, before anything changes: the plugin
-// process is stopped before those writes, so a refusal is made here first.
-// The write's own guard still decides a concurrent change.
-func (s *InstallationStore) CheckSignInProviderRemoval(ctx context.Context, id int) error {
-	if s.pool == nil {
-		return nil
-	}
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if err := lockSignInSettings(ctx, tx); err != nil {
-			return err
-		}
-		works, err := signInWorks(ctx, tx, 0)
-		if err != nil || !works {
-			return err
-		}
-		without, err := signInWorks(ctx, tx, id)
-		if err != nil {
-			return err
-		}
-		if !without {
-			return ErrSignInProviderRequired
-		}
-		return nil
-	})
 }
 
 // logProvisionSignIn applies the check to a provisioning apply without
@@ -134,7 +106,7 @@ func (s *InstallationStore) CheckSignInProviderRemoval(ctx context.Context, id i
 // restore applies stated intent the same way. The provisioning status says so
 // for as long as it is true (withSignInWarning).
 func logProvisionSignIn(ctx context.Context, tx pgx.Tx) error {
-	works, err := signInWorks(ctx, tx, 0)
+	works, err := signInWorks(ctx, tx)
 	if err != nil || works {
 		return err
 	}
@@ -152,7 +124,7 @@ func withSignInWarning(ctx context.Context, db SignInQuerier, statuses []Provisi
 	if len(statuses) == 0 {
 		return statuses, nil
 	}
-	works, err := signInWorks(ctx, db, 0)
+	works, err := signInWorks(ctx, db)
 	if err != nil || works {
 		return statuses, err
 	}
