@@ -25,7 +25,11 @@ import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import { useLinkToken } from "@/hooks/useLinkToken";
 import { usePasswordPolicy } from "@/hooks/queries/account";
 import { newPasswordPolicyProblem, newPasswordHint, passwordErrorMessage } from "@/lib/newPassword";
+import { InviteAppJoin } from "@/components/appKeys/InviteAppJoin";
 import { useT } from "@/i18n";
+
+/** How the invitee claims the invitation: through the Silo app or a password. */
+type JoinPath = "app" | "password";
 
 export default function InviteClaim() {
   const token = useLinkToken();
@@ -67,6 +71,8 @@ function ClaimForm({ token }: { token: string }) {
   // was created and the invitation is unspent, so the invitee can try again.
   const [refusal, setRefusal] = useState<string | null>(null);
   const [createdUsername, setCreatedUsername] = useState<string | null>(null);
+  // The path the invitee picked; null until they pick, when both are offered.
+  const [picked, setPicked] = useState<JoinPath | null>(null);
   const busy = useRef(false);
   const lifetime = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -144,6 +150,16 @@ function ClaimForm({ token }: { token: string }) {
   }
 
   const invitation = lookup.data;
+  // The lookup says which paths this server offers; with local passwords off
+  // it offers neither, and the page says why.
+  const joinOff = !invitation.password_join && !invitation.app_join;
+  const path: JoinPath | "choose" =
+    picked ??
+    (invitation.app_join && invitation.password_join
+      ? "choose"
+      : invitation.app_join
+        ? "app"
+        : "password");
 
   // On Android, offer to continue in the native app — the app registers
   // silo://invite and has the full claim flow. A user-tapped custom-scheme
@@ -154,7 +170,7 @@ function ClaimForm({ token }: { token: string }) {
   // email address it needs, and the page cannot tell which build is installed.
   const platform = detectMobilePlatform(navigator.userAgent);
   const appLink =
-    platform === "android" && !invitation.email_required
+    platform === "android" && !invitation.email_required && path === "password" && !joinOff
       ? buildInviteDeepLink(window.location.origin, token)
       : null;
 
@@ -191,6 +207,7 @@ function ClaimForm({ token }: { token: string }) {
       busy.current ||
       recovery ||
       localLoginDisabled ||
+      !invitation.password_join ||
       createdUsername ||
       !invitation.acceptance_available ||
       getAccessToken()
@@ -285,9 +302,11 @@ function ClaimForm({ token }: { token: string }) {
             {t("web.auth.invite.title", { server: invitation.server_name })}
           </CardTitle>
           <CardDescription className="mt-2 text-sm leading-6">
-            {invitation.email_required
-              ? t("web.auth.invite.descriptionEmailRequired")
-              : t("web.auth.invite.description")}
+            {invitation.app_join && path !== "password"
+              ? t("web.auth.invite.descriptionWithApp")
+              : invitation.email_required
+                ? t("web.auth.invite.descriptionEmailRequired")
+                : t("web.auth.invite.description")}
           </CardDescription>
           {invitation.note && (
             <blockquote className="border-border mt-4 border-s-2 py-1 ps-3 text-sm leading-relaxed">
@@ -320,7 +339,46 @@ function ClaimForm({ token }: { token: string }) {
               </div>
             </div>
           )}
-          {createdUsername ? (
+          {joinOff ? (
+            <p role="alert">
+              {invitation.inviter_name
+                ? t("web.auth.invite.localLoginDisabled", { inviter: invitation.inviter_name })
+                : t("web.auth.invite.localLoginDisabledNoInviter")}
+            </p>
+          ) : path === "choose" ? (
+            <div className="space-y-3">
+              <Button
+                type="button"
+                size="lg"
+                className="h-12 w-full text-base font-semibold"
+                onClick={() => setPicked("app")}
+              >
+                <Smartphone className="me-2 h-5 w-5" /> {t("web.auth.invite.joinWithApp")}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={() => setPicked("password")}
+              >
+                {t("web.auth.invite.usePassword")}
+              </Button>
+            </div>
+          ) : path === "app" ? (
+            <div className="space-y-4">
+              <InviteAppJoin token={token} invitation={invitation} />
+              {invitation.password_join && (
+                <Button
+                  type="button"
+                  variant="link"
+                  className="w-full"
+                  onClick={() => setPicked("password")}
+                >
+                  {t("web.auth.invite.usePassword")}
+                </Button>
+              )}
+            </div>
+          ) : createdUsername ? (
             <div role="status" className="space-y-4">
               <p>{t("web.auth.invite.created", { username: createdUsername })}</p>
               <Button asChild className="w-full">
@@ -429,6 +487,16 @@ function ClaimForm({ token }: { token: string }) {
                     : t("web.auth.createAccount")}
                 </Button>
               </form>
+              {invitation.app_join && !submitting && (
+                <Button
+                  type="button"
+                  variant="link"
+                  className="mt-2 w-full"
+                  onClick={() => setPicked("app")}
+                >
+                  {t("web.auth.invite.joinWithAppInstead")}
+                </Button>
+              )}
             </>
           )}
           <p className="text-muted-foreground mt-4 text-center text-sm">

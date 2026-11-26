@@ -358,6 +358,11 @@
 ./internal/auth TestUninstallNeverTouchesKeyRowsDB
 ./internal/auth TestKeysOfAGoneIdentityAreDeadDB
 ./internal/auth TestDeadPersonKeyDoesNotBlockEnrollDB
+./internal/auth TestRedeemSessionAppCodeDB
+./internal/auth TestRedeemAppCodeKeyEnrolledDB
+./internal/auth TestAppCodeCleanupSkipsHeldRowsDB
+./internal/auth TestIssueSessionAppCodeRefusalsDB
+./internal/auth TestSessionKeyAccessDB
 ./internal/auth TestAdminUnlinkLocksIdentityBeforeKeysDB
 ./internal/auth TestUnlinkRevokesItsKeysDB
 ./internal/auth TestKeyChallengeSpentOnKidMismatchDB
@@ -392,6 +397,11 @@
 ./internal/invitations TestInvitationServiceCommittedOutcomesDB
 ./internal/invitations TestInvitationAtomicConcurrentAccept
 ./internal/invitations TestInvitationAtomicRollbackAndExpiry
+./internal/invitations TestJoinWithAppCodeDB
+./internal/invitations TestJoinWithAppCodeRefusalsDB
+./internal/invitations TestJoinWithAppCodeConcurrentRedeemDB
+./internal/invitations TestClaimsTakeSettingsLockFirstDB
+./internal/invitations TestJoinAppCodeReservationsDB
 
 # Audiobookshelf-compatible tokens minted while the account is signed out everywhere do not outlive it.
 ./internal/audiobooks TestABSTokensMintedDuringSignOutEverywhereDB

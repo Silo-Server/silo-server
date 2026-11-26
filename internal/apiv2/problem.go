@@ -103,6 +103,10 @@ var (
 	// TypeAppGrantExpired: the grant's own exp has passed. A clock that is
 	// wrong where the grant was signed shows up here.
 	TypeAppGrantExpired = ProblemType{"app_grant_expired", http.StatusForbidden, "App grant expired"}
+	// TypeAppCodeInvalid: the app code is unknown, already redeemed or
+	// expired, or what it was for can no longer be done (its invitation was
+	// revoked, replaced or accepted, or the session that made it ended).
+	TypeAppCodeInvalid = ProblemType{"app_code_invalid", http.StatusNotFound, "App code invalid"}
 )
 
 // ProblemType is one entry of the shared problem catalog.
@@ -169,7 +173,7 @@ var (
 	TypeDependencyUnavailable                         = ProblemType{"dependency_unavailable", http.StatusServiceUnavailable, "Dependency unavailable"}
 	TypeClientUpgradeRequired                         = ProblemType{"client_upgrade_required", http.StatusGone, "Client upgrade required"}
 	TypeProfileSetStale                               = ProblemType{"profile_set_stale", http.StatusConflict, "Profile set stale"}
-	catalog                                           = []ProblemType{TypeRangeNotSatisfiable, TypeDeviceLoginExpired, TypeUnsupportedSource, TypeMalformedRequest, TypeInvalidCursor, TypeAuthenticationRequired, TypeInvalidToken, TypeSessionExpired, TypePermissionDenied, TypeProfileVerificationRequired, TypePushInstallationKeyMismatch, TypeNotFound, TypeMethodNotAllowed, TypeNotAcceptable, TypeRequestTimeout, TypeConflict, TypeIdempotencyConflict, TypeJobNotCancelable, TypeCapabilityDisabled, TypeCapabilityNotConfigured, TypePreconditionFailed, TypePayloadTooLarge, TypeUnsupportedMediaType, TypeValidationFailed, TypePreconditionRequired, TypeRateLimited, TypeInternalError, TypeCapabilityUnsupported, TypeDependencyUnavailable, TypeClientUpgradeRequired, TypeSyncResetRequired, TypeSnapshotRequestConflict, TypeProgressSnapshotTooLarge, TypePlaybackInstallationChanged, TypePlaybackSessionEnded, TypePlaybackSessionPausedTimeout, TypePlaybackTransportSuperseded, TypePlaybackProgressConflict, TypePasswordChangeRequired, TypeNotPermitted, TypeAccountRequired, TypeLocalLoginDisabled, TypeProviderPasswordExpired, TypeEmailInUse, TypeIdentityLinkedElsewhere, TypeProviderAlreadyEnabled, TypeBreakGlassRequired, TypeLastSignInMethod, TypeProviderUnavailable, TypeInvalidGrant, TypeAccountDisabled, TypeLocalPasswordRequired, TypeAlreadyLinked, TypeTokenRefreshRequired, TypeNetworkIdentityRequired, TypePreparedFileExpired, TypeDeviceBindingMismatch, TypeRestoreSetChanged, TypeBackupUnauthenticated, TypeNodeDeploymentManaged, TypeUploadLimitReached, TypeChallengeInvalid, TypeSignatureInvalid, TypeOriginMismatch, TypeKeyDenied, TypeProviderSignInRequired, TypeAppGrantInvalid, TypeAppGrantExpired, TypeProfileSetStale, TypeMainProfileRequired}
+	catalog                                           = []ProblemType{TypeRangeNotSatisfiable, TypeDeviceLoginExpired, TypeUnsupportedSource, TypeMalformedRequest, TypeInvalidCursor, TypeAuthenticationRequired, TypeInvalidToken, TypeSessionExpired, TypePermissionDenied, TypeProfileVerificationRequired, TypePushInstallationKeyMismatch, TypeNotFound, TypeMethodNotAllowed, TypeNotAcceptable, TypeRequestTimeout, TypeConflict, TypeIdempotencyConflict, TypeJobNotCancelable, TypeCapabilityDisabled, TypeCapabilityNotConfigured, TypePreconditionFailed, TypePayloadTooLarge, TypeUnsupportedMediaType, TypeValidationFailed, TypePreconditionRequired, TypeRateLimited, TypeInternalError, TypeCapabilityUnsupported, TypeDependencyUnavailable, TypeClientUpgradeRequired, TypeSyncResetRequired, TypeSnapshotRequestConflict, TypeProgressSnapshotTooLarge, TypePlaybackInstallationChanged, TypePlaybackSessionEnded, TypePlaybackSessionPausedTimeout, TypePlaybackTransportSuperseded, TypePlaybackProgressConflict, TypePasswordChangeRequired, TypeNotPermitted, TypeAccountRequired, TypeLocalLoginDisabled, TypeProviderPasswordExpired, TypeEmailInUse, TypeIdentityLinkedElsewhere, TypeProviderAlreadyEnabled, TypeBreakGlassRequired, TypeLastSignInMethod, TypeProviderUnavailable, TypeInvalidGrant, TypeAccountDisabled, TypeLocalPasswordRequired, TypeAlreadyLinked, TypeTokenRefreshRequired, TypeNetworkIdentityRequired, TypePreparedFileExpired, TypeDeviceBindingMismatch, TypeRestoreSetChanged, TypeBackupUnauthenticated, TypeNodeDeploymentManaged, TypeUploadLimitReached, TypeChallengeInvalid, TypeSignatureInvalid, TypeOriginMismatch, TypeKeyDenied, TypeProviderSignInRequired, TypeAppGrantInvalid, TypeAppGrantExpired, TypeProfileSetStale, TypeMainProfileRequired, TypeAppCodeInvalid}
 	defaultTypeByStatus                               = map[int]ProblemType{}
 	problemContentType                                = "application/problem+json"
 	_                               error             = (*Problem)(nil)
@@ -458,6 +462,9 @@ const (
 	codePasswordTooLong        = "password_too_long"
 	codePasswordNeedsUppercase = "password_needs_uppercase"
 	codePasswordNeedsSpecial   = "password_needs_special"
+	// codeKeyEnrolled: the public key is already enrolled on this server, so
+	// the app makes a new one (docs/auth-api.md, "App codes").
+	codeKeyEnrolled = "key_enrolled"
 
 	locationBody     = "body"
 	locationBodyFile = "body.file"

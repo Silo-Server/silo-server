@@ -47,6 +47,7 @@ func keyCreatingRoutes() []struct{ method, path, body string } {
 		{method: http.MethodPost, path: "/auth/keys/enroll", body: enrollBody},
 		{method: http.MethodPut, path: "/auth/keys/person", body: `{"person_key":"` + testPersonKey + `"}`},
 		{method: http.MethodPost, path: pendingKeyPath + "/approve", body: `{}`},
+		{method: http.MethodPost, path: "/auth/app-codes", body: `{}`},
 	}
 }
 
@@ -123,7 +124,7 @@ func TestKeyCreatingRoutesPassTheCheckedProfile(t *testing.T) {
 	verified := with(with(bearer(householdToken), "X-Profile-Id", "p-primary-locked"), "X-Profile-Token", "ptok")
 	for _, route := range keyCreatingRoutes() {
 		t.Run(route.path, func(t *testing.T) {
-			keys := &fakeAppKeys{enabled: true, err: auth.ErrActingProfileChanged, pendingErr: auth.ErrActingProfileChanged}
+			keys := &fakeAppKeys{enabled: true, err: auth.ErrActingProfileChanged, pendingErr: auth.ErrActingProfileChanged, appCodeErr: auth.ErrActingProfileChanged}
 			requireProblem(t, do(t, NewHandler(appKeyDeps(keys)), route.method, Prefix+route.path, route.body, verified), TypeProfileVerificationRequired)
 			if keys.acting.ID != "p-primary-locked" {
 				t.Fatalf("the operation got profile %q, want the one the route checked", keys.acting.ID)

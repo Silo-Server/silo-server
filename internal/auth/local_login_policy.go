@@ -143,6 +143,14 @@ func (r *UserRepository) EnableAccountLocalLogin(ctx context.Context, login, tem
 	return r.GetByID(ctx, user.ID)
 }
 
+// LockServerSettingsInTransaction takes the settings lock for the rest of
+// tx. An invitation claim takes it before any invitation row: a claim locks
+// other invitations' rows too (superseding a link invitation's address), so
+// the settings lock first is the one order every claim shares.
+func LockServerSettingsInTransaction(ctx context.Context, tx pgx.Tx) error {
+	return lockServerSettings(ctx, tx)
+}
+
 // lockServerSettings takes the advisory lock every server_settings mutation
 // holds, so a break-glass change and a local-login setting change cannot
 // validate against each other's stale state.

@@ -17,7 +17,7 @@ type passwordHashCapture struct {
 }
 
 func (db *passwordHashCapture) QueryRow(_ context.Context, _ string, args ...any) pgx.Row {
-	db.hash = args[2].(string)
+	db.hash = *args[2].(*string)
 	return passwordHashRow{}
 }
 

@@ -85,6 +85,9 @@ type KeySignInResult struct {
 	Pair *TokenPair
 	// PersonKeyID is the person key's ID (kid), set by enroll.
 	PersonKeyID string
+	// PersonKeyStatus is PersonKeyEnrolled or PersonKeyReplaced, set by an
+	// app code's redeem.
+	PersonKeyStatus string
 	// ReplyKey and Challenge seal the answer.
 	ReplyKey  appkeys.PublicKey
 	Challenge []byte
@@ -97,6 +100,7 @@ type AppKeySignIn struct {
 	keys       *AppKeyRepository
 	challenges *KeyChallenges
 	service    *Service
+	joins      JoinClaimer
 	now        func() time.Time
 }
 

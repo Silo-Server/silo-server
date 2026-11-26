@@ -83,3 +83,19 @@ func (k Key) SignIn(t testing.TB, serverID, challenge string, now time.Time) app
 		"origin": "https://media.example.test", "reply_key": NewKey(t).Public().String(),
 	})
 }
+
+// Redeem is an app's redeem of code to serverID on challenge, issued at now:
+// signed by k, the person key, with device's device_sig.
+func (k Key) Redeem(t testing.TB, device Key, serverID, challenge, code string, now time.Time) appkeys.Envelope {
+	t.Helper()
+	env := k.Envelope(t, appkeys.PurposeRedeem, map[string]any{
+		"server_id": serverID, "challenge": challenge,
+		"iat": now.Unix() - 10, "exp": now.Unix() + 110,
+		"origin": "https://media.example.test", "reply_key": NewKey(t).Public().String(),
+		"device_key": device.Public().String(), "device_name": "Phone", "device_platform": "ios",
+		"code": code,
+	})
+	deviceSig := device.Sign(t, appkeys.PurposeRedeem, env.Payload)
+	env.DeviceSig = &deviceSig
+	return env
+}
