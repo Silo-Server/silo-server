@@ -3868,7 +3868,7 @@ identifies the acting administrator. Actor filters use
 | `user.device_key_revoked` | `revokeAdminUserDeviceKey` | `device_key_id` (before); recorded only when the key was not already revoked |
 | `user.person_key_revoked` | `revokeAdminUserPersonKey` | `person_key_kid` (before); `denied_device_keys` count (after) when it denied waiting devices |
 | `user.app_keys_enrolled` | `enrollAppKeys` | `device_key_id` (after); `person_key_kid` (after) when the call enrolled the person key; `session_opened_via` (after), the enrolling session's `opened_via` (`password`, `provider` or `app_key`) |
-| `user.person_key_replaced` | `replacePersonKey` | `person_key_kid` (before: the replaced key, absent when the account had none; after: the new key); `session_opened_via` (after) as for enrolling; `denied_device_keys` count (after) when it denied waiting devices |
+| `user.person_key_replaced` | `replacePersonKey` | `person_key_kid` (before: the replaced key; after: the new key). A row with no before side is the account's first person key, by the convention that an absent side is a creation; `session_opened_via` (after) as for enrolling; `denied_device_keys` count (after) when it denied waiting devices |
 | `user.device_key_introduced` | `introduceAppKey` | `device_key_id` and `device_key_status` (`active` or `pending`) (after) |
 | `user.app_code_issued` | `createAppCode` | `app_code_kind` (`session`) and `expires_at` (after); never the code or its hash |
 | `user.app_code_redeemed` | `redeemAppCode`; target is the account the keys joined, created by the redeem for a join code | `app_code_kind` (`join` or `session`), `device_key_id`, and `person_key_kid` when the redeem enrolled it (after); never the code |

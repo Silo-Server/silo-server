@@ -15303,7 +15303,7 @@ export interface components {
        */
       enrolled_by: "introduce" | "session" | "app-code" | "grant";
       /**
-       * @description Client address of the request that enrolled the key, decided as a login session's ip_address is; empty when unknown, which includes every key enrolled before this server recorded it
+       * @description Client address of the request that enrolled the key, decided as a login session's ip_address is, except that an unspecified address (0.0.0.0 or ::) is stored as none; empty when unknown, which includes every key enrolled before this server recorded it, and for a caller who is not an administrator while the server runs in demo mode
        * @example 203.0.113.7
        */
       enrolled_ip_address: string;
@@ -15379,7 +15379,7 @@ export interface components {
        */
       enrolled_by: "session" | "app-code";
       /**
-       * @description Client address of the request that enrolled the key, decided as a login session's ip_address is; empty when unknown, which includes every key enrolled before this server recorded it
+       * @description Client address of the request that enrolled the key, decided as a login session's ip_address is, except that an unspecified address (0.0.0.0 or ::) is stored as none; empty when unknown, which includes every key enrolled before this server recorded it, and for a caller who is not an administrator while the server runs in demo mode
        * @example 203.0.113.7
        */
       enrolled_ip_address: string;
@@ -25692,7 +25692,7 @@ export interface components {
        */
       enrolled_by: "introduce" | "session" | "app-code" | "grant";
       /**
-       * @description Client address of the request that enrolled the key, decided as a login session's ip_address is; empty when unknown, which includes every key enrolled before this server recorded it
+       * @description Client address of the request that enrolled the key, decided as a login session's ip_address is, except that an unspecified address (0.0.0.0 or ::) is stored as none; empty when unknown, which includes every key enrolled before this server recorded it, and for a caller who is not an administrator while the server runs in demo mode
        * @example 203.0.113.7
        */
       enrolled_ip_address: string;
@@ -25967,7 +25967,7 @@ export interface components {
        */
       enrolled_at: string;
       /**
-       * @description Client address of the request that enrolled the key, decided as a login session's ip_address is; empty when unknown, which includes every key enrolled before this server recorded it
+       * @description Client address of the request that enrolled the key, decided as a login session's ip_address is, except that an unspecified address (0.0.0.0 or ::) is stored as none; empty when unknown, which includes every key enrolled before this server recorded it, and for a caller who is not an administrator while the server runs in demo mode
        * @example 203.0.113.7
        */
       enrolled_ip_address: string;
