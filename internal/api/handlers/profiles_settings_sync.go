@@ -193,6 +193,11 @@ func normalizeCanonicalSettingValue(key string, raw json.RawMessage) (json.RawMe
 // profile limit when the creating transaction counted it.
 var errProfileLimitReached = errors.New("profile limit reached")
 
+// errProfileNameConflict is a create or rename whose name another profile of
+// the account took after the early check: the transaction read the names
+// again under the account lock.
+var errProfileNameConflict = errors.New("another profile has this name")
+
 // createProfileWithSettingsSync creates the profile, snapshots surviving
 // account-wide legacy settings, writes every canonical row and records the
 // audit action in one store transaction. PostgreSQL's transaction wrapper
@@ -230,14 +235,15 @@ func (h *ProfileHandler) createProfileWithSettingsSync(
 		if err := checkHouseholdPINRevision(ctx, tx, acting); err != nil {
 			return err
 		}
-		if limit >= 1 {
-			ids, err := tx.ListProfileIDs(ctx)
-			if err != nil {
-				return err
-			}
-			if len(ids) >= limit {
-				return errProfileLimitReached
-			}
+		names, err := tx.ListProfileNames(ctx)
+		if err != nil {
+			return err
+		}
+		if limit >= 1 && len(names) >= limit {
+			return errProfileLimitReached
+		}
+		if profileNameTaken(names, profile.Name, "") {
+			return errProfileNameConflict
 		}
 		if err := tx.CreateProfile(ctx, profile); err != nil {
 			return err
@@ -304,6 +310,15 @@ func (h *ProfileHandler) applyProfileUpdateSettingsSync(
 		}
 		if err := checkHouseholdPINRevision(ctx, tx, acting); err != nil {
 			return err
+		}
+		if input.Name != nil {
+			names, err := tx.ListProfileNames(ctx)
+			if err != nil {
+				return err
+			}
+			if profileNameTaken(names, *input.Name, profileID) {
+				return errProfileNameConflict
+			}
 		}
 		var before *userstore.Profile
 		if recording {

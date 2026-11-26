@@ -239,23 +239,35 @@ type ProfileListView struct {
 // list of a single user's store, so another account's profiles can never
 // conflict.
 //
-// This is a check-then-write guard with no store-level uniqueness constraint
-// (the userstore's dual Postgres/SQLite backends carry no unique index on
-// name), so two concurrent requests can both pass and insert duplicates —
-// unlike the profile limit, which is re-counted inside the creating
-// transaction. Good enough for interactive profile management; a functional
-// unique index is the fix if that ever stops being true.
+// This early check answers the common case without opening a transaction.
+// There is no unique index on names (neither user store carries one); a
+// create and a rename check again inside their transaction, after the
+// account's preference-settings lock (profileNameTaken), as the profile set,
+// the owner's clear of a name and an administrator's change of the account's
+// username do, so two overlapping writes can't both take one name.
 func profileNameConflicts(profiles []userstore.Profile, name, excludeID string) bool {
-	trimmed := strings.TrimSpace(name)
 	for _, p := range profiles {
-		if p.ID == excludeID {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(p.Name), trimmed) {
+		if p.ID != excludeID && sameProfileName(p.Name, name) {
 			return true
 		}
 	}
 	return false
+}
+
+// profileNameTaken is profileNameConflicts over the names a transaction read.
+func profileNameTaken(names []userstore.ProfileName, name, excludeID string) bool {
+	for _, p := range names {
+		if p.ID != excludeID && sameProfileName(p.Name, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// profileNameConflictError is the 409 for a name another profile of the
+// account has.
+func profileNameConflictError() *APIError {
+	return apiError(http.StatusConflict, "name_conflict", "A profile with this name already exists")
 }
 
 // profileLimitReached is the 409 for a household already at its limit.
@@ -532,7 +544,7 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	}
 
 	if profileNameConflicts(existingProfiles, req.Name, "") {
-		return none, apiError(http.StatusConflict, "name_conflict", "A profile with this name already exists")
+		return none, profileNameConflictError()
 	}
 
 	showForcedSubtitles := true
@@ -585,6 +597,9 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	if err := h.createProfileWithSettingsSync(ctx, store, userID, profile, profileLimit, settingsSync, acting); err != nil {
 		if errors.Is(err, errProfileLimitReached) {
 			return none, profileLimitReached(profileLimit)
+		}
+		if errors.Is(err, errProfileNameConflict) {
+			return none, profileNameConflictError()
 		}
 		if errors.Is(err, access.ErrProfileUnverified) {
 			return none, profileManagementError(err)
@@ -703,7 +718,7 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to list profiles")
 		}
 		if profileNameConflicts(existingProfiles, *req.Name, profileID) {
-			return none, apiError(http.StatusConflict, "name_conflict", "A profile with this name already exists")
+			return none, profileNameConflictError()
 		}
 	}
 
@@ -749,6 +764,9 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 	if err := h.applyProfileUpdateSettingsSync(
 		ctx, store, userID, profileID, input, settingsSync, acting,
 	); err != nil {
+		if errors.Is(err, errProfileNameConflict) {
+			return none, profileNameConflictError()
+		}
 		if errors.Is(err, access.ErrProfileUnverified) {
 			return none, profileManagementError(err)
 		}

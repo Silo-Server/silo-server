@@ -52,12 +52,19 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 	}
 	// A deletion takes the account's profile locks before its row, as every
 	// profile writer and the profile set take them first, so it runs before
-	// or after them, never between a write and the edit it records.
-	if input == nil {
+	// or after them, never between a write and the edit it records. A
+	// username change takes them too: it may rename the primary profile,
+	// and checks the new name against the other profiles under them, as a
+	// profile create, a profile rename, the profile set and the owner's
+	// clear of a name do. They are taken whenever
+	// the update carries a username, even one equal to the current name.
+	if input == nil || input.Username != nil {
 		if err = pgstore.LockAccountForImport(ctx, tx, id); err != nil {
 			return AdminUserSnapshot{}, err
 		}
 	}
+	// The revision is compared on the row read under those locks, so an
+	// update that waited for them is judged on what is true when it runs.
 	current, err := adminUserSnapshot(tx.QueryRow(ctx, `SELECT `+allColumns+`, admin_revision FROM users WHERE id=$1 FOR UPDATE`, id))
 	if err != nil {
 		return AdminUserSnapshot{}, err

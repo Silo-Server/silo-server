@@ -39,6 +39,10 @@ type PreferenceSettingsWriter interface {
 	// transaction as a legacy account-setting mutation. This closes the
 	// create/write window where a newly committed profile could miss fan-out.
 	ListProfileIDs(ctx context.Context) ([]string, error)
+	// ListProfileNames reads every profile's ID and name inside the
+	// transaction. A create or rename checks the name against it after the
+	// account lock, so two overlapping writes can't both take one name.
+	ListProfileNames(ctx context.Context) ([]ProfileName, error)
 	// UpdateProfile writes the legacy profile preference columns that shipped
 	// clients still mutate during the canonical-settings cutover.
 	UpdateProfile(ctx context.Context, id string, u UpdateProfileInput) error

@@ -61,9 +61,9 @@ func TestParseProfileSetMembers(t *testing.T) {
 	}
 }
 
-// TestProfileSetRetryable: a set PostgreSQL aborted as a deadlock victim (an
-// account delete running at the same moment locks the other way round) goes
-// round the retry loop instead of answering 500. A unit test of the mapping:
+// TestProfileSetRetryable: a set PostgreSQL aborted as a deadlock victim (a
+// writer that breaks the set's lock order) goes round the retry loop instead
+// of answering 500. A unit test of the mapping:
 // which side PostgreSQL aborts is not deterministic.
 func TestProfileSetRetryable(t *testing.T) {
 	for _, tc := range []struct {

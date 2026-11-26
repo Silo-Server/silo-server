@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // Sentinel errors for repository operations.
@@ -413,6 +414,13 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	// A username change takes the account's profile locks before the
+	// account row, as MutateAdminAccount does.
+	if input.Username != nil {
+		if err := pgstore.LockAccountForImport(ctx, tx, id); err != nil {
+			return err
+		}
+	}
 	if err := updateUser(ctx, tx, id, input, passwordHash); err != nil {
 		return err
 	}
