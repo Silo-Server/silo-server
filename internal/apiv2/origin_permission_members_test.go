@@ -216,6 +216,12 @@ func TestAllowedReadsTellGrantedAppsNoRefusedAction(t *testing.T) {
 			continue
 		}
 		rec := do(t, h, op.Method, pathParam.ReplaceAllString(op.Path, "1"), "", with(bearer(memberToken), "X-Profile-Id", "p-owner"))
+		if rec.Code == http.StatusInternalServerError {
+			// A fake missing a method panics into a 500 and would hide here.
+			// A 503 is a service this fixture leaves unwired.
+			t.Errorf("%s answered the person's own session %d: %s", op.ID, rec.Code, rec.Body.String())
+			continue
+		}
 		var body any
 		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &body) != nil {
 			continue

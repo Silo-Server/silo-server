@@ -499,6 +499,7 @@ func (s *Service) Disconnect(reg *Registration, explicit bool) {
 		return
 	}
 	member.connection = nil
+	member.otherApp = false
 	member.remoteConnected = false
 	if live.pendingDisconnects == nil {
 		live.pendingDisconnects = make(map[string]pendingDisconnect)

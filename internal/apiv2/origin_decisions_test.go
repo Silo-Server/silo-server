@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -471,6 +472,10 @@ func (availableDownloads) Capability(context.Context, int) (downloads.Capability
 	return downloads.Capability{Enabled: true, DownloadAllowed: true, TranscodeUserAllowed: true}, nil
 }
 
+func (availableDownloads) ListPage(context.Context, int, string, string, *downloads.RegistryPosition, int, catalogpkg.AccessFilter) (downloads.RegistryPage, error) {
+	return downloads.RegistryPage{}, nil
+}
+
 type availableSubtitleSync struct{ SubtitleSyncAPI }
 
 func (availableSubtitleSync) SyncAvailable() bool                  { return true }
@@ -552,8 +557,12 @@ func (attachedRoomRead) ReadWatchTogetherRoom(context.Context, string, int, stri
 		SelfRole: watchtogether.MemberRoleHost, SelfCanManageRoom: true, SelfCanControlTransport: true, InvitePath: "/rooms/join?token=T"}, "proof", nil
 }
 
+func (r attachedRoomRead) JoinWatchTogetherRoom(ctx context.Context, user int, profile string, _ watchtogether.JoinInput) (watchtogether.Snapshot, string, error) {
+	return r.ReadWatchTogetherRoom(ctx, "room", user, profile, "")
+}
+
 // TestRoomReadLeavesOutAnotherDevicesStream: a Watch Together member is the
-// account and profile, so the room read names the stream attached to it,
+// account and profile, so the room read and join name the stream attached to it,
 // which may be the person's own device's, and the powers of the profile's
 // seat (the host's controls and invite link, transport control). A session
 // another app's key opened is told neither that playback session id nor
@@ -563,9 +572,20 @@ func (attachedRoomRead) ReadWatchTogetherRoom(context.Context, string, int, stri
 func TestRoomReadLeavesOutAnotherDevicesStream(t *testing.T) {
 	deps := parityDeps(false)
 	deps.WatchTogetherRoomRead = attachedRoomRead{}
+	deps.WatchTogetherJoin = attachedRoomRead{}
 	h := newTestHandler(t, deps)
-	for token, want := range map[string]string{grantedAppToken: "", memberToken: "phone-stream"} {
-		rec := do(t, h, http.MethodGet, Prefix+"/watch-together/rooms/room", "", with(with(bearer(token), "X-Profile-Id", "p-owner"), "X-Room-Token", "proof"))
+	for _, tc := range []struct{ route, token, want string }{
+		{"read", grantedAppToken, ""}, {"read", memberToken, "phone-stream"},
+		{"join", grantedAppToken, ""}, {"join", memberToken, "phone-stream"},
+	} {
+		token, want := tc.route+" "+tc.token, tc.want
+		headers := with(bearer(tc.token), "X-Profile-Id", "p-owner")
+		var rec *httptest.ResponseRecorder
+		if tc.route == "read" {
+			rec = do(t, h, http.MethodGet, Prefix+"/watch-together/rooms/room", "", with(headers, "X-Room-Token", "proof"))
+		} else {
+			rec = do(t, h, http.MethodPost, Prefix+"/watch-together/join", `{"code":"ABCD"}`, headers)
+		}
 		var body struct {
 			Room struct {
 				AttachedSessionID string `json:"attached_session_id"`

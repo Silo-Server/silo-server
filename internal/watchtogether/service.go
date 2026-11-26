@@ -280,8 +280,12 @@ type memberState struct {
 	connection      RoomConnection
 	isReady         bool
 	isBuffering     bool
-	// otherApp marks a connection a session another app's key opened made
-	// (ConnectOtherApp): its snapshots name no power it is refused.
+	// otherApp marks the member's current connection as one a session
+	// another app's key opened (ConnectOtherApp). It belongs to that
+	// connection, not to the seat: it is set and cleared with connection, and
+	// only frames sent on that connection leave out the powers such a session
+	// is refused. A member holds one connection at a time, and the person's own
+	// device asking over REST is never stripped by it.
 	otherApp bool
 	// correctionCommand is the most recent normal-playing correction sent to
 	// this member. It is persisted with the room runtime so another API server
@@ -602,6 +606,9 @@ func (s *Service) connect(
 
 	connectionID := current.connectionID
 	snapshot := s.buildSnapshotLocked(live, userID, profileID)
+	if otherApp {
+		snapshot = snapshot.WithoutSessionPowers()
+	}
 	dispatches := s.prepareSnapshotDispatchesLocked(live)
 	s.mu.Unlock()
 
@@ -633,6 +640,7 @@ func (s *Service) disconnect(ctx context.Context, reg *Registration, explicitLea
 
 	isHost := member.userID == live.room.HostUserID && member.profileID == live.room.HostProfileID
 	member.connection = nil
+	member.otherApp = false
 	member.remoteConnected = false
 	member.disconnectedAt = s.now()
 	if explicitLeave {
@@ -2290,7 +2298,7 @@ func (s *Service) buildSnapshotLocked(live *liveRoom, userID int, profileID stri
 		return cmp.Compare(a.UserID, b.UserID)
 	})
 
-	snapshot := Snapshot{
+	return Snapshot{
 		RoomID:                  live.room.ID,
 		Phase:                   live.room.Phase,
 		PlaybackState:           live.room.PlaybackState,
@@ -2325,10 +2333,6 @@ func (s *Service) buildSnapshotLocked(live *liveRoom, userID int, profileID stri
 		InvitePath: invitePath,
 		Members:    members,
 	}
-	if member != nil && member.otherApp {
-		snapshot = snapshot.WithoutSessionPowers()
-	}
-	return snapshot
 }
 
 func (s *Service) prepareSnapshotDispatchesLocked(live *liveRoom) []snapshotDispatch {
