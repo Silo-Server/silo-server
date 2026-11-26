@@ -865,21 +865,30 @@ Clients use capability documents to decide whether a feature exists. The server 
 contract digest are for diagnostics, support, cache identity, and last-resort compatibility
 messages; they are not substitutes for feature detection.
 
-A permission member of a response (a boolean named `allowed` or ending in `_allowed`, at any
-depth) never reports as allowed an action whose operations are all refused to the session asking.
-Every such member of a response a judged kind of session may read has a row in one table
-(`capabilityMembers`, `internal/apiv2/origin_decisions.go`): either it governs, naming the
-operations it answers for, or it is exempt with a reason that says what the app would do if it
-believed it. A capability read's top-level `allowed` is applied by the shared capability adapter
-(`prepareCapabilityOperation`, published as `x-silo-capability-for`); a member deeper in a response
-by its handler. For a session of a kind the per-operation decisions judge (`x-silo-origin-decisions`),
-a governed member is false when every operation it names is refused to that kind; every other
-caller gets the member's own answer. `TestPermissionMembersStateTheirCase` fails by name on a member
-with no row, and a live check, run over the fakes and against Postgres, fails on a true member with
-no row or a governed one that is true when its operations are all refused. Today the exempt members
-are four documents that describe server behavior (`getImageCapabilities`,
-`getNetworkAccessCapabilities`, `getPolicyCapability`, `getServerConnections`), whose only action is
-reading them.
+A permission member of a response (a boolean named `allowed`, ending in `_allowed`, or starting
+`can_` or `self_can_`, at any depth) never reports as allowed an action whose operations are all
+refused to the session asking. Every such member of a response a judged kind of session may read has
+a row in one table (`capabilityMembers`, `internal/apiv2/origin_decisions.go`): either it governs,
+naming the operations it answers for, or it is exempt with a reason that says what the app would do
+if it believed it. A capability read's top-level `allowed` is applied by the shared capability
+adapter (`prepareCapabilityOperation`, published as `x-silo-capability-for`); a member deeper in a
+response by its handler. For a session of a kind the per-operation decisions judge
+(`x-silo-origin-decisions`), a governed member is false when every operation it names is refused to
+that kind; every other caller gets the member's own answer.
+
+`TestPermissionMembersStateTheirCase` fails by name on a member with no row. A live check, run over
+fakes that report each service available and against Postgres, fails on a true member with no row,
+or a governed one that is true when its operations are all refused. The live check sees every
+governed member except these, whose services its harness does not wire: the top-level `allowed` of
+`getApplePushRegistrationCapabilities`, `getPushRegistrationCapabilities`,
+`getDiagnosticsCapabilities`, `getHistoryImportCapability`, `getOnboardingCapabilities`,
+`getProfileExportCapability`, `getTitleAllowanceCapability`, `getTrailersCapability` and
+`getMetadataAICapability` (applied by the same adapter it does see), and the room read's and join's
+`self_can_manage_room` and `self_can_control_transport` (covered for the room read by
+`TestRoomReadLeavesOutAnotherDevicesStream`). Today the exempt members are four documents that
+describe server behavior (`getImageCapabilities`, `getNetworkAccessCapabilities`,
+`getPolicyCapability`, `getServerConnections`), whose only action is reading them, and the playback
+plan's `can_seek_anywhere`, which describes the stream's timeline, not a permission.
 
 `links.identity` points at `GET /api/v2/system/identity`, the one public per-deployment value:
 a stable `server_id` every API process answers at every address. It is self-asserted and

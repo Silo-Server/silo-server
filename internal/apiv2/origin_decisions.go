@@ -471,6 +471,14 @@ type capabilityMember struct {
 	exempt  string
 }
 
+// watchTogetherHostOperations are what managing a room means; transport
+// control is the socket's play, pause and seek for the room, whose operations
+// are the room's start and stop.
+var (
+	watchTogetherHostOperations      = []string{"closeWatchTogetherRoom", "updateWatchTogetherRoomPolicy", "selectWatchTogetherRoomItem", "updateWatchTogetherRoomSelectionMode", "stageWatchTogetherRoomItem", "promoteWatchTogetherSuggestion"}
+	watchTogetherTransportOperations = []string{"startWatchTogetherRoomPlayback", "stopWatchTogetherRoomPlayback"}
+)
+
 // downloadOperations are the actions a download permission answers for.
 var downloadOperations = []string{"createDownloads", "listDownloads", "createDirectDownloadLink", "getDirectDownload", "createDownloadSubscription"}
 
@@ -500,8 +508,19 @@ var capabilityMembers = map[string]capabilityMember{
 	"getSubtitleAIStatus allowed":                          {governs: []string{"createSubtitleAIJob", "cancelSubtitleAIJob"}},
 	"getSubtitleProviderStatus allowed":                    {governs: []string{"searchSubtitles", "downloadSubtitle"}},
 	"listProfiles items[].requests_allowed":                {governs: []string{"createRequest", "followRequestMedia", "searchRequestMedia"}},
-	// Capabilities whose actions are open to such a session; the answer
-	// stays the capability's own.
+	// A room member is the account and profile, so these describe the
+	// profile's seat; the room read and join name them only for a caller
+	// that may use them (WithoutSessionPowers).
+	"getWatchTogetherRoom room.self_can_manage_room":          {governs: watchTogetherHostOperations},
+	"joinWatchTogetherRoom room.self_can_manage_room":         {governs: watchTogetherHostOperations},
+	"getWatchTogetherRoom room.self_can_control_transport":    {governs: watchTogetherTransportOperations},
+	"joinWatchTogetherRoom room.self_can_control_transport":   {governs: watchTogetherTransportOperations},
+	"startPlayback playback_plan.timeline.can_seek_anywhere":  {exempt: "describes the stream's timeline, not a permission: believing it, the app seeks within its own stream, which it may"},
+	"replanPlayback playback_plan.timeline.can_seek_anywhere": {exempt: "describes the stream's timeline, not a permission: believing it, the app seeks within its own stream, which it may"},
+	// Capabilities some of whose actions are open to such a session; the
+	// answer stays the capability's own. Its finer flags can still describe
+	// refused actions: see getCollectionCapabilities and
+	// getWatchTogetherCapabilities in docs/architecture/app-keys.md.
 	"getCatalogSearchCapabilities allowed":         {governs: []string{"queryCatalogItems", "listCatalogItems"}},
 	"getCollectionCapabilities allowed":            {governs: []string{"listCollections", "getCollection", "createCollection"}},
 	"getEbookCapability allowed":                   {governs: []string{"readEbookFile", "saveEbookProgress", "createEbookAnnotation"}},

@@ -9,9 +9,10 @@ import (
 )
 
 // permissionMemberName reports whether a member names a permission: allowed,
-// or a name ending in _allowed.
+// a name ending in _allowed, or one starting can_ or self_can_.
 func permissionMemberName(name string) bool {
-	return name == "allowed" || strings.HasSuffix(name, "_allowed")
+	return name == "allowed" || strings.HasSuffix(name, "_allowed") ||
+		strings.HasPrefix(name, "can_") || strings.HasPrefix(name, "self_can_")
 }
 
 // schemaPermissionMembers lists the boolean permission members of a schema,
@@ -202,7 +203,37 @@ func TestAllowedReadsTellGrantedAppsNoRefusedAction(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	deps.Accounts = passwordChanger{deps.Accounts.(fakeAccounts)}
 	wireCapabilityServices(&deps)
-	if checked := checkLivePermissionMembers(t, newTestHandler(t, deps), grantedAppToken); checked == 0 {
+	h := newTestHandler(t, deps)
+	if checked := checkLivePermissionMembers(t, h, grantedAppToken); checked == 0 {
 		t.Fatal("no allowed GET answered 200")
+	}
+	// The governed members the live check exercises: each is true for the
+	// person's own session here, so only the rule makes it false for
+	// another app's, and dropping its gate fails above by name.
+	own := map[string]bool{}
+	for _, op := range documentOperations(t) {
+		if op.Method != http.MethodGet || !judgedClass(op.Class) {
+			continue
+		}
+		rec := do(t, h, op.Method, pathParam.ReplaceAllString(op.Path, "1"), "", with(bearer(memberToken), "X-Profile-Id", "p-owner"))
+		var body any
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &body) != nil {
+			continue
+		}
+		trues := map[string]bool{}
+		answerPermissionMembers(body, "", trues)
+		for member := range trues {
+			own[op.ID+" "+member] = true
+		}
+	}
+	for _, key := range []string{
+		"getAccountPasswordCapability allowed", "getNotificationEmailVerificationCapabilities allowed", "getProgressBootstrapCapabilities allowed",
+		"getDownloadCapability allowed", "getDownloadCapability download_allowed", "getDownloadCapability transcode_user_allowed",
+		"getCurrentUser download_allowed", "getSubtitleSyncStatus allowed", "getSubtitleAIStatus allowed", "getSubtitleProviderStatus allowed",
+		"listProfiles items[].requests_allowed",
+	} {
+		if !own[key] {
+			t.Errorf("%s is not true for the person's own session, so the live check cannot see its gate", key)
+		}
 	}
 }

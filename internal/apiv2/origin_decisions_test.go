@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
@@ -455,6 +456,37 @@ func wireCapabilityServices(deps *Dependencies) {
 	deps.NotificationEmailVerification = &fakeEmailVerification{current: true, dispatch: true}
 	deps.ProgressBootstrap = &fakeBootstrap{}
 	deps.CursorSecret = []byte("synthetic-shared-bootstrap-secret")
+	deps.Downloads = availableDownloads{}
+	deps.SubtitleSync = availableSubtitleSync{}
+	deps.SubtitleAI = availableSubtitleAI{}
+	deps.SubtitleProviders = availableSubtitleProviders{}
+}
+
+// The services below report themselves available and the caller permitted,
+// so a permission member that answers for them is true for the person's own
+// session and the rule alone can make it false for another app's.
+type availableDownloads struct{ DownloadRegistryService }
+
+func (availableDownloads) Capability(context.Context, int) (downloads.Capability, error) {
+	return downloads.Capability{Enabled: true, DownloadAllowed: true, TranscodeUserAllowed: true}, nil
+}
+
+type availableSubtitleSync struct{ SubtitleSyncAPI }
+
+func (availableSubtitleSync) SyncAvailable() bool                  { return true }
+func (availableSubtitleSync) AutoSyncEnabled(context.Context) bool { return true }
+func (availableSubtitleSync) ExternalSyncAvailable() bool          { return true }
+
+type availableSubtitleAI struct{}
+
+func (availableSubtitleAI) SubtitleAIStatus(context.Context) handlers.SubtitleAIStatusView {
+	return handlers.SubtitleAIStatusView{Enabled: true}
+}
+
+type availableSubtitleProviders struct{}
+
+func (availableSubtitleProviders) SubtitleProviderStatus() handlers.SubtitleProviderStatusView {
+	return handlers.SubtitleProviderStatusView{SchemaVersion: 1, Enabled: true, Providers: []string{"example"}}
 }
 
 // TestRefusedOperationsDeclareTheir403: an operation that refuses, or limits

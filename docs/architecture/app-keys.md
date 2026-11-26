@@ -497,7 +497,12 @@ resolver (`TestPluginContentMountsAllReachTheContentHandler`,
 - the events socket; Watch Together as a member of a room the person put it
   in: joining by the room's code, reading the room, suggesting and voting,
   reporting member state. As any member, it may suggest and vote, and a
-  buffering report from it pauses the room for everyone. The room read
+  buffering report from it can pause the room for everyone (at most once a
+  minute per room, with a cooldown per member). The room read, join and the
+  socket's snapshots name no power it is refused: `self_can_manage_room`,
+  `self_can_control_transport` and the host's `invite_path` are false or
+  absent for it. `self_role` stays: it names the profile's seat, not what
+  this session may do. The room read
   leaves out the playback session id
   attached to the member (a member is the account and profile, so it may be
   the person's own device's), and a connection of such a session starts with
@@ -599,7 +604,7 @@ on the account for such a session, and what happens to it then:
 | --- | --- | --- |
 | progress, watched, favorites, watchlist, not interested, ratings, history removal, reading progress, notes, home dismissals, read marks | the profile's own state | stays: it is the person's data and the point of the grant |
 | playback, audio and subtitle preferences, ebook reader settings | the profile's own state, per series, library or title | stays, as the profile's |
-| starting playback | which version and quality the profile last played for that title (`user_series_playback_preferences`) | stays, as the profile's state; the one allowed write whose effect shows up on the person's other devices, which start that title from it |
+| starting playback | which version and quality the profile last played for that title (`user_series_playback_preferences`) | stays, as the profile's state; it is written as a side effect of starting playback, not by a request to change a preference, and the person's other devices start that title from it |
 | shuffles | a shuffle of the profile | stays as the profile's; an abandoned one is deleted with other abandoned shuffles |
 | starting playback, theme songs, the bandwidth probe download | a playback attempt bound to its login session, and the play's history row, which carries the client name the app sent | the attempt's media, stream reference and control socket are refused once the session ends, and the stream ends at its idle expiry; the history row stays as the profile's |
 | route events | diagnostics about its own streams, carrying its client name | stay; they grant nothing |
@@ -611,6 +616,18 @@ on the account for such a session, and what happens to it then:
 | any request with client name headers | the client name the app sends, which is not stripped. A person sees it today in the web app's household streams panel, beside their own devices' plays; administrators see it in playback history, insights and session views | stays in playback history after the key is revoked; whether to strip it is a later decision |
 | its own media requests | the declared device label, in stream telemetry (in memory, administrators only) | gone with the process; nothing lasts |
 | sign out, ending its own session, revoking its own key | nothing | nothing to take |
+
+Capability reads that still tell such a session it may do what the gate
+refuses, to be closed by the next change:
+
+- `getCollectionCapabilities` answers `allowed: true` (it governs a mix:
+  listing and reading collections are allowed) with `imports`,
+  `import_sources`, `item_reorder`, `create_description` and
+  `sync_schedule_editable`. The app is told it may import, reorder, describe
+  and schedule collections; the gate refuses every collection write.
+- `getWatchTogetherCapabilities` answers `allowed: true` (joining is allowed)
+  with host flags that say what the host may do; the gate refuses such a
+  session every host operation.
 
 No device registry row and no connection record is left: the declared device
 is removed before anything reads it. Nothing on the list acts for the app
