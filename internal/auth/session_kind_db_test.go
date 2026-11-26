@@ -94,20 +94,21 @@ func TestActiveSessionKindDB(t *testing.T) {
 		name    string
 		session string
 		want    SessionKind
+		wantKey string // GrantedAppKeyID, which the PIN check counts by
 	}{
-		{"another app's key", session(models.SessionOpenedAppKey, &grant), SessionKindGrantedApp},
-		{"the person's own device key", session(models.SessionOpenedAppKey, &own), ""},
-		{"password", session(models.SessionOpenedPassword, nil), ""},
-		{"device signed in by code", session(models.SessionOpenedDeviceLogin, nil), ""},
-		{"key row missing", dangling, SessionKindGrantedApp},
+		{"another app's key", session(models.SessionOpenedAppKey, &grant), SessionKindGrantedApp, grant},
+		{"the person's own device key", session(models.SessionOpenedAppKey, &own), "", ""},
+		{"password", session(models.SessionOpenedPassword, nil), "", ""},
+		{"device signed in by code", session(models.SessionOpenedDeviceLogin, nil), "", ""},
+		{"key row missing", dangling, SessionKindGrantedApp, missing},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			authority, active, err := repo.ActiveSession(ctx, tc.session, userID)
 			if err != nil || !active {
 				t.Fatalf("active = %v, err = %v", active, err)
 			}
-			if authority.Kind != tc.want {
-				t.Fatalf("kind = %q, want %q", authority.Kind, tc.want)
+			if authority.Kind != tc.want || authority.GrantedAppKeyID != tc.wantKey {
+				t.Fatalf("kind = %q, key = %q, want %q, %q", authority.Kind, authority.GrantedAppKeyID, tc.want, tc.wantKey)
 			}
 		})
 	}
