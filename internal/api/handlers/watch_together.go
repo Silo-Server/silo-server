@@ -338,7 +338,7 @@ func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn 
 
 // errOtherAppTransport refuses a transport request from a session another
 // app opened, as the error frame any refused request gets.
-var errOtherAppTransport = errors.New(SessionNotAllowedDetail)
+var errOtherAppTransport = errors.New("watch together transport is not allowed for a sign-in another app opened")
 
 func (h *WatchTogetherHandler) handleRoomClientMessage(
 	ctx context.Context,
