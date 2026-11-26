@@ -228,3 +228,32 @@ func TestNativePushRefusesAnotherAppDB(t *testing.T) {
 		})
 	}
 }
+
+// suggestionDeletes records whether a deletion was limited to the caller's
+// own suggestions.
+type suggestionDeletes struct{ ownOnly []bool }
+
+func (*suggestionDeletes) CheckSuggestionRoomProof(string, int, string, string) error { return nil }
+func (f *suggestionDeletes) DeleteRoomSuggestion(_ context.Context, _, _ string, _ int, _ string, ownOnly bool) error {
+	f.ownOnly = append(f.ownOnly, ownOnly)
+	return nil
+}
+
+// TestSuggestionDeleteForAnotherAppDB: the host may delete any suggestion,
+// and the host is the account and profile, so a session another app opened
+// would remove other members' suggestions in the person's own room and change
+// which one wins a vote. Through the real session rule, only such a session
+// loses the host's power; a password and a device sign-in session keep it.
+func TestSuggestionDeleteForAnotherAppDB(t *testing.T) {
+	deletes := new(suggestionDeletes)
+	d := newKeyRoutesDB(t, func(deps *Dependencies) { deps.WatchTogetherSuggestionDelete = deletes })
+	path := Prefix + "/watch-together/rooms/" + uuid.NewString() + "/suggestions/s-1"
+	for _, token := range []string{"tok-app", "tok-phone", "tok-tv"} {
+		if rec := do(t, d.handler, http.MethodDelete, path, "", with(with(bearer(token), "X-Profile-Id", "p-owner"), "X-Room-Token", "room-proof")); rec.Code != http.StatusNoContent {
+			t.Fatalf("%s: status %d: %s", token, rec.Code, rec.Body.String())
+		}
+	}
+	if !slices.Equal(deletes.ownOnly, []bool{true, false, false}) {
+		t.Fatalf("own-only per caller = %v, want only another app's", deletes.ownOnly)
+	}
+}

@@ -2855,6 +2855,17 @@ func (s *Service) DeleteSuggestion(
 	userID int,
 	profileID string,
 ) ([]Suggestion, error) {
+	return s.deleteSuggestion(ctx, roomID, suggestionID, userID, profileID, true)
+}
+
+// DeleteOwnSuggestion is DeleteSuggestion without the host's power to delete
+// any suggestion, for a session another app opened: it deletes only one its
+// account and profile made.
+func (s *Service) DeleteOwnSuggestion(ctx context.Context, roomID, suggestionID string, userID int, profileID string) ([]Suggestion, error) {
+	return s.deleteSuggestion(ctx, roomID, suggestionID, userID, profileID, false)
+}
+
+func (s *Service) deleteSuggestion(ctx context.Context, roomID, suggestionID string, userID int, profileID string, hostMay bool) ([]Suggestion, error) {
 	if s == nil || s.suggestions == nil {
 		return nil, fmt.Errorf("watch together suggestions unavailable")
 	}
@@ -2874,7 +2885,7 @@ func (s *Service) DeleteSuggestion(
 	}
 
 	s.mu.Lock()
-	isHost := live.room.HostUserID == userID && live.room.HostProfileID == profileID
+	isHost := hostMay && live.room.HostUserID == userID && live.room.HostProfileID == profileID
 	s.mu.Unlock()
 
 	isSuggester := existing.SuggesterUserID == userID && existing.SuggesterProfileID == profileID

@@ -355,6 +355,7 @@
 ./internal/apiv2 TestWebPushRefusesAnotherAppDB
 ./internal/apiv2 TestWatchTogetherRefusesAnotherAppDB
 ./internal/apiv2 TestNativePushRefusesAnotherAppDB
+./internal/apiv2 TestSuggestionDeleteForAnotherAppDB
 ./internal/auth TestRevokeOwnDeviceKeyRulesDB
 ./internal/auth TestKeySignInLocalPasswordsOffDB
 ./internal/auth TestKeySessionContinuesProviderChainDB
