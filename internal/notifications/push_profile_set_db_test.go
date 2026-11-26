@@ -408,8 +408,8 @@ func TestProfileSetWakeEndsWithinItsBudgetDB(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > profileSetWakeBudget+profileSetFinalizeTimeout {
 		t.Fatalf("the wake took %v, want at most its budget %v plus the final write's %v", elapsed, profileSetWakeBudget, profileSetFinalizeTimeout)
 	}
-	if calls.Load() != 1 {
-		t.Fatalf("relay calls = %d, want 1: the phones after the first are past the budget", calls.Load())
+	if calls.Load() != 3 {
+		t.Fatalf("relay calls = %d, want 3: the three phones are sent at once", calls.Load())
 	}
 }
 
@@ -520,6 +520,14 @@ func TestProfileSetWakePanickingSendDB(t *testing.T) {
 	if calls.Load() != 2 {
 		t.Fatalf("relay calls = %d, want 2: the next phone must still be sent", calls.Load())
 	}
+	// The panic released the account's in-flight mark: a later wake starts.
+	waitForWakeEnded(t, node)
+	wakeHarness{t: t, pool: pool}.pastTheMinute()
+	if !node.WakeProfileSetDevices(t.Context(), 7) {
+		t.Fatal("wake after the panicking one answered false")
+	}
+	waitForWakeRows(t, pool, PushOutcomeDelivered+":", PushOutcomeDelivered+":", PushOutcomeDelivered+":",
+		PushOutcomeFailed+":wake_send_unfinished")
 }
 
 // registerAndroid registers, or with remove removes, one Android phone of
@@ -657,4 +665,121 @@ func deviceNames(from, to int) []string {
 		names = append(names, fmt.Sprintf("android-%02d", i))
 	}
 	return names
+}
+
+// waitForWakeEnded waits until node has no wake of account 7 in flight.
+func waitForWakeEnded(t *testing.T, node *System) {
+	t.Helper()
+	deadline := time.After(30 * time.Second)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for node.profileSetWakeInFlight(7) {
+		select {
+		case <-deadline:
+			t.Fatal("the wake never ended")
+		case <-poll.C:
+		}
+	}
+}
+
+// A dead registration at the front of the order costs the account's other
+// phones nothing: they are sent beside it and delivered, and it alone is
+// recorded out of time, within the budget. Regression: sent one after
+// another, one registration whose relay call never answered used the whole
+// budget, and against a relay that times out every request a wake reached
+// two phones of twenty.
+func TestProfileSetWakeSlowFirstPhoneDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	registerForSession(t, repo, "live")
+	registerAndroid(t, repo, "android-dead", 1, false)
+	// android-dead had the most recent accepted push, so it is sent first.
+	var dead string
+	if err := pool.QueryRow(t.Context(), `UPDATE push_devices SET last_success_at = now()
+		WHERE device_id = 'android-dead' RETURNING server_device_id`).Scan(&dead); err != nil {
+		t.Fatal(err)
+	}
+	defer func(previous time.Duration) { profileSetWakeBudget = previous }(profileSetWakeBudget)
+	profileSetWakeBudget = 500 * time.Millisecond
+
+	node := profileSetWakeSystem(t, pool, repo, nil, nil)
+	node.pushSender.client = &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var body map[string]any
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Errorf("decode relay body: %v", err)
+		}
+		if body["server_device_id"] == dead {
+			<-req.Context().Done() // this registration's relay call never answers
+			return nil, req.Context().Err()
+		}
+		return relayResponse(http.StatusOK, `{"request_id":"r","status":"accepted"}`), nil
+	})}
+	started := time.Now()
+	if !node.WakeProfileSetDevices(t.Context(), 7) {
+		t.Fatal("wake answered false")
+	}
+	waitForWakeRows(t, pool, PushOutcomeDelivered+":", PushOutcomeDelivered+":", PushOutcomeFailed+":wake_out_of_time")
+	waitForWakeEnded(t, node)
+	if elapsed := time.Since(started); elapsed > profileSetWakeBudget+profileSetFinalizeTimeout {
+		t.Fatalf("the wake took %v, want at most its budget %v plus the final write's %v", elapsed, profileSetWakeBudget, profileSetFinalizeTimeout)
+	}
+}
+
+// A wake with more phones than profileSetWakeConcurrency reaches every one
+// of them, with never more than that many relay calls in flight at once.
+// Regression: an unbounded fan-out of one wake's sends against the relay's
+// shared allowance.
+func TestProfileSetWakeBoundsSendsInFlightDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	phones := 2*profileSetWakeConcurrency + 1
+	for i := range phones {
+		registerAndroid(t, repo, fmt.Sprintf("android-%02d", i), 1, false)
+	}
+	var inFlight, most, calls atomic.Int32
+	var hold atomic.Bool
+	node := profileSetWakeSystem(t, pool, repo, nil, nil)
+	node.pushSender.client = &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		now := inFlight.Add(1)
+		defer inFlight.Add(-1)
+		calls.Add(1)
+		for seen := most.Load(); now > seen && !most.CompareAndSwap(seen, now); seen = most.Load() {
+		}
+		if hold.Load() {
+			<-req.Context().Done() // held until the wake's budget ends
+			return nil, req.Context().Err()
+		}
+		return relayResponse(http.StatusOK, `{"request_id":"r","status":"accepted"}`), nil
+	})}
+
+	// The relay answering: every phone is reached, within the bound.
+	if !node.WakeProfileSetDevices(t.Context(), 7) {
+		t.Fatal("wake answered false")
+	}
+	delivered := make([]string, phones)
+	for i := range delivered {
+		delivered[i] = PushOutcomeDelivered + ":"
+	}
+	waitForWakeRows(t, pool, delivered...)
+	if got := most.Load(); got > profileSetWakeConcurrency {
+		t.Fatalf("%d relay calls in flight at once while the relay answered, want at most %d", got, profileSetWakeConcurrency)
+	}
+
+	// The relay holding every call until the budget ends: exactly the bound
+	// is in flight, and the phones after it are never started.
+	waitForWakeEnded(t, node)
+	defer func(previous time.Duration) { profileSetWakeBudget = previous }(profileSetWakeBudget)
+	profileSetWakeBudget = time.Second
+	hold.Store(true)
+	most.Store(0)
+	calls.Store(0)
+	if _, err := pool.Exec(t.Context(), `DELETE FROM push_delivery_attempts`); err != nil {
+		t.Fatal(err)
+	}
+	wakeHarness{t: t, pool: pool}.pastTheMinute()
+	if !node.WakeProfileSetDevices(t.Context(), 7) {
+		t.Fatal("held wake answered false")
+	}
+	waitForWakeEnded(t, node)
+	if got := most.Load(); got != profileSetWakeConcurrency || calls.Load() != profileSetWakeConcurrency {
+		t.Fatalf("held wake: %d relay calls, at most %d at once; want %d of each", calls.Load(), got, profileSetWakeConcurrency)
+	}
 }

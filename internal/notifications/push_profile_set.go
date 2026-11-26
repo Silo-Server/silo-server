@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -49,10 +50,21 @@ const (
 // push target or after idempotency_key_reuse, recovering a rejected
 // credential, and the send again), each under pushRelayRequestTimeout, which
 // is more than the budget, so no per-phone deadline is set: the phones are
-// sent in listProfileSetWakeDevices's order, phones that receive pushes
-// first, and one the budget does not reach is recorded failed and gets the
-// next wake. A var so tests can shorten it.
+// started in listProfileSetWakeDevices's order, phones that receive pushes
+// first, profileSetWakeConcurrency at a time, and one the budget does not
+// reach is recorded failed and gets the next wake. A var so tests can
+// shorten it.
 var profileSetWakeBudget = profileSetWakeInterval / 2
+
+// profileSetWakeConcurrency is how many of one wake's phones are sent at
+// once. Sent one after another, a single slow or dead registration at the
+// front could use up the budget, and against a relay that times out every
+// request only two phones would be reached. Four lets a slow phone hold one
+// slot while the person's other phones go on, and keeps one wake to a
+// quarter of the 16 workers the push dispatcher already sends through the
+// same relay with; the relay's per-deployment allowance (1,000 requests in
+// 10 seconds) leaves room for many wakes at once.
+const profileSetWakeConcurrency = 4
 
 // A wake is sent once and never retried: the next edit or the app opening
 // repairs a missed one. Its row is never in a state any server's claim
@@ -341,21 +353,34 @@ func (r *PushDeviceRepository) failUnfinishedProfileSetWake(ctx context.Context,
 // service's other detached sends do (PostServerChannelRequestEvent): the
 // caller never waits for the relay. The whole wake runs under
 // profileSetWakeBudget, started now, and holds the account's in-flight mark
-// until it ends, a panic included. The phones are sent in turn, most
-// recently seen first; a send that did not record an outcome, a panicking
-// one included, and a phone the budget did not reach, are recorded failed on
-// a fresh context the budget cannot have canceled, so no wake row outlives
-// its wake in flight. Only a process that stops mid-wake leaves one, which no
-// claim selects, the queue gauge leaves out, and retention marks failed.
+// until every send has returned and every failure write is done, a panic
+// included. The phones are started in order, profileSetWakeConcurrency at a
+// time; a send that did not record an outcome, a panicking one included, and
+// a phone the budget did not reach, are recorded failed on a fresh context
+// the budget cannot have canceled, so no wake row outlives its wake in
+// flight and no goroutine outlives the wake. Only a process that stops
+// mid-wake leaves a row in flight, which no claim selects, the queue gauge
+// leaves out, and retention marks failed.
 func (s *System) sendProfileSetWakeDetached(ctx context.Context, userID int, attempts []PushDeliveryAttempt) {
 	ctx = context.WithoutCancel(ctx)
 	budget, cancel := context.WithTimeout(ctx, profileSetWakeBudget)
 	go func() {
 		defer s.releaseProfileSetWake(userID)
 		defer cancel()
-		for _, attempt := range attempts {
-			s.sendProfileSetWakeTo(ctx, budget, userID, attempt)
+		next := make(chan PushDeliveryAttempt)
+		var senders sync.WaitGroup
+		for range min(profileSetWakeConcurrency, len(attempts)) {
+			senders.Go(func() {
+				for attempt := range next {
+					s.sendProfileSetWakeTo(ctx, budget, userID, attempt)
+				}
+			})
 		}
+		for _, attempt := range attempts {
+			next <- attempt
+		}
+		close(next)
+		senders.Wait()
 	}()
 }
 
