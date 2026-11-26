@@ -6,6 +6,7 @@ import {
 } from "@/api/client";
 import { v2, type V2Result } from "@/api/v2/request";
 import { useAuth } from "@/hooks/useAuth";
+import { isReducedLoginSession } from "@/lib/loginSessionDevice";
 import {
   captureAdminAuthority,
   requireAdminAuthority,
@@ -121,10 +122,22 @@ export function useLoginSessions(adminUserId?: number, enabled = true) {
     },
   });
   const unique = new Map<string, LoginSession>();
-  for (const page of query.data?.pages ?? []) for (const row of page.items) unique.set(row.id, row);
+  // Each page repeats its own current_session's times in its reduced items, and a
+  // refresh between pages moves expires_at, so each item is judged on its page.
+  // Before any page arrives nothing is marked reduced, and the panel lists no rows.
+  const reducedIds = new Set<string>();
+  for (const page of query.data?.pages ?? []) {
+    const current = page.current_session ?? page.items.find((row) => row.current) ?? null;
+    for (const row of page.items) {
+      unique.set(row.id, row);
+      if (!adminUserId && isReducedLoginSession(row, current)) reducedIds.add(row.id);
+      else reducedIds.delete(row.id);
+    }
+  }
   return {
     query,
     sessions: [...unique.values()],
+    reducedIds: reducedIds as ReadonlySet<string>,
     currentSession: query.data?.pages[0]?.current_session ?? null,
     revoke,
     revokeAll,

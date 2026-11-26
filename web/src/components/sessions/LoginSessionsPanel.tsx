@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useLoginSessions, type LoginSession } from "@/hooks/queries/loginSessions";
 import { useAuth } from "@/hooks/useAuth";
-import { isReducedLoginSession, loginSessionDevice } from "@/lib/loginSessionDevice";
+import { loginSessionDevice } from "@/lib/loginSessionDevice";
 import { useT } from "@/i18n";
 import { LoginSessionRow } from "./LoginSessionRow";
 
@@ -35,7 +35,9 @@ export function LoginSessionsPanel({
   manageOthers?: boolean;
 }) {
   const t = useT();
-  const { query, sessions, currentSession, revoke, revokeAll } = useLoginSessions(adminUser?.id);
+  const { query, sessions, reducedIds, currentSession, revoke, revokeAll } = useLoginSessions(
+    adminUser?.id,
+  );
   const { clearLoginSession } = useAuth();
   const navigate = useNavigate();
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -95,7 +97,7 @@ export function LoginSessionsPanel({
           key={session.id}
           session={session}
           onSignOut={canSignOut ? signOut : undefined}
-          reduced={!adminUser && isReducedLoginSession(session, current)}
+          reduced={reducedIds.has(session.id)}
         />
       ))}
     </ul>
