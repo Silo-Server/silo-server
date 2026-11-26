@@ -93,3 +93,32 @@ func advanceAccountIDs(ctx context.Context, tx pgx.Tx, live liveAccounts) error 
 		highest, restored)
 	return err
 }
+
+// AdvanceAccountIDs moves dbURL's account id sequence past every id liveURL
+// has used (advanceAccountIDs), as CarryCredentials does from the live state
+// it reads. A restore of this deployment's backup that carries none of the
+// live credentials, because the backup's older schema cannot take them,
+// runs it in their place.
+func (l PGLoader) AdvanceAccountIDs(ctx context.Context, dbURL, liveURL string) error {
+	var live liveAccounts
+	conn, err := pgx.Connect(ctx, liveURL)
+	if err != nil {
+		return err
+	}
+	err = pgx.BeginTxFunc(ctx, conn, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+		live, err = readLiveAccounts(ctx, tx)
+		return err
+	})
+	_ = conn.Close(context.WithoutCancel(ctx))
+	if err != nil {
+		return fmt.Errorf("reading the live server's accounts: %w", err)
+	}
+	conn, err = pgx.Connect(ctx, dbURL)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+	return pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		return advanceAccountIDs(ctx, tx, live)
+	})
+}

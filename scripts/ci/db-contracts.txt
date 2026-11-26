@@ -1395,6 +1395,8 @@
 ./internal/backup TestCarryMatchesAProfileWithinItsAccountDB
 ./internal/backup TestFullRestoreCarriesCredentialsOnlyOntoTheSameAccountDB
 ./internal/backup TestFullRestoreKeepsTheLiveAccountIDSequenceDB
+./internal/backup TestFullRestoreLeavingOutCredentialsKeepsTheLiveAccountIDSequenceDB
+./internal/backup TestFullRestoreOfAnotherDeploymentKeepsItsAccountIDSequenceDB
 ./internal/backup TestCarrySwapsDestinationNamesDB
 ./internal/backup TestBackupWritesManifestLastDB
 ./internal/backup TestSubsystemLockSerializesBackupsAndDeletesDB
