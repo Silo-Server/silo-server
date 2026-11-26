@@ -1627,4 +1627,5 @@
 ./internal/auth TestDeviceSignInMigrationMarksKeptRequestsDB
 ./internal/apiv2 TestSessionReachRuleDB
 ./internal/apiv2 TestLimitedSessionDeleteDB
+./internal/apiv2 TestDemoVisitorOnALimitedSessionDB
 ./internal/apiv2 TestLimitedSessionPagesByIDDB

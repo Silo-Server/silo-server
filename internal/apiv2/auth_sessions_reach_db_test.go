@@ -36,6 +36,12 @@ type reachDB struct {
 
 func newReachDB(t *testing.T) *reachDB {
 	t.Helper()
+	return newReachDBIn(t, false)
+}
+
+// newReachDBIn is newReachDB on a server with demo mode on or off.
+func newReachDBIn(t *testing.T, demo bool) *reachDB {
+	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -54,7 +60,7 @@ func newReachDB(t *testing.T) *reachDB {
 	users, sessions := auth.NewUserRepository(pool), auth.NewSessionRepository(pool)
 	jwt := auth.NewJWTService("synthetic-session-reach-secret", time.Minute, time.Hour)
 	svc := auth.NewService(auth.NewLocalProvider(users, sessions), jwt, sessions, users, nil, nil, nil)
-	deps := parityDeps(false)
+	deps := parityDeps(demo)
 	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{d.claims}, sessions, fakeAPIKeys{}, fakeUsers{d.users})
 	deps.Sessions = handlers.NewAuthHandler(svc, jwt, nil)
 	d.handler = newTestHandler(t, deps)
@@ -273,6 +279,46 @@ func TestLimitedSessionDeleteDB(t *testing.T) {
 	own := d.claims[limited].SessionID
 	if rec := do(t, d.handler, http.MethodDelete, Prefix+"/auth/sessions/"+own, "", bearer(limited)); rec.Code != http.StatusNoContent || d.live(t, own) {
 		t.Fatalf("ending its own session = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestDemoVisitorOnALimitedSessionDB: on a demo server, where visitors share
+// one account, a session opened by device sign-in and an ordinary one are
+// each refused another session of the account, an unknown session is still
+// not found for both, each may end itself, and the capability says no to
+// both. It catches either rule switching the other off where they meet.
+func TestDemoVisitorOnALimitedSessionDB(t *testing.T) {
+	d := newReachDBIn(t, true)
+	yes := true
+	account := d.account(t)
+	limited := d.store(t, account, reachSession{via: &yes, platform: "tvOS"})
+	ordinary := d.store(t, account, reachSession{platform: "web"})
+	bystander := uuid.NewString()
+	d.store(t, account, reachSession{id: bystander, platform: "web"})
+	for name, token := range map[string]string{"limited": limited, "ordinary": ordinary} {
+		refusal := requireProblem(t, do(t, d.handler, http.MethodDelete, Prefix+"/auth/sessions/"+bystander, "", bearer(token)), TypePermissionDenied)
+		if !d.live(t, bystander) {
+			t.Fatalf("%s: another visitor's session ended (%s)", name, refusal.Detail)
+		}
+		requireProblem(t, do(t, d.handler, http.MethodDelete, Prefix+"/auth/sessions/"+uuid.NewString(), "", bearer(token)), TypeNotFound)
+		rec := do(t, d.handler, http.MethodGet, Prefix+"/auth/sessions/capabilities", "", bearer(token))
+		var capability struct {
+			RevokeOtherSessions *bool `json:"revoke_other_sessions"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &capability); err != nil || rec.Code != http.StatusOK ||
+			capability.RevokeOtherSessions == nil || *capability.RevokeOtherSessions {
+			t.Fatalf("%s: capability = %d %s, want revoke_other_sessions false", name, rec.Code, rec.Body.String())
+		}
+	}
+	// The limited caller still sees the others redacted, and each may sign
+	// itself out.
+	page := d.list(t, limited, "")
+	requireRedactedItem(t, itemByID(t, page, bystander), bystander, page.CurrentSession)
+	for name, token := range map[string]string{"limited": limited, "ordinary": ordinary} {
+		own := d.claims[token].SessionID
+		if rec := do(t, d.handler, http.MethodDelete, Prefix+"/auth/sessions/"+own, "", bearer(token)); rec.Code != http.StatusNoContent || d.live(t, own) {
+			t.Fatalf("%s: ending its own session = %d %s", name, rec.Code, rec.Body.String())
+		}
 	}
 }
 
