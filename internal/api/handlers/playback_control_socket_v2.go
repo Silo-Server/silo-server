@@ -286,13 +286,20 @@ func (h *PlaybackControlSocketV2) refuseOtherStream(ctx context.Context, identit
 	return err
 }
 
+// canonicalUUID reports whether s is a UUID in the form uuid prints, the only
+// form the attempt store keys by.
+func canonicalUUID(s string) bool {
+	id, err := uuid.Parse(s)
+	return err == nil && id != uuid.Nil && id.String() == s
+}
+
 // startedBy is the login session that started the playback session's
 // durable attempt: "" when none is recorded (a bridge-started session, an id
 // the store can't name), playback.ErrSessionNotFound when there is no
 // attempt, and the store's error when the read fails.
 func (h *PlaybackControlSocketV2) startedBy(ctx context.Context, playbackSessionID string) (string, error) {
 	store := h.Playback.PlanStoreV3
-	if store == nil || validatePlaybackSessionID(playbackSessionID) != nil {
+	if store == nil || !canonicalUUID(playbackSessionID) {
 		return "", nil
 	}
 	attempt, err := store.GetAttemptIdentity(ctx, playbackSessionID)
