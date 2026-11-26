@@ -101,6 +101,13 @@ var deviceCodeAlphabet = []byte("0123456789")
 // update together with session revocation. Already-issued playback grants and
 // requests approved by other accounts are unchanged.
 func withdrawDeviceSignInApprovalsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) (int64, error) {
+	// In id order, as lockSessionPreapprovals takes the rows it shares with
+	// this, so two of them never hold each other's rows.
+	if _, err := tx.Exec(ctx, `SELECT id FROM device_login_requests
+		WHERE approved_by_user_id = ANY($1::int[]) AND status = $2 ORDER BY id FOR UPDATE`,
+		userIDs, DeviceLoginStatusApproved); err != nil {
+		return 0, fmt.Errorf("locking device sign-in approvals: %w", err)
+	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE device_login_requests SET status = $2, updated_at = NOW()
 		WHERE approved_by_user_id = ANY($1::int[]) AND status = $3`,

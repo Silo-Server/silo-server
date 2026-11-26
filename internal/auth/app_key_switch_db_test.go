@@ -271,3 +271,36 @@ func TestSwitchOffSweepAndAccountRevokeDoNotDeadlockDB(t *testing.T) {
 		})
 	}
 }
+
+// A switch-off that commits just after a key session's renewal read the
+// switch as on still ends the session, in its own sweep, and the renewal
+// that slipped through outlives it no further: its new tokens name a revoked
+// session, so the access token is refused on first use and the next refresh
+// is refused. The switch-off runs in the gap through the renewal's hook.
+func TestSwitchOffAfterRenewalReadDB(t *testing.T) {
+	env := newKeyEnv(t, "keyrenewrace")
+	t.Cleanup(saveSettings(t, env.pool, config.AuthAppKeySignInSettingKey))
+	ctx := t.Context()
+	env.setSetting(t, config.AuthAppKeySignInSettingKey, "true")
+	user := env.localAccount(t, "keyrenewrace-user", models.RoleUser)
+	_, _, enrolled := env.enroll(t, user)
+	afterRenewalSwitchRead = func() {
+		afterRenewalSwitchRead = nil
+		if err := switchOff(ctx, env.pool); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { afterRenewalSwitchRead = nil })
+	// The renewal read "on" before the switch-off, so it goes on and mints
+	// tokens; extending the swept session finds nothing to extend.
+	pair, err := env.svc.Refresh(ctx, enrolled.Pair.RefreshToken)
+	if err != nil {
+		t.Fatalf("renewal that read the switch on = %v", err)
+	}
+	if env.sessionLive(t, pair.SessionID, user.ID) {
+		t.Fatal("the session the switch-off swept is live")
+	}
+	if _, err := env.svc.Refresh(ctx, pair.RefreshToken); !errors.Is(err, ErrSessionRevoked) {
+		t.Fatalf("the slipped-through refresh token = %v, want refused", err)
+	}
+}

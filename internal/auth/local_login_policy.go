@@ -178,10 +178,22 @@ func usableBreakGlassCount(ctx context.Context, db rowQuerier, excludeID int) (i
 // while no break-glass admin could still sign in (ErrBreakGlassRequired,
 // checked first), and while any account holds app keys and has no usable
 // password and no provider identity (*AccountsAtRiskError, naming them):
-// afterwards its keys would be its only way in, or it would have none. The
-// caller runs it inside the settings mutation, which already holds the
-// settings lock; before and after are the effective values.
+// afterwards its keys would be its only way in, or it would have none. It
+// judges providers under the stored public URL; a settings write uses
+// CheckLocalLoginSettingChangeAt with the URL it leaves. The caller runs it
+// inside the settings mutation, which already holds the settings lock;
+// before and after are the effective values.
 func CheckLocalLoginSettingChange(ctx context.Context, db dbQuerier, before, after string) error {
+	publicURL, err := readServerSetting(ctx, db, config.ServerPublicURLSettingKey)
+	if err != nil {
+		return err
+	}
+	return CheckLocalLoginSettingChangeAt(ctx, db, before, after, publicURL)
+}
+
+// CheckLocalLoginSettingChangeAt is CheckLocalLoginSettingChange with
+// server.public_url as the same write leaves it.
+func CheckLocalLoginSettingChangeAt(ctx context.Context, db dbQuerier, before, after, publicURL string) error {
 	wasOn := settingBool(before, true)
 	isOn := settingBool(after, true)
 	if !wasOn || isOn {
@@ -194,7 +206,7 @@ func CheckLocalLoginSettingChange(ctx context.Context, db dbQuerier, before, aft
 	if count == 0 {
 		return ErrBreakGlassRequired
 	}
-	return refuseAccountsAtRisk(ctx, db, ChangeLocalPasswordsOff, false)
+	return refuseAccountsAtRisk(ctx, db, ChangeLocalPasswordsOff, SignInSettings{localOn: false, publicURL: publicURL})
 }
 
 func settingBool(value string, fallback bool) bool {

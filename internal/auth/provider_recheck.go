@@ -689,6 +689,9 @@ func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *
 			// them), and an account whose primary provider still vouches for
 			// it keeps what that provider opened: the refusal ends only the
 			// sessions opened through the identity.
+			if err := lockSessionPreapprovals(ctx, tx, `s.identity_id = $1 AND s.user_id = $2`, identity.ID, identity.UserID); err != nil {
+				return err
+			}
 			if _, err := tx.Exec(ctx, `UPDATE device_login_requests SET status = $3, updated_at = NOW()
 				WHERE approved_identity_id = $1 AND approved_by_user_id = $2 AND status = $4`,
 				identity.ID, identity.UserID, DeviceLoginStatusDenied, DeviceLoginStatusApproved); err != nil {

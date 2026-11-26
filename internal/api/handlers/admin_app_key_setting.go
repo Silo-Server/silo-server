@@ -25,8 +25,10 @@ func appKeySwitch(values map[string]string) bool {
 // lock, so the write and the sweep commit together or not at all, and a key
 // path waiting on the lock reads the switch off when it gets it. before and
 // after are the effective values. Turning the switch on needs nothing: keys
-// were never revoked.
-func (h *AdminHandler) checkAppKeySetting(ctx context.Context, tx pgx.Tx, before, after map[string]string) error {
+// were never revoked. While the Owner holds a live key session, only the
+// Owner may turn it off (auth.CheckSwitchOffActor, owner_protected); actorID
+// is the account making the write.
+func (h *AdminHandler) checkAppKeySetting(ctx context.Context, tx pgx.Tx, actorID int, before, after map[string]string) error {
 	if !appKeySwitch(before) || appKeySwitch(after) {
 		return nil
 	}
@@ -35,7 +37,10 @@ func (h *AdminHandler) checkAppKeySetting(ctx context.Context, tx pgx.Tx, before
 		// store without one (a test fake) gets here.
 		return ErrAdminSettingsUnavailable
 	}
-	if err := auth.CheckAppKeysOff(ctx, tx, after[config.AuthLocalPasswordLoginSettingKey]); err != nil {
+	if err := auth.CheckSwitchOffActor(ctx, tx, actorID); err != nil {
+		return ownerError(err)
+	}
+	if err := auth.CheckAppKeysOff(ctx, tx, signInSettingsOf(after)); err != nil {
 		return breakGlassError(err)
 	}
 	ended, err := auth.EndAppKeySessionsTx(ctx, tx)
@@ -53,4 +58,24 @@ func (h *AdminHandler) AccountsAtRisk(ctx context.Context, change auth.SignInCha
 		return nil, ErrAdminSettingsUnavailable
 	}
 	return auth.AccountsAtRisk(ctx, h.pool, change)
+}
+
+// signInSettingsOf is the settings the "no way in" checks read, from
+// effective setting values.
+func signInSettingsOf(values map[string]string) auth.SignInSettings {
+	return auth.SignInSettingsOf(values[config.AuthLocalPasswordLoginSettingKey], values[config.ServerPublicURLSettingKey])
+}
+
+// checkPublicURLSetting refuses a settings write that changes
+// server.public_url while an account would lose the only provider it can
+// sign in with (an OAuth provider needs the address) and have no password
+// that signs in (auth.CheckPublicURLChange, which names them).
+func (h *AdminHandler) checkPublicURLSetting(ctx context.Context, tx pgx.Tx, before, after map[string]string) error {
+	if before[config.ServerPublicURLSettingKey] == after[config.ServerPublicURLSettingKey] {
+		return nil
+	}
+	if tx == nil {
+		return ErrAdminSettingsUnavailable
+	}
+	return breakGlassError(auth.CheckPublicURLChange(ctx, tx, signInSettingsOf(before), signInSettingsOf(after)))
 }

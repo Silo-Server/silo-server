@@ -1536,7 +1536,7 @@ func (h *AdminHandler) checkLocalLoginSetting(ctx context.Context, tx pgx.Tx, be
 		return nil
 	}
 	if tx != nil {
-		return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, tx, before[key], after[key]))
+		return breakGlassError(auth.CheckLocalLoginSettingChangeAt(ctx, tx, before[key], after[key], after[config.ServerPublicURLSettingKey]))
 	}
 	if h.pool == nil {
 		return ErrAdminSettingsUnavailable
@@ -1718,7 +1718,11 @@ func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, value
 				preconditionErr = err
 				return nil, err
 			}
-			if err := h.checkAppKeySetting(ctx, tx, before, after); err != nil {
+			if err := h.checkAppKeySetting(ctx, tx, actorUserID(ctx), before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
+			if err := h.checkPublicURLSetting(ctx, tx, before, after); err != nil {
 				preconditionErr = err
 				return nil, err
 			}
@@ -2131,7 +2135,11 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				preconditionErr = err
 				return nil, err
 			}
-			if err := h.checkAppKeySetting(ctx, tx, before, after); err != nil {
+			if err := h.checkAppKeySetting(ctx, tx, actorUserID(ctx), before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
+			if err := h.checkPublicURLSetting(ctx, tx, before, after); err != nil {
 				preconditionErr = err
 				return nil, err
 			}

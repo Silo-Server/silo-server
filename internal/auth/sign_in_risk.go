@@ -42,18 +42,21 @@ func primarySignInBindingSQL(alias string) string {
 
 // signInProviders answers the installations whose identities can sign people
 // in: an enabled installation with an enabled OIDC or LDAP binding
-// (primarySignInBindingSQL), and for an OAuth binding a public URL
+// (primarySignInBindingSQL) whose capability row exists, and for an OAuth
+// binding a public URL
 // (OAuthSignInServed). A network identity signs in only from a device on
 // its network, and an OAuth provider signs nobody in without a public URL,
 // so neither counts; a credentials (directory) provider needs no public URL.
 // It is the one rule for "a provider people can sign in with" here, written
 // so a single definition can replace it and any other copy.
 func signInProviders(ctx context.Context, db dbQuerier, publicURL string) ([]int, error) {
-	rows, err := db.Query(ctx, `SELECT p.id, COALESCE((SELECT c.metadata->'auth_modes' FROM plugin_capabilities c
-			WHERE c.plugin_installation_id = b.plugin_installation_id AND c.capability_type = 'auth_provider.v1'
-				AND c.capability_id = b.capability_id), '[]'::jsonb)
+	// A binding whose capability row is gone signs nobody in: sign-in's
+	// provider registry drops it, so the join requires the row.
+	rows, err := db.Query(ctx, `SELECT p.id, COALESCE(c.metadata->'auth_modes', '[]'::jsonb)
 		FROM plugin_installations p
 		JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND `+primarySignInBindingSQL("b")+`
+		JOIN plugin_capabilities c ON c.plugin_installation_id = b.plugin_installation_id
+			AND c.capability_type = 'auth_provider.v1' AND c.capability_id = b.capability_id
 		WHERE p.enabled`)
 	if err != nil {
 		return nil, fmt.Errorf("checking for an enabled sign-in provider: %w", err)
@@ -144,6 +147,9 @@ const (
 	ChangeAppKeysOff SignInChange = "app_keys_off"
 	// ChangeLocalPasswordsOff is auth.local_password_login going off.
 	ChangeLocalPasswordsOff SignInChange = "local_passwords_off"
+	// changePublicURL is server.public_url changing, which only a settings
+	// write judges (CheckPublicURLChange).
+	changePublicURL SignInChange = "public_url"
 )
 
 // AccountAtRisk is an enabled account that a switch change leaves with no
@@ -186,31 +192,60 @@ var accountsAtRiskSQL = map[SignInChange]string{
 // in, or with keys as their only way in, in username order. db is the pool
 // or the settings write's transaction.
 func AccountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange) ([]AccountAtRisk, error) {
-	var localOn bool
-	if change == ChangeAppKeysOff {
-		var err error
-		if localOn, err = localPasswordLoginAllowed(ctx, db); err != nil {
-			return nil, err
-		}
-	}
-	return accountsAtRisk(ctx, db, change, localOn)
-}
-
-// accountsAtRisk is AccountsAtRisk with auth.local_password_login given:
-// a settings write judges the value it leaves, not the stored one.
-func accountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange, localOn bool) ([]AccountAtRisk, error) {
-	where, ok := accountsAtRiskSQL[change]
-	if !ok {
-		return nil, fmt.Errorf("unknown sign-in change %q", change)
-	}
-	providers, err := SignInProviderInstallations(ctx, db)
+	settings, err := storedSignInSettings(ctx, db)
 	if err != nil {
 		return nil, err
 	}
+	accounts, _, err := accountsAtRisk(ctx, db, change, settings)
+	return accounts, err
+}
+
+// SignInSettings are the two settings the "no way in" checks read:
+// auth.local_password_login, and server.public_url, which an OAuth provider
+// needs. A settings write passes the values it leaves; a read takes the
+// stored ones.
+type SignInSettings struct {
+	localOn   bool
+	publicURL string
+}
+
+// SignInSettingsOf is SignInSettings for effective setting values (a
+// settings write's before or after).
+func SignInSettingsOf(local, publicURL string) SignInSettings {
+	return SignInSettings{localOn: settingBool(local, true), publicURL: publicURL}
+}
+
+func storedSignInSettings(ctx context.Context, db dbQuerier) (SignInSettings, error) {
+	local, err := localPasswordLoginAllowed(ctx, db)
+	if err != nil {
+		return SignInSettings{}, err
+	}
+	publicURL, err := readServerSetting(ctx, db, config.ServerPublicURLSettingKey)
+	return SignInSettings{localOn: local, publicURL: publicURL}, err
+}
+
+// accountsAtRisk is AccountsAtRisk under settings, and reports whether any
+// provider can sign people in under them (for the remedy).
+func accountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange, settings SignInSettings) ([]AccountAtRisk, bool, error) {
+	where, ok := accountsAtRiskSQL[change]
+	if !ok {
+		return nil, false, fmt.Errorf("unknown sign-in change %q", change)
+	}
+	providers, err := signInProviders(ctx, db, settings.publicURL)
+	if err != nil {
+		return nil, false, err
+	}
 	args := []any{providers}
 	if change == ChangeAppKeysOff {
-		args = append(args, localOn)
+		args = append(args, settings.localOn)
 	}
+	accounts, err := listAccountsAtRisk(ctx, db, where, args...)
+	return accounts, len(providers) > 0, err
+}
+
+// listAccountsAtRisk lists the enabled accounts where selects, in username
+// order.
+func listAccountsAtRisk(ctx context.Context, db dbQuerier, where string, args ...any) ([]AccountAtRisk, error) {
 	rows, err := db.Query(ctx, `SELECT u.id, COALESCE(u.username::text, u.email::text, ''), u.role, u.is_owner,
 			u.break_glass, `+usablePasswordSQL+`
 		FROM users u
@@ -233,9 +268,11 @@ func accountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange, loca
 type AccountsAtRiskError struct {
 	Change   SignInChange
 	Accounts []AccountAtRisk
-	// LocalOn is auth.local_password_login as the change leaves it, which
-	// decides the remedy the detail offers.
-	LocalOn bool
+	// LocalOn is auth.local_password_login as the change leaves it, and
+	// ProviderAvailable whether any provider can sign people in then: they
+	// decide the remedy the detail offers.
+	LocalOn           bool
+	ProviderAvailable bool
 }
 
 func (e *AccountsAtRiskError) Error() string { return e.Detail() }
@@ -260,12 +297,16 @@ func (e *AccountsAtRiskError) Detail() string {
 		list += fmt.Sprintf(" and %d more", more)
 	}
 	breakGlass := slices.ContainsFunc(e.Accounts, func(a AccountAtRisk) bool { return a.BreakGlass })
-	if e.Change == ChangeLocalPasswordsOff {
+	switch e.Change {
+	case ChangeLocalPasswordsOff:
 		return countAccounts(len(e.Accounts), "would", "would") + " have only Silo app keys, or no way at all, to sign in: " + list +
-			". " + WayInRemedy(false, breakGlass) + ", then turn local passwords off."
+			". " + WayInRemedy(false, breakGlass, e.ProviderAvailable) + ", then turn local passwords off."
+	case changePublicURL:
+		return countAccounts(len(e.Accounts), "would", "would") + " be left with no sign-in provider they can use, and no way in but app keys, or none: " + list +
+			". " + WayInRemedy(e.LocalOn, breakGlass, e.ProviderAvailable) + ", then change the address."
 	}
 	return countAccounts(len(e.Accounts), "signs", "sign") + " in only with Silo app keys: " + list +
-		". " + WayInRemedy(e.LocalOn, breakGlass) + ", then turn app keys off."
+		". " + WayInRemedy(e.LocalOn, breakGlass, e.ProviderAvailable) + ", then turn app keys off."
 }
 
 // countAccounts is "1 account <one>" or "N accounts <many>".
@@ -277,26 +318,32 @@ func countAccounts(n int, one, many string) string {
 }
 
 // WayInRemedy is the sentence that tells an administrator how to give the
-// named accounts a way in, true for the server's local password setting:
-// while local passwords are on, a password or a provider account; while
-// they are off, a password signs in only a break-glass administrator, so
-// it is offered only when breakGlass says one is named.
-func WayInRemedy(localOn, breakGlass bool) string {
+// named accounts a way in, true for the settings: a password signs in while
+// local passwords are on, and otherwise only a break-glass administrator
+// (offered when breakGlass says one is named); linking a provider account
+// helps only while a provider can sign people in (providerAvailable), and
+// otherwise one has to be set up first (an OAuth provider needs the server's
+// public address).
+func WayInRemedy(localOn, breakGlass, providerAvailable bool) string {
+	provider := "link a sign-in provider account for each"
+	if !providerAvailable {
+		provider = "set up a sign-in provider people can use (an OAuth provider needs the server's public address) and link an account for each"
+	}
 	switch {
 	case localOn:
-		return "Give each a password or link a sign-in provider account for it"
+		return "Give each a password, or " + provider
 	case breakGlass:
-		return "Link a sign-in provider account for each, or give a break-glass administrator a password"
+		return strings.ToUpper(provider[:1]) + provider[1:] + ", or give a break-glass administrator a password"
 	}
-	return "Link a sign-in provider account for each"
+	return strings.ToUpper(provider[:1]) + provider[1:]
 }
 
 // refuseAccountsAtRisk lists the accounts change leaves at risk and refuses
 // with *AccountsAtRiskError while any of them blocks it. For app keys off an
 // account with a live sign-in link does not block (SignInLinkExpiresAt);
 // this server makes none yet, so every listed account does.
-func refuseAccountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange, localOn bool) error {
-	accounts, err := accountsAtRisk(ctx, db, change, localOn)
+func refuseAccountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange, settings SignInSettings) error {
+	accounts, providers, err := accountsAtRisk(ctx, db, change, settings)
 	if err != nil {
 		return err
 	}
@@ -307,7 +354,7 @@ func refuseAccountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange
 		}
 	}
 	if len(blocking) > 0 {
-		return &AccountsAtRiskError{Change: change, Accounts: blocking, LocalOn: localOn}
+		return &AccountsAtRiskError{Change: change, Accounts: blocking, LocalOn: settings.localOn, ProviderAvailable: providers}
 	}
 	return nil
 }
@@ -317,8 +364,35 @@ func refuseAccountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange
 // with auth.local_password_login as the same write leaves it (localAfter,
 // the effective value). The settings write calls it in its transaction,
 // under the settings lock, before it ends the key sessions.
-func CheckAppKeysOff(ctx context.Context, tx pgx.Tx, localAfter string) error {
-	return refuseAccountsAtRisk(ctx, tx, ChangeAppKeysOff, settingBool(localAfter, true))
+func CheckAppKeysOff(ctx context.Context, tx pgx.Tx, after SignInSettings) error {
+	return refuseAccountsAtRisk(ctx, tx, ChangeAppKeysOff, after)
+}
+
+// CheckPublicURLChange refuses changing server.public_url while an account
+// would lose the only provider it can sign in with and have no password that
+// signs in: an OAuth provider signs nobody in without a public URL. Whether
+// its keys still sign it in (app keys on) or not (off), it would be left
+// with keys as its only way in or with none. Only accounts the change takes
+// a provider from are judged; before and after are the settings around the
+// write.
+func CheckPublicURLChange(ctx context.Context, tx pgx.Tx, before, after SignInSettings) error {
+	if normalizeHostBaseURL(before.publicURL) == normalizeHostBaseURL(after.publicURL) {
+		return nil
+	}
+	had, err := signInProviders(ctx, tx, before.publicURL)
+	if err != nil {
+		return err
+	}
+	has, err := signInProviders(ctx, tx, after.publicURL)
+	if err != nil {
+		return err
+	}
+	accounts, err := listAccountsAtRisk(ctx, tx, usableIdentitySQL("$1")+` AND NOT `+usableIdentitySQL("$2")+
+		` AND NOT `+passwordWorksSQL("$3"), had, has, after.localOn)
+	if err != nil || len(accounts) == 0 {
+		return err
+	}
+	return &AccountsAtRiskError{Change: changePublicURL, Accounts: accounts, LocalOn: after.localOn, ProviderAvailable: len(has) > 0}
 }
 
 // ErrKeysOnlyWayIn refuses an administrator change that would make app keys

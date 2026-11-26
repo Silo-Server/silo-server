@@ -89,7 +89,7 @@ func (l PGLoader) StrandedAccounts(ctx context.Context, dbURL string) ([]string,
 	for _, a := range found {
 		names, breakGlass = append(names, a.Name), breakGlass || a.BreakGlass
 	}
-	return names, auth.WayInRemedy(localOn, breakGlass), nil
+	return names, auth.WayInRemedy(localOn, breakGlass, len(providers) > 0), nil
 }
 
 // reportStranded prints how many accounts StrandedAccounts lists and the

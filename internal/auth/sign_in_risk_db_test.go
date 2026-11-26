@@ -67,7 +67,8 @@ func (e *externalSignInEnv) riskIdentity(t *testing.T, userID, installationID in
 }
 
 // riskProvider seeds an enabled installation whose auth_provider.v1
-// capability declares modes (a JSON array), with its sign-in binding on.
+// capability declares modes (a JSON array), with its sign-in binding on;
+// with modes "" the binding has no capability row.
 func (e *externalSignInEnv) riskProvider(t *testing.T, label, modes string) int {
 	t.Helper()
 	var id int
@@ -76,9 +77,11 @@ func (e *externalSignInEnv) riskProvider(t *testing.T, label, modes string) int 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = e.pool.Exec(context.Background(), `DELETE FROM plugin_installations WHERE id = $1`, id) })
-	if _, err := e.pool.Exec(t.Context(), `INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id, metadata)
-		VALUES ($1, 'auth_provider.v1', 'sign-in', jsonb_build_object('auth_modes', $2::jsonb))`, id, modes); err != nil {
-		t.Fatal(err)
+	if modes != "" {
+		if _, err := e.pool.Exec(t.Context(), `INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id, metadata)
+			VALUES ($1, 'auth_provider.v1', 'sign-in', jsonb_build_object('auth_modes', $2::jsonb))`, id, modes); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, err := e.pool.Exec(t.Context(), `INSERT INTO plugin_auth_bindings (plugin_installation_id, capability_id, enabled) VALUES ($1, 'sign-in', true)`, id); err != nil {
 		t.Fatal(err)
@@ -102,6 +105,7 @@ func TestAccountsAtRiskDB(t *testing.T) {
 	directory := env.riskProvider(t, "directory", `["password"]`)
 	oidc := env.riskProvider(t, "oidc", `["oauth2"]`)
 	network := env.riskProvider(t, "network", `["network"]`)
+	noCapability := env.riskProvider(t, "nocapability", "")
 
 	type listed struct{ appKeysOff, localOff bool }
 	for i, tc := range []struct {
@@ -136,6 +140,11 @@ func TestAccountsAtRiskDB(t *testing.T) {
 			env.riskIdentity(t, id, oidc, "risk-oidc-nourl")
 			env.riskKey(t, id, models.DeviceKeyStatusActive, nil)
 		}},
+		{name: "an identity whose binding has no capability row: sign-in drops it", localOn: true, want: listed{true, true},
+			seed: func(t *testing.T, id int) {
+				env.riskIdentity(t, id, noCapability, "risk-nocapability")
+				env.riskKey(t, id, models.DeviceKeyStatusActive, nil)
+			}},
 		{name: "a network identity: signs in only on its network", localOn: true, publicURL: "https://media.example.test", want: listed{true, true},
 			seed: func(t *testing.T, id int) {
 				env.riskIdentity(t, id, network, "risk-network")
@@ -198,7 +207,7 @@ func TestLocalLoginOffRefusesKeysOnlyDB(t *testing.T) {
 		t.Fatalf("turning local passwords off = %v, want the keys-only account named", err)
 	}
 	detail := risk.Detail()
-	if !strings.Contains(detail, env.name("keysonly-member")) || !strings.Contains(detail, "Link a sign-in provider account") ||
+	if !strings.Contains(detail, env.name("keysonly-member")) || !strings.Contains(detail, "sign-in provider") ||
 		strings.Contains(detail, "Give each a password") {
 		t.Fatalf("detail = %q", detail)
 	}

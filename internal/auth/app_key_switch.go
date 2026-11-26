@@ -109,12 +109,8 @@ func endKeySessionsTx(ctx context.Context, tx pgx.Tx, only []string) (int64, err
 	if _, err := tx.Exec(ctx, `SELECT id FROM plugin_installations ORDER BY id FOR SHARE`); err != nil {
 		return 0, fmt.Errorf("locking plugin installations: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `SELECT r.id FROM device_login_requests r
-		JOIN auth_sessions s ON s.id = r.preapproved_session_id
-		WHERE s.device_key_id IS NOT NULL AND s.revoked_at IS NULL AND ($1::text[] IS NULL OR s.id = ANY($1))
-			AND r.preapproved_at IS NOT NULL AND r.status = 'approved'
-		ORDER BY r.id FOR UPDATE OF r`, only); err != nil {
-		return 0, fmt.Errorf("locking pre-approved device sign-ins: %w", err)
+	if err := lockSessionPreapprovals(ctx, tx, `s.device_key_id IS NOT NULL AND ($1::text[] IS NULL OR s.id = ANY($1))`, only); err != nil {
+		return 0, err
 	}
 	tag, err := tx.Exec(ctx, `WITH ending AS (
 			SELECT id FROM auth_sessions
@@ -128,16 +124,32 @@ func endKeySessionsTx(ctx context.Context, tx pgx.Tx, only []string) (int64, err
 	return tag.RowsAffected(), nil
 }
 
+// afterRenewalSwitchRead, when set, runs between a key session renewal's
+// plain read of the switch and the rest of it. Tests set it to place a
+// switch-off in that gap; it is nil otherwise.
+var afterRenewalSwitchRead func()
+
 // endKeySessionIfSwitchOff ends one key session when the app key switch is
 // off, and reports whether it did. Renewal calls it for a key session, so a
 // session the sweep missed (a database written or put back by hand) ends
 // at its next refresh like any revoked session, and its access token is
 // refused from then on, rather than pausing until the switch comes back.
-// It reads the switch under the settings lock (shared) and ends the session
-// in endKeySessionsTx's order.
+// It reads the switch once without a lock; only when that read says off
+// does it take the settings lock (shared), read again and end the session in
+// endKeySessionsTx's order. Skipping the lock while the switch is on is safe:
+// a switch-off that commits just after the plain read runs its own sweep,
+// which ends this session in the same transaction as the write, so tokens
+// this renewal goes on to mint name a revoked session and fail on first use.
 func endKeySessionIfSwitchOff(ctx context.Context, pool *pgxpool.Pool, sessionID string) (bool, error) {
+	on, err := appKeySwitchOn(ctx, pool)
+	if afterRenewalSwitchRead != nil {
+		afterRenewalSwitchRead()
+	}
+	if err != nil || on {
+		return false, err
+	}
 	ended := false
-	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+	err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		if err := lockSettingsShared(ctx, tx); err != nil {
 			return err
 		}
@@ -150,4 +162,27 @@ func endKeySessionIfSwitchOff(ctx context.Context, pool *pgxpool.Pool, sessionID
 		return err
 	})
 	return ended, err
+}
+
+// CheckSwitchOffActor refuses, with ErrOwnerProtected, turning the app key
+// switch off by anyone but the Owner while the Owner holds a live session a
+// key opened: the sweep would end the Owner's sessions, which only the Owner
+// may do (CheckOwnerTarget). actorID is the account making the settings
+// write (0 for none, which is not the Owner). The settings write calls it in
+// its transaction, which holds the settings lock in exclusive mode, before
+// the sweep: every path that opens a key session takes that lock (shared,
+// lockChain) before it inserts the session, so the Owner can't gain one
+// between this check and the sweep.
+func CheckSwitchOffActor(ctx context.Context, tx pgx.Tx, actorID int) error {
+	var refused bool
+	if err := tx.QueryRow(ctx, `SELECT NOT COALESCE((SELECT is_owner FROM users WHERE id = $1), false)
+		AND EXISTS (SELECT 1 FROM auth_sessions s JOIN users u ON u.id = s.user_id
+			WHERE u.is_owner AND s.device_key_id IS NOT NULL AND s.revoked_at IS NULL AND s.expires_at > NOW())`,
+		actorID).Scan(&refused); err != nil {
+		return fmt.Errorf("checking the owner's key sessions: %w", err)
+	}
+	if refused {
+		return ErrOwnerProtected
+	}
+	return nil
 }

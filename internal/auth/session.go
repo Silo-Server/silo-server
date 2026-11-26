@@ -237,17 +237,41 @@ func (r *SessionRepository) ListByUserPage(ctx context.Context, userID int, afte
 	return scanSessions(rows)
 }
 
-// Revoke sets revoked_at to NOW() for the given session.
-func (r *SessionRepository) Revoke(ctx context.Context, id string) error {
-	query := `UPDATE auth_sessions SET revoked_at = NOW() WHERE id = $1`
-	tag, err := r.pool.Exec(ctx, query, id)
-	if err != nil {
-		return fmt.Errorf("revoking session: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrSessionNotFound
+// lockSessionPreapprovals locks, in id order, the device sign-ins the live
+// sessions sessionWhere selects (a condition on auth_sessions s, with args)
+// approved in advance and nobody has collected: the rows the
+// auth_sessions_withdraw_preapprovals trigger writes when one of those
+// sessions ends. Every path that ends sessions takes these rows before the
+// session rows: this function, or withdrawing the account's approvals
+// (withdrawDeviceSignInApprovalsInTransaction), unconditionally before the
+// session write (TestSessionEndersLockRequestsFirst). One order on every path
+// is what keeps two of them from deadlocking over a pre-approved session.
+func lockSessionPreapprovals(ctx context.Context, db sessionExecQuerier, sessionWhere string, args ...any) error {
+	if _, err := db.Exec(ctx, `SELECT r.id FROM device_login_requests r
+		JOIN auth_sessions s ON s.id = r.preapproved_session_id
+		WHERE `+sessionWhere+` AND s.revoked_at IS NULL AND r.preapproved_at IS NOT NULL AND r.status = 'approved'
+		ORDER BY r.id FOR UPDATE OF r`, args...); err != nil {
+		return fmt.Errorf("locking pre-approved device sign-ins: %w", err)
 	}
 	return nil
+}
+
+// Revoke sets revoked_at to NOW() for the given session, after the device
+// sign-ins it approved in advance (lockSessionPreapprovals).
+func (r *SessionRepository) Revoke(ctx context.Context, id string) error {
+	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		if err := lockSessionPreapprovals(ctx, tx, `s.id = $1`, id); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at = NOW() WHERE id = $1`, id)
+		if err != nil {
+			return fmt.Errorf("revoking session: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrSessionNotFound
+		}
+		return nil
+	})
 }
 
 // revokeChecked revokes one session in a transaction holding its row lock.
@@ -269,6 +293,9 @@ func (r *SessionRepository) revokeChecked(ctx context.Context, id string, check 
 	// The audit row's account locks come before the session lock, the order
 	// RevokeAsAdmin takes them in.
 	if err := auditmutation.LockActors(ctx, tx); err != nil {
+		return err
+	}
+	if err := lockSessionPreapprovals(ctx, tx, `s.id = $1`, id); err != nil {
 		return err
 	}
 	session, err := scanSession(tx.QueryRow(ctx, `SELECT `+sessionColumns+` FROM auth_sessions WHERE id = $1 FOR UPDATE`, id))
@@ -460,7 +487,16 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 	// Sign out everywhere takes the account's identities, then its device
 	// sign-in approvals, then its sessions, as revokeSignInsInTransaction
 	// does (see lockIdentitiesBeforeSessions).
-	var withdrawn int64
+	// One session takes the device sign-ins it approved in advance first,
+	// as every path that ends a session does (lockSessionPreapprovals).
+	var (
+		withdrawn int64
+		query     string
+	)
+	args := []any{userID}
+	// A single session reports whether this call ended it: revoking a
+	// session that was already over succeeds and records nothing.
+	var wasLive bool
 	if sessionID == nil {
 		if err := lockIdentitiesBeforeSessions(ctx, tx, userID, false); err != nil {
 			return 0, err
@@ -468,15 +504,13 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 		if withdrawn, err = withdrawDeviceSignInApprovalsInTransaction(ctx, tx, []int{userID}); err != nil {
 			return 0, err
 		}
-	}
-	query := `UPDATE auth_sessions SET revoked_at = NOW()
-		WHERE (user_id = $1 OR impersonator_user_id = $1)
-		AND revoked_at IS NULL AND expires_at > NOW()`
-	args := []any{userID}
-	// A single session reports whether this call ended it: revoking a
-	// session that was already over succeeds and records nothing.
-	var wasLive bool
-	if sessionID != nil {
+		query = `UPDATE auth_sessions SET revoked_at = NOW()
+			WHERE (user_id = $1 OR impersonator_user_id = $1)
+			AND revoked_at IS NULL AND expires_at > NOW()`
+	} else {
+		if err := lockSessionPreapprovals(ctx, tx, `s.user_id = $1 AND s.id = $2`, userID, *sessionID); err != nil {
+			return 0, err
+		}
 		err := tx.QueryRow(ctx, `SELECT revoked_at IS NULL AND expires_at > NOW() FROM auth_sessions
 			WHERE user_id = $1 AND id = $2 FOR UPDATE`, userID, *sessionID).Scan(&wasLive)
 		if errors.Is(err, pgx.ErrNoRows) {

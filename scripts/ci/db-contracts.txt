@@ -400,6 +400,11 @@
 ./internal/apiv2 TestKeySessionSweepMissedEndsAtRefreshDB
 ./internal/auth TestSwitchOffSweepAndAccountRevokeDoNotDeadlockDB
 ./internal/api/handlers TestAppKeysOffJudgedOnTheBatchLocalSettingDB
+./internal/auth TestSessionEndersShareOneOrderDB
+./internal/auth TestEndImpersonationBesideTheSweepDB
+./internal/auth TestSwitchOffAfterRenewalReadDB
+./internal/api/handlers TestPublicURLWritesKeepAWayInDB
+./internal/api/handlers TestSwitchOffKeepsOwnerProtectionDB
 # Keys are never the only way in: who each switch change leaves at risk, the
 # refusals that name them, and the restore's list of accounts with no way in.
 ./internal/auth TestAccountsAtRiskDB

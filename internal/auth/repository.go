@@ -683,6 +683,9 @@ func (r *UserRepository) ReplaceTemporaryPassword(ctx context.Context, id int, e
 		if err := lockIdentitiesBeforeSessions(ctx, tx, id, false); err != nil {
 			return err
 		}
+		if err := lockSessionPreapprovals(ctx, tx, `s.user_id = $1 AND s.id <> $2`, id, keepSessionID); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE auth_sessions SET revoked_at = NOW()
 			WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL`, id, keepSessionID); err != nil {
