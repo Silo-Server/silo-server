@@ -70,7 +70,8 @@ type SessionOrigin struct {
 	// DeviceKeyID is the device key that opened the session, or "".
 	DeviceKeyID string
 	// GrantKey reports that the device key was enrolled through a grant: it
-	// belongs to another app the person allowed.
+	// belongs to another app the person allowed. A session naming a key whose
+	// row is not stored counts too, failing closed.
 	GrantKey bool
 }
 
@@ -96,7 +97,9 @@ func ReadSessionOrigin(ctx context.Context, db rowQuerier, claims *Claims) (Sess
 	if keyID != nil {
 		origin.DeviceKeyID = *keyID
 	}
-	origin.GrantKey = enrolledVia != nil && *enrolledVia == models.AppKeyEnrolledGrant
+	// A key row that is not stored counts as another app's, as in
+	// LimitedToItself: nothing stored says the key was the person's own.
+	origin.GrantKey = keyID != nil && (enrolledVia == nil || *enrolledVia == models.AppKeyEnrolledGrant)
 	return origin, nil
 }
 
