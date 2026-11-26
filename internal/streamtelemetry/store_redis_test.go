@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
@@ -153,4 +154,64 @@ func keysOf(values map[string][]byte) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// A failover to a replica that missed the last delta leaves the hash behind
+// what the publisher last wrote, with the same field count. A session whose
+// counters have stopped changing is never part of a later delta, so the next
+// publishes must notice the rollback and rewrite the hash in full.
+func TestRedisStoreLostDeltaForcesFullResync(t *testing.T) {
+	client := redis.NewClient(&redis.Options{Addr: miniredis.RunT(t).Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	ctx := context.Background()
+	cfg := testRedisStoreConfig("publisher")
+	cfg.FullResyncEvery = 1000
+	store := NewRedisStore(client, cfg, slog.New(slog.DiscardHandler))
+	key := store.snapshotKey(cfg.PublisherID)
+	at := time.Unix(100, 0)
+	snapshot := Snapshot{PublisherID: cfg.PublisherID, PublisherEpoch: cfg.PublisherEpoch, Sequence: 1, CapturedAt: at, Sessions: []SessionView{
+		{SessionID: "a", BytesAccepted: 100, TokenIssuedAtSources: map[TokenIssuedAtSource]int64{}, Outcomes: map[httpstream.StreamOutcome]int64{}},
+		{SessionID: "b", BytesAccepted: 50, TokenIssuedAtSources: map[TokenIssuedAtSource]int64{}, Outcomes: map[httpstream.StreamOutcome]int64{}},
+	}}
+	publish := func() {
+		t.Helper()
+		if err := store.Publish(ctx, snapshot); err != nil {
+			t.Fatalf("publish %d: %v", snapshot.Sequence, err)
+		}
+		snapshot = cloneSnapshot(snapshot)
+		snapshot.Sequence++
+		snapshot.CapturedAt = snapshot.CapturedAt.Add(time.Second)
+	}
+	storedBytes := func() int64 {
+		t.Helper()
+		loaded, err := store.Load(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, session := range loaded.Sessions {
+			if session.SessionID == "a" {
+				return session.BytesAccepted
+			}
+		}
+		t.Fatalf("session a missing from %+v", loaded.Sessions)
+		return 0
+	}
+
+	publish()
+	lost := client.HGetAll(ctx, key).Val()
+	snapshot.Sessions[0].BytesAccepted = 200 // the delta the failover loses
+	publish()
+
+	// The new primary holds the hash as it was before that delta.
+	client.Del(ctx, key)
+	for field, value := range lost {
+		client.HSet(ctx, key, field, value)
+	}
+
+	// Session a has paused: its counters no longer change.
+	publish()
+	publish()
+	if got := storedBytes(); got != 200 {
+		t.Fatalf("session a bytes after the lost delta = %d, want 200", got)
+	}
 }
