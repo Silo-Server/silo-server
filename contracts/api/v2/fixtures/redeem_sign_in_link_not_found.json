@@ -1,0 +1,7 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/not_found",
+  "title": "Not found",
+  "status": 404,
+  "detail": "This sign-in link is unknown, used or expired. Ask the server's owner for a new one.",
+  "instance": "urn:silo:request:000000000000000000000364"
+}

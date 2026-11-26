@@ -296,6 +296,9 @@ type AdminUserView struct {
 	// BreakGlass is v2-only: the account keeps local password sign-in when
 	// the server turns it off.
 	BreakGlass bool `json:"-"`
+	// LocalPasswordAllowed is v2-only: the server lets the account sign in
+	// with a local password (the switch is on, or it is break-glass).
+	LocalPasswordAllowed bool `json:"-"`
 }
 
 // EffectivePolicyView is the resolved policy block on admin user responses.
@@ -534,6 +537,35 @@ func (h *AdminHandler) ListAdminUsersPage(ctx context.Context, afterID, limit in
 	return views, hasMore, nil
 }
 
+// localPasswordAllowed sets each view's local_password_allowed by the rule
+// password sign-in reads (auth.LocalPasswordRefusal): one read of the
+// switch and one query for network providers' refusals per batch.
+func (h *AdminHandler) localPasswordAllowed(ctx context.Context, users []*models.User, views []AdminUserView) error {
+	if h.pool == nil {
+		for i := range views {
+			views[i].LocalPasswordAllowed = true
+		}
+		return nil
+	}
+	failed := apiError(http.StatusInternalServerError, "internal_error", "Failed to read the local password setting")
+	on, err := auth.LocalPasswordLoginSwitch(ctx, h.pool)
+	if err != nil {
+		return failed
+	}
+	ids := make([]int, len(users))
+	for i, u := range users {
+		ids[i] = u.ID
+	}
+	refused, err := auth.NetworkRefusedAccounts(ctx, h.pool, ids)
+	if err != nil {
+		return failed
+	}
+	for i, u := range users {
+		views[i].LocalPasswordAllowed = auth.LocalPasswordRefusal(u, on, refused[u.ID]) == nil
+	}
+	return nil
+}
+
 // adminUserViews resolves the effective policy and last activity for a batch
 // of accounts, in the batch's order.
 func (h *AdminHandler) adminUserViews(ctx context.Context, users []*models.User) ([]AdminUserView, error) {
@@ -546,6 +578,9 @@ func (h *AdminHandler) adminUserViews(ctx context.Context, users []*models.User)
 	for _, u := range users {
 		userIDs = append(userIDs, u.ID)
 		resp = append(resp, toAdminUserResponse(u, lookupGroupPolicy(policies, u)))
+	}
+	if err := h.localPasswordAllowed(ctx, users, resp); err != nil {
+		return nil, err
 	}
 	lastActive, err := h.loadUserLastActiveAt(ctx, userIDs)
 	if err != nil {

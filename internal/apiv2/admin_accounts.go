@@ -63,6 +63,8 @@ type AdminAccountCapabilitiesOutputBody struct {
 	OwnershipTransfer    bool `json:"ownership_transfer" doc:"Whether transferAdminUserOwnership can make another enabled admin the server Owner"`
 	AccountDevices       bool `json:"account_devices" doc:"Whether listAdminUserDevices can list an account's registered devices"`
 	LoginSessions        bool `json:"login_sessions" doc:"Whether administrators can inspect and revoke a user's login sessions; separate from playback sessions and device registrations"`
+	SignInLinks          bool `json:"sign_in_links" doc:"Whether createAdminUserSignInLink can make sign-in links: the server's public URL is set. For one account, read its local_password_allowed, which says whether the account passes the local-password rule a link needs; this member says whether the server has what every link needs besides"`
+	SignInLinkEmail      bool `json:"sign_in_link_email" doc:"Whether createAdminUserSignInLink can also email the link: sign_in_links, and a mail server is configured"`
 	AppKeys              bool `json:"app_keys" doc:"Whether listAdminUserAppKeys, revokeAdminUserDeviceKey, revokeAdminUserPersonKey and denyAdminUserPendingKey are served. Read the app key capability (getAppKeyCapability) for whether keys sign in now"`
 	WatchSummary         bool `json:"watch_summary" doc:"Whether getAdminUserWatchSummary can total an account's finalized plays"`
 	AccountDownloads     bool `json:"account_downloads" doc:"Whether listAdminUserDownloads, getAdminUserDownloadSummary and listAdminUserDownloadSubscriptions are available"`
@@ -277,6 +279,13 @@ func registerAdminAccounts(reg *Registry) {
 		out.Body.ProfileManagement = reg.deps.AdminAccounts != nil && reg.deps.Profiles != nil
 		out.Body.ProfileSetEdits = reg.deps.AdminAccounts != nil && reg.deps.ProfileSetEdits != nil &&
 			reg.deps.ProfileSet != nil && reg.deps.ProfileSet.ProfileSetSupported()
+		if links := reg.deps.SignInLinks; links != nil {
+			caps, err := links.SignInLinkCapabilities(ctx)
+			if err != nil {
+				return nil, serviceProblem(err)
+			}
+			out.Body.SignInLinks, out.Body.SignInLinkEmail = caps.Links, caps.Email
+		}
 		if resets := reg.deps.PasswordResets; resets != nil {
 			caps := resets.PasswordResetCapabilities(ctx)
 			out.Body.PasswordResetLink, out.Body.PasswordResetEmail = caps.Link, caps.Email

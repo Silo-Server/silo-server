@@ -145,6 +145,7 @@ const Calendar = lazy(() => import("@/pages/Calendar"));
 const Signup = lazy(() => import("@/pages/Signup"));
 const InviteClaim = lazy(() => import("@/pages/InviteClaim"));
 const PasswordReset = lazy(() => import("@/pages/PasswordReset"));
+const SignInLink = lazy(() => import("@/pages/SignInLink"));
 const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
 const ChoosePassword = lazy(() => import("@/pages/ChoosePassword"));
 const HouseholdSetup = lazy(() => import("@/pages/HouseholdSetup"));
@@ -508,6 +509,7 @@ function AppRoutes() {
       {/* The link's token is out of the address by now; see lib/linkToken. */}
       <Route path="/invite" element={<InviteClaim />} />
       <Route path="/reset-password" element={<PasswordReset />} />
+      <Route path="/sign-in-link" element={<SignInLink />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path={CHANGE_PASSWORD_PATH} element={<ChoosePassword />} />
       {/* Shared Watch Party links: offers the native app on phones, else forwards to /rooms. */}

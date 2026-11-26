@@ -99,8 +99,8 @@ type KeySignInResult struct {
 	// through a grant): its answer carries neither the person key nor the
 	// account's email.
 	GrantedApp bool
-	// PersonKeyStatus is PersonKeyEnrolled or PersonKeyKept, set by an app
-	// code's redeem.
+	// PersonKeyStatus is PersonKeyEnrolled, PersonKeyKept or
+	// PersonKeyReplaced, set by an app code's redeem.
 	PersonKeyStatus string
 	// ReplyKey and Challenge seal the answer.
 	ReplyKey  appkeys.PublicKey

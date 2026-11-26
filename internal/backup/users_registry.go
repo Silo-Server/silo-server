@@ -74,6 +74,7 @@ var excludedUserTables = map[string]string{
 	"auth_device_keys":                 "app keys: a full restore carries them; an account restored from a restore set enrolls again",
 	"auth_grant_uses":                  "IDs of grants another app redeemed, kept until each grant expires",
 	"auth_app_codes":                   "one-time app codes, which live ten minutes",
+	"auth_sign_in_links":               "one-time sign-in links, which live a day",
 	tableAPIKeys:                       "API keys",
 	"oauth_completions":                excludedSignIn,
 	"oauth_link_tickets":               excludedSignIn,

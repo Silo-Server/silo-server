@@ -248,6 +248,28 @@ func networkRefused(ctx context.Context, db rowQuerier, userID int) (bool, error
 	return refused, nil
 }
 
+// NetworkRefusedAccounts is networkRefused for several accounts in one
+// query: the IDs among userIDs that a network identity provider refuses.
+func NetworkRefusedAccounts(ctx context.Context, db rowQuerier, userIDs []int) (map[int]bool, error) {
+	refused := map[int]bool{}
+	if len(userIDs) == 0 {
+		return refused, nil
+	}
+	var ids []int
+	if err := db.QueryRow(ctx, `SELECT COALESCE(array_agg(DISTINCT i.user_id), '{}') FROM plugin_auth_identities i
+		JOIN plugin_installations p ON p.id = i.plugin_installation_id AND p.enabled
+		JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND b.enabled
+		WHERE i.user_id = ANY($1) AND `+plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id")+`
+			AND (i.last_check_status = ANY($2) OR i.pending_refusal = ANY($2))`,
+		userIDs, refusalStatuses).Scan(&ids); err != nil {
+		return nil, fmt.Errorf("checking for network providers' refusals: %w", err)
+	}
+	for _, id := range ids {
+		refused[id] = true
+	}
+	return refused, nil
+}
+
 // installationIsNetwork reports whether installationID signs people in only
 // as a network provider: it has a network binding and no other kind. An
 // installation that also has an OIDC or LDAP binding, enabled or not, is

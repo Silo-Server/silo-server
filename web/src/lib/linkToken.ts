@@ -1,5 +1,5 @@
 /**
- * The one-time token of a password reset or invitation link.
+ * The one-time token of a password reset, invitation or sign-in link.
  *
  * Links carry it in the fragment (`/reset-password#<token>`), which a browser
  * never sends to the server or in a Referer header. Links issued before that
@@ -10,7 +10,7 @@
  */
 
 const STATE_KEY = "siloLinkToken";
-const LINK_PAGES = ["/reset-password", "/invite"];
+const LINK_PAGES = ["/reset-password", "/invite", "/sign-in-link"];
 
 function tokenInAddress(): { page: string; token: string } | null {
   const { pathname, hash } = window.location;
@@ -57,4 +57,24 @@ export function installLinkTokenHandling(): void {
 export function linkToken(): string {
   const token = (window.history.state as Record<string, unknown> | null)?.[STATE_KEY];
   return typeof token === "string" ? token : "";
+}
+
+const SPENT_KEY = "siloLinkSpent";
+
+/**
+ * Marks the current entry's link token as spent, so a reload of a page whose
+ * link works once says so instead of offering it again. It records only that
+ * the token was used, never what the redeem handed out.
+ */
+export function markLinkTokenSpent(): void {
+  const state = (window.history.state ?? {}) as Record<string, unknown>;
+  window.history.replaceState({ ...state, [SPENT_KEY]: linkToken() }, "");
+}
+
+/** Whether the current entry's link token was spent on an earlier load. */
+export function linkTokenSpent(): boolean {
+  const token = linkToken();
+  return (
+    token !== "" && (window.history.state as Record<string, unknown> | null)?.[SPENT_KEY] === token
+  );
 }

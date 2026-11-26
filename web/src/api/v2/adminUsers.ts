@@ -65,6 +65,7 @@ export function adminUserFromV2(user: AdminUserV2): AdminUser {
     password_change_required: user.password_change_required,
     is_owner: user.is_owner,
     break_glass: user.break_glass,
+    local_password_allowed: user.local_password_allowed,
     effective_policy: {
       library_ids:
         user.effective_policy.library_ids === null
@@ -240,6 +241,25 @@ export async function issueAdminPasswordReset(
   const result = await v2("POST /api/v2/admin/users/{id}/password-reset", {
     path: { id: String(id) },
     body: { delivery },
+    profileContext,
+    retryAuthentication: false,
+  });
+  requireAdminUserAuthority(profileContext);
+  return result;
+}
+export type AdminSignInLink = V2Result<"POST /api/v2/admin/users/{user_id}/sign-in-links">;
+
+/** Makes a single-use sign-in link for an account, replacing its earlier
+ * ones; `sendEmail` also emails it to the account's address. */
+export async function createAdminSignInLink(
+  id: number,
+  sendEmail: boolean,
+  profileContext = captureAdminUserAuthority(),
+): Promise<AdminSignInLink> {
+  requireAdminUserAuthority(profileContext);
+  const result = await v2("POST /api/v2/admin/users/{user_id}/sign-in-links", {
+    path: { user_id: String(id) },
+    body: { send_email: sendEmail },
     profileContext,
     retryAuthentication: false,
   });
