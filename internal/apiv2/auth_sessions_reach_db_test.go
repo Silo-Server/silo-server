@@ -130,7 +130,7 @@ func (d *reachDB) storeDeviceKey(t *testing.T, userID int, sessionID, enrolledVi
 		kind = "app"
 	}
 	if _, err := d.pool.Exec(t.Context(), `INSERT INTO auth_device_keys (id, user_id, public_key, key_id, kind, name, enrolled_via)
-		VALUES ($1, $2, $3, $1::text, $4, 'Key '||$1::text, $5)`, keyID, userID, publicKey, kind, enrolledVia); err != nil {
+		VALUES ($1::uuid, $2, $3, $6, $4, $7, $5)`, keyID, userID, publicKey, kind, enrolledVia, "key-"+keyID, "Key "+keyID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.pool.Exec(t.Context(), `UPDATE auth_sessions SET device_key_id = $2 WHERE id = $1`, sessionID, keyID); err != nil {
