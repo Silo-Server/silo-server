@@ -92296,12 +92296,12 @@
             }
           },
           {
-            "description": "Opaque identifier",
+            "description": "Lists only this history import source's rows; absent, every source's are listed",
             "explode": false,
             "in": "query",
             "name": "source_id",
             "schema": {
-              "description": "Opaque identifier",
+              "description": "Lists only this history import source's rows; absent, every source's are listed",
               "examples": [
                 "1"
               ],
@@ -93713,12 +93713,12 @@
             }
           },
           {
-            "description": "Opaque identifier",
+            "description": "Lists only this history import source's rows; absent, every source's are listed",
             "explode": false,
             "in": "query",
             "name": "source_id",
             "schema": {
-              "description": "Opaque identifier",
+              "description": "Lists only this history import source's rows; absent, every source's are listed",
               "examples": [
                 "1"
               ],

@@ -13,7 +13,7 @@ import (
 type AdminHistoryImportListInput struct {
 	LimitParam
 	Cursor   string `query:"cursor"`
-	SourceID ID     `query:"source_id" pattern:"^[1-9][0-9]*$"`
+	SourceID ID     `query:"source_id" pattern:"^[1-9][0-9]*$" doc:"Lists only this history import source's rows; absent, every source's are listed"`
 }
 type AdminHistoryImportSourceCollectionOutput struct {
 	Body Collection[AdminHistoryImportSource]
@@ -91,9 +91,13 @@ func registerAdminHistoryImportLists(reg *Registry, op func(string, string, stri
 		if p != nil {
 			return nil, p
 		}
-		source, p := adminHistoryID(in.SourceID)
-		if p != nil {
-			return nil, p
+		var source *int
+		if in.SourceID != "" {
+			id, p := adminHistoryID(in.SourceID)
+			if p != nil {
+				return nil, p
+			}
+			source = &id
 		}
 		rows, err := s.ListMappings(ctx, source)
 		if err != nil {
