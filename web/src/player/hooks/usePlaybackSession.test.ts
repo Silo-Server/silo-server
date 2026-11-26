@@ -5257,22 +5257,32 @@ describe("usePlaybackSession subtitle changes on the original file", () => {
 
   // The server answers a subtitle pick on the playing file with a new plan: a
   // newly signed token and a start where the viewer was. A subtitle the player
-  // draws keeps the stream the element plays; a burned-in one replaces it.
+  // draws keeps the stream the element plays. When that stream fails while the
+  // pick is in flight, the recovery queued behind it is dropped once the plan
+  // moves on, so the answer replaces the stream instead.
   it.each([
-    { name: "keeps the stream for a subtitle the player draws", mode: "render", keeps: true },
-    { name: "opens a new stream for a burned-in subtitle", mode: "burn_in", keeps: false },
-  ] as const)("$name", async ({ mode, keeps }) => {
+    { name: "keeps the stream for a subtitle the player draws", failsMeanwhile: false },
+    { name: "opens a new stream when the playing one failed meanwhile", failsMeanwhile: true },
+  ])("$name", async ({ failsMeanwhile }) => {
     const answer = original({
       plan_id: "plan:next",
       plan_attempt_key: "v3:next",
       stream: { ...original().stream, url: "/stream/session-1?st=second" },
       timeline: { ...original().timeline, source_start_seconds: 45, player_start_seconds: 45 },
       selected_tracks: { ...original().selected_tracks, subtitle },
-      subtitle: { mode, inventory: [] },
+      subtitle: { mode: "render", inventory: [] },
     });
+    let answerPick: ((response: Response) => void) | undefined;
+    const replanBodies: Array<{ operation: string }> = [];
     vi.stubGlobal(
       "fetch",
-      sessionFetch(() => jsonResponse(playable("session-1", answer)), original()),
+      sessionFetch((init) => {
+        replanBodies.push(JSON.parse(String(init?.body)) as { operation: string });
+        if (replanBodies.length > 1) return new Promise<Response>(() => {});
+        return new Promise<Response>((resolve) => {
+          answerPick = resolve;
+        });
+      }, original()),
     );
     const { result, unmount } = renderSession();
     await waitFor(() => expect(result.current.plan).not.toBeNull());
@@ -5283,17 +5293,27 @@ describe("usePlaybackSession subtitle changes on the original file", () => {
     };
 
     act(() => result.current.changeSubtitleTrack(0, 45));
+    await waitFor(() => expect(answerPick).toBeDefined());
+    if (failsMeanwhile) {
+      act(() => result.current.recoverFromFailure({ classification: "decoder_error" }, 46));
+    }
+    await act(async () => answerPick?.(jsonResponse(playable("session-1", answer))));
 
     await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:next"));
     expect(result.current.plan?.selected_tracks.subtitle).toEqual(subtitle);
     expect(result.current.replanning).toBe(false);
+    expect(replanBodies.map(({ operation }) => operation)).toEqual(["track_change"]);
     const after = {
       planRevision: result.current.planRevision,
       streamUrl: result.current.streamUrl,
       initialPosition: result.current.initialPosition,
     };
-    if (keeps) expect(after).toEqual(before);
-    else expect(after.planRevision).toBe(before.planRevision + 1);
+    if (failsMeanwhile) {
+      expect(after.planRevision).toBe(before.planRevision + 1);
+      expect(after.streamUrl).toContain("st=second");
+    } else {
+      expect(after).toEqual(before);
+    }
     unmount();
   });
 });

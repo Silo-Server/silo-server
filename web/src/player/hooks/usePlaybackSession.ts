@@ -1820,11 +1820,19 @@ export function usePlaybackSession(
         // the marker and lets the new server-selected track take ownership.
         // A subtitle pick, or a refresh of the subtitle list, answered with
         // the stream already playing changes nothing the transport carries.
+        // Not when the playing stream failed while this was in flight: the
+        // recovery queued for it is dropped once the plan moves on, so the
+        // answer has to bring the new stream itself.
+        const queued = pendingReplanRef.current?.options.operation;
+        const recoveryQueued = queued === "failure_recovery" || queued === "seek_failure_recovery";
         const adopted = adoptDecision(
           decision,
           options.operation === "track_change" && options.subtitle !== undefined ? null : undefined,
           onAdopt,
-          options.operation === "track_change" && options.audio === undefined && !reconnect,
+          options.operation === "track_change" &&
+            options.audio === undefined &&
+            !reconnect &&
+            !recoveryQueued,
         );
         adoptedPlan = adopted;
         if (!adopted && (failurePolicy.retireOnRefusal || tightenedStillActive)) {
