@@ -54,9 +54,8 @@ type guestSeatView struct {
 // join, room read and socket snapshot name no power it is refused, while
 // the device's own room read still says it may control transport, after
 // the app disconnects too, and on its reconnected socket. Regression: the
-// strip followed a flag on the seat, so the person's own device lost
-// transport control while the app held the seat and kept losing it after
-// the app disconnected.
+// strip followed a flag on the seat, so the person's own device's room read
+// lost transport control while the app held the seat.
 func TestGuestSeatAnotherAppKeepsOwnDeviceViewDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
