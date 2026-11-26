@@ -151,6 +151,11 @@ type Operation struct {
 	// gate enforces a refusal right after authentication. It is refused on
 	// ClassPublic and ClassActingAdmin.
 	Origins OriginDecisions
+	// CapabilityFor, on a capability read, names the operations whose
+	// action its permission answer (allowed) describes. The answer is false
+	// for a session of a judged kind every one of those operations refuses;
+	// documented as x-silo-capability-for.
+	CapabilityFor []string
 	// ProfileOptional, on a ClassProfileScoped operation, accepts an absent
 	// X-Profile-Id: viewer access still resolves and judges a present header,
 	// but the profile-required gate is not run, as on the v1 routes whose
@@ -258,6 +263,7 @@ type Registry struct {
 
 	mu                      sync.Mutex
 	ops                     []Declared
+	origins                 map[string]OriginDecisions
 	routes                  map[routeKey]struct{}
 	publicCapabilitySchemas map[string]bool
 }
@@ -294,7 +300,11 @@ func (reg *Registry) Declared() []Declared {
 // forbids: registration runs at startup, where a panic is a build failure,
 // not a request failure.
 func Register[I, O any](reg *Registry, op Operation, handler func(context.Context, *I) (*O, error)) {
-	handler = prepareCapabilityOperation(&op, handler)
+	if op.CapabilityFor == nil {
+		op.CapabilityFor = capabilityGoverns[op.OperationID]
+	}
+	handler = prepareCapabilityOperation(&op, handler, reg.capabilityPermitted(op.CapabilityFor))
+	reg.recordOrigins(op.OperationID, op.Origins)
 	if op.Audited {
 		audited := handler
 		handler = func(ctx context.Context, in *I) (*O, error) {

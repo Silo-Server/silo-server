@@ -26,6 +26,9 @@ const (
 	extPermission     = "x-silo-permission"
 	extDemoRestricted = "x-silo-demo-restricted"
 	extServiceBacked  = "x-silo-service-backed"
+	// extCapabilityFor lists the operations whose action a capability
+	// read's permission answer describes (Operation.CapabilityFor).
+	extCapabilityFor = "x-silo-capability-for"
 	// extGuarded, extConditional and extCreateOnly record the
 	// optimistic-concurrency declarations so a reader of the document can
 	// enumerate the operations that require If-Match, honor If-None-Match on
@@ -95,6 +98,9 @@ func documentDeclaration(op *Operation, input reflect.Type) {
 	if op.ServiceBacked {
 		op.Extensions[extServiceBacked] = true
 	}
+	if len(op.CapabilityFor) > 0 {
+		op.Extensions[extCapabilityFor] = op.CapabilityFor
+	}
 	if op.Guarded {
 		op.Extensions[extGuarded] = true
 		op.Parameters = append(op.Parameters, ifMatchParam())
@@ -129,7 +135,7 @@ func documentDeclaration(op *Operation, input reflect.Type) {
 	}
 	hasBody := declaresBody(input)
 	hasPath := strings.Contains(op.Path, "{")
-	for _, status := range ImpliedStatuses(op.Class, op.DemoRestricted, op.ServiceBacked, hasBody, hasPath, op.Guarded, op.Conditional, op.CreateOnly, op.RateLimitBucket != "") {
+	for _, status := range ImpliedStatuses(op.Class, op.DemoRestricted || op.Origins.mayRefuse(), op.ServiceBacked, hasBody, hasPath, op.Guarded, op.Conditional, op.CreateOnly, op.RateLimitBucket != "") {
 		if status < http.StatusBadRequest {
 			// 304 is a success shape, documented with its headers by
 			// documentConcurrencyResponses, not a problem.

@@ -380,3 +380,95 @@ func TestDisplayTokenOperationsStayAllowed(t *testing.T) {
 	}
 	t.Fatalf("%s is not in the document", notificationApplePushDisplayOperation)
 }
+
+// capabilityAllowed reads a capability response's permission answer.
+func capabilityAllowed(t *testing.T, h http.Handler, path, token string) (allowed, ok bool) {
+	t.Helper()
+	rec := do(t, h, http.MethodGet, path, "", with(bearer(token), "X-Profile-Id", "p-owner"))
+	var body struct {
+		Allowed *bool `json:"allowed"`
+	}
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &body) != nil || body.Allowed == nil {
+		return false, false
+	}
+	return *body.Allowed, true
+}
+
+// TestCapabilitiesDoNotOfferRefusedActions: a capability read never reports
+// as allowed an action every one of whose operations is refused to the
+// session asking. For every capability the document lists with
+// x-silo-capability-for, each named operation exists, and where the
+// person's own session is told allowed, a session another app's key opened
+// is told not allowed when the decisions refuse it all of them. Catches a
+// capability that offers such a session a form the gate will refuse, and one
+// that names an operation that does not exist.
+func TestCapabilitiesDoNotOfferRefusedActions(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	deps.Accounts = passwordChanger{deps.Accounts.(fakeAccounts)}
+	wireCapabilityServices(&deps)
+	h := newTestHandler(t, deps)
+	ops := documentOperations(t)
+	byID := map[string]documentOperation{}
+	for _, op := range ops {
+		byID[op.ID] = op
+	}
+	exercised := []string{}
+	for _, op := range ops {
+		raw, ok := op.Raw[extCapabilityFor].([]any)
+		if !ok {
+			continue
+		}
+		allRefused := true
+		for _, v := range raw {
+			id, _ := v.(string)
+			governed, ok := byID[id]
+			if !ok {
+				t.Fatalf("%s names %s, which is not an operation", op.ID, id)
+			}
+			if d := documentedDecision(t, governed); d == nil || d.Verdict != VerdictRefused {
+				allRefused = false
+			}
+		}
+		member, ok := capabilityAllowed(t, h, op.Path, memberToken)
+		if !ok || !member {
+			continue
+		}
+		exercised = append(exercised, op.ID)
+		app, ok := capabilityAllowed(t, h, op.Path, grantedAppToken)
+		if !ok || app == allRefused {
+			t.Errorf("%s: another app's session told allowed=%v (ok %v); every named operation refused: %v", op.ID, app, ok, allRefused)
+		}
+	}
+	t.Logf("exercised: %v", exercised)
+	for _, want := range []string{"getAccountPasswordCapability", "getNotificationEmailVerificationCapabilities", "getProgressBootstrapCapabilities"} {
+		if !slices.Contains(exercised, want) {
+			t.Errorf("%s was not exercised: the person's own session was not told allowed", want)
+		}
+	}
+}
+
+// wireCapabilityServices gives the capability reads the services they ask,
+// so the person's own session is told allowed where the server offers it.
+func wireCapabilityServices(deps *Dependencies) {
+	deps.NotificationEmailVerification = &fakeEmailVerification{current: true, dispatch: true}
+	deps.ProgressBootstrap = &fakeBootstrap{}
+	deps.CursorSecret = []byte("synthetic-shared-bootstrap-secret")
+}
+
+// TestRefusedOperationsDeclareTheir403: an operation that refuses, or limits
+// to its own things, some judged kind of session answers that session 403,
+// so the document declares 403 for it, whatever else it declares. Catches a
+// refusal the gate enforces but the contract does not document, as on an
+// authenticated operation with no demo restriction and no profile.
+func TestRefusedOperationsDeclareTheir403(t *testing.T) {
+	for _, op := range documentOperations(t) {
+		d := documentedDecision(t, op)
+		if d == nil || (d.Verdict != VerdictRefused && d.Verdict != VerdictOwnOnly) {
+			continue
+		}
+		responses, _ := op.Raw["responses"].(map[string]any)
+		if _, ok := responses["403"]; !ok {
+			t.Errorf("%s %s (%s) is %s for another app's session but declares no 403", op.Method, op.Path, op.ID, d.Verdict)
+		}
+	}
+}

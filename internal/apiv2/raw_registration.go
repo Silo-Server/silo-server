@@ -170,6 +170,7 @@ func RegisterRaw(reg *Registry, raw RawOperation, handler http.Handler) {
 	if op.Metadata == nil {
 		op.Metadata = map[string]any{}
 	}
+	reg.recordOrigins(op.OperationID, op.Origins)
 	op.Metadata[metaClass] = op.Class
 	op.Metadata[metaPermission] = op.Permission
 	op.Metadata[metaDemoRestricted] = op.DemoRestricted

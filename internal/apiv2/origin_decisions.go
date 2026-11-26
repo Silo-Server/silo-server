@@ -95,6 +95,18 @@ func (d OriginDecisions) byKind() map[auth.SessionKind]*SessionDecision {
 
 func (d OriginDecisions) empty() bool { return len(d.byKind()) == 0 }
 
+// mayRefuse reports whether the gate or a handler can answer some judged
+// kind of session 403: a refusal, or a limit to its own things. The
+// document then declares 403 for the operation.
+func (d OriginDecisions) mayRefuse() bool {
+	for _, dec := range d.byKind() {
+		if dec.Verdict == VerdictRefused || dec.Verdict == VerdictOwnOnly {
+			return true
+		}
+	}
+	return false
+}
+
 // decideAllowed, decideOwnOnly and decideRefused build the three verdicts.
 func decideAllowed(reason string) *SessionDecision {
 	return &SessionDecision{Verdict: VerdictAllowed, Reason: reason}
@@ -170,6 +182,7 @@ const (
 	reasonRefusedDiagnosticsQuota = "refused by decision: a diagnostics upload spends a per-account quota"
 	reasonRefusedProviderSearch   = "refused by decision: a provider search spends the server's allowance with its subtitle providers"
 	reasonRefusedChannelReads     = "refused by decision: reads the person's email address or Discord link"
+	reasonRefusedProfileSet       = "refused: the profile set is read and sent only by a session that may manage the account's keys"
 )
 
 // Decisions shared by whole families: what a session another app's key
@@ -248,6 +261,7 @@ var (
 	grantedRefusedDiagnosticsQuota = grantedApp(decideRefused(reasonRefusedDiagnosticsQuota))
 	grantedRefusedProviderSearch   = grantedApp(decideRefused(reasonRefusedProviderSearch))
 	grantedRefusedChannelReads     = grantedApp(decideRefused(reasonRefusedChannelReads))
+	grantedRefusedProfileSet       = grantedApp(decideRefused(reasonRefusedProfileSet))
 )
 
 // extOriginDecisions documents OriginDecisions as {kind: {verdict, reason,
@@ -397,4 +411,64 @@ func withOrigins(op Operation, d OriginDecisions) Operation {
 func withRawOrigins(raw RawOperation, d OriginDecisions) RawOperation {
 	raw.Origins = d
 	return raw
+}
+
+// recordOrigins keeps each operation's decisions for the capability reads
+// that describe it.
+func (reg *Registry) recordOrigins(operationID string, d OriginDecisions) {
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	if reg.origins == nil {
+		reg.origins = map[string]OriginDecisions{}
+	}
+	reg.origins[operationID] = d
+}
+
+// capabilityPermitted is the rule every capability read applies to its
+// permission answer: a capability never reports as allowed an action whose
+// operations are all refused to the session asking. It reads, for the
+// caller's kind of session (judgedKind), the decision of each operation the
+// capability names in CapabilityFor; a caller of no judged kind, and a
+// capability that names none, is left to its own answer. Today one kind is
+// judged; another kind is judged here with no new code. The decisions are
+// read at request time, so a capability may name an operation registered
+// after it.
+func (reg *Registry) capabilityPermitted(governed []string) func(context.Context) bool {
+	if len(governed) == 0 {
+		return nil
+	}
+	return func(ctx context.Context) bool {
+		kind := judgedKind(claimsFrom(ctx))
+		if kind == "" {
+			return true
+		}
+		reg.mu.Lock()
+		defer reg.mu.Unlock()
+		for _, id := range governed {
+			if d := reg.origins[id].decisionFor(kind); d != nil && d.Verdict != VerdictRefused {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// capabilityGoverns names, for each capability read whose permission answer
+// describes actions some judged kind of session is refused, the operations
+// it describes (Operation.CapabilityFor). A capability not listed describes
+// only actions every judged kind may take, or none.
+var capabilityGoverns = map[string][]string{
+	"getAccountPasswordCapability":                 {"changePassword"},
+	"getApplePushRegistrationCapabilities":         {"registerApplePushDevice", "resetApplePushInstallation"},
+	"getPushRegistrationCapabilities":              {"registerPushDevice", "unregisterPushDevice"},
+	"getDiagnosticsCapabilities":                   {"uploadDiagnosticsReport", "createDiagnosticsUpload", "putDiagnosticsUploadChunk", "completeDiagnosticsUpload", "abortDiagnosticsUpload"},
+	"getDownloadCapability":                        {"createDownloads", "listDownloads", "createDirectDownloadLink", "getDirectDownload", "createDownloadSubscription"},
+	"getHistoryImportCapability":                   {"createHistoryImportRun", "createPlexPin", "loginEmbyConnect", "listHistoryImportRuns", "listHistoryImportSources"},
+	"getNotificationEmailVerificationCapabilities": {"requestNotificationEmailVerification"},
+	"getOnboardingCapabilities":                    {"getOnboardingFlow", "getOnboardingState", "updateOnboardingProgress"},
+	"getProfileExportCapability":                   {"exportProfile", "importProfile"},
+	opProgressBootstrapCapabilities:                {opCreateProgressSnapshot, opGetProgressSnapshot},
+	"getTitleAllowanceCapability":                  {"allowTitle", "disallowTitle", "allowCollectionTitles", "listTitleAllowanceProfiles", "listAllowedTitles"},
+	"getTrailersCapability":                        {"refreshCatalogItemTrailers"},
+	"getMetadataAICapability":                      {"translateCatalogItemDescription"},
 }

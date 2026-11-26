@@ -352,6 +352,7 @@
 ./internal/auth TestActiveSessionKindDB
 ./internal/auth TestExpiredPendingKeySweepDB
 ./internal/apiv2 TestKeyRoutesRefuseSessionsDB
+./internal/apiv2 TestAllowedOperationsAnswerGrantedAppsDB
 ./internal/apiv2 TestHouseholdSessionsForAnotherAppDB
 ./internal/apiv2 TestWebPushRefusesAnotherAppDB
 ./internal/apiv2 TestWatchTogetherRefusesAnotherAppDB

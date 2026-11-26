@@ -67478,6 +67478,9 @@
         "tags": [
           "account"
         ],
+        "x-silo-capability-for": [
+          "changePassword"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
@@ -153935,6 +153938,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "406": {
             "content": {
               "application/problem+json": {
@@ -161503,6 +161516,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "406": {
             "content": {
               "application/problem+json": {
@@ -163313,6 +163336,13 @@
         "tags": [
           "downloads"
         ],
+        "x-silo-capability-for": [
+          "createDownloads",
+          "listDownloads",
+          "createDirectDownloadLink",
+          "getDirectDownload",
+          "createDownloadSubscription"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
@@ -163725,6 +163755,9 @@
         "summary": "Whether AI metadata translation is configured and how the viewer-facing on-view translation behaves.",
         "tags": [
           "catalog"
+        ],
+        "x-silo-capability-for": [
+          "translateCatalogItemDescription"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
@@ -164480,6 +164513,10 @@
         "tags": [
           "profiles"
         ],
+        "x-silo-capability-for": [
+          "exportProfile",
+          "importProfile"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
@@ -164894,6 +164931,13 @@
         "tags": [
           "profiles"
         ],
+        "x-silo-capability-for": [
+          "allowTitle",
+          "disallowTitle",
+          "allowCollectionTitles",
+          "listTitleAllowanceProfiles",
+          "listAllowedTitles"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
@@ -165100,6 +165144,9 @@
         "summary": "Whether this server offers the viewer-facing trailer fetch, its cooldown, and the statuses the action answers.",
         "tags": [
           "catalog"
+        ],
+        "x-silo-capability-for": [
+          "refreshCatalogItemTrailers"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
@@ -178965,6 +179012,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "406": {
             "content": {
               "application/problem+json": {
@@ -179650,6 +179707,10 @@
         "summary": "Describe ordered Apple registration support, separately from delivery and rollout readiness.",
         "tags": [
           "notifications"
+        ],
+        "x-silo-capability-for": [
+          "registerApplePushDevice",
+          "resetApplePushInstallation"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
@@ -180751,6 +180812,13 @@
         "summary": "Read diagnostics upload availability and limits for this account.",
         "tags": [
           "diagnostics"
+        ],
+        "x-silo-capability-for": [
+          "uploadDiagnosticsReport",
+          "createDiagnosticsUpload",
+          "putDiagnosticsUploadChunk",
+          "completeDiagnosticsUpload",
+          "abortDiagnosticsUpload"
         ],
         "x-silo-class": "authenticated",
         "x-silo-conditional": true,
@@ -193483,6 +193551,13 @@
         "summary": "Describe what an import run may rely on, including Plex connection fallback.",
         "tags": [
           "history-imports"
+        ],
+        "x-silo-capability-for": [
+          "createHistoryImportRun",
+          "createPlexPin",
+          "loginEmbyConnect",
+          "listHistoryImportRuns",
+          "listHistoryImportSources"
         ],
         "x-silo-class": "authenticated",
         "x-silo-conditional": true,
@@ -208644,6 +208719,9 @@
         "tags": [
           "notifications"
         ],
+        "x-silo-capability-for": [
+          "requestNotificationEmailVerification"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
@@ -211102,6 +211180,10 @@
         "summary": "Describe ordered registration support separately from push delivery availability.",
         "tags": [
           "notifications"
+        ],
+        "x-silo-capability-for": [
+          "registerPushDevice",
+          "unregisterPushDevice"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
@@ -215347,6 +215429,11 @@
         "summary": "Read or advance the active profile's onboarding tour.",
         "tags": [
           "onboarding"
+        ],
+        "x-silo-capability-for": [
+          "getOnboardingFlow",
+          "getOnboardingState",
+          "updateOnboardingProgress"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
@@ -223508,8 +223595,8 @@
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
           "granted_app": {
-            "verdict": "allowed",
-            "reason": "who it is and which profile it acts as"
+            "verdict": "refused",
+            "reason": "refused: the profile set is read and sent only by a session that may manage the account's keys"
           }
         },
         "x-silo-service-backed": true
@@ -247519,6 +247606,10 @@
         "summary": "Discover full-replacement progress bootstrap support for this profile.",
         "tags": [
           "progress"
+        ],
+        "x-silo-capability-for": [
+          "createProgressBootstrapSnapshot",
+          "getProgressBootstrapSnapshot"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,

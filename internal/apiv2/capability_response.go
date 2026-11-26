@@ -49,7 +49,10 @@ type capabilityDocument interface{ commonCapability() *Capability }
 // anonymous response bodies, without inferring domain semantics from JSON
 // property names or operation IDs. Domain handlers own support/configuration;
 // this registration adapter owns representation identity and revalidation.
-func prepareCapabilityOperation[I, O any](op *Operation, handler func(context.Context, *I) (*O, error)) func(context.Context, *I) (*O, error) {
+// permitted, when set, is asked for the permission answer as well: a
+// capability never reports as allowed an action every one of whose
+// operations is refused to the session asking (capabilityPermitted).
+func prepareCapabilityOperation[I, O any](op *Operation, handler func(context.Context, *I) (*O, error), permitted func(context.Context) bool) func(context.Context, *I) (*O, error) {
 	output := reflect.TypeFor[O]()
 	if output.Kind() != reflect.Struct {
 		return handler
@@ -92,7 +95,7 @@ func prepareCapabilityOperation[I, O any](op *Operation, handler func(context.Co
 			return nil, NewProblem(TypeInternalError, "The capability document has no valid support state.")
 		}
 		if scoped {
-			allowed := head.State == StateAvailable && (head.Allowed == nil || *head.Allowed)
+			allowed := head.State == StateAvailable && (head.Allowed == nil || *head.Allowed) && (permitted == nil || permitted(ctx))
 			head.Allowed = &allowed
 		}
 		// Hash the complete authorized representation with the self-referential
