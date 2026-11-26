@@ -872,7 +872,9 @@ export function VideoPlayer({
   const [liveCues, setLiveCues] = useState<ParsedCue[]>([]);
   const [pendingTranslationHandoff, setPendingTranslationHandoff] = useState<{
     language: string;
-    planRevision: number;
+    // The plan the refresh replaces. Its answer is always a new plan, also
+    // when taken on the playing stream under the same `planRevision`.
+    plan: PlanV3;
     existingTrackIndexes: number[];
   } | null>(null);
   const [translationBuffering, setTranslationBuffering] = useState(false);
@@ -1023,6 +1025,12 @@ export function VideoPlayer({
     () => (streamPlayedRef.current ? currentTimeRef.current : subtitleFetchAnchorRef.current),
     [],
   );
+  // Read when a failure is reported: a plan taken on the playing transport (a
+  // subtitle change on the original file) brings its own attempt key, and the
+  // transport effect, which depends on the callback below, must not open the
+  // stream again for it.
+  const planAttemptKeyRef = useRef(plan.plan_attempt_key);
+  planAttemptKeyRef.current = plan.plan_attempt_key;
   const reportCurrentPlanFailure = useCallback(
     (failure: FailureV3): boolean => {
       if (!onPlanFailure) return false;
@@ -1031,7 +1039,7 @@ export function VideoPlayer({
       if (connectionStatusRef.current !== "connected") return true;
       // The revision is part of the key: a reconnect can hand back the same
       // route under the same attempt key, and its transport can fail as well.
-      const failureKey = `${sessionId}:${plan.plan_attempt_key}:${planRevision}`;
+      const failureKey = `${sessionId}:${planAttemptKeyRef.current}:${planRevision}`;
       if (reportedPlanFailureKeyRef.current === failureKey) return true;
       reportedPlanFailureKeyRef.current = failureKey;
       transportFailedForPlanRevisionRef.current = planRevision;
@@ -1046,7 +1054,7 @@ export function VideoPlayer({
       onPlanFailure(failure, resumeAt);
       return true;
     },
-    [onPlanFailure, plan.plan_attempt_key, planRevision, replanPosition, sessionId],
+    [onPlanFailure, planRevision, replanPosition, sessionId],
   );
 
   useEffect(() => {
@@ -2335,8 +2343,7 @@ export function VideoPlayer({
   useEffect(() => {
     if (!pendingTranslationHandoff || replanning) return;
 
-    const refreshSettled =
-      planRevision !== pendingTranslationHandoff.planRevision || replanError !== null;
+    const refreshSettled = plan !== pendingTranslationHandoff.plan || replanError !== null;
     if (!refreshSettled) return;
 
     const normalizedLanguage = pendingTranslationHandoff.language.trim().toLowerCase();
@@ -2355,7 +2362,7 @@ export function VideoPlayer({
   }, [
     handleSubtitleSelect,
     pendingTranslationHandoff,
-    planRevision,
+    plan,
     replanError,
     replanning,
     subtitleUrls,
@@ -2533,7 +2540,7 @@ export function VideoPlayer({
             const language = event.payload.language.trim().toLowerCase();
             setPendingTranslationHandoff({
               language: event.payload.language,
-              planRevision,
+              plan,
               existingTrackIndexes: subtitleUrls
                 .filter(
                   (track) =>
@@ -2576,7 +2583,7 @@ export function VideoPlayer({
       onApplySubtitleTrack,
       onRealtimeEvent,
       onRefreshSubtitles,
-      planRevision,
+      plan,
       resumeFromTranslationPause,
       reportSubtitleFailure,
       sessionId,

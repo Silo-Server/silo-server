@@ -17,6 +17,7 @@ import {
   fixturePlanV3,
   fixtureSubtitleInventoryItemV3,
 } from "../protocol-v3.fixtures";
+import type { PlanV3 } from "../protocol-v3";
 import { resetSessionMutations } from "../session-mutations";
 import { resetCodecDetectionForTests } from "./useCodecDetection";
 import {
@@ -5234,5 +5235,65 @@ describe("usePlaybackSession leaving the player", () => {
 
     answerStop(jsonResponse({ outcome: "stopped" }));
     await waitFor(() => expect(onSessionStopped).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe("usePlaybackSession subtitle changes on the original file", () => {
+  const original = (overrides: Partial<PlanV3> = {}) =>
+    fixturePlanV3({
+      delivery: "original_http",
+      stream: {
+        url: "/stream/session-1?st=first",
+        protocol: "http_progressive",
+        container: "mp4",
+        mime_type: "video/mp4",
+        headers: {},
+        header_refresh: "none",
+      },
+      subtitle: { mode: "off", inventory: [] },
+      ...overrides,
+    });
+  const subtitle = { id: "file:7:subtitle:0", index: 0 };
+
+  // The server answers a subtitle pick on the playing file with a new plan: a
+  // newly signed token and a start where the viewer was. A subtitle the player
+  // draws keeps the stream the element plays; a burned-in one replaces it.
+  it.each([
+    { name: "keeps the stream for a subtitle the player draws", mode: "render", keeps: true },
+    { name: "opens a new stream for a burned-in subtitle", mode: "burn_in", keeps: false },
+  ] as const)("$name", async ({ mode, keeps }) => {
+    const answer = original({
+      plan_id: "plan:next",
+      plan_attempt_key: "v3:next",
+      stream: { ...original().stream, url: "/stream/session-1?st=second" },
+      timeline: { ...original().timeline, source_start_seconds: 45, player_start_seconds: 45 },
+      selected_tracks: { ...original().selected_tracks, subtitle },
+      subtitle: { mode, inventory: [] },
+    });
+    vi.stubGlobal(
+      "fetch",
+      sessionFetch(() => jsonResponse(playable("session-1", answer)), original()),
+    );
+    const { result, unmount } = renderSession();
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+    const before = {
+      planRevision: result.current.planRevision,
+      streamUrl: result.current.streamUrl,
+      initialPosition: result.current.initialPosition,
+    };
+
+    act(() => result.current.changeSubtitleTrack(0, 45));
+
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:next"));
+    expect(result.current.plan?.selected_tracks.subtitle).toEqual(subtitle);
+    expect(result.current.replanning).toBe(false);
+    const after = {
+      planRevision: result.current.planRevision,
+      streamUrl: result.current.streamUrl,
+      initialPosition: result.current.initialPosition,
+    };
+    if (keeps) expect(after).toEqual(before);
+    else expect(after.planRevision).toBe(before.planRevision + 1);
+    unmount();
   });
 });
