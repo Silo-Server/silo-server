@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -331,8 +333,23 @@ func (h *ProfileHandler) ClearProfileSetOverride(ctx context.Context, cmd Profil
 		return ProfileSetClearResult{}, err
 	}
 	run.afterCommit(ctx)
-	out.WakeQueued = h.ProfileSetWaker.Wake(ctx, cmd.UserID)
+	out.WakeQueued = h.wakeAfterClear(ctx, cmd.UserID)
 	return out, nil
+}
+
+// wakeAfterClear tells the account's apps about a clear that has committed,
+// and reports whether a wake was queued. The clear stands whatever the waker
+// does: a waker that panics answers false, logged with the account and the
+// panic's type only, since its value may carry anything.
+func (h *ProfileHandler) wakeAfterClear(ctx context.Context, userID int) (queued bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			queued = false
+			slog.ErrorContext(ctx, "profile set wake after a clear panicked", "component", "api", "user_id", userID,
+				"panic_type", fmt.Sprintf("%T", r))
+		}
+	}()
+	return h.ProfileSetWaker.Wake(ctx, userID)
 }
 
 // ClearProfileSetHidden clears an owner's removal of a profile of the set.
@@ -357,7 +374,7 @@ func (h *ProfileHandler) ClearProfileSetHidden(ctx context.Context, cmd ProfileS
 		return ProfileSetClearResult{}, err
 	}
 	run.afterCommit(ctx)
-	return ProfileSetClearResult{WakeQueued: h.ProfileSetWaker.Wake(ctx, cmd.UserID)}, nil
+	return ProfileSetClearResult{WakeQueued: h.wakeAfterClear(ctx, cmd.UserID)}, nil
 }
 
 // DismissProfileSetEdit deletes the settled record of the person's edit of

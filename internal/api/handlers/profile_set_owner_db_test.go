@@ -43,14 +43,23 @@ type clearFixture struct {
 	kidID            string
 	audio            userstore.SettingIdentity
 	version          int
-	woken            int
+	// woken counts calls of the waker; wake, when set, answers them in
+	// place of a waker that queues one.
+	woken int
+	wake  func(context.Context, int) bool
 }
 
 func newClearFixture(t *testing.T) *clearFixture {
 	t.Helper()
 	c := &clearFixture{editsFixture: newEditsFixture(t), version: 1}
 	f := c.editsFixture
-	f.handler.ProfileSetWaker = func(context.Context, int) bool { c.woken++; return true }
+	f.handler.ProfileSetWaker = func(ctx context.Context, userID int) bool {
+		c.woken++
+		if c.wake != nil {
+			return c.wake(ctx, userID)
+		}
+		return true
+	}
 	c.main = newSetItem("Parent")
 	c.kid = newSetItem("Kid").with("max_content_rating", "PG").with("pin", map[string]any{"set": "1111"}).
 		with("settings", map[string]any{settingskeys.PlaybackAudioLanguage: "en"})
@@ -88,6 +97,14 @@ func TestClearProfileSetOverrideDB(t *testing.T) {
 	t.Run("clearing a field puts the set's value back now, and the next set applies to it", c.clearsAField)
 	t.Run("clearing a setting puts the set's value back now", c.clearsASetting)
 	t.Run("clearing a PIN keeps the owner's PIN until a newer set sends one", c.clearsAPIN)
+	t.Run("clearing a PIN the app has none for removes the owner's PIN", c.clearsAPINTheAppDropped)
+	t.Run("the wake comes once, after the clear commits", c.wakesAfterCommit)
+	t.Run("a waker that queues nothing leaves the clear standing", func(t *testing.T) {
+		c.wakeFailing(t, func(context.Context, int) bool { return false })
+	})
+	t.Run("a waker that panics leaves the clear standing", func(t *testing.T) {
+		c.wakeFailing(t, func(context.Context, int) bool { panic("relay down") })
+	})
 	t.Run("a hidden profile comes back only with a set after the owner clears it", c.clearsHidden)
 	t.Run("a clear of something not there is not found", func(t *testing.T) {
 		_, err := c.clearField("max_content_rating")
@@ -144,6 +161,90 @@ func (c *clearFixture) clearsAPIN(t *testing.T) {
 	c.nextSet(t, c.main, c.kid.with("pin", map[string]any{"set": "3333"}), c.guest)
 	if p := c.profileBySyncID(t, c.kid.syncID()); !pinMatches(p.PINHash, "3333") {
 		t.Fatal("the newer set's PIN was not applied")
+	}
+}
+
+// clearsAPINTheAppDropped: the person's app sends the profile with no PIN,
+// then the owner sets one here. The list says clearing puts the app's value
+// back now, and the clear does: the profile has no PIN afterwards.
+func (c *clearFixture) clearsAPINTheAppDropped(t *testing.T) {
+	c.nextSet(t, c.main, c.kid.with("pin", map[string]any{"clear": true}), c.guest)
+	c.update(t, c.admin(), c.kidID, ProfileUpdateRequest{PIN: new("4444")}, true)
+	pin := c.record(t, "pin")
+	if string(pin.SetValue) != `"clear"` || !pin.ClearApplies {
+		t.Fatalf("PIN record = %+v; want the set's clear, applied on clearing", pin)
+	}
+	if res, err := c.clearField("pin"); err != nil || !res.Applied {
+		t.Fatalf("clear = %+v, %v", res, err)
+	}
+	if p := c.profileBySyncID(t, c.kid.syncID()); p.PINHash != "" {
+		t.Fatal("the owner's PIN is still set after clearing to the app's no PIN")
+	}
+}
+
+// record is the account's one record of field on the kid.
+func (c *clearFixture) record(t *testing.T, field string) ProfileSetEditView {
+	t.Helper()
+	views, err := c.handler.ListProfileSetEdits(t.Context(), c.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range views {
+		if v.SyncID == c.kid.syncID() && v.Field == field {
+			return v
+		}
+	}
+	t.Fatalf("no record of %s in %+v", field, views)
+	return ProfileSetEditView{}
+}
+
+// ownerRating gives the kid an owner's rating again, an override to clear.
+func (c *clearFixture) ownerRating(t *testing.T) {
+	t.Helper()
+	c.update(t, c.admin(), c.kidID, ProfileUpdateRequest{MaxContentRating: new("G")}, true)
+	if c.record(t, "max_content_rating").Kind != ProfileSetEditOverride {
+		t.Fatal("the owner's rating is not an override")
+	}
+}
+
+// wakesAfterCommit: the person's app is told once, and only once the clear
+// is visible to everyone, so an app that syncs at once finds it.
+func (c *clearFixture) wakesAfterCommit(t *testing.T) {
+	c.ownerRating(t)
+	calls, sawCleared := 0, false
+	c.wake = func(ctx context.Context, _ int) bool {
+		calls++
+		rows, err := profileedits.List(ctx, c.pool, c.userID)
+		if err != nil {
+			t.Error(err)
+			return false
+		}
+		sawCleared = !slices.ContainsFunc(rows, func(e profileedits.Edit) bool {
+			return e.SyncID == c.kid.syncID() && e.Field == "max_content_rating"
+		})
+		return true
+	}
+	defer func() { c.wake = nil }()
+	if res, err := c.clearField("max_content_rating"); err != nil || !res.WakeQueued {
+		t.Fatalf("clear = %+v, %v", res, err)
+	}
+	if calls != 1 || !sawCleared {
+		t.Fatalf("waker called %d times; saw the clear committed: %v", calls, sawCleared)
+	}
+}
+
+// wakeFailing: whatever the waker does, a committed clear answers success,
+// with wake_queued false when no wake was queued.
+func (c *clearFixture) wakeFailing(t *testing.T, wake func(context.Context, int) bool) {
+	c.ownerRating(t)
+	c.wake = wake
+	defer func() { c.wake = nil }()
+	res, err := c.clearField("max_content_rating")
+	if err != nil || !res.Applied || res.WakeQueued {
+		t.Fatalf("clear = %+v, %v; want applied, no wake queued", res, err)
+	}
+	if p := c.profileBySyncID(t, c.kid.syncID()); p.MaxContentRating != c.kid["max_content_rating"] {
+		t.Fatalf("rating after the clear = %q", p.MaxContentRating)
 	}
 }
 
