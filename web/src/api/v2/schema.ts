@@ -21272,6 +21272,8 @@ export interface components {
       device_platform?: string;
       /** @description Whole-session method: direct, remux, direct_stream (copied video, converted audio) or transcode; absent when unknown */
       effective_play_method?: string;
+      /** @description Viewer egress of the session, only when the list was read with include_egress=true. Absent when it is unknown: stream telemetry is off, its merged view is not built, its last refresh failed, the session's routes exceeded the telemetry route cap, telemetry has no record of the session, or a proxy node served the session while telemetry is not shared between servers. Never present in session.* events. */
+      egress?: components["schemas"]["AdminPlaybackSessionEgress"];
       /**
        * Format: int64
        * @description Episode number; absent when not an episode
@@ -21450,6 +21452,8 @@ export interface components {
       device_identity: boolean;
       effective_play_method: boolean;
       effective_play_method_values: string[];
+      /** @description Stream telemetry is enabled: the list accepts include_egress and rows may then carry egress */
+      egress: boolean;
       is_jellyfin_client: boolean;
       /** @description The admin sessions channel carries session.started, session.paused, session.resumed and session.stopped, and rows may carry lifecycle_seq */
       lifecycle_events: boolean;
@@ -21476,6 +21480,20 @@ export interface components {
       tone_map_mode_values: string[];
       transcode_hw_accel: boolean;
       user_filter: boolean;
+    };
+    AdminPlaybackSessionEgress: {
+      /**
+       * Format: int64
+       * @description Bytes Silo has sent to the viewer for this playback session so far, summed across every API server and proxy node; hops between Silo's own nodes are not counted
+       */
+      bytes: number;
+      /**
+       * Format: date-time
+       * @description When the newest of the counting servers last reported; the same on every API server for the same reports. For bytes a proxy node sent, it is when the API server received the node's report, so rates over short intervals jitter. Divide a change in bytes by the change in this, not by the time between polls
+       */
+      measured_at: string;
+      /** @description Opaque token naming the set of servers that make up bytes. Compare bytes only within one series: when it changes, start a new baseline. Within a series, ignore an observation whose measured_at is not newer than the baseline's, and start a new baseline when bytes falls at a newer measured_at */
+      series: string;
     };
     AdminPlaybackSessionMessageInputBody: {
       /**
@@ -87990,6 +88008,8 @@ export interface operations {
     parameters: {
       query?: {
         cursor?: string;
+        /** @description Add egress to the rows. Send it only when the capabilities report egress true. */
+        include_egress?: boolean;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
         /** @description Only live observations belonging to this login account */

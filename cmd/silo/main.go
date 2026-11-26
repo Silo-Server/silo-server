@@ -389,6 +389,9 @@ func newStreamTelemetryRegistry(ctx context.Context, nodeID string, redisClient 
 			pingCancel()
 		} else {
 			slog.ErrorContext(ctx, "stream telemetry distributed mode requested but redis is not configured; using local store")
+			// The registry reports this mode to readers of its merged view, which
+			// then holds only this process.
+			streamTelemetryConfig.Distributed = false
 		}
 	}
 	if streamTelemetryConfig.Enabled {

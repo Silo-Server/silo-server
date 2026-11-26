@@ -266,7 +266,9 @@ server sends them. Each event's `data` is:
   or `stopped`.
 - `session` on a started, paused or resumed event: the session's row as
   `GET /api/v2/admin/sessions` returns it, with `lifecycle_seq` equal to `seq`.
-  Absent when no server has a live row for it.
+  Absent when no server has a live row for it. It never carries `egress`; read
+  that from the list with `include_egress=true`
+  ([admin-api.md](admin-api.md#session-egress)).
 - `end_reason` and `history` on `session.stopped`: the history entry the end
   recorded, as `GET /api/v2/admin/playback-history` returns it. Its figures are the
   stored ones, so a later history read agrees with the event.
