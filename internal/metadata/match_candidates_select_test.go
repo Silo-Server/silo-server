@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -383,6 +384,77 @@ var selectInitialMatchCandidateDecisionsCases = func() []selectInitialMatchCandi
 			candidates: daysWild},
 	}
 }()
+
+// TestSelectInitialMatchCandidate_ProviderFirstResult covers ties between
+// candidates that all match the folder's title, year and type, such as TMDB
+// listing the Disney "Aladdin (1992)" beside two smaller films of that name and
+// year. Search results run through normalization, which records each
+// provider's own result order.
+func TestSelectInitialMatchCandidate_ProviderFirstResult(t *testing.T) {
+	t.Parallel()
+
+	result := func(provider, title string, year int, ids ...string) SearchResult {
+		providerIDs := map[string]string{}
+		for i := 0; i+1 < len(ids); i += 2 {
+			providerIDs[ids[i]] = ids[i+1]
+		}
+		return SearchResult{Name: title, Year: year, Provider: provider, ProviderIDs: providerIDs}
+	}
+	tmdb := func(title string, year int, id string) SearchResult {
+		return result(testTMDBProvider, title, year, testTMDBProvider, id)
+	}
+	aladdin := []SearchResult{tmdb("Aladdin", 1992, "812"), tmdb("Aladdin", 1992, "343693"), tmdb("Aladdin", 1992, "357528")}
+
+	cases := []struct {
+		name     string
+		hints    *MatchHints
+		results  []SearchResult
+		wantTMDB string // empty when the tie must stay ambiguous
+	}{
+		{name: "provider's first result wins an exact tie",
+			hints: &MatchHints{Title: "Aladdin", Year: 1992, Type: anchoredItemTypeMovie}, results: aladdin, wantTMDB: "812"},
+		{name: "provider listed another film first",
+			hints: &MatchHints{Title: "Distant", Year: 2024, Type: anchoredItemTypeMovie},
+			results: []SearchResult{
+				tmdb("Distant", 2002, "31026"), tmdb("Distant", 2024, "1395720"), tmdb("Distant", 2024, "1390523"),
+			}},
+		{name: "tie includes a year-off candidate",
+			hints: &MatchHints{Title: "Arrival", Year: 2016, Type: anchoredItemTypeMovie},
+			results: []SearchResult{
+				tmdb("Arrival", 2016, "329865"), tmdb("Arrival", 2017, "999001"),
+				result(testTVDBProvider, "Arrival", 2017, testTVDBProvider, "77", testTMDBProvider, "999001"),
+			}},
+		{name: "providers put different films first",
+			hints: &MatchHints{Title: "Aladdin", Year: 1992, Type: anchoredItemTypeMovie},
+			results: []SearchResult{
+				tmdb("Aladdin", 1992, "812"), tmdb("Aladdin", 1992, "343693"),
+				result(testTVDBProvider, "Aladdin", 1992, testTVDBProvider, "20", testTMDBProvider, "343693"),
+				result(testTVDBProvider, "Aladdin", 1992, testTVDBProvider, "10", testTMDBProvider, "812"),
+			}},
+		{name: "no folder year",
+			hints: &MatchHints{Title: "Aladdin", Type: anchoredItemTypeMovie}, results: aladdin},
+		{name: "series",
+			hints: &MatchHints{Title: "Aladdin", Year: 1992, Type: anchoredItemTypeSeries}, results: aladdin},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			candidates := NormalizeCandidatesForLanguage(tt.results, tt.hints.Type, "en")
+			got, ok := selectInitialMatchCandidate(tt.hints, candidates, nil)
+			if tt.wantTMDB == "" {
+				if ok || got != nil {
+					t.Fatalf("expected an ambiguous tie, got winner %+v", got)
+				}
+				return
+			}
+			if !ok || got == nil || got.ProviderIDs[testTMDBProvider] != tt.wantTMDB {
+				t.Fatalf("winner = %+v (ok=%v), want tmdb %s", got, ok, tt.wantTMDB)
+			}
+			if !slices.Contains(got.MatchReasons, "provider_first_result") {
+				t.Fatalf("MatchReasons = %v, want provider_first_result", got.MatchReasons)
+			}
+		})
+	}
+}
 
 //nolint:goconst // Keep the production-shaped provider fixtures readable in place.
 func TestSelectInitialMatchCandidate_MissingYearConsensusAllowsResolvedCanonicalIDConflict(t *testing.T) {
