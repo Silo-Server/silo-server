@@ -42,7 +42,7 @@ func IsReachabilityError(err error) bool {
 		return false
 	}
 
-	if errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errUpstreamBodyRead) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
 

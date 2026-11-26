@@ -232,6 +232,7 @@ func decodeUpstreamJSON(ctx context.Context, body io.Reader, out any, listing *l
 var (
 	errUpstreamBytesLimit = errors.New("byte limit reached")
 	errUpstreamJSONDecode = errors.New("unexpected upstream JSON response")
+	errUpstreamBodyRead   = errors.New("upstream response body read failed")
 )
 
 type bodyReadErrorTracker struct {
@@ -259,7 +260,10 @@ func decodeLimitedJSON(body io.Reader, out any, limit int64) (int64, error) {
 	if limited.N <= 0 {
 		return read, errUpstreamBytesLimit
 	}
-	if err != nil && tracker.readErr == nil && !errors.Is(err, ErrUpstreamResponseTooLarge) {
+	if err != nil && tracker.readErr != nil {
+		return read, fmt.Errorf("%w: %w", errUpstreamBodyRead, tracker.readErr)
+	}
+	if err != nil && !errors.Is(err, ErrUpstreamResponseTooLarge) {
 		return read, fmt.Errorf("%w: %w", errUpstreamJSONDecode, err)
 	}
 	return read, err

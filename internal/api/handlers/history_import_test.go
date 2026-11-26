@@ -45,7 +45,7 @@ func TestHistoryImportAPIErrorMapsValidationAndUnexpectedResponse(t *testing.T) 
 
 	unexpected := fmt.Errorf("authenticating against Emby server: %w", historyimport.ErrUnexpectedSourceResponse)
 	out = historyImportAPIError(unexpected)
-	if out.Status != http.StatusBadGateway || out.Code != "bad_gateway" || out.Message != historyimport.UnexpectedSourceResponseMessage || !errors.Is(out, historyimport.ErrUnexpectedSourceResponse) {
+	if out.Status != http.StatusServiceUnavailable || out.Code != "dependency_unavailable" || out.Message != historyimport.UnexpectedSourceResponseMessage || !errors.Is(out, historyimport.ErrUnexpectedSourceResponse) {
 		t.Fatalf("ErrUnexpectedSourceResponse mapping = %+v", out)
 	}
 }

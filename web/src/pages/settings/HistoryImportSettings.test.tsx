@@ -13,6 +13,14 @@ const mocks = vi.hoisted(() => ({
   createMutateAsync: vi.fn(),
   loginMutateAsync: vi.fn(),
   resetCreate: vi.fn(),
+  toastError: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({
+  toast: {
+    error: (...args: unknown[]) => mocks.toastError(...args),
+    success: vi.fn(),
+  },
 }));
 
 vi.mock("@/components/realtimeEventsContext", () => ({
@@ -65,6 +73,7 @@ describe("HistoryImportSettings", () => {
       expires_at: "2026-11-26T00:00:00Z",
     });
     mocks.resetCreate.mockReset();
+    mocks.toastError.mockReset();
 
     mocks.useCapability.mockReset().mockReturnValue({
       data: {
@@ -173,13 +182,18 @@ describe("HistoryImportSettings", () => {
     await user.type(screen.getByLabelText("Emby Username"), "alice");
     await user.click(screen.getByRole("button", { name: "Start Import" }));
 
-    // Switching away while pending hides the error on other tabs.
+    // Switching away while pending hides the inline alert on other tabs and notifies via toast.
     await user.click(screen.getByRole("button", { name: "Emby Connect" }));
     rejectRun?.(
       new Error(
         "Emby server URL must be an HTTP or HTTPS URL without credentials, a query, or a fragment.",
       ),
     );
+    await waitFor(() => {
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        "Emby server URL must be an HTTP or HTTPS URL without credentials, a query, or a fragment.",
+      );
+    });
     rerender(
       <MemoryRouter>
         <HistoryImportSettings />
@@ -187,16 +201,29 @@ describe("HistoryImportSettings", () => {
     );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
-    // Returning to the failed tab still shows the error, marks the URL field invalid, and clicking the active tab keeps it.
+    // Returning to the failed tab still shows the error, marks the invalid URL field, and clicking the active tab keeps it.
     await user.click(screen.getByRole("button", { name: "Server URL" }));
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Emby server URL must be an HTTP or HTTPS URL without credentials, a query, or a fragment.",
     );
-    expect(screen.getByLabelText("Emby Server URL")).toHaveAttribute("aria-invalid", "true");
+    const urlInput = screen.getByLabelText("Emby Server URL");
+    expect(urlInput).toHaveAttribute("aria-invalid", "true");
     await user.click(screen.getByRole("button", { name: "Server URL" }));
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Emby server URL must be an HTTP or HTTPS URL without credentials, a query, or a fragment.",
     );
+
+    // Fixing the URL syntax clears aria-invalid immediately, and failing on the visible tab does not toast.
+    await user.clear(urlInput);
+    await user.type(urlInput, "https://emby.example.test");
+    expect(urlInput).not.toHaveAttribute("aria-invalid");
+    mocks.toastError.mockReset();
+    await user.click(screen.getByRole("button", { name: "Start Import" }));
+    rejectRun?.(new Error("Invalid credentials"));
+    await waitFor(() => {
+      expect(isPending).toBe(false);
+    });
+    expect(mocks.toastError).not.toHaveBeenCalled();
 
     // Leaving the failed tab after seeing the error dismisses it without calling mutation.reset().
     await user.click(screen.getByRole("button", { name: "Emby Connect" }));

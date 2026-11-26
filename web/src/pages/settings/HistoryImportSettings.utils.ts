@@ -29,3 +29,21 @@ export function canStartJellyfinImport(
 ): boolean {
   return !!profileId && serverURL.trim() !== "" && username.trim() !== "" && !!password;
 }
+
+export function isValidHttpServerURL(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.includes("#")) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      parsed.hostname !== "" &&
+      parsed.username === "" &&
+      parsed.password === "" &&
+      parsed.search === "" &&
+      parsed.hash === ""
+    );
+  } catch {
+    return false;
+  }
+}

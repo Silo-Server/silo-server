@@ -197,7 +197,7 @@ func historyImportAPIError(err error) *APIError {
 	case errors.Is(err, historyimport.ErrInvalidInput):
 		return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: err.Error(), cause: err}
 	case errors.Is(err, historyimport.ErrUnexpectedSourceResponse):
-		return &APIError{Status: http.StatusBadGateway, Code: "bad_gateway", Message: historyimport.UnexpectedSourceResponseMessage, cause: err}
+		return &APIError{Status: http.StatusServiceUnavailable, Code: "dependency_unavailable", Message: historyimport.UnexpectedSourceResponseMessage, cause: err}
 	case errors.Is(err, historyimport.ErrConnectSessionExpired),
 		errors.Is(err, historyimport.ErrConnectSessionUsed),
 		errors.Is(err, historyimport.ErrPlexSessionExpired),

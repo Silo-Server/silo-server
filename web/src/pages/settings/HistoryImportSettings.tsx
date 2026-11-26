@@ -41,10 +41,12 @@ import {
 import {
   canStartEmbyImport,
   canStartJellyfinImport,
+  isValidHttpServerURL,
   type EmbyMode,
   type PlexMode,
   type SourceType,
 } from "./HistoryImportSettings.utils";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { isActingAdmin } from "@/lib/permissions";
 import { AlertTriangle, CheckCircle2, CircleSlash2, Clock, Loader2, XCircle } from "lucide-react";
@@ -197,11 +199,22 @@ export default function HistoryImportSettings() {
   const effectiveEmbyMode: EmbyMode =
     embyMode === "direct" && !supportsEmbyDirect ? "connect" : embyMode;
   const currentFormScope = formScope(sourceType, effectiveEmbyMode, plexMode);
+  const currentFormScopeRef = useRef(currentFormScope);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    currentFormScopeRef.current = currentFormScope;
+  }, [currentFormScope]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const startError = startErrorScope === currentFormScope ? createRunMutation.error : null;
   const embyURLInvalid =
     sourceType === "emby" &&
     effectiveEmbyMode === "direct" &&
-    Boolean(startError?.message.startsWith("Emby server URL"));
+    Boolean(startError && !isValidHttpServerURL(embyServerURL));
   const returnedPlexAuth = searchParams.get("plex_auth");
   const returnedPlexPinId = searchParams.get("plex_pin_id");
   const returnedPlexPinCode = searchParams.get("plex_pin_code");
@@ -374,8 +387,17 @@ export default function HistoryImportSettings() {
     const submitScope = currentFormScope;
     async function submitRun(body: CreateHistoryImportRunRequest) {
       setStartErrorScope(submitScope);
-      const run = await createRunMutation.mutateAsync(body);
-      setActiveRunId(run.id);
+      try {
+        const run = await createRunMutation.mutateAsync(body);
+        setActiveRunId(run.id);
+      } catch (err) {
+        if (!mountedRef.current || currentFormScopeRef.current !== submitScope) {
+          toast.error(
+            err instanceof Error ? err.message : t("web.common.toast.historyImport.startFailed"),
+          );
+        }
+        throw err;
+      }
     }
 
     if (sourceType === "emby") {

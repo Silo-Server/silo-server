@@ -253,6 +253,69 @@ func TestEmbyAuthenticateServerUser_DroppedConnectionIsReachabilityError(t *test
 	}
 }
 
+func TestEmbyAuthenticateServerUser_MidBodyDisconnectIsReachabilityError(t *testing.T) {
+	t.Parallel()
+
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		if hj, ok := w.(http.Hijacker); ok {
+			if conn, buf, err := hj.Hijack(); err == nil {
+				_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{\"AccessToken\":")
+				_ = buf.Flush()
+				_ = conn.Close()
+			}
+		}
+	}))
+	defer server.Close()
+
+	_, err := newUnthrottledEmbyClient().AuthenticateServerUser(trustLoopback(t.Context()), server.URL, "alice", "pw")
+	if err == nil {
+		t.Fatal("expected error when upstream disconnects mid-body")
+	}
+	if errors.Is(err, ErrUnexpectedSourceResponse) {
+		t.Fatalf("mid-body disconnect misclassified as ErrUnexpectedSourceResponse: %v", err)
+	}
+	if !IsReachabilityError(err) {
+		t.Fatalf("IsReachabilityError(%v) = false, want true", err)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("hits = %d, want 1 (must not retry /emby on mid-body disconnect)", got)
+	}
+}
+
+func TestEmbyAuthenticateServerUser_FallsBackToEmbyPrefixOn405(t *testing.T) {
+	t.Parallel()
+
+	var rec recordedPaths
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec.add(r.URL.Path)
+		if r.URL.Path == "/Users/AuthenticateByName" {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if r.URL.Path == "/emby/Users/AuthenticateByName" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"AccessToken":"tok-405","User":{"Id":"u-405"}}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	auth, err := newUnthrottledEmbyClient().AuthenticateServerUser(trustLoopback(t.Context()), server.URL, "alice", "pw")
+	if err != nil {
+		t.Fatalf("AuthenticateServerUser returned error: %v", err)
+	}
+	if auth.BaseURL != server.URL+"/emby" || auth.AccessToken != "tok-405" || auth.UserID != "u-405" {
+		t.Fatalf("auth = %+v", auth)
+	}
+	paths := rec.snapshot()
+	if len(paths) != 2 || paths[0] != "/Users/AuthenticateByName" || paths[1] != "/emby/Users/AuthenticateByName" {
+		t.Fatalf("requested paths = %v, want root then /emby fallback", paths)
+	}
+}
+
 func TestEmbyProviderStopsOnCanceledResumeFetch(t *testing.T) {
 	t.Parallel()
 

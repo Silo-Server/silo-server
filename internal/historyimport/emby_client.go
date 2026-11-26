@@ -421,8 +421,8 @@ func UpstreamHTTPStatus(err error) int {
 }
 
 // shouldTryAnotherBase reports whether trying the "/emby" suffix can succeed
-// after err: only when the root path returned 404 or a non-JSON 2xx (such as a
-// reverse-proxy landing page), never on cancellation, address refusals,
+// after err: only when the root path returned 404, 405, or a non-JSON 2xx (such
+// as a reverse-proxy landing page), never on cancellation, address refusals,
 // transport failures, or auth rejections.
 func shouldTryAnotherBase(ctx context.Context, err error) bool {
 	if ctx.Err() != nil {
@@ -430,7 +430,7 @@ func shouldTryAnotherBase(ctx context.Context, err error) bool {
 	}
 	var httpErr *embyHTTPError
 	if errors.As(err, &httpErr) {
-		return httpErr.StatusCode == http.StatusNotFound
+		return httpErr.StatusCode == http.StatusNotFound || httpErr.StatusCode == http.StatusMethodNotAllowed
 	}
 	return isJSONDecodeError(err)
 }
