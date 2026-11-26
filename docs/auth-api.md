@@ -113,8 +113,10 @@ password breaks, and its `detail` is the English sentence for it, such as "Use a
 characters." When a password breaks several rules, the code names one of them, so a client should
 not rely on which. A translated client shows `error.field.<code>` instead. That text is generic, so
 `password_too_short` doesn't name the minimum; a client that wants to show it reads
-[`getPasswordPolicy`](#get-authpassword-policy-getpasswordpolicy) again. A password outside the
-schema's 8 to 72 characters is refused before the policy runs, with code `out_of_range`.
+[`getPasswordPolicy`](#get-authpassword-policy-getpasswordpolicy) again. Every operation that sets a password
+except `changePassword` limits it to 8 to 72 characters in its schema, so a password outside that
+range gets `out_of_range` there before the policy runs. `changePassword` accepts 1 to 1024
+characters, so the policy answers it at any length.
 
 | Code | Rule broken |
 | --- | --- |
