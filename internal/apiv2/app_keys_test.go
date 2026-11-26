@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -281,10 +282,11 @@ func TestAppKeySealedReply(t *testing.T) {
 	challenge := make([]byte, appkeys.ChallengeSize)
 	user := &models.User{ID: 4}
 	tokens := &handlers.TokenPairView{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 28800,
-		User: handlers.UserView{ID: 4, Username: "sam", Email: "sam@example.test", Role: "user", DownloadAllowed: true, CreatedAt: fixtureAccountCreatedAt}}
+		User: handlers.UserView{ID: 4, Username: "sam", Email: "sam@example.test", Role: "user", DownloadAllowed: true,
+			PolicyPermissions: []string{"marker_edit", "metadata_curation"}, CreatedAt: fixtureAccountCreatedAt}}
 	const (
 		deviceID = "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11"
-		ownUser  = `"user":{"id":"4","username":"sam","email":"sam@example.test","role":"user","permissions":[],"download_allowed":true,"password_change_required":false},"account_created_at":"2025-03-14T09:26:53.589793Z"}`
+		ownUser  = `"user":{"id":"4","username":"sam","email":"sam@example.test","role":"user","permissions":["marker_edit","metadata_curation"],"download_allowed":true,"password_change_required":false},"account_created_at":"2025-03-14T09:26:53.589793Z"}`
 		appUser  = `"user":{"id":"4","username":"sam","email":"","role":"user","permissions":[],"download_allowed":false,"password_change_required":false}}`
 		pair     = `"tokens":{"access_token":"access","refresh_token":"refresh","expires_in":28800,`
 		route    = `"local_route":{"spki_sha256":"n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=","url":"http://192.168.1.20:8080"}}`
@@ -373,21 +375,30 @@ func openSealedAnswer(t *testing.T, path string, result auth.KeySignInResult, to
 // A session another app's key opened reads one account object, wherever it
 // reads it: the current-user read and tokens.user in its redeem's and its
 // sign-ins' sealed replies are built by one function, so the email is the
-// empty string and download_allowed false (downloads are refused to it) in
-// all of them, while the person's own device key reads the real values.
+// empty string, download_allowed false and permissions empty (every action
+// they stand for is refused to it) in all of them, while the person's own
+// device key and password session read the real values.
 // Catches the sealed reply drifting from the current-user read, which once
 // carried the email and the account's download permission to such an app.
 func TestGrantedAppReadsOneAccount(t *testing.T) {
 	deps := appKeyDeps(&fakeAppKeys{enabled: true})
 	view := deps.Accounts.(fakeAccounts).users[1]
+	view.PolicyPermissions = []string{"marker_edit", "metadata_curation"}
+	deps.Accounts = fakeAccounts{users: map[int]handlers.UserView{1: view}}
+	held := []Permission{"marker_edit", "metadata_curation"}
 	tokens := &handlers.TokenPairView{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 3600, User: view}
 	rec := do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/account/me", "", bearer(grantedAppToken))
 	var me Account
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &me) != nil {
 		t.Fatalf("current user: %d %s", rec.Code, rec.Body.String())
 	}
-	if me.Email != "" || me.DownloadAllowed || me.Username != view.Username {
+	if me.Email != "" || me.DownloadAllowed || me.Permissions == nil || len(me.Permissions) != 0 || me.Username != view.Username {
 		t.Fatalf("current user for another app = %+v", me)
+	}
+	rec = do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/account/me", "", bearer(memberToken))
+	var mine Account
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &mine) != nil || !slices.Equal(mine.Permissions, held) {
+		t.Fatalf("current user for the person's password session: %d %s", rec.Code, rec.Body.String())
 	}
 	user := &models.User{ID: 1}
 	for _, path := range []string{"/auth/grants/redeem", "/auth/keys/sign-in"} {
@@ -397,8 +408,8 @@ func TestGrantedAppReadsOneAccount(t *testing.T) {
 		}
 	}
 	own := openSealedAnswer(t, "/auth/keys/sign-in", auth.KeySignInResult{Status: appkeys.ReplySignedIn, User: user, PersonKeyReported: true}, tokens)
-	if own.Email != view.Email || !own.DownloadAllowed {
-		t.Fatalf("the person's own key: email %q, download_allowed %v", own.Email, own.DownloadAllowed)
+	if own.Email != view.Email || !own.DownloadAllowed || !slices.Equal(own.Permissions, held) {
+		t.Fatalf("the person's own key: email %q, download_allowed %v, permissions %v", own.Email, own.DownloadAllowed, own.Permissions)
 	}
 }
 

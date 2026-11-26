@@ -208,10 +208,12 @@ func (reg *Registry) getCurrentUser(ctx context.Context, _ *struct{}) (*AccountO
 // the current-user read and a sealed reply's tokens.user both build it here,
 // so the two always agree. A session another app's key opened gets the
 // email as the shape's "none" (the person's address is not an app's to
-// read), and download_allowed false when every download operation is
-// refused to it; everything else is the account's.
+// read), download_allowed false when every download operation is refused to
+// it, and only the permissions whose operations are not all refused to it
+// (permittedPermissions); everything else is the account's.
 func (reg *Registry) accountForSession(view handlers.UserView, kind auth.SessionKind) Account {
 	out := accountFromView(view)
+	out.Permissions = reg.permittedPermissions(kind, out.Permissions)
 	out.DownloadAllowed = out.DownloadAllowed && reg.memberPermittedFor(kind, "getCurrentUser download_allowed")
 	if kind == auth.SessionKindGrantedApp {
 		out.Email = ""

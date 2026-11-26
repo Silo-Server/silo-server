@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -430,6 +431,42 @@ func (reg *Registry) recordOrigins(operationID string, d OriginDecisions) {
 		reg.origins = map[string]OriginDecisions{}
 	}
 	reg.origins[operationID] = d
+}
+
+// recordPermission keeps which operations a policy permission gates, so a
+// read can tell a session of a permission only while one of them is open to
+// it (permittedPermissions).
+func (reg *Registry) recordPermission(permission, operationID string) {
+	if permission == "" {
+		return
+	}
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	if reg.permissionOps == nil {
+		reg.permissionOps = map[string][]string{}
+	}
+	reg.permissionOps[permission] = append(reg.permissionOps[permission], operationID)
+}
+
+// permittedPermissions is the part of an account's permissions a kind of
+// session may be told of: a read never tells a session it may do what every
+// operation a permission gates refuses it. A permission whose operations are
+// all refused to that kind is left out; one with an open operation stays, so
+// opening a permission's actions to such a session needs no change here.
+func (reg *Registry) permittedPermissions(kind auth.SessionKind, permissions []Permission) []Permission {
+	if kind == "" {
+		return permissions
+	}
+	out := make([]Permission, 0, len(permissions))
+	for _, permission := range permissions {
+		reg.mu.Lock()
+		governed := slices.Clone(reg.permissionOps[string(permission)])
+		reg.mu.Unlock()
+		if len(governed) == 0 || reg.permittedFor(kind, governed) {
+			out = append(out, permission)
+		}
+	}
+	return out
 }
 
 // capabilityPermitted is the rule every capability read applies to its
