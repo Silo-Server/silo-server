@@ -1388,8 +1388,7 @@ key, so its answers leave the member out.
 
 An answer to another app's key also carries `tokens.user.email` as the empty
 string and no `tokens.account_created_at`, as its refreshes carry none; the
-name and the role stay. `getCurrentUser` leaves the email out for such a
-session for the same reason: the person's address is not that app's to read.
+name and the role stay: the person's address is not that app's to read.
 
 **Waiting keys.** Every key an administrator's `introduce` enrolls waits for
 approval; keys from `enroll` start active. A waiting device repeats `sign-in`

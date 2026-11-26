@@ -765,7 +765,7 @@ Two answers leave the member out:
 An answer to another app's key also carries the account's email as the empty
 string in `tokens.user`, and no `account_created_at` (below), on its redeem,
 its sign-ins and its refreshes. The name and the role stay. The person's email
-is not that app's to read, as the current-user read answers such a session.
+is not that app's to read.
 The role there is always `user`: a grant is refused for an administrator's
 account, and promoting an account revokes all its keys.
 
