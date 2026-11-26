@@ -590,13 +590,17 @@ a Jellyfin name whose budget name signs in to a different account, keeps the bud
 Writing the setting refuses an account that does not exist or is an administrator's, with
 the usual settings validation answer at the setting's field. The exemption fails closed to
 the ordinary budget: with demo mode off, the setting empty, the account deleted, disabled,
-without local password sign-in or promoted to administrator since, or the settings never
-read by this process. The setting is read through the same `demomode.Setting` as
-`demo.enabled`, so a failed read uses the last value this process read. The account's
+without local password sign-in or promoted to administrator since, or a read of the
+settings or the account that fails. The two settings deliberately differ when a read
+fails. The demo refusals tighten what a visitor may do, so they keep the last value this
+process read (`demomode.Setting`). The exemption loosens a limit, so it reads the
+settings store directly and applies only on a read that just succeeded. The account's
 names are worked out off the sign-in path (`auth.DemoSignIn`, refreshed in the
 background), and an attempt only compares its name's budget key with them: an attempt for
 any other name runs the same reads as without the setting. An attempt whose name matches
-re-reads the settings and the account before it skips the budget. A rename or a newly
+re-reads the settings and the account before it skips the budget; names an earlier
+refresh found only choose which attempts re-read, and never skip the budget on their own.
+A rename or a newly
 set email takes effect at the next refresh; until then that name keeps the ordinary
 budget.
 
