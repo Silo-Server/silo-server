@@ -2857,7 +2857,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	// Cleaned and clamped like every other client identity, since the stream
 	// request that starts the native session may reuse these values.
 	negotiatedClient := playback.ClientInfo{
-		Name:    firstMediaBrowserAuthorizationValue(r, "Client"),
+		Name:    playback.WithoutGrantedAppClientName(firstMediaBrowserAuthorizationValue(r, "Client")),
 		Version: firstMediaBrowserAuthorizationValue(r, "Version"),
 	}.Normalized()
 	if err := h.playbackStore.PutNegotiated(PlaybackSession{

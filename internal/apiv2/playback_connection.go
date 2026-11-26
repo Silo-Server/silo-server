@@ -65,7 +65,7 @@ func registerPlaybackConnection(reg *Registry) {
 		}
 		return result
 	}
-	Register(reg, withOrigins(op(http.MethodGet, "", "getPlaybackConnection"), grantedRefusedOwnDevice), func(ctx context.Context, in *PlaybackConnectionInput) (*PlaybackConnectionOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "", "getPlaybackConnection"), grantedRefusedDeviceState), func(ctx context.Context, in *PlaybackConnectionInput) (*PlaybackConnectionOutput, error) {
 		service, ok := reg.deps.Playback.(playbackConnectionService)
 		if !ok {
 			return nil, NewProblem(TypeCapabilityNotConfigured, "Connection observations are unavailable.")
@@ -77,7 +77,7 @@ func registerPlaybackConnection(reg *Registry) {
 		body := PlaybackConnection{Connection: state.Connection, Probe: playbackProbeOf(state.Probe), PlaybackSample: playbackSampleOf(state.PlaybackSample), AutoBudgetKbps: state.AutoBudgetKbps, LearnedLimit: NullableObject[PlaybackLearnedLimit]{playbackLimitOf(state.LearnedLimit)}}
 		return &PlaybackConnectionOutput{CacheControl: playbackCacheControl, Body: body}, nil
 	})
-	Register(reg, withOrigins(op(http.MethodDelete, "/learned-limit", "resetPlaybackLearnedLimit"), grantedRefusedOwnDevice), func(ctx context.Context, in *PlaybackLearnedLimitResetInput) (*PlaybackConnectionResetOutput, error) {
+	Register(reg, withOrigins(op(http.MethodDelete, "/learned-limit", "resetPlaybackLearnedLimit"), grantedRefusedDeviceState), func(ctx context.Context, in *PlaybackLearnedLimitResetInput) (*PlaybackConnectionResetOutput, error) {
 		service, ok := reg.deps.Playback.(playbackConnectionService)
 		if !ok {
 			return nil, NewProblem(TypeCapabilityNotConfigured, "Connection observations are unavailable.")
@@ -106,7 +106,7 @@ type PlaybackProbeResultsInput struct {
 }
 
 func registerPlaybackProbeResults(reg *Registry) {
-	Register(reg, Operation{Operation: humaOp(http.MethodPost, Prefix+"/playback/bandwidth-probe/results", "reportPlaybackBandwidthProbe", playbackTag, "Store the calling device's latest measured connection speed."), Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, Origins: grantedRefusedOwnDevice}, func(ctx context.Context, in *PlaybackProbeResultsInput) (*PlaybackConnectionResetOutput, error) {
+	Register(reg, Operation{Operation: humaOp(http.MethodPost, Prefix+"/playback/bandwidth-probe/results", "reportPlaybackBandwidthProbe", playbackTag, "Store the calling device's latest measured connection speed."), Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, Origins: grantedRefusedDeviceState}, func(ctx context.Context, in *PlaybackProbeResultsInput) (*PlaybackConnectionResetOutput, error) {
 		service, ok := reg.deps.Playback.(playbackProbeResultService)
 		if !ok {
 			return nil, unavailable("connection observations")

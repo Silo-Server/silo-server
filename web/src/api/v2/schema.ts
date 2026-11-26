@@ -28328,11 +28328,14 @@ export interface components {
     CollectionCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
-      /** @description The acting account supports collection artwork */
+      /** @description The caller may upload and remove collection artwork: the acting account supports it and the session may make those operations (false for a session another app's key opened) */
       artwork: boolean;
       /** @example true */
       collection_default_sort: boolean;
-      /** @example true */
+      /**
+       * @description The caller may set and clear collection sort preferences; false for a session another app's key opened
+       * @example true
+       */
       collection_sort_preferences: boolean;
       /**
        * @description listCollections accepts contains_item and marks the acting profile's own manual collections with contains
@@ -28340,7 +28343,7 @@ export interface components {
        */
       contains_item: boolean;
       /**
-       * @description createCollection stores a description for the acting account
+       * @description The caller may create a collection, and createCollection stores its description; false for a session another app's key opened, which may not create one
        * @example true
        */
       create_description: boolean;
@@ -28358,7 +28361,7 @@ export interface components {
       /** @description Always false: personal collection groups are no longer supported */
       groups: boolean;
       /**
-       * @description Import sources the acting account can create a collection from; empty when imports is false
+       * @description Import sources the caller may create a collection from; empty when imports is false
        * @example [
        *       "mdblist",
        *       "tmdb",
@@ -28366,9 +28369,9 @@ export interface components {
        *     ]
        */
       import_sources: ("mdblist" | "tmdb" | "tmdb_list")[];
-      /** @description The acting account supports imported collections */
+      /** @description The caller may import collections: the acting account supports them and the session may make the import operations (false for a session another app's key opened) */
       imports: boolean;
-      /** @description The acting account supports reordering collection items */
+      /** @description The caller may reorder collection items: the acting account supports it and the session may make that operation (false for a session another app's key opened) */
       item_reorder: boolean;
       /** @description is_shared shows a collection to every profile on the login, listCollections includes other profiles' shared collections, and only a collection's creator changes or orders it */
       login_sharing: boolean;
@@ -28391,7 +28394,7 @@ export interface components {
       revision: string;
       schedule_time_zone: components["schemas"]["CollectionScheduleTimeZone"];
       /**
-       * @description collection_kind values the sort-preference operations accept
+       * @description collection_kind values the sort-preference operations accept; empty when the caller may not use them
        * @example [
        *       "library",
        *       "user",
@@ -28406,7 +28409,7 @@ export interface components {
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
       /**
-       * @description updateCollection accepts sync_schedule on a synced list; false when imports is false
+       * @description The caller may set sync_schedule on a synced list with updateCollection; false when imports is false
        * @example true
        */
       sync_schedule_editable: boolean;
@@ -40692,19 +40695,19 @@ export interface components {
       picker: boolean;
       /** @description Opaque revision of this document */
       revision: string;
-      /** @description The host may switch a lobby between host picks and voting */
+      /** @description The host may switch a lobby between host picks and voting; false for a session another app's key opened, which may not host a room */
       selection_mode_switch: boolean;
       socket_protocol: string;
-      /** @description Lobbies stage an item and the host starts it explicitly */
+      /** @description Lobbies stage an item and the host starts it explicitly; false for a session another app's key opened, which may not host a room */
       staged_selection: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
-      /** @description The host may stop playback and return the room to the lobby without ending it */
+      /** @description The host may stop playback and return the room to the lobby without ending it; false for a session another app's key opened, which may not host a room */
       stop_playback: boolean;
-      /** @description The host may promote any suggestion in a vote room, not only the leader */
+      /** @description The host may promote any suggestion in a vote room, not only the leader; false for a session another app's key opened, which may not host a room */
       vote_host_override: boolean;
     };
     WatchTogetherCreateInputBody: {

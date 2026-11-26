@@ -873,25 +873,48 @@ A permission member of a response (a boolean named `allowed`, ending in `_allowe
 refused to the session asking. Every such member of a response a judged kind of session may read has
 a row in one table (`capabilityMembers`, `internal/apiv2/origin_decisions.go`): either it governs,
 naming the operations it answers for, or it is exempt with a reason that says what the app would do
-if it believed it. A capability read's top-level `allowed` is applied by the shared capability
-adapter (`prepareCapabilityOperation`, published as `x-silo-capability-for`); a member deeper in a
-response by its handler. For a session of a kind the per-operation decisions judge
-(`x-silo-origin-decisions`), a governed member is false when every operation it names is refused to
-that kind; every other caller gets the member's own answer.
+if it believed it. A member that says what the caller may do under another name (a flag such as
+`imports`, or a list such as `import_sources`) has a row too. A capability read's top-level
+`allowed` is applied by the shared capability adapter (`prepareCapabilityOperation`, published as
+`x-silo-capability-for`); a member deeper in a response, or a finer member of a capability read, by
+its handler. For a session of a kind the per-operation decisions judge
+(`x-silo-origin-decisions`), a governed member is false, or an empty list, when every operation it
+names is refused to that kind; every other caller gets the member's own answer.
+
+Two capability reads answer member by member for a session another app's key opened, because some
+of what they describe is open to it and some is not:
+
+- `getCollectionCapabilities`: `allowed` stays true (listing and reading collections are open to
+  it). Every collection write is refused to it, so `imports`, `sync_schedule_editable`,
+  `item_reorder`, `create_description`, `artwork` and `collection_sort_preferences` are false and
+  `import_sources` and `sort_preference_kinds` are empty. `mdblist_search`, `contains_item` and
+  `preview_posters` name reads it may make and stay as they are; `login_sharing`,
+  `poster_collages`, `collection_default_sort`, `effective_collection_sort`, the display filter
+  vocabulary, `schedule_time_zone` and `groups` (always false) describe the server and stay.
+- `getWatchTogetherCapabilities`: `allowed` stays true (joining a room is open to it). The host
+  flags `staged_selection`, `selection_mode_switch`, `vote_host_override` and `stop_playback` are
+  false, since creating a room and every host operation are refused to it. The member features
+  (`lobby_ready`, `member_state`, `picker`, `max_member_state_ids`, `connection_replaced`,
+  `socket_protocol`) stay.
+
+The person's own session reads both as before. `TestCapabilityReadsAnswerForTheSession` checks
+every member of both reads for both kinds of session.
 
 `TestPermissionMembersStateTheirCase` fails by name on a member with no row. A live check, run over
 fakes that report each service available and against Postgres, fails on a true member with no row,
-or a governed one that is true when its operations are all refused. The live check sees every
-governed member except these, whose services its harness does not wire: the top-level `allowed` of
+or a governed one that is true when its operations are all refused. The governed members its harness
+cannot make true for the person's own session have tests of their own: the top-level `allowed` of
 `getApplePushRegistrationCapabilities`, `getPushRegistrationCapabilities`,
 `getDiagnosticsCapabilities`, `getHistoryImportCapability`, `getOnboardingCapabilities`,
 `getProfileExportCapability`, `getTitleAllowanceCapability`, `getTrailersCapability` and
-`getMetadataAICapability` (applied by the same adapter it does see), and the room read's and join's
-`self_can_manage_room` and `self_can_control_transport` (covered for the room read by
-`TestRoomReadLeavesOutAnotherDevicesStream`). Today the exempt members are four documents that
-describe server behavior (`getImageCapabilities`, `getNetworkAccessCapabilities`,
-`getPolicyCapability`, `getServerConnections`), whose only action is reading them, and the playback
-plan's `can_seek_anywhere`, which describes the stream's timeline, not a permission.
+`getMetadataAICapability` (`TestRefusedCapabilitiesTellAnotherAppNotAllowed`), and the room read's
+and join's `self_can_manage_room` and `self_can_control_transport`
+(`TestRoomReadLeavesOutAnotherDevicesStream`). Every other governed member names an operation open to
+such a session, so the rule never makes it false. The exempt members are documents that describe
+server behavior (`getImageCapabilities`, `getNetworkAccessCapabilities`, `getPolicyCapability`,
+`getServerConnections`), whose only action is reading them, the playback plan's
+`can_seek_anywhere`, which describes the stream's timeline, not a permission, and the finer members
+of the two reads above that describe the server.
 
 `links.identity` points at `GET /api/v2/system/identity`, the one public per-deployment value:
 a stable `server_id` every API process answers at every address. It is self-asserted and

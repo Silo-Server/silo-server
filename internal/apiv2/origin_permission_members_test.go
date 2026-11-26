@@ -1,11 +1,18 @@
 package apiv2
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/backup"
+	"github.com/Silo-Server/silo-server/internal/diagnostics"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // permissionMemberName reports whether a member names a permission: allowed,
@@ -15,9 +22,10 @@ func permissionMemberName(name string) bool {
 		strings.HasPrefix(name, "can_") || strings.HasPrefix(name, "self_can_")
 }
 
-// schemaPermissionMembers lists the boolean permission members of a schema,
-// at any depth, as paths ("allowed", "items[].requests_allowed").
-func schemaPermissionMembers(schemas map[string]any, schema any, path string, seen map[string]bool, out *[]string) {
+// schemaMembers lists every member of a schema, at any depth, as paths
+// ("allowed", "items[].requests_allowed"), each marked true when it is a
+// boolean permission member (permissionMemberName).
+func schemaMembers(schemas map[string]any, schema any, path string, seen map[string]bool, out map[string]bool) {
 	node, _ := schema.(map[string]any)
 	if node == nil {
 		return
@@ -31,7 +39,7 @@ func schemaPermissionMembers(schemas map[string]any, schema any, path string, se
 		for k := range seen {
 			next[k] = true
 		}
-		schemaPermissionMembers(schemas, schemas[name], path, next, out)
+		schemaMembers(schemas, schemas[name], path, next, out)
 		return
 	}
 	props, _ := node["properties"].(map[string]any)
@@ -41,18 +49,16 @@ func schemaPermissionMembers(schemas map[string]any, schema any, path string, se
 		if ref, ok := resolved["$ref"].(string); ok {
 			resolved, _ = schemas[ref[strings.LastIndex(ref, "/")+1:]].(map[string]any)
 		}
-		if permissionMemberName(name) && isBooleanSchema(resolved) {
-			*out = append(*out, member)
-		}
-		schemaPermissionMembers(schemas, prop, member, seen, out)
+		out[member] = out[member] || permissionMemberName(name) && isBooleanSchema(resolved)
+		schemaMembers(schemas, prop, member, seen, out)
 	}
 	if items, ok := node["items"]; ok {
-		schemaPermissionMembers(schemas, items, path+"[]", seen, out)
+		schemaMembers(schemas, items, path+"[]", seen, out)
 	}
 	for _, key := range []string{"allOf", "oneOf", "anyOf"} {
 		subs, _ := node[key].([]any)
 		for _, sub := range subs {
-			schemaPermissionMembers(schemas, sub, path, seen, out)
+			schemaMembers(schemas, sub, path, seen, out)
 		}
 	}
 }
@@ -67,10 +73,10 @@ func isBooleanSchema(s map[string]any) bool {
 	return false
 }
 
-// callablePermissionMembers is every permission member of a success response
-// of an operation a session another app's key opened may call, keyed as
-// capabilityMembers is.
-func callablePermissionMembers(t *testing.T) map[string]bool {
+// callableMembers is every member of a success response of an operation a
+// session another app's key opened may call, keyed as capabilityMembers is,
+// each marked true when it is a boolean permission member.
+func callableMembers(t *testing.T) map[string]bool {
 	t.Helper()
 	doc := generatedDocument(t)
 	schemas, _ := doc["components"].(map[string]any)["schemas"].(map[string]any)
@@ -87,10 +93,10 @@ func callablePermissionMembers(t *testing.T) map[string]bool {
 			}
 			content, _ := r.(map[string]any)["content"].(map[string]any)
 			for _, media := range content {
-				var members []string
-				schemaPermissionMembers(schemas, media.(map[string]any)["schema"], "", map[string]bool{}, &members)
-				for _, m := range members {
-					found[op.ID+" "+m] = true
+				members := map[string]bool{}
+				schemaMembers(schemas, media.(map[string]any)["schema"], "", map[string]bool{}, members)
+				for m, permission := range members {
+					found[op.ID+" "+m] = found[op.ID+" "+m] || permission
 				}
 			}
 		}
@@ -100,23 +106,26 @@ func callablePermissionMembers(t *testing.T) map[string]bool {
 
 // TestPermissionMembersStateTheirCase: a capability read never reports as
 // allowed an action whose operations are all refused to the session asking.
-// Every boolean member named allowed or *_allowed, at any depth, of a success
-// response a session another app's key opened may read either governs (names
-// the operations it answers for) or is exempt with a reason saying what the
-// app would do if it believed it. A member with neither fails here by name,
-// as an operation with no decision fails the decisions test; so does a
-// governed operation that does not exist, and a table row no response has.
-// Catches a new capability read, or a new permission flag, that tells the app
-// it may do what the gate refuses without anyone deciding.
+// Every boolean permission member (permissionMemberName), at any depth, of a
+// success response a session another app's key opened may read, and every
+// member a row names under another name, either governs (names the
+// operations it answers for) or is exempt with a reason saying what the app
+// would do if it believed it. A member with neither fails here by name, as an
+// operation with no decision fails the decisions test; so does a governed
+// operation that does not exist, and a table row no response has. Catches a
+// new capability read, or a new permission flag, that tells the app it may do
+// what the gate refuses without anyone deciding.
 func TestPermissionMembersStateTheirCase(t *testing.T) {
-	found := callablePermissionMembers(t)
+	found := callableMembers(t)
 	ids := map[string]bool{}
 	for _, op := range documentOperations(t) {
 		ids[op.ID] = true
 	}
-	for key := range found {
+	for key, permission := range found {
 		entry, ok := capabilityMembers[key]
 		switch {
+		case !ok && !permission:
+			continue
 		case !ok:
 			t.Errorf("%s: a permission member with no row in capabilityMembers: govern it or exempt it with a reason", key)
 		case len(entry.governs) == 0 && strings.TrimSpace(entry.exempt) == "":
@@ -131,7 +140,7 @@ func TestPermissionMembersStateTheirCase(t *testing.T) {
 		}
 	}
 	for key := range capabilityMembers {
-		if !found[key] {
+		if _, ok := found[key]; !ok {
 			t.Errorf("%s: no response such a session may read has this member; remove the row", key)
 		}
 	}
@@ -244,6 +253,101 @@ func TestAllowedReadsTellGrantedAppsNoRefusedAction(t *testing.T) {
 	}
 }
 
+// The services below report themselves available and answer only what a
+// capability read asks, so the person's own session is told allowed and the
+// rule alone tells another app's session not.
+type availableDiagnostics struct{ DiagnosticsIngressService }
+
+func (availableDiagnostics) UploadStatus(context.Context, int) (diagnostics.Status, error) {
+	return diagnostics.Status{Status: diagnostics.StatusAvailable, AcceptedSchemaVersions: []int{1}, AcceptedCrashSources: []string{}}, nil
+}
+
+type availableProfileTransfer struct{ ProfileTransferService }
+
+func (availableProfileTransfer) Capability() backup.ProfileExportCapability {
+	return backup.ProfileExportCapability{Format: "silo-profile-export", Version: 1, DataTypes: []string{}}
+}
+
+type availableTitleAllowances struct{ TitleAllowanceService }
+
+func (availableTitleAllowances) Supported(context.Context, int) bool { return true }
+
+type availableTrailers struct{ CatalogTrailerService }
+
+func (availableTrailers) TrailerRefreshCapability() handlers.TrailerRefreshCapabilityView {
+	return handlers.TrailerRefreshCapabilityView{Enabled: true, Statuses: []string{}, SupportedTypes: []string{}}
+}
+
+type availableMetadataAI struct{ MetadataAIService }
+
+func (availableMetadataAI) Status(context.Context) handlers.MetadataAIStatusView {
+	return handlers.MetadataAIStatusView{Enabled: true, OnView: metadataAIOnViewOff}
+}
+
+// TestRefusedCapabilitiesTellAnotherAppNotAllowed covers the governed
+// capability members the live check cannot reach: each answers for
+// operations all refused to a session another app's key opened, but the live
+// check's fixture leaves its service unwired, so the person's own session is
+// not told allowed there either. Each row wires the smallest fake that makes
+// the read available, and the person's own session is told allowed while
+// another app's session is told not. The four room members
+// (self_can_manage_room, self_can_control_transport on the room read and
+// join) are covered by TestRoomReadLeavesOutAnotherDevicesStream. Every other
+// governed member names an operation open to such a session, so the rule
+// never makes it false and the live check has nothing to see. Catches the
+// rule dropping off one of these reads.
+func TestRefusedCapabilitiesTellAnotherAppNotAllowed(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		wire func(*Dependencies)
+	}{
+		{"/devices/push/apple/capabilities", func(d *Dependencies) { d.OrderedApplePush = new(fakeOrderedApple) }},
+		{"/notifications/push/devices/capabilities", func(d *Dependencies) { d.OrderedAndroidPush = new(fakeOrderedPush) }},
+		{"/diagnostics/capabilities", func(d *Dependencies) { d.DiagnosticsIngress = availableDiagnostics{} }},
+		{"/history-imports/capability", func(d *Dependencies) { d.HistoryImports = struct{ HistoryImportService }{} }},
+		{"/onboarding/capabilities", func(d *Dependencies) { d.Onboarding = struct{ OnboardingService }{} }},
+		{"/capabilities/profile-export", func(d *Dependencies) { d.ProfileTransfer = availableProfileTransfer{} }},
+		{"/capabilities/title-allowances", func(d *Dependencies) { d.TitleAllowances = availableTitleAllowances{} }},
+		{"/capabilities/trailers", func(d *Dependencies) { d.CatalogTrailers = availableTrailers{} }},
+		{"/capabilities/metadata-ai", func(d *Dependencies) { d.MetadataAI = availableMetadataAI{} }},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			deps := pilotDeps(nil, nil)
+			tc.wire(&deps)
+			h := newTestHandler(t, deps)
+			if own, ok := capabilityAllowed(t, h, Prefix+tc.path, liveMemberToken); !ok || !own {
+				t.Fatalf("the person's own session was not told allowed (ok %v)", ok)
+			}
+			if app, ok := capabilityAllowed(t, h, Prefix+tc.path, liveGrantedAppToken); !ok || app {
+				t.Fatalf("another app's session told allowed=%v (ok %v)", app, ok)
+			}
+		})
+	}
+}
+
+// configuredMDBList reports an MDBList key, so mdblist_search is offered.
+type configuredMDBList struct{ CollectionImportService }
+
+func (configuredMDBList) MDBListConfigured() bool { return true }
+
+// truthy reports whether a JSON value offers something: true, a non-empty
+// list, string or object, or a nonzero number.
+func truthy(v any) bool {
+	switch x := v.(type) {
+	case bool:
+		return x
+	case []any:
+		return len(x) > 0
+	case string:
+		return x != ""
+	case float64:
+		return x != 0
+	case map[string]any:
+		return len(x) > 0
+	}
+	return false
+}
+
 // powerListName reports whether a list member names powers: permissions, or
 // a name ending in _permissions, _actions or _capabilities.
 func powerListName(name string) bool {
@@ -261,6 +365,78 @@ func isArraySchema(s map[string]any) bool {
 		return slices.Contains(t, any("array"))
 	}
 	return false
+}
+
+// TestCapabilityReadsAnswerForTheSession: the collection and Watch Together
+// capability reads answer, member by member, for the session asking. With
+// every feature on, the person's own session reads each governed member as
+// offered (the server's answer, as before), and another app's session reads
+// a member whose operations are all refused to it as false or empty and
+// every other member as the person's own session does. Catches a member that
+// offers such a session a collection write or a host power the gate refuses,
+// and a member the rule wrongly takes from the person's own session.
+func TestCapabilityReadsAnswerForTheSession(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	deps.PersonalCollections = &fakePersonalCollections{collages: true,
+		features: userstore.CollectionFeatures{Imports: true, Artwork: true, ItemReorder: true, Description: true}}
+	deps.CollectionImports = configuredMDBList{}
+	deps.WatchTogetherCapability = &fakeWatchTogetherCapability{available: true}
+	wireWatchTogetherCapabilityFakes(&deps)
+	h := newTestHandler(t, deps)
+	refused := map[string]bool{}
+	for _, op := range documentOperations(t) {
+		if d := documentedDecision(t, op); d != nil && d.Verdict == VerdictRefused {
+			refused[op.ID] = true
+		}
+	}
+	for op, path := range map[string]string{"getCollectionCapabilities": "/collections/capabilities", "getWatchTogetherCapabilities": "/watch-together/capabilities"} {
+		read := func(token string) map[string]any {
+			rec := do(t, h, http.MethodGet, Prefix+path, "", with(bearer(token), "X-Profile-Id", "p-owner"))
+			var body map[string]any
+			if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &body) != nil {
+				t.Fatalf("%s %s: %d %s", op, token, rec.Code, rec.Body.String())
+			}
+			return body
+		}
+		own, app := read(liveMemberToken), read(liveGrantedAppToken)
+		// A member with a row must be in both answers, not null, as the same
+		// kind of JSON value, before its value means anything: a renamed,
+		// dropped or nulled member fails here.
+		for key := range capabilityMembers {
+			member, ok := strings.CutPrefix(key, op+" ")
+			if !ok {
+				continue
+			}
+			if o, a := own[member], app[member]; o == nil || a == nil || reflect.TypeOf(o) != reflect.TypeOf(a) {
+				t.Errorf("%s %s: the person's own answer %v (%T), another app's %v (%T)", op, member, o, o, a, a)
+			}
+		}
+		for member := range own {
+			if member == "revision" || member == "state" {
+				continue
+			}
+			entry, ok := capabilityMembers[op+" "+member]
+			if !ok {
+				t.Errorf("%s %s has no row in capabilityMembers", op, member)
+				continue
+			}
+			o, a := own[member], app[member]
+			allRefused := len(entry.governs) > 0 && !slices.ContainsFunc(entry.governs, func(id string) bool { return !refused[id] })
+			_, boolean := o.(bool)
+			switch {
+			case len(entry.governs) > 0 && boolean && o != true:
+				t.Errorf("%s %s: the person's own session reads %v, want exactly true with every feature on", op, member, o)
+			case len(entry.governs) > 0 && !truthy(o):
+				t.Errorf("%s %s: the person's own session reads %v with every feature on", op, member, o)
+			case allRefused && boolean && a != false:
+				t.Errorf("%s %s: another app's session reads %v, want exactly false: every operation it governs is refused to it", op, member, a)
+			case allRefused && truthy(a):
+				t.Errorf("%s %s: another app's session reads %v, but every operation it governs is refused to it", op, member, a)
+			case !allRefused && !reflect.DeepEqual(a, o):
+				t.Errorf("%s %s: another app's session reads %v, the person's own %v", op, member, a, o)
+			}
+		}
+	}
 }
 
 // schemaPowerLists lists the array members of a schema whose name names
