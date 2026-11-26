@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -393,33 +394,60 @@ func TestProfileSetWakeSlowPhoneDB(t *testing.T) {
 		t.Fatal("wake answered false")
 	}
 
+	waitForWakeRows(t, pool, PushOutcomeDelivered+":", PushOutcomeFailed+":wake_send_timed_out")
+	if calls.Load() != 2 {
+		t.Fatalf("relay calls = %d, want 2: the second phone must still be sent", calls.Load())
+	}
+}
+
+// waitForWakeRows waits until the wake rows, as outcome:reason sorted by
+// outcome, are want.
+func waitForWakeRows(t *testing.T, pool *pgxpool.Pool, want ...string) {
+	t.Helper()
 	deadline := time.After(30 * time.Second)
 	poll := time.NewTicker(10 * time.Millisecond)
 	defer poll.Stop()
 	for {
-		rows, err := pool.Query(t.Context(), `SELECT outcome, COALESCE(upstream_reason, '') FROM push_delivery_attempts
+		rows, err := pool.Query(t.Context(), `SELECT outcome || ':' || COALESCE(upstream_reason, '') FROM push_delivery_attempts
 			WHERE trigger_type = $1 ORDER BY outcome`, PushTriggerProfileSet)
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (string, error) {
-			var outcome, reason string
-			err := row.Scan(&outcome, &reason)
-			return outcome + ":" + reason, err
-		})
+		got, err := pgx.CollectRows(rows, pgx.RowTo[string])
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(got) == 2 && got[0] == PushOutcomeDelivered+":" && got[1] == PushOutcomeFailed+":wake_send_timed_out" {
-			break
+		if slices.Equal(got, want) {
+			return
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("wake rows = %v after %d relay calls, want one delivered and one failed as timed out", got, calls.Load())
+			t.Fatalf("wake rows = %v, want %v", got, want)
 		case <-poll.C:
 		}
 	}
+}
+
+// A panic in one phone's send records that phone's wake failed and the
+// account's next phone is still sent. Regression: the only recover wrapped
+// the loop over the phones, so a panic left that row and every later
+// phone's in flight until the daily retention run.
+func TestProfileSetWakePanickingSendDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	registerForSession(t, repo, "live")
+	var calls atomic.Int32
+	node := profileSetWakeSystem(t, pool, repo, nil, nil)
+	node.pushSender.client = &http.Client{Transport: relayRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		if calls.Add(1) == 1 {
+			panic("relay transport failed")
+		}
+		return relayResponse(http.StatusOK, `{"request_id":"r","status":"accepted"}`), nil
+	})}
+	if !node.WakeProfileSetDevices(t.Context(), 7) {
+		t.Fatal("wake answered false")
+	}
+	waitForWakeRows(t, pool, PushOutcomeDelivered+":", PushOutcomeFailed+":wake_send_unfinished")
 	if calls.Load() != 2 {
-		t.Fatalf("relay calls = %d, want 2: the second phone must still be sent", calls.Load())
+		t.Fatalf("relay calls = %d, want 2: the next phone must still be sent", calls.Load())
 	}
 }
