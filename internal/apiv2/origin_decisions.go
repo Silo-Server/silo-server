@@ -1,6 +1,7 @@
 package apiv2
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -269,6 +270,7 @@ func originGate(decisions OriginDecisions) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
+			stripDeclaredDevice(r.Header)
 			if d := decisions.decisionFor(auth.SessionKindGrantedApp); d != nil && d.Verdict != VerdictRefused {
 				next.ServeHTTP(w, r)
 				return
@@ -279,6 +281,37 @@ func originGate(decisions OriginDecisions) func(http.Handler) http.Handler {
 			_, _ = w.Write(body)
 		})
 	}
+}
+
+// declaredDeviceHeaders are the headers a client names its device with.
+// X-Device-ID is the v2 playback device the start digests and resolves
+// device-scoped settings under; it is a device the caller names too.
+var declaredDeviceHeaders = []string{auth.ClientDeviceIDHeader, auth.ClientDeviceNameHeader, auth.ClientDevicePlatformHeader, "X-Device-ID"}
+
+// stripDeclaredDevice removes the device a session another app's key opened
+// declares, before any later gate, input binding or handler reads it. The
+// server cannot tell that app's device from another of the person's, so the
+// device registry, the connection record and the device-scoped settings would
+// otherwise be written or read for whichever device the app names. Every
+// device-keyed read and write then takes the "no declared device" path. The
+// request's header map is shared by every request value the chain derives
+// from it (WithContext copies the pointer), and nothing before this gate
+// clones it on a login session's path, so no later reader sees the value.
+func stripDeclaredDevice(h http.Header) {
+	for _, name := range declaredDeviceHeaders {
+		h.Del(name)
+	}
+}
+
+// grantedAppNamedTargetProblem refuses a session another app's key opened
+// that names another profile or another device on a settings read. The
+// answer is the same whether the id exists, so the refusal reveals nothing
+// about the account's profiles or devices.
+func grantedAppNamedTargetProblem(ctx context.Context, profileID ID, deviceID string) *Problem {
+	if !grantedAppSession(claimsFrom(ctx)) || (profileID == "" && deviceID == "") {
+		return nil
+	}
+	return NewProblem(TypePermissionDenied, handlers.SessionNotAllowedDetail)
 }
 
 // grantedAppSession reports whether the caller is a session another app's

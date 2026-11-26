@@ -1085,6 +1085,9 @@ func (reg *Registry) getSettingValue(ctx context.Context, in *SettingKeyInput) (
 	if p != nil {
 		return nil, p
 	}
+	if p := grantedAppNamedTargetProblem(ctx, in.ProfileID, in.DeviceID); p != nil {
+		return nil, p
+	}
 	view, err := reg.deps.SettingValues.GetSettingValue(ctx, userID, in.identity(ctx, in.Key))
 	if err != nil {
 		return nil, settingValueProblem(err, nil)
@@ -1128,6 +1131,9 @@ func (reg *Registry) listSettingValues(ctx context.Context, in *SettingValuesInp
 	if p != nil {
 		return nil, p
 	}
+	if p := grantedAppNamedTargetProblem(ctx, in.ProfileID, in.DeviceID); p != nil {
+		return nil, p
+	}
 	views, err := reg.deps.SettingValues.ListSettingValues(ctx, userID, in.Keys, in.identity(ctx, ""))
 	if err != nil {
 		return nil, settingValueProblem(err, map[string]string{fieldKey: locationQueryKeys})
@@ -1152,6 +1158,9 @@ func (reg *Registry) listSettingValues(ctx context.Context, in *SettingValuesInp
 func (reg *Registry) listEffectiveSettings(ctx context.Context, in *EffectiveSettingsInput) (*EffectiveSettingCollectionOutput, error) {
 	userID, p := reg.settingValuesReady(ctx)
 	if p != nil {
+		return nil, p
+	}
+	if p := grantedAppNamedTargetProblem(ctx, in.ProfileID, in.DeviceID); p != nil {
 		return nil, p
 	}
 	q, p := in.query(ctx, in.Keys)
