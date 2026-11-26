@@ -145,9 +145,9 @@ func TestClearOverrideNameConflictOnTheWireDB(t *testing.T) {
 		Request: handlers.ProfileUpdateRequest{Name: new("Kid")}, AccountAdmin: true}); err != nil {
 		t.Fatal(err)
 	}
-	clear := readProblemAnswer(t, do(t, h, http.MethodDelete, base+kidID+"/overrides/name", "", actingRequestAdmin))
-	if rename.status != http.StatusConflict || clear.status != rename.status || clear.problem.Type != rename.problem.Type || clear.problem.Detail != rename.problem.Detail {
-		t.Fatalf("clear answered %d %+v; the owner's rename to a taken name answers %d %+v", clear.status, clear.problem, rename.status, rename.problem)
+	cleared := readProblemAnswer(t, do(t, h, http.MethodDelete, base+kidID+"/overrides/name", "", actingRequestAdmin))
+	if rename.status != http.StatusConflict || cleared.status != rename.status || cleared.problem.Type != rename.problem.Type || cleared.problem.Detail != rename.problem.Detail {
+		t.Fatalf("clear answered %d %+v; the owner's rename to a taken name answers %d %+v", cleared.status, cleared.problem, rename.status, rename.problem)
 	}
 	after, err := service.HeldProfileSet(ctx, userID)
 	if err != nil || len(after.Overrides) != 1 || after.Overrides[0].Field != "name" || after.Items[1].Name != "Kiddo" {
