@@ -57,7 +57,7 @@ func registerDownloadCreation(reg *Registry) {
 	op.DefaultStatus = http.StatusAccepted
 	op.MaxBodyBytes = 256 << 10
 	op.Errors = []int{409, 429, 501}
-	Register(reg, withOrigins(op, grantedRefusedOwnDevice), func(ctx context.Context, in *DownloadCreateInput) (*DownloadCreateOutput, error) {
+	Register(reg, withOrigins(op, grantedRefusedDeviceState), func(ctx context.Context, in *DownloadCreateInput) (*DownloadCreateOutput, error) {
 		return reg.createDownloads(ctx, cursors, in)
 	})
 }

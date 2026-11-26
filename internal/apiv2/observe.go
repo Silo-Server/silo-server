@@ -115,10 +115,6 @@ type observation struct {
 	errorCode   string
 	authClass   string
 	userID      *int
-	// clientName and clientVersion are the clamped X-Silo-Client identity,
-	// read once when the request arrives.
-	clientName    string
-	clientVersion string
 }
 
 type observationKey struct{}
@@ -143,7 +139,6 @@ func observe(next http.Handler) http.Handler {
 		ctx, db := queryattr.StartRequest(ctx)
 		r = r.WithContext(ctx)
 		o := &observation{db: db, operationID: labelNone, errorCode: labelNone, authClass: authClassAnonymous}
-		o.clientName, o.clientVersion = clientIdentity(r)
 		r = r.WithContext(context.WithValue(r.Context(), observationKey{}, o))
 		sw := &statusRecorder{ResponseWriter: w}
 		httpstream.Serve(recoverRaw(next, sw), sw, r, func(aborted bool) {
@@ -309,7 +304,10 @@ func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 }
 
 func report(r *http.Request, o *observation, status int, aborted, hijacked bool, bodyBytes int64, elapsed time.Duration) {
-	name, version := o.clientName, o.clientVersion
+	// Read when the line is written, not when the request arrives: the origin
+	// gate names the client of a session another app's key opened, and drops
+	// that name from every other caller, on the request's shared headers.
+	name, version := clientIdentity(r)
 	major := strconv.Itoa(APIMajor)
 	method := methodLabel(r.Method)
 	class := statusClass(status)

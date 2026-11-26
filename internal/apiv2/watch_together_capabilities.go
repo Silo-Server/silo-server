@@ -48,16 +48,19 @@ func registerWatchTogetherCapabilities(reg *Registry) {
 		if memberState {
 			maxIDs = watchtogether.MaxMemberStateIDs
 		}
+		// A host flag describes the session asking: false for one to which
+		// every host operation it governs is refused (capabilityMembers).
+		host := func(member string) bool { return reg.memberPermitted(ctx, "getWatchTogetherCapabilities "+member) }
 		return &WatchTogetherCapabilitiesOutput{Body: WatchTogetherCapabilities{
 			Capability:          Capability{Allowed: new(capabilityLoginAllowed(ctx))},
-			StagedSelection:     reg.deps.WatchTogetherStage != nil && reg.deps.WatchTogetherStart != nil,
+			StagedSelection:     reg.deps.WatchTogetherStage != nil && reg.deps.WatchTogetherStart != nil && host("staged_selection"),
 			LobbyReady:          reg.deps.WatchTogetherSocket != nil,
 			ConnectionReplaced:  reg.deps.WatchTogetherSocket != nil,
-			SelectionModeSwitch: reg.deps.WatchTogetherSelectionMode != nil,
+			SelectionModeSwitch: reg.deps.WatchTogetherSelectionMode != nil && host("selection_mode_switch"),
 			MemberState:         memberState,
 			Picker:              reg.deps.WatchTogetherPicker != nil && reg.deps.CatalogAccess != nil,
-			VoteHostOverride:    reg.deps.WatchTogetherSuggestionPromote != nil,
-			StopPlayback:        reg.deps.WatchTogetherStop != nil,
+			VoteHostOverride:    reg.deps.WatchTogetherSuggestionPromote != nil && host("vote_host_override"),
+			StopPlayback:        reg.deps.WatchTogetherStop != nil && host("stop_playback"),
 			MaxMemberStateIDs:   maxIDs,
 			SocketProtocol:      socketProtocol,
 		}}, nil

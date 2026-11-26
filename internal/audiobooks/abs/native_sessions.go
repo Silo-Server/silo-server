@@ -409,7 +409,9 @@ func (d *absDeviceInfo) UnmarshalJSON(data []byte) error {
 // sent, else the request headers.
 func absPlaybackClientInfo(r *http.Request, device absDeviceInfo) playback.ClientInfo {
 	client := absPlaybackClientInfoFromRequest(r)
-	if name := strings.TrimSpace(device.ClientName); name != "" {
+	// No client here is recorded under the name reserved for another app's
+	// session on the native API.
+	if name := strings.TrimSpace(playback.WithoutGrantedAppClientName(device.ClientName)); name != "" {
 		// The headers may describe another client, so their version is not
 		// carried over to the one deviceInfo names.
 		client.Name, client.Version = name, strings.TrimSpace(device.ClientVersion)
@@ -421,12 +423,12 @@ func absPlaybackClientInfoFromRequest(r *http.Request) playback.ClientInfo {
 	if r == nil {
 		return playback.ClientInfo{Name: "Audiobookshelf"}
 	}
-	name := firstHeaderValue(r,
+	name := playback.WithoutGrantedAppClientName(firstHeaderValue(r,
 		"X-Silo-Client",
 		"X-Client-Name",
 		"X-Device-Name",
 		"X-Emby-Client",
-	)
+	))
 	if name == "" {
 		name = "Audiobookshelf"
 	}

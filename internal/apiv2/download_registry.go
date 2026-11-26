@@ -130,21 +130,21 @@ type DownloadCapabilityOutput struct {
 
 func registerDownloadRegistry(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/downloads", "listDownloads", "downloads", "Page device-managed downloads or account ephemeral downloads."), Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedOwnDevice}, func(ctx context.Context, in *DownloadRegistryInput) (*DownloadRegistryOutput, error) {
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/downloads", "listDownloads", "downloads", "Page device-managed downloads or account ephemeral downloads."), Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedDeviceState}, func(ctx context.Context, in *DownloadRegistryInput) (*DownloadRegistryOutput, error) {
 		return reg.listDownloads(ctx, cursors, in)
 	})
 	op := Operation{Operation: humaOp(http.MethodPatch, Prefix+"/downloads/{id}", "reportDownloadStatus", "downloads", "Record a revision-bound local status event; older or equal events return current state."), Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyDomainIdentity}
 	op.MaxBodyBytes = 4096
 	op.Errors = []int{409}
-	Register(reg, withOrigins(op, grantedRefusedOwnDevice), reg.reportDownloadStatus)
+	Register(reg, withOrigins(op, grantedRefusedDeviceState), reg.reportDownloadStatus)
 	remove := Operation{Operation: humaOp(http.MethodDelete, Prefix+"/downloads/{id}", "deleteDownload", "downloads", "Remove a managed download or cancel an ephemeral transfer."), Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	remove.DefaultStatus = 204
-	Register(reg, withOrigins(remove, grantedRefusedOwnDevice), reg.deleteDownload)
+	Register(reg, withOrigins(remove, grantedRefusedDeviceState), reg.deleteDownload)
 	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/capabilities/downloads", "getDownloadCapability", "downloads", "Discover download policy and ordered registry status support."), Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedCapability}, reg.getDownloadCapability)
 	prepare := Operation{Operation: humaOp(http.MethodPost, Prefix+"/downloads/{id}/prepare", "prepareDownloadAgain", "downloads", "Prepare a finished download's file again after the server cleaned up its copy; the entry returns to preparing and becomes ready like a new download."), Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	prepare.Description = "Use after the file route answers 409 prepared_file_expired. The revision does not change: the recipe is the same. An entry whose file is still on the server, an original-quality entry, or one already preparing returns unchanged."
 	prepare.Errors = []int{409, 429, 501}
-	Register(reg, withOrigins(prepare, grantedRefusedOwnDevice), reg.prepareDownloadAgain)
+	Register(reg, withOrigins(prepare, grantedRefusedDeviceState), reg.prepareDownloadAgain)
 }
 
 // DownloadPrepareAgainService prepares a finished managed download's expired

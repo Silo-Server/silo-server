@@ -622,7 +622,7 @@ func (reg *Registry) getCollectionCapabilities(ctx context.Context, _ *Capabilit
 			return nil, collectionProblem(err)
 		}
 	}
-	return &CollectionCapabilitiesOutput{Body: CollectionCapabilities{
+	body := CollectionCapabilities{
 		Groups: features.Groups, LoginSharing: true, Imports: features.Imports, Artwork: features.Artwork, ItemReorder: features.ItemReorder,
 		ImportSources:       collectionImportSources(features.Imports),
 		DisplayFilterFields: NonNil(v.DisplayFilterFields),
@@ -640,7 +640,29 @@ func (reg *Registry) getCollectionCapabilities(ctx context.Context, _ *Capabilit
 		ContainsItem:              true,
 		PreviewPosters:            true,
 		PosterCollages:            v.PosterCollages && features.Artwork,
-	}}, nil
+	}
+	reg.collectionWritesForSession(ctx, &body)
+	return &CollectionCapabilitiesOutput{Body: body}, nil
+}
+
+// collectionWritesForSession makes each member that offers a collection
+// write describe the session asking: false, or no import source, for a
+// session to which every operation the member governs is refused
+// (capabilityMembers). A person's own session reads the server's answer.
+func (reg *Registry) collectionWritesForSession(ctx context.Context, c *CollectionCapabilities) {
+	permitted := func(member string) bool { return reg.memberPermitted(ctx, "getCollectionCapabilities "+member) }
+	c.Imports = c.Imports && permitted("imports")
+	if !permitted("import_sources") {
+		c.ImportSources = []string{}
+	}
+	c.SyncScheduleEditable = c.SyncScheduleEditable && permitted("sync_schedule_editable")
+	c.ItemReorder = c.ItemReorder && permitted("item_reorder")
+	c.CreateDescription = c.CreateDescription && permitted("create_description")
+	c.Artwork = c.Artwork && permitted("artwork")
+	c.CollectionSortPreferences = c.CollectionSortPreferences && permitted("collection_sort_preferences")
+	if !permitted("sort_preference_kinds") {
+		c.SortPreferenceKinds = []string{}
+	}
 }
 
 // createCollection is the JSON form of v1 POST /collections. The v1
