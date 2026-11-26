@@ -240,7 +240,7 @@ func (r *PushDeviceRepository) failUnfinishedProfileSetWake(ctx context.Context,
 // service's other detached sends do (PostServerChannelRequestEvent): the
 // caller never waits for the relay. Each phone is sent in turn under its own
 // deadline, and a send that did not record an outcome is recorded failed on
-// a fresh context its deadline cannot have cancelled, so no wake row outlives
+// a fresh context its deadline cannot have canceled, so no wake row outlives
 // its send in flight. Only a process that stops mid-send leaves one, which no
 // claim selects, the queue gauge leaves out, and retention marks failed.
 func (s *System) sendProfileSetWakeDetached(ctx context.Context, attempts []PushDeliveryAttempt) {
