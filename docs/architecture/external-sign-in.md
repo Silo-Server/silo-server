@@ -44,10 +44,12 @@ SDK's `docs/auth-provider.md`.
   the settings lock first and then the identities. So the uninstall never
   waits for an identity while it holds the settings lock: if one is held, it
   rolls the whole attempt back, releasing the settings lock, and tries again
-  a bounded number of times within well under a second, then answers busy
-  (`plugins.ErrInstallationBusy`, 503 `dependency_unavailable` with
-  `Retry-After`) with nothing changed. `TestUninstallAddsNoLockCycleDB` stages
-  each of those paths against it, each side first.
+  a bounded number of times, then answers busy (`plugins.ErrInstallationBusy`,
+  503 `dependency_unavailable` with `Retry-After`) with nothing changed. The
+  pauses between attempts add about 150 ms; each attempt still waits its turn
+  for the settings lock, and the request's deadline bounds the call.
+  `TestUninstallAddsNoLockCycleDB` stages each of those paths against it,
+  each side first.
 - Every other writer of those rows writes one row, writes only sessions that
   carry no identity (impersonation sessions), deletes an account created in
   the same request, or never waits (the expired-session and expired-request

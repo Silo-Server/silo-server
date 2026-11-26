@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -77,10 +78,20 @@ func (e *lockOrderEnv) waitBlocked(t *testing.T, fragment string, skip ...int) i
 	}
 }
 
-// uninstall runs the plugin uninstall in the background.
+// uninstallDeadline bounds each staged uninstall. An uninstall that waits on
+// a lock the test holds open (what it would do without its no-wait identity
+// lock) fails the test when it runs out, instead of hanging it.
+const uninstallDeadline = 5 * time.Second
+
+// uninstall runs the plugin uninstall in the background, within
+// uninstallDeadline.
 func (e *lockOrderEnv) uninstall() <-chan error {
 	done := make(chan error, 1)
-	go func() { done <- e.installs.Delete(context.Background(), e.oidc) }()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), uninstallDeadline)
+		defer cancel()
+		done <- e.installs.Delete(ctx, e.oidc)
+	}()
 	return done
 }
 
@@ -119,8 +130,9 @@ func noDeadlock(t *testing.T, side string, err error) {
 // settings lock in either order: unlinking an identity and deleting an
 // account (identity, then settings lock) and an account update that ends
 // sessions (settings lock, then identities). Each side goes first. Without
-// the uninstall's no-wait identity lock, the identity-first paths deadlock
-// with it.
+// the uninstall's no-wait identity lock, the uninstall-first cases with
+// unlink and account delete deadlock, and the identity-first cases wait out
+// uninstallDeadline.
 func TestUninstallAddsNoLockCycleDB(t *testing.T) {
 	// The identity-first paths, replayed in their order. Each takes an
 	// identity row, then the settings lock.

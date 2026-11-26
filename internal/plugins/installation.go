@@ -793,8 +793,9 @@ const sqlStateLockNotAvailable = "55P03"
 // errIdentitiesHeld is one attempt finding an identity row already locked.
 var errIdentitiesHeld = errors.New("plugin identities are locked")
 
-// Uninstall attempts and the pause between them. The whole retry stays well
-// under a second, so an admin request answers promptly either way.
+// Uninstall attempts and the pause between them. The pauses add about 150 ms
+// in all; each attempt still waits its turn for the server-settings lock, and
+// the request's deadline bounds the whole call.
 const (
 	deleteIdentityAttempts = 3
 	deleteIdentityBackoff  = 50 * time.Millisecond
