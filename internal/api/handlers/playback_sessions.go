@@ -154,11 +154,9 @@ type PlaybackSessionsQuery struct {
 	Lifecycle bool
 	// SessionID, when set, limits results to one session.
 	SessionID string
-	// LoginSessionID, when set, limits results to the sessions whose
-	// playback attempt that login session started. A session with no
-	// attempt or no recorded login session (a Jellyfin-compatible or
-	// Audiobookshelf-compatible play, or an attempt older than the record)
-	// is left out.
+	// LoginSessionID, when set, limits results to the sessions whose attempt
+	// that login session started; one with no recorded login session (a
+	// compatibility-surface play, an older attempt) is left out.
 	LoginSessionID string
 	// Detached reads one session from this playback_sessions_sync row,
 	// rendered by worker.SessionSyncRowJSON, instead of the table.
