@@ -100,13 +100,14 @@ func (s *Service) keyProviderExpiry(ctx context.Context, userID int, binding Key
 
 // keySignInPolicy decides whether a key may open a login session now, and
 // answers the provider identity and provider_since the session continues
-// (nil for none). It runs after the account row lock and before any key or
-// session row is locked, from a binding read without a lock: the caller then
-// locks the row and checks its binding is still the one decided here. That
-// keeps the lock order every key path shares: the account, the installation,
-// the identity, the person key, the device keys, the sessions. A plugin
-// uninstall takes the installation, its identities and the sessions whose
-// identity it clears, and never a key row.
+// (nil for none). It runs after the account row lock and the settings lock
+// (lockChain) and before any key or session row is locked, from a binding
+// read without a lock: the caller then locks the row and checks its binding
+// is still the one decided here. That keeps the lock order every key path
+// shares: the account, the settings lock, the installation, the identity,
+// the person key, the device keys, the sessions. A plugin uninstall takes the
+// installation, its identities and the sessions whose identity it clears,
+// and never a key row or the settings lock.
 //
 // A provider-bound key inherits the provider checks of the session that
 // enrolled it. Its identity is locked and checked as an OAuth sign-in checks
@@ -119,17 +120,12 @@ func (s *Service) keyProviderExpiry(ctx context.Context, userID int, binding Key
 // A key that is not provider-bound is a local credential. While the server
 // has local password sign-in off it works only for a break-glass account,
 // exactly as a password would, and it is refused while a network provider
-// refuses the account (localPasswordPolicy).
+// refuses the account (localPasswordPolicy). The settings lock lockChain
+// holds serializes it with a change of auth.local_password_login, as a
+// password sign-in's does.
 func keySignInPolicy(ctx context.Context, tx pgx.Tx, user *models.User, binding KeyBinding) (*int64, *time.Time, error) {
 	if binding.ProviderBound {
 		return lockKeyIdentity(ctx, tx, user, binding.IdentityID)
-	}
-	if !user.BreakGlass {
-		// Serialize with a change of auth.local_password_login, as a password
-		// sign-in does.
-		if err := lockServerSettings(ctx, tx); err != nil {
-			return nil, nil, err
-		}
 	}
 	return nil, nil, localPasswordPolicy(ctx, tx, user)
 }

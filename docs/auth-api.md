@@ -1562,7 +1562,12 @@ code redemption, `PUT /auth/keys/person`, `pending/{id}/approve` and the signed
 form of `PUT /api/v2/profiles/set` answer 409 `capability_disabled`, and the
 invitation lookup reports `app_join: false`. The capability,
 `GET /auth/keys` and its deletes, `GET /auth/keys/pending` and
-`pending/{id}/deny` stay open. A server in demo
+`pending/{id}/deny` stay open. Turning the switch off ends every login session
+a key opened, a granted app's included, in the same transaction as the
+settings write; sessions opened by a password, a provider or device sign-in
+stay. A key session is also refused at refresh while the switch is off
+(`session_expired`, as a revoked session). Turning it back on needs nothing:
+each device signs in again with its key. A server in demo
 mode (`demo.enabled`) behaves as if the switch were off, for administrators
 too, and its capability reports `disabled`: every visitor shares one account
 there, so no key is enrolled on it and none signs in. There

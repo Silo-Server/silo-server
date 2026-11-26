@@ -389,6 +389,11 @@
 ./internal/auth TestUnlinkRevokesItsKeysDB
 ./internal/auth TestKeyChallengeSpentOnKidMismatchDB
 ./internal/auth TestKeySessionRefusedPastItsLimitDB
+# Turning the app key switch off: key sessions end with the write, key paths
+# re-read the switch under the settings lock, and renewal reads it.
+./internal/auth TestAppKeySwitchOffEndsKeySessionsDB
+./internal/auth TestKeySignInRacesSwitchOffDB
+./internal/api/handlers TestAppKeySwitchWriteEndsKeySessionsDB
 ./internal/auth TestGrantRedeemDB
 ./internal/auth TestGrantRedeemRefusalsDB
 ./internal/auth TestGrantRedeemConcurrentDB

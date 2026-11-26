@@ -196,9 +196,14 @@ type lockedChain struct {
 	providerSince *time.Time
 }
 
-// lockChain takes the provider and settings locks for binding (keySignInPolicy)
-// after the account row lock and before any key or session row.
+// lockChain takes the settings lock and reads the switch under it
+// (lockAppKeySwitch), then takes the provider locks for binding
+// (keySignInPolicy), after the account row lock and before any key or
+// session row. A switch that is off refuses with ErrAppKeySignInDisabled.
 func lockChain(ctx context.Context, tx pgx.Tx, user *models.User, binding KeyBinding) (lockedChain, error) {
+	if err := lockAppKeySwitch(ctx, tx); err != nil {
+		return lockedChain{}, err
+	}
 	identityID, providerSince, err := keySignInPolicy(ctx, tx, user, binding)
 	return lockedChain{identityID: identityID, providerSince: providerSince}, err
 }

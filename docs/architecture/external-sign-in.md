@@ -47,7 +47,12 @@ SDK's `docs/auth-provider.md`.
   clears requests before sessions; that follows from the names Postgres gave
   the two foreign keys' triggers, and nothing relies on it. These paths take
   one account at a time: an uninstall deletes an installation's identities in
-  an order of its own, and an account holds at most one of them.
+  an order of its own, and an account holds at most one of them. Turning the
+  app key switch off ends key sessions across every account
+  (`EndAppKeySessionsTx`), so it locks every installation row (share, in id
+  order) before the sessions instead: an uninstall locks its installation
+  before it deletes identities, so one of the two waits at the installation
+  holding no session row.
 - Every other writer of those rows writes one row, writes only sessions that
   carry no identity (impersonation sessions), deletes an account created in
   the same request, or never waits (the expired-session and expired-request

@@ -93,10 +93,15 @@ fails like any other revoked session's. Revoking every key of an account does
 the same for each of its device keys.
 
 **Lock order.** Key rows are written only by application transactions, and
-always in one order: the account row (`lockUser`), the plugin installation
-(share) and the provider identity a key is bound to (`keySignInPolicy`), the
-person key, the device keys, then the login sessions those keys opened. No
-database trigger or cascade writes to a key row. A sign-in reads the key's
+always in one order: the account row (`lockUser`), the settings lock (shared;
+`lockChain`, see [The switch](#the-switch)), the plugin installation (share)
+and the provider identity a key is bound to (`keySignInPolicy`), the person
+key, the device keys, then the login sessions those keys opened. No database
+trigger or cascade writes to a key row. Turning the switch off takes the
+settings lock (exclusive), every plugin installation row (share, in id order)
+and then the key sessions (in id order), and no account, identity or key
+row, so it never waits on anything a key path holds while holding something
+that path needs. A sign-in reads the key's
 binding without a lock, locks the installation and identity, then locks the
 key row and, when its binding changed meanwhile (a link committed in between),
 answers 429 with a one-second `Retry-After`: the key is still good, and the
@@ -1586,12 +1591,48 @@ redemption, both app code issues and app code redemption,
 `PUT /auth/keys/person`, `pending/{id}/approve` and the signed
 form of `PUT /profiles/set` answer
 `capability_disabled`; the invitation lookup reports `app_join: false`. A person's own key list and its deletes, the pending
-list and `deny` stay open, so keys can be reviewed, revoked and refused; sessions keys
-opened before are not ended by the switch. A session another app's key
-opened is answered 403 `permission_denied` by the origin gate on
-`createAppCode`, `enrollAppKeys`, `approvePendingAppKey` and
-`replacePersonKey` before those operations' `capability_disabled`. Backups classify it as an access setting: a restore keeps the
-stricter of the live and the backed-up value.
+list and `deny` stay open, so keys can be reviewed, revoked and refused.
+
+**Turning the switch off ends every session a key opened.** "The switch" is
+one fact everywhere it is read: the setting on and demo mode off
+(`auth.AppKeySwitchOn`). A settings write that turns it off, through
+`PUT /admin/settings` or `PUT /admin/settings/{key}` (the setting going off,
+or `demo.enabled` going on), ends every live session with a
+`device_key_id` (`auth.EndAppKeySessionsTx`): the person's own device keys'
+and those of apps enrolled with a grant. Sessions opened by a password, a
+provider or device sign-in are untouched, and so are the keys. The sweep runs
+in the settings write's own transaction, which holds the settings lock in
+exclusive mode, so the write and the sweep commit together or not at all.
+Turning the switch back on needs nothing: each device signs in again with the
+key it holds.
+
+Every key path that opens a session, enrolls a key or verifies a signed
+profile set reads the switch again inside its transaction, under the settings
+lock (`lockChain`, which calls `lockAppKeySwitch` right after the account row
+lock), and refuses with `capability_disabled` when it is off. So a key
+sign-in and a switch-off serialize: either the switch-off commits first and
+the sign-in is refused without a session, or the sign-in commits first and
+the switch-off, waiting on the lock, ends its session. The key paths take the
+lock in shared mode: they only read the settings under it, and none asks for
+it in exclusive mode later in the same transaction (an app code's join takes
+it exclusive before `lockChain`, and a transaction's shared request on a lock
+it already holds exclusive is granted at once). Two key paths therefore don't
+wait for each other, and none can hold it shared while waiting to take it
+exclusive, the pattern that would deadlock two of them.
+
+A session a key opened is also refused at renewal while the switch is off
+(`checkSessionStanding`, which `Service.Refresh` and plugin access renewal
+share), with the answer a revoked session gets. Only a session with a
+`device_key_id` reads the switch there. That covers a session that a
+database write skipped the sweep for, such as `demo.enabled` set straight in
+`server_settings`: it ends at its next renewal instead of refreshing on for
+the refresh lifetime.
+
+A session another app's key opened, if one still existed, would be answered
+403 `permission_denied` by the origin gate on `createAppCode`,
+`enrollAppKeys`, `approvePendingAppKey` and `replacePersonKey` before those
+operations' `capability_disabled`. Backups classify it as an access setting:
+a restore keeps the stricter of the live and the backed-up value.
 
 **Demo mode.** On a demo server (`demo.enabled`) every visitor signs in to
 one shared account. A key a visitor enrolled would be a lasting credential of

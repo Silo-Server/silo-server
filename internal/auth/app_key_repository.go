@@ -52,9 +52,10 @@ const (
 
 // AppKeyRepository stores app keys: an account's person key and its device
 // keys. Every key path takes its locks in one order: the account row
-// (lockUser), the plugin installation and provider identity of a
-// provider-bound key (keySignInPolicy), the person key, the device key rows,
-// then the login sessions those keys opened. Key rows are written only here,
+// (lockUser), the settings lock in shared mode (lockChain, which reads the
+// app key switch under it), the plugin installation and provider identity of
+// a provider-bound key (keySignInPolicy), the person key, the device key
+// rows, then the login sessions those keys opened. Key rows are written only here,
 // in application transactions that hold the account lock: a key's
 // identity_id has no foreign key, so deleting an identity (the cascade from
 // uninstalling a plugin, which takes no account lock) never writes one.

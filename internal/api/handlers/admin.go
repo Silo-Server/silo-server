@@ -1718,6 +1718,10 @@ func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, value
 				preconditionErr = err
 				return nil, err
 			}
+			if err := h.checkAppKeySetting(ctx, tx, before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
 			if err := h.checkBackupDestination(normalized, before, after); err != nil {
 				preconditionErr = err
 				return nil, err
@@ -2124,6 +2128,10 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 			before := h.effectiveAdminSettings(stored)
 			after = h.effectiveAdminSettings(prospective)
 			if err := h.checkLocalLoginSetting(ctx, tx, before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
+			if err := h.checkAppKeySetting(ctx, tx, before, after); err != nil {
 				preconditionErr = err
 				return nil, err
 			}
