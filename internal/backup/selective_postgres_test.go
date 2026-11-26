@@ -1827,14 +1827,15 @@ func TestCarryMovesAnswerSequencePastCarriedLinksDB(t *testing.T) {
 	restored, restoredURL := backuptest.Database(t)
 	ctx := t.Context()
 	var account, installation int
-	if err := live.QueryRow(ctx, `INSERT INTO users (role, username) VALUES ('user', 'linked') RETURNING id`).Scan(&account); err != nil {
+	if err := live.QueryRow(ctx, `INSERT INTO users (role, username, created_at) VALUES ('user', 'linked', '2026-01-02 03:04:05.678901+00') RETURNING id`).Scan(&account); err != nil {
 		t.Fatal(err)
 	}
 	if err := live.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
 		VALUES ('answer-seq-test', '0', '/nonexistent/answer-seq-test', true, 'manual', 'plugin') RETURNING id`).Scan(&installation); err != nil {
 		t.Fatal(err)
 	}
-	dbExec(t, restored, `INSERT INTO users (id, role, username) VALUES ($1, 'user', 'linked')`, account)
+	// The same account in the restored data: its id and creation time (sameAccount).
+	dbExec(t, restored, `INSERT INTO users (id, role, username, created_at) VALUES ($1, 'user', 'linked', '2026-01-02 03:04:05.678901+00')`, account)
 	dbExec(t, restored, `INSERT INTO plugin_installations (id, plugin_id, version, install_path, enabled, update_policy, kind)
 		OVERRIDING SYSTEM VALUE VALUES ($1, 'answer-seq-test', '0', '/nonexistent/answer-seq-test', true, 'manual', 'plugin')`, installation)
 	dbExec(t, live, `SELECT setval('plugin_auth_identity_answer_seq', 1000)`)

@@ -18,10 +18,11 @@ func TestCarrySwapsDestinationNamesDB(t *testing.T) {
 	restored, restoredURL := backuptest.Database(t)
 	ctx := t.Context()
 	var owner int
-	if err := live.QueryRow(ctx, `INSERT INTO users (role, username) VALUES ('user', 'owner') RETURNING id`).Scan(&owner); err != nil {
+	if err := live.QueryRow(ctx, `INSERT INTO users (role, username, created_at) VALUES ('user', 'owner', '2026-01-02 03:04:05.678901+00') RETURNING id`).Scan(&owner); err != nil {
 		t.Fatal(err)
 	}
-	dbExec(t, restored, `INSERT INTO users (id, role, username) VALUES ($1, 'user', 'owner')`, owner)
+	// The same account in the restored data: its id and creation time (sameAccount).
+	dbExec(t, restored, `INSERT INTO users (id, role, username, created_at) VALUES ($1, 'user', 'owner', '2026-01-02 03:04:05.678901+00')`, owner)
 	destinations := func(db *pgxpool.Pool, first, second string) {
 		t.Helper()
 		testProfile(t, db, owner, "default", "Default", true, "")

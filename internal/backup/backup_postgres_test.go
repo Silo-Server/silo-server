@@ -1837,10 +1837,11 @@ func TestCarryMatchesAProfileWithinItsAccountDB(t *testing.T) {
 	ctx := t.Context()
 	account := func(name string) (id int) {
 		t.Helper()
-		if err := live.QueryRow(ctx, `INSERT INTO users (role, username) VALUES ('user', $1) RETURNING id`, name).Scan(&id); err != nil {
+		if err := live.QueryRow(ctx, `INSERT INTO users (role, username, created_at) VALUES ('user', $1, '2026-01-02 03:04:05.678901+00') RETURNING id`, name).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
-		dbExec(t, restored, `INSERT INTO users (id, role, username) VALUES ($1, 'user', $2)`, id, name)
+		// The same account in the restored data: its id and creation time (sameAccount).
+		dbExec(t, restored, `INSERT INTO users (id, role, username, created_at) VALUES ($1, 'user', $2, '2026-01-02 03:04:05.678901+00')`, id, name)
 		return id
 	}
 	first, second := account("first"), account("second")
