@@ -14,6 +14,9 @@ import (
 const (
 	PushTriggerDelivery = "delivery"
 	PushTriggerTest     = "test"
+	// PushTriggerProfileSet is a background wake after a profile from the
+	// account's profile set changed on this server (push_profile_set.go).
+	PushTriggerProfileSet = "profile_set"
 
 	PushOutcomePending   = "pending"
 	PushOutcomeDelivered = "delivered"
@@ -65,10 +68,12 @@ func newPushDeliveryAttempts(deliveryID string, devices []PushDevice) []PushDeli
 	return attempts
 }
 
-const pushAttemptReturning = `
-		RETURNING id, notification_delivery_id, push_device_id, trigger_type, provider, platform,
+const pushAttemptColumns = `id, notification_delivery_id, push_device_id, trigger_type, provider, platform,
 		          attempt_number, attempted_at, next_retry_at, outcome, relay_request_id,
 		          upstream_status, upstream_reason, failure_message, created_at, updated_at`
+
+const pushAttemptReturning = `
+		RETURNING ` + pushAttemptColumns
 
 func scanPushDeliveryAttempts(rows pgx.Rows) ([]PushDeliveryAttempt, error) {
 	defer rows.Close()
@@ -153,6 +158,12 @@ func (r *PushDeviceRepository) ListEnabledPushByProfiles(ctx context.Context, tx
 // foreign key. Like enqueueAttemptsForLiveTargets, it key-share locks the
 // devices that still exist, in id order, until the transaction ends.
 func (r *PushDeviceRepository) EnqueuePushAttempts(ctx context.Context, tx pgx.Tx, attempts []PushDeliveryAttempt) error {
+	return enqueuePushAttempts(ctx, tx, attempts, PushOutcomePending)
+}
+
+// enqueuePushAttempts is EnqueuePushAttempts with the rows' outcome, and
+// next_retry_at left NULL.
+func enqueuePushAttempts(ctx context.Context, tx pgx.Tx, attempts []PushDeliveryAttempt, outcome string) error {
 	if len(attempts) == 0 {
 		return nil
 	}
@@ -178,7 +189,7 @@ func (r *PushDeviceRepository) EnqueuePushAttempts(ctx context.Context, tx pgx.T
 			AS a(id, delivery_id, device_id, trigger_type, provider, platform)
 		JOIN live ON live.id = a.device_id
 		ON CONFLICT DO NOTHING`,
-		ids, deliveries, devices, triggers, providers, platforms, PushOutcomePending); err != nil {
+		ids, deliveries, devices, triggers, providers, platforms, outcome); err != nil {
 		return fmt.Errorf("enqueue push attempts: %w", err)
 	}
 	return nil

@@ -36,6 +36,9 @@ const (
 	relayAppleSendPath      = "/v1/apple/send"
 	relayFcmSendPath        = "/v1/fcm/send"
 	relayModePrivateAlert   = "private_alert"
+	// relayModeBackgroundWake shows nothing: the relay sends a background
+	// APNs push or a normal-priority FCM data message.
+	relayModeBackgroundWake = "background_wake"
 
 	// relayCodeIdempotencyKeyReuse is the relay's 422 code for a retry whose
 	// payload differs from the one recorded under its idempotency key.
@@ -169,9 +172,12 @@ type pushSender struct {
 	// serverID reads the deployment identity getServerIdentity reports.
 	serverID func(context.Context) (string, error)
 
-	// renewMu serializes credential renewal and replacement in this process;
-	// lastRelayReplacement is guarded by it.
-	renewMu              sync.Mutex
+	// renewLock serializes credential renewal and replacement in this
+	// process; lastRelayReplacement is guarded by it. It is a one-slot
+	// channel rather than a mutex so that a profile set wake's send can give
+	// up waiting when the wake's budget ends (renewWait); every other send
+	// waits for it as long as it takes, as for a mutex.
+	renewLock            chan struct{}
 	lastRelayReplacement time.Time
 
 	// targetMu guards relayWithoutTarget: per relay base URL, the time until
@@ -195,8 +201,35 @@ func newPushSender(devices *PushDeviceRepository, deliveries *DeliveryRepository
 		developmentRelayURL: os.Getenv("SILO_PUSH_RELAY_DEVELOPMENT_URL"),
 		now:                 time.Now,
 		relayWithoutTarget:  map[string]time.Time{},
+		renewLock:           make(chan struct{}, 1),
 	}
 }
+
+// renewWait is the context attempt's send waits for renewLock under: the
+// send's own for a profile set wake, which gives up when the wake's budget
+// ends, and one that never ends for every other attempt, which waits as long
+// as the lock is held, as it did for a mutex. What runs after the lock is
+// taken keeps the send's own context.
+func renewWait(ctx context.Context, attempt PushDeliveryAttempt) context.Context {
+	if attempt.TriggerType == PushTriggerProfileSet {
+		return ctx
+	}
+	return context.WithoutCancel(ctx)
+}
+
+// lockRenew takes renewLock, or gives up with wait's error when wait ends
+// first.
+func (s *pushSender) lockRenew(wait context.Context) error {
+	select {
+	case s.renewLock <- struct{}{}:
+		return nil
+	case <-wait.Done():
+		return wait.Err()
+	}
+}
+
+// unlockRenew releases renewLock.
+func (s *pushSender) unlockRenew() { <-s.renewLock }
 
 func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAttempt) *PushDeliveryAttempt {
 	device, loginLive, err := s.devices.getPushDeviceByID(ctx, attempt.PushDeviceID)
@@ -272,8 +305,11 @@ func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAtt
 	}
 	_ = s.devices.RecordPushFailure(ctx, device.ID, code, result.TerminalDevice)
 
+	// A profile set wake is sent once: the next edit or the app opening
+	// repairs a missed one, and a retrying row is one any server's sweep
+	// would claim (push_profile_set.go).
 	delay, more := pushRetryDelayWithHint(attemptNumber, result.RetryAfter)
-	if more && !result.TerminalDevice && retryableHTTPStatus(result.HTTPStatus) {
+	if more && !result.TerminalDevice && retryableHTTPStatus(result.HTTPStatus) && attempt.TriggerType != PushTriggerProfileSet {
 		nextRetry := time.Now().Add(delay)
 		return s.finalize(ctx, attempt, PushOutcomeRetrying, result.UpstreamReason, result.Message, statusPtr, result.RelayRequestID, &nextRetry)
 	}
@@ -292,14 +328,15 @@ func (s *pushSender) finalize(ctx context.Context, attempt PushDeliveryAttempt, 
 func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token string) (result pushSendResult) {
 	ctx, finishObservation := telemetry.StartDependency(ctx, "notifications", "worker", "push")
 	defer func() { finishObservation(deliveryObservationError(ctx, result.OK)) }()
-	credential, err := s.prepareRelayCredential(ctx)
+	wait := renewWait(ctx, attempt)
+	credential, err := s.prepareRelayCredential(ctx, wait)
 	if err != nil {
 		return pushSendResult{HTTPStatus: http.StatusServiceUnavailable, Message: err.Error(), UpstreamReason: "relay_credential_unavailable"}
 	}
 	target, identityKnown := s.relayTarget(ctx, device)
 	result = s.sendWithCapability(ctx, attempt, device, token, target, credential.RelayURL, credential.APIKey)
 	if result.HTTPStatus == http.StatusUnauthorized {
-		recovered, err := s.recoverRelayCredential(ctx, credential, result.UpstreamReason)
+		recovered, err := s.recoverRelayCredential(ctx, wait, credential, result.UpstreamReason)
 		if err != nil {
 			if result.UpstreamReason == relayCodeDeploymentDisabled {
 				return result
@@ -345,9 +382,13 @@ func (s *pushSender) relayTarget(ctx context.Context, device *PushDevice) (targe
 // never fewer than the UTF-16 units the relay counts.
 func relayTargetID(id string) bool { return id != "" && len(id) <= 128 }
 
-func (s *pushSender) prepareRelayCredential(ctx context.Context) (PushRelayCredential, error) {
-	s.renewMu.Lock()
-	defer s.renewMu.Unlock()
+// prepareRelayCredential waits for renewLock under wait (renewWait) and
+// does the rest under ctx.
+func (s *pushSender) prepareRelayCredential(ctx, wait context.Context) (PushRelayCredential, error) {
+	if err := s.lockRenew(wait); err != nil {
+		return PushRelayCredential{}, err
+	}
+	defer s.unlockRenew()
 	current := LoadPushRelayCredential(ctx, s.settings)
 	relayURL, err := NormalizePushRelayURL(current.RelayURL, s.developmentRelayURL)
 	if err != nil {
@@ -418,9 +459,13 @@ func (s *pushSender) registerRelayCredential(ctx context.Context, relayURL strin
 // recoverRelayCredential answers a relay 401 for the capability that was just
 // sent: an expired capability is renewed, and any other rejection is healed
 // by registering a fresh deployment.
-func (s *pushSender) recoverRelayCredential(ctx context.Context, failed PushRelayCredential, code string) (PushRelayCredential, error) {
-	s.renewMu.Lock()
-	defer s.renewMu.Unlock()
+// It waits for renewLock under wait (renewWait) and does the rest under
+// ctx.
+func (s *pushSender) recoverRelayCredential(ctx, wait context.Context, failed PushRelayCredential, code string) (PushRelayCredential, error) {
+	if err := s.lockRenew(wait); err != nil {
+		return PushRelayCredential{}, err
+	}
+	defer s.unlockRenew()
 
 	current := LoadPushRelayCredential(ctx, s.settings)
 	if current.Parked() {
@@ -452,7 +497,7 @@ func (s *pushSender) recoverRelayCredential(ctx context.Context, failed PushRela
 }
 
 // handleRelayRejectionLocked parks a deployment the relay disabled and
-// replaces any other rejected capability. Callers hold renewMu.
+// replaces any other rejected capability. Callers hold renewLock.
 func (s *pushSender) handleRelayRejectionLocked(ctx context.Context, current PushRelayCredential, code string) (PushRelayCredential, error) {
 	if code == relayCodeDeploymentDisabled {
 		stored, parked, err := parkRelayCredential(ctx, s.settings, current)
@@ -486,7 +531,7 @@ func (s *pushSender) adoptStoredRelayCredential(stored PushRelayCredential) (Pus
 
 // replaceRejectedRelayCredentialLocked registers a new deployment in place of
 // a rejected capability, at most once per cooldown per process so a relay
-// that rejects fresh credentials too is not hammered. Callers hold renewMu.
+// that rejects fresh credentials too is not hammered. Callers hold renewLock.
 func (s *pushSender) replaceRejectedRelayCredentialLocked(ctx context.Context, current PushRelayCredential, code string) (PushRelayCredential, error) {
 	now := s.now()
 	if !s.lastRelayReplacement.IsZero() && now.Sub(s.lastRelayReplacement) < relayReplacementCooldown {
@@ -590,13 +635,16 @@ func (s *pushSender) postRelay(ctx context.Context, attempt PushDeliveryAttempt,
 	if attempt.NotificationDeliveryID != nil {
 		deliveryID = *attempt.NotificationDeliveryID
 	}
-	collapseID := deliveryID
+	mode, collapseID := relayModePrivateAlert, deliveryID
+	if attempt.TriggerType == PushTriggerProfileSet {
+		mode, collapseID = relayModeBackgroundWake, profileSetCollapseID
+	}
 	sendPath := relayAppleSendPath
 	var payload any = pushRelayAppleRequest{
 		Token:           token,
 		Environment:     device.APNsEnvironment,
 		Topic:           device.APNsTopic,
-		Mode:            relayModePrivateAlert,
+		Mode:            mode,
 		ServerDeviceID:  device.ServerDeviceID,
 		DeliveryID:      deliveryID,
 		CollapseID:      &collapseID,
@@ -606,7 +654,7 @@ func (s *pushSender) postRelay(ctx context.Context, attempt PushDeliveryAttempt,
 		sendPath = relayFcmSendPath
 		payload = pushRelayFcmRequest{
 			Token:           token,
-			Mode:            relayModePrivateAlert,
+			Mode:            mode,
 			ServerDeviceID:  device.ServerDeviceID,
 			DeliveryID:      deliveryID,
 			CollapseID:      &collapseID,

@@ -86,6 +86,7 @@ var excludedUserTables = map[string]string{
 	"apple_push_installations":         excludedPush,
 	"android_push_installations":       excludedPush,
 	"web_push_subscriptions":           excludedPush,
+	"push_profile_set_wakes":           "when the account was last sent a profile set wake, a one-minute limit",
 	"watch_provider_connections":       "watch-provider credentials",
 	"watch_provider_auth_sessions":     "watch-provider credentials",
 	"history_import_connect_sessions":  excludedHistoryImport,

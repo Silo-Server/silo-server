@@ -44,7 +44,10 @@ var loggedTables = []string{"activity_log", "operational_logs", "policy_decision
 	tablePluginProvisionStatus, "plugin_provision_placement",
 	// Plugin builds for other platforms: a server fetches its own again
 	// from the catalog.
-	"plugin_platform_archives"}
+	"plugin_platform_archives",
+	// When each account was last sent a profile set wake: a one-minute
+	// limit, meaningless by the time a backup is restored.
+	"push_profile_set_wakes"}
 
 const tableIntroFingerprints = "media_intro_fingerprints"
 
