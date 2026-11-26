@@ -243,11 +243,17 @@ type restoredRecord struct {
 	settings profileSetSettings
 }
 
+// decodeApplied reads a profile's applied record. A profile with none, or
+// one this server can't read, has nothing for a clear to restore.
+func decodeApplied(raw json.RawMessage, into *profileSetApplied) bool {
+	return len(raw) > 0 && json.Unmarshal(raw, into) == nil
+}
+
 // restoreRecord rebuilds the record of row's last accepted set; ok is false
 // when the profile has none.
 func restoreRecord(contract *settingscontract.Manifest, row *userstore.ProfileSetRow) (restoredRecord, bool, error) {
 	var out restoredRecord
-	if len(row.SyncApplied) == 0 || json.Unmarshal(row.SyncApplied, &out.applied) != nil {
+	if !decodeApplied(row.SyncApplied, &out.applied) {
 		return out, false, nil
 	}
 	a := out.applied
