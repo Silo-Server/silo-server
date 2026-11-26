@@ -655,3 +655,24 @@ func TestRoomReadLeavesOutAnotherDevicesStream(t *testing.T) {
 		}
 	}
 }
+
+// TestPermissionGatingNothingIsLeftOutForAnotherApp: an account's permissions
+// are listed for a session another app's key opened only while an operation
+// the permission gates is open to it. A permission registered against no
+// operation is a power checked only by hand, so such a session is not told of
+// it; the person's own session is. Catches the account view telling such a
+// session of a power nothing in the decisions covers.
+func TestPermissionGatingNothingIsLeftOutForAnotherApp(t *testing.T) {
+	reg := &Registry{}
+	reg.recordOrigins("openOperation", grantedApp(decideAllowed("r")))
+	reg.permissionOps = map[string][]string{"gates_an_open_operation": {"openOperation"}}
+	view := handlers.UserView{PolicyPermissions: []string{"gates_an_open_operation", "gates_nothing"}}
+	for kind, want := range map[auth.SessionKind][]Permission{
+		auth.SessionKindGrantedApp: {"gates_an_open_operation"},
+		"":                         {"gates_an_open_operation", "gates_nothing"},
+	} {
+		if got := reg.accountForSession(view, kind).Permissions; !slices.Equal(got, want) {
+			t.Errorf("kind %q: permissions %v, want %v", kind, got, want)
+		}
+	}
+}

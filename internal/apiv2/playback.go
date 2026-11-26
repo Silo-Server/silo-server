@@ -616,15 +616,16 @@ func (reg *Registry) bandwidthProbeBaseURL(r *http.Request) string {
 	return handlers.RequestBaseURL(r)
 }
 
-// withDeclaredVersionsOnly drops the body's app version, build and channel
-// when one does not look like a version (playback.LooksLikeClientVersion).
-// The start falls back to them when the headers carry none, and the label
-// beside a client name shows the version, so for a session another app's key
-// opened (recorded as playback.GrantedAppClientName) they could otherwise
-// carry a client name into it. The origin gate does the same to the headers.
+// withDeclaredVersionsOnly drops the body's app version and build when one
+// does not look like a version (playback.LooksLikeClientVersion), and its app
+// channel when it is not a known channel (playback.IsKnownClientChannel). The
+// start falls back to them when the headers carry none, and the label beside
+// a client name shows them, so for a session another app's key opened
+// (recorded as playback.GrantedAppClientName) they could otherwise carry a
+// client name into it. The origin gate does the same to the headers.
 func withDeclaredVersionsOnly(c playback.ClientPlaybackContextV3) playback.ClientPlaybackContextV3 {
-	for _, v := range []*string{&c.AppVersion, &c.AppBuild, &c.AppChannel} {
-		if !playback.LooksLikeClientVersion(strings.TrimSpace(*v)) {
+	for v, keeps := range map[*string]func(string) bool{&c.AppVersion: playback.LooksLikeClientVersion, &c.AppBuild: playback.LooksLikeClientVersion, &c.AppChannel: playback.IsKnownClientChannel} {
+		if !keeps(strings.TrimSpace(*v)) {
 			*v = ""
 		}
 	}

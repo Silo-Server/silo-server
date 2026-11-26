@@ -24,6 +24,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -378,10 +379,18 @@ func statusClass(status int) string {
 
 // clientIdentity reads the client's self-reported name and version, clamped
 // to a printable bounded string. The values are opaque: trimmed, length
-// limited, control characters dropped, never parsed or validated.
+// limited, control characters dropped, never parsed or validated. The clamp
+// is shorter than the stored name, so a name the origin gate kept (it reads
+// as the reserved name only after the cut) is checked again as logged and
+// left out unless it is the reserved name itself, which only the gate sets
+// for a session another app's key opened.
 func clientIdentity(r *http.Request) (name, version string) {
-	return clampLabel(r.Header.Get("X-Silo-Client"), maxClientNameLen),
-		clampLabel(r.Header.Get("X-Silo-Client-Version"), maxClientVersionLen)
+	raw := r.Header.Get("X-Silo-Client")
+	name = clampLabel(raw, maxClientNameLen)
+	if raw != playback.GrantedAppClientName && playback.IsGrantedAppClientName(name) {
+		name = ""
+	}
+	return name, clampLabel(r.Header.Get("X-Silo-Client-Version"), maxClientVersionLen)
 }
 
 func clampLabel(v string, limit int) string {

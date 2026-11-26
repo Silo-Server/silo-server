@@ -403,19 +403,23 @@ func stripDeclaredDevice(h http.Header) {
 var clientNameHeaders = []string{"X-Client-Name", "X-Silo-Client"}
 
 // clientVersionHeaders are the version, build and channel paired with either
-// name header. The label beside a client name shows the version, so for a
-// session another app's key opened one that does not look like a version
-// (playback.LooksLikeClientVersion) is dropped.
-var clientVersionHeaders = []string{"X-Client-Version", "X-Client-Build", "X-Client-Channel", "X-Silo-Client-Version", "X-Silo-Client-Build", "X-Silo-Client-Channel"}
+// name header, each with the shape a session another app's key opened must
+// keep: the label beside a client name shows the version, and the full label
+// adds the build and channel, so for such a session one that does not look
+// like a version, or a channel not on the known list, is dropped.
+var clientVersionHeaders = map[string]func(string) bool{
+	"X-Client-Version": playback.LooksLikeClientVersion, "X-Client-Build": playback.LooksLikeClientVersion, "X-Client-Channel": playback.IsKnownClientChannel,
+	"X-Silo-Client-Version": playback.LooksLikeClientVersion, "X-Silo-Client-Build": playback.LooksLikeClientVersion, "X-Silo-Client-Channel": playback.IsKnownClientChannel,
+}
 
 // nameDeclaredClient sets the client name a session another app's key opened
 // is recorded under: the app could otherwise name its plays after the
 // person's own apps in the household streams, playback history and insights.
 // Both headers carry playback.GrantedAppClientName, the declared one only when
 // the app sent it, so the same header family supplies the rest of the client
-// identity (version, build, channel). Each of those stays as declared when it
-// looks like a version and is dropped otherwise, so it cannot carry a client
-// name into the label. Every other caller has a name dropped from either
+// identity (version, build, channel). A version or build stays as declared
+// when it looks like one, and a channel when it is on the known list; any
+// other value is dropped, so it cannot carry a client name into the label. Every other caller has a name dropped from either
 // header when it would be stored as one reading as the reserved name
 // (playback.IsGrantedAppClientName), so the request proceeds as if it named
 // no client there and nothing else is recorded under it. Like the device strip, this edits the request's shared header map
@@ -428,9 +432,9 @@ func nameDeclaredClient(h http.Header, grantedApp bool) {
 			h.Del(clientNameHeaders[0])
 		}
 		h.Set(clientNameHeaders[1], playback.GrantedAppClientName)
-		for _, name := range clientVersionHeaders {
+		for name, keeps := range clientVersionHeaders {
 			for _, v := range h.Values(name) {
-				if !playback.LooksLikeClientVersion(strings.TrimSpace(v)) {
+				if !keeps(strings.TrimSpace(v)) {
 					h.Del(name)
 					break
 				}
@@ -506,8 +510,10 @@ func (reg *Registry) recordPermission(permission, operationID string) {
 // permittedPermissions is the part of an account's permissions a kind of
 // session may be told of: a read never tells a session it may do what every
 // operation a permission gates refuses it. A permission whose operations are
-// all refused to that kind is left out; one with an open operation stays, so
-// opening a permission's actions to such a session needs no change here.
+// all refused to that kind is left out, and so is one that gates no
+// operation at all (a power checked only by hand); one with an open operation
+// stays, so opening a permission's actions to such a session needs no change
+// here.
 func (reg *Registry) permittedPermissions(kind auth.SessionKind, permissions []Permission) []Permission {
 	if kind == "" {
 		return permissions
@@ -517,7 +523,7 @@ func (reg *Registry) permittedPermissions(kind auth.SessionKind, permissions []P
 		reg.mu.Lock()
 		governed := slices.Clone(reg.permissionOps[string(permission)])
 		reg.mu.Unlock()
-		if len(governed) == 0 || reg.permittedFor(kind, governed) {
+		if len(governed) > 0 && reg.permittedFor(kind, governed) {
 			out = append(out, permission)
 		}
 	}

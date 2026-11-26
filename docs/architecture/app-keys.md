@@ -499,38 +499,48 @@ app sent it, and `X-Silo-Client` always) to `Granted App`
 (`playback.GrantedAppClientName`), so every reader, whichever header family
 the app used, records that name, and an app that sends none is recorded
 under it too. The label beside the name is built from the version, and the
-full label adds the build and channel, so for such a session each of those,
-in the headers or in the start body's `client_playback_context`, is kept
-only when it looks like a version (a letter or digit, then letters, digits,
-`.`, `+`, `_` or `-`, at most 32 characters) and dropped otherwise
-(`playback.LooksLikeClientVersion`).
+full label adds the build and channel, so for such a session, in the headers
+or in the start body's `client_playback_context`, a version or build is kept
+only when it starts with a digit (or `v` and a digit), then letters, digits,
+`.`, `+`, `_` or `-`, at most 32 characters (`playback.LooksLikeClientVersion`),
+and a channel only when it is one of `release`, `stable`, `beta`, `alpha`,
+`rc`, `testflight`, `debug`, `dev`, `nightly`, `canary` or `internal`
+(`playback.IsKnownClientChannel`). Anything else is dropped. A play named
+`Granted App` never gets the Jellyfin badge.
 
 Every other caller that declares a name that would be stored as one reading
 as `Granted App` has it dropped: the request proceeds as if it named no
 client in that header. The Jellyfin-compatible and Audiobookshelf-compatible
-listeners drop it the same way, so no other session is recorded under it.
-One function decides (`playback.IsGrantedAppClientName`). It judges the name
-as it would be stored (trimmed, controls removed, cut to 128 characters),
-folds it with NFKC and lower case, and drops everything but letters and
-digits; the name is reserved when what is left has as many characters as
-`grantedapp`, each one either equal to the character at its position or
-outside ASCII, and at least half of them equal. So it catches case, spacing,
-punctuation, invisible characters, padding past the cut, fullwidth forms,
-and a letter swapped for one from another script in a name of the same
-length. It does not catch a name of a different length made to look
-similar, and it says nothing about what is shown beside the name.
+listeners apply the same function (`playback.IsGrantedAppClientName`), and
+the request log checks the shorter name it logs the same way. The function
+judges the name as it would be stored (trimmed, controls removed, cut to 128
+characters). It folds it with NFKD and lower case, drops combining marks,
+every character that is not a letter or digit and every default-ignorable
+code point (the Hangul fillers are letters that render as nothing), and maps
+the known look-alikes of the name's letters (Cyrillic, Greek and Armenian
+letters, Latin small capitals and some Latin-extended letters, in one table)
+to the plain letter. The name is reserved when what is left has as many
+characters as `grantedapp`, each one either equal to the letter at its
+position or outside ASCII, with at least one equal. So it catches case,
+spacing, punctuation, invisible characters, padding past the cut, fullwidth
+and mathematical forms, accents, and look-alike letters the table knows. Two
+things still pass: a look-alike spelling that uses no letter the table knows
+and no plain letter of the name, and a name of a different length made to
+look similar. And it says nothing about what is shown beside the name.
 
 Nothing in the server decides anything by the client name: it is shown,
 filtered and grouped on in admin lists, used as a metrics label and logged.
 The limit that remains: the lists show that another app made a play, not
-which app. What the app still chooses is shown beside the name, never in
-it: the `User-Agent`, which the household streams and session views show as
-sent and from which the Jellyfin badge is decided; a version, build or
-channel that is version-shaped but can still be a word; and the model and
-platform it declares (`X-Client-Model`, `X-Client-Platform` and the start
-body's device description), which playback diagnosis reads. The history and
-live rows take their device platform from the declared device, which the
-gate removes, so it is empty there for such a session.
+which app. What the app still chooses is shown beside the name, never in it:
+the `User-Agent`, which the household streams and session views show as
+sent, and the model and platform it declares (`X-Client-Model`,
+`X-Client-Platform` and the start body's device description), which playback
+diagnosis reads. The history and live rows take their device platform from
+the declared device, which the gate removes, so it is empty there for such a
+session. A Jellyfin Quick Connect request's app name (the `Client` of its
+authorization header) is shown to the approver as the request's platform and
+becomes that login session's platform in the sessions list; it is never a
+play's client name, which comes from each playback request.
 
 Stream telemetry runs before authentication and sees the name the app sent
 on each stream's media requests. It keeps that in memory on each API
