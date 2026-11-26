@@ -79022,7 +79022,7 @@
   "web.admin.settings.signIn.page.demoAccountDescription": [
     {
       "type": 0,
-      "value": "The account every visitor of a public demo signs in to. While demo mode is on, failed sign-ins with this account's names don't count toward the per-name limit, which every visitor would otherwise share. Limits per address still apply. Leave empty to name none."
+      "value": "The account every visitor of a public demo signs in to. While demo mode is on, failed sign-ins with this account's names and its Silo password don't count toward the per-name limit, which every visitor would otherwise share. Limits per address still apply. Leave empty to name none."
     }
   ],
   "web.admin.settings.signIn.page.demoAccountLabel": [
