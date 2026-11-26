@@ -23,7 +23,7 @@ func (r *Repository) CreateEventLog(ctx context.Context, entry WebhookEventLog) 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	attrsJSON, err := json.Marshal(replaceNULBytes(entry.Attrs))
+	attrsJSON, err := json.Marshal(replaceNULBytesInAttrs(entry.Attrs))
 	if err != nil {
 		return nil, fmt.Errorf("marshal webhook event log attrs: %w", err)
 	}
@@ -78,30 +78,20 @@ func replaceNULByte(s string) string {
 	return strings.ReplaceAll(s, "\x00", "\uFFFD")
 }
 
-// replaceNULBytes applies replaceNULByte to every key and string value of a
-// JSON-shaped attrs value.
-func replaceNULBytes(value any) any {
-	switch typed := value.(type) {
-	case string:
-		return replaceNULByte(typed)
-	case map[string]any:
-		if typed == nil {
-			return value
-		}
-		out := make(map[string]any, len(typed))
-		for key, nested := range typed {
-			out[replaceNULByte(key)] = replaceNULBytes(nested)
-		}
-		return out
-	case []any:
-		out := make([]any, len(typed))
-		for i, nested := range typed {
-			out[i] = replaceNULBytes(nested)
-		}
-		return out
-	default:
-		return value
+// replaceNULBytesInAttrs applies replaceNULByte to the keys and string values
+// of an attrs map.
+func replaceNULBytesInAttrs(attrs map[string]any) map[string]any {
+	if attrs == nil {
+		return nil
 	}
+	out := make(map[string]any, len(attrs))
+	for key, value := range attrs {
+		if text, ok := value.(string); ok {
+			value = replaceNULByte(text)
+		}
+		out[replaceNULByte(key)] = value
+	}
+	return out
 }
 
 func scanWebhookEventLog(row interface {
