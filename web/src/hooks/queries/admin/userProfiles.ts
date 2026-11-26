@@ -9,6 +9,7 @@ import {
   captureAdminUserAuthority,
   requireAdminUserAuthority,
 } from "@/api/v2/adminUsers";
+import type { components } from "@/api/v2/schema";
 import { v2, v2ErrorText } from "@/api/v2/request";
 import { adminKeys, profileKeys } from "@/hooks/queries/keys";
 import { profileFromV2, type ProfileCreate, type ProfileUpdate } from "@/hooks/queries/profiles";
@@ -136,5 +137,96 @@ export function useDeleteAdminUserProfile(userId: number) {
     onSuccess: () => toast.success(t("web.admin.common.userProfiles.deleted")),
     onError: failed("web.admin.common.userProfiles.deleteFailed"),
     onSettled: () => invalidateAccountProfiles(client, userId, context),
+  });
+}
+
+export type AdminProfileSetEdit = components["schemas"]["AdminProfileSetEdit"];
+export type AdminProfileSetCleared = components["schemas"]["AdminProfileSetCleared"];
+
+function adminProfileSetEditsKey(userId: number, context = adminUserScope()) {
+  return [...adminUsersKey(context), "profile-set-edits", userId] as const;
+}
+
+/**
+ * The edits made on this server to the account's profiles from its app: the
+ * administrator's overrides and hidden profiles, the person's own edits their
+ * app has not merged, and settled records of the person's edits over the
+ * administrator's. Only read while the account capability says it is served.
+ */
+export function useAdminUserProfileSetEdits(userId: number, enabled: boolean) {
+  const context = captureProfileRequestContext();
+  return useQuery({
+    queryKey: adminProfileSetEditsKey(userId, adminUserScope(context)),
+    queryFn: async (): Promise<AdminProfileSetEdit[]> => {
+      const authority = context ?? captureAdminUserAuthority();
+      requireAdminUserAuthority(authority);
+      const out = await v2("GET /api/v2/admin/users/{id}/profile-set/edits", {
+        path: { id: String(userId) },
+        profileContext: authority,
+      });
+      return out.edits;
+    },
+    enabled: enabled && context !== null,
+    retry: false,
+  });
+}
+
+/** What to clear: an override of one field, or a hidden profile. */
+export type ProfileSetClearTarget =
+  | { kind: "override"; profileId: string; field: string }
+  | { kind: "hidden"; syncId: string };
+
+export function useClearAdminUserProfileSetEdit(userId: number) {
+  const client = useQueryClient();
+  const context = captureProfileRequestContext();
+  return useMutation({
+    // Sent even offline, so it fails at once rather than clearing later
+    // with nothing on screen saying one is pending.
+    networkMode: "always",
+    retry: false,
+    mutationFn: async (target: ProfileSetClearTarget): Promise<AdminProfileSetCleared> => {
+      const authority = context ?? captureAdminUserAuthority();
+      requireAdminUserAuthority(authority);
+      if (target.kind === "hidden") {
+        return v2("DELETE /api/v2/admin/users/{id}/profile-set/hidden/{sync_id}", {
+          path: { id: String(userId), sync_id: target.syncId },
+          profileContext: authority,
+        });
+      }
+      return v2("DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/overrides/{field}", {
+        path: { id: String(userId), profile_id: target.profileId, field: target.field },
+        profileContext: authority,
+      });
+    },
+    onError: failed("web.admin.users.detail.profiles.setEdits.clearFailed"),
+    onSettled: () =>
+      Promise.all([
+        client.invalidateQueries({
+          queryKey: adminProfileSetEditsKey(userId, adminUserScope(context)),
+        }),
+        invalidateAccountProfiles(client, userId, context),
+      ]),
+  });
+}
+
+export function useDismissAdminUserProfileSetEdit(userId: number) {
+  const client = useQueryClient();
+  const context = captureProfileRequestContext();
+  return useMutation({
+    networkMode: "always",
+    retry: false,
+    mutationFn: async ({ profileId, field }: { profileId: string; field: string }) => {
+      const authority = context ?? captureAdminUserAuthority();
+      requireAdminUserAuthority(authority);
+      await v2("DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/settled-edits/{field}", {
+        path: { id: String(userId), profile_id: profileId, field },
+        profileContext: authority,
+      });
+    },
+    onError: failed("web.admin.users.detail.profiles.setEdits.dismissFailed"),
+    onSettled: () =>
+      client.invalidateQueries({
+        queryKey: adminProfileSetEditsKey(userId, adminUserScope(context)),
+      }),
   });
 }

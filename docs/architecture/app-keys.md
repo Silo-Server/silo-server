@@ -700,9 +700,9 @@ by a set built elsewhere.
   field replaces the row, whoever makes it, so an override is not a lock: the
   person's edit of an overridden field on this server makes it a mark, with
   `replaced_owner` set. An edit of either key of a pair the settings contract
-  mirrors records both keys, so it ends the override on both. Until an owner can clear an override directly, a
-  profile delete clears its overrides, and a profile an administrator deleted
-  stays hidden. An override decides which value wins for a field of a profile
+  mirrors records both keys, so it ends the override on both. A profile
+  delete clears its overrides, and a profile an administrator deleted stays
+  hidden until the owner clears it (below). An override decides which value wins for a field of a profile
   both sides still hold; it does not lock the household. A set that drops the
   profile removes what the owner recorded for it, and an item under a new
   `sync_id` is a new profile with none of the old one's overrides, as the
@@ -733,6 +733,23 @@ by a set built elsewhere.
   overridden field included, as if it had been written. A repeat of the held
   version does not compare a PIN the owner overrides, so a retry is not stale
   because of it.
+- *The owner clears.* The admin routes clear an override, clear a hidden
+  profile, and dismiss a settled row, each in the set's own transaction
+  (`WithProfileSetTransaction`, naming every `sync_id` the account holds so it
+  removes nothing), with the set's locks in the set's order and the edit row
+  deleted last. Clearing an override applies the field's value from
+  `sync_applied` with the set's per-field apply (`updateProfile` limited to
+  that field, the four column-backed preferences included) under
+  `WithoutRecording`, so the write is not an edit. A `set` PIN can't be
+  applied, since the server holds no digits, and stays until a newer set
+  compares and writes it; a `keep` PIN asks for nothing; a picture this
+  server lacks waits for its upload. Clearing either half of a mirrored
+  setting clears both rows, since a set writes the pair together. Clearing a
+  hidden profile deletes the removal row only: the next accepted newer set
+  finds the item missing and creates it, and a repeat of the held version
+  creates nothing. Each clear then calls the wake hook
+  (`profileedits.Waker`) itself, since its writes record nothing for the
+  request's middleware to wake on, and answers what the hook reported.
 
 **Recording edits.** The store's shared write helpers record, in the write's
 transaction: `updateProfile` for the set's item fields, compared before and

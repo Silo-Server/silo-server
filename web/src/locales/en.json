@@ -341,6 +341,12 @@
       "value": "This value has the wrong type."
     }
   ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "This key is already in use on this server."
+    }
+  ],
   "error.field.malformed_form": [
     {
       "type": 0,
@@ -89968,6 +89974,12 @@
       "value": "The account is at its profile limit"
     }
   ],
+  "web.admin.users.detail.profiles.badge.changedHere": [
+    {
+      "type": 0,
+      "value": "Changed here"
+    }
+  ],
   "web.admin.users.detail.profiles.badge.kids": [
     {
       "type": 0,
@@ -90169,6 +90181,492 @@
     {
       "type": 0,
       "value": "Save PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgain": [
+    {
+      "type": 0,
+      "value": "Allow again"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowAgainAria": [
+    {
+      "type": 0,
+      "value": "Let "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " come back on this server"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowDescription": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " comes back the next time their app syncs, as a new profile without its history on this server."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.allowTitle": [
+    {
+      "type": 0,
+      "value": "Allow "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " again?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.changedBy": [
+    {
+      "type": 0,
+      "value": "Changed by "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " on "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clear": [
+    {
+      "type": 0,
+      "value": "Clear"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAria": [
+    {
+      "type": 0,
+      "value": "Clear the change to "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " on "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t clear the change."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearLater": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " stays as it is until their app next sends it. After that, changes from their app apply to it again."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearNow": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " goes back to the value from their app now, and changes from their app apply to it again."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPin": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " keeps the PIN you set until their app next sends one. After that, changes from their app apply to it again."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearTitle": [
+    {
+      "type": 0,
+      "value": "Clear the change to "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " on "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.deletedAccount": [
+    {
+      "type": 0,
+      "value": "a deleted account"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.description": [
+    {
+      "type": 0,
+      "value": "These profiles come from "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "’s app. A change you make here stays on this server until you clear it. It isn’t a lock: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " can change the same thing here too."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismiss": [
+    {
+      "type": 0,
+      "value": "Dismiss"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissAria": [
+    {
+      "type": 0,
+      "value": "Dismiss the note about "
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " on "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.dismissFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t dismiss the note."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.isChild": [
+    {
+      "type": 0,
+      "value": "Kids profile"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Age limit"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.maxContentRating": [
+    {
+      "type": 0,
+      "value": "Content rating limit"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.name": [
+    {
+      "type": 0,
+      "value": "Name"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.picture": [
+    {
+      "type": 0,
+      "value": "Picture"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.pin": [
+    {
+      "type": 0,
+      "value": "PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requests": [
+    {
+      "type": 0,
+      "value": "Requests"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.field.requireAdvisoryAge": [
+    {
+      "type": 0,
+      "value": "Require an age rating"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.fieldValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.hidden": [
+    {
+      "type": 0,
+      "value": "Removed on this server by "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " on "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ". Their app won’t add it back until you allow it."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.loadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t load the changes made on this server."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " comes back the next time "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "’s app syncs."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " comes back once their app syncs. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "’s phone has been told."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
+    {
+      "type": 0,
+      "value": "Cleared. It reaches "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "’s app the next time it syncs."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.noticeWoken": [
+    {
+      "type": 0,
+      "value": "Cleared. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "’s phone has been told."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.removedBy": [
+    {
+      "type": 0,
+      "value": "Removed by "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " on "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.replacedOwner": [
+    {
+      "type": 0,
+      "value": "This replaced the value you set."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.setBy": [
+    {
+      "type": 0,
+      "value": "Set by "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " on "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.settled": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " changed this on "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "; the value you set no longer applies."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.title": [
+    {
+      "type": 0,
+      "value": "Changed on this server"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.inherited": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (inherited)"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.noPicture": [
+    {
+      "type": 0,
+      "value": "No picture"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.none": [
+    {
+      "type": 0,
+      "value": "None"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.off": [
+    {
+      "type": 0,
+      "value": "Off"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.on": [
+    {
+      "type": 0,
+      "value": "On"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.picture": [
+    {
+      "type": 0,
+      "value": "Custom picture"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinNone": [
+    {
+      "type": 0,
+      "value": "No PIN"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.pinSet": [
+    {
+      "type": 0,
+      "value": "PIN set"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Allowed"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.value.requestsBlocked": [
+    {
+      "type": 0,
+      "value": "Blocked"
     }
   ],
   "web.admin.users.detail.profiles.setPin": [
@@ -93216,6 +93714,12 @@
       "value": "Approve sign-in"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "Code"
+    }
+  ],
   "web.auth.appCode.expired": [
     {
       "type": 0,
@@ -93246,6 +93750,12 @@
       "value": "Get a new code"
     }
   ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "Server address"
+    }
+  ],
   "web.auth.appCode.singleUse": [
     {
       "type": 0,
@@ -93256,6 +93766,18 @@
     {
       "type": 0,
       "value": "Open Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "In the Silo app on your phone or tablet, add this server by its address and type this code to create your account. Anyone with the code can join in your place, so don’t share it."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "Join with this code"
     }
   ],
   "web.auth.appCode.webLink": [
@@ -93686,6 +94208,12 @@
       "value": "Use a password instead"
     }
   ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "A username with @ must be the email address you enter below."
+    }
+  ],
   "web.auth.invite.usernameRequired": [
     {
       "type": 0,
@@ -93695,7 +94223,7 @@
   "web.auth.invite.usernameTaken": [
     {
       "type": 0,
-      "value": "That username or email address is already in use. Choose another."
+      "value": "That username is already in use. Choose another."
     }
   ],
   "web.auth.languagePicker.label": [
@@ -139925,7 +140453,19 @@
   "web.settings.openInSilo.action": [
     {
       "type": 0,
-      "value": "Open in Silo"
+      "value": "Get a code for the Silo app"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "In the Silo app on your phone or tablet, add this server by its address and type this code. Anyone with the code can sign in to this account, so don’t share it."
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "Code for the Silo app"
     }
   ],
   "web.settings.openInSilo.description": [
@@ -139934,10 +140474,22 @@
       "value": "Sign the Silo app on your phone or tablet in to this account, without a password."
     }
   ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t check whether this browser can get a code for the Silo app."
+    }
+  ],
   "web.settings.openInSilo.mainProfileOnly": [
     {
       "type": 0,
-      "value": "Only the household’s main profile can open Silo for this account. Switch to it and try again."
+      "value": "Only the household’s main profile can get a code for the Silo app. Switch to it and try again."
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "Enter the main profile’s PIN to get a code for the Silo app."
     }
   ],
   "web.settings.openInSilo.title": [

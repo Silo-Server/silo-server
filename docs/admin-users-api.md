@@ -368,6 +368,60 @@ change the Owner's or another administrator's profiles (403 `permission_denied`
 otherwise), because a primary profile's PIN guards that account's admin access. A profile that is not one of the account's answers 404,
 as does an unknown account. Writes are audited like other admin mutations.
 
+### Profiles from the person's app
+
+A household whose profiles come from the person's app (a profile set, see
+[auth-api.md](auth-api.md#household-profiles)) records edits made on this server.
+An administrator's edit of a field is an override: the person's later sets leave
+it as it is. An administrator deleting such a profile hides it: their sets don't
+bring it back. These routes show those records and end them.
+
+| Route below `/api/v2/admin/users/{id}` | Response |
+| --- | --- |
+| `GET /profile-set/edits` | Every record (`listAdminUserProfileSetEdits`): `{ "edits": [...] }` |
+| `DELETE /profiles/{profile_id}/overrides/{field}` | Clears one override (`clearAdminUserProfileOverride`); 200 `{ "applied", "wake_queued" }` |
+| `DELETE /profile-set/hidden/{sync_id}` | Clears one hidden profile (`clearAdminUserHiddenProfile`); 200 `{ "applied": false, "wake_queued" }` |
+| `DELETE /profiles/{profile_id}/settled-edits/{field}` | Dismisses one settled record (`dismissAdminUserSettledProfileEdit`); 204 |
+
+Each record has a `kind`:
+
+- `override`: a field the owner set here.
+- `hidden`: a profile the owner removed here. It has no `profile_id` and no
+  `field`; `profile_name` is the name it had.
+- `unmerged`: the person's own edit here that their app has not merged yet. With
+  no `field`, the person removed that profile. `replaced_owner` is true when it
+  replaced the owner's value.
+- `settled`: the person's edit of a field the owner had set, kept after their app
+  merged it as the record that the owner's value no longer applies.
+
+New kinds may be added. A record also carries `by`, `actor` (`id`, and `username`
+while that account exists), `at` (the last edit of that field), `value` (the value
+in force; for a setting, what the profile resolves to, with `inherited` true when
+the profile has no value of its own), and the person's last set's value as
+`set_value`, or `set_resets` for a setting the set resets. An override is not a
+lock: the person may change the field here too, and their edit then replaces the
+owner's as `unmerged`, and `settled` once their app merges it.
+
+Clearing an override puts the set's value back at once, in one transaction that
+takes the set's locks, and the set applies to the field again from then on.
+Nothing it writes counts as an edit. A PIN the set sent as digits, or kept, can't
+be put back, because the server never stores digits: the owner's PIN stays until
+the person's app sends a newer set. A picture this server doesn't hold waits for
+its upload. `clear_applies` on the record and `applied` in the answer say which
+happened. For a setting the settings contract mirrors in another key, clearing
+either key clears both. Clearing a hidden profile does not recreate it: the next
+newer set does, as a new profile. A cleared override or hidden profile asks the
+person's apps to sync, and `wake_queued` says whether a push could be queued; when
+it is false, the change reaches the app the next time it syncs. Dismissing a
+settled record changes nothing else and tells no app.
+
+The clears and the dismissal follow the Owner rules above and are audited as
+`profile.override_cleared`, `profile.hidden_cleared` and `profile.edit_dismissed`.
+A record that does not exist answers 404, including an override the person has
+since replaced. Where profiles are not kept in PostgreSQL, the list is empty and
+the other three answer 501 `capability_unsupported`. The account capability
+`profile_set_edits` says whether the routes are served.
+
 ### Profile page layouts
 
 An administrator can read and correct one profile's home or library page layout

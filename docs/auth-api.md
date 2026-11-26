@@ -890,14 +890,24 @@ or it is `profile_set_stale` with nothing written: read the set, merge the
 marks, and send again. An accepted newer set settles exactly the marks its
 `edits_seen` named and they leave `changed_here` and `deleted_here`; a mark
 recorded after the read stays. A repeat of the held version settles nothing.
-An override stays until the person edits that field on this server, or the
-profile is deleted here. Two settings the settings contract keeps as one
+An override stays until the person edits that field on this server, the
+owner clears it, or the profile is deleted here. Two settings the settings contract keeps as one
 preference under two keys are recorded together, so the person's edit of
 either ends the override on both. An override belongs to its profile: a set that drops
 the profile removes what the owner recorded for it, and an item under a new
 `sync_id` is a new profile with none of the old one's overrides. A profile an
-administrator deleted stays hidden on this server: no operation clears that
-yet.
+administrator deleted stays hidden on this server until an administrator
+clears that.
+
+An administrator sees these records and clears them from the admin routes in
+[admin-users-api.md](admin-users-api.md#profiles-from-the-persons-app).
+Clearing an override puts the field back to the value of the last accepted
+set at once, except a PIN the set sent as digits, which stays as the owner set
+it until a newer set; the field leaves `overrides` and the next newer set
+applies to it. Clearing a hidden profile takes it out of `hidden_by_owner`
+without recreating it; the next newer set creates it. Either asks the
+person's apps to sync. A field that leaves `overrides` without the person's
+own edit was cleared: send a newer set so the server holds the app's value.
 
 ## Profile PINs
 
