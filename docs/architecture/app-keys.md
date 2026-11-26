@@ -978,11 +978,14 @@ by a set built elsewhere.
   `WithoutRecording`, so the write is not an edit. A `set` PIN can't be
   applied, since the server holds no digits, and stays until a newer set
   compares and writes it; a `keep` PIN asks for nothing; a picture this
-  server lacks waits for its upload. Clearing either half of a mirrored
+  server lacks waits for its upload; a setting the last set neither names
+  nor resets is in no plan, so the clear writes nothing and the owner's
+  value stays until a set names or resets the key. Clearing either half of a mirrored
   setting clears both rows, since a set writes the pair together. Clearing a
-  hidden profile deletes the removal row only: the next accepted newer set
-  finds the item missing and creates it, and a repeat of the held version
-  creates nothing. Each clear then calls the wake hook
+  hidden profile deletes the removal row only and creates nothing: the next
+  accepted newer set creates the profile only if it has an item with that
+  `sync_id` and the household has room (otherwise the item is left off), and
+  a repeat of the held version creates nothing. Each clear then calls the wake hook
   (`profileedits.Waker`) itself, since its writes record nothing for the
   request's middleware to wake on, and answers what the hook reported: true
   only when that call queued a wake. With nothing recorded in the request,

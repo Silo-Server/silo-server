@@ -438,13 +438,19 @@ Nothing it writes counts as an edit. A PIN the set sent as digits, or kept, can'
 be put back, because the server never stores digits: the owner's PIN stays until
 the person's app sends a newer set. When the set has no PIN for the profile,
 clearing removes the owner's PIN at once. A picture this server doesn't hold waits for
-its upload. `clear_applies` on the record and `applied` in the answer say which
+its upload. A setting the last set neither names nor resets has no value from
+the set: the clear writes nothing, and the profile keeps the owner's value
+until a set names or resets the key. `clear_applies` on the record and `applied` in the answer say which
 happened. For a setting the settings contract mirrors in another key, clearing
 either key clears both. Putting back a `name` that another profile on the account now has,
 compared trimmed and without case as every profile write compares names, is
 refused with 409 `conflict`, as the owner's own rename to it is: nothing is
-written and the override stays until that profile is renamed. Clearing a hidden profile does not recreate it: the next
-newer set does, as a new profile. After a clear of an override or a hidden
+written and the override stays until that profile is renamed. Clearing a hidden profile creates nothing. A newer set
+creates the profile, as a new profile with no history here, only if it has an
+item with that `sync_id` and the household has room for another profile;
+otherwise the item is in `left_off`, or not in the set, and nothing comes back.
+`wake_queued` says only that a push was queued, not that the profile returned.
+After a clear of an override or a hidden
 profile commits, the server tries to wake the person's apps with a push, and
 `wake_queued` is true only when this call queued one. It is false with push
 off, with no phone registered, within a minute after an earlier wake of the

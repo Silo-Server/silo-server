@@ -1103,11 +1103,16 @@ An administrator sees these records and clears them from the admin routes in
 [admin-users-api.md](admin-users-api.md#profiles-from-the-persons-app).
 Clearing an override (a guarded `PATCH` that must name, in `If-Match`, the
 `etag` the administrator was shown) puts the field back to the value of the
-last accepted set at once, except a PIN the set sent as digits, which stays as the owner set
-it until a newer set. A picture this server doesn't hold waits for its upload.
+last accepted set at once, with three exceptions. A PIN the set sent as digits,
+or kept (`{"keep": true}`), stays as the owner set it until a newer set. A
+picture this server doesn't hold waits for its upload. A setting the last set
+neither names nor resets has no value from the set: the clear writes nothing,
+and the profile keeps the owner's value until a set names or resets the key.
 The field leaves `overrides` and the next newer set applies to it. Clearing a
-hidden profile takes it out of `hidden_by_owner` without recreating it; the
-next newer set creates it. After either commits, the server wakes the
+hidden profile takes it out of `hidden_by_owner` and creates nothing. A newer
+set creates the profile only if it has an item with that `sync_id` and the
+household has room for another profile; otherwise the item is in `left_off`,
+or not in the set, and nothing comes back. After either commits, the server wakes the
 person's apps with a push where it can (at most one a minute per account, and
 only with push on, a phone registered and the wake queued in time); otherwise
 the app sees the change
