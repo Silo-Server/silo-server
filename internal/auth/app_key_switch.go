@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/demomode"
@@ -83,25 +84,70 @@ func lockAppKeySwitch(ctx context.Context, tx pgx.Tx) error {
 // settings lock in exclusive mode, so the sweep and the write commit
 // together. It answers how many sessions it ended.
 //
-// It works across accounts, so it can't take each account's row and
-// identities first as other writers of sessions do. Its order is the
-// settings lock, every plugin installation row (share, in id order), then
-// the session rows (in id order), the order of a key path's installation
-// and session locks. A plugin uninstall locks its installation row before
-// it deletes the identities whose sessions it clears, so either the
-// uninstall waits at its installation for the sweep to commit, or the sweep
-// waits there, holding no session row, for the uninstall to commit.
+// It runs endKeySessionsTx over every key session.
 func EndAppKeySessionsTx(ctx context.Context, tx pgx.Tx) (int64, error) {
+	return endKeySessionsTx(ctx, tx, nil)
+}
+
+// endKeySessionsTx ends the live key sessions (device_key_id set) of the
+// session IDs in only, or every one when only is nil. It works across
+// accounts, so it can't take each account's row and identities first as
+// other writers of sessions do. Its order, after the settings lock the
+// caller holds:
+//
+//   - every plugin installation row (share, in id order). A plugin uninstall
+//     locks its installation row before it deletes the identities whose
+//     sessions it clears, so either the uninstall waits there for this to
+//     commit, or this waits there, holding no request or session row.
+//   - the device sign-in requests those sessions pre-approved (in id order),
+//     the rows the auth_sessions_withdraw_preapprovals trigger writes when a
+//     session ends. Ending all of an account's sessions
+//     (revokeSignInsInTransaction) withdraws its approvals before it ends its
+//     sessions, so both take requests before sessions.
+//   - the sessions (in id order), whose revocation fires that trigger.
+func endKeySessionsTx(ctx context.Context, tx pgx.Tx, only []string) (int64, error) {
 	if _, err := tx.Exec(ctx, `SELECT id FROM plugin_installations ORDER BY id FOR SHARE`); err != nil {
 		return 0, fmt.Errorf("locking plugin installations: %w", err)
 	}
+	if _, err := tx.Exec(ctx, `SELECT r.id FROM device_login_requests r
+		JOIN auth_sessions s ON s.id = r.preapproved_session_id
+		WHERE s.device_key_id IS NOT NULL AND s.revoked_at IS NULL AND ($1::text[] IS NULL OR s.id = ANY($1))
+			AND r.preapproved_at IS NOT NULL AND r.status = 'approved'
+		ORDER BY r.id FOR UPDATE OF r`, only); err != nil {
+		return 0, fmt.Errorf("locking pre-approved device sign-ins: %w", err)
+	}
 	tag, err := tx.Exec(ctx, `WITH ending AS (
-			SELECT id FROM auth_sessions WHERE device_key_id IS NOT NULL AND revoked_at IS NULL
+			SELECT id FROM auth_sessions
+			WHERE device_key_id IS NOT NULL AND revoked_at IS NULL AND ($1::text[] IS NULL OR id = ANY($1))
 			ORDER BY id FOR UPDATE
 		)
-		UPDATE auth_sessions s SET revoked_at = NOW() FROM ending WHERE s.id = ending.id`)
+		UPDATE auth_sessions s SET revoked_at = NOW() FROM ending WHERE s.id = ending.id`, only)
 	if err != nil {
 		return 0, fmt.Errorf("ending app key sessions: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// endKeySessionIfSwitchOff ends one key session when the app key switch is
+// off, and reports whether it did. Renewal calls it for a key session, so a
+// session the sweep missed (a database written or put back by hand) ends
+// at its next refresh like any revoked session, and its access token is
+// refused from then on, rather than pausing until the switch comes back.
+// It reads the switch under the settings lock (shared) and ends the session
+// in endKeySessionsTx's order.
+func endKeySessionIfSwitchOff(ctx context.Context, pool *pgxpool.Pool, sessionID string) (bool, error) {
+	ended := false
+	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if err := lockSettingsShared(ctx, tx); err != nil {
+			return err
+		}
+		on, err := appKeySwitchOn(ctx, tx)
+		if err != nil || on {
+			return err
+		}
+		ended = true
+		_, err = endKeySessionsTx(ctx, tx, []string{sessionID})
+		return err
+	})
+	return ended, err
 }

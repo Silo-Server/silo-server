@@ -310,8 +310,8 @@ func (l fakeLoader) HasAccounts(_ context.Context, liveURL string) (bool, error)
 	l.ctl.liveURLs = append(l.ctl.liveURLs, liveURL)
 	return !l.ctl.noAccounts, nil
 }
-func (l fakeLoader) StrandedAccounts(context.Context, string) ([]string, error) {
-	return nil, nil
+func (l fakeLoader) StrandedAccounts(context.Context, string) ([]string, string, error) {
+	return nil, "", nil
 }
 func (l fakeLoader) CarryCredentials(_ context.Context, _, liveURL string, _ AppKeyCarry) (CarriedCredentials, error) {
 	l.ctl.carriedFrom = append(l.ctl.carriedFrom, liveURL)

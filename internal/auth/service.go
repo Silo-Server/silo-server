@@ -1410,14 +1410,14 @@ func (s *Service) checkSessionStanding(ctx context.Context, sessionID string) (*
 	}
 	if session.DeviceKeyID != nil {
 		// A session a key opened lives only while the switch is on. Turning
-		// it off ends these sessions in the same transaction; one that a
-		// race or a direct database write left behind is refused here, at
-		// its next renewal, rather than refreshing on for weeks.
-		on, err := appKeySwitchOn(ctx, s.sessions.pool)
+		// it off ends these sessions in the same transaction; one a
+		// database written by hand left live is ended here, at its next
+		// renewal, so it neither refreshes on nor returns with the switch.
+		ended, err := endKeySessionIfSwitchOff(ctx, s.sessions.pool, session.ID)
 		if err != nil {
-			return nil, sessionCheckUnavailable("reading the app key switch", err)
+			return nil, sessionCheckUnavailable("ending a key session with the switch off", err)
 		}
-		if !on {
+		if ended {
 			return nil, ErrSessionRevoked
 		}
 	}

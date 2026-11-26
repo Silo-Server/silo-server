@@ -191,3 +191,69 @@ func TestAppKeySwitchWriteEndsKeySessionsDB(t *testing.T) {
 		})
 	}
 }
+
+// A batch that turns app keys off together with local passwords is judged
+// on the local password setting the batch leaves, not the stored one. With
+// passwords stored off, an account with a password and a key has no way in
+// now, and turning passwords on in the same write gives it its password
+// back: the write succeeds. A passwordless key holder judged on the stored
+// "off" would look keyless (its key needs local passwords) and slip through;
+// on the batch's "on" its keys are its only way in, so the write is refused
+// naming it. Turning both off is refused naming it too.
+func TestAppKeysOffJudgedOnTheBatchLocalSettingDB(t *testing.T) {
+	f := newSwitchWriteFixture(t)
+	ctx := t.Context()
+	h := &AdminHandler{SettingsRepo: serversettings.NewServerSettingsRepo(f.pool), pool: f.pool}
+	if existing, err := h.AccountsAtRisk(ctx, auth.ChangeAppKeysOff); err != nil || len(existing) > 0 {
+		t.Skipf("accounts that sign in only with keys already in the database (%v)", err)
+	}
+	var savedLocal *string
+	_ = f.pool.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, config.AuthLocalPasswordLoginSettingKey).Scan(&savedLocal)
+	t.Cleanup(func() {
+		if savedLocal == nil {
+			_, _ = f.pool.Exec(context.Background(), `DELETE FROM server_settings WHERE key = $1`, config.AuthLocalPasswordLoginSettingKey)
+		} else {
+			_, _ = f.pool.Exec(context.Background(), `UPDATE server_settings SET value = $2 WHERE key = $1`, config.AuthLocalPasswordLoginSettingKey, *savedLocal)
+		}
+	})
+	// A break-glass admin, so turning local passwords off passes its own
+	// check.
+	glass := f.account(t, "glass", true)
+	if _, err := f.pool.Exec(ctx, `UPDATE users SET role = 'admin', break_glass = true WHERE id = $1`, glass); err != nil {
+		t.Fatal(err)
+	}
+	for i, tc := range []struct {
+		name, storedLocal, batchLocal string
+		password                      bool
+		refused                       bool
+	}{
+		{name: "passwords on, keys off, a password and a key", storedLocal: "false", batchLocal: "true", password: true},
+		{name: "passwords on, keys off, keys only", storedLocal: "false", batchLocal: "true", refused: true},
+		{name: "passwords off, keys off, keys only", storedLocal: "true", batchLocal: "false", refused: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := f.pool.Exec(ctx, `DELETE FROM server_settings WHERE key = ANY($1)`, switchSettingKeys); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.pool.Exec(ctx, `INSERT INTO server_settings (key, value) VALUES ($1, $2)
+				ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, config.AuthLocalPasswordLoginSettingKey, tc.storedLocal); err != nil {
+				t.Fatal(err)
+			}
+			label := "holder" + strconv.Itoa(i)
+			f.deviceKey(t, f.account(t, label, tc.password), "device", "session")
+			_, err := h.UpdateAdminSettings(ctx, map[string]string{
+				config.AuthLocalPasswordLoginSettingKey: tc.batchLocal, config.AuthAppKeySignInSettingKey: "false",
+			}, nil)
+			if !tc.refused {
+				if err != nil {
+					t.Fatalf("batch = %v, want it saved", err)
+				}
+				return
+			}
+			requireAdminError(t, err, 409, "last_sign_in_method")
+			if !strings.Contains(err.Error(), label+"-"+f.suffix) {
+				t.Fatalf("refusal %v does not name the account", err)
+			}
+		})
+	}
+}

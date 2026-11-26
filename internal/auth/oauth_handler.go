@@ -155,8 +155,19 @@ func NewOAuthHandler(d OAuthHandlerDeps) *OAuthHandler {
 // SetHostBaseURL updates the externally reachable origin used for future
 // OAuth redirects.
 func (h *OAuthHandler) SetHostBaseURL(url string) {
-	normalized := strings.TrimRight(strings.TrimSpace(url), "/")
+	normalized := normalizeHostBaseURL(url)
 	h.hostBaseURL.Store(&normalized)
+}
+
+func normalizeHostBaseURL(url string) string {
+	return strings.TrimRight(strings.TrimSpace(url), "/")
+}
+
+// OAuthSignInServed reports whether an OAuth provider can sign anyone in with
+// publicURL (server.public_url) as the server's public origin: the browser
+// and native starts both need one for the callback, and refuse without it.
+func OAuthSignInServed(publicURL string) bool {
+	return normalizeHostBaseURL(publicURL) != ""
 }
 
 func (h *OAuthHandler) currentHostBaseURL() string {

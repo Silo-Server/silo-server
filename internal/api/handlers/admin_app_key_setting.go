@@ -35,7 +35,7 @@ func (h *AdminHandler) checkAppKeySetting(ctx context.Context, tx pgx.Tx, before
 		// store without one (a test fake) gets here.
 		return ErrAdminSettingsUnavailable
 	}
-	if err := auth.CheckAppKeysOff(ctx, tx); err != nil {
+	if err := auth.CheckAppKeysOff(ctx, tx, after[config.AuthLocalPasswordLoginSettingKey]); err != nil {
 		return breakGlassError(err)
 	}
 	ended, err := auth.EndAppKeySessionsTx(ctx, tx)

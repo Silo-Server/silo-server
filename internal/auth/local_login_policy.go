@@ -194,7 +194,7 @@ func CheckLocalLoginSettingChange(ctx context.Context, db dbQuerier, before, aft
 	if count == 0 {
 		return ErrBreakGlassRequired
 	}
-	return refuseAccountsAtRisk(ctx, db, ChangeLocalPasswordsOff)
+	return refuseAccountsAtRisk(ctx, db, ChangeLocalPasswordsOff, false)
 }
 
 func settingBool(value string, fallback bool) bool {

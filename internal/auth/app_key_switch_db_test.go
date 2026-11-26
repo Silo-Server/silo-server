@@ -3,9 +3,11 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -54,9 +56,9 @@ func waitForLockWaiters(t *testing.T, pool *pgxpool.Pool, n int) {
 }
 
 // Turning the switch off ends every session a key opened, the person's own
-// devices' and a granted app's, and no other session; renewal of a key
-// session the sweep missed is refused while the switch is off, in demo mode
-// too; and turning it back on lets the same device key sign in again.
+// devices' and a granted app's, and no other session; key sign-in is refused
+// while it is off and in demo mode; and turning it back on lets the same
+// device key sign in again.
 func TestAppKeySwitchOffEndsKeySessionsDB(t *testing.T) {
 	env := newKeyEnv(t, "keyswitch")
 	t.Cleanup(saveSettings(t, env.pool, config.AuthAppKeySignInSettingKey, demomode.SettingKey))
@@ -90,30 +92,24 @@ func TestAppKeySwitchOffEndsKeySessionsDB(t *testing.T) {
 		t.Fatalf("sign-in with the switch off = %v", err)
 	}
 
-	// A key session left live (a database write that skipped the sweep)
-	// does not renew while the switch is off, nor in demo mode.
+	// Back on: the same device key signs in again and its session renews.
+	// In demo mode key sign-in is refused as with the setting off. (A key
+	// session the sweep missed is ended at its next refresh:
+	// TestKeySessionSweepMissedEndsAtRefreshDB drives that through the
+	// routes.)
 	env.setSetting(t, config.AuthAppKeySignInSettingKey, "true")
 	again, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: device}))
 	if err != nil || again.DeviceID != enrolled.DeviceID {
 		t.Fatalf("the same device key after the switch came back on = %+v, %v", again, err)
 	}
-	for _, off := range []struct{ key, value string }{
-		{config.AuthAppKeySignInSettingKey, "false"},
-		{demomode.SettingKey, demomode.OnValue},
-	} {
-		env.setSetting(t, off.key, off.value)
-		if _, err := env.svc.Refresh(ctx, again.Pair.RefreshToken); !errors.Is(err, ErrSessionRevoked) {
-			t.Errorf("renewing a key session with %s=%s = %v", off.key, off.value, err)
-		}
-		if _, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: device})); !errors.Is(err, ErrAppKeySignInDisabled) {
-			t.Errorf("sign-in with %s=%s = %v", off.key, off.value, err)
-		}
-		env.setSetting(t, config.AuthAppKeySignInSettingKey, "true")
-		env.setSetting(t, demomode.SettingKey, "")
-	}
 	if _, err := env.svc.Refresh(ctx, again.Pair.RefreshToken); err != nil {
 		t.Fatalf("renewing a key session with the switch on = %v", err)
 	}
+	env.setSetting(t, demomode.SettingKey, demomode.OnValue)
+	if _, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: device})); !errors.Is(err, ErrAppKeySignInDisabled) {
+		t.Errorf("sign-in in demo mode = %v", err)
+	}
+	env.setSetting(t, demomode.SettingKey, "")
 }
 
 // A key sign-in and a switch-off serialize on the settings lock: either the
@@ -203,4 +199,75 @@ func TestKeySignInRacesSwitchOffDB(t *testing.T) {
 			t.Fatalf("%d key sessions survived the switch-off", live)
 		}
 	})
+}
+
+// The switch-off sweep and ending all of an account's sessions
+// (revokeSignInsInTransaction) take a key session's pre-approved device
+// sign-in before the session, so neither order deadlocks when a key session
+// holds one. A blocker on the session row lets each side take what it takes
+// first and wait; then both must finish within the deadline.
+func TestSwitchOffSweepAndAccountRevokeDoNotDeadlockDB(t *testing.T) {
+	env := newKeyEnv(t, "keydeadlock")
+	t.Cleanup(saveSettings(t, env.pool, config.AuthAppKeySignInSettingKey))
+	ctx := t.Context()
+	sweep := func(_ *models.User) func(context.Context) error {
+		return func(ctx context.Context) error { return switchOff(ctx, env.pool) }
+	}
+	revokeAll := func(user *models.User) func(context.Context) error {
+		return func(ctx context.Context) error {
+			return pgx.BeginFunc(ctx, env.pool, func(tx pgx.Tx) error {
+				if _, err := lockUser(ctx, tx, user.ID); err != nil {
+					return err
+				}
+				return revokeSignInsInTransaction(ctx, tx, user.ID, nil)
+			})
+		}
+	}
+	for i, order := range []struct {
+		name          string
+		first, second func(*models.User) func(context.Context) error
+	}{
+		{"the sweep first", sweep, revokeAll},
+		{"ending all of the account's sessions first", revokeAll, sweep},
+	} {
+		t.Run(order.name, func(t *testing.T) {
+			env.setSetting(t, config.AuthAppKeySignInSettingKey, "true")
+			user := env.localAccount(t, fmt.Sprintf("keydeadlock-%d", i), models.RoleUser)
+			_, _, enrolled := env.enroll(t, user)
+			session := enrolled.Pair.SessionID
+			if _, err := env.pool.Exec(ctx, `INSERT INTO device_login_requests (id, device_code_hash, browser_code_hash, user_code_hash,
+					match_code, device_name, status, approved_by_user_id, expires_at, preapproved_at, preapproved_session_id, binding_hash)
+				VALUES ($1, $4, $4, $4, '000000', 'TV', 'approved', $2, NOW() + interval '10 minutes', NOW(), $3, 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')`,
+				uuid.NewString(), user.ID, session, uuid.NewString()); err != nil {
+				t.Fatal(err)
+			}
+			hold, err := env.pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = hold.Rollback(context.Background()) })
+			if _, err := hold.Exec(ctx, `SELECT 1 FROM auth_sessions WHERE id = $1 FOR UPDATE`, session); err != nil {
+				t.Fatal(err)
+			}
+			deadline, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			done := make(chan error, 2)
+			go func() { done <- order.first(user)(deadline) }()
+			waitForLockWaiters(t, env.pool, 1)
+			go func() { done <- order.second(user)(deadline) }()
+			waitForLockWaiters(t, env.pool, 2)
+			if err := hold.Rollback(ctx); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				if err := <-done; err != nil {
+					t.Fatalf("one side failed (a deadlock aborts one): %v", err)
+				}
+			}
+			var live int
+			if err := env.pool.QueryRow(ctx, `SELECT COUNT(*) FROM auth_sessions WHERE id = $1 AND revoked_at IS NULL`, session).Scan(&live); err != nil || live != 0 {
+				t.Fatalf("the key session is still live (%d, %v)", live, err)
+			}
+		})
+	}
 }

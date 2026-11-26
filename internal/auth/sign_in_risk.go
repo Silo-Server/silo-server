@@ -3,12 +3,15 @@ package auth
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
 // The facts below are written as SQL over users u, so one query can judge
@@ -22,13 +25,66 @@ import (
 // passwords is separate (passwordWorksSQL).
 const usablePasswordSQL = `(u.local_password_login_enabled AND COALESCE(u.password_hash, '') <> '')`
 
-// usableIdentitySQL is usableIdentityCount's rule, the one the unlink guard
-// uses: an identity of the account at an enabled installation with an
-// enabled sign-in binding, so the person can sign in through the provider.
-const usableIdentitySQL = `EXISTS (SELECT 1 FROM plugin_auth_identities i
-	JOIN plugin_installations p ON p.id = i.plugin_installation_id AND p.enabled
-	WHERE i.user_id = u.id AND EXISTS (
-		SELECT 1 FROM plugin_auth_bindings b WHERE b.plugin_installation_id = p.id AND b.enabled))`
+// usableIdentitySQL is an identity of the account at one of providers (a
+// SQL int[] expression, the installations signInProviders answers): a
+// provider the person can sign in with from an ordinary device.
+func usableIdentitySQL(providers string) string {
+	return `EXISTS (SELECT 1 FROM plugin_auth_identities i
+	WHERE i.user_id = u.id AND i.plugin_installation_id = ANY(` + providers + `))`
+}
+
+// primarySignInBindingSQL is the SQL test that the plugin_auth_bindings row
+// named by alias is an enabled OIDC or LDAP binding: enabled, and not a
+// network identity binding, which signs in only people on its network.
+func primarySignInBindingSQL(alias string) string {
+	return alias + `.enabled AND NOT ` + plugins.AuthBindingIsNetworkSQL(alias+".plugin_installation_id", alias+".capability_id")
+}
+
+// signInProviders answers the installations whose identities can sign people
+// in: an enabled installation with an enabled OIDC or LDAP binding
+// (primarySignInBindingSQL), and for an OAuth binding a public URL
+// (OAuthSignInServed). A network identity signs in only from a device on
+// its network, and an OAuth provider signs nobody in without a public URL,
+// so neither counts; a credentials (directory) provider needs no public URL.
+// It is the one rule for "a provider people can sign in with" here, written
+// so a single definition can replace it and any other copy.
+func signInProviders(ctx context.Context, db dbQuerier, publicURL string) ([]int, error) {
+	rows, err := db.Query(ctx, `SELECT p.id, COALESCE((SELECT c.metadata->'auth_modes' FROM plugin_capabilities c
+			WHERE c.plugin_installation_id = b.plugin_installation_id AND c.capability_type = 'auth_provider.v1'
+				AND c.capability_id = b.capability_id), '[]'::jsonb)
+		FROM plugin_installations p
+		JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND `+primarySignInBindingSQL("b")+`
+		WHERE p.enabled`)
+	if err != nil {
+		return nil, fmt.Errorf("checking for an enabled sign-in provider: %w", err)
+	}
+	type binding struct {
+		InstallationID int
+		Modes          []string
+	}
+	bindings, err := pgx.CollectRows(rows, pgx.RowToStructByPos[binding])
+	if err != nil {
+		return nil, fmt.Errorf("checking for an enabled sign-in provider: %w", err)
+	}
+	providers := []int{}
+	for _, b := range bindings {
+		if ProviderModeForAuthModes(b.Modes) != ProviderModeOAuth || OAuthSignInServed(publicURL) {
+			providers = append(providers, b.InstallationID)
+		}
+	}
+	return providers, nil
+}
+
+// SignInProviderInstallations is signInProviders with the public URL db
+// stores (server.public_url), for a database that is not this server's
+// own yet, such as a restored one.
+func SignInProviderInstallations(ctx context.Context, db dbQuerier) ([]int, error) {
+	publicURL, err := readServerSetting(ctx, db, config.ServerPublicURLSettingKey)
+	if err != nil {
+		return nil, err
+	}
+	return signInProviders(ctx, db, publicURL)
+}
 
 // passwordWorksSQL is a password that signs in now: a usable one, and the
 // server allows local passwords (localOn, a boolean SQL expression) or the
@@ -63,19 +119,20 @@ func keyWorksSQL(localOn string) string {
 // AccountHasNoWayInSQL is the condition on an account u (the users row) that
 // it has no way to sign in under the two switches: appKeysOn and localOn
 // are boolean SQL expressions (placeholders or literals) for the app key
-// switch and auth.local_password_login. No provider identity it can sign in
+// switch and auth.local_password_login, and providers an int[] expression
+// for SignInProviderInstallations. No provider identity it can sign in
 // with, no password that signs in, and no key that does. Whether the
 // account is enabled is the caller's condition.
-func AccountHasNoWayInSQL(appKeysOn, localOn string) string {
-	return `(NOT ` + usableIdentitySQL + ` AND NOT ` + passwordWorksSQL(localOn) +
+func AccountHasNoWayInSQL(appKeysOn, localOn, providers string) string {
+	return `(NOT ` + usableIdentitySQL(providers) + ` AND NOT ` + passwordWorksSQL(localOn) +
 		` AND NOT (` + appKeysOn + ` AND ` + keyWorksSQL(localOn) + `))`
 }
 
 // AccountHasNoWayInWithoutKeysSQL is AccountHasNoWayInSQL for a database
 // with no app key tables (a backup from before them), where no key is a way
 // in.
-func AccountHasNoWayInWithoutKeysSQL(localOn string) string {
-	return `(NOT ` + usableIdentitySQL + ` AND NOT ` + passwordWorksSQL(localOn) + `)`
+func AccountHasNoWayInWithoutKeysSQL(localOn, providers string) string {
+	return `(NOT ` + usableIdentitySQL(providers) + ` AND NOT ` + passwordWorksSQL(localOn) + `)`
 }
 
 // SignInChange names a server-wide sign-in switch going off.
@@ -121,24 +178,37 @@ type AccountAtRisk struct {
 //     in, or with none; a password would not help it then, so only linking
 //     a provider takes it off the list.
 var accountsAtRiskSQL = map[SignInChange]string{
-	ChangeAppKeysOff:        `NOT ` + passwordWorksSQL("$1") + ` AND NOT ` + usableIdentitySQL + ` AND ` + keyWorksSQL("$1"),
-	ChangeLocalPasswordsOff: `NOT ` + usablePasswordSQL + ` AND NOT ` + usableIdentitySQL + ` AND ` + keyWorksSQL("true"),
+	ChangeAppKeysOff:        `NOT ` + passwordWorksSQL("$2") + ` AND NOT ` + usableIdentitySQL("$1") + ` AND ` + keyWorksSQL("$2"),
+	ChangeLocalPasswordsOff: `NOT ` + usablePasswordSQL + ` AND NOT ` + usableIdentitySQL("$1") + ` AND ` + keyWorksSQL("true"),
 }
 
 // AccountsAtRisk lists the enabled accounts change would leave with no way
 // in, or with keys as their only way in, in username order. db is the pool
 // or the settings write's transaction.
 func AccountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange) ([]AccountAtRisk, error) {
+	var localOn bool
+	if change == ChangeAppKeysOff {
+		var err error
+		if localOn, err = localPasswordLoginAllowed(ctx, db); err != nil {
+			return nil, err
+		}
+	}
+	return accountsAtRisk(ctx, db, change, localOn)
+}
+
+// accountsAtRisk is AccountsAtRisk with auth.local_password_login given:
+// a settings write judges the value it leaves, not the stored one.
+func accountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange, localOn bool) ([]AccountAtRisk, error) {
 	where, ok := accountsAtRiskSQL[change]
 	if !ok {
 		return nil, fmt.Errorf("unknown sign-in change %q", change)
 	}
-	var args []any
+	providers, err := SignInProviderInstallations(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	args := []any{providers}
 	if change == ChangeAppKeysOff {
-		localOn, err := localPasswordLoginAllowed(ctx, db)
-		if err != nil {
-			return nil, err
-		}
 		args = append(args, localOn)
 	}
 	rows, err := db.Query(ctx, `SELECT u.id, COALESCE(u.username::text, u.email::text, ''), u.role, u.is_owner,
@@ -163,6 +233,9 @@ func AccountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange) ([]A
 type AccountsAtRiskError struct {
 	Change   SignInChange
 	Accounts []AccountAtRisk
+	// LocalOn is auth.local_password_login as the change leaves it, which
+	// decides the remedy the detail offers.
+	LocalOn bool
 }
 
 func (e *AccountsAtRiskError) Error() string { return e.Detail() }
@@ -186,24 +259,44 @@ func (e *AccountsAtRiskError) Detail() string {
 	if more := len(e.Accounts) - len(names); more > 0 {
 		list += fmt.Sprintf(" and %d more", more)
 	}
-	accounts := fmt.Sprintf("%d accounts", len(e.Accounts))
-	if len(e.Accounts) == 1 {
-		accounts = "1 account"
-	}
+	breakGlass := slices.ContainsFunc(e.Accounts, func(a AccountAtRisk) bool { return a.BreakGlass })
 	if e.Change == ChangeLocalPasswordsOff {
-		return accounts + " would have only Silo app keys, or no way at all, to sign in: " + list +
-			". Link a sign-in provider account for each, then turn local passwords off."
+		return countAccounts(len(e.Accounts), "would", "would") + " have only Silo app keys, or no way at all, to sign in: " + list +
+			". " + WayInRemedy(false, breakGlass) + ", then turn local passwords off."
 	}
-	return accounts + " sign in only with Silo app keys: " + list +
-		". Give each a password or link a sign-in provider account for it, then turn app keys off."
+	return countAccounts(len(e.Accounts), "signs", "sign") + " in only with Silo app keys: " + list +
+		". " + WayInRemedy(e.LocalOn, breakGlass) + ", then turn app keys off."
+}
+
+// countAccounts is "1 account <one>" or "N accounts <many>".
+func countAccounts(n int, one, many string) string {
+	if n == 1 {
+		return "1 account " + one
+	}
+	return fmt.Sprintf("%d accounts %s", n, many)
+}
+
+// WayInRemedy is the sentence that tells an administrator how to give the
+// named accounts a way in, true for the server's local password setting:
+// while local passwords are on, a password or a provider account; while
+// they are off, a password signs in only a break-glass administrator, so
+// it is offered only when breakGlass says one is named.
+func WayInRemedy(localOn, breakGlass bool) string {
+	switch {
+	case localOn:
+		return "Give each a password or link a sign-in provider account for it"
+	case breakGlass:
+		return "Link a sign-in provider account for each, or give a break-glass administrator a password"
+	}
+	return "Link a sign-in provider account for each"
 }
 
 // refuseAccountsAtRisk lists the accounts change leaves at risk and refuses
 // with *AccountsAtRiskError while any of them blocks it. For app keys off an
 // account with a live sign-in link does not block (SignInLinkExpiresAt);
 // this server makes none yet, so every listed account does.
-func refuseAccountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange) error {
-	accounts, err := AccountsAtRisk(ctx, db, change)
+func refuseAccountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange, localOn bool) error {
+	accounts, err := accountsAtRisk(ctx, db, change, localOn)
 	if err != nil {
 		return err
 	}
@@ -214,17 +307,18 @@ func refuseAccountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange
 		}
 	}
 	if len(blocking) > 0 {
-		return &AccountsAtRiskError{Change: change, Accounts: blocking}
+		return &AccountsAtRiskError{Change: change, Accounts: blocking, LocalOn: localOn}
 	}
 	return nil
 }
 
 // CheckAppKeysOff refuses turning the app key switch off while an account
-// would be left with no way in (AccountsAtRisk, ChangeAppKeysOff). The
-// settings write calls it in its transaction, under the settings lock,
-// before it ends the key sessions.
-func CheckAppKeysOff(ctx context.Context, tx pgx.Tx) error {
-	return refuseAccountsAtRisk(ctx, tx, ChangeAppKeysOff)
+// would be left with no way in (AccountsAtRisk, ChangeAppKeysOff), judged
+// with auth.local_password_login as the same write leaves it (localAfter,
+// the effective value). The settings write calls it in its transaction,
+// under the settings lock, before it ends the key sessions.
+func CheckAppKeysOff(ctx context.Context, tx pgx.Tx, localAfter string) error {
+	return refuseAccountsAtRisk(ctx, tx, ChangeAppKeysOff, settingBool(localAfter, true))
 }
 
 // ErrKeysOnlyWayIn refuses an administrator change that would make app keys
@@ -286,9 +380,13 @@ func EnsureKeysNotOnlyWayInAfterAdminChange(ctx context.Context, tx pgx.Tx, curr
 	// After the change the account is break-glass, so its local keys work
 	// as they would with local passwords on; the stored row still has the
 	// flag as it was.
+	providers, err := SignInProviderInstallations(ctx, tx)
+	if err != nil {
+		return err
+	}
 	var keysOnly bool
-	if err := tx.QueryRow(ctx, `SELECT NOT `+usableIdentitySQL+` AND `+keyWorksSQL("true")+`
-		FROM users u WHERE u.id = $1`, current.ID).Scan(&keysOnly); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT NOT `+usableIdentitySQL("$2")+` AND `+keyWorksSQL("true")+`
+		FROM users u WHERE u.id = $1`, current.ID, providers).Scan(&keysOnly); err != nil {
 		return fmt.Errorf("checking the account's other ways in: %w", err)
 	}
 	if keysOnly {

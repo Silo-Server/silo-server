@@ -15,66 +15,92 @@ import (
 )
 
 // strandedSentence follows the count of accounts a full restore leaves with
-// no way to sign in, and heads their names.
-const strandedSentence = "have no way to sign in on the restored server; give each a password or link a sign-in provider account for it:"
+// no way to sign in, and heads their names; the remedy for the restored
+// server's switches follows them (auth.WayInRemedy).
+const strandedSentence = "have no way to sign in on the restored server:"
 
 // strandedAccounts selects the enabled accounts the restored database
 // leaves with no way in under its two switches: no provider identity it can
 // sign in with, no password that signs in, and no key that does
 // (auth.AccountHasNoWayInSQL, the rule the sign-in switch checks use), with
-// $1 auth.local_password_login and $2 the app key switch. Keys the restore
-// revoked or left out are revoked or absent in the restored rows, so they
-// count as gone. A database without the key tables (a backup from before
-// them) uses the same rule without keys, and takes only $1.
+// $1 auth.local_password_login, $2 the installations whose identities can
+// sign people in (auth.SignInProviderInstallations) and $3 the app key
+// switch. Keys the restore revoked or left out are revoked or absent in the
+// restored rows, so they count as gone. A database without the key tables
+// (a backup from before them) uses the same rule without keys, and takes no
+// $3.
 func strandedAccounts(keyTables bool) string {
-	noWayIn := auth.AccountHasNoWayInWithoutKeysSQL("$1")
+	noWayIn := auth.AccountHasNoWayInWithoutKeysSQL("$1", "$2")
 	if keyTables {
-		noWayIn = auth.AccountHasNoWayInSQL("$2", "$1")
+		noWayIn = auth.AccountHasNoWayInSQL("$3", "$1", "$2")
 	}
-	return `SELECT format('%s (account %s)', coalesce(u.username::text, u.email::text, ''), u.id)
+	return `SELECT format('%s (account %s)', coalesce(u.username::text, u.email::text, ''), u.id), u.break_glass
 		FROM users u WHERE u.enabled AND ` + noWayIn + ` ORDER BY u.id`
 }
 
 // StrandedAccounts lists by name and id every enabled account the restored
-// database leaves with no way to sign in (strandedAccounts), or none.
-func (l PGLoader) StrandedAccounts(ctx context.Context, dbURL string) ([]string, error) {
+// database leaves with no way to sign in (strandedAccounts), or none, and
+// the remedy true for its switches: a password helps only while local
+// passwords are on, or for a break-glass administrator.
+func (l PGLoader) StrandedAccounts(ctx context.Context, dbURL string) ([]string, string, error) {
 	conn, err := pgx.Connect(ctx, dbURL)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 	settings, err := settingRows(ctx, conn, []string{config.AuthAppKeySignInSettingKey, config.AuthLocalPasswordLoginSettingKey, demomode.SettingKey})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	// As internal/auth reads them: a value that doesn't parse is the
 	// default, on, and app keys are off in demo mode (auth.AppKeySwitchOn).
 	local, err := strconv.ParseBool(strings.TrimSpace(settings[config.AuthLocalPasswordLoginSettingKey]))
-	args := []any{err != nil || local}
+	localOn := err != nil || local
+	providers, err := auth.SignInProviderInstallations(ctx, conn)
+	if err != nil {
+		return nil, "", err
+	}
+	args := []any{localOn, providers}
 	person, err := tableExists(ctx, conn, tableAuthPersonKeys)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	device, err := tableExists(ctx, conn, tableAuthDeviceKeys)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if person && device {
 		args = append(args, auth.AppKeySwitchOn(strings.TrimSpace(settings[config.AuthAppKeySignInSettingKey]), settings[demomode.SettingKey]))
 	}
-	return collectStrings(ctx, conn, strandedAccounts(person && device), args...)
+	rows, err := conn.Query(ctx, strandedAccounts(person && device), args...)
+	if err != nil {
+		return nil, "", err
+	}
+	var (
+		names      []string
+		name       string
+		glass      bool
+		breakGlass bool
+	)
+	if _, err := pgx.ForEachRow(rows, []any{&name, &glass}, func() error {
+		names, breakGlass = append(names, name), breakGlass || glass
+		return nil
+	}); err != nil {
+		return nil, "", err
+	}
+	return names, auth.WayInRemedy(localOn, breakGlass), nil
 }
 
 // reportStranded prints how many accounts StrandedAccounts lists and the
 // first maxListedAccounts of them (listNames), or nothing. It changes nothing and
 // never fails the restore: an owner fixes each account after Silo starts.
 func reportStranded(ctx context.Context, loader DatabaseLoader, dbURL string, out io.Writer) {
-	stranded, err := loader.StrandedAccounts(ctx, dbURL)
+	stranded, remedy, err := loader.StrandedAccounts(ctx, dbURL)
 	if err != nil {
 		_, _ = fmt.Fprintf(out, "Could not list the accounts left with no way to sign in: %v\n", err)
 		return
 	}
 	if len(stranded) > 0 {
-		_, _ = fmt.Fprintf(out, "%d accounts %s %s.\n", len(stranded), strandedSentence, listNames(stranded))
+		_, _ = fmt.Fprintf(out, "%d accounts %s %s. %s.\n", len(stranded), strandedSentence, listNames(stranded), remedy)
 	}
 }
