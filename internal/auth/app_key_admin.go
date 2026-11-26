@@ -125,7 +125,7 @@ func (a *AppKeySignIn) AdminRevokeDeviceKey(ctx context.Context, actorID, userID
 		if _, err := tx.Exec(ctx, `UPDATE auth_device_keys SET revoked_at = NOW() WHERE id = $1`, key.ID); err != nil {
 			return nil, fmt.Errorf("revoking device key: %w", err)
 		}
-		if err := endDeviceKeySessions(ctx, tx, []string{key.ID}); err != nil {
+		if err := endDeviceKeySessions(ctx, tx, userID, []string{key.ID}); err != nil {
 			return nil, err
 		}
 		return auditmutation.RecordMutation(ctx, tx, auditmutation.ActionDeviceKeyRevoked, auditmutation.TargetUser,

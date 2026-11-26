@@ -64,6 +64,17 @@ var signInRowWriters = map[string]string{
 	"internal/auth/device_login.go:Approve":                                    identitiesFirst,
 	"internal/auth/device_login.go:approveForProfile":                          identitiesFirst,
 	"internal/auth/device_login.go:poll":                                       identitiesFirst,
+	// Collecting a pre-approved request runs inside poll, after its locks.
+	"internal/auth/device_login_preapproval.go:preapprovedSession": identitiesFirst,
+	// approvingProviderChain takes the account row and its identities.
+	"internal/auth/device_login_preapproval.go:Preapprove": identitiesFirst,
+	// App keys: the sessions a key opened carry the identity the key was
+	// bound to. deleteIdentity holds that identity before it calls
+	// revokeIdentityKeysTx; the other two take the account's identities
+	// themselves.
+	"internal/auth/app_key_repository.go:endDeviceKeySessions": identitiesFirst,
+	"internal/auth/app_key_repository.go:revokeAccountKeysTx":  identitiesFirst,
+	"internal/auth/app_key_repository.go:revokeIdentityKeysTx": identitiesFirst,
 
 	"internal/auth/session.go:createWithQuerier":                 oneRow,
 	"internal/auth/device_login.go:markOpened":                   oneRow,
@@ -76,6 +87,8 @@ var signInRowWriters = map[string]string{
 	"internal/auth/session.go:revokeChecked":                     oneRow,
 	"internal/auth/session.go:UpdateLastSeen":                    oneRow,
 	"internal/auth/session.go:ExtendExpiresAt":                   oneRow,
+	// Locks and denies the one pre-approved request it was given.
+	"internal/auth/device_login_preapproval.go:revokePreapprovalTx": oneRow,
 
 	// Inserts a new identity, which no uninstall can see yet, and gives it
 	// to the account's sessions that had none.
@@ -86,10 +99,11 @@ var signInRowWriters = map[string]string{
 	"internal/auth/session.go:DeleteExpired":      neverWaits,
 	"internal/auth/device_login.go:DeleteExpired": neverWaits,
 
-	"internal/auth/repository.go:Delete":                          newAccount,
-	"internal/auth/session.go:RevokeAllByUser":                    unused,
-	"internal/auth/session.go:RevokeAllByImpersonator":            unused,
-	"internal/userstore/pgstore/profiles.go:DeleteProfileAudited": knownGap,
+	"internal/auth/user_delete.go:Delete":              newAccount,
+	"internal/auth/session.go:RevokeAllByUser":         unused,
+	"internal/auth/session.go:RevokeAllByImpersonator": unused,
+	// Deleting a profile, and a profile set that no longer lists one.
+	"internal/userstore/pgstore/profiles.go:deleteProfileRowsTx": knownGap,
 }
 
 // signInRowWrite matches SQL that writes the tables, allowing a schema and

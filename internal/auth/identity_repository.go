@@ -118,7 +118,7 @@ func listIdentitiesForUser(ctx context.Context, db dbQuerier, userID int) ([]Lin
 // (lockOAuthIdentity) lock the identity FOR UPDATE and so wait for it, as
 // they already wait on the account row; account resolution's non-key update
 // of the identity after a sign-in does not.
-func lockIdentitiesBeforeSessions(ctx context.Context, db dbQuerier, userID int, forDelete bool) error {
+func lockIdentitiesBeforeSessions(ctx context.Context, db sessionExecQuerier, userID int, forDelete bool) error {
 	lock := "FOR KEY SHARE"
 	if forDelete {
 		lock = "FOR UPDATE"

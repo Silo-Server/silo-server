@@ -31797,7 +31797,7 @@ export interface components {
       device_id?: string;
       /**
        * Format: uuid
-       * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
+       * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in, and on another session's item for a session opened by device sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
        * @example 0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11
        */
       device_key_id: string | null;
@@ -31868,7 +31868,7 @@ export interface components {
         device_id?: string;
         /**
          * Format: uuid
-         * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
+         * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in, and on another session's item for a session opened by device sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
          * @example 0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11
          */
         device_key_id: string | null;

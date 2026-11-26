@@ -28,6 +28,9 @@ func TestLimitedLoginSessionViewDecidesEveryMember(t *testing.T) {
 		"device_platform": "",
 		"last_seen_at":    NullableInstant{},
 		"current":         false,
+		// Which enrolled device holds another session is not a shared TV's
+		// to know.
+		"device_key_id": (*string)(nil),
 	}
 	typ := got.Type()
 	if typ.NumField() != len(decided) {

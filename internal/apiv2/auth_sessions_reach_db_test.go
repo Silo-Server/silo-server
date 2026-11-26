@@ -233,8 +233,10 @@ func requireRedactedItem(t *testing.T, item map[string]json.RawMessage, id strin
 		"ip_address":   `""`,
 		"last_seen_at": "null",
 		"current":      "false",
-		"created_at":   string(own["created_at"]),
-		"expires_at":   string(own["expires_at"]),
+		// Null like every session no app key opened, so it says nothing.
+		"device_key_id": "null",
+		"created_at":    string(own["created_at"]),
+		"expires_at":    string(own["expires_at"]),
 	}
 	for member, value := range item {
 		if want[member] != string(value) {

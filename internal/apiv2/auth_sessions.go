@@ -88,7 +88,7 @@ type LoginSession struct {
 	DevicePlatform string          `json:"device_platform,omitempty" doc:"Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in" example:"tvOS"`
 	LastSeenAt     NullableInstant `json:"last_seen_at" doc:"Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in" example:"2026-01-02T03:04:05.678Z"`
 	Current        bool            `json:"current" doc:"Whether this is the login session making this request"`
-	DeviceKeyID    *string         `json:"device_key_id" nullable:"true" format:"uuid" doc:"The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session" example:"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11"`
+	DeviceKeyID    *string         `json:"device_key_id" nullable:"true" format:"uuid" doc:"The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in, and on another session's item for a session opened by device sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session" example:"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11"`
 }
 
 // LoginSessionListInput is the listSessions query.

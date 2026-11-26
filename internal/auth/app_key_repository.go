@@ -378,7 +378,7 @@ func (r *AppKeyRepository) RevokeDeviceKey(ctx context.Context, userID int, id s
 		if _, err := tx.Exec(ctx, `UPDATE auth_device_keys SET revoked_at = COALESCE(revoked_at, NOW()) WHERE id = $1`, id); err != nil {
 			return fmt.Errorf("revoking device key: %w", err)
 		}
-		return endDeviceKeySessions(ctx, tx, []string{id})
+		return endDeviceKeySessions(ctx, tx, userID, []string{id})
 	})
 }
 
@@ -392,7 +392,7 @@ func revokeDeviceKeyTx(ctx context.Context, tx pgx.Tx, userID int, id string) er
 	if _, err := tx.Exec(ctx, `UPDATE auth_device_keys SET revoked_at = COALESCE(revoked_at, NOW()) WHERE id = $1`, id); err != nil {
 		return fmt.Errorf("revoking device key: %w", err)
 	}
-	return endDeviceKeySessions(ctx, tx, []string{id})
+	return endDeviceKeySessions(ctx, tx, userID, []string{id})
 }
 
 // revokePersonKeyTx revokes one of the account's person keys in tx, which
@@ -453,8 +453,13 @@ func (r *AppKeyRepository) RevokeAccountKeys(ctx context.Context, userID int) er
 // the person, an email match taking the account over, a promotion to admin
 // or Owner) call it in their own transaction, so it needs only Exec. The
 // device keys' rows are locked by their UPDATE before the sessions they
-// opened, the documented order.
+// opened, the documented order. Those sessions carry the identity their key
+// was bound to, so the account's identities are taken first, the order a
+// plugin uninstall takes them (lockIdentitiesBeforeSessions).
 func revokeAccountKeysTx(ctx context.Context, tx sessionExecQuerier, userID int) error {
+	if err := lockIdentitiesBeforeSessions(ctx, tx, userID, false); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `UPDATE auth_person_keys SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, userID); err != nil {
 		return fmt.Errorf("revoking person keys: %w", err)
 	}
@@ -468,9 +473,16 @@ func revokeAccountKeysTx(ctx context.Context, tx sessionExecQuerier, userID int)
 	return nil
 }
 
-// endDeviceKeySessions ends the live login sessions the device keys opened.
-// It runs after the keys' rows are locked.
-func endDeviceKeySessions(ctx context.Context, tx pgx.Tx, ids []string) error {
+// endDeviceKeySessions ends the live login sessions userID's device keys
+// opened, in tx, which holds the account row lock, after the keys' rows are
+// locked. A key can have opened
+// several, each carrying the identity the key was bound to, so the account's
+// identities are taken first, the order a plugin uninstall takes them
+// (lockIdentitiesBeforeSessions).
+func endDeviceKeySessions(ctx context.Context, tx pgx.Tx, userID int, ids []string) error {
+	if err := lockIdentitiesBeforeSessions(ctx, tx, userID, false); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, NOW())
 		WHERE device_key_id = ANY($1::uuid[]) AND revoked_at IS NULL`, ids); err != nil {
 		return fmt.Errorf("ending device key sessions: %w", err)
