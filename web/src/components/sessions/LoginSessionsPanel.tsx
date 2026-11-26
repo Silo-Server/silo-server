@@ -22,6 +22,7 @@ import { loginSessionDevice } from "@/lib/loginSessionDevice";
 import { useT } from "@/i18n";
 import { LoginSessionRow } from "./LoginSessionRow";
 import { SignsBackInNote } from "@/components/appKeys/SignsBackInNote";
+import { useAppKeyCapability } from "@/hooks/queries/appKeySession";
 import { adminDevicesPath, deviceAnchor, ownDevicesPath } from "@/components/appKeys/devicePaths";
 
 type Selection = { kind: "one"; session: LoginSession } | { kind: "all" };
@@ -60,6 +61,11 @@ export function LoginSessionsPanel({
         : ownDevicesPath(anchor);
   // A disabled account's keys are refused at sign-in: nothing comes back.
   const accountEnabled = adminUser?.enabled !== false;
+  // A session row says its device signs back in only when that is true: app
+  // key sign-in available (not while the read loads or failed), and the
+  // account enabled. SignsBackInNote applies the same capability rule.
+  const keysSignIn = useAppKeyCapability().data?.state === "available";
+  const keyMark = !keysSignIn || !accountEnabled ? "hidden" : linkDevices ? "link" : "text";
   // Signing out everywhere, or one session a Silo app key opened, leaves the
   // key: the device signs in again by itself.
   const signsBackIn =
@@ -111,7 +117,7 @@ export function LoginSessionsPanel({
       {rows.map((session) => (
         <LoginSessionRow
           key={session.id}
-          linkDevice={linkDevices}
+          keyMark={keyMark}
           session={session}
           onSignOut={canSignOut ? signOut : undefined}
         />
@@ -311,11 +317,17 @@ export function LoginSessionsPanel({
               {signsBackIn && (
                 <>
                   <SignsBackInNote
-                    to={devicesPath(
-                      selection?.kind === "one" && selection.session.device_key_id
-                        ? deviceAnchor(selection.session.device_key_id)
-                        : undefined,
-                    )}
+                    // While the sign-out runs the dialog must stay open for
+                    // its result, so the words lose their link.
+                    to={
+                      pending
+                        ? undefined
+                        : devicesPath(
+                            selection?.kind === "one" && selection.session.device_key_id
+                              ? deviceAnchor(selection.session.device_key_id)
+                              : undefined,
+                          )
+                    }
                     onNavigate={() => setSelection(null)}
                   />
                 </>

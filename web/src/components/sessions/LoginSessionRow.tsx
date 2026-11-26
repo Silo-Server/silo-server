@@ -16,11 +16,15 @@ const WRAPPING_BUTTON = "h-auto min-h-8 max-w-full py-1 text-start wrap-anywhere
 export function LoginSessionRow({
   session,
   onSignOut,
-  linkDevice = true,
+  keyMark = "hidden",
 }: {
   session: LoginSession;
-  /** False where no devices list is on the page to link to. */
-  linkDevice?: boolean;
+  /**
+   * How a session a Silo app key opened says it signs back in: as a link to
+   * its device, as words alone (no devices list to link to), or not at all
+   * (app key sign-in isn't available, or the account is disabled).
+   */
+  keyMark?: "link" | "text" | "hidden";
   onSignOut?: (session: LoginSession) => void;
 }) {
   const t = useT();
@@ -67,11 +71,11 @@ export function LoginSessionRow({
               ),
             })}
           </p>
-          {session.device_key_id && (
+          {session.device_key_id && keyMark !== "hidden" && (
             // Signing this session out doesn't stop it: the link goes to the
             // device in the Silo app devices list on the same page.
             <p className="text-muted-foreground mt-1 text-xs">
-              {linkDevice ? (
+              {keyMark === "link" ? (
                 <Link
                   to={{
                     pathname: location.pathname,

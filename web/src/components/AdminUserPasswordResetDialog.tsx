@@ -195,7 +195,11 @@ export function AdminUserPasswordResetDialog({
             {t("web.admin.users.passwordResetDialog.description")}
             {/* A disabled account's keys are refused at sign-in. */}
             {user.enabled && (
-              <SignsBackInNote to={adminDevicesPath(user.id)} onNavigate={onClose} />
+              // While a request runs the dialog stays open for its result.
+              <SignsBackInNote
+                to={pending ? undefined : adminDevicesPath(user.id)}
+                onNavigate={onClose}
+              />
             )}
           </DialogDescription>
         </DialogHeader>

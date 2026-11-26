@@ -1203,7 +1203,10 @@ TLS connection covers all of it.
   describes one of these or signing out a single session, and links to the
   devices list: the person's own on Settings → Signed-in sessions, an
   administrator's on the user's Sign-in tab. A session row the key opened
-  (`device_key_id`) links to its device the same way.
+  (`device_key_id`) links to its device the same way. Both show only while
+  the key capability is `available` (with app key sign-in off a device does
+  not come back), and in an administrator's view only for an enabled account,
+  since key sign-in is refused while an account is disabled.
 - **Unlinking an identity** revokes the keys bound to it and ends their
   sessions. **Uninstalling a plugin** leaves them dead, revoked at their next
   use (above).

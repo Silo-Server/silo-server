@@ -115,6 +115,7 @@ it("renders and asks nothing for an administrator acting as the account", () => 
   state.impersonating = true;
   mount();
   expect(screen.queryByRole("heading")).toBeNull();
+  expect(state.accessEnabled.length).toBeGreaterThan(0);
   expect(state.accessEnabled.every((enabled) => !enabled)).toBe(true);
   expect(state.useOwnAppKeys).not.toHaveBeenCalled();
 });
@@ -127,6 +128,7 @@ it("offers a retry when the capability read fails", () => {
   expect(screen.getByRole("heading", { name: "Silo app devices" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(state.refetchCapability).toHaveBeenCalledTimes(1);
+  expect(state.accessEnabled.length).toBeGreaterThan(0);
   expect(state.accessEnabled.every((enabled) => !enabled)).toBe(true);
 });
 

@@ -21,6 +21,11 @@ vi.mock("@/api/v2/adminUsers", async () => ({
   updateAdminUser: update,
 }));
 vi.mock("@/lib/clipboard", () => ({ copyTextToClipboard: copy }));
+// The Silo app sentence asks the server whether app keys are on; a marker
+// stands in for it, so a test sees only whether the dialog shows it.
+vi.mock("@/components/appKeys/SignsBackInNote", () => ({
+  SignsBackInNote: () => <span>Silo app sentence</span>,
+}));
 
 const user = {
   id: 7,
@@ -124,4 +129,14 @@ it("asks to try again when the account changed", async () => {
   await ui.click(screen.getByRole("button", { name: "Set password" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("The account changed. Try again.");
   await waitFor(() => expect(screen.getByRole("button", { name: "Set password" })).toBeEnabled());
+});
+
+// A disabled account's keys are refused at sign-in, so the dialog must not
+// say its devices sign back in.
+it.each([
+  [true, true],
+  [false, false],
+])("says devices sign back in only for an enabled account (enabled: %s)", (enabled, shown) => {
+  mount({ user: { ...user, enabled } });
+  expect(Boolean(screen.queryByText("Silo app sentence"))).toBe(shown);
 });
