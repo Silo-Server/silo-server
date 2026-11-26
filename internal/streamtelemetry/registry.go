@@ -467,8 +467,11 @@ func (r *Registry) Start(ctx context.Context) {
 					return
 				case <-r.stop:
 					return
-				case sweepStart := <-ticker.C:
-					snapshot := r.sweep(sweepStart)
+				case <-ticker.C:
+					// Stamp the sweep when it runs, not with the tick: after a slow
+					// publish the queued tick is already old, and a snapshot dated
+					// with it would land stale.
+					snapshot := r.sweep(now())
 					snapshot.Sequence = r.sequence.Add(1)
 					// A publish that takes longer than Freshness lands a snapshot
 					// readers already treat as stale, so waiting longer buys

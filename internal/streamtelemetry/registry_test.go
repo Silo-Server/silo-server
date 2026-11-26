@@ -219,18 +219,34 @@ func TestStartContinuesAfterPublishError(t *testing.T) {
 	}
 }
 
-// stalledStore models a Redis connection that never answers: Publish returns
-// only when its context ends.
+// stalledStore models a Redis connection that stops answering once: the first
+// Publish returns only when its context ends, later ones succeed.
 type stalledStore struct {
-	published     atomic.Int64
+	mu            sync.Mutex
+	stallErr      error
+	stallEnded    time.Time
+	recovered     Snapshot
+	recoveredErr  error
+	calls         int
 	secondPublish chan struct{}
 }
 
-func (s *stalledStore) Publish(ctx context.Context, _ Snapshot) error {
-	if s.published.Add(1) == 2 {
+func (s *stalledStore) Publish(ctx context.Context, snapshot Snapshot) error {
+	s.mu.Lock()
+	s.calls++
+	call := s.calls
+	if call == 2 {
+		s.recovered, s.recoveredErr = snapshot, ctx.Err()
 		close(s.secondPublish)
 	}
+	s.mu.Unlock()
+	if call != 1 {
+		return nil
+	}
 	<-ctx.Done()
+	s.mu.Lock()
+	s.stallErr, s.stallEnded = ctx.Err(), time.Now()
+	s.mu.Unlock()
 	return ctx.Err()
 }
 func (s *stalledStore) Load(context.Context) (Snapshot, error) { return Snapshot{}, nil }
@@ -238,7 +254,7 @@ func (s *stalledStore) Load(context.Context) (Snapshot, error) { return Snapshot
 func TestStartRetriesAfterStalledPublish(t *testing.T) {
 	cfg := testConfig()
 	cfg.SweepInterval = time.Millisecond
-	cfg.Freshness = 5 * time.Millisecond
+	cfg.Freshness = 20 * time.Millisecond
 	store := &stalledStore{secondPublish: make(chan struct{})}
 	registry := NewRegistry(cfg, store, slog.New(slog.DiscardHandler))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -253,6 +269,22 @@ func TestStartRetriesAfterStalledPublish(t *testing.T) {
 	defer stopCancel()
 	if err := registry.Stop(stopCtx); err != nil {
 		t.Fatal(err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.calls < 2 {
+		return
+	}
+	if !errors.Is(store.stallErr, context.DeadlineExceeded) {
+		t.Fatalf("stalled publish ended with %v, want its deadline", store.stallErr)
+	}
+	if store.recoveredErr != nil {
+		t.Fatalf("retry publish got a dead context: %v", store.recoveredErr)
+	}
+	// The tick that queued during the stall is stale; the retry must describe
+	// the registry as of the retry, or readers count it stale on arrival.
+	if store.recovered.CapturedAt.Before(store.stallEnded) {
+		t.Fatalf("retry captured at %v, before the stall ended at %v", store.recovered.CapturedAt, store.stallEnded)
 	}
 }
 
