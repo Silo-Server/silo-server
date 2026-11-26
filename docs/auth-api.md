@@ -908,7 +908,7 @@ the PostgreSQL user store: elsewhere they answer 501
 | Member | Type | Meaning |
 | --- | --- | --- |
 | `sync_id` | string | The profile's ID on every server: a lower-case UUID, unique in the set. |
-| `name` | string | 1 to 64 characters after trimming; unique in the set, compared trimmed and without case. |
+| `name` | string | 1 to 64 characters after trimming. Two items with one name are refused with `name_conflict` (see below). |
 | `picture` | string | `preset:<id>` (`avatar-1` to `avatar-8`, or `dicebear:<style>:<seed>`), `sha256:<64 lower-case hex>` naming an upload, or `""`. |
 | `pin` | object | Exactly one of `{"set": "1234"}` (four digits), `{"keep": true}`, `{"clear": true}`. |
 | `is_child`, `require_advisory_age`, `requests_blocked` | boolean | |
@@ -946,12 +946,27 @@ no `set` member; it names the same member of the same set. Only a fault in the
 envelope itself (its signature, challenge, `account_id` or times, or a payload
 with no set at all) is reported as the other signed routes report it. A signed
 set is validated after its signature verifies, so a 422 for it has already
-spent the challenge: correct the set, get a new challenge, and sign again. A new item named like a profile outside
-the set is 422 at its name with code `name_conflict`, and so is an item whose
-name the owner already gave another of the set's profiles on this server (a
-profile keeps a name the owner set, whatever its item says); the item named is
-the one whose name comes from the set, the later one when both do. An item 0 whose `sync_id` the owner removed on this server
-(see `hidden_by_owner`) is 422 at `body.set.items[0].sync_id`.
+spent the challenge: correct the set, get a new challenge, and sign again.
+
+The server decides whether two names are the same: it trims them and compares
+them without regard to case, so `Sam` and `sam` are one name here. An app does
+not reproduce that comparison; it goes by the code and the location. Every
+name clash is 422 `validation_failed` with code `name_conflict` at an item's
+name, and is judged after the version (see Refusals), so a stale set is told it
+is stale first:
+
+- Two items of the set with one name: the entry is at the later item, with the
+  detail "Two items of the set have this name; rename one." Every item counts,
+  one left off for the limit or removed by the owner included, and so does an
+  item whose profile keeps a name the owner gave it here.
+- A new item named like a profile outside the set.
+- An item whose name the owner already gave another of the set's profiles on
+  this server (a profile keeps a name the owner set, whatever its item says);
+  the item named is the one whose name comes from the set, the later one when
+  both do.
+
+An item 0 whose `sync_id` the owner removed on this server (see
+`hidden_by_owner`) is 422 at `body.set.items[0].sync_id`.
 
 **Answer.**
 
@@ -1006,8 +1021,9 @@ at the held version, or newer without the person's latest edits (`edits_seen`)
 is `profile_set_stale`. Then the household must map the set (`pairs`, the
 main profile). The held version again is then compared and answered as a
 no-op; it is never refused for something only a write would do. Last, a set
-that will write is refused for what it would do: `name_conflict`, or item 0
-taking a `sync_id` the owner removed.
+that will write is refused for what it would do, in this order: two items of
+the set with one name (`name_conflict`), item 0 taking a `sync_id` the owner
+removed, then a name another profile here would share (`name_conflict`).
 
 | Problem | When |
 | --- | --- |
@@ -1016,6 +1032,7 @@ taking a `sync_id` the owner removed.
 | 409 `conflict` | The household kept changing while the set was applied; or the account has profiles but no main profile, which a set can't apply to. Send the set again a few times, waiting longer each time, then stop and report it: the second case doesn't clear by itself. |
 | 401 `signature_invalid`, `challenge_invalid` | The signed form, as on the other signed routes. A payload naming another account is `signature_invalid`. A replayed envelope is `challenge_invalid`. |
 | 401 `authentication_required` | The session form without a login session. An API key carries no login session, so it gets this too. |
+| 403 `password_change_required` | The session form from a login session that must change its temporary password first, as every other session route answers it. The session is not gone: change the password, refresh the session, and send the set again. |
 | 401 `session_expired` | The account was deleted while the set was applied. |
 | 403 `permission_denied` | The signed form for an administrator's account; a session opened by device sign-in, by another app's key, or by an administrator acting as the account, a remote-playback handoff, a session older than the record of how sessions open; either form from a non-administrator in demo mode. |
 | 403 `main_profile_required` | The session form from a request that isn't acting as the main profile, or names no profile. |
@@ -1190,8 +1207,9 @@ household has room for another profile; otherwise the item is in `left_off`,
 or not in the set, and nothing comes back. A set that has the item can
 still be refused as a whole (for example, its name is now another profile's on
 the account), and then nothing is written. If it pairs the `sync_id` with a
-profile of the account outside the set, that profile takes the `sync_id` and
-keeps its history instead of a new profile being created. After either
+profile on the account with no `sync_id`, that profile takes the `sync_id` and
+keeps its history instead of a new profile being created, and needs no room in
+the household, since the profile limit applies only to new profiles. After either
 commits, the server wakes the
 person's apps with a push where it can (at most one a minute per account, and
 only with push on, a phone registered and the wake queued in time); otherwise

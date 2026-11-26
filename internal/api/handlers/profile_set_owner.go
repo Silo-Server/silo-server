@@ -667,7 +667,7 @@ func checkRestoredName(rows []userstore.ProfileSetRow, row *userstore.ProfileSet
 		profiles[i] = rows[i].Profile
 	}
 	if profileNameConflicts(profiles, record.Name, row.ID) {
-		return apiError(http.StatusConflict, "name_conflict", "A profile with this name already exists")
+		return profileNameConflictError()
 	}
 	return nil
 }
