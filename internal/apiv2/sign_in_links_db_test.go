@@ -61,7 +61,8 @@ func signInLinkSchema(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 	for _, table := range []string{"users", "access_groups", "auth_sessions", "api_keys", "abs_sessions", "jellycompat_sessions",
-		"device_login_requests", "user_profiles", "activity_log", "auth_sign_in_links", "auth_app_codes", "auth_device_keys", "auth_person_keys"} {
+		"device_login_requests", "user_profiles", "activity_log", "auth_sign_in_links", "auth_app_codes", "auth_device_keys", "auth_person_keys",
+		"server_settings"} {
 		if _, err := pool.Exec(t.Context(), "CREATE TABLE "+table+" (LIKE public."+table+" INCLUDING ALL)"); err != nil {
 			t.Fatal(err)
 		}
@@ -208,5 +209,64 @@ func TestCreateSignInLinkNeedsPublicURLDB(t *testing.T) {
 	var links int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM auth_sign_in_links`).Scan(&links); err != nil || links != 0 {
 		t.Fatalf("links stored = %d (%v), want none", links, err)
+	}
+}
+
+// The account view says, per account, whether a link can be made for it, by
+// the rule password sign-in uses, so the Users page offers the action
+// exactly there: with the server's switch off, true for a break-glass
+// administrator (a link for it is made) and false for an ordinary account
+// (refused with provider_sign_in_required). Regression guard: the single
+// account read left the member false for the one account a link works for.
+func TestAdminUserLocalPasswordAllowedDB(t *testing.T) {
+	pool := signInLinkSchema(t)
+	ctx := t.Context()
+	users := auth.NewUserRepository(pool)
+	sessions := auth.NewSessionRepository(pool)
+	jwt := auth.NewJWTService("synthetic-sign-in-link-jwt-secret", time.Minute, time.Hour)
+	login := auth.NewService(auth.NewLocalProvider(users, sessions), jwt, sessions, users, nil, nil, nil)
+	deps := parityDeps(false)
+	deps.Auth = apimw.NewAuthMiddleware(jwt, sessions, auth.NewAPIKeyRepository(pool), users)
+	deps.AdminAccounts = handlers.NewAdminHandler(users, pool, nil)
+	deps.SignInLinks = handlers.NewSignInLinkHandler(signinlinks.NewService(auth.NewAppKeySignIn(pool, login), users, nil, publicURLSettings{}, nil))
+	router := NewHandler(deps)
+	const password = "a sign-in link test password"
+	create := func(name, role string) *models.User {
+		t.Helper()
+		user, err := users.Create(ctx, models.CreateUserInput{Username: name, Email: name + "@example.test", Password: password, Role: role})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return user
+	}
+	glass, member := create("glass", models.RoleAdmin), create("member", models.RoleUser)
+	if _, err := pool.Exec(ctx, `UPDATE users SET break_glass = true, is_owner = true WHERE id = $1`, glass.ID); err != nil {
+		t.Fatal(err)
+	}
+	pair, _, err := login.Login(ctx, glass.Username, password, "test", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO server_settings (key, value) VALUES ('auth.local_password_login', 'false')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		user   *models.User
+		member string
+		link   int
+	}{
+		{glass, `"local_password_allowed":true`, http.StatusCreated},
+		{member, `"local_password_allowed":false`, http.StatusConflict},
+	} {
+		t.Run(tc.user.Username, func(t *testing.T) {
+			view := do(t, router, http.MethodGet, fmt.Sprintf("%s/admin/users/%d", Prefix, tc.user.ID), "", bearer(pair.AccessToken))
+			if view.Code != http.StatusOK || !strings.Contains(view.Body.String(), tc.member) {
+				t.Fatalf("account view %d %s, want %s", view.Code, view.Body, tc.member)
+			}
+			link := do(t, router, http.MethodPost, fmt.Sprintf("%s/admin/users/%d/sign-in-links", Prefix, tc.user.ID), `{}`, bearer(pair.AccessToken))
+			if link.Code != tc.link {
+				t.Fatalf("making a link: %d %s, want %d", link.Code, link.Body, tc.link)
+			}
+		})
 	}
 }

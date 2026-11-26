@@ -537,6 +537,19 @@ func (h *AdminHandler) ListAdminUsersPage(ctx context.Context, afterID, limit in
 	return views, hasMore, nil
 }
 
+// localPasswordSwitchOn reads the server-wide local password switch for the
+// views' local_password_allowed (auth.LocalPasswordAllowedFor).
+func (h *AdminHandler) localPasswordSwitchOn(ctx context.Context) (bool, error) {
+	if h.pool == nil {
+		return true, nil
+	}
+	on, err := auth.LocalPasswordLoginSwitch(ctx, h.pool)
+	if err != nil {
+		return false, apiError(http.StatusInternalServerError, "internal_error", "Failed to read the local password setting")
+	}
+	return on, nil
+}
+
 // adminUserViews resolves the effective policy and last activity for a batch
 // of accounts, in the batch's order.
 func (h *AdminHandler) adminUserViews(ctx context.Context, users []*models.User) ([]AdminUserView, error) {
@@ -545,11 +558,9 @@ func (h *AdminHandler) adminUserViews(ctx context.Context, users []*models.User)
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve effective policy")
 	}
 	// The rule password sign-in reads, with the switch read once.
-	switchOn := true
-	if h.pool != nil {
-		if switchOn, err = auth.LocalPasswordLoginSwitch(ctx, h.pool); err != nil {
-			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to read the local password setting")
-		}
+	switchOn, err := h.localPasswordSwitchOn(ctx)
+	if err != nil {
+		return nil, err
 	}
 	resp := make([]AdminUserView, 0, len(users))
 	userIDs := make([]int, 0, len(users))

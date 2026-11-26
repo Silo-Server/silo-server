@@ -397,6 +397,7 @@
 ./internal/auth TestSignInLinkReplacementStartsUnboundDB
 ./internal/apiv2 TestCreateSignInLinkAuthorityDB
 ./internal/apiv2 TestCreateSignInLinkNeedsPublicURLDB
+./internal/apiv2 TestAdminUserLocalPasswordAllowedDB
 ./internal/auth TestIssueSessionAppCodeRefusalsDB
 ./internal/auth TestSessionKeyAccessDB
 ./internal/auth TestAdminUnlinkLocksIdentityBeforeKeysDB
