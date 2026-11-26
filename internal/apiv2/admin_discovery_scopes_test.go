@@ -72,7 +72,8 @@ func (s fixedResourceSampler) Snapshot() nodemetrics.Snapshot { return nodemetri
 // aggregate refreshes.
 func TestMonitorScopeWithholdsDeploymentDetails(t *testing.T) {
 	deps := pilotDeps(nil, nil)
-	deps.AdminResourceSampler = fixedResourceSampler{Available: true, System: &nodemetrics.SystemStats{Cores: 4, Disks: []nodemetrics.DiskStats{{Path: "/srv/secret-media", Role: "library-0", TotalGB: 10}}}}
+	deps.AdminResourceSampler = fixedResourceSampler{Available: true, System: &nodemetrics.SystemStats{Cores: 4, Disks: []nodemetrics.DiskStats{{Path: "/srv/secret-media", Role: "library-0", TotalGB: 10}}},
+		Attribution: &nodemetrics.ResourceAttribution{Process: &nodemetrics.ProcessStats{CPUPct: new(12.5)}, Children: &nodemetrics.ChildStats{Workload: "ffmpeg", CPUPct: new(0.0)}}}
 	deps.AdminDownloadPreparations = new(fakeAdminDownloadPreparations)
 	insights := new(dashboardInsightsStub)
 	deps.AdminDashboardInsights = insights
@@ -97,6 +98,13 @@ func TestMonitorScopeWithholdsDeploymentDetails(t *testing.T) {
 			t.Fatal(path, rec.Code, rec.Body.String())
 		}
 		requireProblem(t, do(t, h, "GET", Prefix+path, "", bearer("sa_member_monitor")), TypePermissionDenied)
+	}
+	// A monitor charts Silo's own CPU beside the host's from these two reads.
+	if body := do(t, h, "GET", Prefix+"/admin/system/resources", "", bearer("sa_monitor")).Body.String(); !strings.Contains(body, `"process":{"cpu_pct":12.5}`) || !strings.Contains(body, `"cpu_pct":0}`) {
+		t.Fatal("monitor resources lost the CPU shares", body)
+	}
+	if rec := do(t, h, "GET", Prefix+"/admin/system/resources/capabilities", "", bearer("sa_monitor")); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"process_cpu_percent":true`) {
+		t.Fatal("monitor capabilities", rec.Code, rec.Body.String())
 	}
 	rec := do(t, h, "GET", Prefix+"/admin/nodes/summary", "", bearer("sa_monitor"))
 	if !strings.Contains(rec.Body.String(), `"cores":8`) || !strings.Contains(rec.Body.String(), `"role":"scratch"`) {

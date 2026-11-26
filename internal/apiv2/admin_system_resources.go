@@ -34,6 +34,7 @@ type AdminProcessStats struct {
 	ResidentBytes *uint64  `json:"resident_bytes,omitempty"`
 	VirtualBytes  *uint64  `json:"virtual_bytes,omitempty"`
 	CPUSeconds    *float64 `json:"cpu_seconds,omitempty"`
+	CPUPct        *float64 `json:"cpu_pct,omitempty" minimum:"0" maximum:"100" doc:"This process's CPU over the last sample window, on the same scale and capacity as system.cpu_pct. Omitted when the window was not measured; a measured idle process is 0."`
 	Threads       *uint64  `json:"threads,omitempty"`
 	OpenFDs       *uint64  `json:"open_fds,omitempty"`
 	MaxFDs        *uint64  `json:"max_fds,omitempty"`
@@ -73,17 +74,19 @@ type AdminCgroupMemoryStats struct {
 	PressureFullPct *float64 `json:"pressure_full_pct,omitempty"`
 }
 
-// AdminChildStats is a bounded point-in-time view of owned FFmpeg processes. CPU and
-// RSS are sums of live processes; CPU can decrease when a child exits. RSS can
-// count shared pages more than once. Short-lived work requires owner lifecycle
-// counters and is deliberately not represented as a cumulative total here.
+// AdminChildStats is a bounded point-in-time view of owned FFmpeg processes. CPU
+// seconds and RSS are sums of live processes; CPU seconds can decrease when a
+// child exits. RSS can count shared pages more than once. Short-lived work
+// requires owner lifecycle counters and is deliberately not represented as a
+// cumulative total here.
 type AdminChildStats struct {
-	Workload      string  `json:"workload"`
-	Sampled       int     `json:"sampled"`
-	Unavailable   int     `json:"unavailable"`
-	Truncated     bool    `json:"truncated"`
-	ResidentBytes uint64  `json:"resident_bytes"`
-	CPUSeconds    float64 `json:"cpu_seconds"`
+	Workload      string   `json:"workload"`
+	Sampled       int      `json:"sampled"`
+	Unavailable   int      `json:"unavailable"`
+	Truncated     bool     `json:"truncated"`
+	ResidentBytes uint64   `json:"resident_bytes"`
+	CPUSeconds    float64  `json:"cpu_seconds"`
+	CPUPct        *float64 `json:"cpu_pct,omitempty" minimum:"0" maximum:"100" doc:"CPU of live owned FFmpeg children over the last sample window, on the same scale and capacity as system.cpu_pct. A lower bound: a child's last partial window and children shorter than one window are missed. Omitted when the window was not measured, including a truncated pass."`
 }
 
 // AdminDiskDetails extends operational snapshots without adding fields to the frozen

@@ -6596,6 +6596,13 @@
       "AdminChildStats": {
         "additionalProperties": false,
         "properties": {
+          "cpu_pct": {
+            "description": "CPU of live owned FFmpeg children over the last sample window, on the same scale and capacity as system.cpu_pct. A lower bound: a child's last partial window and children shorter than one window are missed. Omitted when the window was not measured, including a truncated pass.",
+            "format": "double",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
           "cpu_seconds": {
             "format": "double",
             "type": "number"
@@ -21407,6 +21414,13 @@
       "AdminProcessStats": {
         "additionalProperties": false,
         "properties": {
+          "cpu_pct": {
+            "description": "This process's CPU over the last sample window, on the same scale and capacity as system.cpu_pct. Omitted when the window was not measured; a measured idle process is 0.",
+            "format": "double",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
           "cpu_seconds": {
             "format": "double",
             "type": "number"
@@ -23461,6 +23475,9 @@
           "instance_attribution": {
             "type": "boolean"
           },
+          "process_cpu_percent": {
+            "type": "boolean"
+          },
           "process_resources": {
             "type": "boolean"
           },
@@ -23487,6 +23504,7 @@
           "process_resources",
           "cgroup_resources",
           "sample_freshness",
+          "process_cpu_percent",
           "revision",
           "state",
           "allowed"
@@ -258619,6 +258637,10 @@
       "nodemetrics_ChildStats": {
         "additionalProperties": false,
         "properties": {
+          "cpu_pct": {
+            "format": "double",
+            "type": "number"
+          },
           "cpu_seconds": {
             "format": "double",
             "type": "number"
@@ -258755,6 +258777,10 @@
       "nodemetrics_ProcessStats": {
         "additionalProperties": false,
         "properties": {
+          "cpu_pct": {
+            "format": "double",
+            "type": "number"
+          },
           "cpu_seconds": {
             "format": "double",
             "type": "number"

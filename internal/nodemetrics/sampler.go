@@ -93,6 +93,9 @@ type Sampler struct {
 	sessions     func() map[string]int
 	identities   func() []DeviceIdentity
 	ffmpegPIDs   func() []int
+	// bootTicks reads the boot clock child start times count on; a seam so
+	// tests can drive it beside their fake /proc.
+	bootTicks func() (uint64, bool)
 
 	// Path seams. Production values point at the real filesystem; tests point
 	// them at a fake /proc tree.
@@ -117,6 +120,17 @@ type Sampler struct {
 	prevGPU       map[fdinfoClient]engineCounters
 	prevGPUAt     time.Time
 	prevCgroupCPU cgroupCPUSample
+	// cpuShare is what this pass's System.CPUPct was divided by, set by
+	// cpuStats; prevCPUShare is the previous pass's. The process and child CPU
+	// shares in attribution reuse it so the three percentages are comparable.
+	cpuShare     cpuShareBasis
+	prevCPUShare cpuShareBasis
+	// prevAttrAt is when the process and child CPU baselines below were read;
+	// zero means there is none. Process and children share it so both shares
+	// describe the same window.
+	prevAttrAt     time.Time
+	prevProcTicks  uint64
+	prevChildTicks map[childKey]uint64
 	// droppedRoots is how many configured media roots the last pass left
 	// unsampled because of the maxSampledDisks cap; see noteDroppedRoots.
 	droppedRoots int
@@ -175,6 +189,7 @@ func NewSampler(opts Options) *Sampler {
 		sessions:     opts.DeviceSessions,
 		identities:   opts.DeviceIdentities,
 		ffmpegPIDs:   ffmpegPIDs,
+		bootTicks:    bootClockTicks,
 		procDir:      procDir,
 		hostProcDir:  hostProcDir,
 		// Each cgroup read is tried at this process's own cgroup before the
@@ -255,13 +270,17 @@ func (s *Sampler) sample(ctx context.Context) {
 	started := time.Now()
 	s.cgroupCPUDetails = nil
 	s.cgroupMemoryDetails = nil
+	system := s.sampleSystem(ctx, now)
+	// Attribution runs before the GPU pass, which can wait on nvidia-smi, so its
+	// process CPU window ends as close as possible to the one System.CPUPct used.
+	attribution := s.sampleAttribution()
 	snapshot := Snapshot{
-		Available: true,
-		SampledAt: now,
-		System:    s.sampleSystem(ctx, now),
-		GPU:       s.sampleGPU(ctx, now),
+		Available:   true,
+		SampledAt:   now,
+		System:      system,
+		GPU:         s.sampleGPU(ctx, now),
+		Attribution: attribution,
 	}
-	snapshot.Attribution = s.sampleAttribution()
 	snapshot.Attribution.SampleDurationSeconds = time.Since(started).Seconds()
 	s.snapshot.Store(&snapshot)
 }
@@ -309,6 +328,7 @@ func (s *Sampler) cpuStats(now time.Time) (busyPct, cores int) {
 	var available bool
 	busyPct, available = cpuBusyPercent(s.prevCPU, host)
 	s.cpuSource = s.procSource("stat", available)
+	s.cpuShare = cpuShareBasis{}
 	if host.valid {
 		s.prevCPU = host
 	}
@@ -337,6 +357,7 @@ func (s *Sampler) cpuStats(now time.Time) (busyPct, cores int) {
 		// process beyond what the machine already does, and treating it as a cap
 		// moves the measurement to a domain that answers a different question.
 		s.prevCgroupCPU = cgroupCPUSample{}
+		s.cpuShare = cpuShareBasis{source: s.cpuSource.Source, capacity: float64(cores), available: available}
 		return busyPct, cores
 	}
 	cores = cgroupQuotaCores(quota, hostCores)
@@ -355,6 +376,7 @@ func (s *Sampler) cpuStats(now time.Time) (busyPct, cores int) {
 	// different machines' busyness across intervals.
 	cgroupPct, available := cgroupCPUPercent(s.prevCgroupCPU, sample, quota)
 	s.cpuSource = ResourceSource{Scope: scopeCgroup, Source: "cgroup_" + s.cgroupCPUDetails.Version, Available: available}
+	s.cpuShare = cpuShareBasis{source: s.cpuSource.Source, capacity: quota, available: available}
 	s.prevCgroupCPU = sample
 	return cgroupPct, cores
 }

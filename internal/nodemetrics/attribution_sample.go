@@ -7,9 +7,40 @@ import (
 	"runtime/metrics"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/prometheus/procfs"
 )
+
+// procfsUserHZ is the kernel's USER_HZ, the unit of /proc/PID/stat CPU times
+// and of /proc/stat jiffies. Linux fixes it at 100 on every architecture Silo
+// ships for, and procfs assumes the same value for CPUTime.
+const procfsUserHZ = 100
+
+// cpuShareBasis is the capacity one pass's System.CPUPct measured against, in
+// cores: the host's (or lxcfs view's) CPU count, or a binding cgroup quota.
+// Shares divide CPU used over the attribution window by that many cores over
+// the same window, so they stay on System.CPUPct's scale without borrowing
+// System.CPUPct's own window, which the disk pass between the two reads can
+// stretch or shrink.
+type cpuShareBasis struct {
+	source    string  // ResourceSource.Source: procfs, lxcfs, cgroup_v1, cgroup_v2
+	capacity  float64 // cores
+	available bool    // System.CPUPct was measured this pass
+}
+
+// capacityTicks is the CPU, in USER_HZ ticks, that capacity can supply over
+// elapsed.
+func (b cpuShareBasis) capacityTicks(elapsed time.Duration) float64 {
+	return b.capacity * elapsed.Seconds() * procfsUserHZ
+}
+
+// childKey identifies one process lifetime: a PID the kernel reuses arrives
+// with a different start time, so it is never mistaken for its predecessor.
+type childKey struct {
+	pid   int
+	start uint64
+}
 
 func (s *Sampler) procSource(name string, available bool) ResourceSource {
 	if s.procDirFor(name) != s.procDir {
@@ -27,15 +58,115 @@ func (s *Sampler) sampleAttribution() *ResourceAttribution {
 		CgroupCPU: s.cgroupCPUDetails, CgroupMemory: s.cgroupMemoryDetails,
 		DroppedDiskRoots: s.droppedRoots,
 	}
-	out.Process = sampleProcess(s.procDir, os.Getpid())
+	// The window end is taken right before the reads it closes.
+	at := s.now()
+	var procTicks uint64
+	var childTicks map[childKey]uint64
+	out.Process, procTicks = sampleProcess(s.procDir, os.Getpid())
 	if out.Process.CPUSeconds != nil {
-		out.Children = sampleChildren(s.procDir, os.Getpid(), s.ffmpegPIDs())
+		out.Children, childTicks = sampleChildren(s.procDir, os.Getpid(), s.ffmpegPIDs())
 	}
+	s.attributeCPU(out, at, procTicks, childTicks)
 	out.Disks = s.diskDetails
 	return out
 }
 
-func sampleProcess(procDir string, pid int) *ProcessStats {
+// attributeCPU fills the process and child CPU shares for the window since the
+// previous baseline and records this pass as the next baseline.
+//
+// Both shares use the denominator System.CPUPct used this pass, so they stay
+// comparable to it. Any pass whose denominator cannot be trusted, or whose
+// process counter cannot be read, publishes neither share and discards every
+// baseline; the pass after it records fresh baselines and publishes nothing, so
+// no share ever spans a gap or a change of capacity.
+func (s *Sampler) attributeCPU(out *ResourceAttribution, at time.Time, procTicks uint64, children map[childKey]uint64) {
+	basis, previous := s.cpuShare, s.prevCPUShare
+	s.prevCPUShare = basis
+	elapsed := at.Sub(s.prevAttrAt)
+	if out.Process.CPUSeconds == nil || !basis.available || basis.source != previous.source || basis.capacity != previous.capacity ||
+		(!s.prevAttrAt.IsZero() && elapsed <= 0) {
+		s.prevAttrAt, s.prevProcTicks, s.prevChildTicks = time.Time{}, 0, nil
+		return
+	}
+	if !s.prevAttrAt.IsZero() {
+		s.publishCPUShares(out, basis, elapsed, procTicks, children)
+	}
+	s.prevAttrAt, s.prevProcTicks = at, procTicks
+	// A truncated pass did not see every child, so its map is not a baseline:
+	// a child it skipped would read as new next pass. sampleChildren returns a
+	// non-nil map whenever it returns stats, so an empty one is still a baseline.
+	s.prevChildTicks = nil
+	if out.Children != nil && !out.Children.Truncated {
+		s.prevChildTicks = children
+	}
+}
+
+// publishCPUShares sets the shares for a window that has a usable baseline.
+// Children need their own: a truncated pass leaves none behind.
+func (s *Sampler) publishCPUShares(out *ResourceAttribution, basis cpuShareBasis, elapsed time.Duration, procTicks uint64, children map[childKey]uint64) {
+	if pct, ok := cpuSharePercent(tickDelta(procTicks, s.prevProcTicks), basis, elapsed); ok {
+		out.Process.CPUPct = new(pct)
+	}
+	if out.Children == nil || out.Children.Truncated || s.prevChildTicks == nil {
+		return
+	}
+	if pct, ok := cpuSharePercent(s.childTickDelta(children, basis, elapsed), basis, elapsed); ok {
+		out.Children.CPUPct = new(pct)
+	}
+}
+
+// childTickDelta totals the CPU ticks live children used in the window.
+//
+// A child in the baseline contributes its growth. A child the baseline has not
+// seen contributes its whole lifetime only when it was born inside the window;
+// an older one (a child that was unreadable for a pass, say) only becomes a
+// baseline, because its lifetime is mostly earlier windows' work. A child that
+// exited contributes nothing, so this is a lower bound.
+//
+// Birth is judged on the clock a start time is counted on: the kernel's boot
+// clock, read directly because lxcfs replaces /proc/uptime with a container's
+// own. A lifetime larger than the window's whole capacity cannot have been
+// earned inside it either way, so it stays a baseline.
+func (s *Sampler) childTickDelta(children map[childKey]uint64, basis cpuShareBasis, elapsed time.Duration) uint64 {
+	boot, bootOK := s.bootTicks()
+	windowTicks := elapsed.Seconds() * procfsUserHZ
+	capacityTicks := basis.capacityTicks(elapsed)
+	var total uint64
+	for key, ticks := range children {
+		if previous, seen := s.prevChildTicks[key]; seen {
+			total += tickDelta(ticks, previous)
+			continue
+		}
+		if bootOK && key.start <= boot && float64(boot-key.start) <= windowTicks+1 && float64(ticks) <= capacityTicks {
+			total += ticks
+		}
+	}
+	return total
+}
+
+func tickDelta(current, previous uint64) uint64 {
+	if current < previous {
+		return 0
+	}
+	return current - previous
+}
+
+// cpuSharePercent converts CPU ticks used over a window into a percentage of
+// what basis's capacity could supply over it, rounded to 0.01 and clamped to
+// 0-100.
+func cpuSharePercent(ticks uint64, basis cpuShareBasis, elapsed time.Duration) (float64, bool) {
+	capacity := basis.capacityTicks(elapsed)
+	if capacity <= 0 {
+		return 0, false
+	}
+	pct := float64(ticks) * 100 / capacity
+	return math.Round(min(max(pct, 0), 100)*100) / 100, true
+}
+
+// sampleProcess reads this process's resource summary. The second result is
+// its user plus system CPU in USER_HZ ticks, meaningful only when CPUSeconds is
+// set.
+func sampleProcess(procDir string, pid int) (*ProcessStats, uint64) {
 	out := &ProcessStats{}
 	// runtime/metrics reads a bounded selection without forcing a GC. It does
 	// not expose a parallel runtime metric API: these are resource summaries.
@@ -48,13 +179,15 @@ func sampleProcess(procDir string, pid int) *ProcessStats {
 	}
 	fs, err := procfs.NewFS(procDir)
 	if err != nil {
-		return out
+		return out, 0
 	}
 	p, err := fs.Proc(pid)
 	if err != nil {
-		return out
+		return out, 0
 	}
+	var ticks uint64
 	if stat, err := p.Stat(); err == nil {
+		ticks = uint64(stat.UTime) + uint64(stat.STime)
 		out.CPUSeconds = new(stat.CPUTime())
 		out.VirtualBytes = new(uint64(stat.VirtualMemory()))
 		if resident := stat.ResidentMemory(); resident >= 0 {
@@ -73,22 +206,25 @@ func sampleProcess(procDir string, pid int) *ProcessStats {
 	if io, err := p.IO(); err == nil {
 		out.ReadBytes, out.WriteBytes = new(io.ReadBytes), new(io.WriteBytes)
 	}
-	return out
+	return out, ticks
 }
 
 const maxSampledChildren = 256
 
-func sampleChildren(procDir string, parent int, pids []int) *ChildStats {
+// sampleChildren reads the owned FFmpeg children among pids. The map holds
+// each validated child's user plus system CPU in USER_HZ ticks.
+func sampleChildren(procDir string, parent int, pids []int) (*ChildStats, map[childKey]uint64) {
 	out := &ChildStats{Workload: "ffmpeg"}
 	fs, err := procfs.NewFS(procDir)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	if len(pids) > maxSampledChildren {
 		out.Truncated = true
 		pids = pids[:maxSampledChildren]
 	}
 	seen := make(map[int]bool, len(pids))
+	ticks := make(map[childKey]uint64, len(pids))
 	for _, pid := range pids {
 		if seen[pid] {
 			continue
@@ -114,8 +250,9 @@ func sampleChildren(procDir string, parent int, pids []int) *ChildStats {
 		out.Sampled++
 		out.ResidentBytes += uint64(after.ResidentMemory())
 		out.CPUSeconds += after.CPUTime()
+		ticks[childKey{pid: pid, start: after.Starttime}] = uint64(after.UTime) + uint64(after.STime)
 	}
-	return out
+	return out, ticks
 }
 
 func sampleCgroupCPU(binding, leaf cgroupCPUPath, quota float64, usageNS int64) *CgroupCPUStats {

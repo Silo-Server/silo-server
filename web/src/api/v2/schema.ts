@@ -16517,6 +16517,11 @@ export interface components {
       working_set_bytes?: number;
     };
     AdminChildStats: {
+      /**
+       * Format: double
+       * @description CPU of live owned FFmpeg children over the last sample window, on the same scale and capacity as system.cpu_pct. A lower bound: a child's last partial window and children shorter than one window are missed. Omitted when the window was not measured, including a truncated pass.
+       */
+      cpu_pct?: number;
       /** Format: double */
       cpu_seconds: number;
       /** Format: int64 */
@@ -22242,6 +22247,11 @@ export interface components {
       source: string;
     };
     AdminProcessStats: {
+      /**
+       * Format: double
+       * @description This process's CPU over the last sample window, on the same scale and capacity as system.cpu_pct. Omitted when the window was not measured; a measured idle process is 0.
+       */
+      cpu_pct?: number;
       /** Format: double */
       cpu_seconds?: number;
       /** Format: int64 */
@@ -23050,6 +23060,7 @@ export interface components {
       allowed: boolean;
       cgroup_resources: boolean;
       instance_attribution: boolean;
+      process_cpu_percent: boolean;
       process_resources: boolean;
       /** @description Opaque revision of this document */
       revision: string;

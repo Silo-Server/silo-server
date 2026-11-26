@@ -1229,6 +1229,9 @@ contract is:
   with `status` `draining`, then `drained` once it has no work left; the values are additive to
   the frozen shape, and the status code does not change, so probes keep passing while the node
   finishes its sessions. See [node-drain.md](node-drain.md).
+  Revision (2026-11-26, with process CPU percent): the optional `attribution` object, the same
+  type `GET /api/v2/admin/system/resources` returns, gains `process.cpu_pct` and
+  `children.cpu_pct`; both are additive and omitted when not measured.
 
 Probe traffic is excluded from request and activity logging. Consumers stay where they are:
 container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `dev/compose.yml`), orchestrator
