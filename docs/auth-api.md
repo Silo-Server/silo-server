@@ -324,11 +324,12 @@ administrator issued; while one exists, requests send nothing.
 
 ## The account's creation time
 
-Every answer that carries a token pair also carries `account_created_at`
-beside `user`: password and network sign-in, `completeOAuthLogin`, device
-sign-in polling, `refreshSession`, signup and setup, an accepted invitation, a
-completed password reset, an administrator's impersonation, and every sealed
-`signed_in` answer to one of the person's own device keys. It is the account's `users.created_at`: RFC 3339
+Every answer that carries a token pair for one of the person's own sessions
+also carries `account_created_at` beside `user`: password and network
+sign-in, `completeOAuthLogin`, device sign-in polling, `refreshSession`,
+signup and setup, an accepted invitation, a completed password reset, an
+administrator's impersonation, and every sealed `signed_in` answer to one of
+the person's own device keys. It is the account's `users.created_at`: RFC 3339
 in UTC at the stored microsecond precision, with trailing zeros of the
 fraction left out (so it is not the millisecond instant other fields use).
 Nothing rewrites it after the account is made, and a full restore brings it
