@@ -1093,8 +1093,9 @@ clears that.
 
 An administrator sees these records and clears them from the admin routes in
 [admin-users-api.md](admin-users-api.md#profiles-from-the-persons-app).
-Clearing an override puts the field back to the value of the last accepted
-set at once, except a PIN the set sent as digits, which stays as the owner set
+Clearing an override (a guarded `PATCH` that must name, in `If-Match`, the
+`etag` the administrator was shown) puts the field back to the value of the
+last accepted set at once, except a PIN the set sent as digits, which stays as the owner set
 it until a newer set. A picture this server doesn't hold waits for its upload.
 The field leaves `overrides` and the next newer set applies to it. Clearing a
 hidden profile takes it out of `hidden_by_owner` without recreating it; the

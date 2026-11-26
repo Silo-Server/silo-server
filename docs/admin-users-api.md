@@ -384,7 +384,7 @@ bring it back. These routes show those records and end them.
 | Route below `/api/v2/admin/users/{id}` | Response |
 | --- | --- |
 | `GET /profile-set/edits` | Every record (`listAdminUserProfileSetEdits`): `{ "edits": [...] }` |
-| `DELETE /profiles/{profile_id}/overrides/{field}` | Clears one override (`clearAdminUserProfileOverride`); 200 `{ "applied", "wake_queued" }` |
+| `PATCH /profiles/{profile_id}/overrides/{field}` | Clears one override (`clearAdminUserProfileOverride`): body `{ "state": "cleared" }`, `If-Match` the record's `etag`; 200 `{ "applied", "wake_queued" }` |
 | `DELETE /profile-set/hidden/{sync_id}` | Clears one hidden profile (`clearAdminUserHiddenProfile`); 200 `{ "applied": false, "wake_queued" }` |
 | `DELETE /profiles/{profile_id}/settled-edits/{field}` | Dismisses one settled record (`dismissAdminUserSettledProfileEdit`); 204 |
 
@@ -403,9 +403,26 @@ New kinds may be added. A record also carries `by`, `actor` (`id`, and `username
 while that account exists), `at` (the last edit of that field), `value` (the value
 in force; for a setting, what the profile resolves to, with `inherited` true when
 the profile has no value of its own), and the person's last set's value as
-`set_value`, or `set_resets` for a setting the set resets. An override is not a
+`set_value`, or `set_resets` for a setting the set resets. An `override` also
+carries `etag`, the validator a clear of it must send. An override is not a
 lock: the person may change the field here too, and their edit then replaces the
 owner's as `unmerged`, and `settled` once their app merges it.
+
+Clearing an override is a guarded `PATCH` whose body is the state the
+override is put in, `{ "state": "cleared" }`; that is the only state, so the
+operation ends an override and does nothing else, and any other value, an extra
+member or `null` is 422. It requires `If-Match` with the record's `etag`, so the
+clear does what the owner was shown. The `etag` changes whenever anything the
+clear depends on changes: the set's value of the field and whether the set
+resets it (for a mirrored setting, either key), `clear_applies`, the value in
+force, and the override itself. A missing `If-Match` is 428
+`precondition_required`; one that no longer matches is 412
+`precondition_failed` with the current `ETag`, for example when the person's app
+sent a newer set after the list was read. Nothing is written in either case.
+The `etag` is compared inside the clear's transaction, on the profile rows it
+has locked, so no set lands between the check and the write. Refusals come in
+this order: 404 when there is no override of the field, then 428 or 412, then
+409 for a taken name. The answer is a receipt with no `ETag`.
 
 Clearing an override puts the set's value back at once, in one transaction that
 takes the set's locks, and the set applies to the field again from then on.
@@ -420,8 +437,10 @@ compared trimmed and without case as every profile write compares names, is
 refused with 409 `conflict`, as the owner's own rename to it is: nothing is
 written and the override stays until that profile is renamed. Clearing a hidden profile does not recreate it: the next
 newer set does, as a new profile. A cleared override or hidden profile asks the
-person's apps to sync, and `wake_queued` says whether a push could be queued; when
-it is false, the change reaches the app the next time it syncs. Dismissing a
+person's apps to sync, and `wake_queued` says whether this call queued a push
+after the clear committed; when it is false, the change reaches the app the
+next time it syncs. The hidden-profile clear and the dismissal restore no value,
+so they stay unguarded `DELETE`s. Dismissing a
 settled record changes nothing else and tells no app.
 
 The clears and the dismissal follow the Owner rules above and are audited (see

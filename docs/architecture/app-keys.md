@@ -985,6 +985,15 @@ by a set built elsewhere.
   creates nothing. Each clear then calls the wake hook
   (`profileedits.Waker`) itself, since its writes record nothing for the
   request's middleware to wake on, and answers what the hook reported.
+- *What an override clear must match.* The list gives each override a token:
+  a SHA-256 over the account, the profile and the field and, for the field
+  and a mirrored setting's other key, the value in force, the set's value and
+  whether it resets it, whether a clear applies it (all from the same rebuilt
+  record the clear writes), and the edit row (who, revision). The clear is a
+  guarded `PATCH` whose `If-Match` must match the token recomputed in its
+  transaction, after the profile rows are locked and before the name check,
+  so a set accepted after the owner read the list refuses the clear (412)
+  instead of the clear applying a value the owner never saw.
 
 **Recording edits.** The store's shared write helpers record, in the write's
 transaction: `updateProfile` for the set's item fields, compared before and
