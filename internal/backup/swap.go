@@ -331,7 +331,7 @@ func carryLiveState(ctx context.Context, ctl ControlDB, live string, loader Data
 	}
 	// Once the keys and the sign-in switches are as the restored server will
 	// start.
-	reportStranded(ctx, loader, restoredURL, keys.Holders, out)
+	reportStranded(ctx, loader, restoredURL, out)
 	return nil
 }
 
