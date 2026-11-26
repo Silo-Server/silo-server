@@ -23,7 +23,12 @@ import (
 type healthResponse struct {
 	Status     string `json:"status"`
 	ActiveJobs int    `json:"active_jobs"`
-	EgressKbps int    `json:"egress_kbps"`
+	// ActiveJobsByKind breaks ActiveJobs down by JobKind. It is stored with
+	// the resource sample (see marshalLastStats), so every API server's
+	// planner reads it from the node row without a column of its own. A node
+	// that predates job kinds omits it.
+	ActiveJobsByKind json.RawMessage `json:"active_jobs_by_kind"`
+	EgressKbps       int             `json:"egress_kbps"`
 	// CapabilitiesHash identifies the node's current hardware capability
 	// snapshot. A node that predates capability snapshots reports none, which
 	// is how the sweep tells "nothing changed" from "cannot say".
@@ -225,7 +230,8 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 	sampledAt := trimJSONNull(hr.SampledAt)
 	build := trimJSONNull(hr.Build)
 	artifacts := trimJSONNull(hr.Artifacts)
-	if system == nil && gpu == nil && attribution == nil && build == nil && artifacts == nil {
+	jobsByKind := trimJSONNull(hr.ActiveJobsByKind)
+	if system == nil && gpu == nil && attribution == nil && build == nil && artifacts == nil && jobsByKind == nil {
 		return nil
 	}
 	payload := struct {
@@ -235,7 +241,10 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 		SampledAt   json.RawMessage `json:"sampled_at,omitempty"`
 		Build       json.RawMessage `json:"build,omitempty"`
 		Artifacts   json.RawMessage `json:"artifacts,omitempty"`
-	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt, Build: build, Artifacts: artifacts}
+		// ActiveJobsByKind is read back by reportedJobsByKind: unlike the
+		// rest of the sample, transcode selection routes on it.
+		ActiveJobsByKind json.RawMessage `json:"active_jobs_by_kind,omitempty"`
+	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt, Build: build, Artifacts: artifacts, ActiveJobsByKind: jobsByKind}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil
