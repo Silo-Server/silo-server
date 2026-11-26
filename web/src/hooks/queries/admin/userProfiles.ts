@@ -59,6 +59,11 @@ function invalidateAccountProfiles(
   return Promise.all([
     client.invalidateQueries({ queryKey: [...base, "profile-activity", userId] }),
     client.invalidateQueries({ queryKey: [...base, "profile", userId] }),
+    // An edit or delete of a profile from the person's app adds or ends a
+    // record the "Changed on this server" card lists.
+    client.invalidateQueries({
+      queryKey: adminProfileSetEditsKey(userId, adminUserScope(context)),
+    }),
     client.invalidateQueries({ queryKey: adminKeys.userProfiles(userId) }),
     client.invalidateQueries({ queryKey: profileKeys.list() }),
   ]);
@@ -221,13 +226,7 @@ export function useClearAdminUserProfileSetEdit(userId: number) {
       });
     },
     onError: failedUnlessExplained("web.admin.users.detail.profiles.setEdits.clearFailed"),
-    onSettled: () =>
-      Promise.all([
-        client.invalidateQueries({
-          queryKey: adminProfileSetEditsKey(userId, adminUserScope(context)),
-        }),
-        invalidateAccountProfiles(client, userId, context),
-      ]),
+    onSettled: () => invalidateAccountProfiles(client, userId, context),
   });
 }
 
