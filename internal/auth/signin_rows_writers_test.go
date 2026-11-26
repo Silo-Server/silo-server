@@ -76,7 +76,7 @@ var signInRowWriters = map[string]string{
 	"internal/auth/app_key_repository.go:revokeIdentityKeysTx": identitiesFirst,
 	// Promotion: under the account lock, after revokeAccountKeysTx has taken
 	// the account's identities and ended its key sessions.
-	"internal/auth/repository.go:revokeCredentialsIssuedToNonAdmin": identitiesFirst,
+	"internal/auth/promotion_credentials.go:revokeCredentialsIssuedToNonAdmin": identitiesFirst,
 	// Turning the app key switch off ends every key session on the server.
 	"internal/auth/app_key_switch.go:endKeySessionsTx": installationsFirst,
 
