@@ -1061,13 +1061,18 @@ budget of 30 seconds, half the one-minute interval, started when it is
 queued. A wake is queued up to five seconds after its time is recorded, so it
 has ended within 35 seconds of that, before the account's limit lets another
 start; a test holds the budget under the interval less those five seconds.
-The phones are sent one after another in the order above, each under what is
-left of the budget. One send can take up to seven relay requests, more than the budget
-allows, so there is no deadline per phone, and a slow phone can use up the
-budget. A phone the budget doesn't reach, or doesn't let finish, is recorded
-`failed` as `wake_out_of_time`; it gets the next wake, and the app reads the
-set when it opens. A send that panics or stops before it records an outcome is
-recorded `failed` as `wake_send_unfinished`, and the next phone is still sent.
+The phones are started in the order above, four at a time, each under what is
+left of the budget. One send can take up to seven relay requests, more than the
+budget allows, so there is no deadline per phone. A slow or dead registration
+holds one of the four slots, and the account's other phones go on in the other
+three. Four keeps one wake to a quarter of the 16 workers the push dispatcher
+already sends through the same relay with. A phone the budget doesn't reach,
+or doesn't let finish, is recorded `failed` as `wake_out_of_time`; it gets the
+next wake, and the app reads the set when it opens. A send that panics or
+stops before it records an outcome is recorded `failed` as
+`wake_send_unfinished`, its slot goes to the next phone, and the others go on.
+The account's in-flight mark is released once every send has returned and
+every failure write is done.
 These failure writes run on a fresh context the budget cannot have canceled.
 On each server, a wake of an account also does not start while the previous
 one is still in flight there. That guard is a mark in the process, released

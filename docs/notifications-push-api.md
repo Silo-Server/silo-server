@@ -220,8 +220,9 @@ wake a minute per account, across all API servers; an edit inside that minute
 sends nothing more, and the app learns of it from the next wake or when it
 opens. Attempts are recorded with trigger `profile_set`. A wake is sent once
 and never retried: a missed one is repaired by the next edit or by the app
-opening. A wake ends within 30 seconds: a phone it doesn't reach in that time
-is recorded as failed and gets the next wake. Wake attempts are deleted after
+opening. A wake sends up to four phones at once and ends within 30 seconds: a
+phone it doesn't reach in that time is recorded as failed and gets the next
+wake. Wake attempts are deleted after
 seven days.
 Apple delivers background pushes at its discretion and not at all to an app the
 person force-quit, so an app must still read the set when it opens.
