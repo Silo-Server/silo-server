@@ -1,6 +1,10 @@
 package metadata
 
-import "sort"
+import (
+	"context"
+	"fmt"
+	"sort"
+)
 
 // providerStructure is what one provider returned for a series' seasons and
 // episodes in one refresh, in chain order.
@@ -137,4 +141,38 @@ func (s *providerStructures) seasonNumbers() []int {
 	}
 	sort.Ints(out)
 	return out
+}
+
+// seriesEpisodeOrderProvider returns the provider whose episode order a
+// series follows: the setting of the first of its enabled libraries, in
+// library order, that picks one. Every library holding the series shares its
+// episode rows, so the answer must not depend on which library asked for the
+// refresh. Empty means chain order.
+func (s *MetadataService) seriesEpisodeOrderProvider(ctx context.Context, contentID string) (string, error) {
+	if s == nil || s.libraryRepo == nil || s.folderRepo == nil || contentID == "" {
+		return "", nil
+	}
+	folderIDs, err := s.libraryRepo.GetFolderIDsForItem(ctx, contentID)
+	if err != nil {
+		return "", fmt.Errorf("loading libraries for the episode order: %w", err)
+	}
+	if len(folderIDs) == 0 {
+		return "", nil
+	}
+	folders, err := s.folderRepo.ListByIDs(ctx, folderIDs)
+	if err != nil {
+		return "", fmt.Errorf("loading libraries for the episode order: %w", err)
+	}
+	sort.SliceStable(folders, func(i, j int) bool {
+		if folders[i].SortOrder != folders[j].SortOrder {
+			return folders[i].SortOrder < folders[j].SortOrder
+		}
+		return folders[i].ID < folders[j].ID
+	})
+	for _, folder := range folders {
+		if folder != nil && folder.Enabled && folder.EpisodeOrderProvider != "" {
+			return folder.EpisodeOrderProvider, nil
+		}
+	}
+	return "", nil
 }

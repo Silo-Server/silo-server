@@ -1,7 +1,11 @@
 package metadata
 
 import (
+	"context"
 	"testing"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func structureEpisode(season, number int, title string, ids map[string]string) EpisodeResult {
@@ -87,5 +91,48 @@ func TestMergeSeriesStructure_NoFallbackWhenPreferredFailed(t *testing.T) {
 
 	if len(seasons) != 0 || len(episodes) != 0 {
 		t.Fatalf("seasons = %+v, episodes = %+v; want none while TVDB is failing", seasons, episodes)
+	}
+}
+
+// Every library holding a series shares its episode rows, so the order comes
+// from the series' libraries, whichever library asked for the refresh: the
+// first enabled one, in library order, that picks a provider.
+func TestSeriesEpisodeOrderProvider(t *testing.T) {
+	cases := []struct {
+		name    string
+		folders map[int]*models.MediaFolder
+		want    string
+	}{
+		{"no library picks one", map[int]*models.MediaFolder{
+			10: {ID: 10, Enabled: true},
+		}, ""},
+		{"a later library picks TMDB", map[int]*models.MediaFolder{
+			10: {ID: 10, Enabled: true, SortOrder: 0},
+			20: {ID: 20, Enabled: true, SortOrder: 1, EpisodeOrderProvider: "tmdb"},
+		}, "tmdb"},
+		{"the first library in order wins", map[int]*models.MediaFolder{
+			10: {ID: 10, Enabled: true, SortOrder: 1, EpisodeOrderProvider: "tmdb"},
+			20: {ID: 20, Enabled: true, SortOrder: 0, EpisodeOrderProvider: "tvdb"},
+		}, "tvdb"},
+		{"a disabled library has no say", map[int]*models.MediaFolder{
+			10: {ID: 10, Enabled: false, EpisodeOrderProvider: "tmdb"},
+			20: {ID: 20, Enabled: true},
+		}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			h.service.folderRepo = &fakeMetadataFolderRepo{folders: tc.folders}
+			for id := range tc.folders {
+				_ = h.libraryRepo.Upsert(context.Background(), "series-tvdb-74796", id, time.Now())
+			}
+			got, err := h.service.seriesEpisodeOrderProvider(context.Background(), "series-tvdb-74796")
+			if err != nil {
+				t.Fatalf("seriesEpisodeOrderProvider = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("seriesEpisodeOrderProvider = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

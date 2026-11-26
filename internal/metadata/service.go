@@ -2391,7 +2391,11 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				}
 			}
 		}
-		allSeasons, allEpisodes = mergeSeriesStructure(structures.list, "", req.Language)
+		orderProvider, err := s.seriesEpisodeOrderProvider(ctx, req.ContentID)
+		if err != nil {
+			return nil, err
+		}
+		allSeasons, allEpisodes = mergeSeriesStructure(structures.list, orderProvider, req.Language)
 	}
 	// Phase 5: Merge & Persist.
 	if !accumulator.HasMetadata && accumulator.Title == "" {

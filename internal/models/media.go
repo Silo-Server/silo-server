@@ -48,6 +48,10 @@ type MediaFolder struct {
 	ScanWarningAt         *time.Time
 	AllowEmptyCleanupOnce bool
 	SortOrder             int
+	// EpisodeOrderProvider is the provider whose episode order the library
+	// follows, "tvdb" or "tmdb". Empty means the first enabled remote
+	// provider in the library's Episodes chain.
+	EpisodeOrderProvider string
 }
 
 // MediaFile represents a row in the media_files table.

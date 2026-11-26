@@ -156,6 +156,9 @@ type UpdateFolderInput struct {
 	// RealtimeMonitoring is nil on the frozen /api/v1 update path, which
 	// never sets it, so the column stays unchanged there.
 	RealtimeMonitoring *bool
+	// EpisodeOrderProvider is "tvdb", "tmdb", or "" for the Episodes chain
+	// order; nil leaves it unchanged.
+	EpisodeOrderProvider *string
 }
 
 // FolderRepository provides CRUD operations for the media_folders table.
@@ -221,7 +224,7 @@ func normalizeTrailerKindsInput(kinds []string) []string {
 // folderColumns is the list of columns returned by all SELECT queries.
 // Kept in one place so scanFolder stays in sync.
 const folderColumns = `id, type, name, enabled, metadata_language, auto_translate_metadata, chapter_thumbnails_enabled, intro_detection_enabled, trickplay_enabled, box_sets_enabled, box_set_min_movies, box_sets_in_search, realtime_monitoring, trailer_kinds, poster_path, last_scanned_at,
-	scan_warning_code, scan_warning_message, scan_warning_at, allow_empty_cleanup_once, sort_order`
+	scan_warning_code, scan_warning_message, scan_warning_at, allow_empty_cleanup_once, sort_order, episode_order_provider`
 
 // scanFolder scans a single row into a *models.MediaFolder.
 func scanFolder(row pgx.Row) (*models.MediaFolder, error) {
@@ -249,6 +252,7 @@ func scanFolder(row pgx.Row) (*models.MediaFolder, error) {
 		&f.ScanWarningAt,
 		&f.AllowEmptyCleanupOnce,
 		&f.SortOrder,
+		&f.EpisodeOrderProvider,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -682,6 +686,9 @@ func folderUpdateAssignments(input UpdateFolderInput) (clauses []string, args []
 	}
 	if input.TrailerKinds != nil {
 		set("trailer_kinds", normalizeTrailerKindsInput(*input.TrailerKinds))
+	}
+	if input.EpisodeOrderProvider != nil {
+		set("episode_order_provider", *input.EpisodeOrderProvider)
 	}
 	if input.RealtimeMonitoring != nil {
 		set("realtime_monitoring", *input.RealtimeMonitoring)
