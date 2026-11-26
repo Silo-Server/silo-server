@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -82,11 +83,13 @@ func (d *reachDB) account(t *testing.T) int {
 // reachSession is one stored session; via is nil for a session stored
 // without a value, as before the column existed, and opened is empty for one
 // with no record of how it was opened, as a server of the previous release
-// stores it.
+// stores it. keyVia, when set, stores a device key enrolled that way and
+// records the session as opened by it.
 type reachSession struct {
 	id, platform string
 	opened       string
 	via          *bool
+	keyVia       string
 	createdAt    time.Time
 }
 
@@ -106,9 +109,33 @@ func (d *reachDB) store(t *testing.T, userID int, s reachSession) string {
 		s.id, userID, s.platform, s.via, s.createdAt, s.opened); err != nil {
 		t.Fatal(err)
 	}
+	if s.keyVia != "" {
+		d.storeDeviceKey(t, userID, s.id, s.keyVia)
+	}
 	token := "reach-token-" + s.id
 	d.claims[token] = &auth.Claims{UserID: userID, Role: models.RoleUser, SessionID: s.id, TokenType: auth.TokenTypeAccess}
 	return token
+}
+
+// storeDeviceKey stores an active device key enrolled through enrolledVia
+// and records it as the key that opened sessionID.
+func (d *reachDB) storeDeviceKey(t *testing.T, userID int, sessionID, enrolledVia string) {
+	t.Helper()
+	publicKey := make([]byte, 65)
+	if _, err := rand.Read(publicKey); err != nil {
+		t.Fatal(err)
+	}
+	keyID, kind := uuid.NewString(), "device"
+	if enrolledVia == models.AppKeyEnrolledGrant {
+		kind = "app"
+	}
+	if _, err := d.pool.Exec(t.Context(), `INSERT INTO auth_device_keys (id, user_id, public_key, key_id, kind, name, enrolled_via)
+		VALUES ($1::uuid, $2, $3, $6, $4, $7, $5)`, keyID, userID, publicKey, kind, enrolledVia, "key-"+keyID, "Key "+keyID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.pool.Exec(t.Context(), `UPDATE auth_sessions SET device_key_id = $2 WHERE id = $1`, sessionID, keyID); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (d *reachDB) live(t *testing.T, id string) bool {
@@ -172,8 +199,8 @@ func requireCompleteItem(t *testing.T, label string, item map[string]json.RawMes
 // TestSessionReachRuleDB is the rule's table, through both routes: for each
 // kind of caller session, what another session's item shows and whether
 // ending another session is allowed. Regression: a session a device signed
-// in with by code read every session of the account and could end any. The
-// rows without a value pin each TV spelling the apps send (tvOS, android-tv,
+// in with by code, or one another app's grant-enrolled key opened, read every
+// session of the account and could end any. The rows without a value pin each TV spelling the apps send (tvOS, android-tv,
 // roku), each in another case, against one platform that isn't a TV's and
 // none.
 func TestSessionReachRuleDB(t *testing.T) {
@@ -184,28 +211,33 @@ func TestSessionReachRuleDB(t *testing.T) {
 		opened   string
 		via      *bool
 		platform string
+		keyVia   string
 		limited  bool
 	}{
 		// A recorded opened_via decides, with or without the flag.
-		{"recorded device sign-in, phone", models.SessionOpenedDeviceLogin, &yes, "iOS", true},
-		{"recorded device sign-in, no flag", models.SessionOpenedDeviceLogin, nil, "", true},
-		{"recorded password sign-in, TV", models.SessionOpenedPassword, &no, "tvOS", false},
-		{"recorded password sign-in, no flag, TV", models.SessionOpenedPassword, nil, "tvOS", false},
+		{"recorded device sign-in, phone", models.SessionOpenedDeviceLogin, &yes, "iOS", "", true},
+		{"recorded device sign-in, no flag", models.SessionOpenedDeviceLogin, nil, "", "", true},
+		{"recorded password sign-in, TV", models.SessionOpenedPassword, &no, "tvOS", "", false},
+		{"recorded password sign-in, no flag, TV", models.SessionOpenedPassword, nil, "tvOS", "", false},
 		// The flag alone, as a server of the previous release writes it.
-		{"device sign-in, TV", "", &yes, "tvOS", true},
-		{"device sign-in, phone", "", &yes, "iOS", true},
-		{"device sign-in, no platform", "", &yes, "", true},
-		{"password sign-in, TV", "", &no, "tvOS", false},
+		{"device sign-in, TV", "", &yes, "tvOS", "", true},
+		{"device sign-in, phone", "", &yes, "iOS", "", true},
+		{"device sign-in, no platform", "", &yes, "", "", true},
+		{"password sign-in, TV", "", &no, "tvOS", "", false},
 		// Neither: a session older than both columns.
-		{"before the column, tvOS", "", nil, "TVOS", true},
-		{"before the column, Android TV", "", nil, "Android-TV", true},
-		{"before the column, Roku", "", nil, "ROKU", true},
-		{"before the column, phone", "", nil, "iOS", false},
-		{"before the column, no platform", "", nil, "", false},
+		{"before the column, tvOS", "", nil, "TVOS", "", true},
+		{"before the column, Android TV", "", nil, "Android-TV", "", true},
+		{"before the column, Roku", "", nil, "ROKU", "", true},
+		{"before the column, phone", "", nil, "iOS", "", false},
+		{"before the column, no platform", "", nil, "", "", false},
+		// A device key decides first: another app's key is limited, the
+		// person's own is not.
+		{"another app's key", models.SessionOpenedAppKey, &no, "iOS", models.AppKeyEnrolledGrant, true},
+		{"the person's own key", models.SessionOpenedAppKey, &no, "iOS", models.AppKeyEnrolledSession, false},
 	} {
 		t.Run(tc.label, func(t *testing.T) {
 			account := d.account(t)
-			caller := reachSession{id: uuid.NewString(), opened: tc.opened, via: tc.via, platform: tc.platform, createdAt: time.Now().Add(-2 * time.Hour)}
+			caller := reachSession{id: uuid.NewString(), opened: tc.opened, via: tc.via, platform: tc.platform, keyVia: tc.keyVia, createdAt: time.Now().Add(-2 * time.Hour)}
 			token := d.store(t, account, caller)
 			other := uuid.NewString()
 			d.store(t, account, reachSession{id: other, platform: "web"})
@@ -226,7 +258,7 @@ func TestSessionReachRuleDB(t *testing.T) {
 			rec := do(t, d.handler, http.MethodDelete, Prefix+"/auth/sessions/"+other, "", bearer(token))
 			if tc.limited {
 				p := requireProblem(t, rec, TypePermissionDenied)
-				if !strings.Contains(p.Detail, "signed in with a code can end only its own session") {
+				if !strings.Contains(p.Detail, "can end only its own session") {
 					t.Fatalf("detail = %q", p.Detail)
 				}
 				if !d.live(t, other) {
@@ -234,6 +266,10 @@ func TestSessionReachRuleDB(t *testing.T) {
 				}
 			} else if rec.Code != http.StatusNoContent || d.live(t, other) {
 				t.Fatalf("ordinary delete = %d %s", rec.Code, rec.Body.String())
+			}
+			// The capability a client reads before offering the action agrees.
+			if d.mayRevokeOthers(t, token) == tc.limited {
+				t.Fatalf("revoke_other_sessions = %v for a session limited to itself: %v", !tc.limited, tc.limited)
 			}
 		})
 	}

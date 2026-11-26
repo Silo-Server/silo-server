@@ -349,7 +349,7 @@
 ./internal/auth TestPendingKeyCapDB
 ./internal/auth TestKeyOperationsRecheckActingProfileDB
 ./internal/auth TestExpiredPendingKeySweepDB
-./internal/apiv2 TestKeyListRefusesDeviceSignInSessionDB
+./internal/apiv2 TestKeyRoutesRefuseSessionsDB
 ./internal/auth TestRevokeOwnDeviceKeyRulesDB
 ./internal/auth TestKeySignInLocalPasswordsOffDB
 ./internal/auth TestKeySessionContinuesProviderChainDB

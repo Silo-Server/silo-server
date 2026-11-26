@@ -189,7 +189,7 @@ func (h *AuthHandler) RevokeSessionChecked(ctx context.Context, sessionID string
 			return apiError(http.StatusNotFound, "not_found", "Session not found")
 		}
 		if errors.Is(err, auth.ErrSessionOutOfReach) {
-			return apiError(http.StatusForbidden, "permission_denied", "A device signed in with a code can end only its own session.")
+			return apiError(http.StatusForbidden, "permission_denied", "A sign-in made with a device code or by another app can end only its own session.")
 		}
 		return apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}

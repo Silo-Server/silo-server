@@ -144,6 +144,17 @@ type DeviceLoginDecision struct {
 	Status string
 }
 
+// SessionNotAllowedDetail answers a caller auth.ErrSessionNotAllowed
+// refuses: a session a device sign-in or another app opened, one with no
+// record of how it was opened, an API key or a remote-playback session.
+// Each of them can do the change from a fresh sign-in of the account or
+// from the person's own app.
+const SessionNotAllowedDetail = "This sign-in can't do that. Sign in again with your password or sign-in provider, or use your own Silo app."
+
+// ActingAsAccountDetail answers an administrator acting as the account
+// (auth.ErrActingAsAccount), who cannot sign in again as it.
+const ActingAsAccountDetail = "An administrator acting as this account can't do that; only the account's own sign-in can."
+
 // deviceDecisionSessionError refuses a device decision that does not come
 // from a login session. An approval gives the device a login session of
 // the account, so an API key must not mint one (it would turn a key into a
@@ -250,8 +261,10 @@ func deviceDecisionError(err error) *APIError {
 		out = apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
 	case errors.Is(err, auth.ErrSessionRevoked):
 		out = apiError(http.StatusUnauthorized, "unauthorized", "Login session is no longer valid")
+	case errors.Is(err, auth.ErrActingAsAccount):
+		out = apiError(http.StatusForbidden, "forbidden", ActingAsAccountDetail)
 	case errors.Is(err, auth.ErrSessionNotAllowed):
-		out = apiError(http.StatusForbidden, "forbidden", "This sign-in cannot approve a device")
+		out = apiError(http.StatusForbidden, "forbidden", SessionNotAllowedDetail)
 	case errors.Is(err, auth.ErrDeviceLoginPurpose):
 		out = apiError(http.StatusConflict, "purpose_mismatch", "Device login purpose does not match this approval route")
 	case errors.Is(err, auth.ErrDeviceLoginConflict):
