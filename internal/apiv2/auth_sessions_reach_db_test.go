@@ -276,17 +276,37 @@ func TestLimitedSessionDeleteDB(t *testing.T) {
 	if !d.live(t, foreign) {
 		t.Fatal("another account's session ended")
 	}
+	// The capability a client reads before offering the action agrees.
+	if d.mayRevokeOthers(t, limited) || !d.mayRevokeOthers(t, ordinary) {
+		t.Fatal("revoke_other_sessions: want false for the limited session and true for the ordinary one")
+	}
 	own := d.claims[limited].SessionID
 	if rec := do(t, d.handler, http.MethodDelete, Prefix+"/auth/sessions/"+own, "", bearer(limited)); rec.Code != http.StatusNoContent || d.live(t, own) {
 		t.Fatalf("ending its own session = %d %s", rec.Code, rec.Body.String())
 	}
 }
 
+// mayRevokeOthers reads revoke_other_sessions from the login-session
+// capability as the token's caller.
+func (d *reachDB) mayRevokeOthers(t *testing.T, token string) bool {
+	t.Helper()
+	rec := do(t, d.handler, http.MethodGet, Prefix+"/auth/sessions/capabilities", "", bearer(token))
+	var capability struct {
+		RevokeOtherSessions *bool `json:"revoke_other_sessions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &capability); err != nil || rec.Code != http.StatusOK || capability.RevokeOtherSessions == nil {
+		t.Fatalf("capability = %d %s", rec.Code, rec.Body.String())
+	}
+	return *capability.RevokeOtherSessions
+}
+
 // TestDemoVisitorOnALimitedSessionDB: on a demo server, where visitors share
 // one account, a session opened by device sign-in and an ordinary one are
 // each refused another session of the account, an unknown session is still
 // not found for both, each may end itself, and the capability says no to
-// both. It catches either rule switching the other off where they meet.
+// both. Each caller's refusal names its own rule (the device sign-in rule
+// answers first), so the test fails when either rule stops applying where
+// they meet.
 func TestDemoVisitorOnALimitedSessionDB(t *testing.T) {
 	d := newReachDBIn(t, true)
 	yes := true
@@ -295,19 +315,16 @@ func TestDemoVisitorOnALimitedSessionDB(t *testing.T) {
 	ordinary := d.store(t, account, reachSession{platform: "web"})
 	bystander := uuid.NewString()
 	d.store(t, account, reachSession{id: bystander, platform: "web"})
-	for name, token := range map[string]string{"limited": limited, "ordinary": ordinary} {
-		refusal := requireProblem(t, do(t, d.handler, http.MethodDelete, Prefix+"/auth/sessions/"+bystander, "", bearer(token)), TypePermissionDenied)
-		if !d.live(t, bystander) {
-			t.Fatalf("%s: another visitor's session ended (%s)", name, refusal.Detail)
+	for name, caller := range map[string]struct{ token, rule string }{
+		"limited": {limited, "signed in with a code"}, "ordinary": {ordinary, "demo mode"},
+	} {
+		refusal := requireProblem(t, do(t, d.handler, http.MethodDelete, Prefix+"/auth/sessions/"+bystander, "", bearer(caller.token)), TypePermissionDenied)
+		if !d.live(t, bystander) || !strings.Contains(refusal.Detail, caller.rule) {
+			t.Fatalf("%s: refusal %q (other session live: %v), want one naming %q", name, refusal.Detail, d.live(t, bystander), caller.rule)
 		}
-		requireProblem(t, do(t, d.handler, http.MethodDelete, Prefix+"/auth/sessions/"+uuid.NewString(), "", bearer(token)), TypeNotFound)
-		rec := do(t, d.handler, http.MethodGet, Prefix+"/auth/sessions/capabilities", "", bearer(token))
-		var capability struct {
-			RevokeOtherSessions *bool `json:"revoke_other_sessions"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &capability); err != nil || rec.Code != http.StatusOK ||
-			capability.RevokeOtherSessions == nil || *capability.RevokeOtherSessions {
-			t.Fatalf("%s: capability = %d %s, want revoke_other_sessions false", name, rec.Code, rec.Body.String())
+		requireProblem(t, do(t, d.handler, http.MethodDelete, Prefix+"/auth/sessions/"+uuid.NewString(), "", bearer(caller.token)), TypeNotFound)
+		if d.mayRevokeOthers(t, caller.token) {
+			t.Fatalf("%s: revoke_other_sessions is true", name)
 		}
 	}
 	// The limited caller still sees the others redacted, and each may sign
