@@ -1035,9 +1035,10 @@ An administrator sees these records and clears them from the admin routes in
 [admin-users-api.md](admin-users-api.md#profiles-from-the-persons-app).
 Clearing an override puts the field back to the value of the last accepted
 set at once, except a PIN the set sent as digits, which stays as the owner set
-it until a newer set; the field leaves `overrides` and the next newer set
-applies to it. Clearing a hidden profile takes it out of `hidden_by_owner`
-without recreating it; the next newer set creates it. Either asks the
+it until a newer set. A picture this server doesn't hold waits for its upload.
+The field leaves `overrides` and the next newer set applies to it. Clearing a
+hidden profile takes it out of `hidden_by_owner` without recreating it; the
+next newer set creates it. Either asks the
 person's apps to sync. A field that leaves `overrides` without the person's
 own edit was cleared: send a newer set so the server holds the app's value.
 
