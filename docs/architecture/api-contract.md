@@ -259,7 +259,10 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   operation to such a session with `403 permission_denied` before anything else is judged;
   `allowed` and `own_only` pass, and an own-only limit is the handler's. `Register` refuses a
   decision without its reason and one on `public` or `acting_admin`, and
-  `TestEveryOperationDecidesForGrantedApps` fails on an operation with none.
+  `TestEveryOperationDecidesForGrantedApps` fails on an operation with none. Whatever such a
+  session reads about what it may do describes that session, never the account: booleans, lists
+  of named powers and capability reads
+  ([app keys](app-keys.md#what-a-granted-app-can-do)).
 - **The delegation row.** The API listener hands the `/api/v2/` subtree to the sealed
   `apiv2` handler with one wildcard registration, built in the registration itself. The route
   inventory records that as a delegation row per method (`delegates_to: api_v2`, namespace

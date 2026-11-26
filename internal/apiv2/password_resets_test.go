@@ -93,7 +93,7 @@ func (f *fakePasswordResets) CompletePasswordReset(_ context.Context, token, pas
 	if token == "sign-in-required" {
 		return view, passwordreset.ErrSessionStart
 	}
-	view.Tokens = &handlers.TokenPairView{AccessToken: "fixture-access", RefreshToken: "fixture-refresh", ExpiresIn: 3600, User: handlers.UserView{ID: 3, Username: "reset-user", Role: models.RoleUser}}
+	view.Tokens = &handlers.TokenPairView{AccessToken: "fixture-access", RefreshToken: "fixture-refresh", ExpiresIn: 3600, User: handlers.UserView{ID: 3, Username: "reset-user", Role: models.RoleUser, CreatedAt: fixtureAccountCreatedAt}}
 	return view, nil
 }
 

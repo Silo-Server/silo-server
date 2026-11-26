@@ -348,6 +348,25 @@ func truthy(v any) bool {
 	return false
 }
 
+// powerListName reports whether a list member names powers: permissions, or
+// a name ending in _permissions, _actions or _capabilities.
+func powerListName(name string) bool {
+	return name == "permissions" || strings.HasSuffix(name, "_permissions") ||
+		strings.HasSuffix(name, "_actions") || strings.HasSuffix(name, "_capabilities")
+}
+
+// isArraySchema reports whether a schema is an array: type "array", or a
+// type list that holds it (a nullable list, ["array","null"]).
+func isArraySchema(s map[string]any) bool {
+	switch t := s["type"].(type) {
+	case string:
+		return t == "array"
+	case []any:
+		return slices.Contains(t, any("array"))
+	}
+	return false
+}
+
 // TestCapabilityReadsAnswerForTheSession: the collection and Watch Together
 // capability reads answer, member by member, for the session asking. With
 // every feature on, the person's own session reads each governed member as
@@ -399,5 +418,110 @@ func TestCapabilityReadsAnswerForTheSession(t *testing.T) {
 				t.Errorf("%s %s: another app's session reads %v, the person's own %v", op, member, app[member], own[member])
 			}
 		}
+	}
+}
+
+// schemaPowerLists lists the array members of a schema whose name names
+// powers, at any depth, as paths keyed like capabilityMembers.
+func schemaPowerLists(schemas map[string]any, schema any, path string, seen map[string]bool, out *[]string) {
+	node, _ := schema.(map[string]any)
+	if node == nil {
+		return
+	}
+	if ref, ok := node["$ref"].(string); ok {
+		name := ref[strings.LastIndex(ref, "/")+1:]
+		if seen[name] {
+			return
+		}
+		next := map[string]bool{name: true}
+		for k := range seen {
+			next[k] = true
+		}
+		schemaPowerLists(schemas, schemas[name], path, next, out)
+		return
+	}
+	props, _ := node["properties"].(map[string]any)
+	for name, prop := range props {
+		member := strings.TrimPrefix(path+"."+name, ".")
+		resolved, _ := prop.(map[string]any)
+		if ref, ok := resolved["$ref"].(string); ok {
+			resolved, _ = schemas[ref[strings.LastIndex(ref, "/")+1:]].(map[string]any)
+		}
+		if isArraySchema(resolved) && powerListName(name) {
+			*out = append(*out, member)
+		}
+		schemaPowerLists(schemas, prop, member, seen, out)
+	}
+	if items, ok := node["items"]; ok {
+		schemaPowerLists(schemas, items, path+"[]", seen, out)
+	}
+	for _, key := range []string{"allOf", "oneOf", "anyOf"} {
+		subs, _ := node[key].([]any)
+		for _, sub := range subs {
+			schemaPowerLists(schemas, sub, path, seen, out)
+		}
+	}
+}
+
+// TestPowerListsStateTheirCase: a read never tells a session another app's
+// key opened that it holds a power whose operations are all refused to it,
+// in a list any more than in a boolean. Every list member named like a list
+// of powers in a success response such a session may read has a row saying
+// how it is kept to that session; a row no response has fails too. Catches a
+// new list of permissions reaching such a session with nobody deciding.
+func TestPowerListsStateTheirCase(t *testing.T) {
+	doc := generatedDocument(t)
+	schemas, _ := doc["components"].(map[string]any)["schemas"].(map[string]any)
+	found := map[string]bool{}
+	for _, op := range documentOperations(t) {
+		if d := documentedDecision(t, op); d == nil || d.Verdict == VerdictRefused {
+			continue
+		}
+		responses, _ := op.Raw["responses"].(map[string]any)
+		for code, r := range responses {
+			if !strings.HasPrefix(code, "2") {
+				continue
+			}
+			content, _ := r.(map[string]any)["content"].(map[string]any)
+			for _, media := range content {
+				var members []string
+				schemaPowerLists(schemas, media.(map[string]any)["schema"], "", map[string]bool{}, &members)
+				for _, m := range members {
+					found[op.ID+" "+m] = true
+				}
+			}
+		}
+	}
+	for key := range found {
+		if strings.TrimSpace(powerListMembers[key]) == "" {
+			t.Errorf("%s: a list of powers with no row in powerListMembers", key)
+		}
+	}
+	for key := range powerListMembers {
+		if !found[key] {
+			t.Errorf("%s: no response such a session may read has this list; remove the row", key)
+		}
+	}
+}
+
+// TestPowerListScanSeesEveryArrayForm: the scan finds a list of powers
+// written inline, as a reference to an array schema, and as a nullable list
+// (a type list), the three forms the published document uses. Catches the
+// scan missing a list for the way it is written.
+func TestPowerListScanSeesEveryArrayForm(t *testing.T) {
+	schemas := map[string]any{
+		"Powers": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		"Answer": map[string]any{"properties": map[string]any{
+			"inline_permissions":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"ref_permissions":      map[string]any{"$ref": "#/components/schemas/Powers"},
+			"nullable_permissions": map[string]any{"type": []any{"array", "null"}, "items": map[string]any{"type": "string"}},
+			"names":                map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		}},
+	}
+	var found []string
+	schemaPowerLists(schemas, map[string]any{"$ref": "#/components/schemas/Answer"}, "", map[string]bool{}, &found)
+	slices.Sort(found)
+	if want := []string{"inline_permissions", "nullable_permissions", "ref_permissions"}; !slices.Equal(found, want) {
+		t.Fatalf("found %v, want %v", found, want)
 	}
 }

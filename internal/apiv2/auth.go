@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -66,6 +67,8 @@ type OAuthCompletion struct {
 	ExpiresIn    int     `json:"expires_in" doc:"Access token lifetime in seconds" example:"3600"`
 	Next         string  `json:"next" doc:"Site-relative path the login started from; / when none was given" example:"/"`
 	User         Account `json:"user" doc:"The account the tokens authenticate"`
+	// AccountCreatedAt is TokenPair's (tokenPairFromView).
+	AccountCreatedAt *time.Time `json:"account_created_at,omitempty" doc:"When the account was made: RFC 3339 in UTC at the stored microsecond precision, with trailing zeros of the fraction left out. Nothing rewrites it after the account is made, and a full restore brings it back exactly. Compare it as an instant, never as text. Left out of an answer to another app's key, one enrolled through a grant" example:"2026-03-14T09:26:53.589793Z"`
 }
 
 // CompleteOAuthLoginOutput is the completeOAuthLogin response.
@@ -234,7 +237,8 @@ func (reg *Registry) completeOAuthLogin(ctx context.Context, in *CompleteOAuthLo
 		return nil, NewProblem(TypeInvalidToken, "The completion code is invalid, used, or expired.")
 	}
 	view := reg.deps.Accounts.OAuthUserView(ctx, c.User)
-	return &CompleteOAuthLoginOutput{Body: OAuthCompletion{AccessToken: c.AccessToken, RefreshToken: c.RefreshToken, ExpiresIn: c.ExpiresIn, Next: c.NextURL, User: accountFromView(view)}}, nil
+	return &CompleteOAuthLoginOutput{Body: OAuthCompletion{AccessToken: c.AccessToken, RefreshToken: c.RefreshToken, ExpiresIn: c.ExpiresIn, Next: c.NextURL, User: accountFromView(view),
+		AccountCreatedAt: accountCreatedAt(view.CreatedAt)}}, nil
 }
 
 // loginProblem renders a login failure: v1's 401 invalid_credentials is the

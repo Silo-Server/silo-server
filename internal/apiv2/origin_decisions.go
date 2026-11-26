@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -130,7 +131,7 @@ func grantedApp(d *SessionDecision) OriginDecisions { return OriginDecisions{Gra
 // app can do).
 const (
 	reasonWhoItIs        = "who it is and which profile it acts as"
-	reasonCurrentUser    = "who it is; the account's email is left out for such a session"
+	reasonCurrentUser    = "who it is, built by accountForSession: for such a session the email is empty, download_allowed false and permissions only those with an operation open to it"
 	reasonVerifyPIN      = "acting as a PIN-protected profile; its attempts count under its own allowance per profile and app key (GrantedAppPINPolicy) and never spend the household's"
 	reasonShuffle        = "playing a shuffle of the profile's; a shuffle's id is random and not listed"
 	reasonPersonRead     = "reading the catalog; reading a person can queue that person's metadata refresh when one is due"
@@ -471,6 +472,42 @@ func (reg *Registry) recordOrigins(operationID string, d OriginDecisions) {
 	reg.origins[operationID] = d
 }
 
+// recordPermission keeps which operations a policy permission gates, so a
+// read can tell a session of a permission only while one of them is open to
+// it (permittedPermissions).
+func (reg *Registry) recordPermission(permission, operationID string) {
+	if permission == "" {
+		return
+	}
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	if reg.permissionOps == nil {
+		reg.permissionOps = map[string][]string{}
+	}
+	reg.permissionOps[permission] = append(reg.permissionOps[permission], operationID)
+}
+
+// permittedPermissions is the part of an account's permissions a kind of
+// session may be told of: a read never tells a session it may do what every
+// operation a permission gates refuses it. A permission whose operations are
+// all refused to that kind is left out; one with an open operation stays, so
+// opening a permission's actions to such a session needs no change here.
+func (reg *Registry) permittedPermissions(kind auth.SessionKind, permissions []Permission) []Permission {
+	if kind == "" {
+		return permissions
+	}
+	out := make([]Permission, 0, len(permissions))
+	for _, permission := range permissions {
+		reg.mu.Lock()
+		governed := slices.Clone(reg.permissionOps[string(permission)])
+		reg.mu.Unlock()
+		if len(governed) == 0 || reg.permittedFor(kind, governed) {
+			out = append(out, permission)
+		}
+	}
+	return out
+}
+
 // capabilityPermitted is the rule every capability read applies to its
 // permission answer: a capability never reports as allowed an action whose
 // operations are all refused to the session asking. It reads, for the
@@ -485,19 +522,24 @@ func (reg *Registry) capabilityPermitted(governed []string) func(context.Context
 		return nil
 	}
 	return func(ctx context.Context) bool {
-		kind := judgedKind(claimsFrom(ctx))
-		if kind == "" {
+		return reg.permittedFor(judgedKind(claimsFrom(ctx)), governed)
+	}
+}
+
+// permittedFor reports whether a kind of session may use at least one of the
+// governed operations; every operation is open to an unjudged session ("").
+func (reg *Registry) permittedFor(kind auth.SessionKind, governed []string) bool {
+	if kind == "" {
+		return true
+	}
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	for _, id := range governed {
+		if d := reg.origins[id].decisionFor(kind); d != nil && d.Verdict != VerdictRefused {
 			return true
 		}
-		reg.mu.Lock()
-		defer reg.mu.Unlock()
-		for _, id := range governed {
-			if d := reg.origins[id].decisionFor(kind); d != nil && d.Verdict != VerdictRefused {
-				return true
-			}
-		}
-		return false
 	}
+	return false
 }
 
 // capabilityMember is one permission member of a response a judged kind of
@@ -629,10 +671,27 @@ var capabilityMembers = map[string]capabilityMember{
 	"getServerConnections allowed":         {exempt: "believing it, the app reads the addresses the deployment offers, which it may; the document offers no action the gate refuses"},
 }
 
+// powerListMembers says, for each list of named powers a session another
+// app's key opened may read, keyed as capabilityMembers is, how the answer
+// keeps the list to that session's own powers. TestPowerListsStateTheirCase
+// fails on such a list with no row. A sealed reply's tokens.user is the same
+// account object as getCurrentUser's (accountForSession); the scan cannot see
+// inside the sealed plaintext, so this row stands for both.
+var powerListMembers = map[string]string{
+	"getCurrentUser permissions": "accountForSession keeps a permission only while an operation it gates is open to the session (permittedPermissions)",
+}
+
 // memberPermitted applies a governed permission member below a capability
 // read's top level: false when the caller's kind of session is refused every
 // operation it names, else true (the handler's own answer then stands).
 func (reg *Registry) memberPermitted(ctx context.Context, key string) bool {
-	permitted := reg.capabilityPermitted(capabilityMembers[key].governs)
-	return permitted == nil || permitted(ctx)
+	return reg.memberPermittedFor(judgedKind(claimsFrom(ctx)), key)
+}
+
+// memberPermittedFor is memberPermitted for a kind of session named outright,
+// for an answer whose session is not the request's own (a sealed reply opens
+// one).
+func (reg *Registry) memberPermittedFor(kind auth.SessionKind, key string) bool {
+	governed := capabilityMembers[key].governs
+	return len(governed) == 0 || reg.permittedFor(kind, governed)
 }

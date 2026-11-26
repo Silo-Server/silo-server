@@ -428,6 +428,38 @@ host power (the host flags false). Every published reason states a decision:
 the six "refused for now" reasons are a closed list (`forNowReasons`), each
 beside the policy question it waits on.
 
+**What such a session reads about what it may do describes that session,
+never the account.** The rule has three shapes, each checked:
+
+- a boolean permission member (`allowed`, `*_allowed`, `can_*`): a row in
+  `capabilityMembers`, checked by `TestPermissionMembersStateTheirCase`. A
+  member that says what the caller may do under another name has a row there
+  too: the collection read's write flags, `import_sources` and
+  `sort_preference_kinds`, and the Watch Together read's host flags, checked
+  for both kinds of session by `TestCapabilityReadsAnswerForTheSession`;
+- a list of named powers (`permissions`, `*_permissions`, `*_actions`,
+  `*_capabilities`): a row in `powerListMembers`, checked by
+  `TestPowerListsStateTheirCase`. The account's `permissions` keep only the
+  permissions one of whose gated operations is open to the session
+  (`permittedPermissions`);
+- a capability read's `allowed`: the capability rule above.
+
+A permission the account holds gives such a session nothing it is refused,
+including what a handler decides from the permission itself. File paths,
+and the file names a curator's own sessions see (`CanViewFilePaths`), are
+hidden from such a session as from any caller without metadata curation; it
+still sees the book file names every viewer sees
+([File paths and names](../catalog-api.md#file-paths-and-names)).
+`TestEveryAccountPermissionReaderIsListed` (`internal/auth`) fails on a
+function that reads an account's permissions by hand until it is listed with
+why such a session gets nothing from it.
+
+The power-list scan matches names, so these lists pass it by name and were
+read by hand: `features` and `server_features` on playback, the settings
+`scopes`, the shuffle `scope_kinds`, collection `groups` and a profile's
+`allowed_library_ids`. Each describes a fact about the server or that
+session's own profile, and none offers a refused power.
+
 A refusal is enforced in the gate chain right after authentication, before
 the demo gate, the rate limiter, viewer access and the handler: 403
 `permission_denied` with the detail every key route gives a session that may
@@ -539,7 +571,13 @@ resolver (`TestPluginContentMountsAllReachTheContentHandler`,
   absent for it. `self_role` stays: it names the profile's seat, not what
   this session may do. The strip follows who is asking: it marks the app's
   connection, never the seat, so the person's own device in the same profile
-  is told its powers while the app holds the seat and after it leaves. The
+  is told its powers while the app holds the seat and after it leaves. For
+  the host's seat this strip is a guard behind the ticket rule, which already
+  refuses such a session a socket for a room its own account and profile
+  hosts (`TestRoomSocketV2KeepsAnotherAppFromHosting`). For a guest's seat it
+  is what keeps the person's own device's view right while such a session is
+  connected as the same profile (`TestGuestSeatAnotherAppKeepsOwnDeviceViewDB`
+  drives it through the routes). The
   room read leaves out the playback session id
   attached to the member (a member is the account and profile, so it may be
   the person's own device's), and a connection of such a session starts with
@@ -851,8 +889,8 @@ challenge. Every refusal after the code is found returns inside the redeem's
 transaction, so the code's spend rolls back and only the challenge is used up
 (`docs/auth-api.md` has the table). Issuing a join code answers a taken name
 with `duplicate` at `body.username` or `body.email`, whichever clashed. The sealed
-plaintext is the usual `signed_in` answer plus `username`, `person_key_id`
-(the account's person key once the redeem commits) and `person_key`
+plaintext is the usual `signed_in` answer, `person_key_id` naming the
+account's person key once the redeem commits, plus `username` and `person_key`
 (`enrolled`, or `kept` when the account kept a different key). An unknown, spent or expired code, and one whose
 invitation or session can no longer be used, is `app_code_invalid` (404). Of
 two redemptions of one code, on any API processes, exactly one succeeds.
@@ -1060,6 +1098,82 @@ the challenge, AES-256-GCM. A fake server that relays a device's request to the
 real one can read nothing it gets back, and can't swap the reply key without
 breaking the signature. Refusals are not sealed.
 
+## The person key in a sealed reply
+
+Every `signed_in` sealed reply to one of the person's own device keys
+(`introduce`, `sign-in`, `enroll` and an app code's redeem) carries
+`person_key_id`: the key ID of the account's live person key, or `null` when
+the account has none. "None" follows the key list's rule: no key was enrolled,
+the key was revoked, or it is unrevoked but bound to a sign-in provider
+identity that is gone from the account. The member is absent only from a
+server that does not report it and from the answers that never carry it.
+
+It tells a device which person key this server holds. A device that knows a
+newer person key than the one named, or gets `null`, learns that this server
+holds an older key or none: the server is behind, or the key was changed or
+revoked here.
+
+The value is read inside the transaction that opens the session, after that
+transaction's own writes to the person key (an enroll or a redeem that
+enrolled or kept it, an `introduce` that revoked its vouching key because the
+key's identity was gone, which answers a refusal and never `signed_in`). It is
+a plain read under the account row lock, which every writer of person key rows
+holds, so it is the account's person key as the session commits.
+
+The limit: an identity can go without that lock, when a plugin uninstall
+deletes it by cascade. When the signing key is provider-bound, the session's
+transaction holds that key's sign-in installation (`FOR SHARE`), so an identity
+under that installation can't go while it runs. A provider-bound person key whose identity is under an
+installation the signing key's binding did not lock (for example a device
+enrolled from a password session that reused a provider-bound person key) can
+be named in one reply whose session commits just after the identity is gone.
+The next reply says `null`.
+
+Two answers leave the member out:
+
+- `approval_required`: no session opened.
+- Every answer to another app's key, one enrolled through a grant: its redeem
+  and its later sign-ins. That app is not one of the person's devices, and a key
+  ID that changes would tell it the person replaced their key.
+
+### What another app's session reads about the account
+
+The current-user read and `tokens.user` in a sealed reply are built by one
+function (`accountForSession`), so a session another app's key opened reads
+the same account object in both. For such a session:
+
+| Member | Value |
+| --- | --- |
+| `tokens.user.id`, `username` | the account's |
+| `tokens.user.email` | changed: the empty string; the person's address is not that app's to read |
+| `tokens.user.role` | the account's, always `user`: a grant is refused for an administrator's account, and promoting an account revokes all its keys |
+| `tokens.user.permissions` | changed: empty (`[]`). A permission is listed only while one operation it gates is open to such a session; today only `marker_edit` and `metadata_curation` exist, and every operation they gate (catalog edits) is refused. What handlers decide from a permission themselves follows the same rule: such a session sees no file paths, and no file names except the book file names every viewer sees ([File paths and names](../catalog-api.md#file-paths-and-names)) |
+| `tokens.user.download_allowed` | changed: false, because every download operation is refused to such a session |
+| `tokens.user.password_change_required` | the account's flag |
+| `tokens.user.impersonation` | absent: such a session never views as another account |
+| `tokens.access_token`, `refresh_token`, `expires_in` | the session's own |
+| `tokens.account_created_at` | absent, also from its refreshes |
+| `status`, `device_id`, `account_id`, `local_route` | real: the app's key, the account, the server's pinned route |
+| `person_key_id` | absent |
+| `username`, `person_key` | absent: only an app code's redeem carries them |
+
+While the account holds a temporary password, such a session is restricted
+like every session of the account (403 `password_change_required` on all but
+the account read, the password capability, which answers not allowed, and
+sign-out) and is refused the change itself (403 `permission_denied`); the
+person changes the password from their own device.
+
+## The account's creation time
+
+Every answer that carries a token pair for one of the person's own sessions
+carries `account_created_at` beside `user`, set where the pair is built, so no
+such path leaves it out; the current-user read and the administrator's views
+do not carry it. It is the account's `users.created_at`, RFC 3339 in UTC at the stored
+microsecond precision. Nothing rewrites that column after the account is made,
+and a full restore brings it back exactly. Its JSON form drops trailing zeros
+of the fraction, so it is compared as an instant at microsecond precision,
+never as text. Answers to another app's key leave it out.
+
 ## The pinned route
 
 A `signed_in` sealed reply from `introduce`, `sign-in` and `enroll` (and from
@@ -1141,6 +1255,38 @@ TLS connection covers all of it.
   use (above).
 - **A provider that can't re-check** bounds key sign-in by age (above) without
   revoking anything.
+
+## Revoked person keys stay revoked
+
+A person key this server has revoked is never enrolled, never vouches and is
+never accepted by a replace again, on any account, while the account that held
+it exists. Every person key insert outside a restore goes through
+`insertPersonKeyTx`, whose `claimPublicKey` refuses a public key or key ID present in either key table,
+with no condition on `revoked_at` or on the account. `introduce` and the
+profile set check answer a revoked key as an unknown one, and a grant's
+redeem looks up only the account's unrevoked key. A restore writes key rows
+directly, by the rules below.
+
+Revoked key rows are kept for as long as the account exists: nothing prunes
+them, and no retention task deletes key rows. Deleting the account deletes its
+key rows (`deleteAccountKeysTx`, and the foreign key's cascade), after which
+that public key may be enrolled again, on any account.
+
+A restore does one of three things with the backup's key rows
+(`internal/backup/credentials_app_keys.go`):
+
+- `AppKeysKept` (a full restore onto the deployment the backup came from, or a
+  server that takes its identity) keeps the live server's rows and the backup's
+  rows the live server lacks, so the revocations on both sides are kept.
+- `AppKeysRevoked` (another deployment's backup onto a server that keeps its
+  own identity) keeps the backup's keys, all revoked, so their public keys stay
+  enrolled once and every revocation is kept.
+- `AppKeysLeftOut` (a separate restore's copy, or a full restore that could not
+  carry the live server's credentials) keeps no key rows at all: every device
+  enrolls again, and no revocation is remembered.
+
+A cleanup job for key rows must not be written without changing this rule
+first.
 
 ## The profile set
 
