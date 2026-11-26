@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Smartphone } from "lucide-react";
-import type { AppCode, JoinAppCode, SessionAppCode } from "@/api/v2/appCodes";
+import type { AppCode, JoinAppCode, LinkableJoinAppCode, SessionAppCode } from "@/api/v2/appCodes";
 import { Button } from "@/components/ui/button";
 import { buildJoinLink } from "@/lib/joinLink";
 import { useT } from "@/i18n";
@@ -13,7 +13,8 @@ type StepProps<Code extends AppCode> = {
 };
 
 /**
- * The step that hands the Silo app an invitation's code: a button that opens
+ * The step that hands the Silo app an invitation's code whose answer allowed
+ * a link (linkableJoinCode): a button that opens
  * the app (silo://join) and the same fragment after https://siloserver.org/join.
  * The person may have to install the app first, so the step stays until the
  * code expires, and then offers a new one. Nothing fires automatically: the
@@ -21,7 +22,7 @@ type StepProps<Code extends AppCode> = {
  * works reliably when tapped. Only a join code goes in a link: an app that
  * intercepts it gets a new, empty account, which the invited person notices.
  */
-export function JoinLinkStep({ appCode, onRenew, renewing }: StepProps<JoinAppCode>) {
+export function JoinLinkStep({ appCode, onRenew, renewing }: StepProps<LinkableJoinAppCode>) {
   const t = useT();
   return (
     <AppCodeStep
@@ -50,6 +51,28 @@ export function JoinLinkStep({ appCode, onRenew, renewing }: StepProps<JoinAppCo
 }
 
 /**
+ * The step for an invitation's code whose answer refused a link (an
+ * administrator's invitation): the server address and the code, to type in
+ * the Silo app to create the account. An app that intercepted a link would
+ * hold the new administrator's session.
+ */
+export function JoinCodeStep({ appCode, onRenew, renewing }: StepProps<JoinAppCode>) {
+  const t = useT();
+  return (
+    <AppCodeStep
+      key={appCode.code}
+      appCode={appCode}
+      onRenew={onRenew}
+      renewing={renewing}
+      title={t("web.auth.appCode.typeTitle")}
+      instructions={t("web.auth.appCode.typeInstructions")}
+    >
+      <CodeToType appCode={appCode} />
+    </AppCodeStep>
+  );
+}
+
+/**
  * The step that shows a code for the signed-in account ("Open in Silo"): the
  * server address and the code, to type in the Silo app. Never a link or a
  * scannable link: a link can be received by an app other than Silo, which
@@ -66,19 +89,25 @@ export function SessionCodeStep({ appCode, onRenew, renewing }: StepProps<Sessio
       title={t("web.settings.openInSilo.codeTitle")}
       instructions={t("web.settings.openInSilo.codeInstructions")}
     >
-      <dl className="space-y-2">
-        <div>
-          <dt className="text-muted-foreground text-xs">
-            {t("web.settings.openInSilo.serverAddress")}
-          </dt>
-          <dd className="font-mono text-sm break-all select-all">{appCode.server_address}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground text-xs">{t("web.settings.openInSilo.code")}</dt>
-          <dd className="font-mono text-base break-all select-all">{appCode.code}</dd>
-        </div>
-      </dl>
+      <CodeToType appCode={appCode} />
     </AppCodeStep>
+  );
+}
+
+/** The server address and the code as text to type: never a link. */
+function CodeToType({ appCode }: { appCode: AppCode }) {
+  const t = useT();
+  return (
+    <dl className="space-y-2">
+      <div>
+        <dt className="text-muted-foreground text-xs">{t("web.auth.appCode.serverAddress")}</dt>
+        <dd className="font-mono text-sm break-all select-all">{appCode.server_address}</dd>
+      </div>
+      <div>
+        <dt className="text-muted-foreground text-xs">{t("web.auth.appCode.code")}</dt>
+        <dd className="font-mono text-base break-all select-all">{appCode.code}</dd>
+      </div>
+    </dl>
   );
 }
 

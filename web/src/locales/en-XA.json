@@ -101374,6 +101374,12 @@
       "value": "⟦Åþþŕöṽé šîĝñ-îñ~~~~~~⟧"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "⟦Çöđé~~⟧"
+    }
+  ],
   "web.auth.appCode.expired": [
     {
       "type": 0,
@@ -101404,6 +101410,12 @@
       "value": "⟦Ĝéţ å ñéŵ çöđé~~~~~~⟧"
     }
   ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "⟦Šéŕṽéŕ åđđŕéšš~~~~~~⟧"
+    }
+  ],
   "web.auth.appCode.singleUse": [
     {
       "type": 0,
@@ -101414,6 +101426,18 @@
     {
       "type": 0,
       "value": "⟦Öþéñ Šîļö~~~~⟧"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "⟦Îñ ţĥé Šîļö åþþ öñ ýöûŕ þĥöñé öŕ ţåƀļéţ, åđđ ţĥîš šéŕṽéŕ ƀý îţš åđđŕéšš åñđ ţýþé ţĥîš çöđé ţö çŕéåţé ýöûŕ åççöûñţ. Åñýöñé ŵîţĥ ţĥé çöđé çåñ ĵöîñ îñ ýöûŕ þļåçé, šö đöñ’ţ šĥåŕé îţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "⟦Ĵöîñ ŵîţĥ ţĥîš çöđé~~~~~~~~⟧"
     }
   ],
   "web.auth.appCode.webLink": [
@@ -152028,12 +152052,6 @@
       "value": "⟦Ĝéţ å çöđé ƒöŕ ţĥé Šîļö åþþ~~~~~~~~~~~⟧"
     }
   ],
-  "web.settings.openInSilo.code": [
-    {
-      "type": 0,
-      "value": "⟦Çöđé~~⟧"
-    }
-  ],
   "web.settings.openInSilo.codeInstructions": [
     {
       "type": 0,
@@ -152068,12 +152086,6 @@
     {
       "type": 0,
       "value": "⟦Éñţéŕ ţĥé ɱåîñ þŕöƒîļé’š ÞÎÑ ţö ĝéţ å çöđé ƒöŕ ţĥé Šîļö åþþ.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.settings.openInSilo.serverAddress": [
-    {
-      "type": 0,
-      "value": "⟦Šéŕṽéŕ åđđŕéšš~~~~~~⟧"
     }
   ],
   "web.settings.openInSilo.title": [

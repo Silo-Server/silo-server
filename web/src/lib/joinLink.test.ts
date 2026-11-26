@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { JoinAppCode } from "@/api/v2/appCodes";
+import type { LinkableJoinAppCode } from "@/api/v2/appCodes";
 import { buildJoinLink, type JoinLinkForm } from "./joinLink";
 import vectors from "./joinLink.vectors.json";
 
@@ -25,7 +25,8 @@ describe("buildJoinLink", () => {
       code: c.app_code,
       server_address: c.address,
       expires_in: 600,
-    } as JoinAppCode;
+      link_allowed: true,
+    } as LinkableJoinAppCode;
     expect(buildJoinLink(joinCode, c.form)).toBe(c.string);
   });
 });

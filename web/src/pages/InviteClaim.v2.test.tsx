@@ -11,6 +11,7 @@ import {
   renderRoutes,
 } from "./authPage.test-support";
 import InviteClaim from "./InviteClaim";
+import { expectNoLinkCarrying } from "@/components/appKeys/codeLinkGuard.test-support";
 import accepted from "../../../contracts/api/v2/fixtures/invitation_accepted.json";
 const auth = vi.hoisted(() => ({ completeLogin: vi.fn() }));
 vi.mock("@/hooks/useAuth", () => ({
@@ -33,6 +34,7 @@ const issuedCode = {
   code: "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o",
   expires_in: 600,
   server_address: "https://media.example.com",
+  link_allowed: true,
 };
 const linkInvitation = { ...invitation, email: "", email_required: true, note: "For Sam" };
 const emailProblem = (type: string, status: number, errors?: unknown[]) =>
@@ -506,4 +508,19 @@ it("reads a name taken at renewal once, from the username field", async () => {
   await waitFor(() => expect(document.activeElement).toBe(username));
   expect(username).toHaveAccessibleDescription("That username is already in use. Choose another.");
   expect(screen.getByRole("status")).toHaveTextContent("");
+});
+
+// An administrator's invitation: the server says its code may not go in a
+// link (an app that took the link would hold the new administrator's
+// session), so the page shows it to type, with no link of any kind.
+it("shows a code the server keeps out of links as text to type", async () => {
+  lookup = async () => json({ ...invitation, app_join: true });
+  appCode = async () => json({ ...issuedCode, link_allowed: false });
+  const { container } = mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(await screen.findByRole("heading", { name: "Join with this code" })).toBeTruthy();
+  expect(screen.getByText(issuedCode.code)).toBeTruthy();
+  expect(screen.queryByRole("link", { name: "Open Silo" })).toBeNull();
+  expectNoLinkCarrying(container, issuedCode.code);
 });

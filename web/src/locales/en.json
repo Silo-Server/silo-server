@@ -93222,6 +93222,12 @@
       "value": "Approve sign-in"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "Code"
+    }
+  ],
   "web.auth.appCode.expired": [
     {
       "type": 0,
@@ -93252,6 +93258,12 @@
       "value": "Get a new code"
     }
   ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "Server address"
+    }
+  ],
   "web.auth.appCode.singleUse": [
     {
       "type": 0,
@@ -93262,6 +93274,18 @@
     {
       "type": 0,
       "value": "Open Silo"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "In the Silo app on your phone or tablet, add this server by its address and type this code to create your account. Anyone with the code can join in your place, so don’t share it."
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "Join with this code"
     }
   ],
   "web.auth.appCode.webLink": [
@@ -139940,12 +139964,6 @@
       "value": "Get a code for the Silo app"
     }
   ],
-  "web.settings.openInSilo.code": [
-    {
-      "type": 0,
-      "value": "Code"
-    }
-  ],
   "web.settings.openInSilo.codeInstructions": [
     {
       "type": 0,
@@ -139980,12 +139998,6 @@
     {
       "type": 0,
       "value": "Enter the main profile’s PIN to get a code for the Silo app."
-    }
-  ],
-  "web.settings.openInSilo.serverAddress": [
-    {
-      "type": 0,
-      "value": "Server address"
     }
   ],
   "web.settings.openInSilo.title": [

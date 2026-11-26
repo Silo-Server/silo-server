@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { V2ProblemError } from "@/api/v2/request";
+import { expectNoLinkCarrying } from "./codeLinkGuard.test-support";
 import { OpenInSiloSection } from "./OpenInSiloSection";
 
 const state = vi.hoisted(() => ({
@@ -30,6 +31,7 @@ const code = {
   code: "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o",
   expires_in: 600,
   server_address: "https://media.example.com",
+  link_allowed: false,
 };
 
 function problem(type: string, status: number) {
@@ -128,15 +130,6 @@ it("never puts the session code in a link", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Get a code for the Silo app" }));
   expect(await screen.findByText(code.code)).toBeTruthy();
   expect(screen.getByText(code.server_address)).toBeTruthy();
-  const urlWithCode = new RegExp(`(silo|https?):[^\\s"']*${code.code}`);
-  for (const element of container.querySelectorAll("*")) {
-    for (const attribute of element.attributes) {
-      expect(attribute.value, `${element.tagName} ${attribute.name}`).not.toContain(code.code);
-    }
-  }
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    expect(node.textContent ?? "").not.toMatch(urlWithCode);
-  }
+  expectNoLinkCarrying(container, code.code);
   expect(container.querySelector("a, img, svg, canvas")).toBeNull();
 });

@@ -1,4 +1,4 @@
-import type { JoinAppCode } from "@/api/v2/appCodes";
+import type { LinkableJoinAppCode } from "@/api/v2/appCodes";
 
 /**
  * The link that hands the Silo app a server address and an app code. It
@@ -22,10 +22,10 @@ function base64Url(text: string): string {
 }
 
 /**
- * Builds the join link for an invitation's code, with the server address
- * the server answered with it. Only a join code may be put in a link; a
- * session code is shown to type (SessionAppCode).
+ * Builds the join link for an invitation's code whose answer allowed a link
+ * (linkableJoinCode), with the server address the server answered with it.
+ * Every other code is shown to type.
  */
-export function buildJoinLink(joinCode: JoinAppCode, form: JoinLinkForm): string {
+export function buildJoinLink(joinCode: LinkableJoinAppCode, form: JoinLinkForm): string {
   return `${prefixes[form]}v1.${base64Url(joinCode.server_address)}.${joinCode.code}`;
 }

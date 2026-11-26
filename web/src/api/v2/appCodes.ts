@@ -6,12 +6,23 @@ export type AppCode = V2Result<"POST /api/v2/auth/app-codes">;
 
 declare const codeKind: unique symbol;
 
-/**
- * A join code, from an invitation: the only kind that may travel in a link
- * (buildJoinLink takes nothing else). An app that intercepts the link gets a
- * new, empty account and the invited person notices at once.
- */
+declare const linkable: unique symbol;
+
+/** A join code, from an invitation. It goes in a link only once narrowed by linkableJoinCode. */
 export type JoinAppCode = AppCode & { readonly [codeKind]: "join" };
+
+/**
+ * A join code whose answer allowed a link (link_allowed): redeeming it creates
+ * a new account with no administrative power. The only kind buildJoinLink
+ * takes. An app that intercepts the link gets a new, empty account for an
+ * ordinary invitation, which the invited person notices at once.
+ */
+export type LinkableJoinAppCode = JoinAppCode & { readonly [linkable]: true };
+
+/** The code narrowed to one that may go in a link, or null when the answer said it may not. */
+export function linkableJoinCode(code: JoinAppCode): LinkableJoinAppCode | null {
+  return code.link_allowed === true ? (code as LinkableJoinAppCode) : null;
+}
 
 /**
  * A code for the signed-in account ("Open in Silo"). It reaches an existing
@@ -28,6 +39,7 @@ function checked(operation: string, result: AppCode | undefined): AppCode {
     !Number.isSafeInteger(result.expires_in) ||
     result.expires_in <= 0 ||
     typeof result.server_address !== "string" ||
+    typeof result.link_allowed !== "boolean" ||
     !/^https?:\/\//.test(result.server_address)
   ) {
     throw new V2TransportError(operation, 200, "Invalid app code response");

@@ -1103,6 +1103,16 @@ too, verify the profile's PIN again for a new `X-Profile-Token`; if it gets
 a PIN can get the first answer too, when a PIN was added or the profile was
 being written at that moment.
 
+**Codes and links.** Both issuing operations answer `link_allowed`. When it is
+true (only an ordinary invitation's code: redeeming it creates an account with
+no administrator power) a page may put the code in the join link. When it is
+false, a client shows the server address and the code as text for the person
+to type, and never builds a link, a scannable link or anything a device could
+open from them: a link can be received by an app other than Silo, which would
+redeem the code first. For an ordinary invitation that risk is accepted (the
+intercepting app gets a new, empty account the invited person notices at
+once); for an administrator's invitation or a session code it is not.
+
 **App codes.** A server's web page hands the Silo app a one-time code, and
 the app redeems it to enroll its keys (`docs/architecture/app-keys.md`, "App
 codes"). A code is base64url of 32 random bytes, good once for ten minutes, and
@@ -1134,9 +1144,8 @@ request arrived on.
 - `POST /auth/app-codes` is "Open in Silo". Its code reaches an existing
   account, so a page shows it as text to type and never puts it in the join
   link or any other link: an app that receives a link before Silo does could
-  redeem it, and the server can't tell a typed code from a lifted one. Only an
-  invitation's code goes in the link; whoever intercepts that gets a new, empty
-  account the invited person notices at once. Refused (403 `permission_denied`)
+  redeem it, and the server can't tell a typed code from a lifted one. Its
+  answer's `link_allowed` is always false. Refused (403 `permission_denied`)
   for an API key, an administrator acting as the account, a remote-playback
   session, a session opened by device sign-in or by another app's key, and a
   session older than the record of how sessions open. The keys take this

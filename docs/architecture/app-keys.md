@@ -373,18 +373,42 @@ reverse proxy adds survives; otherwise the request's own canonical origin. The
 older `silo://invite?server=&token=` link, which hands released Android builds
 the raw invitation token, is unchanged.
 
-**Only a join code travels in a link.** A link can be received by an app
-other than Silo (any app may claim a custom scheme), and whatever receives it
-can redeem the code first with its own keys. For a join code that gets it a
-new, empty account: the invitation is spent, so the invited person notices at
-once and the owner removes the account. That risk is accepted. A session code
-reaches an existing account, an administrator's included, so no page ever puts
-one in a link, a scannable link or anything a device could open: "Open in
-Silo" shows the server address and the code as text, to type in the app. The
-server can't tell a typed code from one lifted out of a link, so the
-protection is that no page makes such a link. (The protocol defines no
-scannable form for an app code: its link vectors cover the join link, which a
-camera would open as a URL, and the pairing QR, which carries no code.)
+**A code travels in a link only when redeeming it creates a new account with
+no administrator power.** Every other code, a session code or a join code for
+an administrator's invitation, moves only by the person's own hands. A link
+can be received by an app other than Silo (any app may claim a custom scheme),
+and whatever receives it can redeem the code first with its own keys. For an
+ordinary invitation that gets it a new, empty account: the invitation is spent,
+so the invited person notices at once and the owner removes the account. That
+risk is accepted. A session code reaches an existing account, an
+administrator's included, and an administrator's join code would hand the
+intercepting app a working administrator session (keys from a join code start
+active, and the redeem opens a session at once).
+
+The server decides, and says so in the answer that issues the code:
+`link_allowed`. A page builds the join link only when it is true; otherwise it
+shows the server address and the code as text to type, never a link, a
+scannable link or anything a device could open. The server can't tell a typed
+code from one lifted out of a link, so the protection is that no page makes
+such a link. (The protocol defines no scannable form for an app code: its link
+vectors carry a code only in the join link, which a camera would open as a
+URL.)
+
+`link_allowed` is decided at issue from the account input the redeem will
+create (`joinAccountInput`, `linkAllowed` in `internal/invitations`), field by
+field of what an invitation carries:
+
+| Field | Can it confer administrator power? |
+| --- | --- |
+| role | Yes: only `user` allows a link; `admin`, or any other value, refuses. |
+| permissions | The invitation sets none; the account takes its role's defaults (`auth.NewUserPermissions`). Anything beyond `marker_edit` refuses (`metadata_curation` edits what every account sees). |
+| access group | No: a group narrows permissions and limits and never adds any (`access.ApplyGroupPolicy` intersects). |
+| library list, first profile, name, email | No: media access and identity. |
+| ownership, break-glass | Can't be carried: an invitation has no such field, and creating an account never sets them. |
+
+An invitation can't be edited after a code is issued: resending makes a new
+invitation (copying its role, group and libraries), and the old invitation's
+codes stop working. `createAppCode` always answers `link_allowed: false`.
 
 There are two kinds:
 

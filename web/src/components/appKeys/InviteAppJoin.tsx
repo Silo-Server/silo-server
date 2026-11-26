@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { createInvitationAppCode, type JoinAppCode } from "@/api/v2/appCodes";
+import { createInvitationAppCode, linkableJoinCode, type JoinAppCode } from "@/api/v2/appCodes";
 import type { InvitationLookup } from "@/api/v2/publicInvitations";
 import { V2ProblemError } from "@/api/v2/request";
-import { JoinLinkStep } from "@/components/appKeys/AppCodeStep";
+import { JoinCodeStep, JoinLinkStep } from "@/components/appKeys/AppCodeStep";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -176,11 +176,18 @@ export function InviteAppJoin({
     </p>
   );
 
+  // The server says whether this code may go in a link; the page never
+  // judges it from the invitation.
+  const linkable = appCode ? linkableJoinCode(appCode) : null;
   if (appCode) {
     return (
       <>
         {refusalAlert}
-        <JoinLinkStep appCode={appCode} onRenew={() => void issue()} renewing={pending} />
+        {linkable ? (
+          <JoinLinkStep appCode={linkable} onRenew={() => void issue()} renewing={pending} />
+        ) : (
+          <JoinCodeStep appCode={appCode} onRenew={() => void issue()} renewing={pending} />
+        )}
       </>
     );
   }
