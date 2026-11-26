@@ -130,7 +130,7 @@ func grantedApp(d *SessionDecision) OriginDecisions { return OriginDecisions{Gra
 // app can do).
 const (
 	reasonWhoItIs        = "who it is and which profile it acts as"
-	reasonCurrentUser    = "who it is; the account's email is left out for such a session"
+	reasonCurrentUser    = "who it is, built by accountForSession: for such a session the email is empty, download_allowed false and permissions only those with an operation open to it"
 	reasonVerifyPIN      = "acting as a PIN-protected profile; a following change counts such a session's attempts separately"
 	reasonShuffle        = "playing a shuffle of the profile's; a shuffle's id is random and not listed"
 	reasonPersonRead     = "reading the catalog; reading a person can queue that person's metadata refresh when one is due"

@@ -430,6 +430,20 @@ never the account.** The rule has three shapes, each checked:
   (`permittedPermissions`);
 - a capability read's `allowed`: the capability rule above.
 
+A permission the account holds gives such a session nothing it is refused,
+including what a handler decides from the permission itself: on-disk file
+paths and names, which a curator's own sessions see (`CanViewFilePaths`), are
+hidden from such a session as from any caller without metadata curation.
+`TestEveryAccountPermissionReaderIsListed` (`internal/auth`) fails on a
+function that reads an account's permissions by hand until it is listed with
+why such a session gets nothing from it.
+
+The power-list scan matches names, so these lists pass it by name and were
+read by hand: `features` and `server_features` on playback, the settings
+`scopes`, the shuffle `scope_kinds`, collection `groups` and a profile's
+`allowed_library_ids`. Each describes a fact about the server or that
+session's own profile, and none offers a refused power.
+
 A refusal is enforced in the gate chain right after authentication, before
 the demo gate, the rate limiter, viewer access and the handler: 403
 `permission_denied` with the detail every key route gives a session that may
@@ -1069,7 +1083,7 @@ the same account object in both. For such a session:
 | `tokens.user.id`, `username` | the account's |
 | `tokens.user.email` | changed: the empty string; the person's address is not that app's to read |
 | `tokens.user.role` | the account's, always `user`: a grant is refused for an administrator's account, and promoting an account revokes all its keys |
-| `tokens.user.permissions` | changed: empty (`[]`). A permission is listed only while one operation it gates is open to such a session; today only `marker_edit` and `metadata_curation` exist, and every operation they gate (catalog edits) is refused |
+| `tokens.user.permissions` | changed: empty (`[]`). A permission is listed only while one operation it gates is open to such a session; today only `marker_edit` and `metadata_curation` exist, and every operation they gate (catalog edits) is refused. What handlers decide from a permission themselves follows the same rule: such a session sees no file paths or names |
 | `tokens.user.download_allowed` | changed: false, because every download operation is refused to such a session |
 | `tokens.user.password_change_required` | the account's flag |
 | `tokens.user.impersonation` | absent: such a session never views as another account |

@@ -67325,7 +67325,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "who it is; the account's email is left out for such a session"
+            "reason": "who it is, built by accountForSession: for such a session the email is empty, download_allowed false and permissions only those with an operation open to it"
           }
         },
         "x-silo-service-backed": true
