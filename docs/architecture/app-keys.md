@@ -96,16 +96,15 @@ the same for each of its device keys.
 always in one order: the account row (`lockUser`), the settings lock (shared;
 `lockChain`, see [The switch](#the-switch)), the plugin installation (share)
 and the provider identity a key is bound to (`keySignInPolicy`), the person
-key, the device keys, the device sign-ins those sessions approved in advance
-(in id order), then the login sessions those keys opened. No database
-trigger or cascade writes to a key row. Ending a session fires a trigger that
-withdraws the device sign-ins it approved in advance, so every path that ends
-sessions locks those request rows first, then the session rows
-(`lockSessionPreapprovals`). Turning the switch off takes the settings lock
-(exclusive), every plugin installation row (share, in id order), the
-request rows, then the key sessions (in id order), and no account, identity
-or key row, so it never waits on anything a key path holds while holding
-something that path needs. A sign-in reads the key's
+key, the device keys, then the login sessions those keys opened. No database
+trigger or cascade writes to a key row. Ending a session writes only its
+row. A path that ends or deletes several sessions locks them in id order
+first, with a separate locking read (`lockSessionsInOrder`), and writes any
+device sign-in request after the sessions, the order a session's deletion
+writes them in through its foreign key. Turning the switch off takes the
+settings lock (exclusive), every plugin installation row (share, in id
+order), then the key sessions (in id order), and no account, identity or key
+row. A sign-in reads the key's
 binding without a lock, locks the installation and identity, then locks the
 key row and, when its binding changed meanwhile (a link committed in between),
 answers 429 with a one-second `Retry-After`: the key is still good, and the
@@ -906,7 +905,7 @@ to the Go check it mirrors: a usable password is `HasLocalPassword`; a usable
 provider identity is an identity at an installation whose provider can sign
 people in from an ordinary device (`signInProviders`: an enabled
 installation with an enabled sign-in binding that is not a network identity
-binding and whose capability row exists, and for an OAuth provider a public
+binding, and for an OAuth provider a public
 URL, without which its browser and native starts refuse); a working key follows
 `keySignInPolicy` (a local key under the local password rule, a person key
 only on an account that isn't an administrator's, a provider-bound key while
@@ -914,7 +913,9 @@ its identity's installation is enabled; a waiting key is no way in). A
 settings write that changes `server.public_url` is refused, with the same
 problem and remedy, while an account would lose the only provider it can
 sign in with and has no password that signs in (`auth.CheckPublicURLChange`),
-and the switch checks judge the address the same write leaves. An address
+and the switch checks judge the address the same write leaves. The rule
+counts a binding whose capability row is missing, while sign-in's registry
+keeps its last good provider set. An address
 the environment supplies refuses admin writes, and a change to that value at
 a restart is not checked. A full
 restore lists the accounts it brings back with no way in with the same SQL
@@ -1837,8 +1838,9 @@ sessions (`deleteSession`), or an administrator ends one of the account's
 sessions (`deleteAdminUserLoginSession`) or all of them
 (`deleteAdminUserLoginSessions`, which also deletes the account's
 Jellyfin-compatible and Audiobookshelf sessions). An uncollected device
-sign-in a key session approved in advance is withdrawn when that session ends,
-by the switch or any other way.
+sign-in a key session approved in advance is no longer honoured once that
+session has ended, by the switch or any other way: collection refuses it
+([device-login.md](device-login.md), "The approving session").
 
 What else a key session obtained stops working with it:
 
@@ -1873,22 +1875,22 @@ wait for each other, and none can hold it shared while waiting to take it
 exclusive, the pattern that would deadlock two of them.
 
 The sweep ends key sessions in one order (`endKeySessionsTx`): every plugin
-installation row (share), then the device sign-ins those sessions approved in
-advance (the rows the `auth_sessions_withdraw_preapprovals` trigger writes as
-a session ends), then the sessions, each in id order. Every other path that
-ends sessions takes the request rows before the session rows too: logout,
-ending one session from the session list, the administrator's revoke of one
-session or all of an account's, ending all of an account's sessions on a
-password reset or account deletion, replacing a temporary password, a
-provider's refusal, and revoking keys (`lockSessionPreapprovals`, or
-withdrawing the account's approvals in id order). A source check
-(`TestSessionEndersLockRequestsFirst`) holds every statement that ends
-sessions to taking them first. Staged tests run the sweep against logout,
-ending one session from the list and the administrator's single revoke in
-both orders, a renewal against its own session's logout, and a logout against
-ending all of an account's sessions, each without a deadlock. Ending a
-session viewing as another account touches no request row, as such a session
-can't approve a device sign-in in advance.
+installation row (share), then the sessions in id order. Ending a session
+writes only its row: a device sign-in the session approved in advance stops
+being honoured because collection reads the session's state, not because a
+trigger rewrites the request (a migration dropped the trigger that did; no
+row was rewritten). A schema check (`TestNoUnlistedSideWritesDB`) fails on
+any trigger or foreign-key action that writes another table on a write to
+sessions, device sign-ins or keys, unless it is listed with its reason.
+Staged tests run, each in both orders and without a deadlock: logout against
+the sweep; deleting an account against a logout and against the sweep; the
+sweep against ending all of an account's sessions (as a password reset and
+an administrator do) with two key sessions stored against their id order;
+the sweep against revoking one device key, an account's keys, and unlinking
+an identity, each with two key sessions; two revokes of one session with a
+pre-approval committed between them; and a collect against the revoke of the
+session that approved it, which never yields a session once the revoke has
+committed before the collect reads it.
 
 A key session can survive the sweep only in a database written or put back
 by hand (`auth.app_key_sign_in` or `demo.enabled` stored without the
@@ -1913,7 +1915,9 @@ an updated server handles.
 turn app keys off or demo mode on through the settings write; anyone else is
 refused `owner_protected`, as for any other change to the Owner's account
 (`auth.CheckSwitchOffActor`, decided in the write's transaction before the
-sweep, where every key path waits on the settings lock).
+sweep, where every key path waits on the settings lock; it reads ownership
+under the ownership lock, which a transfer and the recovery command take
+before any row).
 
 A session another app's key opened, if one still existed, would be answered
 403 `permission_denied` by the origin gate on `createAppCode`,

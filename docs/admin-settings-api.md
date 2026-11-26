@@ -134,7 +134,7 @@ list of sessions (`deleteSession`), or an administrator ends one of the
 account's sessions (`deleteAdminUserLoginSession`) or all of them
 (`deleteAdminUserLoginSessions`, which also deletes the account's
 Jellyfin-compatible and Audiobookshelf sessions). An uncollected device
-sign-in approved in advance is withdrawn when the approving session ends.
+sign-in approved in advance is refused once the approving session has ended.
 
 `GET /admin/sign-in/accounts-at-risk?change=app_keys_off|local_passwords_off`
 (`listSignInAccountsAtRisk`, acting admin) lists those accounts with their id,

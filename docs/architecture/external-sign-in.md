@@ -29,8 +29,11 @@ SDK's `docs/auth-provider.md`.
   sessions locks the account row, then the account's identities
   (`lockIdentitiesBeforeSessions`, or the identity `FOR UPDATE` where a path
   works on one identity), and only then those rows: the uninstall waits at the
-  identities, or the transaction waits for it. Revocation also withdraws device
-  sign-in approvals before it revokes sessions. Revoking app keys follows the
+  identities, or the transaction waits for it. A transaction that ends several
+  sessions locks them in id order first (`lockSessionsInOrder`), and
+  revocation withdraws device sign-in approvals after it revokes sessions:
+  session rows before request rows, the order a session's deletion writes
+  them in (its foreign key nulls the requests that name it). Revoking app keys follows the
   same rule for the sessions, since a session a key opened carries the identity
   the key was bound to: the identities are locked before those sessions. Where
   the key rows fall varies. Revoking every key of the account
@@ -50,9 +53,9 @@ SDK's `docs/auth-provider.md`.
   an order of its own, and an account holds at most one of them. Turning the
   app key switch off ends key sessions across every account
   (`EndAppKeySessionsTx`), so it locks every installation row (share, in id
-  order) before the sessions instead: an uninstall locks its installation
-  before it deletes identities, so one of the two waits at the installation
-  holding no session row.
+  order) before the sessions (in id order) instead: an uninstall locks its
+  installation before it deletes identities, so one of the two waits at the
+  installation holding no session row.
 - Every other writer of those rows writes one row, writes only sessions that
   carry no identity (impersonation sessions), deletes an account created in
   the same request, or never waits (the expired-session and expired-request

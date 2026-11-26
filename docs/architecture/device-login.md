@@ -203,18 +203,24 @@ the fingerprint. Nothing on the poll changes for the TV.
   or deleted since answers `denied`; this holds for every device sign-in, not
   only pre-approved ones, since over 30 days it is a normal case.
 - **The approving session.** The row records the login session that approved
-  it (`preapproved_session_id`). Revoking that one session withdraws the
-  sign-ins it approved in advance and that no device has redeemed, in the
-  same statement. A database trigger on `auth_sessions` does it, not
-  application code, so it holds for every write that revokes a login
-  session: the session list, an administrator, logout, a revoked app key that
-  opened it, the account-wide revocations, and a node from an older release.
-  A session someone else was using therefore cannot leave a sign-in behind
-  for later, and cannot hide one by logging itself out. Sign-ins the account
-  approved from its other sessions stay, and so does a device that already
-  redeemed: its session is its own and is ended from the session list. A
-  session that only reaches its expiry is not revoked and leaves its sign-ins
-  in place; they expire within the same 30 days.
+  it (`preapproved_session_id`), and a sign-in approved in advance stands only
+  while that session is live: not revoked, not expired. The poll that would
+  collect it reads the session's state (a plain read, under the account and
+  request locks the poll already holds) and answers a request whose approver
+  has ended as `denied`, as it answers a withdrawn one; the lists and the cap
+  leave such a request out. However the session ended (the session list, an
+  administrator, logout, a revoked app key that opened it, an account-wide
+  revocation, a node from an older release, or simply expiring), a session
+  someone else was using therefore cannot leave a sign-in behind for later,
+  and cannot hide one by logging itself out. Sign-ins the account approved
+  from its other sessions stay, and so does a device that already redeemed:
+  its session is its own and is ended from the session list. Ending a session
+  writes no request row; the request stays approved in its row, nothing can
+  collect it, and retention deletes it a day after it expires. A collect that
+  read the approver as live a moment before it ended still succeeds, as an
+  approval given a moment before a logout does.
+  An approving session that simply expires now stops its sign-ins at once;
+  before, they lasted until they expired.
 - **Provider identity at redemption.** When the approving session came from a
   provider identity, the poll locks and checks that identity as a provider
   sign-in does, before the device row: a refused identity, an unlinked one, or
