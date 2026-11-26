@@ -80,7 +80,7 @@ func TestExternalIdentityDenials(t *testing.T) {
 }
 
 func TestUsableBreakGlass(t *testing.T) {
-	base := models.User{BreakGlass: true, Role: models.RoleAdmin, Enabled: true, LocalPasswordLoginEnabled: true}
+	base := models.User{BreakGlass: true, Role: models.RoleAdmin, Enabled: true, LocalPasswordLoginEnabled: true, PasswordHash: "$2a$stored"}
 	if !usableBreakGlass(&base) {
 		t.Fatal("usable account refused")
 	}
@@ -89,6 +89,7 @@ func TestUsableBreakGlass(t *testing.T) {
 		"not admin":    func(u *models.User) { u.Role = models.RoleUser },
 		"disabled":     func(u *models.User) { u.Enabled = false },
 		"password off": func(u *models.User) { u.LocalPasswordLoginEnabled = false },
+		"no password":  func(u *models.User) { u.PasswordHash = "" },
 	} {
 		user := base
 		mutate(&user)
