@@ -27,7 +27,9 @@ var queueQueries = []struct{ name, sql string }{
 	{"autoscan_intake", `SELECT CASE WHEN locked_by = '' THEN 'queued' ELSE 'running' END, count(*), min(received_at) FROM autoscan_webhook_deliveries GROUP BY 1`},
 	{"webhook_delivery", `SELECT 'queued', count(*), min(attempted_at) FROM webhook_delivery_attempts WHERE outcome IN ('pending','retrying')`},
 	{"web_push_delivery", `SELECT 'queued', count(*), min(attempted_at) FROM web_push_delivery_attempts WHERE outcome IN ('pending','retrying')`},
-	{"native_push_delivery", `SELECT 'queued', count(*), min(created_at) FROM push_delivery_attempts WHERE outcome IN ('pending','retrying')`},
+	// A profile set wake is no queued work: no worker ever claims one, and a
+	// row its sending process left in flight waits only for retention.
+	{"native_push_delivery", `SELECT 'queued', count(*), min(created_at) FROM push_delivery_attempts WHERE outcome IN ('pending','retrying') AND trigger_type <> 'profile_set'`},
 }
 var queueDepthDesc = prometheus.NewDesc("silo_queue_items", "Shared durable queue items; aggregate replicas with max, not sum. Queued includes delayed retries.", []string{labelQueue, "state"}, nil)
 var queueOldestDesc = prometheus.NewDesc("silo_queue_oldest_requested_timestamp_seconds", "Oldest request timestamp by shared queue state (oldest due timestamp for queued images); absent when empty, nothing is due, or unavailable.", []string{labelQueue, "state"}, nil)

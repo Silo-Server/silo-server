@@ -522,6 +522,19 @@
 # leaves the delivery transaction intact. A retention sweep skips a target a
 # delivery holds instead of waiting on it; the unbound push sweep then waits for
 # it one row at a time, before session cleanup removes its evidence.
+./internal/notifications TestProfileSetWakeDebounceDB
+./internal/notifications TestProfileSetWakeIsNeverClaimedDB
+./internal/notifications TestProfileSetWakeEndsWithinItsBudgetDB
+./internal/notifications TestProfileSetWakeTailIsOneBoundedWriteDB
+./internal/notifications TestProfileSetWakeGivesUpWaitingForTheCredentialLockDB
+./internal/notifications TestProfileSetWakeWaitsForTheWakeInFlightDB
+./internal/notifications TestProfileSetWakeGuardFollowsTheCommitCheckDB
+./internal/notifications TestProfileSetWakeFailingToQueueAnswersFalseDB
+./internal/notifications TestProfileSetWakeSlowFirstPhoneDB
+./internal/notifications TestProfileSetWakeBoundsSendsInFlightDB
+./internal/notifications TestProfileSetWakePanickingSendDB
+./internal/notifications TestProfileSetWakeSurvivesDeviceRemovalDB
+./internal/notifications TestProfileSetWakeCapsPhonesDB
 ./internal/notifications TestPushEnqueueSkipsTargetsRemovedAfterListingDB
 ./internal/notifications TestPushRetentionSkipsTargetsADeliveryHoldsDB
 ./internal/notifications TestPushRetentionKeepsTheLastChanceForAnExpiredAppleLoginDB
@@ -1735,6 +1748,7 @@
 # Image cache queue metrics count future-deferred retries in queued depth while
 # reporting oldest queued age only for due rows (next_attempt_at <= NOW()).
 ./internal/workmetrics TestQueueSamplerImagesReportsDueQueuedAgeDB
+./internal/workmetrics TestQueueSamplerLeavesProfileSetWakesOutDB
 # A session opened by device sign-in is recorded as such and sees and ends only itself.
 ./internal/auth TestSessionsRecordDeviceSignInDB
 ./internal/auth TestDeviceSignInMigrationMarksKeptRequestsDB

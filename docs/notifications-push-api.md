@@ -193,6 +193,40 @@ and keep delivering until they sign in again or the conditions above start to ho
 The device IDs read here are client-supplied and authorize nothing; this sweep only
 uses them as evidence, and only to stop push to the account's own registrations.
 
+## Profile set wake
+
+When the server records an edit to a profile from an account's profile set
+(see [Edits made on this server](auth-api.md#edits-made-on-this-server)), it
+wakes every registered, enabled phone of the account whose login is
+live, on the platforms whose push delivery is on, up to 20: those a push was
+most recently accepted for, then the most recently registered. The app should read
+`GET /api/v2/profiles/set` when woken.
+
+The relay request is the one an alert uses, with:
+
+- `mode`: `background_wake` instead of `private_alert`. The relay sends APNs a
+  background push (`content-available`, push type `background`, priority 5) with
+  no alert, and FCM a normal-priority data message whose `silo_mode` is
+  `background_wake`.
+- `collapse_id`: `profile-set` for every wake, so a phone that was offline gets
+  one.
+- `delivery_id`: the attempt's own ID, as for a test push with no notification.
+  It names no notification, and `GET .../display/{delivery_id}` answers `404`.
+- `server_id` and `profile_id` as for any push. `profile_id` is the profile the
+  device registered under, not the profile that changed.
+
+The push carries nothing else and shows nothing. The server sends at most one
+wake a minute per account, across all API servers; an edit inside that minute
+sends nothing more, and the app learns of it from the next wake or when it
+opens. Attempts are recorded with trigger `profile_set`. A wake is sent once
+and never retried: a missed one is repaired by the next edit or by the app
+opening. A wake sends up to four phones at once, gives its sends 30 seconds,
+and ends within 35: a phone it doesn't reach in that time is recorded as failed
+and gets the next wake. Wake attempts are deleted after
+seven days.
+Apple delivers background pushes at its discretion and not at all to an app the
+person force-quit, so an app must still read the set when it opens.
+
 ## Reset after a lost installation key
 
 The server binds an Apple installation (`device_id`) to the installation key and

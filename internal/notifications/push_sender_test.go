@@ -333,7 +333,7 @@ func TestPushSenderDoesNotAutoRegisterAfterAdminClear(t *testing.T) {
 		return relayResponse(http.StatusOK, credentialJSON("deployment-unwanted", "unwanted.capability", time.Now().Add(24*time.Hour))), nil
 	})}
 
-	_, err := sender.prepareRelayCredential(context.Background())
+	_, err := sender.prepareRelayCredential(context.Background(), context.Background())
 	if err == nil || registrations != 0 {
 		t.Fatalf("err = %v, registrations = %d; cleared state must block first-use registration", err, registrations)
 	}

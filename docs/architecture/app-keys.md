@@ -1024,8 +1024,88 @@ the account row on every edit. Deleting an account deletes its rows after the
 account, in the same transaction, at both deletion sites.
 
 After a request that recorded an edit, the middleware calls the server's
-waker for each account that got one, to tell the person's apps; it calls it
-for a write that rolled back too. No waker is wired yet, so nothing is sent.
+waker for each account that got one, on its own goroutine so the response
+never waits for it. A caller that needs the answer calls the waker after its
+write commits and gets it within five seconds. The waker queues a
+`background_wake` push for each of the account's registered phones, at most 20
+(`internal/notifications/push_profile_set.go`): a person can set a wake off
+from their own session, and each phone costs an attempt row and a relay call.
+The 20 are the phones a push was most recently accepted for, then the most
+recently registered. APNs and FCM accept a push only for a real token of the
+app, so registrations that never received a push, such as ones with made-up
+tokens, cannot take the place of the person's phones. With more than 20 live
+registrations, a new phone that has not had a push accepted yet ranks behind
+20 that have, and gets no wake until another push reaches it. It wakes only for an edit that
+committed: the request remembers the first edit revision it recorded per
+account, and the waker checks that a row at or above it exists, so a write
+that rolled back sends nothing. At most one wake goes out a minute per
+account, on every API server, measured from when each wake is recorded. One
+statement decides and records it: an upsert of the account's row in
+`push_profile_set_wakes` that writes the new time, from the statement's own
+clock, only when the last one is a minute old. Two servers recording at once
+queue one wake, no server keeps a timer, and removing a phone and registering
+it again does not reset the limit, since the row is not tied to the account's
+devices. The time is recorded in the transaction that queues the wake's
+attempts, so a failure to queue them rolls it back. A send that fails after
+that keeps the time, and the account's next edit inside the minute is not
+pushed; the app learns of it when it opens. A second edit inside the minute
+queues nothing; the phone learns of it from the next wake or when the app
+opens. The table has no foreign key to `users`, which would lock the account
+row on every wake and could deadlock with an account deletion. Notification
+retention deletes rows a day old instead, a deleted account's included; until
+then a deleted account's row is harmless, since account IDs are not reused.
+
+The waker answers true when, and only when, this call queued a wake after the
+edit committed: the wake's attempts were written and committed for at least
+one phone. The answer is about the wake being queued, not delivered; it stays
+true if the send then fails or runs out of time. It answers false inside the
+minute after another wake, while a wake for the account is still in flight on
+this server, for an edit that rolled back, and with push off or no phone to
+wake. A wake that left before the edit existed says nothing about it, and a
+caller may tell a person that their phone has been told. The waker never
+fails the edit: errors are logged and the send runs in the background.
+
+A wake is sent once and never retried. Its attempt row is inserted in flight,
+as `retrying` with no `next_retry_at`, and the send records `delivered` or
+`failed`. No claim query selects any of those, so no server's retry sweep,
+including one of the previous release that would send it as an alert, ever
+picks a wake up.
+
+One wake of an account never overlaps the next. The phones are started in
+the order above, four at a time, under one budget of 30 seconds, half the
+one-minute interval, started when the wake is queued. Each send runs under
+what is left of the budget: its relay requests, its database writes, and its
+wait for the relay credential's lock all give up when the budget ends. That
+lock is shared by every push the server sends; only a wake's wait for it is
+bounded, and every other push waits for it as long as it is held, as before. One
+send can take up to seven relay requests, more than the budget allows, so
+there is no deadline per phone. A slow or dead registration holds one of the
+four slots, and the account's other phones go on in the other three. Four
+keeps one wake to a quarter of the 16 workers the push dispatcher already
+sends through the same relay with.
+
+Once every send has returned, one statement records every phone still in
+flight as `failed`, on a fresh context limited to five seconds: a send that
+panicked or stopped before it recorded an outcome as `wake_send_unfinished`,
+a phone the budget didn't reach or let finish as `wake_out_of_time`. Such a
+phone gets the next wake, and the app reads the set when it opens. The
+account's in-flight mark is released after that write, a panic included, so
+a wake ends within 35 seconds of being queued. A wake is queued up to five
+seconds after its time is recorded, so it has ended within 40 seconds of
+that, before the account's limit lets another start; a test holds the budget
+plus the final write under the interval less those five seconds.
+
+On each server, a wake of an account also does not start while the previous
+one is still in flight there. That guard is a mark in the process, taken
+only once the edit is known to have committed; a row in the database would
+outlive a process that stopped mid-wake and hold the account's wakes until
+retention. Across servers, the budget and the account's limit row keep wakes
+apart. The worst case for one account is one wake at a time on a server,
+each ending within 35 seconds of being queued. Only a process that stops
+mid-wake leaves a row in flight. The push queue gauge leaves wake rows out,
+because no worker ever claims one, and the daily notification retention run
+marks a row that has been in flight for more than ten minutes as failed.
+Retention deletes wake rows after seven days.
 
 **Mapping.** The first item is always the main profile, which the set never
 creates, deletes or swaps; a set naming the main profile's `sync_id` anywhere
@@ -1151,6 +1231,9 @@ API process is spent once on any of them, and a revocation on one ends the
 sessions every node checks. The switch and the local-password setting are read
 from `server_settings` on each request. The rate-limit budgets follow the
 rate limiter's backend (cluster-wide with Redis).
+The profile set wake's one-a-minute limit holds across API processes
+through one upsert of the account's row in `push_profile_set_wakes` (see
+[The profile set](#the-profile-set)).
 
 ## The switch
 
