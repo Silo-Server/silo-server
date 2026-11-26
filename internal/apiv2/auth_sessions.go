@@ -230,7 +230,9 @@ func registerAuthSessions(reg *Registry) {
 	})
 	del := humaOp(http.MethodDelete, Prefix+"/auth/sessions/{id}", "deleteSession", "auth",
 		"Revoke one of the caller's login sessions.")
-	del.Description = sessionReachDeleteDescription
+	del.Description = "In demo mode a caller that is not an administrator may revoke only the session making the request; any other session of the account is 403 permission_denied, while an unknown session or one of another account is 404 as for every caller. getLoginSessionCapabilities reports this as revoke_other_sessions. " +
+		sessionReachDeleteDescription
+	// 403: another session, refused in demo mode or to a session limited to itself.
 	del.Errors = []int{http.StatusNotFound, http.StatusForbidden}
 	Register(reg, Operation{Operation: del, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true}, reg.deleteSession)
 	setup := humaOp(http.MethodPost, Prefix+"/auth/setup", "setupServer", "system",
@@ -412,7 +414,33 @@ func (reg *Registry) deleteSession(ctx context.Context, in *DeleteSessionInput) 
 	if claims == nil {
 		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
-	if err := reg.deps.Sessions.RevokeSession(ctx, string(in.ID), claims.UserID); err != nil {
+	// Read before the revocation's transaction, so no setting read waits
+	// under its row lock.
+	restricted, demoErr := demoRestricted(ctx, reg.deps.DemoSettings)
+	// The check runs after the ownership check, in the revocation's
+	// transaction, so an unknown session or another account's is 404 as
+	// without demo mode.
+	var refused *Problem
+	check := func(session *models.AuthSession) error {
+		// Demo visitors share one account, so its other sessions are other
+		// visitors': they may sign themselves out, not each other.
+		if session.ID != claims.SessionID {
+			if demoErr != nil {
+				refused = serviceProblem(demoErr)
+			} else if restricted {
+				refused = demoRestrictedProblem()
+			}
+		}
+		if refused != nil {
+			return refused
+		}
+		return nil
+	}
+	err := reg.deps.Sessions.RevokeSessionChecked(ctx, string(in.ID), claims.UserID, check)
+	if refused != nil {
+		return nil, refused
+	}
+	if err != nil {
 		return nil, serviceProblem(err)
 	}
 	return nil, nil

@@ -124,3 +124,15 @@ it("keeps recovery on the sign-in form until a new sign-in clears it", () => {
   expect(wasSignedOut()).toBe(false);
   expect(sessionEndReason()).toBeNull();
 });
+// Demo mode: a visitor may sign this browser out, not the other visitors.
+it("offers only this session's sign out when others may not be revoked", () => {
+  mocks.sessions = [listedSession, { ...listedSession, id: "this", current: true }];
+  render(
+    <MemoryRouter>
+      <LoginSessionsPanel manageOthers={false} />
+    </MemoryRouter>,
+  );
+  expect(screen.getAllByText("Chrome on Windows")).toHaveLength(2);
+  expect(screen.getByRole("button", { name: "Sign out this browser" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Sign out Chrome on Windows" })).toBeNull();
+});

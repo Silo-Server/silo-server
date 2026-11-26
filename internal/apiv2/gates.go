@@ -193,32 +193,81 @@ func runChain(ctx huma.Context, next func(huma.Context), chain []func(http.Handl
 
 // demoGate is the v2 demo-mode rule: with demo.enabled set, a non-admin may
 // not run an operation declared DemoRestricted. Read-only methods always
-// pass, as in v1. A nil settings reader means demo mode cannot be on.
+// pass, as in v1. A nil settings reader means demo mode cannot be on. A
+// setting that can't be read refuses the non-admin's mutation as an internal
+// failure, not as a demo refusal: the server may not be a demo.
 func demoGate(settings apimw.DemoSettingsReader) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions || !demoRestricted(r.Context(), settings) {
+			if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+			restricted, err := demoRestricted(r.Context(), settings)
+			if err == nil && !restricted {
 				next.ServeHTTP(w, r)
 				return
 			}
 			w.Header().Set("Content-Type", mediaTypeJSON)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":"internal_error","message":"An unexpected error occurred."}`))
+				return
+			}
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":"demo_restricted","message":"This action is not available in demo mode."}`))
 		})
 	}
 }
 
-// demoRestricted is shared by mutation admission and capability discovery.
-func demoRestricted(ctx context.Context, settings apimw.DemoSettingsReader) bool {
+// demoMode reports whether the server runs as a public demo, whoever is
+// asking: every visitor shares one account there, so nothing that leaves a
+// lasting credential of a visitor's on it may run.
+// A setting that can't be read is an error, not "no": the callers close what
+// they guard.
+func demoMode(ctx context.Context, settings apimw.DemoSettingsReader) (bool, error) {
 	if settings == nil {
-		return false
+		return false, nil
 	}
-	enabled, _ := settings.Get(ctx, "demo.enabled")
-	if enabled != "true" { //nolint:goconst // settings literal, not a shared constant
-		return false
+	enabled, err := settings.Get(ctx, "demo.enabled")
+	if err != nil {
+		return false, err
 	}
-	claims := claimsFrom(ctx)
-	return claims == nil || claims.Role != models.RoleAdmin
+	return enabled == "true", nil
+}
+
+// demoRestricted reports whether demo mode restricts the caller: demo mode
+// is on and the caller is not an administrator. It is shared by mutation
+// admission and capability discovery. An administrator is never restricted,
+// so the setting is not read for one. In production settings is the shared
+// demomode.Setting, which logs a failed read and answers the last value it
+// read; it returns an error only when this process has never read the
+// setting, and then callers refuse the mutation and answer capabilities
+// with the restricted value.
+func demoRestricted(ctx context.Context, settings apimw.DemoSettingsReader) (bool, error) {
+	if claims := claimsFrom(ctx); claims != nil && claims.Role == models.RoleAdmin {
+		return false, nil
+	}
+	demo, err := demoMode(ctx, settings)
+	if err != nil {
+		return true, err
+	}
+	return demo, nil
+}
+
+// demoAllows is a capability's answer to "may the caller do this restricted
+// thing": false while demo mode restricts the caller, and false when the
+// setting can't be read, so a client hides an action the server would refuse.
+func demoAllows(ctx context.Context, settings apimw.DemoSettingsReader) bool {
+	restricted, err := demoRestricted(ctx, settings)
+	return err == nil && !restricted
+}
+
+// demoRestrictedProblem is demoGate's refusal, for an operation that demo
+// mode restricts only in part (deleteSession may still end the caller's own
+// session), so its handler decides.
+func demoRestrictedProblem() *Problem {
+	return NewProblem(TypePermissionDenied, "This action is not available in demo mode.")
 }
 
 // denialWriter buffers what a gate writes on denial. Nothing reaches the
