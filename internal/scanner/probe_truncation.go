@@ -53,9 +53,9 @@ func indexedContainer(formatName string) bool {
 }
 
 // truncationReadTimeout bounds each read of a file's last seconds. A seek
-// usually reads one keyframe interval and a second, but a Matroska file
-// without Cues, as a cut-off copy is, is read from its start to find them. A
-// read that does not finish in time leaves the file treated as whole.
+// usually reads one keyframe interval and a second; a Matroska file whose
+// Cues were cut off with its end is read from its start to find them. A read
+// that does not finish in time settles nothing (see checkMediaReachesEnd).
 const truncationReadTimeout = 30 * time.Second
 
 // errTailUnsettled reports a read of a file's last seconds that settled

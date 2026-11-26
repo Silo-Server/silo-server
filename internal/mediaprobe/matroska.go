@@ -104,31 +104,32 @@ func readMatroskaTracks(r io.ReaderAt, size int64) ([]MatroskaTrack, error) {
 	}
 
 	tracksAt := int64(-1)
-	for at, visited := segStart, 0; at < segEnd && visited < maxTopLevelVisited; visited++ {
-		id, dataSize, headerLen, err := matroska.ReadElementHeader(r, at)
-		if err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-				break
-			}
-			return nil, fmt.Errorf("mediaprobe: read Matroska element at %d: %w", at, err)
-		}
+	var (
+		tracks    []MatroskaTrack
+		tracksErr error
+		found     bool
+	)
+	err = walkMatroskaHeader(r, segStart, segEnd, func(id uint64, dataAt, dataSize int64) bool {
 		switch id {
 		case mkvIDTracks:
-			return readMatroskaTracksElement(r, at+headerLen, dataSize)
+			tracks, tracksErr = readMatroskaTracksElement(r, dataAt, dataSize)
+			found = true
+			return true
 		case mkvIDSeekHead:
 			// A damaged seek head only loses the fallback; keep scanning.
-			if data, err := matroska.ReadElementData(r, at+headerLen, dataSize, maxSeekHeadSize); err == nil && tracksAt < 0 {
+			if data, err := matroska.ReadElementData(r, dataAt, dataSize, maxSeekHeadSize); err == nil && tracksAt < 0 {
 				if p, ok := matroska.SeekPosition(data, mkvIDTracks); ok {
 					tracksAt = segStart + p
 				}
 			}
 		}
-		// Clusters hold the media. Stop the linear scan at the first one and
-		// follow the seek head instead.
-		if id == mkvIDCluster || dataSize == ebmlUnknownSize {
-			break
-		}
-		at += headerLen + dataSize
+		return false
+	})
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return tracks, tracksErr
 	}
 
 	if tracksAt < segStart || tracksAt >= segEnd {
@@ -222,28 +223,53 @@ func matroskaHasCues(r io.ReaderAt, size int64) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	var (
+		hasCues bool
+		readErr error
+	)
+	err = walkMatroskaHeader(r, segStart, segEnd, func(id uint64, dataAt, dataSize int64) bool {
+		switch id {
+		case mkvIDCues:
+			hasCues = true
+		case mkvIDSeekHead:
+			// Unlike a Tracks lookup, a seek head that cannot be read
+			// leaves the answer open rather than negative.
+			data, err := matroska.ReadElementData(r, dataAt, dataSize, maxSeekHeadSize)
+			if err != nil {
+				readErr = fmt.Errorf("mediaprobe: read Matroska seek head at %d: %w", dataAt, err)
+				return true
+			}
+			_, hasCues = matroska.SeekPosition(data, mkvIDCues)
+		}
+		return hasCues
+	})
+	if err != nil {
+		return false, err
+	}
+	return hasCues, readErr
+}
+
+// walkMatroskaHeader calls visit with the ID and data span of each top-level
+// element of a Segment, from segStart, until visit returns true or the walk
+// reaches the first Cluster, which holds the media, an element of unknown
+// size, the end of the file, or maxTopLevelVisited elements.
+func walkMatroskaHeader(r io.ReaderAt, segStart, segEnd int64, visit func(id uint64, dataAt, dataSize int64) bool) error {
 	for at, visited := segStart, 0; at < segEnd && visited < maxTopLevelVisited; visited++ {
 		id, dataSize, headerLen, err := matroska.ReadElementHeader(r, at)
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-				break
+				return nil
 			}
-			return false, fmt.Errorf("mediaprobe: read Matroska element at %d: %w", at, err)
+			return fmt.Errorf("mediaprobe: read Matroska element at %d: %w", at, err)
 		}
-		switch id {
-		case mkvIDCues:
-			return true, nil
-		case mkvIDSeekHead:
-			if data, err := matroska.ReadElementData(r, at+headerLen, dataSize, maxSeekHeadSize); err == nil {
-				if _, ok := matroska.SeekPosition(data, mkvIDCues); ok {
-					return true, nil
-				}
-			}
+		if visit(id, at+headerLen, dataSize) {
+			return nil
 		}
+		// Clusters hold the media. Stop the linear scan at the first one.
 		if id == mkvIDCluster || dataSize == ebmlUnknownSize {
-			break
+			return nil
 		}
 		at += headerLen + dataSize
 	}
-	return false, nil
+	return nil
 }

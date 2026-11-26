@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/matroska"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -683,6 +684,43 @@ printf '%%s\n' '{"format":{"format_name":"mov,mp4,m4a,3gp,3g2,mj2","probe_score"
 		}
 		if stored := repo.files[file.ID]; stored.ProbeFailedAt == nil || stored.ProbeUpdatedAt != nil || (err == nil && !got.ProbeRejected()) {
 			t.Fatalf("%s: Ensure returned %+v, stored %+v, want the file still marked damaged", tc.name, got, stored)
+		}
+	}
+}
+
+// A Matroska file that names no Cues ahead of its clusters, as one written to
+// a pipe, is not read at its end: FFmpeg would read every cluster to get
+// there. One whose seek head names Cues is.
+func TestProbeFileChecksMatroskaEndOnlyWithCues(t *testing.T) {
+	ctx := t.Context()
+	ffprobe := filepath.Join(t.TempDir(), "ffprobe")
+	writeFakeTool(t, ffprobe, `#!/bin/sh
+if [ "$1" = "-read_intervals" ]; then
+	printf '%s\n' '{"packets": []}'
+	exit 0
+fi
+printf '%s\n' '{"format":{"format_name":"matroska,webm","probe_score":100,"start_time":"0.000000","duration":"60.000000"},"streams":[{"index":0,"codec_type":"audio","codec_name":"aac"}]}'
+`)
+	header := matroska.AppendElement(nil, matroska.IDEBML, matroska.AppendElement(nil, matroska.IDDocType, []byte("matroska")))
+	cluster := matroska.AppendElement(nil, matroska.IDCluster, make([]byte, 16))
+	seekHead := matroska.AppendElement(nil, matroska.IDSeekHead, matroska.AppendElement(nil, matroska.IDSeek,
+		append(matroska.AppendElement(nil, matroska.IDSeekID, []byte{0x1C, 0x53, 0xBB, 0x6B}), matroska.AppendUint(nil, matroska.IDSeekPosition, 1<<20)...)))
+	for _, tc := range []struct {
+		name        string
+		segment     []byte
+		wantRejects bool
+	}{
+		{"no Cues", cluster, false},
+		{"seek head names Cues", append(slices.Clone(seekHead), cluster...), true},
+	} {
+		media := filepath.Join(t.TempDir(), "Movie (2020).mkv")
+		file := matroska.AppendElement(slices.Clone(header), matroska.IDSegment, tc.segment)
+		if err := os.WriteFile(media, file, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ProbeFile(ctx, ffprobe, media)
+		if got := err != nil && IsProbeRejection(ctx, media, err); got != tc.wantRejects || (err != nil) != tc.wantRejects {
+			t.Fatalf("%s: err = %v, rejection = %v, want rejection %v", tc.name, err, got, tc.wantRejects)
 		}
 	}
 }

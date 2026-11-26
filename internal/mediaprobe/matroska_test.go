@@ -217,6 +217,13 @@ func TestMatroskaHasCues(t *testing.T) {
 			t.Fatalf("%s: MatroskaHasCues = %v, %v; want %v", tc.name, got, err, tc.wantCues)
 		}
 	}
+	// A seek head that cannot be read leaves the answer open.
+	cut := append(ebmlHeader("matroska"), ebmlElement(mkvIDSegment, seekHead, testTracksElement(), cluster)...)
+	// Segment and seek head headers are 12 bytes each; cut inside the seek head.
+	cut = cut[:len(ebmlHeader("matroska"))+12+12+5]
+	if got, err := MatroskaHasCues(bytes.NewReader(cut), int64(len(cut))); err == nil {
+		t.Fatalf("unreadable seek head: MatroskaHasCues = %v, nil; want an error", got)
+	}
 	if _, err := MatroskaHasCues(bytes.NewReader(ebmlHeader("notmkv")), 64); !errors.Is(err, ErrNotMatroska) {
 		t.Fatalf("other doc type: err = %v", err)
 	}
