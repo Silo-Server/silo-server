@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -211,5 +212,152 @@ func TestSwitchOffKeepsOwnerProtectionDB(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// Turning local passwords off judges the state it leaves: an account with a
+// password and a key bound to a provider that can't sign people in (an
+// OAuth provider on a server with no public address) would keep only its
+// key, which needs no local password, so the write is refused naming it.
+func TestLocalPasswordsOffJudgesTheStateLeftDB(t *testing.T) {
+	f := newSwitchWriteFixture(t)
+	ctx := t.Context()
+	h := &AdminHandler{SettingsRepo: serversettings.NewServerSettingsRepo(f.pool), pool: f.pool}
+	f.restoreSetting(t, config.AuthLocalPasswordLoginSettingKey)
+	f.restoreSetting(t, config.ServerPublicURLSettingKey)
+	if _, err := f.pool.Exec(ctx, `DELETE FROM server_settings WHERE key = ANY($1)`,
+		[]string{config.AuthLocalPasswordLoginSettingKey, config.ServerPublicURLSettingKey}); err != nil {
+		t.Fatal(err)
+	}
+	glass := f.account(t, "glass-local", true)
+	if _, err := f.pool.Exec(ctx, `UPDATE users SET role = 'admin', break_glass = true WHERE id = $1`, glass); err != nil {
+		t.Fatal(err)
+	}
+	provider := f.oauthProvider(t)
+	userID := f.account(t, "pwbound", true)
+	var identity int64
+	if err := f.pool.QueryRow(ctx, `INSERT INTO plugin_auth_identities (plugin_installation_id, external_subject, user_id, issuer, linked_at)
+		VALUES ($1, $2, $3, 'https://idp.example.test', NOW()) RETURNING id`, provider, "pwbound"+f.suffix, userID).Scan(&identity); err != nil {
+		t.Fatal(err)
+	}
+	key := f.deviceKey(t, userID, "device", "session")
+	if _, err := f.pool.Exec(ctx, `UPDATE auth_device_keys SET identity_id = $2, provider_bound = true WHERE id = $1`, key, identity); err != nil {
+		t.Fatal(err)
+	}
+	_, err := h.UpdateAdminSettings(ctx, map[string]string{config.AuthLocalPasswordLoginSettingKey: "false"}, nil)
+	requireAdminError(t, err, 409, "last_sign_in_method")
+	if !strings.Contains(err.Error(), "pwbound-"+f.suffix) {
+		t.Fatalf("refusal %v does not name the account", err)
+	}
+}
+
+// waitLockWaiters waits until n backends of this database wait on a lock.
+func (f *switchWriteFixture) waitLockWaiters(t *testing.T, n int) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		var waiting int
+		if err := f.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d backends waiting on a lock, want %d", waiting, n)
+		}
+		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // the poll interval; the wait is on pg_stat_activity, an observable lock wait
+	}
+}
+
+// Moving ownership and turning app keys off read ownership under one lock,
+// so in either order the Owner check sees ownership before or after the
+// move, never in between, and neither deadlocks.
+func TestOwnershipMoveAgainstSwitchOffDB(t *testing.T) {
+	f := newSwitchWriteFixture(t)
+	ctx := t.Context()
+	h := &AdminHandler{SettingsRepo: serversettings.NewServerSettingsRepo(f.pool), pool: f.pool}
+	var formerOwner *int
+	_ = f.pool.QueryRow(ctx, `SELECT id FROM users WHERE is_owner`).Scan(&formerOwner)
+	if formerOwner != nil {
+		if _, err := f.pool.Exec(ctx, `UPDATE users SET is_owner = false WHERE id = $1`, *formerOwner); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = f.pool.Exec(context.Background(), `UPDATE users SET is_owner = true WHERE id = $1`, *formerOwner)
+		})
+	}
+	users := auth.NewUserRepository(f.pool)
+	for i, transferFirst := range []bool{true, false} {
+		t.Run(map[bool]string{true: "the move first", false: "the switch-off first"}[transferFirst], func(t *testing.T) {
+			if _, err := f.pool.Exec(ctx, `DELETE FROM server_settings WHERE key = ANY($1)`, switchSettingKeys); err != nil {
+				t.Fatal(err)
+			}
+			admin := func(label string, owner bool) int {
+				id := f.account(t, label+strconv.Itoa(i), true)
+				if _, err := f.pool.Exec(ctx, `UPDATE users SET role = 'admin', is_owner = $2 WHERE id = $1`, id, owner); err != nil {
+					t.Fatal(err)
+				}
+				return id
+			}
+			owner, next, other := admin("from", true), admin("to", false), admin("other", false)
+			t.Cleanup(func() {
+				_, _ = f.pool.Exec(context.Background(), `UPDATE users SET is_owner = false WHERE id = ANY($1)`, []int{owner, next})
+			})
+			ownerKey := f.deviceKey(t, owner, "device", "session")
+			session := uuid.NewString()
+			if _, err := f.pool.Exec(ctx, `INSERT INTO auth_sessions (id, user_id, device_name, expires_at, opened_via, device_key_id)
+				VALUES ($1, $2, 'phone', NOW() + interval '1 hour', 'app_key', $3)`, session, owner, ownerKey); err != nil {
+				t.Fatal(err)
+			}
+			hold, err := f.pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = hold.Rollback(context.Background()) })
+			deadline, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			move := func() error { return users.TransferOwnership(deadline, owner, next) }
+			// The move first: it holds the ownership lock and waits on the
+			// new Owner's row, and the switch-off (by another administrator)
+			// waits on the ownership lock; afterwards the new Owner holds no
+			// key session, so it is allowed. The switch-off first (by the
+			// Owner): it holds the ownership lock and waits on the Owner's
+			// key session, and the move waits on the ownership lock.
+			actor, row := other, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`
+			holdID := any(next)
+			if !transferFirst {
+				actor, row, holdID = owner, `SELECT 1 FROM auth_sessions WHERE id = $1 FOR UPDATE`, session
+			}
+			if _, err := hold.Exec(ctx, row, holdID); err != nil {
+				t.Fatal(err)
+			}
+			switchOff := func() error {
+				_, err := h.UpdateAdminSettings(apimw.SetClaims(deadline, &auth.Claims{UserID: actor, Role: "admin", TokenType: auth.TokenTypeAccess}),
+					map[string]string{config.AuthAppKeySignInSettingKey: "false"}, nil)
+				return err
+			}
+			first, second := move, switchOff
+			if !transferFirst {
+				first, second = switchOff, move
+			}
+			done := make(chan error, 2)
+			go func() { done <- first() }()
+			f.waitLockWaiters(t, 1)
+			go func() { done <- second() }()
+			f.waitLockWaiters(t, 2)
+			if err := hold.Rollback(ctx); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				if err := <-done; err != nil {
+					t.Fatalf("one side failed: %v", err)
+				}
+			}
+			if f.live(t, session) {
+				t.Fatal("the key session is live after the switch went off")
+			}
+		})
 	}
 }

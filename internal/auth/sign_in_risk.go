@@ -42,21 +42,18 @@ func primarySignInBindingSQL(alias string) string {
 
 // signInProviders answers the installations whose identities can sign people
 // in: an enabled installation with an enabled OIDC or LDAP binding
-// (primarySignInBindingSQL) whose capability row exists, and for an OAuth
-// binding a public URL
+// (primarySignInBindingSQL), and for an OAuth binding a public URL
 // (OAuthSignInServed). A network identity signs in only from a device on
 // its network, and an OAuth provider signs nobody in without a public URL,
 // so neither counts; a credentials (directory) provider needs no public URL.
 // It is the one rule for "a provider people can sign in with" here, written
 // so a single definition can replace it and any other copy.
 func signInProviders(ctx context.Context, db dbQuerier, publicURL string) ([]int, error) {
-	// A binding whose capability row is gone signs nobody in: sign-in's
-	// provider registry drops it, so the join requires the row.
-	rows, err := db.Query(ctx, `SELECT p.id, COALESCE(c.metadata->'auth_modes', '[]'::jsonb)
+	rows, err := db.Query(ctx, `SELECT p.id, COALESCE((SELECT c.metadata->'auth_modes' FROM plugin_capabilities c
+			WHERE c.plugin_installation_id = b.plugin_installation_id AND c.capability_type = 'auth_provider.v1'
+				AND c.capability_id = b.capability_id), '[]'::jsonb)
 		FROM plugin_installations p
 		JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND `+primarySignInBindingSQL("b")+`
-		JOIN plugin_capabilities c ON c.plugin_installation_id = b.plugin_installation_id
-			AND c.capability_type = 'auth_provider.v1' AND c.capability_id = b.capability_id
 		WHERE p.enabled`)
 	if err != nil {
 		return nil, fmt.Errorf("checking for an enabled sign-in provider: %w", err)
@@ -169,23 +166,28 @@ type AccountAtRisk struct {
 	SignInLinkExpiresAt *time.Time
 }
 
-// accountsAtRiskSQL lists the accounts at risk for each change. The app
-// keys query takes $1, auth.local_password_login as it is now.
+// accountsAtRiskSQL lists the accounts at risk for each change, judged on
+// the settings the change leaves: $1 is the installations whose identities
+// can sign people in under them (signInProviders), and the app keys query's
+// $2 is auth.local_password_login.
 //
-//   - App keys off: an account whose keys sign in now (keyWorksSQL under $1)
+//   - App keys off: an account whose keys sign in now (keyWorksSQL under $2)
 //     and that has no password that signs in and no provider identity. With
 //     the switch off its keys are no way in, so it has none. The list does
 //     not depend on the switch: while it is already off it names the
 //     accounts that still have no way in.
-//   - Local passwords off: an account that holds a key that works with local
-//     passwords on, and has no usable password and no provider identity.
-//     Afterwards a key that is not provider-bound works only for a
-//     break-glass account, so the account is left with keys as its only way
-//     in, or with none; a password would not help it then, so only linking
-//     a provider takes it off the list.
+//   - Local passwords off: an account that afterwards has no password that
+//     signs in and no provider identity, and either holds working keys and
+//     no usable password (afterwards a key that is not provider-bound works
+//     only for a break-glass account, so it has keys as its only way in, or
+//     none), or keeps a key that still works then (a provider-bound key, or
+//     a break-glass account's), which would be its only way in. An account
+//     with a password and only local keys is left with no way in, as an
+//     account with only a password always has been, and is not listed.
 var accountsAtRiskSQL = map[SignInChange]string{
-	ChangeAppKeysOff:        `NOT ` + passwordWorksSQL("$2") + ` AND NOT ` + usableIdentitySQL("$1") + ` AND ` + keyWorksSQL("$2"),
-	ChangeLocalPasswordsOff: `NOT ` + usablePasswordSQL + ` AND NOT ` + usableIdentitySQL("$1") + ` AND ` + keyWorksSQL("true"),
+	ChangeAppKeysOff: `NOT ` + passwordWorksSQL("$2") + ` AND NOT ` + usableIdentitySQL("$1") + ` AND ` + keyWorksSQL("$2"),
+	ChangeLocalPasswordsOff: `NOT ` + passwordWorksSQL("false") + ` AND NOT ` + usableIdentitySQL("$1") +
+		` AND ((NOT ` + usablePasswordSQL + ` AND ` + keyWorksSQL("true") + `) OR ` + keyWorksSQL("false") + `)`,
 }
 
 // AccountsAtRisk lists the enabled accounts change would leave with no way

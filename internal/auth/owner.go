@@ -291,6 +291,9 @@ func (r *UserRepository) TransferOwnership(ctx context.Context, fromID, toID int
 	if fromID == toID {
 		return ErrOwnershipTarget
 	}
+	if err := lockOwnership(ctx, tx, false); err != nil {
+		return err
+	}
 	// Lock both accounts in id order so a transfer cannot interleave with
 	// another change to either.
 	rows, err := tx.Query(ctx, `SELECT id, role, enabled, is_owner FROM users WHERE id = ANY($1) ORDER BY id FOR UPDATE`, []int{fromID, toID})
@@ -404,6 +407,9 @@ func (r *UserRepository) SetOwner(ctx context.Context, username string) (*models
 		return nil, 0, err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if err := lockOwnership(ctx, tx, false); err != nil {
+		return nil, 0, err
+	}
 	// Lock the named account and the current Owner in one statement, in id
 	// order, so concurrent recoveries serialize instead of deadlocking.
 	rows, err := tx.Query(ctx, `
@@ -458,4 +464,24 @@ func (r *UserRepository) SetOwner(ctx context.Context, username string) (*models
 		return nil, 0, err
 	}
 	return user, previous, nil
+}
+
+// ownershipLock names the advisory lock around moving ownership. The two
+// writers of ownership (TransferOwnership and SetOwner) take it exclusively
+// before any row; a reader that must not see ownership move under it takes
+// it shared (CheckSwitchOffActor, after the settings lock). Neither writer
+// takes the settings lock, and the reader takes no account row, so the lock
+// sits outside every other order: a writer waits here holding nothing, and a
+// reader waits here holding only the settings lock, which no writer wants.
+const ownershipLock = "silo:auth:ownership"
+
+func lockOwnership(ctx context.Context, tx pgx.Tx, shared bool) error {
+	fn := "pg_advisory_xact_lock"
+	if shared {
+		fn = "pg_advisory_xact_lock_shared"
+	}
+	if _, err := tx.Exec(ctx, `SELECT `+fn+`(hashtextextended($1, 0))`, ownershipLock); err != nil {
+		return fmt.Errorf("locking ownership: %w", err)
+	}
+	return nil
 }

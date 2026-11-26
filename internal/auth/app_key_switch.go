@@ -168,6 +168,12 @@ func endKeySessionIfSwitchOff(ctx context.Context, pool *pgxpool.Pool, sessionID
 // lockChain) before it inserts the session, so the Owner can't gain one
 // between this check and the sweep.
 func CheckSwitchOffActor(ctx context.Context, tx pgx.Tx, actorID int) error {
+	// Ownership can't move between this read and the sweep: its writers
+	// take this lock exclusively (lockOwnership). An account row lock here
+	// would invert the account-then-settings order of every key path.
+	if err := lockOwnership(ctx, tx, true); err != nil {
+		return err
+	}
 	var refused bool
 	if err := tx.QueryRow(ctx, `SELECT NOT COALESCE((SELECT is_owner FROM users WHERE id = $1), false)
 		AND EXISTS (SELECT 1 FROM auth_sessions s JOIN users u ON u.id = s.user_id

@@ -163,9 +163,11 @@ func normalizeHostBaseURL(url string) string {
 	return strings.TrimRight(strings.TrimSpace(url), "/")
 }
 
-// OAuthSignInServed reports whether an OAuth provider can sign anyone in with
-// publicURL (server.public_url) as the server's public origin: the browser
-// and native starts both need one for the callback, and refuse without it.
+// OAuthSignInServed reports whether OAuth sign-in can be served with
+// publicURL (server.public_url) as the public URL: every flow start needs
+// one to resume on and to name the callback the provider knows. Without it
+// an OAuth provider signs nobody in, while a credentials (directory)
+// provider still does.
 func OAuthSignInServed(publicURL string) bool {
 	return normalizeHostBaseURL(publicURL) != ""
 }
