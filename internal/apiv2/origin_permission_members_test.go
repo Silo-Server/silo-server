@@ -251,6 +251,18 @@ func powerListName(name string) bool {
 		strings.HasSuffix(name, "_actions") || strings.HasSuffix(name, "_capabilities")
 }
 
+// isArraySchema reports whether a schema is an array: type "array", or a
+// type list that holds it (a nullable list, ["array","null"]).
+func isArraySchema(s map[string]any) bool {
+	switch t := s["type"].(type) {
+	case string:
+		return t == "array"
+	case []any:
+		return slices.Contains(t, any("array"))
+	}
+	return false
+}
+
 // schemaPowerLists lists the array members of a schema whose name names
 // powers, at any depth, as paths keyed like capabilityMembers.
 func schemaPowerLists(schemas map[string]any, schema any, path string, seen map[string]bool, out *[]string) {
@@ -274,7 +286,10 @@ func schemaPowerLists(schemas map[string]any, schema any, path string, seen map[
 	for name, prop := range props {
 		member := strings.TrimPrefix(path+"."+name, ".")
 		resolved, _ := prop.(map[string]any)
-		if t, _ := resolved["type"].(string); t == "array" && powerListName(name) {
+		if ref, ok := resolved["$ref"].(string); ok {
+			resolved, _ = schemas[ref[strings.LastIndex(ref, "/")+1:]].(map[string]any)
+		}
+		if isArraySchema(resolved) && powerListName(name) {
 			*out = append(*out, member)
 		}
 		schemaPowerLists(schemas, prop, member, seen, out)
@@ -328,5 +343,27 @@ func TestPowerListsStateTheirCase(t *testing.T) {
 		if !found[key] {
 			t.Errorf("%s: no response such a session may read has this list; remove the row", key)
 		}
+	}
+}
+
+// TestPowerListScanSeesEveryArrayForm: the scan finds a list of powers
+// written inline, as a reference to an array schema, and as a nullable list
+// (a type list), the three forms the published document uses. Catches the
+// scan missing a list for the way it is written.
+func TestPowerListScanSeesEveryArrayForm(t *testing.T) {
+	schemas := map[string]any{
+		"Powers": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		"Answer": map[string]any{"properties": map[string]any{
+			"inline_permissions":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"ref_permissions":      map[string]any{"$ref": "#/components/schemas/Powers"},
+			"nullable_permissions": map[string]any{"type": []any{"array", "null"}, "items": map[string]any{"type": "string"}},
+			"names":                map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		}},
+	}
+	var found []string
+	schemaPowerLists(schemas, map[string]any{"$ref": "#/components/schemas/Answer"}, "", map[string]bool{}, &found)
+	slices.Sort(found)
+	if want := []string{"inline_permissions", "nullable_permissions", "ref_permissions"}; !slices.Equal(found, want) {
+		t.Fatalf("found %v, want %v", found, want)
 	}
 }
