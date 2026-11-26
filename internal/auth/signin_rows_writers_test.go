@@ -56,7 +56,7 @@ var signInRowWriters = map[string]string{
 	// holding the settings lock; a held identity rolls the attempt back and
 	// it retries, then answers busy), then the delete: identities (cascade),
 	// then device sign-in requests and sessions (SET NULL).
-	"internal/plugins/installation.go:DeleteThen": "the uninstall",
+	"internal/plugins/installation.go:deleteOnce": "the uninstall",
 
 	"internal/auth/admin_users.go:MutateAdminAccount":                          identitiesFirst,
 	"internal/auth/password_reset.go:revokeSignInsInTransaction":               identitiesFirst,
