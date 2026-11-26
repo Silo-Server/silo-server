@@ -146978,6 +146978,20 @@
       "value": "~~⟧"
     }
   ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "⟦Ƒŕöɱ "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
+    }
+  ],
   "web.settings.appKeys.row.identityGone": [
     {
       "type": 0,

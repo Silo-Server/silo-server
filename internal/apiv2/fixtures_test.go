@@ -1870,19 +1870,19 @@ func fixtureAppKeys() *fakeAppKeys {
 	used := created.Add(time.Hour)
 	return &fakeAppKeys{enabled: true, err: auth.ErrKeySignatureInvalid, grantErr: auth.ErrGrantInvalid,
 		sessionAccess: auth.SessionKeyAccess{List: true, Manage: true}, keys: auth.OwnAppKeys{
-			Person: &models.AppPersonKey{KeyID: "PgujdSfBbNNyXngLWCsOgw", CreatedAt: created},
+			Person: &models.AppPersonKey{KeyID: "PgujdSfBbNNyXngLWCsOgw", EnrolledIP: "127.0.0.2", CreatedAt: created},
 			Devices: []*models.AppDeviceKey{
 				{ID: "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", KeyID: "zT321tSgcB7emUH9k0B0oA", Kind: models.DeviceKeyKindDevice, Name: "Sam's iPhone", Platform: "ios",
-					Status: models.DeviceKeyStatusActive, EnrolledVia: models.AppKeyEnrolledIntroduce, CreatedAt: created, LastUsedAt: &used},
+					Status: models.DeviceKeyStatusActive, EnrolledVia: models.AppKeyEnrolledIntroduce, EnrolledIP: "2001:db8::17", CreatedAt: created, LastUsedAt: &used},
 				{ID: "5b1d7f0e-6a57-4d0c-8a59-0f3f3a0f4a10", KeyID: "iX--ofJySUkUOsEpPo17PQ", Kind: models.DeviceKeyKindDevice, Name: "Sam's iPad", Platform: "ipados",
-					Status: models.DeviceKeyStatusPending, EnrolledVia: models.AppKeyEnrolledAppCode, CreatedAt: created},
+					Status: models.DeviceKeyStatusPending, EnrolledVia: models.AppKeyEnrolledAppCode, EnrolledIP: "127.0.0.2", CreatedAt: created},
 				{ID: "9e0b6c1d-3f2a-4b7e-8c5d-1a2b3c4d5e6f", KeyID: "Qm9vay1wbGF5ZXIta2V5MQ", Kind: models.DeviceKeyKindApp, Name: "Example Player", Platform: "android",
 					Status: models.DeviceKeyStatusActive, EnrolledVia: models.AppKeyEnrolledGrant, CreatedAt: created, LastUsedAt: &used},
 			},
 			AllowedBy: "sam",
 		}, pending: []*models.AppDeviceKey{
 			{ID: "5b1d7f0e-6a57-4d0c-8a59-0f3f3a0f4a10", KeyID: "iX--ofJySUkUOsEpPo17PQ", Kind: models.DeviceKeyKindDevice, Name: "Sam's iPad", Platform: "ipados",
-				Status: models.DeviceKeyStatusPending, EnrolledVia: models.AppKeyEnrolledIntroduce, CreatedAt: created},
+				Status: models.DeviceKeyStatusPending, EnrolledVia: models.AppKeyEnrolledIntroduce, EnrolledIP: "127.0.0.2", CreatedAt: created},
 		}}
 }
 

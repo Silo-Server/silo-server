@@ -14,6 +14,7 @@ const key = (id: string, name: string, extra: Record<string, unknown> = {}) => (
   enrolled_by: "introduce",
   allowed_by: null,
   enrolled_at: "2026-10-05T00:00:00Z",
+  enrolled_ip_address: "",
   last_used_at: null,
   provider_bound: false,
   identity_gone: false,
@@ -33,10 +34,19 @@ vi.mock("@/hooks/queries/admin/appKeys", () => ({
       isFetching: false,
       refetch: vi.fn(),
       data: {
-        person_key: { kid: "p", enrolled_at: "2026-10-01T00:00:00Z", enrolled_by: "session" },
+        person_key: {
+          kid: "p",
+          enrolled_at: "2026-10-01T00:00:00Z",
+          enrolled_ip_address: "203.0.113.7",
+          enrolled_by: "session",
+        },
         devices: [
           key("waiting", "New iPad", { status: "pending", waiting_until: "2026-10-06T00:00:00Z" }),
-          key("dead", "Old laptop", { provider_bound: true, identity_gone: true }),
+          key("dead", "Old laptop", {
+            provider_bound: true,
+            identity_gone: true,
+            enrolled_ip_address: "198.51.100.24",
+          }),
         ],
       },
     },
@@ -86,4 +96,16 @@ it("still offers to remove a device that can no longer sign in", async () => {
     within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove device" }),
   );
   expect(mocks.revokeDevice).toHaveBeenCalledWith("dead");
+});
+
+// Where a key was added from sits beside when; a key added before the server
+// recorded it shows no address rather than an empty "From".
+it("shows the address each key was added from, and none when it is unknown", () => {
+  const { container } = render(
+    <AdminAppKeysPanel user={{ id: 2, username: "sam" }} manageable={false} />,
+  );
+  const shown = [...container.querySelectorAll("bdi")].map((el) => el.parentElement?.textContent);
+  expect(shown).toHaveLength(2);
+  expect(shown[0]).toBe("From 203.0.113.7");
+  expect(shown[1]).toMatch(/ · From 198\.51\.100\.24$/);
 });
