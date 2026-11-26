@@ -31,6 +31,9 @@ WHERE mi.content_id = sub.series_id
   AND mi.last_air_date_at IS DISTINCT FROM sub.last_aired;
 
 -- +goose Down
--- Data-only repair. An older binary counts specials again on the series'
--- next episode write; restoring the old values here is not needed.
+-- Intentionally a no-op, like the repo's other data-only backfills. Silo has
+-- no supported in-place downgrade (docs/release-versioning.md): rolling back
+-- means restoring the pre-upgrade backup, which holds the old values. Under an
+-- older binary a skipped value only leaves a special out of the series' list
+-- end date, and its next episode write recomputes it the old way.
 SELECT 1;
