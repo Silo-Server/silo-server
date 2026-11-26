@@ -957,6 +957,7 @@ removed, then a name another profile here would share (`name_conflict`).
 | 409 `conflict` | The household kept changing while the set was applied; or the account has profiles but no main profile, which a set can't apply to. Send the set again a few times, waiting longer each time, then stop and report it: the second case doesn't clear by itself. |
 | 401 `signature_invalid`, `challenge_invalid` | The signed form, as on the other signed routes. A payload naming another account is `signature_invalid`. A replayed envelope is `challenge_invalid`. |
 | 401 `authentication_required` | The session form without a login session. An API key carries no login session, so it gets this too. |
+| 403 `password_change_required` | The session form from a login session that must change its temporary password first, as every other session route answers it. The session is not gone: change the password, refresh the session, and send the set again. |
 | 401 `session_expired` | The account was deleted while the set was applied. |
 | 403 `permission_denied` | The signed form for an administrator's account; a session opened by device sign-in, by another app's key, or by an administrator acting as the account, a remote-playback handoff, a session older than the record of how sessions open; either form from a non-administrator in demo mode. |
 | 403 `main_profile_required` | The session form from a request that isn't acting as the main profile, or names no profile. |

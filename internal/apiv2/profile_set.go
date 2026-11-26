@@ -264,7 +264,7 @@ const putProfileSetDescription = "Makes the account's household profiles match a
 	"or {set, pairs?, edits_seen?} over the account's own login session acting as its main profile (X-Profile-Id), with X-Profile-Token when that profile has a PIN. " +
 	"The signed form is refused for an administrator's account (403 permission_denied) and while auth.app_key_sign_in is off (409 capability_disabled); the session form takes neither rule. " +
 	"A session form that is not acting as the main profile is 403 main_profile_required. " +
-	"Sessions opened by device sign-in, by another app's key, or by an administrator acting as the account, remote-playback handoffs, and sessions older than the record of how sessions open are 403 permission_denied; an API key carries no login session and is 401 authentication_required. In demo mode a non-administrator is 403 permission_denied in both forms. " +
+	"Sessions opened by device sign-in, by another app's key, or by an administrator acting as the account, remote-playback handoffs, and sessions older than the record of how sessions open are 403 permission_denied; the session form without a login session is 401 authentication_required, and so is an API key, which carries none; a session that must change its temporary password is 403 password_change_required. In demo mode a non-administrator is 403 permission_denied in both forms. " +
 	"The first item is the main profile; items match profiles by sync_id, then by pairs, and are otherwise created in set order up to the household's profile limit (the rest are left_off; nothing is deleted to fit). " +
 	"A profile holding a sync_id the set no longer has is deleted with everything that belongs to it; a profile with no sync_id that pairs does not name is left alone. " +
 	"Only a newer version changes anything: an older version, the same version with other content, the same version whose PINs differ from the stored ones (a PIN the owner set here is not compared), and a newer set whose edits_seen is not getProfileSet's current edits_token while that token is not empty are 409 profile_set_stale, with nothing written; the same version and content again answers 200 and writes nothing. " +
@@ -451,6 +451,9 @@ func (reg *Registry) validateSignedProfileSet(authority *auth.ProfileSetAuthorit
 // profile the service checks is the verified main profile.
 func (reg *Registry) sessionProfileSet(ctx context.Context, raw []byte) (handlers.ProfileSetCommand, error) {
 	claims := claimsFrom(ctx)
+	if claims == nil && apimw.SessionMustChangePassword(ctx) {
+		return handlers.ProfileSetCommand{}, passwordChangeRequiredProblem()
+	}
 	if claims == nil {
 		return handlers.ProfileSetCommand{}, NewProblem(TypeAuthenticationRequired, "A profile set without a signature needs a login session.")
 	}

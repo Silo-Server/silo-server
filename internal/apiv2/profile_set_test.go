@@ -128,6 +128,14 @@ func TestPutProfileSetAuthority(t *testing.T) {
 		{name: "switch off, session", body: testSessionSet, headers: map[string]string{"Authorization": "Bearer " + memberToken, profileHeader: "p-owner"}},
 		{name: "held-back session", body: testSessionSet, headers: bearer(memberToken), sessionErr: auth.ErrSessionNotAllowed, want: TypePermissionDenied},
 		{name: "session form without a session", body: testSessionSet, want: TypeAuthenticationRequired},
+		// A client reads 401 as signed out; this session is only told to
+		// change its temporary password first.
+		{name: "session form, session must change its password", body: testSessionSet,
+			headers: map[string]string{"Authorization": "Bearer " + temporaryPasswordToken, profileHeader: "p-owner"}, want: TypePasswordChangeRequired},
+		{name: "session form, unknown token", body: testSessionSet, headers: bearer("tok-unknown"), want: TypeAuthenticationRequired},
+		{name: "session form, ended session", body: testSessionSet, headers: bearer(expiredToken), want: TypeAuthenticationRequired},
+		{name: "signed with a session that must change its password", body: testEnvelope, enabled: true, signed: true,
+			headers: bearer(temporaryPasswordToken)},
 		{name: "session form not as the main profile", body: testSessionSet, headers: map[string]string{"Authorization": "Bearer " + memberToken, profileHeader: "p-owner"},
 			sets: fakeProfileSets{applyErr: handlers.ErrProfileSetNotMainProfile}, want: TypeMainProfileRequired},
 		{name: "main profile PIN not proven", body: testSessionSet, headers: map[string]string{"Authorization": "Bearer " + householdToken, profileHeader: "p-primary-locked"}, want: TypeProfileVerificationRequired},
