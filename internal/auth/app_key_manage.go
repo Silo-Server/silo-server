@@ -63,7 +63,7 @@ func (a *AppKeySignIn) ListOwnKeys(ctx context.Context, claims *Claims) (OwnAppK
 // by device sign-in may revoke none.
 func (a *AppKeySignIn) RevokeOwnDeviceKey(ctx context.Context, claims *Claims, id string) error {
 	if !claims.IsOwnLoginSession() {
-		return ErrSessionNotAllowed
+		return NotOwnSessionError(claims)
 	}
 	origin, err := ReadSessionOrigin(ctx, a.pool, claims)
 	if err != nil {

@@ -141,7 +141,7 @@ func TestDevicePreapprovalRedeemDB(t *testing.T) {
 	if err != nil || again.TokenPair != nil || again.Status != DeviceLoginStatusConsumed {
 		t.Fatalf("second redeem = %+v, %v", again, err)
 	}
-	if list, err := svc.ListPreapprovals(t.Context(), userID); err != nil || len(list) != 0 {
+	if list, err := svc.ListPreapprovals(ctx, userID); err != nil || len(list) != 0 {
 		t.Fatalf("list after redeem = %+v, %v", list, err)
 	}
 }
@@ -166,10 +166,10 @@ func TestDevicePreapprovalRefusedDB(t *testing.T) {
 
 	revokedID, revokedCode, revokedSecret := preapprove("revoked", 0)
 	keptID, _, _ := preapprove("kept", 0)
-	if list, err := svc.ListPreapprovals(t.Context(), userID); err != nil || len(list) != 2 {
+	if list, err := svc.ListPreapprovals(ctx, userID); err != nil || len(list) != 2 {
 		t.Fatalf("list = %+v, %v", list, err)
 	}
-	if err := svc.RevokePreapproval(t.Context(), userID, revokedID); err != nil {
+	if err := svc.RevokePreapproval(ctx, userID, revokedID); err != nil {
 		t.Fatal(err)
 	}
 	var otherID int
@@ -180,10 +180,10 @@ func TestDevicePreapprovalRefusedDB(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.WithoutCancel(t.Context()), `DELETE FROM users WHERE id = $1`, otherID)
 	})
-	if err := svc.RevokePreapproval(t.Context(), otherID, keptID); !errors.Is(err, ErrDeviceLoginNotFound) {
+	if err := svc.RevokePreapproval(preapprovalApprover(t, svc, otherID, nil, nil), otherID, keptID); !errors.Is(err, ErrDeviceLoginNotFound) {
 		t.Fatalf("another account's revoke: %v", err)
 	}
-	if list, err := svc.ListPreapprovals(t.Context(), userID); err != nil || len(list) != 1 || list[0].ID != keptID {
+	if list, err := svc.ListPreapprovals(ctx, userID); err != nil || len(list) != 1 || list[0].ID != keptID {
 		t.Fatalf("list after revoke = %+v, %v", list, err)
 	}
 
@@ -380,7 +380,7 @@ func TestDevicePreapprovalCapDB(t *testing.T) {
 	if _, err := svc.Preapprove(ctx, DevicePreapprovalInput{DeviceName: name("tv"), Binding: binding}, userID); !errors.Is(err, ErrDevicePreapprovalLimit) {
 		t.Fatalf("over the cap: %v", err)
 	}
-	if err := svc.RevokePreapproval(t.Context(), userID, first); err != nil {
+	if err := svc.RevokePreapproval(ctx, userID, first); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.Preapprove(ctx, DevicePreapprovalInput{DeviceName: name("tv"), Binding: binding}, userID); err != nil {
@@ -422,8 +422,11 @@ func TestDevicePreapprovalWrongSecretBudgetDB(t *testing.T) {
 }
 
 // TestDevicePreapprovalSessionRuleDB: a sign-in approved in advance outlives
-// the session that made it, so a session opened by device sign-in (a TV) or by
-// another app's key can't make one; the person's own password session can.
+// the session that made it, so a session opened by device sign-in (a TV), by
+// another app's key, or with no record of how it was opened can't make one,
+// list the waiting ones, or withdraw one; the person's own password session
+// can do all three. Regression: a shared TV's session listed and withdrew
+// the account's waiting approvals.
 func TestDevicePreapprovalSessionRuleDB(t *testing.T) {
 	svc, pool, userID, name := deviceLoginTestService(t)
 	grant, err := NewAppKeyRepository(pool).InsertDeviceKey(t.Context(), NewDeviceKey{UserID: userID, PublicKey: newAppPublicKey(t),
@@ -431,6 +434,7 @@ func TestDevicePreapprovalSessionRuleDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	owner := preapprovalApprover(t, svc, userID, nil, nil)
 	for _, tc := range []struct {
 		name, via string
 		deviceKey *string
@@ -439,6 +443,7 @@ func TestDevicePreapprovalSessionRuleDB(t *testing.T) {
 		{name: "password", via: models.SessionOpenedPassword, allowed: true},
 		{name: "device sign-in", via: models.SessionOpenedDeviceLogin},
 		{name: "another app's key", via: models.SessionOpenedAppKey, deviceKey: &grant.ID},
+		{name: "no record", via: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			session := models.AuthSession{ID: uuid.New().String(), UserID: userID, DeviceName: "caller",
@@ -447,10 +452,29 @@ func TestDevicePreapprovalSessionRuleDB(t *testing.T) {
 				t.Fatal(err)
 			}
 			ctx := WithClaims(t.Context(), &Claims{UserID: userID, SessionID: session.ID, TokenType: TokenTypeAccess})
+			refused := func(op string, err error) {
+				t.Helper()
+				if tc.allowed != (err == nil) || (!tc.allowed && !errors.Is(err, ErrSessionNotAllowed)) {
+					t.Fatalf("%s from a %s session = %v", op, tc.name, err)
+				}
+			}
 			_, binding := preapprovalSecret(t)
 			_, err := svc.Preapprove(ctx, DevicePreapprovalInput{DeviceName: name(tc.name), Binding: binding}, userID)
-			if tc.allowed != (err == nil) || (!tc.allowed && !errors.Is(err, ErrSessionNotAllowed)) {
-				t.Fatalf("preapprove from a %s session = %v", tc.name, err)
+			refused("preapprove", err)
+			_, err = svc.ListPreapprovals(ctx, userID)
+			refused("list", err)
+			_, binding = preapprovalSecret(t)
+			waiting, err := svc.Preapprove(owner, DevicePreapprovalInput{DeviceName: name(tc.name + " waiting"), Binding: binding}, userID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			refused("withdraw", svc.RevokePreapproval(ctx, userID, waiting.ID))
+			want := DeviceLoginStatusDenied
+			if !tc.allowed {
+				want = DeviceLoginStatusApproved
+			}
+			if got := preapprovalStatus(t, pool, waiting.ID); got != want {
+				t.Fatalf("after withdraw from a %s session: status %s, want %s", tc.name, got, want)
 			}
 		})
 	}
