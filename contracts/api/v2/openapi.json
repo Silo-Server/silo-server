@@ -107,6 +107,60 @@
         ],
         "type": "object"
       },
+      "AccountAtRisk": {
+        "additionalProperties": false,
+        "properties": {
+          "break_glass": {
+            "type": "boolean"
+          },
+          "has_password": {
+            "description": "Whether the account has a usable local password, whatever the server's local password setting",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "The account's ID",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "is_owner": {
+            "type": "boolean"
+          },
+          "role": {
+            "enum": [
+              "admin",
+              "user"
+            ],
+            "type": "string"
+          },
+          "sign_in_link_expires_at": {
+            "description": "When the account's live, unused sign-in link expires; null for none. This server makes no sign-in links yet, so it is always null",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "username": {
+            "description": "The account's username, or its email when it has none",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "role",
+          "is_owner",
+          "break_glass",
+          "has_password",
+          "sign_in_link_expires_at"
+        ],
+        "type": "object"
+      },
       "AccountIdentity": {
         "additionalProperties": false,
         "properties": {
@@ -2083,7 +2137,7 @@
             ]
           },
           "break_glass": {
-            "description": "Make the admin account a break-glass account, which keeps local password sign-in while the server turns it off, or clear it. Only admins may hold it, and only the server Owner may set or clear it (403 permission_denied otherwise); clearing the last usable one while local password sign-in is off is 409 break_glass_required",
+            "description": "Make the admin account a break-glass account, which keeps local password sign-in while the server turns it off, or clear it. Only admins may hold it, and only the server Owner may set or clear it (403 permission_denied otherwise); clearing the last usable one while local password sign-in is off is 409 break_glass_required; setting it, while local password sign-in is off, on an account whose Silo app keys would then be its only way in (no usable password, no sign-in provider account) is 409 last_sign_in_method",
             "type": "boolean"
           },
           "download_allowed": {
@@ -58477,6 +58531,22 @@
         "required": [
           "kind",
           "id"
+        ],
+        "type": "object"
+      },
+      "SignInRiskOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "Every account the change leaves at risk, in username order. Not paged: it holds only accounts that sign in with keys and have no password or provider identity that works",
+            "items": {
+              "$ref": "#/components/schemas/AccountAtRisk"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
         ],
         "type": "object"
       },
@@ -138682,7 +138752,7 @@
         "x-silo-service-backed": true
       },
       "put": {
-        "description": "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required.",
+        "description": "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required. Turning it off while any account holds app keys and has no usable password and no sign-in provider account is 409 last_sign_in_method, whose detail names the accounts (listSignInAccountsAtRisk with local_passwords_off lists them). Turning app keys off (auth.app_key_sign_in off, or demo.enabled on) while any account signs in only with its keys is 409 last_sign_in_method, naming them (listSignInAccountsAtRisk with app_keys_off); otherwise every login session a key opened ends in the same transaction as the write.",
         "operationId": "updateAdminSettings",
         "parameters": [
           {
@@ -139709,7 +139779,7 @@
         "x-silo-service-backed": true
       },
       "put": {
-        "description": "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required.",
+        "description": "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required. Turning it off while any account holds app keys and has no usable password and no sign-in provider account is 409 last_sign_in_method, whose detail names the accounts (listSignInAccountsAtRisk with local_passwords_off lists them). Turning app keys off (auth.app_key_sign_in off, or demo.enabled on) while any account signs in only with its keys is 409 last_sign_in_method, naming them (listSignInAccountsAtRisk with app_keys_off); otherwise every login session a key opened ends in the same transaction as the write.",
         "operationId": "updateAdminSetting",
         "parameters": [
           {
@@ -139955,6 +140025,164 @@
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/sign-in/accounts-at-risk": {
+      "get": {
+        "description": "app_keys_off lists the enabled accounts whose Silo app keys sign in now and that have no password that signs in and no sign-in provider account: with app keys off they have no way in. updateAdminSettings refuses turning app keys off while it lists any account. The list is the same while app keys are already off, where it names the accounts that still have no way in. local_passwords_off lists the enabled accounts that hold app keys and have no usable password and no sign-in provider account: afterwards their keys would be their only way in, or they would have none, and only linking a provider account takes one off the list. updateAdminSettings refuses turning local passwords off while it lists any account.",
+        "operationId": "listSignInAccountsAtRisk",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The switch going off: app_keys_off for auth.app_key_sign_in, local_passwords_off for auth.local_password_login",
+            "explode": false,
+            "in": "query",
+            "name": "change",
+            "required": true,
+            "schema": {
+              "description": "The switch going off: app_keys_off for auth.app_key_sign_in, local_passwords_off for auth.local_password_login",
+              "enum": [
+                "app_keys_off",
+                "local_passwords_off"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignInRiskOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the accounts a sign-in switch change would leave with no way in.",
+        "tags": [
+          "admin-settings"
+        ],
+        "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
       }
     },

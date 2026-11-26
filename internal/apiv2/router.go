@@ -290,6 +290,7 @@ type Dependencies struct {
 	SubtitleUploads       SubtitleUploadService
 	SubtitleSync          SubtitleSyncAPI
 	AdminSettingsWrite    AdminSettingsWriteService
+	AdminSignInRisk       AdminSignInRiskService
 	PluginContent         PluginContentService
 	SubtitleAICancel      SubtitleAICancelService
 	SubtitleAICreate      SubtitleAICreateService

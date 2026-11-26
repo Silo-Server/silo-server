@@ -641,6 +641,7 @@ func registerAll(reg *Registry) {
 	registerAdminTelemetryParity(reg)
 	registerAdminSettingsInspection(reg)
 	registerAdminSettingsWrite(reg)
+	registerAdminSignInRisk(reg)
 	registerAdminSettingsChecks(reg)
 	registerChatGPT(reg)
 	registerAdminAIProviders(reg)

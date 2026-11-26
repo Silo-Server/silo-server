@@ -6,12 +6,14 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/demomode"
 	"github.com/Silo-Server/silo-server/internal/serversettings"
@@ -95,11 +97,40 @@ func TestAppKeySwitchWriteEndsKeySessionsDB(t *testing.T) {
 	}
 
 	h := &AdminHandler{SettingsRepo: serversettings.NewServerSettingsRepo(pool), pool: pool}
+	if existing, err := h.AccountsAtRisk(ctx, auth.ChangeAppKeysOff); err != nil || len(existing) > 0 {
+		t.Skipf("accounts that sign in only with keys already in the database (%v): every switch-off would be refused", err)
+	}
+	// keysOnly makes an account with a key and no password or provider, so
+	// turning app keys off is refused, and returns a function removing it.
+	keysOnly := func(t *testing.T) func() {
+		t.Helper()
+		var id int
+		if err := pool.QueryRow(ctx, `INSERT INTO users (username, email, role, enabled, local_password_login_enabled)
+			VALUES ($1, $2, 'user', true, false) RETURNING id`, "keysonly-"+suffix, "keysonly-"+suffix+"@example.invalid").Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		public := make([]byte, 65)
+		if _, err := rand.Read(public); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO auth_device_keys (id, user_id, public_key, key_id, kind, name, enrolled_via)
+			VALUES ($1, $2, $3, $4, 'device', 'Phone', 'app_code')`, uuid.NewString(), id, public, hex.EncodeToString(public[:16])); err != nil {
+			t.Fatal(err)
+		}
+		return func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, id) }
+	}
 	for _, tc := range []struct {
-		name   string
-		write  func() error
-		failed bool
+		name    string
+		write   func() error
+		failed  bool
+		refused bool
 	}{
+		{name: "batch refused with a keys-only account", refused: true, write: func() error {
+			return saveAdminSetting(t, h, config.AuthAppKeySignInSettingKey, "false", false)
+		}},
+		{name: "single key refused with a keys-only account", refused: true, write: func() error {
+			return saveAdminSetting(t, h, config.AuthAppKeySignInSettingKey, "false", true)
+		}},
 		{name: "batch", write: func() error { return saveAdminSetting(t, h, config.AuthAppKeySignInSettingKey, "false", false) }},
 		{name: "single key", write: func() error { return saveAdminSetting(t, h, config.AuthAppKeySignInSettingKey, "false", true) }},
 		{name: "demo mode on", write: func() error { return saveAdminSetting(t, h, demomode.SettingKey, demomode.OnValue, true) }},
@@ -116,6 +147,23 @@ func TestAppKeySwitchWriteEndsKeySessionsDB(t *testing.T) {
 			reset(t)
 			own, app := session(t, "app_key", &ownKey), session(t, "app_key", &appKey)
 			password, deviceSignIn := session(t, "password", nil), session(t, "device_login", nil)
+			if tc.refused {
+				remove := keysOnly(t)
+				err := tc.write()
+				remove()
+				requireAdminError(t, err, 409, "last_sign_in_method")
+				if !strings.Contains(err.Error(), "keysonly-"+suffix) {
+					t.Fatalf("refusal %v does not name the account", err)
+				}
+				var stored int
+				if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM server_settings WHERE key = $1`, config.AuthAppKeySignInSettingKey).Scan(&stored); err != nil || stored != 0 {
+					t.Fatalf("refused write stored the setting (%d, %v)", stored, err)
+				}
+				if !live(t, own) || !live(t, app) {
+					t.Fatal("a refused write ended key sessions")
+				}
+				return
+			}
 			err := tc.write()
 			if tc.failed {
 				requireAdminError(t, err, 400, "")

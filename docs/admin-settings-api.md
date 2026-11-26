@@ -103,6 +103,24 @@ keys, so a stale validator still answers 412. Turning
 `auth.local_password_login` off while no enabled break-glass administrator can
 sign in with a password is `409 break_glass_required`.
 
+Two more refusals keep every account a way in, both `409 last_sign_in_method`
+with a detail that names the accounts (the first ten, then how many more):
+
+- Turning `auth.local_password_login` off while any enabled account holds Silo
+  app keys and has no usable password and no sign-in provider account. Its keys
+  would be its only way in afterwards, or it would have none, so the detail
+  names one remedy: link a provider account for each.
+- Turning app keys off (`auth.app_key_sign_in` off, or `demo.enabled` on) while
+  any enabled account signs in only with its keys. Otherwise the write ends
+  every login session a key opened, in the same transaction.
+
+`GET /admin/sign-in/accounts-at-risk?change=app_keys_off|local_passwords_off`
+(`listSignInAccountsAtRisk`, acting admin) lists those accounts with their id,
+username, role, `is_owner`, `break_glass`, `has_password` and
+`sign_in_link_expires_at` (always null on this server for now). The app keys
+list is the same while app keys are already off, where it names the accounts
+that still have no way in. It is not paged.
+
 Both writes are non-retryable. Enabling diagnostics can probe storage before the
 transaction, a change to the Redis connection connects to Redis before it (see
 [saving the Redis connection](#saving-the-redis-connection)), and runtime

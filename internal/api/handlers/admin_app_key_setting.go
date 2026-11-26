@@ -19,11 +19,13 @@ func appKeySwitch(values map[string]string) bool {
 
 // checkAppKeySetting applies a settings write that turns the app key switch
 // off (auth.app_key_sign_in going off, or demo mode going on, while the other
-// leaves keys on): every login session a key opened ends in the write's own
-// transaction, which holds the settings lock, so the write and the sweep
-// commit together or not at all, and a key path waiting on the lock reads
-// the switch off when it gets it. before and after are the effective values.
-// Turning the switch on needs nothing: keys were never revoked.
+// leaves keys on). It refuses while an account would be left with no way in
+// (auth.CheckAppKeysOff, which names them). Otherwise every login session a
+// key opened ends in the write's own transaction, which holds the settings
+// lock, so the write and the sweep commit together or not at all, and a key
+// path waiting on the lock reads the switch off when it gets it. before and
+// after are the effective values. Turning the switch on needs nothing: keys
+// were never revoked.
 func (h *AdminHandler) checkAppKeySetting(ctx context.Context, tx pgx.Tx, before, after map[string]string) error {
 	if !appKeySwitch(before) || appKeySwitch(after) {
 		return nil
@@ -33,10 +35,22 @@ func (h *AdminHandler) checkAppKeySetting(ctx context.Context, tx pgx.Tx, before
 		// store without one (a test fake) gets here.
 		return ErrAdminSettingsUnavailable
 	}
+	if err := auth.CheckAppKeysOff(ctx, tx); err != nil {
+		return breakGlassError(err)
+	}
 	ended, err := auth.EndAppKeySessionsTx(ctx, tx)
 	if err != nil {
 		return err
 	}
 	slog.InfoContext(ctx, "app key switch turned off; ending key sessions", "component", "auth", "sessions", ended)
 	return nil
+}
+
+// AccountsAtRisk lists the accounts change would leave with no way in, for
+// the owner's settings page (auth.AccountsAtRisk).
+func (h *AdminHandler) AccountsAtRisk(ctx context.Context, change auth.SignInChange) ([]auth.AccountAtRisk, error) {
+	if h.pool == nil {
+		return nil, ErrAdminSettingsUnavailable
+	}
+	return auth.AccountsAtRisk(ctx, h.pool, change)
 }

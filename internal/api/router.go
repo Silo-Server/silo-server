@@ -3029,6 +3029,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminJellyfinCompatWeb = adminHandler
 		v2deps.AdminSettingsInspection = adminHandler
 		v2deps.AdminSettingsWrite = adminHandler
+		v2deps.AdminSignInRisk = adminHandler
 		v2deps.AdminSettingsChecks = adminHandler
 		v2deps.AdminAIProviders = adminHandler
 		adminHandler.ChatGPT = chatGPT

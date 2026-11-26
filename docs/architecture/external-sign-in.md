@@ -204,6 +204,21 @@ ordered against each other.
   clearing, demoting, disabling, removing password sign-in from or deleting the
   last such account, are refused with `break_glass_required`. Both sides take
   the server-settings advisory lock, so they cannot pass each other's check.
+- Silo app keys are never an account's only way in (app-keys.md, "Keys are
+  never the only way in"). Turning the switch off is also refused, with
+  `last_sign_in_method`, while any enabled account holds app keys and has no
+  usable password and no provider identity it can sign in with; the detail
+  names those accounts. Afterwards a key that is not provider-bound works only
+  for a break-glass account, so such an account would be left with its keys as
+  its only way in, or with none. A password would not help it once local
+  passwords are off, so the refusal names one remedy: link a provider account
+  for each. The break-glass check runs first. While the switch is off, an
+  administrator change that would leave a break-glass admin with keys as its
+  only way in (setting the flag on an account with keys and no usable password
+  or provider identity, or turning such an account's password sign-in off) is
+  refused the same way. A person's own unlink of their last usable provider
+  account is refused with `last_sign_in_method` whatever keys they hold; an
+  administrator's unlink stays allowed.
 - Recovery from a shell with the server's `DATABASE_URL`:
   `silo auth local-login enable` turns the switch back on;
   `silo auth local-login enable -user <name or email>` turns one account's

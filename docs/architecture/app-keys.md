@@ -837,6 +837,37 @@ the provider on the server's site and using "Open in Silo"
 (`POST /auth/app-codes`), so the keys enroll against that identity. Creating
 and resending invitations stays refused while local passwords are off.
 
+### Keys are never the only way in
+
+Every account keeps a way to sign in that is not its app keys: a password, or
+a sign-in provider account. Two switches could break that, and both refuse a
+change that would, with `last_sign_in_method` and a detail naming the
+accounts (`auth.AccountsAtRiskError`). One query decides who is at risk
+(`auth.AccountsAtRisk`), and `GET /admin/sign-in/accounts-at-risk` serves the
+same list to the settings page:
+
+- **App keys going off**: an enabled account whose keys sign in now and that
+  has no password that signs in and no provider identity it can sign in with.
+  With the switch off it would have no way in, so the write is refused until
+  it gets a password or a provider account. The list doesn't depend on the
+  switch, so while app keys are already off it names the accounts that still
+  have no way in.
+- **Local passwords going off**: an enabled account that holds a working key
+  and has no usable password and no provider identity. Afterwards its keys
+  would be its only way in (a break-glass admin) or it would have none, and a
+  password would not sign it in either, so only linking a provider takes it off
+  the list.
+
+The facts are SQL fragments in `internal/auth` (`sign_in_risk.go`), each tied
+to the Go check it mirrors: a usable password is `HasLocalPassword`; a usable
+provider identity is an identity at an enabled installation with an enabled
+sign-in binding (the unlink guard's rule); a working key follows
+`keySignInPolicy` (a local key under the local password rule, a person key
+only on an account that isn't an administrator's, a provider-bound key while
+its identity's installation is enabled; a waiting key is no way in). A full
+restore lists the accounts it brings back with no way in with the same SQL
+(`auth.AccountHasNoWayInSQL`), over every enabled account.
+
 ### Sessions that can't manage keys
 
 `GET /auth/keys/session` answers what the caller's session may do:

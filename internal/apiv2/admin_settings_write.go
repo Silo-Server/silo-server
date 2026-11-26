@@ -102,9 +102,11 @@ func registerAdminSettingsWrite(reg *Registry) {
 	op := func(path, id, summary string) Operation {
 		o := Operation{Operation: humaOp("PUT", Prefix+"/admin/settings"+path, id, "admin-settings", summary), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyNonRetryable}
 		o.MaxBodyBytes = 1 << 20
-		// Turning auth.local_password_login off without a usable
-		// break-glass admin is refused.
-		o.Description = "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required."
+		// Turning a sign-in switch off is refused while it would leave
+		// an account without a way in.
+		o.Description = "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required. " +
+			"Turning it off while any account holds app keys and has no usable password and no sign-in provider account is 409 last_sign_in_method, whose detail names the accounts (listSignInAccountsAtRisk with local_passwords_off lists them). " +
+			"Turning app keys off (auth.app_key_sign_in off, or demo.enabled on) while any account signs in only with its keys is 409 last_sign_in_method, naming them (listSignInAccountsAtRisk with app_keys_off); otherwise every login session a key opened ends in the same transaction as the write."
 		o.Errors = append(o.Errors, http.StatusConflict)
 		return o
 	}

@@ -175,10 +175,13 @@ func usableBreakGlassCount(ctx context.Context, db rowQuerier, excludeID int) (i
 }
 
 // CheckLocalLoginSettingChange refuses turning local password sign-in off
-// while no break-glass admin could still sign in. The caller runs it inside
-// the settings mutation, which already holds the settings lock; before and
-// after are the effective values.
-func CheckLocalLoginSettingChange(ctx context.Context, db rowQuerier, before, after string) error {
+// while no break-glass admin could still sign in (ErrBreakGlassRequired,
+// checked first), and while any account holds app keys and has no usable
+// password and no provider identity (*AccountsAtRiskError, naming them):
+// afterwards its keys would be its only way in, or it would have none. The
+// caller runs it inside the settings mutation, which already holds the
+// settings lock; before and after are the effective values.
+func CheckLocalLoginSettingChange(ctx context.Context, db dbQuerier, before, after string) error {
 	wasOn := settingBool(before, true)
 	isOn := settingBool(after, true)
 	if !wasOn || isOn {
@@ -191,7 +194,7 @@ func CheckLocalLoginSettingChange(ctx context.Context, db rowQuerier, before, af
 	if count == 0 {
 		return ErrBreakGlassRequired
 	}
-	return nil
+	return refuseAccountsAtRisk(ctx, db, ChangeLocalPasswordsOff)
 }
 
 func settingBool(value string, fallback bool) bool {

@@ -394,6 +394,12 @@
 ./internal/auth TestAppKeySwitchOffEndsKeySessionsDB
 ./internal/auth TestKeySignInRacesSwitchOffDB
 ./internal/api/handlers TestAppKeySwitchWriteEndsKeySessionsDB
+# Keys are never the only way in: who each switch change leaves at risk, the
+# refusals that name them, and the restore's list of accounts with no way in.
+./internal/auth TestAccountsAtRiskDB
+./internal/auth TestLocalLoginOffRefusesKeysOnlyDB
+./internal/auth TestUnlinkOnlyProviderWithKeysRefusedDB
+./internal/backup TestStrandedAccountsCoverEveryAccountDB
 ./internal/auth TestGrantRedeemDB
 ./internal/auth TestGrantRedeemRefusalsDB
 ./internal/auth TestGrantRedeemConcurrentDB

@@ -5483,7 +5483,7 @@ export interface paths {
     get: operations["getAdminStoredSettings"];
     /**
      * Validate and merge captured settings under the existing transaction guard; prerequisite probes and runtime notifications are not replayable receipts.
-     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required.
+     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required. Turning it off while any account holds app keys and has no usable password and no sign-in provider account is 409 last_sign_in_method, whose detail names the accounts (listSignInAccountsAtRisk with local_passwords_off lists them). Turning app keys off (auth.app_key_sign_in off, or demo.enabled on) while any account signs in only with its keys is 409 last_sign_in_method, naming them (listSignInAccountsAtRisk with app_keys_off); otherwise every login session a key opened ends in the same transaction as the write.
      */
     put: operations["updateAdminSettings"];
     post?: never;
@@ -5504,7 +5504,7 @@ export interface paths {
     get: operations["getAdminSetting"];
     /**
      * Validate and replace one setting with the established single-key validation rules and transaction guard.
-     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required.
+     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required. Turning it off while any account holds app keys and has no usable password and no sign-in provider account is 409 last_sign_in_method, whose detail names the accounts (listSignInAccountsAtRisk with local_passwords_off lists them). Turning app keys off (auth.app_key_sign_in off, or demo.enabled on) while any account signs in only with its keys is 409 last_sign_in_method, naming them (listSignInAccountsAtRisk with app_keys_off); otherwise every login session a key opened ends in the same transaction as the write.
      */
     put: operations["updateAdminSetting"];
     post?: never;
@@ -5574,6 +5574,26 @@ export interface paths {
     };
     /** Read configured secret key names without returning secret values. */
     get: operations["getAdminSensitiveSettingsStatus"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/sign-in/accounts-at-risk": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the accounts a sign-in switch change would leave with no way in.
+     * @description app_keys_off lists the enabled accounts whose Silo app keys sign in now and that have no password that signs in and no sign-in provider account: with app keys off they have no way in. updateAdminSettings refuses turning app keys off while it lists any account. The list is the same while app keys are already off, where it names the accounts that still have no way in. local_passwords_off lists the enabled accounts that hold app keys and have no usable password and no sign-in provider account: afterwards their keys would be their only way in, or they would have none, and only linking a provider account takes one off the list. updateAdminSettings refuses turning local passwords off while it lists any account.
+     */
+    get: operations["listSignInAccountsAtRisk"];
     put?: never;
     post?: never;
     delete?: never;
@@ -14665,6 +14685,26 @@ export interface components {
        */
       username: string;
     };
+    AccountAtRisk: {
+      break_glass: boolean;
+      /** @description Whether the account has a usable local password, whatever the server's local password setting */
+      has_password: boolean;
+      /**
+       * @description The account's ID
+       * @example 1
+       */
+      id: string;
+      is_owner: boolean;
+      /** @enum {string} */
+      role: "admin" | "user";
+      /**
+       * Format: date-time
+       * @description When the account's live, unused sign-in link expires; null for none. This server makes no sign-in links yet, so it is always null
+       */
+      sign_in_link_expires_at: string | null;
+      /** @description The account's username, or its email when it has none */
+      username: string;
+    };
     AccountIdentity: {
       /**
        * @description Name at the provider; may be empty
@@ -15125,7 +15165,7 @@ export interface components {
        */
       access_group_id?: string | null;
       audio_transcode_allowed?: boolean | null;
-      /** @description Make the admin account a break-glass account, which keeps local password sign-in while the server turns it off, or clear it. Only admins may hold it, and only the server Owner may set or clear it (403 permission_denied otherwise); clearing the last usable one while local password sign-in is off is 409 break_glass_required */
+      /** @description Make the admin account a break-glass account, which keeps local password sign-in while the server turns it off, or clear it. Only admins may hold it, and only the server Owner may set or clear it (403 permission_denied otherwise); clearing the last usable one while local password sign-in is off is 409 break_glass_required; setting it, while local password sign-in is off, on an account whose Silo app keys would then be its only way in (no usable password, no sign-in provider account) is 409 last_sign_in_method */
       break_glass?: boolean;
       download_allowed?: boolean | null;
       download_transcode_allowed?: boolean | null;
@@ -38470,6 +38510,10 @@ export interface components {
       id: string;
       /** @enum {string} */
       kind: "library" | "series" | "season" | "library_collection" | "user_collection";
+    };
+    SignInRiskOutputBody: {
+      /** @description Every account the change leaves at risk, in username order. Not paged: it holds only accounts that sign in with keys and have no password or provider identity that works */
+      items: components["schemas"]["AccountAtRisk"][];
     };
     SignupInputBody: {
       /**
@@ -91795,6 +91839,115 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AdminSensitiveStatus"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listSignInAccountsAtRisk: {
+    parameters: {
+      query: {
+        /** @description The switch going off: app_keys_off for auth.app_key_sign_in, local_passwords_off for auth.local_password_login */
+        change: "app_keys_off" | "local_passwords_off";
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SignInRiskOutputBody"];
         };
       };
       /** @description Bad Request */
