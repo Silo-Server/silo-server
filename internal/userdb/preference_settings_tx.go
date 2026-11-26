@@ -44,7 +44,7 @@ func (tx *preferenceSettingsTx) ListProfileNames(_ context.Context) ([]userstore
 	if err != nil {
 		return nil, fmt.Errorf("listing profile names: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close() //nolint:errcheck // a read-only query: a close error changes nothing the scan returned
 	var out []userstore.ProfileName
 	for rows.Next() {
 		var p userstore.ProfileName
