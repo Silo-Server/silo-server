@@ -399,18 +399,16 @@ func TestCapabilityReadsAnswerForTheSession(t *testing.T) {
 			return body
 		}
 		own, app := read(liveMemberToken), read(liveGrantedAppToken)
-		// A member with a row must be in both answers, as the same kind of
-		// JSON value, before its value means anything: a renamed or dropped
-		// member fails here.
+		// A member with a row must be in both answers, not null, as the same
+		// kind of JSON value, before its value means anything: a renamed,
+		// dropped or nulled member fails here.
 		for key := range capabilityMembers {
 			member, ok := strings.CutPrefix(key, op+" ")
 			if !ok {
 				continue
 			}
-			o, inOwn := own[member]
-			a, inApp := app[member]
-			if !inOwn || !inApp || reflect.TypeOf(o) != reflect.TypeOf(a) {
-				t.Errorf("%s %s: in the person's own answer %v (%T), in another app's %v (%T)", op, member, inOwn, o, inApp, a)
+			if o, a := own[member], app[member]; o == nil || a == nil || reflect.TypeOf(o) != reflect.TypeOf(a) {
+				t.Errorf("%s %s: the person's own answer %v (%T), another app's %v (%T)", op, member, o, o, a, a)
 			}
 		}
 		for member := range own {
@@ -422,14 +420,20 @@ func TestCapabilityReadsAnswerForTheSession(t *testing.T) {
 				t.Errorf("%s %s has no row in capabilityMembers", op, member)
 				continue
 			}
+			o, a := own[member], app[member]
 			allRefused := len(entry.governs) > 0 && !slices.ContainsFunc(entry.governs, func(id string) bool { return !refused[id] })
+			_, boolean := o.(bool)
 			switch {
-			case len(entry.governs) > 0 && !truthy(own[member]):
-				t.Errorf("%s %s: the person's own session reads %v with every feature on", op, member, own[member])
-			case allRefused && truthy(app[member]):
-				t.Errorf("%s %s: another app's session reads %v, but every operation it governs is refused to it", op, member, app[member])
-			case !allRefused && member != "allowed" && !reflect.DeepEqual(app[member], own[member]):
-				t.Errorf("%s %s: another app's session reads %v, the person's own %v", op, member, app[member], own[member])
+			case len(entry.governs) > 0 && boolean && o != true:
+				t.Errorf("%s %s: the person's own session reads %v, want exactly true with every feature on", op, member, o)
+			case len(entry.governs) > 0 && !truthy(o):
+				t.Errorf("%s %s: the person's own session reads %v with every feature on", op, member, o)
+			case allRefused && boolean && a != false:
+				t.Errorf("%s %s: another app's session reads %v, want exactly false: every operation it governs is refused to it", op, member, a)
+			case allRefused && truthy(a):
+				t.Errorf("%s %s: another app's session reads %v, but every operation it governs is refused to it", op, member, a)
+			case !allRefused && !reflect.DeepEqual(a, o):
+				t.Errorf("%s %s: another app's session reads %v, the person's own %v", op, member, a, o)
 			}
 		}
 	}

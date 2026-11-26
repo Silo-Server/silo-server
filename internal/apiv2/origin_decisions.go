@@ -345,6 +345,9 @@ func originGate(decisions OriginDecisions) func(http.Handler) http.Handler {
 			}
 			if stripsDeclaredDevice(kind) {
 				stripDeclaredDevice(r.Header)
+				if o := observationFrom(r.Context()); o != nil {
+					o.clientNamedByGate = true
+				}
 			}
 			if d := decisions.decisionFor(kind); d != nil && d.Verdict != VerdictRefused {
 				next.ServeHTTP(w, r)
@@ -419,11 +422,11 @@ var clientVersionHeaders = map[string]func(string) bool{
 // the app sent it, so the same header family supplies the rest of the client
 // identity (version, build, channel). A version or build stays as declared
 // when it looks like one, and a channel when it is on the known list; any
-// other value is dropped, so it cannot carry a client name into the label. Every other caller has a name dropped from either
-// header when it would be stored as one reading as the reserved name
+// other value is dropped, so it cannot carry a client name into the label.
+// Every other caller has the reserved name itself dropped from either header
 // (playback.IsGrantedAppClientName), so the request proceeds as if it named
-// no client there and nothing else is recorded under it. Like the device strip, this edits the request's shared header map
-// before anything after the gate reads it.
+// no client there. Like the device strip, this edits the request's shared
+// header map before anything after the gate reads it.
 func nameDeclaredClient(h http.Header, grantedApp bool) {
 	if grantedApp {
 		if strings.TrimSpace(h.Get(clientNameHeaders[0])) != "" {

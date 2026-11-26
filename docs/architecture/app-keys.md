@@ -501,32 +501,33 @@ the app used, records that name, and an app that sends none is recorded
 under it too. The label beside the name is built from the version, and the
 full label adds the build and channel, so for such a session, in the headers
 or in the start body's `client_playback_context`, a version or build is kept
-only when it starts with a digit (or `v` and a digit), then letters, digits,
-`.`, `+`, `_` or `-`, at most 32 characters (`playback.LooksLikeClientVersion`),
-and a channel only when it is one of `release`, `stable`, `beta`, `alpha`,
-`rc`, `testflight`, `debug`, `dev`, `nightly`, `canary` or `internal`
-(`playback.IsKnownClientChannel`). Anything else is dropped. A play named
-`Granted App` never gets the Jellyfin badge.
+only as numbers with a couple of known suffixes: an optional `v`, one to
+four dot-separated numbers, then at most two suffixes introduced by `-`, `+`
+or `.`, each digits, a hexadecimal run of 7 to 12 characters (optionally
+after `g`), or one of `alpha`, `beta`, `rc`, `dev`, `pre`, `snapshot`,
+`nightly`, `build`, `a` or `b` with up to six digits; at most 32 characters
+(`playback.LooksLikeClientVersion`). A channel is kept only when it is one
+of `release`, `stable`, `beta`, `alpha`, `rc`, `testflight`, `debug`, `dev`,
+`nightly`, `canary` or `internal` (`playback.IsKnownClientChannel`).
+Anything else is dropped, so what a version may still say is a number with
+one of those suffixes. A play named `Granted App` never gets the Jellyfin
+badge.
 
-Every other caller that declares a name that would be stored as one reading
-as `Granted App` has it dropped: the request proceeds as if it named no
-client in that header. The Jellyfin-compatible and Audiobookshelf-compatible
-listeners apply the same function (`playback.IsGrantedAppClientName`), and
-the request log checks the shorter name it logs the same way. The function
-judges the name as it would be stored (trimmed, controls removed, cut to 128
-characters). It folds it with NFKD and lower case, drops combining marks,
-every character that is not a letter or digit and every default-ignorable
-code point (the Hangul fillers are letters that render as nothing), and maps
-the known look-alikes of the name's letters (Cyrillic, Greek and Armenian
-letters, Latin small capitals and some Latin-extended letters, in one table)
-to the plain letter. The name is reserved when what is left has as many
-characters as `grantedapp`, each one either equal to the letter at its
-position or outside ASCII, with at least one equal. So it catches case,
-spacing, punctuation, invisible characters, padding past the cut, fullwidth
-and mathematical forms, accents, and look-alike letters the table knows. Two
-things still pass: a look-alike spelling that uses no letter the table knows
-and no plain letter of the name, and a name of a different length made to
-look similar. And it says nothing about what is shown beside the name.
+Every other caller that declares `Granted App` itself has it dropped: the
+request proceeds as if it named no client in that header. The
+Jellyfin-compatible and Audiobookshelf-compatible listeners apply the same
+function (`playback.IsGrantedAppClientName`). It compares the name as it
+would be stored (trimmed, controls removed, cut to 128 characters), lower
+cased, with separators, format characters, combining marks and
+default-ignorable code points (the Hangul fillers among them) dropped, to the
+reserved name built the same way. Nothing else is reserved: a different
+letter, symbol or punctuation mark is a different name, however it looks.
+The request log shows `Granted App` only for a request the origin gate named;
+any other request whose logged name is `Granted App` is logged with none.
+The name in these lists is what a client says about itself, except for a
+granted app's, which the server sets; a client that is not a granted app can
+still choose a name that looks like `Granted App`, so the lists are not proof
+of which app played.
 
 Nothing in the server decides anything by the client name: it is shown,
 filtered and grouped on in admin lists, used as a metrics label and logged.

@@ -20,11 +20,11 @@ func TestABSClientIsNeverNamedAsAnotherApp(t *testing.T) {
 		want         string
 	}{
 		{"reserved header", "Granted App", absDeviceInfo{}, "Audiobookshelf"},
-		{"reserved device name", "Plappa", absDeviceInfo{ClientName: "granted app", ClientVersion: "1"}, "Plappa"},
+		{"reserved device name", "Plappa", absDeviceInfo{ClientName: "GRANTED app", ClientVersion: "1"}, "Plappa"},
 		{"reserved header padded past the stored length", "Granted App" + strings.Repeat(" ", 200) + "x", absDeviceInfo{}, "Audiobookshelf"},
 		{"reserved device name padded with zero-width spaces", "Plappa", absDeviceInfo{ClientName: "Granted App" + strings.Repeat("\u200b", 200) + "x"}, "Plappa"},
 		{"reserved header hiding a Hangul filler", "Granted\u3164App", absDeviceInfo{}, "Audiobookshelf"},
-		{"reserved device name in look-alike letters", "Plappa", absDeviceInfo{ClientName: "Gr\u0430nt\u0435\u0501 \u0410\u0440\u0440"}, "Plappa"},
+		{"look-alike device name, kept on purpose", "Plappa", absDeviceInfo{ClientName: "Gr\u0430nted App"}, "Gr\u0430nted App"},
 		{"other name", "Plappa", absDeviceInfo{}, "Plappa"},
 	} {
 		r := httptest.NewRequest(http.MethodPost, "/api/session/local", nil)

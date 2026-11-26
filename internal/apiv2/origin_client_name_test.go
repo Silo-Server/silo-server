@@ -3,7 +3,6 @@ package apiv2
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -16,9 +15,10 @@ import (
 // start hands the playback service is what its session, its history row and
 // the household streams read carry. A session another app's key opened is
 // named playback.GrantedAppClientName whatever it declares, in either header
-// family or none, and keeps the version it declared; the person's own session
-// keeps its name; and any other session that declares the reserved name, or a
-// lookalike, is recorded with no name there. Catches an app naming its plays
+// family or none, and keeps a version-shaped version; the person's own
+// session keeps its name; any other session that declares the reserved name
+// itself (any case, spacing or invisible characters) is recorded with no name
+// there; and a look-alike is kept on purpose. Catches an app naming its plays
 // after the person's own apps, and the person's own session, or anyone else,
 // being recorded as another app. The gate and the header binding are real;
 // the playback service is a fake that records the caller.
@@ -46,13 +46,15 @@ func TestGrantedAppPlaysUnderTheServersClientName(t *testing.T) {
 		{"own session", memberToken, map[string]string{"X-Silo-Client": "Silo Web", "X-Silo-Client-Version": "2.4.0"}, "Silo Web", "2.4.0"},
 		{"own session in the declared header", memberToken, map[string]string{"X-Client-Name": "Silo Android TV", "X-Client-Version": "3.1.0"}, "Silo Android TV", "3.1.0"},
 		{"own session declaring the reserved name", memberToken, map[string]string{"X-Silo-Client": playback.GrantedAppClientName, "X-Silo-Client-Version": "2.4.0"}, "", ""},
-		{"own session declaring a lookalike in the declared header", memberToken, map[string]string{"X-Client-Name": "granted-app", "X-Client-Version": "3.1.0"}, "", "3.1.0"},
+		{"own session declaring the reserved name in the declared header", memberToken, map[string]string{"X-Client-Name": "granted APP", "X-Client-Version": "3.1.0"}, "", "3.1.0"},
 		{"device signed in by code declaring the reserved name", deviceLoginToken, map[string]string{"X-Silo-Client": "GRANTED APP"}, "", ""},
 		{"own session padding the reserved name past the stored length", memberToken, map[string]string{"X-Silo-Client": playback.GrantedAppClientName + strings.Repeat(" ", 200) + "x"}, "", ""},
 		{"own session padding the reserved name with zero-width spaces", memberToken, map[string]string{"X-Silo-Client": playback.GrantedAppClientName + strings.Repeat("\u200b", 200) + "x"}, "", ""},
-		{"own session declaring a look-alike letter", memberToken, map[string]string{"X-Silo-Client": "Gr\u0430nted App"}, "", ""},
+		// A look-alike is a different name and is kept on purpose: a person's
+		// own client can already put any name it likes in the lists.
+		{"own session declaring a look-alike letter, kept on purpose", memberToken, map[string]string{"X-Silo-Client": "Gr\u0430nted App"}, "Gr\u0430nted App", ""},
 		{"own session hiding a Hangul filler in the name", memberToken, map[string]string{"X-Silo-Client": "Granted\u3164App"}, "", ""},
-		{"own session declaring six look-alike letters", memberToken, map[string]string{"X-Silo-Client": "Gr\u0430nt\u0435\u0501 \u0410\u0440\u0440"}, "", ""},
+		{"own session declaring punctuation, kept on purpose", memberToken, map[string]string{"X-Silo-Client": "Granted-App"}, "Granted-App", ""},
 		{"app carrying a name in a version-shaped word", grantedAppToken, map[string]string{"X-Silo-Client": "Silo Web", "X-Silo-Client-Version": "Silo-for-Apple-TV", "X-Silo-Client-Channel": "Silo-for-Apple-TV"}, playback.GrantedAppClientName, ""},
 		// The label is the name and version (build and channel in the full
 		// label), so a version that carries a name would read "Granted App
@@ -112,22 +114,31 @@ func TestGrantedAppStartBodyCarriesNoNameInItsVersion(t *testing.T) {
 	}
 }
 
-// TestRequestLogNeverReadsAsAnotherApp: the request log cuts the client name
-// shorter than it is stored, so a name the gate kept because its stored form
-// does not read as "Granted App" could read as it once cut. The logged value
-// is checked again and left out unless it is the reserved name itself, which
-// only the gate sets. Catches the request log showing another caller as
-// another app.
+// TestRequestLogNeverReadsAsAnotherApp: the request log shows the reserved
+// client name only for a request the origin gate named, a session another
+// app's key opened. A caller that sends it where the gate never runs (a public
+// operation, a refused credential) or sends a longer name the log's shorter
+// cut turns into it is logged with no client name. Catches the request log
+// showing another caller as another app.
 func TestRequestLogNeverReadsAsAnotherApp(t *testing.T) {
-	for sent, want := range map[string]string{
-		playback.GrantedAppClientName + strings.Repeat(" ", 60) + "x": "",
-		playback.GrantedAppClientName:                                 playback.GrantedAppClientName,
-		"Silo Web":                                                    "Silo Web",
+	buf := captureLogs(t)
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	reserved := `"client_name":"` + playback.GrantedAppClientName + `"`
+	for _, tc := range []struct {
+		name, path, sent string
+		headers          map[string]string
+		logged           bool
+	}{
+		{"public operation", "/system/info", playback.GrantedAppClientName, nil, false},
+		{"refused credential", "/account/me", playback.GrantedAppClientName, nil, false},
+		{"name the log's cut turns into it", "/system/info", playback.GrantedAppClientName + strings.Repeat(" ", 60) + "x", nil, false},
+		{"another app's session", "/account/me", "Silo Web", bearer(grantedAppToken), true},
 	} {
-		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		r.Header.Set("X-Silo-Client", sent)
-		if got, _ := clientIdentity(r); got != want {
-			t.Errorf("%q logged as %q, want %q", sent, got, want)
+		buf.Reset()
+		headers := with(tc.headers, "X-Silo-Client", tc.sent)
+		do(t, h, http.MethodGet, Prefix+tc.path, "", headers)
+		if got := strings.Contains(buf.String(), reserved); got != tc.logged {
+			t.Errorf("%s: logged as another app %v, want %v: %s", tc.name, got, tc.logged, buf.String())
 		}
 	}
 }

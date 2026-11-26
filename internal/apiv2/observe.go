@@ -116,6 +116,10 @@ type observation struct {
 	errorCode   string
 	authClass   string
 	userID      *int
+	// clientNamedByGate marks a request whose client name the origin gate set
+	// (a session another app's key opened); only then is the reserved name
+	// logged.
+	clientNamedByGate bool
 }
 
 type observationKey struct{}
@@ -308,7 +312,7 @@ func report(r *http.Request, o *observation, status int, aborted, hijacked bool,
 	// Read when the line is written, not when the request arrives: the origin
 	// gate names the client of a session another app's key opened, and drops
 	// that name from every other caller, on the request's shared headers.
-	name, version := clientIdentity(r)
+	name, version := clientIdentity(r, o.clientNamedByGate)
 	major := strconv.Itoa(APIMajor)
 	method := methodLabel(r.Method)
 	class := statusClass(status)
@@ -379,15 +383,18 @@ func statusClass(status int) string {
 
 // clientIdentity reads the client's self-reported name and version, clamped
 // to a printable bounded string. The values are opaque: trimmed, length
-// limited, control characters dropped, never parsed or validated. The clamp
-// is shorter than the stored name, so a name the origin gate kept (it reads
-// as the reserved name only after the cut) is checked again as logged and
-// left out unless it is the reserved name itself, which only the gate sets
-// for a session another app's key opened.
-func clientIdentity(r *http.Request) (name, version string) {
-	raw := r.Header.Get("X-Silo-Client")
-	name = clampLabel(raw, maxClientNameLen)
-	if raw != playback.GrantedAppClientName && playback.IsGrantedAppClientName(name) {
+// limited, control characters dropped, never parsed or validated. The
+// reserved client name is logged only for a request the origin gate named
+// (namedByGate); any other request whose logged name is the reserved name is
+// logged with none, whether it never reached the gate (a public operation, a
+// refused credential, an unknown route) or the log's shorter cut left only
+// the reserved name.
+func clientIdentity(r *http.Request, namedByGate bool) (name, version string) {
+	name = clampLabel(r.Header.Get("X-Silo-Client"), maxClientNameLen)
+	switch {
+	case namedByGate:
+		name = playback.GrantedAppClientName
+	case playback.IsGrantedAppClientName(name):
 		name = ""
 	}
 	return name, clampLabel(r.Header.Get("X-Silo-Client-Version"), maxClientVersionLen)
