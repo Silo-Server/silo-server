@@ -3,8 +3,10 @@ import { useState } from "react";
 import type { AdminUser } from "@/api/types";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   type AdminProfileSetEdit,
+  profileSetEditRefusal,
   useAdminUserProfileSetEdits,
   useClearAdminUserProfileSetEdit,
   useDismissAdminUserProfileSetEdit,
@@ -77,7 +79,15 @@ type Pending =
   | { kind: "override"; edit: AdminProfileSetEdit }
   | { kind: "hidden"; edit: AdminProfileSetEdit };
 
-type Notice = { hidden: boolean; profile: string; woken: boolean };
+/**
+ * What the card says after an action: a clear's outcome (whether the
+ * person's phone was told), a name the server refused to put back, or a
+ * record someone else had already cleared.
+ */
+type Notice =
+  | { kind: "cleared"; hidden: boolean; profile: string; woken: boolean }
+  | { kind: "nameTaken"; profile: string; name: string }
+  | { kind: "gone" };
 
 /**
  * Changes made on this server to profiles that come from the person's app.
@@ -94,6 +104,16 @@ export function ProfileSetEditsCard({ user, manage }: { user: AdminUser; manage:
   const [pending, setPending] = useState<Pending | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
 
+  if (edits.isPending) {
+    return (
+      <DetailCard title={t(`${P}.title`)}>
+        <div aria-busy="true" className="space-y-3 px-4 py-4 sm:px-5">
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-full" />
+        </div>
+      </DetailCard>
+    );
+  }
   if (edits.isError) {
     return (
       <DetailCard title={t(`${P}.title`)}>
@@ -125,11 +145,21 @@ export function ProfileSetEditsCard({ user, manage }: { user: AdminUser; manage:
     clear.mutate(target, {
       onSuccess: (result) => {
         setNotice({
+          kind: "cleared",
           hidden: pending.kind === "hidden",
           profile: edit.profile_name,
           woken: result.wake_queued,
         });
         setPending(null);
+      },
+      onError: (err) => {
+        const refusal = profileSetEditRefusal(err);
+        if (refusal === "nameTaken") {
+          setNotice({ kind: "nameTaken", profile: edit.profile_name, name: setValueText(t, edit) });
+        } else if (refusal === "gone") {
+          setNotice({ kind: "gone" });
+        }
+        if (refusal !== null) setPending(null);
       },
     });
   };
@@ -157,9 +187,17 @@ export function ProfileSetEditsCard({ user, manage }: { user: AdminUser; manage:
               setNotice(null);
               setPending({ kind: edit.kind === "hidden" ? "hidden" : "override", edit });
             }}
-            onDismiss={() =>
-              dismiss.mutate({ profileId: edit.profile_id ?? "", field: edit.field ?? "" })
-            }
+            onDismiss={() => {
+              setNotice(null);
+              dismiss.mutate(
+                { profileId: edit.profile_id ?? "", field: edit.field ?? "" },
+                {
+                  onError: (err) => {
+                    if (profileSetEditRefusal(err) === "gone") setNotice({ kind: "gone" });
+                  },
+                },
+              );
+            }}
           />
         ))}
       </DetailCard>
@@ -168,7 +206,7 @@ export function ProfileSetEditsCard({ user, manage }: { user: AdminUser; manage:
         onOpenChange={(next) => (next ? undefined : setPending(null))}
         title={pending ? confirmTitle(t, pending) : ""}
         description={pending ? confirmDescription(t, pending) : ""}
-        confirmLabel={pending?.kind === "hidden" ? t(`${P}.allowAgain`) : t(`${P}.clear`)}
+        confirmLabel={pending ? confirmLabel(t, pending) : ""}
         className={TOUCH_TARGETS}
         isPending={clear.isPending}
         onConfirm={confirm}
@@ -178,6 +216,10 @@ export function ProfileSetEditsCard({ user, manage }: { user: AdminUser; manage:
 }
 
 function noticeText(t: Translate, notice: Notice, name: string): string {
+  if (notice.kind === "gone") return t(`${P}.alreadyCleared`, { name });
+  if (notice.kind === "nameTaken") {
+    return t(`${P}.nameTaken`, { profile: notice.profile, name: notice.name });
+  }
   if (notice.hidden) {
     return notice.woken
       ? t(`${P}.noticeHiddenWoken`, { profile: notice.profile, name })
@@ -195,12 +237,40 @@ function confirmTitle(t: Translate, pending: Pending): string {
   });
 }
 
+/** The set's value of a record's field, as the list shows a value. */
+function setValueText(t: Translate, edit: AdminProfileSetEdit): string {
+  return valueText(t, { ...edit, value: edit.set_value, inherited: false });
+}
+
+/** Whether clearing this record takes the PIN off the profile. */
+function clearRemovesPin(edit: AdminProfileSetEdit): boolean {
+  return edit.field === "pin" && edit.clear_applies && edit.set_value === "clear";
+}
+
+/**
+ * What clearing does, from what the server reported for the record: the
+ * set's value comes back now (clear_applies), with a PIN removed when the
+ * set has none; or, when the server can't put the set's value back, the
+ * field stays as it is until the person's app sends it.
+ */
 function confirmDescription(t: Translate, pending: Pending): string {
   const { edit } = pending;
-  if (pending.kind === "hidden") return t(`${P}.allowDescription`, { profile: edit.profile_name });
-  if (edit.field === "pin") return t(`${P}.clearPin`, { profile: edit.profile_name });
-  if (edit.clear_applies) return t(`${P}.clearNow`, { profile: edit.profile_name });
-  return t(`${P}.clearLater`, { field: fieldLabel(t, edit.field ?? "") });
+  const profile = edit.profile_name;
+  const field = fieldLabel(t, edit.field ?? "");
+  if (pending.kind === "hidden") return t(`${P}.allowDescription`, { profile });
+  if (clearRemovesPin(edit)) return t(`${P}.clearPinRemoves`, { profile });
+  if (edit.field === "pin") return t(`${P}.clearPin`, { profile });
+  if (!edit.clear_applies) return t(`${P}.clearLater`, { field });
+  if (edit.set_resets) return t(`${P}.clearInherit`, { field, profile });
+  if (edit.set_value !== undefined) {
+    return t(`${P}.clearNowValue`, { field, profile, value: setValueText(t, edit) });
+  }
+  return t(`${P}.clearNow`, { profile });
+}
+
+function confirmLabel(t: Translate, pending: Pending): string {
+  if (pending.kind === "hidden") return t(`${P}.allowAgain`);
+  return clearRemovesPin(pending.edit) ? t(`${P}.clearAndRemovePin`) : t(`${P}.clear`);
 }
 
 function EditRow({

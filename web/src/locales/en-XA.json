@@ -98485,6 +98485,20 @@
       "value": " åĝåîñ?~~~~~~⟧"
     }
   ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥåţ çĥåñĝé ŵåš åļŕéåđý çļéåŕéđ, öŕ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " çĥåñĝéđ îţ åĝåîñ. Ţĥé ļîšţ îš ûþ ţö đåţé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.users.detail.profiles.setEdits.changedBy": [
     {
       "type": 0,
@@ -98511,6 +98525,12 @@
     {
       "type": 0,
       "value": "⟦Çļéåŕ~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "⟦Çļéåŕ åñđ ŕéɱöṽé ÞÎÑ~~~~~~~~⟧"
     }
   ],
   "web.admin.users.detail.profiles.setEdits.clearAria": [
@@ -98541,6 +98561,28 @@
       "value": "⟦Çöûļđñ’ţ çļéåŕ ţĥé çĥåñĝé.~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " öñ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ĝöéš ƀåçķ ţö ţĥîš šéŕṽéŕ'š đéƒåûļţ ñöŵ, åš ţĥéîŕ åþþ åšķš. Çĥåñĝéš ƒŕöɱ ţĥéîŕ åþþ åþþļý ţö îţ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.users.detail.profiles.setEdits.clearLater": [
     {
       "type": 0,
@@ -98569,6 +98611,36 @@
       "value": " ĝöéš ƀåçķ ţö ţĥé ṽåļûé ƒŕöɱ ţĥéîŕ åþþ ñöŵ, åñđ çĥåñĝéš ƒŕöɱ ţĥéîŕ åþþ åþþļý ţö îţ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " öñ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ĝöéš ƀåçķ ţö "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": ", ţĥé ṽåļûé ƒŕöɱ ţĥéîŕ åþþ, ñöŵ. Çĥåñĝéš ƒŕöɱ ţĥéîŕ åþþ åþþļý ţö îţ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.users.detail.profiles.setEdits.clearPin": [
     {
       "type": 0,
@@ -98581,6 +98653,28 @@
     {
       "type": 0,
       "value": " ķééþš ţĥé ÞÎÑ ýöû šéţ ûñţîļ ţĥéîŕ åþþ ñéẋţ šéñđš öñé. Åƒţéŕ ţĥåţ, çĥåñĝéš ƒŕöɱ ţĥéîŕ åþþ åþþļý ţö îţ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥéîŕ åþþ šéñđš "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ŵîţĥöûţ å ÞÎÑ, šö çļéåŕîñĝ ŕéɱöṽéš ţĥé ÞÎÑ ýöû šéţ, ñöŵ. Åñýöñé ûšîñĝ ţĥîš åççöûñţ çåñ ţĥéñ öþéñ "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " ŵîţĥöûţ å ÞÎÑ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.users.detail.profiles.setEdits.clearTitle": [
@@ -98763,6 +98857,28 @@
     {
       "type": 0,
       "value": "⟦Çöûļđñ’ţ ļöåđ ţĥé çĥåñĝéš ɱåđé öñ ţĥîš šéŕṽéŕ.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " çåñ’ţ ĝö ƀåçķ ţö ţĥé ñåɱé "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ƒŕöɱ ţĥéîŕ åþþ, ƀéçåûšé åñöţĥéŕ þŕöƒîļé ĥéŕé ĥåš ţĥåţ ñåɱé. Ŕéñåɱé ţĥåţ þŕöƒîļé ƒîŕšţ, ţĥéñ çļéåŕ ţĥîš åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [

@@ -10,7 +10,7 @@ import {
   requireAdminUserAuthority,
 } from "@/api/v2/adminUsers";
 import type { components } from "@/api/v2/schema";
-import { v2, v2ErrorText } from "@/api/v2/request";
+import { V2ProblemError, v2, v2ErrorText } from "@/api/v2/request";
 import { adminKeys, profileKeys } from "@/hooks/queries/keys";
 import { profileFromV2, type ProfileCreate, type ProfileUpdate } from "@/hooks/queries/profiles";
 
@@ -171,6 +171,28 @@ export function useAdminUserProfileSetEdits(userId: number, enabled: boolean) {
   });
 }
 
+/**
+ * Why the server refused a clear or dismissal that the card explains in
+ * words instead of reporting a failure: the record was already gone (cleared
+ * by someone else, or the person changed the field again), or putting the
+ * set's name back would give two profiles one name.
+ */
+export type ProfileSetEditRefusal = "gone" | "nameTaken";
+
+export function profileSetEditRefusal(err: unknown): ProfileSetEditRefusal | null {
+  if (!(err instanceof V2ProblemError)) return null;
+  if (err.status === 404) return "gone";
+  if (err.status === 409) return "nameTaken";
+  return null;
+}
+
+function failedUnlessExplained(fallback: MessageKey) {
+  const report = failed(fallback);
+  return (err: unknown) => {
+    if (profileSetEditRefusal(err) === null) report(err);
+  };
+}
+
 /** What to clear: an override of one field, or a hidden profile. */
 export type ProfileSetClearTarget =
   | { kind: "override"; profileId: string; field: string }
@@ -198,7 +220,7 @@ export function useClearAdminUserProfileSetEdit(userId: number) {
         profileContext: authority,
       });
     },
-    onError: failed("web.admin.users.detail.profiles.setEdits.clearFailed"),
+    onError: failedUnlessExplained("web.admin.users.detail.profiles.setEdits.clearFailed"),
     onSettled: () =>
       Promise.all([
         client.invalidateQueries({
@@ -223,7 +245,7 @@ export function useDismissAdminUserProfileSetEdit(userId: number) {
         profileContext: authority,
       });
     },
-    onError: failed("web.admin.users.detail.profiles.setEdits.dismissFailed"),
+    onError: failedUnlessExplained("web.admin.users.detail.profiles.setEdits.dismissFailed"),
     onSettled: () =>
       client.invalidateQueries({
         queryKey: adminProfileSetEditsKey(userId, adminUserScope(context)),

@@ -90577,6 +90577,20 @@
       "value": " again?"
     }
   ],
+  "web.admin.users.detail.profiles.setEdits.alreadyCleared": [
+    {
+      "type": 0,
+      "value": "That change was already cleared, or "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " changed it again. The list is up to date."
+    }
+  ],
   "web.admin.users.detail.profiles.setEdits.changedBy": [
     {
       "type": 0,
@@ -90599,6 +90613,12 @@
     {
       "type": 0,
       "value": "Clear"
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearAndRemovePin": [
+    {
+      "type": 0,
+      "value": "Clear and remove PIN"
     }
   ],
   "web.admin.users.detail.profiles.setEdits.clearAria": [
@@ -90625,6 +90645,24 @@
       "value": "Couldn’t clear the change."
     }
   ],
+  "web.admin.users.detail.profiles.setEdits.clearInherit": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " on "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " goes back to this server's default now, as their app asks. Changes from their app apply to it again."
+    }
+  ],
   "web.admin.users.detail.profiles.setEdits.clearLater": [
     {
       "type": 1,
@@ -90645,6 +90683,32 @@
       "value": " goes back to the value from their app now, and changes from their app apply to it again."
     }
   ],
+  "web.admin.users.detail.profiles.setEdits.clearNowValue": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " on "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " goes back to "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": ", the value from their app, now. Changes from their app apply to it again."
+    }
+  ],
   "web.admin.users.detail.profiles.setEdits.clearPin": [
     {
       "type": 1,
@@ -90653,6 +90717,28 @@
     {
       "type": 0,
       "value": " keeps the PIN you set until their app next sends one. After that, changes from their app apply to it again."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.clearPinRemoves": [
+    {
+      "type": 0,
+      "value": "Their app sends "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " without a PIN, so clearing removes the PIN you set, now. Anyone using this account can then open "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " without a PIN."
     }
   ],
   "web.admin.users.detail.profiles.setEdits.clearTitle": [
@@ -90823,6 +90909,24 @@
     {
       "type": 0,
       "value": "Couldn’t load the changes made on this server."
+    }
+  ],
+  "web.admin.users.detail.profiles.setEdits.nameTaken": [
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " can’t go back to the name "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " from their app, because another profile here has that name. Rename that profile first, then clear this again."
     }
   ],
   "web.admin.users.detail.profiles.setEdits.noticeHiddenNextSync": [
