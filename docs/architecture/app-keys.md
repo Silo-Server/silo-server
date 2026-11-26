@@ -40,6 +40,33 @@ Each key row records whether the session that enrolled it came from a provider
 identity: `identity_id` while that identity exists, and `provider_bound`, which
 stays true after the identity row is deleted.
 
+Each key row also records `enrolled_ip_address`, the client address of the
+request that enrolled it. It is the value the login session that request opens
+records as `ip_address`: the address the client-address middleware resolved,
+which reads forwarding headers only from `clientip.trusted_proxies` and
+otherwise takes the connection's peer. Replacing the person key opens no
+session and records the same resolved address. The one difference from the
+session row: when the resolver could not tell the client and answered the
+unspecified address (`0.0.0.0` or `::`), the key row stores none, where the
+session row keeps that value. A key enrolled before the column existed, or
+whose address was unknown, has none, and the key lists show an empty
+string. The key lists that show it are refused to a
+session opened by device sign-in or by another app's key, like the session
+list's other sessions' addresses. Like `auth_sessions.ip_address` it is
+personal data, and it travels in backups with the rest of the key row.
+
+Every way a key or an approval in advance comes to exist writes a domain
+audit row on the account in the transaction that makes it, so a rolled-back
+or refused call leaves none: `user.app_keys_enrolled` (enroll from a
+session), `user.person_key_replaced`, `user.device_key_introduced`,
+`user.app_code_issued`, `user.app_code_redeemed` (both kinds of code),
+`user.app_grant_redeemed` and `user.device_sign_in_preapproved`. A row names
+keys by their IDs and an app code by its kind and expiry, never a code, a
+hash or a secret; the enroll and replace rows also carry
+`session_opened_via`, whether the session that made the change was opened by
+a password, a provider or a device key. The fields are listed in
+[admin-api.md](../admin-api.md#account-and-permission-audit-details).
+
 - **A public key is enrolled once per server.** `public_key` and `key_id` are
   unique in each table, and an enrollment also refuses a key already stored in
   the other table. The cross-table check runs under a transaction lock on the
@@ -1209,6 +1236,11 @@ inherits it. A `demo.enabled` that can't be read fails those routes; it is
 never taken as "not a demo". Approving a device sign-in in advance is not behind the switch;
 it carries the ordinary demo restriction (refused for a caller who is not an
 administrator) and the device login capability reports `preapprove: false`.
+The key lists stay open in demo mode, so its visitors can see and revoke
+keys enrolled before it was turned on, but `GET /auth/keys` and
+`GET /auth/keys/pending` answer `enrolled_ip_address` as the empty string to a
+caller who is not an administrator: those keys' addresses are not every
+visitor's to see. The administrator's list is unchanged.
 
 ## Backups
 

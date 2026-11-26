@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -18,7 +19,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/appkeys/appkeystest"
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
+	"github.com/Silo-Server/silo-server/internal/auditmutation/audittest"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
@@ -164,6 +168,47 @@ func TestJoinWithAppCodeDB(t *testing.T) {
 				t.Fatalf("second redeem: %v", err)
 			}
 		})
+	}
+}
+
+// A join records the keys it enrolled on the new account: one audit row
+// naming them and the code's kind, never the code, and both key rows carry
+// the request's address, the one the device's session records. Regression:
+// joining through the Silo app added a way in that no audit row showed.
+func TestJoinWithAppCodeRecordsAddedKeysDB(t *testing.T) {
+	env := newJoinEnv(t)
+	token, _ := env.invite(t, models.RoleUser)
+	issued, err := env.svc.IssueAppCode(t.Context(), AppCodeRequest{Token: token, Username: env.name("joiner-audit")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, _ := audittest.Context(t, env.pool, audittest.Request{Method: http.MethodPost, Pattern: "/api/v2/auth/app-codes/redeem",
+		Path: "/api/v2/auth/app-codes/redeem", OptIn: true})
+	challenge, _, err := env.signIn.IssueChallenge(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	person, device := appkeystest.NewKey(t), appkeystest.NewKey(t)
+	result, err := env.signIn.RedeemAppCode(ctx, auth.KeyRedeemRequest{PersonKey: person.Public(), KeyRequest: auth.KeyRequest{
+		Envelope: person.Redeem(t, device, joinTestServerID, challenge, issued.Code, time.Now()), ServerID: joinTestServerID, IP: clientip.FromContext(ctx)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := audittest.One(t, env.pool, auditmutation.ActionAppCodeRedeemed, auditmutation.TargetUser, strconv.Itoa(result.User.ID))
+	for field, want := range map[string]string{"app_code_kind": `"join"`, "device_key_id": `"` + result.DeviceID + `"`, "person_key_kid": `"` + person.Public().KeyID() + `"`} {
+		if got := audittest.Value(row.Change(t, field).After); got != want {
+			t.Fatalf("%s = %s, want %s", field, got, want)
+		}
+	}
+	row.AssertNoSecrets(t, issued.Code)
+	var sessionIP, personIP, deviceIP string
+	if err := env.pool.QueryRow(t.Context(), `SELECT host(s.ip_address), host(p.enrolled_ip_address), host(d.enrolled_ip_address)
+		FROM auth_sessions s, auth_person_keys p, auth_device_keys d
+		WHERE s.id = $1 AND p.user_id = $2 AND d.id = $3::uuid`, result.Pair.SessionID, result.User.ID, result.DeviceID).Scan(&sessionIP, &personIP, &deviceIP); err != nil {
+		t.Fatal(err)
+	}
+	if sessionIP == "" || personIP != sessionIP || deviceIP != sessionIP {
+		t.Fatalf("addresses: session %q, person key %q, device key %q", sessionIP, personIP, deviceIP)
 	}
 }
 

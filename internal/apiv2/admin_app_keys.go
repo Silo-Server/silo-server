@@ -141,7 +141,7 @@ func (reg *Registry) listAdminUserAppKeys(ctx context.Context, in *AdminAppKeysI
 	out := AdminAppKeyList{Devices: make([]AdminAppDeviceKey, 0, len(keys.Devices))}
 	if person := keys.Person; person != nil {
 		out.PersonKey = &AdminAppPersonKey{
-			AppPersonKey:  AppPersonKey{KeyID: person.KeyID, EnrolledAt: NewInstant(person.CreatedAt)},
+			AppPersonKey:  appPersonKeyOf(person.AppPersonKey),
 			EnrolledBy:    enrolledBy(person.EnrolledVia),
 			ProviderBound: person.ProviderBound,
 			IdentityGone:  person.IdentityGone,

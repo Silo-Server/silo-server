@@ -7,12 +7,14 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Silo-Server/silo-server/internal/appkeys"
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -240,6 +242,7 @@ func (a *AppKeySignIn) IssueSessionAppCode(ctx context.Context, claims *Claims, 
 	}
 	binding := unlocked.binding()
 	var out IssuedAppCode
+	var audit *auditmutation.Entry
 	err = a.inTx(ctx, func(tx pgx.Tx) error {
 		user, err := lockEnabledUser(ctx, tx, claims.UserID)
 		if err != nil {
@@ -275,11 +278,16 @@ func (a *AppKeySignIn) IssueSessionAppCode(ctx context.Context, claims *Claims, 
 		if !chain.binding().same(binding) {
 			return ErrSessionRevoked
 		}
-		return nil
+		// The code's kind and expiry only: never the code or its hash.
+		audit, err = recordKeyAdded(ctx, tx, auditmutation.ActionAppCodeIssued, user.ID, http.StatusOK, keyAdded{
+			auditFieldAppCodeKind: appCodeKindSession, auditFieldExpiresAt: auditInstant(out.ExpiresAt),
+		})
+		return err
 	})
 	if err != nil {
 		return IssuedAppCode{}, err
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	return out, nil
 }
 
@@ -382,17 +390,19 @@ func (a *AppKeySignIn) RedeemAppCode(ctx context.Context, req KeyRedeemRequest) 
 		return nil, err
 	}
 	out := &KeySignInResult{ReplyKey: *payload.ReplyKey, Challenge: payload.Challenge}
+	var audit *auditmutation.Entry
 	switch {
 	case code.kind == appCodeKindJoin && code.invitationID != nil:
-		err = a.redeemJoin(ctx, req, payload, hash, code, out)
+		audit, err = a.redeemJoin(ctx, req, payload, hash, code, out)
 	case code.kind == appCodeKindSession && code.userID != nil:
-		err = a.redeemSession(ctx, req, payload, hash, code, out)
+		audit, err = a.redeemSession(ctx, req, payload, hash, code, out)
 	default:
 		err = ErrAppCodeInvalid
 	}
 	if err != nil {
 		return nil, err
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	return a.signedIn(ctx, out), nil
 }
 
@@ -401,12 +411,13 @@ func (a *AppKeySignIn) RedeemAppCode(ctx context.Context, req KeyRedeemRequest) 
 // other invitations the claim supersedes and the new account's rows. Every
 // invitation claim and every app code issue takes the settings lock before
 // any invitation or code row, so they run one after the other.
-func (a *AppKeySignIn) redeemJoin(ctx context.Context, req KeyRedeemRequest, payload *appkeys.Payload, hash []byte, code appCodeRow, out *KeySignInResult) error {
+func (a *AppKeySignIn) redeemJoin(ctx context.Context, req KeyRedeemRequest, payload *appkeys.Payload, hash []byte, code appCodeRow, out *KeySignInResult) (*auditmutation.Entry, error) {
 	if a.joins == nil {
-		return ErrAppCodeInvalid
+		return nil, ErrAppCodeInvalid
 	}
 	expiry := time.Now().Add(a.service.jwt.RefreshExpiry())
-	return a.inTx(ctx, func(tx pgx.Tx) error {
+	var audit *auditmutation.Entry
+	err := a.inTx(ctx, func(tx pgx.Tx) error {
 		if err := lockServerSettings(ctx, tx); err != nil {
 			return err
 		}
@@ -430,25 +441,33 @@ func (a *AppKeySignIn) redeemJoin(ctx context.Context, req KeyRedeemRequest, pay
 			return err
 		}
 		person, err := insertPersonKeyTx(ctx, tx, NewPersonKey{
-			UserID: user.ID, PublicKey: req.PersonKey, EnrolledVia: models.AppKeyEnrolledAppCode,
+			UserID: user.ID, PublicKey: req.PersonKey, EnrolledVia: models.AppKeyEnrolledAppCode, IP: req.IP,
 		})
 		if err != nil {
 			return keyEnrolledAs(KeyMemberPerson, err)
 		}
-		return a.enrollRedeemedDevice(ctx, tx, user, person, KeyBinding{}, payload, chain.session(req.IP, expiry), PersonKeyEnrolled, out)
+		key, err := a.enrollRedeemedDevice(ctx, tx, user, person, KeyBinding{}, payload, chain.session(req.IP, expiry), PersonKeyEnrolled, out)
+		if err != nil {
+			return err
+		}
+		audit, err = recordKeyAdded(ctx, tx, auditmutation.ActionAppCodeRedeemed, user.ID, http.StatusOK,
+			keyAdded{auditFieldAppCodeKind: appCodeKindJoin}.withDevice(key).withPerson(person, true))
+		return err
 	})
+	return audit, err
 }
 
 // redeemSession enrolls the keys of a session code on its account, bound
 // as the session that issued it was. Lock order: the account, the code,
 // then the provider locks, the keys and the issuing session's row.
-func (a *AppKeySignIn) redeemSession(ctx context.Context, req KeyRedeemRequest, payload *appkeys.Payload, hash []byte, code appCodeRow, out *KeySignInResult) error {
+func (a *AppKeySignIn) redeemSession(ctx context.Context, req KeyRedeemRequest, payload *appkeys.Payload, hash []byte, code appCodeRow, out *KeySignInResult) (*auditmutation.Entry, error) {
 	binding := KeyBinding{IdentityID: code.identityID, ProviderBound: code.providerBound}
 	expiry, err := a.service.keyProviderExpiry(ctx, *code.userID, binding)
 	if err != nil {
-		return sessionIdentityGone(err)
+		return nil, sessionIdentityGone(err)
 	}
-	return a.inTx(ctx, func(tx pgx.Tx) error {
+	var audit *auditmutation.Entry
+	err = a.inTx(ctx, func(tx pgx.Tx) error {
 		user, err := lockEnabledUser(ctx, tx, *code.userID)
 		if err != nil {
 			return err
@@ -460,11 +479,12 @@ func (a *AppKeySignIn) redeemSession(ctx context.Context, req KeyRedeemRequest, 
 		if err != nil {
 			return sessionIdentityGone(err)
 		}
-		person, status, err := redeemPersonKeyTx(ctx, tx, user.ID, req.PersonKey, binding)
+		person, status, personCreated, err := redeemPersonKeyTx(ctx, tx, user.ID, req.PersonKey, binding, req.IP)
 		if err != nil {
 			return keyEnrolledAs(KeyMemberPerson, err)
 		}
-		if err := a.enrollRedeemedDevice(ctx, tx, user, person, binding, payload, chain.session(req.IP, expiry), status, out); err != nil {
+		key, err := a.enrollRedeemedDevice(ctx, tx, user, person, binding, payload, chain.session(req.IP, expiry), status, out)
+		if err != nil {
 			return err
 		}
 		// The issuing session's row last: a code whose session ended, or
@@ -473,8 +493,14 @@ func (a *AppKeySignIn) redeemSession(ctx context.Context, req KeyRedeemRequest, 
 		if errors.Is(err, ErrSessionRevoked) || (err == nil && !issuing.binding().same(binding)) {
 			return ErrAppCodeInvalid
 		}
+		if err != nil {
+			return err
+		}
+		audit, err = recordKeyAdded(ctx, tx, auditmutation.ActionAppCodeRedeemed, user.ID, http.StatusOK,
+			keyAdded{auditFieldAppCodeKind: appCodeKindSession}.withDevice(key).withPerson(person, personCreated))
 		return err
 	})
+	return audit, err
 }
 
 // redeemPersonKeyTx returns the person key a redeemed device key enrolls
@@ -483,45 +509,46 @@ func (a *AppKeySignIn) redeemSession(ctx context.Context, req KeyRedeemRequest, 
 // replaces or revokes the account's person key, so its other devices and
 // the devices waiting for approval are untouched; key was only the proof
 // the device signed with, and is not stored.
-func redeemPersonKeyTx(ctx context.Context, tx pgx.Tx, userID int, key appkeys.PublicKey, binding KeyBinding) (*models.AppPersonKey, string, error) {
+func redeemPersonKeyTx(ctx context.Context, tx pgx.Tx, userID int, key appkeys.PublicKey, binding KeyBinding, ip string) (person *models.AppPersonKey, status string, created bool, err error) {
 	current, err := livePersonKeyTx(ctx, tx, userID)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	if current != nil {
 		if current.KeyID == key.KeyID() {
-			return current, PersonKeyEnrolled, nil
+			return current, PersonKeyEnrolled, false, nil
 		}
-		return current, PersonKeyKept, nil
+		return current, PersonKeyKept, false, nil
 	}
-	person, err := insertPersonKeyTx(ctx, tx, NewPersonKey{
+	person, err = insertPersonKeyTx(ctx, tx, NewPersonKey{
 		UserID: userID, PublicKey: key, IdentityID: binding.IdentityID,
-		ProviderBound: binding.ProviderBound, EnrolledVia: models.AppKeyEnrolledAppCode,
+		ProviderBound: binding.ProviderBound, EnrolledVia: models.AppKeyEnrolledAppCode, IP: ip,
 	})
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
-	return person, PersonKeyEnrolled, nil
+	return person, PersonKeyEnrolled, true, nil
 }
 
 // enrollRedeemedDevice enrolls the payload's device key under person with
-// the code's provider binding, opens its session and fills the answer.
+// the code's provider binding, opens its session, fills the answer and
+// returns the key.
 func (a *AppKeySignIn) enrollRedeemedDevice(ctx context.Context, tx pgx.Tx, user *models.User, person *models.AppPersonKey,
 	binding KeyBinding, payload *appkeys.Payload, session KeySession, personStatus string, out *KeySignInResult,
-) error {
+) (*models.AppDeviceKey, error) {
 	key, err := insertDeviceKeyTx(ctx, tx, NewDeviceKey{
 		UserID: user.ID, PublicKey: *payload.DeviceKey, Kind: models.DeviceKeyKindDevice,
 		Name: payload.DeviceName, Platform: payload.DevicePlatform,
 		EnrolledVia: models.AppKeyEnrolledAppCode, PersonKeyID: &person.ID,
-		IdentityID: binding.IdentityID, ProviderBound: binding.ProviderBound,
+		IdentityID: binding.IdentityID, ProviderBound: binding.ProviderBound, IP: session.IP,
 	})
 	if err != nil {
-		return keyEnrolledAs(KeyMemberDevice, err)
+		return nil, keyEnrolledAs(KeyMemberDevice, err)
 	}
 	out.User, out.DeviceID, out.Status = user, key.ID, appkeys.ReplySignedIn
 	out.PersonKeyID, out.PersonKeyStatus = person.KeyID, personStatus
 	out.Pair, err = a.service.openKeySessionTx(ctx, tx, user, key, session)
-	return err
+	return key, err
 }
 
 // SessionKeyAccess answers what the claims' session may do with the
