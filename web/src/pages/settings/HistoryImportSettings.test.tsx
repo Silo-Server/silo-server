@@ -55,6 +55,7 @@ vi.mock("@/hooks/queries/history-import", () => ({
 }));
 
 import HistoryImportSettings from "./HistoryImportSettings";
+import { isValidHttpServerURL } from "./HistoryImportSettings.utils";
 
 function renderPage() {
   return render(
@@ -279,5 +280,16 @@ describe("HistoryImportSettings", () => {
     await user.type(urlInput, "https://jellyfin.example.test");
     await user.type(usernameInput, "alice");
     expect(startButton).toBeEnabled();
+  });
+
+  it("matches backend HTTP server URL rules including empty queries, missing slashes, and bare credentials", () => {
+    expect(isValidHttpServerURL("https://emby.example.test")).toBe(true);
+    expect(isValidHttpServerURL("http://emby.example.test:8096/emby")).toBe(true);
+    expect(isValidHttpServerURL("https://emby.example.test?")).toBe(false);
+    expect(isValidHttpServerURL("https://emby.example.test/?")).toBe(false);
+    expect(isValidHttpServerURL("https://emby.example.test#")).toBe(false);
+    expect(isValidHttpServerURL("https:emby.example.test")).toBe(false);
+    expect(isValidHttpServerURL("http://@emby.example.test")).toBe(false);
+    expect(isValidHttpServerURL("https://user:pass@emby.example.test")).toBe(false);
   });
 });

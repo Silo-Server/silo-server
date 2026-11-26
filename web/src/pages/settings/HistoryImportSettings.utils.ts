@@ -32,7 +32,11 @@ export function canStartJellyfinImport(
 
 export function isValidHttpServerURL(raw: string): boolean {
   const trimmed = raw.trim();
-  if (!trimmed || trimmed.includes("#")) return false;
+  if (!/^https?:\/\//i.test(trimmed) || trimmed.includes("?") || trimmed.includes("#")) {
+    return false;
+  }
+  const authority = trimmed.slice(trimmed.indexOf("://") + 3).split("/")[0] ?? "";
+  if (authority.includes("@")) return false;
   try {
     const parsed = new URL(trimmed);
     return (

@@ -260,10 +260,16 @@ func decodeLimitedJSON(body io.Reader, out any, limit int64) (int64, error) {
 	if limited.N <= 0 {
 		return read, errUpstreamBytesLimit
 	}
+	if errors.Is(err, ErrUpstreamResponseTooLarge) {
+		return read, err
+	}
 	if err != nil && tracker.readErr != nil {
+		if errors.Is(tracker.readErr, context.Canceled) {
+			return read, tracker.readErr
+		}
 		return read, fmt.Errorf("%w: %w", errUpstreamBodyRead, tracker.readErr)
 	}
-	if err != nil && !errors.Is(err, ErrUpstreamResponseTooLarge) {
+	if err != nil {
 		return read, fmt.Errorf("%w: %w", errUpstreamJSONDecode, err)
 	}
 	return read, err

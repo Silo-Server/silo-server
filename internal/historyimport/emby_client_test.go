@@ -3,6 +3,7 @@ package historyimport
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -313,6 +314,40 @@ func TestEmbyAuthenticateServerUser_FallsBackToEmbyPrefixOn405(t *testing.T) {
 	paths := rec.snapshot()
 	if len(paths) != 2 || paths[0] != "/Users/AuthenticateByName" || paths[1] != "/emby/Users/AuthenticateByName" {
 		t.Fatalf("requested paths = %v, want root then /emby fallback", paths)
+	}
+}
+
+type failingReader struct {
+	data []byte
+	err  error
+}
+
+func (f *failingReader) Read(p []byte) (int, error) {
+	n := copy(p, f.data)
+	f.data = f.data[n:]
+	return n, f.err
+}
+
+func TestDecodeLimitedJSONPreservesValueLimitOverBodyError(t *testing.T) {
+	t.Parallel()
+
+	oversized := make([]byte, 0, maxUpstreamResponseValues+16)
+	oversized = append(oversized, '[')
+	for range maxUpstreamResponseValues + 1 {
+		oversized = append(oversized, '1', ',')
+	}
+	var out any
+	_, err := decodeLimitedJSON(&failingReader{data: oversized, err: io.ErrUnexpectedEOF}, &out, int64(len(oversized)+64))
+	if !errors.Is(err, ErrUpstreamResponseTooLarge) {
+		t.Fatalf("decodeLimitedJSON err = %v, want ErrUpstreamResponseTooLarge", err)
+	}
+	if IsReachabilityError(err) {
+		t.Fatalf("IsReachabilityError(%v) = true, want false for size limit", err)
+	}
+
+	_, canceledErr := decodeLimitedJSON(&failingReader{data: []byte(`{"AccessToken":`), err: context.Canceled}, &out, 1024)
+	if !errors.Is(canceledErr, context.Canceled) || IsReachabilityError(canceledErr) {
+		t.Fatalf("canceled decode err = %v (reachable=%v), want context.Canceled and not reachable", canceledErr, IsReachabilityError(canceledErr))
 	}
 }
 
