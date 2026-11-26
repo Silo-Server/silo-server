@@ -98,10 +98,9 @@ var signInRowWriters = map[string]string{
 	"internal/auth/session.go:RevokeAllByUser":         unused,
 	"internal/auth/session.go:RevokeAllByImpersonator": unused,
 	// Deleting a profile, and a profile set that no longer lists one: both
-	// hold the account row by the time they delete (a profile delete takes
-	// it first, lockAccountForProfileDelete; a set takes it after the
-	// profile rows) and take the identities (LockSignInIdentities) before
-	// the profile's row, whose deletion clears the requests approved for it.
+	// lock the account row first (lockAccountForProfileDelete, or the set's
+	// own lock) and take the identities (LockSignInIdentities) before the
+	// profile's row, whose deletion clears the requests approved for it.
 	"internal/userstore/pgstore/profiles.go:deleteProfileRowsTx": identitiesFirst,
 }
 

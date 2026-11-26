@@ -276,14 +276,20 @@ func signOutOpponent(ctx context.Context, t *testing.T, f *profileDeleteFixture)
 	return 0, done, func() error { return nil }
 }
 
-// waiting waits until a backend other than the excluded ones waits on a lock
-// one of blockers holds, and returns its pid and the pids blocking it.
+// waiting is lockWaiter on the fixture's pool.
 func (f *profileDeleteFixture) waiting(ctx context.Context, t *testing.T, blockers []int, exclude ...int) (int, []int) {
+	t.Helper()
+	return lockWaiter(ctx, t, f.pool, blockers, exclude...)
+}
+
+// lockWaiter waits until a backend other than the excluded ones waits on a
+// lock one of blockers holds, and returns its pid and the pids blocking it.
+func lockWaiter(ctx context.Context, t *testing.T, pool *pgxpool.Pool, blockers []int, exclude ...int) (int, []int) {
 	t.Helper()
 	for {
 		var pid int
 		var by []int
-		err := f.pool.QueryRow(ctx, `SELECT pid, pg_blocking_pids(pid) FROM pg_stat_activity
+		err := pool.QueryRow(ctx, `SELECT pid, pg_blocking_pids(pid) FROM pg_stat_activity
 			WHERE datname = current_database() AND pg_blocking_pids(pid) && $1::int[] AND NOT pid = ANY($2::int[])
 			LIMIT 1`, blockers, append([]int{0}, exclude...)).Scan(&pid, &by)
 		if err == nil {
