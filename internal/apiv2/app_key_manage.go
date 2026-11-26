@@ -12,7 +12,7 @@ import (
 type AppPersonKey struct {
 	KeyID             string  `json:"kid" doc:"The person key's ID" example:"PgujdSfBbNNyXngLWCsOgw"`
 	EnrolledAt        Instant `json:"enrolled_at" doc:"When the key was enrolled"`
-	EnrolledIPAddress string  `json:"enrolled_ip_address" doc:"Client address of the request that enrolled the key, decided as a login session's ip_address is; empty when unknown, which includes every key enrolled before this server recorded it" example:"203.0.113.7"`
+	EnrolledIPAddress string  `json:"enrolled_ip_address" doc:"Client address of the request that enrolled the key, decided as a login session's ip_address is; empty when unknown, which includes every key enrolled before this server recorded it, and for a caller who is not an administrator while the server runs in demo mode" example:"203.0.113.7"`
 }
 
 // AppDeviceKey is one device or app key of the account.
@@ -26,7 +26,7 @@ type AppDeviceKey struct {
 	EnrolledBy        string   `json:"enrolled_by" enum:"introduce,session,app-code,grant" doc:"How the key was enrolled: introduced by the person key, from a signed-in session, with an app code, or through a grant" example:"introduce"`
 	AllowedBy         *string  `json:"allowed_by" nullable:"true" doc:"For a key a grant enrolled, the name of the account whose person key signed the grant; null otherwise" example:"sam"`
 	EnrolledAt        Instant  `json:"enrolled_at" doc:"When the key was enrolled"`
-	EnrolledIPAddress string   `json:"enrolled_ip_address" doc:"Client address of the request that enrolled the key, decided as a login session's ip_address is; empty when unknown, which includes every key enrolled before this server recorded it" example:"203.0.113.7"`
+	EnrolledIPAddress string   `json:"enrolled_ip_address" doc:"Client address of the request that enrolled the key, decided as a login session's ip_address is; empty when unknown, which includes every key enrolled before this server recorded it, and for a caller who is not an administrator while the server runs in demo mode" example:"203.0.113.7"`
 	LastUsedAt        *Instant `json:"last_used_at" nullable:"true" doc:"When the key last opened a login session. enroll and an introduce that signs in open one, so a key not used since shows enrolled_at; null for a key that has never opened one: a key waiting for approval, and a key approved since that has not signed in yet. status, not this member, says whether a key is waiting"`
 }
 
@@ -97,15 +97,32 @@ func (reg *Registry) listAppKeys(ctx context.Context, _ *struct{}) (*AppKeyListO
 	if err != nil {
 		return nil, appKeyProblem(err)
 	}
+	hide := reg.hideEnrolledAddresses(ctx)
 	out := AppKeyList{Devices: make([]AppDeviceKey, 0, len(keys.Devices))}
 	if keys.Person != nil {
 		person := appPersonKeyOf(keys.Person)
+		if hide {
+			person.EnrolledIPAddress = ""
+		}
 		out.PersonKey = &person
 	}
 	for _, key := range keys.Devices {
-		out.Devices = append(out.Devices, appDeviceKeyOf(key, keys.AllowedBy))
+		device := appDeviceKeyOf(key, keys.AllowedBy)
+		if hide {
+			device.EnrolledIPAddress = ""
+		}
+		out.Devices = append(out.Devices, device)
 	}
 	return &AppKeyListOutput{Body: out}, nil
+}
+
+// hideEnrolledAddresses reports whether the caller's own key lists leave out
+// enrolled_ip_address: in demo mode every visitor shares one account, so a
+// caller who is not an administrator sees no address. A demo setting that
+// can't be read hides them too (demoRestricted answers restricted).
+func (reg *Registry) hideEnrolledAddresses(ctx context.Context) bool {
+	restricted, _ := demoRestricted(ctx, reg.deps.DemoSettings)
+	return restricted
 }
 
 // appPersonKeyOf is the person key object of a key.

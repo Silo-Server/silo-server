@@ -1164,6 +1164,11 @@ inherits it. A `demo.enabled` that can't be read fails those routes; it is
 never taken as "not a demo". Approving a device sign-in in advance is not behind the switch;
 it carries the ordinary demo restriction (refused for a caller who is not an
 administrator) and the device login capability reports `preapprove: false`.
+The key lists stay open in demo mode, so its visitors can see and revoke
+keys enrolled before it was turned on, but `GET /auth/keys` and
+`GET /auth/keys/pending` answer `enrolled_ip_address` as the empty string to a
+caller who is not an administrator: those keys' addresses are not every
+visitor's to see. The administrator's list is unchanged.
 
 ## Backups
 

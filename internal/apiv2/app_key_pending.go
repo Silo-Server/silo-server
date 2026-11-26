@@ -137,10 +137,15 @@ func (reg *Registry) listPendingAppKeys(ctx context.Context, _ *struct{}) (*Pend
 	if err != nil {
 		return nil, appKeyProblem(err)
 	}
+	hide := reg.hideEnrolledAddresses(ctx)
 	out := PendingAppKeyList{Items: make([]AppDeviceKey, 0, len(keys))}
 	for _, key := range keys {
 		// An introduced key never comes from a grant, so allowed_by stays null.
-		out.Items = append(out.Items, appDeviceKeyOf(key, ""))
+		device := appDeviceKeyOf(key, "")
+		if hide {
+			device.EnrolledIPAddress = ""
+		}
+		out.Items = append(out.Items, device)
 	}
 	return &PendingAppKeyListOutput{Body: out}, nil
 }
