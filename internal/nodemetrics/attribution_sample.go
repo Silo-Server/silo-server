@@ -117,7 +117,11 @@ func (s *Sampler) attributeCPU(out *ResourceAttribution, at time.Time, boot uint
 		return
 	}
 	if !s.prevAttrAt.IsZero() {
-		s.publishCPUShares(out, basis, elapsed, procTicks, children)
+		closeBoot := boot
+		if !bootOK {
+			closeBoot = 0 // an unread clock credits no new child
+		}
+		s.publishCPUShares(out, basis, elapsed, closeBoot, procTicks, children)
 	}
 	s.prevAttrAt, s.prevProcTicks, s.prevBoot, s.prevBootOK = at, procTicks, boot, bootOK
 	// A truncated pass did not see every child, so its map is not a baseline:
@@ -131,14 +135,14 @@ func (s *Sampler) attributeCPU(out *ResourceAttribution, at time.Time, boot uint
 
 // publishCPUShares sets the shares for a window that has a usable baseline.
 // Children need their own: a truncated pass leaves none behind.
-func (s *Sampler) publishCPUShares(out *ResourceAttribution, basis cpuShareBasis, elapsed time.Duration, procTicks uint64, children map[childKey]uint64) {
+func (s *Sampler) publishCPUShares(out *ResourceAttribution, basis cpuShareBasis, elapsed time.Duration, closeBoot, procTicks uint64, children map[childKey]uint64) {
 	if pct, ok := cpuSharePercent(tickDelta(procTicks, s.prevProcTicks), basis, elapsed); ok {
 		out.Process.CPUPct = new(pct)
 	}
 	if out.Children == nil || out.Children.Truncated || s.prevChildTicks == nil {
 		return
 	}
-	if pct, ok := cpuSharePercent(s.childTickDelta(children, basis, elapsed), basis, elapsed); ok {
+	if pct, ok := cpuSharePercent(s.childTickDelta(children, basis, elapsed, closeBoot), basis, elapsed); ok {
 		out.Children.CPUPct = new(pct)
 	}
 }
@@ -148,7 +152,8 @@ func (s *Sampler) publishCPUShares(out *ResourceAttribution, basis cpuShareBasis
 // A child in the baseline contributes its growth. A child the baseline has not
 // seen contributes its whole lifetime only when it was born inside the window:
 // its start time is on or after the boot clock reading taken when the window
-// opened. An older one (a child that was unreadable for a pass, say) only
+// opened and before the one taken when it closed. A child born after the
+// close, while discovery ran, only becomes a baseline. An older one (a child that was unreadable for a pass, say) only
 // becomes a baseline, because its lifetime is mostly earlier windows' work. A
 // child that exited contributes nothing, so this is a lower bound.
 //
@@ -156,7 +161,7 @@ func (s *Sampler) publishCPUShares(out *ResourceAttribution, basis cpuShareBasis
 // lxcfs replaces /proc/uptime with a container's own. A lifetime larger than
 // the window's whole capacity cannot have been earned inside it either way, so
 // it stays a baseline.
-func (s *Sampler) childTickDelta(children map[childKey]uint64, basis cpuShareBasis, elapsed time.Duration) uint64 {
+func (s *Sampler) childTickDelta(children map[childKey]uint64, basis cpuShareBasis, elapsed time.Duration, closeBoot uint64) uint64 {
 	capacityTicks := basis.capacityTicks(elapsed)
 	var total uint64
 	for key, ticks := range children {
@@ -164,7 +169,7 @@ func (s *Sampler) childTickDelta(children map[childKey]uint64, basis cpuShareBas
 			total += tickDelta(ticks, previous)
 			continue
 		}
-		if s.prevBootOK && key.start >= s.prevBoot && float64(ticks) <= capacityTicks {
+		if s.prevBootOK && key.start >= s.prevBoot && key.start < closeBoot && float64(ticks) <= capacityTicks {
 			total += ticks
 		}
 	}
