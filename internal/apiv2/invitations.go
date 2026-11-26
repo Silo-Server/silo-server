@@ -31,6 +31,9 @@ type InvitationService interface {
 	Send(context.Context, invitations.SendInput) (*invitations.SendResult, error)
 	Resend(context.Context, int64, int64, invitations.Delivery) (*invitations.SendResult, error)
 	Revoke(context.Context, int64) error
+	// IssueAppCode starts a join through the Silo app
+	// (createInvitationAppCode).
+	IssueAppCode(context.Context, invitations.AppCodeRequest) (auth.IssuedAppCode, error)
 }
 
 type InvitationCapabilities struct {
@@ -94,6 +97,8 @@ type InvitationLookup struct {
 	ExpiresAt           Instant `json:"expires_at"`
 	ShowTour            bool    `json:"show_tour"`
 	AcceptanceAvailable bool    `json:"acceptance_available"`
+	PasswordJoin        bool    `json:"password_join" doc:"Whether the invitation can be claimed with a password here (acceptInvitationLink): false while the server has local password sign-in off."`
+	AppJoin             bool    `json:"app_join" doc:"Whether the invitation can be claimed through the Silo app here (createInvitationAppCode): app key sign-in is on, the server has local password sign-in on, and acceptance_available is true."`
 }
 type InvitationLookupOutput struct{ Body InvitationLookup }
 
@@ -294,7 +299,15 @@ func registerInvitations(reg *Registry) {
 		if err != nil {
 			return nil, invitationProblem(err, true)
 		}
-		return &InvitationLookupOutput{Body: InvitationLookup{Email: view.Email, EmailRequired: view.EmailRequired, Note: view.Note, InviterName: view.InviterName, ServerName: view.ServerName, ExpiresAt: NewInstant(view.ExpiresAt), ShowTour: view.ShowTour, AcceptanceAvailable: !view.CreateProfile || svc.SupportsDefaultProfile()}}, nil
+		acceptance := !view.CreateProfile || svc.SupportsDefaultProfile()
+		appJoin := false
+		if keys := reg.deps.AppKeys; keys != nil && view.LocalPasswords && acceptance {
+			if appJoin, err = reg.appKeySwitch(ctx, keys); err != nil {
+				return nil, serviceProblem(err)
+			}
+		}
+		return &InvitationLookupOutput{Body: InvitationLookup{Email: view.Email, EmailRequired: view.EmailRequired, Note: view.Note, InviterName: view.InviterName, ServerName: view.ServerName, ExpiresAt: NewInstant(view.ExpiresAt), ShowTour: view.ShowTour, AcceptanceAvailable: acceptance,
+			PasswordJoin: view.LocalPasswords, AppJoin: appJoin}}, nil
 	}
 	accept := func(ctx context.Context, token, email, password, userAgent string) (*InvitationAcceptOutput, error) {
 		if len([]byte(password)) > 72 {

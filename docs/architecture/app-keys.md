@@ -352,6 +352,188 @@ like any device.
 hourly retention step that clears challenges deletes it. By then every process
 refuses the grant by its `exp`.
 
+## App codes
+
+An app code is how a server's web page hands the Silo app what it needs to
+enroll its keys: base64url of 32 random bytes, good once for ten minutes. Only
+its SHA-256 is stored (`auth_app_codes`). The page opens the app with one link
+built by one function, `appkeys.JoinLink` on the server and `buildJoinLink`
+on the web:
+
+```
+silo://join#v1.<base64url of the server address>.<app code>
+https://siloserver.org/join#v1.<base64url of the server address>.<app code>
+```
+
+Both carry the code in the fragment, so the link page's host never receives
+it. The server address comes from the answer that issued the code
+(`server_address`): `server.public_url`, in its canonical server address form,
+when the request arrived on that address's canonical origin, so a path prefix a
+reverse proxy adds survives; otherwise the request's own canonical origin. The
+older `silo://invite?server=&token=` link, which hands released Android builds
+the raw invitation token, is unchanged.
+
+**A code travels in a link only when redeeming it creates a new account with
+no administrator power.** Every other code, a session code or a join code for
+an administrator's invitation, moves only by the person's own hands. A link
+can be received by an app other than Silo (any app may claim a custom scheme),
+and whatever receives it can redeem the code first with its own keys. For an
+ordinary invitation that gets it a new, empty account: the invitation is spent,
+so the invited person notices at once and the owner removes the account. That
+risk is accepted. A session code reaches an existing account, an
+administrator's included, and an administrator's join code would hand the
+intercepting app a working administrator session (keys from a join code start
+active, and the redeem opens a session at once).
+
+The server decides, and says so in the answer that issues the code:
+`link_allowed`. A page builds the join link only when it is true; otherwise it
+shows the server address and the code as text to type, never a link, a
+scannable link or anything a device could open. The server can't tell a typed
+code from one lifted out of a link, so the protection is that no page makes
+such a link. (The protocol defines no scannable form for an app code: its link
+vectors carry a code only in the join link, which a camera would open as a
+URL.)
+
+`link_allowed` is decided at issue from the account input the redeem will
+create (`joinAccountInput`, `linkAllowed` in `internal/invitations`), field by
+field of what an invitation carries:
+
+| Field | Can it confer administrator power? |
+| --- | --- |
+| role | Yes: only `user` allows a link; `admin`, or any other value, refuses. |
+| permissions | The invitation sets none; the account takes its role's defaults (`auth.NewUserPermissions`). Anything beyond `marker_edit` refuses (`metadata_curation` edits what every account sees). |
+| access group | No: a group narrows permissions and limits and never adds any (`access.ApplyGroupPolicy` intersects). |
+| library list, first profile, name, email | No: media access and identity. |
+| ownership, break-glass | Can't be carried: an invitation has no such field, and creating an account never sets them. |
+
+An invitation can't be edited after a code is issued: resending makes a new
+invitation (copying its role, group and libraries), and the old invitation's
+codes stop working. `createAppCode` always answers `link_allowed: false`.
+
+There are two kinds:
+
+- **Join** (`POST /invitations/app-code`, public): the invite page's "Join
+  with the Silo app". It checks the invitation exactly as accepting it does,
+  checks the account name and email are free, and reserves the name. The
+  invitation stays open and nothing else is created. A second code from one
+  invitation replaces the first. The reservation is advisory: a partial unique
+  index on the reserved name among unspent codes stops two joins choosing one
+  name, and the account insert at redeem decides, so a name an administrator
+  creates in between refuses the redeem with `conflict`. Only a live code
+  reserves: issuing first deletes, under the settings lock, the unspent join
+  codes for the same name or email that are expired or whose invitation can
+  no longer be claimed (accepted, revoked, resent, superseded or expired), so
+  a resent or revoked invitation doesn't hold its invitee's name for the rest
+  of its code's ten minutes; such a code could never be redeemed. An emailed
+  invitation's account takes its address as name and email, as accept gives
+  it; for an invitation with no address the person chooses a username, and an
+  email is optional. A username containing `@` must be the email the same
+  request gives: otherwise someone could hold another person's address as a
+  name and block that person's own invitation. A code is refused where accept
+  would be (an invitation that creates a profile the store can't create in the
+  same transaction), so the page is never handed a code no redeem can use.
+- **Session** (`POST /auth/app-codes`): "Open in Silo" for a signed-in browser,
+  shown as text to type, never as a link.
+  It is a key-creating operation: only a session that may manage keys
+  (`ActionManageKeys`), acting as the household's verified main profile,
+  rechecked under the account lock. The code records the session and its
+  provider binding. The keys it enrolls take that binding, and a code whose
+  session ended before it is redeemed no longer works.
+
+**Redeem** (`POST /auth/app-codes/redeem`, public, `key_sign_in` budget). The
+body is `{ person_key, message }`, a `redeem` envelope signed with
+`person_key`'s private half, with `device_sig`, on a challenge, the code in
+its payload. The challenge is spent once the signature verifies. Then:
+
+- A join runs in one transaction. Lock order: the settings lock, the
+  invitation, the code, then the other invitations for the same address that
+  the claim revokes, then the new account's rows. Accepting with a password
+  and issuing a code take the settings lock first too, before any invitation
+  or code row, so all three run one after the other and the rows each locks
+  after it can't close a cycle. The join spends the code, claims the
+  invitation through the same claim accept uses (re-checked: it may have been
+  revoked, resent or expired since), creates the account with no password and
+  the invitation's role, libraries, access group and first-profile choice,
+  enrolls the person key and the device key, marks the invitation accepted and
+  opens the device key's session. A code nobody redeems leaves the invitation
+  open and no account.
+- A session code locks the account, spends the code, and enrolls the device
+  key. The account's person key is enrolled when it has none and replaced when
+  it has a different one: the old key is revoked, devices waiting on it are
+  refused, devices already enrolled keep their keys. The issuing session's row
+  is read last; one that ended rolls the redeem back.
+
+The hourly cleanup of expired codes never waits on any of these: it skips a
+code row a request holds (`FOR UPDATE SKIP LOCKED`) and deletes it on a later
+run.
+
+Keys from a code start active, also on an administrator's account: the code
+came from the account's own session, or the invitation an administrator made
+(an invitation may grant the administrator role, as accept allows). A session
+code is not checked against the main profile's PIN again at redeem: it was
+issued to the verified main profile, and it ends with the session that issued
+it.
+
+`server_address` tells the app where to connect. It is not proof of which
+server answers there; the redeem's signed `server_id` and the origin rule are,
+as for every signed request.
+
+**Two conflicts.** A redeem answers 409 `conflict` for two causes with
+different remedies, told apart by `errors[0].code`, never by the detail:
+`duplicate` (at `body.message.payload`) is a reserved name or email taken
+since the code was issued, and the person gets a new code from the page with
+another name; `key_enrolled` is a public key this server already holds, at
+`body.person_key` for the person key and `body.message.payload` for the device
+key, and the app makes that key again and redeems the same code on a new
+challenge. Every refusal after the code is found returns inside the redeem's
+transaction, so the code's spend rolls back and only the challenge is used up
+(`docs/auth-api.md` has the table). Issuing a join code answers a taken name
+with `duplicate` at `body.username` or `body.email`, whichever clashed. The sealed
+plaintext is the usual `signed_in` answer plus `username` and `person_key`
+(`enrolled` or `replaced`). An unknown, spent or expired code, and one whose
+invitation or session can no longer be used, is `app_code_invalid` (404). Of
+two redemptions of one code, on any API processes, exactly one succeeds.
+
+**Retention.** The hourly step that clears challenges deletes codes past their
+expiry, spent or not. Codes are left out of backups.
+
+### Accounts with no password
+
+A join creates an account with no password: `password_hash` NULL and
+`local_password_login_enabled` false. Its keys are its way in. One helper,
+`models.User.HasLocalPassword`, answers whether an account has a usable local
+password (a stored hash and local sign-in on for the account), and every
+reader of that fact uses it: password sign-in, password change, reset links,
+the administrator's account view. `createUser` stores NULL, never an empty
+string, for a blank email or username, so two accounts with no email don't
+collide on a unique constraint. A password sign-in to an account with no
+stored password compares the placeholder hash, so the time does not tell a
+stranger which accounts have one.
+
+### Local passwords off
+
+No join may create an account whose only credential is keys. While
+`auth.local_password_login` is off, `POST /invitations/app-code` answers
+`provider_sign_in_required` (409), and a redeem refuses a join code the same
+way if the setting changed in between: the claim checks it under the settings
+lock, as accept does. On such a server a person gets the app by signing in with
+the provider on the server's site and using "Open in Silo"
+(`POST /auth/app-codes`), so the keys enroll against that identity. Creating
+and resending invitations stays refused while local passwords are off.
+
+### Sessions that can't manage keys
+
+`GET /auth/keys/session` answers what the caller's session may do:
+`list` (`ActionReadKeys`), `manage` (`ActionManageKeys`), `approve` (manage,
+and the request acts as the verified main profile) and `sign_in_again`. The
+last is true only for a session refused for how it was opened (device sign-in,
+or no record of how) whose account has another way into a browser: a local
+password the server accepts for it, or a sign-in provider account. A person
+with neither only ever gets a browser session by device sign-in, so "sign in
+again" would be a dead end; the page says to manage devices in the Silo app
+instead. It is false for an administrator acting as the account, an API key, a
+remote-playback session and a grant-enrolled app's session.
+
 ## Who decides
 
 The operations on keys check how the calling session was opened
@@ -866,11 +1048,14 @@ answer `capability_unsupported`.
 ## Rate limits
 
 `createAppKeyChallenge` spends the per-address `key_challenge` budget;
-`introduce`, `sign-in`, `enroll` and grant redemption spend `key_sign_in`. Both default to 60 a
-minute with a burst of 20, enough for a few waiting devices behind one address
-(each asks every five seconds). Neither budget can be spent per key before
-the signature verifies; the challenge is what makes each signed request single
-use.
+`introduce`, `sign-in`, `enroll`, grant redemption, app code redemption and
+`createAppCode` spend `key_sign_in`. Both default to 60 a minute with a burst
+of 20, enough for a few waiting devices behind one address (each asks every
+five seconds). `createInvitationAppCode` spends the invitation routes'
+`invitation` budget, 20 a minute with a burst of 10: the invite page shares it
+between the lookup, each code and each renewal. Neither budget can be spent
+per key before the signature verifies; the challenge is what makes each signed
+request single use.
 
 Both of those are counted per client address, and stay so: a sign-in is
 untrusted until its signature verifies, so there is no account to count it
@@ -907,7 +1092,7 @@ spent it by the time the account's limit refuses the set.
 
 ## Multi-node rules
 
-Nothing about app keys lives in a node's memory. Challenges, used grants, keys,
+Nothing about app keys lives in a node's memory. Challenges, used grants, app codes, keys,
 waiting keys' last tries and sessions are Postgres rows, so a challenge issued by one
 API process is spent once on any of them, and a revocation on one ends the
 sessions every node checks. The switch and the local-password setting are read
@@ -920,9 +1105,10 @@ rate limiter's backend (cluster-wide with Redis).
 server-wide. It is read from `server_settings` on each request, so a change on
 any node applies at once. While it is off, `getAppKeyCapability` reports
 `disabled`, and the challenge, `introduce`, `sign-in`, `enroll`, grant
-redemption, `PUT /auth/keys/person`, `pending/{id}/approve` and the signed
+redemption, both app code issues and app code redemption,
+`PUT /auth/keys/person`, `pending/{id}/approve` and the signed
 form of `PUT /profiles/set` answer
-`capability_disabled`. A person's own key list and its deletes, the pending
+`capability_disabled`; the invitation lookup reports `app_join: false`. A person's own key list and its deletes, the pending
 list and `deny` stay open, so keys can be reviewed, revoked and refused; sessions keys
 opened before are not ended by the switch. Backups classify it as an access setting: a restore keeps the
 stricter of the live and the backed-up value.

@@ -86,6 +86,10 @@ type appKeyReply struct {
 	Tokens    *TokenPair `json:"tokens,omitempty"`
 	// PersonKeyID is the enrolled person key's ID, on enroll only.
 	PersonKeyID string `json:"person_key_id,omitempty"`
+	// Username and PersonKey are the account's name and what happened to
+	// its person key (enrolled or replaced), on an app code's redeem only.
+	Username  string `json:"username,omitempty"`
+	PersonKey string `json:"person_key,omitempty"`
 	// LocalRoute is the pinned local route, on signed_in only, when the
 	// listener has a TLS identity (docs/architecture/app-keys.md, "The pinned
 	// route").
@@ -323,6 +327,9 @@ func (reg *Registry) sealAppKeyAnswer(answer *handlers.AppKeyAnswer) (*SealedRep
 	}
 	if result.User != nil {
 		reply.AccountID = IDFromInt(int64(result.User.ID))
+		if result.PersonKeyStatus != "" {
+			reply.Username, reply.PersonKey = result.User.Username, result.PersonKeyStatus
+		}
 	}
 	if answer.Tokens != nil {
 		tokens := tokenPairFromView(*answer.Tokens)
@@ -481,4 +488,8 @@ var appKeyProblems = []struct {
 	{auth.ErrProviderSignInRequired, TypeProviderSignInRequired, "Sign in with this server's sign-in provider once; after that this device signs in again."},
 	{auth.ErrNotPermitted, TypeNotPermitted, "The sign-in provider does not permit this account to sign in."},
 	{auth.ErrProviderUnavailable, TypeProviderUnavailable, "The sign-in provider is unavailable; try again later."},
+	{auth.ErrAppCodeInvalid, TypeAppCodeInvalid, "The app code is unknown, used or expired; get a new one from the server's page."},
+	{auth.ErrAppCodeNameTaken, TypeConflict, "An account already uses this username or email; join again with another."},
+	{auth.ErrJoinNotAvailable, TypeProviderSignInRequired, joinNotAvailableDetail},
+	{auth.ErrTransactionalProfileUnavailable, TypeCapabilityUnsupported, "The selected store cannot atomically create the required profile."},
 }

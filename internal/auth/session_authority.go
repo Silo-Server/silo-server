@@ -146,3 +146,62 @@ func allowedSessionOrigin(ctx context.Context, db rowQuerier, claims *Claims, ac
 	}
 	return origin, nil
 }
+
+// SessionKeyAccess is what a login session may do with the account's app
+// keys, for a page deciding what to offer before it asks.
+type SessionKeyAccess struct {
+	// List: ActionReadKeys.
+	List bool
+	// Manage: ActionManageKeys.
+	Manage bool
+	// SignInAgain: the session is refused for how it was opened (a device
+	// sign-in, or no record of how), and a fresh sign-in in the same
+	// browser would pass: the account has a local password the server
+	// accepts, or a sign-in provider account. A person with neither only
+	// ever gets a browser session by device sign-in, so offering it would be
+	// a dead end.
+	SignInAgain bool
+}
+
+// ReadSessionKeyAccess answers SessionKeyAccess for the claims. An API key,
+// an administrator acting as the account, a remote-playback session and a
+// session a grant-enrolled app opened may do none of it, and signing in
+// again would not change that.
+func ReadSessionKeyAccess(ctx context.Context, db rowQuerier, claims *Claims) (SessionKeyAccess, error) {
+	if !claims.IsOwnLoginSession() {
+		return SessionKeyAccess{}, nil
+	}
+	origin, err := ReadSessionOrigin(ctx, db, claims)
+	if err != nil {
+		return SessionKeyAccess{}, err
+	}
+	out := SessionKeyAccess{List: origin.Allows(ActionReadKeys), Manage: origin.Allows(ActionManageKeys)}
+	if origin.GrantKey || (origin.OpenedVia != "" && origin.OpenedVia != models.SessionOpenedDeviceLogin) {
+		return out, nil
+	}
+	out.SignInAgain, err = accountHasOtherSignIn(ctx, db, claims.UserID)
+	return out, err
+}
+
+// accountHasOtherSignIn reports whether the account can sign in in a browser
+// without device sign-in: a local password the server accepts for it (the
+// server allows local passwords, or the account is break-glass), or any
+// sign-in provider account.
+func accountHasOtherSignIn(ctx context.Context, db rowQuerier, userID int) (bool, error) {
+	allowed, err := localPasswordLoginAllowed(ctx, db)
+	if err != nil {
+		return false, err
+	}
+	var yes bool
+	err = db.QueryRow(ctx, `SELECT
+		(u.local_password_login_enabled AND COALESCE(u.password_hash, '') <> '' AND ($2 OR u.break_glass))
+		OR EXISTS (SELECT 1 FROM plugin_auth_identities i WHERE i.user_id = u.id)
+		FROM users u WHERE u.id = $1`, userID, allowed).Scan(&yes)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, ErrSessionRevoked
+	}
+	if err != nil {
+		return false, fmt.Errorf("reading the account's sign-in methods: %w", err)
+	}
+	return yes, nil
+}

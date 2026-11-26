@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/invitations"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -42,6 +43,11 @@ func (h *InvitationHandler) AcceptInvitation(ctx context.Context, token, email, 
 		view.Tokens = &TokenPairView{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresIn: pair.ExpiresIn, User: buildUserResponse(user, effectiveAccountPolicy(ctx, user, h.accessGroups), nil, nil)}
 	}
 	return view, err
+}
+
+// IssueAppCode starts a join through the Silo app (invitations.Service.IssueAppCode).
+func (h *InvitationHandler) IssueAppCode(ctx context.Context, in invitations.AppCodeRequest) (auth.IssuedAppCode, error) {
+	return h.service.IssueAppCode(ctx, in)
 }
 func (h *InvitationHandler) SupportsDefaultProfile() bool { return h.service.SupportsDefaultProfile() }
 func (h *InvitationHandler) EmailDeliveryAvailable(ctx context.Context) bool {

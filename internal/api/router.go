@@ -2871,7 +2871,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.PersonalAPIKeys = newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, deps.Config)
 	}
 	if deps.DB != nil && authHandler != nil && authService != nil {
-		authHandler.SetAppKeySignIn(auth.NewAppKeySignIn(deps.DB, authService))
+		appKeySignIn := auth.NewAppKeySignIn(deps.DB, authService)
+		if invitationService != nil {
+			appKeySignIn.SetJoinClaimer(invitationService)
+		}
+		authHandler.SetAppKeySignIn(appKeySignIn)
 		authHandler.SetHouseholdStores(deps.UserStoreProvider, profilesOutsidePostgres(deps.Config))
 		v2deps.AppKeys = authHandler
 		v2deps.AdminAppKeys = authHandler

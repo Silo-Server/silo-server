@@ -11,6 +11,7 @@ import {
   renderRoutes,
 } from "./authPage.test-support";
 import InviteClaim from "./InviteClaim";
+import { expectNoLinkCarrying } from "@/components/appKeys/codeLinkGuard.test-support";
 import accepted from "../../../contracts/api/v2/fixtures/invitation_accepted.json";
 const auth = vi.hoisted(() => ({ completeLogin: vi.fn() }));
 vi.mock("@/hooks/useAuth", () => ({
@@ -26,6 +27,14 @@ const invitation = {
   acceptance_available: true,
   email_required: false,
   note: "",
+  password_join: true,
+  app_join: false,
+};
+const issuedCode = {
+  code: "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o",
+  expires_in: 600,
+  server_address: "https://media.example.com",
+  link_allowed: true,
 };
 const linkInvitation = { ...invitation, email: "", email_required: true, note: "For Sam" };
 const emailProblem = (type: string, status: number, errors?: unknown[]) =>
@@ -40,6 +49,7 @@ function problem(status: number) {
   );
 }
 let submit: () => Promise<Response>;
+let appCode: () => Promise<Response>;
 let lookup: () => Promise<Response>;
 const fetchMock = vi.fn<typeof fetch>();
 function Move() {
@@ -73,8 +83,10 @@ beforeEach(() => {
   setRefreshToken("existing-refresh");
   submit = async () => json(accepted, 201);
   lookup = async () => json(invitation);
+  appCode = async () => json(issuedCode);
   fetchMock.mockImplementation(async (url) => {
     if (String(url).endsWith("/accept")) return submit();
+    if (String(url).endsWith("/app-code")) return appCode();
     if (String(url).endsWith("/capabilities"))
       return json({ revision: "1", state: "available", default_profile: true, profileless: true });
     return lookup();
@@ -284,4 +296,231 @@ it("still treats a server error as an unconfirmed result", async () => {
   send();
   await screen.findByText(/We could not confirm the result/);
   expect(screen.getByRole("button", { name: "Create account" })).toBeDisabled();
+});
+
+it("joins a link invitation through the Silo app without creating anything first", async () => {
+  lookup = async () => json({ ...linkInvitation, app_join: true });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.change(screen.getByLabelText("Username"), { target: { value: " sam " } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  const open = await screen.findByRole("link", { name: "Open Silo" });
+  expect(open.getAttribute("href")).toBe(
+    "silo://join#v1.aHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbQ.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o",
+  );
+  // A join code keeps both forms: the custom scheme and the https link.
+  expect(
+    screen
+      .getByRole("link", { name: "Open with the siloserver.org link instead" })
+      .getAttribute("href"),
+  ).toBe(
+    "https://siloserver.org/join#v1.aHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbQ.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o",
+  );
+  expect(bodiesSentTo(fetchMock, "/api/v2/invitations/app-code")).toEqual([
+    { token: "first-secret", username: "sam" },
+  ]);
+  expect(posts()).toHaveLength(0);
+  expect(auth.completeLogin).not.toHaveBeenCalled();
+});
+
+it("offers only the app where passwords can't claim, and says when the server refuses it", async () => {
+  lookup = async () => json({ ...invitation, password_join: false, app_join: true });
+  appCode = async () => problemResponse(409, "provider_sign_in_required");
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Test server adds people through its sign-in provider.",
+  );
+  expect(screen.queryByRole("button", { name: "Use a password instead" })).toBeNull();
+  expect(screen.queryByLabelText("Password", { exact: true })).toBeNull();
+});
+
+it("renews a code once it expires", async () => {
+  lookup = async () => json({ ...invitation, app_join: true });
+  let issued = 0;
+  appCode = async () =>
+    json({
+      ...issuedCode,
+      code: `${++issued}`.padEnd(43, "A"),
+      expires_in: issued === 1 ? 1 : 600,
+    });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  await screen.findByRole("link", { name: "Open Silo" });
+  fireEvent.click(await screen.findByRole("button", { name: "Get a new code" }, { timeout: 3000 }));
+  await screen.findByRole("link", { name: "Open Silo" });
+  expect(bodiesSentTo(fetchMock, "/api/v2/invitations/app-code")).toHaveLength(2);
+});
+
+it("explains an invitation no path can claim instead of showing a form", async () => {
+  lookup = async () => json({ ...invitation, password_join: false, app_join: false });
+  mount();
+  expect(await screen.findByRole("alert")).toHaveTextContent("Password sign-in is turned off");
+  expect(screen.queryByRole("button", { name: "Create account" })).toBeNull();
+});
+
+it("puts a taken email on the email field and moves focus there", async () => {
+  lookup = async () => json({ ...linkInvitation, app_join: true });
+  appCode = async () =>
+    problemResponse(409, "conflict", {
+      errors: [{ location: "body.email", code: "duplicate", detail: "taken" }],
+    });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  const username = screen.getByLabelText("Username");
+  expect(document.activeElement).toBe(username);
+  fireEvent.change(username, { target: { value: "sam" } });
+  fireEvent.change(screen.getByLabelText("Email (optional)"), {
+    target: { value: "sam@example.test" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  const email = screen.getByLabelText("Email (optional)");
+  await waitFor(() => expect(document.activeElement).toBe(email));
+  // Read with the field it describes, not also announced as an alert.
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(email).toHaveAccessibleDescription(/An account already uses this email address\./);
+});
+
+it("moves focus to the Open Silo step when the code arrives", async () => {
+  lookup = async () => json({ ...invitation, app_join: true });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  const heading = await screen.findByRole("heading", { name: "Open Silo" });
+  await waitFor(() => expect(document.activeElement).toBe(heading));
+});
+
+it("moves focus to the renewal button when the code expires, and keeps a refused renewal on the step", async () => {
+  lookup = async () => json({ ...invitation, app_join: true });
+  let issued = 0;
+  appCode = async () =>
+    ++issued === 1 ? json({ ...issuedCode, expires_in: 1 }) : problemResponse(429, "rate_limited");
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  await screen.findByRole("link", { name: "Open Silo" });
+  const renew = await screen.findByRole("button", { name: "Get a new code" }, { timeout: 3000 });
+  await waitFor(() => expect(document.activeElement).toBe(renew));
+  fireEvent.click(renew);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Too many requests");
+  expect(screen.getByRole("heading", { name: "Open Silo" })).toBeTruthy();
+  await waitFor(() =>
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Get a new code" })),
+  );
+});
+
+it("returns to the form when a renewal finds the name taken", async () => {
+  lookup = async () => json({ ...linkInvitation, app_join: true });
+  let issued = 0;
+  appCode = async () =>
+    ++issued === 1
+      ? json({ ...issuedCode, expires_in: 1 })
+      : problemResponse(409, "conflict", {
+          errors: [{ location: "body.username", code: "duplicate", detail: "taken" }],
+        });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.change(screen.getByLabelText("Username"), { target: { value: "sam" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Get a new code" }, { timeout: 3000 }));
+  const username = await screen.findByLabelText("Username");
+  await waitFor(() => expect(document.activeElement).toBe(username));
+  expect(username).toHaveAccessibleDescription("That username is already in use. Choose another.");
+});
+
+it("says an emailed invitation's address is taken when its code is refused", async () => {
+  lookup = async () => json({ ...invitation, app_join: true });
+  appCode = async () =>
+    problemResponse(409, "conflict", {
+      errors: [{ location: "body.username", code: "duplicate", detail: "taken" }],
+    });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "An account already uses this email address.",
+  );
+});
+
+// Focus moves once, when an answer comes back, never while the person types:
+// a taken email, then a refusal with no field, then typing in the email field
+// keeps focus there.
+it("keeps focus where the person types after a later refusal", async () => {
+  lookup = async () => json({ ...linkInvitation, app_join: true });
+  let issued = 0;
+  appCode = async () =>
+    ++issued === 1
+      ? problemResponse(409, "conflict", {
+          errors: [{ location: "body.email", code: "duplicate", detail: "taken" }],
+        })
+      : problemResponse(429, "rate_limited");
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.change(screen.getByLabelText("Username"), { target: { value: "sam" } });
+  const email = screen.getByLabelText("Email (optional)");
+  fireEvent.change(email, { target: { value: "sam@example.test" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  await waitFor(() => expect(document.activeElement).toBe(email));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Too many requests");
+  // The submit cleared the email's error; the refusal sent focus to the form.
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Username")));
+  expect(email).not.toHaveAccessibleDescription(/already uses/);
+  email.focus();
+  fireEvent.change(email, { target: { value: "sam2@example.test" } });
+  expect(document.activeElement).toBe(email);
+});
+
+// An error on the field that already has focus can't be read by moving
+// focus there, so the status region says it.
+it("announces an error on the field that has focus", async () => {
+  lookup = async () => json({ ...linkInvitation, app_join: true });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  const username = screen.getByLabelText("Username");
+  expect(document.activeElement).toBe(username);
+  fireEvent.submit(username.closest("form")!);
+  expect(await screen.findByRole("status")).toHaveTextContent("Choose a username.");
+  expect(username).toHaveAccessibleDescription("Choose a username.");
+});
+
+// A renewal from the Open Silo step finds the name taken: the form comes
+// back with focus on the username field, which reads its error once; the
+// status region stays empty.
+it("reads a name taken at renewal once, from the username field", async () => {
+  lookup = async () => json({ ...linkInvitation, app_join: true });
+  let issued = 0;
+  appCode = async () =>
+    ++issued === 1
+      ? json({ ...issuedCode, expires_in: 1 })
+      : problemResponse(409, "conflict", {
+          errors: [{ location: "body.username", code: "duplicate", detail: "taken" }],
+        });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.change(screen.getByLabelText("Username"), { target: { value: "sam" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  const renew = await screen.findByRole("button", { name: "Get a new code" }, { timeout: 3000 });
+  renew.focus();
+  fireEvent.click(renew);
+  const username = await screen.findByLabelText("Username");
+  await waitFor(() => expect(document.activeElement).toBe(username));
+  expect(username).toHaveAccessibleDescription("That username is already in use. Choose another.");
+  expect(screen.getByRole("status")).toHaveTextContent("");
+});
+
+// An administrator's invitation: the server says its code may not go in a
+// link (an app that took the link would hold the new administrator's
+// session), so the page shows it to type, with no link of any kind.
+it("shows a code the server keeps out of links as text to type", async () => {
+  lookup = async () => json({ ...invitation, app_join: true });
+  appCode = async () => json({ ...issuedCode, link_allowed: false });
+  const { container } = mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(await screen.findByRole("heading", { name: "Join with this code" })).toBeTruthy();
+  expect(screen.getByText(issuedCode.code)).toBeTruthy();
+  expect(screen.queryByRole("link", { name: "Open Silo" })).toBeNull();
+  expectNoLinkCarrying(container, issuedCode.code);
 });

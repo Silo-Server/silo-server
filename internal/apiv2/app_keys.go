@@ -32,6 +32,11 @@ type AppKeyService interface {
 	DenyPendingAppKey(ctx context.Context, claims *auth.Claims, id string) error
 	// ActsAsVerifiedMainProfile is the main-profile rule of the operations
 	// that create lasting access (requireVerifiedMainProfile).
+	IssueSessionAppCode(ctx context.Context, claims *auth.Claims, acting auth.ActingProfile) (auth.IssuedAppCode, error)
+	RedeemAppCode(context.Context, auth.KeyRedeemRequest) (*handlers.AppKeyAnswer, error)
+	// AppKeySessionAccess answers what the caller's session may do with
+	// keys (getAppKeySessionAccess).
+	AppKeySessionAccess(context.Context, *auth.Claims) (auth.SessionKeyAccess, error)
 	ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, auth.ActingProfile, error)
 	// VerifyProfileSet verifies a signed profile set and spends its
 	// challenge.
@@ -114,6 +119,7 @@ func registerAppKeys(reg *Registry) {
 	registerAppKeySignIn(reg)
 	registerAppKeyManagement(reg)
 	registerAppKeyPending(reg)
+	registerAppCodes(reg)
 }
 
 func (reg *Registry) getAppKeyCapability(ctx context.Context, _ *CapabilityInput) (*AppKeyCapabilityOutput, error) {
@@ -137,6 +143,7 @@ func (reg *Registry) getAppKeyCapability(ctx context.Context, _ *CapabilityInput
 			Introduce:         true,
 			SignIn:            true,
 			Enroll:            true,
+			AppCodes:          true,
 			Grants:            true,
 			ProfileSet:        reg.deps.ProfileSet != nil && reg.deps.ProfileSet.ProfileSetSupported(),
 			SignatureSuites:   []string{appKeySignatureSuite},

@@ -1,0 +1,41 @@
+{
+  "description": "The valid join-link cases of internal/appkeys/testdata/vectors/v1/links.json, copied for the web tests, whose CI checkout has only web/. Derived, not edited by hand: TestWebJoinLinkVectorsMatch in internal/appkeys fails when this file and links.json disagree; regenerate it from links.json when the vectors are refreshed.",
+  "cases": [
+    {
+      "type": "join-link",
+      "name": "https form",
+      "valid": true,
+      "form": "https",
+      "string": "https://siloserver.org/join#v1.aHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbQ.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o",
+      "address": "https://media.example.com",
+      "app_code": "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "join-link",
+      "name": "silo form",
+      "valid": true,
+      "form": "silo",
+      "string": "silo://join#v1.aHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbQ.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o",
+      "address": "https://media.example.com",
+      "app_code": "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "join-link",
+      "name": "an address with a path",
+      "valid": true,
+      "form": "https",
+      "string": "https://siloserver.org/join#v1.aHR0cHM6Ly9leGFtcGxlLmNvbS9zaWxv.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o",
+      "address": "https://example.com/silo",
+      "app_code": "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "join-link",
+      "name": "a LAN address with a port",
+      "valid": true,
+      "form": "silo",
+      "string": "silo://join#v1.aHR0cDovLzE5Mi4xNjguMS4yMDo4MDgw.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o",
+      "address": "http://192.168.1.20:8080",
+      "app_code": "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    }
+  ]
+}

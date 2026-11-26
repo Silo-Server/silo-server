@@ -11,8 +11,8 @@ import (
 )
 
 // expiredKeyChallengeDeleter removes app key challenges that expired
-// unspent and the IDs of used grants past their life; *auth.KeyChallenges
-// satisfies it.
+// unspent, the IDs of used grants past their life, and expired app codes;
+// *auth.KeyChallenges satisfies it.
 type expiredKeyChallengeDeleter interface {
 	DeleteExpiredChallenges(ctx context.Context) (int, error)
 }
@@ -23,8 +23,9 @@ type expiredPendingKeyRevoker interface {
 	RevokeExpiredPendingKeys(ctx context.Context) (int, error)
 }
 
-// AppKeyChallengeCleanupTask deletes app key challenges nobody spent and the
-// records of used grants once their grant has expired, and revokes device
+// AppKeyChallengeCleanupTask deletes app key challenges nobody spent, the
+// records of used grants once their grant has expired and app codes past
+// their ten minutes, and revokes device
 // keys that waited for an administrator's approval past their 24 hours.
 // Spending a challenge deletes it; nothing else removes one that was never
 // used. A waiting key is revoked, not deleted, so its public key stays

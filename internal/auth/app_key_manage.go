@@ -118,14 +118,7 @@ func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key
 			if current.KeyID == key.KeyID() {
 				return nil
 			}
-			if _, err := tx.Exec(ctx, `UPDATE auth_person_keys SET revoked_at = NOW() WHERE id = $1`, current.ID); err != nil {
-				return fmt.Errorf("revoking person key: %w", err)
-			}
-			// Replacing the key is how the person cuts off a copy of it, and
-			// a device still waiting for approval may be the copy's work: it
-			// is refused with the key that vouched for it. Devices already
-			// approved keep their keys.
-			if _, err := denyIntroducedWaitingKeysTx(ctx, tx, user.ID, current.ID); err != nil {
+			if err := retirePersonKeyTx(ctx, tx, user.ID, current.ID); err != nil {
 				return err
 			}
 		}
@@ -147,4 +140,19 @@ func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key
 		}
 		return nil
 	})
+}
+
+// retirePersonKeyTx revokes a person key that is being replaced. Replacing
+// the key is how the person cuts off a copy of it, and a device still
+// waiting for approval may be the copy's work: it is refused with the key
+// that vouched for it. Devices already approved keep their keys. tx holds
+// the account row lock and the key's row lock.
+func retirePersonKeyTx(ctx context.Context, tx pgx.Tx, userID int, id string) error {
+	if _, err := tx.Exec(ctx, `UPDATE auth_person_keys SET revoked_at = NOW() WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("revoking person key: %w", err)
+	}
+	if _, err := denyIntroducedWaitingKeysTx(ctx, tx, userID, id); err != nil {
+		return err
+	}
+	return nil
 }

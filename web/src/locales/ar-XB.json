@@ -341,6 +341,12 @@
       "value": "\u200F\u202EThis value has the wrong type.\u202C"
     }
   ],
+  "error.field.key_enrolled": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis key is already in use on this server.\u202C"
+    }
+  ],
   "error.field.malformed_form": [
     {
       "type": 0,
@@ -98036,6 +98042,12 @@
       "value": "\u200F\u202EApprove sign-in\u202C"
     }
   ],
+  "web.auth.appCode.code": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECode\u202C"
+    }
+  ],
   "web.auth.appCode.expired": [
     {
       "type": 0,
@@ -98066,6 +98078,12 @@
       "value": "\u200F\u202EGet a new code\u202C"
     }
   ],
+  "web.auth.appCode.serverAddress": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EServer address\u202C"
+    }
+  ],
   "web.auth.appCode.singleUse": [
     {
       "type": 0,
@@ -98076,6 +98094,18 @@
     {
       "type": 0,
       "value": "\u200F\u202EOpen Silo\u202C"
+    }
+  ],
+  "web.auth.appCode.typeInstructions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIn the Silo app on your phone or tablet, add this server by its address and type this code to create your account. Anyone with the code can join in your place, so don’t share it.\u202C"
+    }
+  ],
+  "web.auth.appCode.typeTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EJoin with this code\u202C"
     }
   ],
   "web.auth.appCode.webLink": [
@@ -98510,6 +98540,12 @@
       "value": "\u200F\u202EUse a password instead\u202C"
     }
   ],
+  "web.auth.invite.usernameIsAddress": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA username with @ must be the email address you enter below.\u202C"
+    }
+  ],
   "web.auth.invite.usernameRequired": [
     {
       "type": 0,
@@ -98519,7 +98555,7 @@
   "web.auth.invite.usernameTaken": [
     {
       "type": 0,
-      "value": "\u200F\u202EThat username or email address is already in use. Choose another.\u202C"
+      "value": "\u200F\u202EThat username is already in use. Choose another.\u202C"
     }
   ],
   "web.auth.languagePicker.label": [
@@ -146845,7 +146881,19 @@
   "web.settings.openInSilo.action": [
     {
       "type": 0,
-      "value": "\u200F\u202EOpen in Silo\u202C"
+      "value": "\u200F\u202EGet a code for the Silo app\u202C"
+    }
+  ],
+  "web.settings.openInSilo.codeInstructions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIn the Silo app on your phone or tablet, add this server by its address and type this code. Anyone with the code can sign in to this account, so don’t share it.\u202C"
+    }
+  ],
+  "web.settings.openInSilo.codeTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECode for the Silo app\u202C"
     }
   ],
   "web.settings.openInSilo.description": [
@@ -146854,10 +146902,22 @@
       "value": "\u200F\u202ESign the Silo app on your phone or tablet in to this account, without a password.\u202C"
     }
   ],
+  "web.settings.openInSilo.loadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t check whether this browser can get a code for the Silo app.\u202C"
+    }
+  ],
   "web.settings.openInSilo.mainProfileOnly": [
     {
       "type": 0,
-      "value": "\u200F\u202EOnly the household’s main profile can open Silo for this account. Switch to it and try again.\u202C"
+      "value": "\u200F\u202EOnly the household’s main profile can get a code for the Silo app. Switch to it and try again.\u202C"
+    }
+  ],
+  "web.settings.openInSilo.pinDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnter the main profile’s PIN to get a code for the Silo app.\u202C"
     }
   ],
   "web.settings.openInSilo.title": [
