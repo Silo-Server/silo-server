@@ -292,6 +292,7 @@ func scanFolders(rows pgx.Rows) ([]*models.MediaFolder, error) {
 			&f.ScanWarningAt,
 			&f.AllowEmptyCleanupOnce,
 			&f.SortOrder,
+			&f.EpisodeOrderProvider,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning folder row: %w", err)

@@ -42,7 +42,7 @@ func TestMergeSeriesStructure_OneProviderNumbersTheShow(t *testing.T) {
 		},
 	}
 
-	seasons, episodes := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
+	seasons, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
 
 	if len(seasons) != 2 || seasons[0].Title != "The Substitute" || seasons[1].Title != "The Entry" {
 		t.Fatalf("seasons = %+v, want TVDB's two seasons only", seasons)
@@ -70,7 +70,7 @@ func TestMergeSeriesStructure_FallsBackWhenPreferredHasNoEpisodes(t *testing.T) 
 		episodes: []EpisodeResult{structureEpisode(1, 1, "Pilot", map[string]string{"tmdb": "m1"})},
 	}
 
-	seasons, episodes := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
+	seasons, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
 
 	if len(seasons) != 1 || len(episodes) != 1 || episodes[0].Title != "Pilot" {
 		t.Fatalf("seasons = %+v, episodes = %+v; want TMDB's season and episode", seasons, episodes)
@@ -87,7 +87,7 @@ func TestMergeSeriesStructure_NoFallbackWhenPreferredFailed(t *testing.T) {
 		episodes: []EpisodeResult{structureEpisode(1, 21, "Enter!", map[string]string{"tmdb": "m21"})},
 	}
 
-	seasons, episodes := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
+	seasons, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
 
 	if len(seasons) != 0 || len(episodes) != 0 {
 		t.Fatalf("seasons = %+v, episodes = %+v; want none while TVDB is failing", seasons, episodes)
@@ -134,5 +134,51 @@ func TestSeriesEpisodeOrderProvider(t *testing.T) {
 				t.Fatalf("seriesEpisodeOrderProvider = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// Providers rarely send each other's episode IDs, so episodes are bridged by
+// air date: the date both providers give exactly one episode, else the same
+// numbers on the same date. A bridged episode fills empty fields and lends
+// its IDs, so the stored row learns its TMDB ID too.
+func TestMergeSeriesStructure_BridgesByAirDate(t *testing.T) {
+	ep := func(season, number int, title, air, overview string, ids map[string]string) EpisodeResult {
+		return EpisodeResult{SeasonNumber: season, EpisodeNumber: number, Title: title, AirDate: air, Overview: overview, ProviderIDs: ids}
+	}
+	tvdb := providerStructure{
+		slug:    "tvdb",
+		seasons: []SeasonResult{{SeasonNumber: 2}, {SeasonNumber: 3}},
+		episodes: []EpisodeResult{
+			ep(2, 1, "Enter!", "2005-03-08", "", map[string]string{"tvdb": "t21"}),
+			// A streaming drop: every episode of the season on one day.
+			ep(3, 1, "Drop one", "2020-01-01", "", map[string]string{"tvdb": "t50"}),
+			ep(3, 2, "Drop two", "2020-01-01", "", map[string]string{"tvdb": "t51"}),
+		},
+	}
+	tmdb := providerStructure{
+		slug: "tmdb",
+		episodes: []EpisodeResult{
+			ep(1, 21, "Enter! The World of the Shinigami", "2005-03-08", "Ichigo arrives.", map[string]string{"tmdb": "m21"}),
+			ep(3, 2, "Drop two", "2020-01-01", "The second one.", map[string]string{"tmdb": "m51"}),
+			// Same date, different numbers: ambiguous, so not bridged.
+			ep(3, 9, "Drop nine", "2020-01-01", "Wrong one.", map[string]string{"tmdb": "m59"}),
+		},
+	}
+
+	_, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
+
+	got := episodesByKey(episodes)
+	if len(got) != 3 {
+		t.Fatalf("episodes = %+v, want TVDB's three", episodes)
+	}
+	enter := got[structureKey{2, 1}]
+	if enter.Overview != "Ichigo arrives." || enter.ProviderIDs["tmdb"] != "m21" || enter.ProviderIDs["tvdb"] != "t21" {
+		t.Fatalf("S2E1 = %+v, want TMDB's S1E21 bridged by its unique air date", enter)
+	}
+	if two := got[structureKey{3, 2}]; two.Overview != "The second one." || two.ProviderIDs["tmdb"] != "m51" {
+		t.Fatalf("S3E2 = %+v, want TMDB's S3E2 bridged by number on the same date", two)
+	}
+	if one := got[structureKey{3, 1}]; one.Overview != "" || one.ProviderIDs["tmdb"] != "" {
+		t.Fatalf("S3E1 = %+v, want nothing bridged onto it", one)
 	}
 }

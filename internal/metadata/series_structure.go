@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // providerStructure is what one provider returned for a series' seasons and
@@ -26,8 +27,15 @@ type providerStructure struct {
 // providers number episodes in their own order, so they only fill empty
 // fields of episodes they share a provider ID with. Local providers merge by
 // number, as the library's files do.
-func mergeSeriesStructure(providers []providerStructure, preferred, language string) ([]SeasonResult, []EpisodeResult) {
+//
+// It also returns the structure provider's slug, empty when no remote
+// provider numbered the series.
+func mergeSeriesStructure(providers []providerStructure, preferred, language string) ([]SeasonResult, []EpisodeResult, string) {
 	structure := structureProvider(providers, preferred)
+	structureSlug := ""
+	if structure != nil {
+		structureSlug = structure.slug
+	}
 
 	seasonResults := make(map[int]*SeasonResult)
 	episodeResults := make(map[episodeResultKey]*EpisodeResult)
@@ -40,26 +48,37 @@ func mergeSeriesStructure(providers []providerStructure, preferred, language str
 		accumulateEpisodeResults(episodeResults, p.episodes, language)
 	}
 
-	byID := make(map[string]*EpisodeResult)
-	for _, episode := range episodeResults {
-		for key, value := range episode.ProviderIDs {
-			if value != "" {
-				byID[key+"\x00"+value] = episode
-			}
-		}
-	}
+	bridge := newEpisodeBridge(episodeResults)
 	for i := range providers {
 		p := &providers[i]
 		if p.local || p == structure {
 			continue
 		}
+		bridge.countOther(p.episodes)
 		for _, episode := range p.episodes {
-			if target := sharedEpisode(byID, episode); target != nil {
-				mergeEpisodeInto(target, episode, language)
+			target := bridge.match(episode)
+			if target == nil {
+				continue
 			}
+			mergeEpisodeInto(target, episode, language)
+			lendProviderIDs(target, episode.ProviderIDs)
 		}
 	}
-	return flattenSeasonResults(seasonResults), flattenEpisodeResults(episodeResults)
+	return flattenSeasonResults(seasonResults), flattenEpisodeResults(episodeResults), structureSlug
+}
+
+type episodeStructureKey struct{}
+
+// withEpisodeStructure marks a full series refresh whose episodes the
+// provider slug numbered, so persisting them renumbers the stored rows to
+// match (renumberSeriesEpisodes). Partial episode refetches never carry it.
+func withEpisodeStructure(ctx context.Context, slug string) context.Context {
+	return context.WithValue(ctx, episodeStructureKey{}, slug)
+}
+
+func episodeStructureOf(ctx context.Context) string {
+	slug, _ := ctx.Value(episodeStructureKey{}).(string)
+	return slug
 }
 
 // structureProvider picks the remote provider that numbers the series: the
@@ -92,18 +111,94 @@ func structureProvider(providers []providerStructure, preferred string) *provide
 	return nil
 }
 
-// sharedEpisode finds the structure episode that carries one of episode's
-// provider IDs.
-func sharedEpisode(byID map[string]*EpisodeResult, episode EpisodeResult) *EpisodeResult {
-	for key, value := range episode.ProviderIDs {
+// episodeBridge finds the structure episode another provider's episode is.
+// Providers rarely send each other's episode IDs, so after a shared ID it
+// goes by air date: a date both providers give exactly one episode, else the
+// same numbers on the same date. Anything else stays unmatched: a wrong match
+// would put one episode's data, and later its watch history, on another.
+type episodeBridge struct {
+	byID         map[string]*EpisodeResult
+	byDate       map[string][]*EpisodeResult
+	byNumbers    map[episodeResultKey]*EpisodeResult
+	otherPerDate map[string]int
+}
+
+func newEpisodeBridge(structure map[episodeResultKey]*EpisodeResult) *episodeBridge {
+	b := &episodeBridge{
+		byID:      make(map[string]*EpisodeResult),
+		byDate:    make(map[string][]*EpisodeResult),
+		byNumbers: make(map[episodeResultKey]*EpisodeResult, len(structure)),
+	}
+	for key, episode := range structure {
+		b.byNumbers[key] = episode
+		for idKey, value := range episode.ProviderIDs {
+			if value != "" {
+				b.byID[idKey+"\x00"+value] = episode
+			}
+		}
+		if date := episodeAirDate(episode.AirDate); date != "" {
+			b.byDate[date] = append(b.byDate[date], episode)
+		}
+	}
+	return b
+}
+
+// countOther records how many episodes one other provider airs per date, so
+// match can tell a unique date from a shared one.
+func (b *episodeBridge) countOther(episodes []EpisodeResult) {
+	b.otherPerDate = make(map[string]int)
+	for _, episode := range episodes {
+		if date := episodeAirDate(episode.AirDate); date != "" {
+			b.otherPerDate[date]++
+		}
+	}
+}
+
+func (b *episodeBridge) match(episode EpisodeResult) *EpisodeResult {
+	for idKey, value := range episode.ProviderIDs {
 		if value == "" {
 			continue
 		}
-		if target := byID[key+"\x00"+value]; target != nil {
+		if target := b.byID[idKey+"\x00"+value]; target != nil {
 			return target
 		}
 	}
+	date := episodeAirDate(episode.AirDate)
+	if date == "" {
+		return nil
+	}
+	if candidates := b.byDate[date]; len(candidates) == 1 && b.otherPerDate[date] == 1 {
+		return candidates[0]
+	}
+	target := b.byNumbers[episodeResultKey{seasonNumber: episode.SeasonNumber, episodeNumber: episode.EpisodeNumber}]
+	if target != nil && episodeAirDate(target.AirDate) == date {
+		return target
+	}
 	return nil
+}
+
+// episodeAirDate is the date part of a provider air date, empty when unknown.
+func episodeAirDate(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 10 {
+		return value[:10]
+	}
+	return ""
+}
+
+// lendProviderIDs adds a bridged episode's provider IDs the structure
+// episode lacks, so the stored row can be found by them after a later order
+// change.
+func lendProviderIDs(target *EpisodeResult, ids map[string]string) {
+	for key, value := range ids {
+		if value == "" || target.ProviderIDs[key] != "" {
+			continue
+		}
+		if target.ProviderIDs == nil {
+			target.ProviderIDs = make(map[string]string)
+		}
+		target.ProviderIDs[key] = value
+	}
 }
 
 // providerStructures collects providerStructure values in the order providers

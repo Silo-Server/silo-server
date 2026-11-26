@@ -2395,7 +2395,11 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if err != nil {
 			return nil, err
 		}
-		allSeasons, allEpisodes = mergeSeriesStructure(structures.list, orderProvider, req.Language)
+		var structureSlug string
+		allSeasons, allEpisodes, structureSlug = mergeSeriesStructure(structures.list, orderProvider, req.Language)
+		if slices.Contains(renumberIDKeys, structureSlug) {
+			ctx = withEpisodeStructure(ctx, structureSlug)
+		}
 	}
 	// Phase 5: Merge & Persist.
 	if !accumulator.HasMetadata && accumulator.Title == "" {
@@ -6433,6 +6437,20 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 
 	if backdropAuthority == seasonBackdropsReidentified && !imagesLocked {
 		s.clearOmittedSeasonBackdrops(ctx, seriesID, seasons, episodes)
+	}
+
+	// Phase 3a: a full refresh first moves stored rows to the numbers the
+	// structure provider gives them, so the writes below land on the right
+	// episodes. If that fails, writing by number would put one episode's data
+	// on another's row, so this refresh leaves the episodes alone.
+	if isCanonicalWrite && len(episodes) > 0 {
+		if structureKey := episodeStructureOf(ctx); structureKey != "" {
+			if err := s.renumberSeriesEpisodes(ctx, seriesID, episodes, structureKey); err != nil {
+				slog.WarnContext(ctx, "metadata: renumbering episodes failed; episodes left as stored", "component", "metadata",
+					"series_id", seriesID, "error", err)
+				episodes = nil
+			}
+		}
 	}
 
 	// Phase 3: Prefetch the requested episode rows, including provider-only rows

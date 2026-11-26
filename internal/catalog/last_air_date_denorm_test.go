@@ -29,6 +29,11 @@ func TestNoEpisodeDeletePath_ProtectsLastAirDateDenorm(t *testing.T) {
 	knownEpisodeDeleteSites := map[string]bool{
 		// Migration 001 owns the initial schema; subsequent migrations may
 		// rebuild the table. Add specific migration filenames here.
+
+		// An episode order change merges duplicate rows of one episode and
+		// recomputes the series' air dates in the same transaction
+		// (applyEpisodeMerges).
+		"episode_renumber.go": true,
 	}
 
 	// Match `DELETE FROM episodes` (with optional schema qualifier and

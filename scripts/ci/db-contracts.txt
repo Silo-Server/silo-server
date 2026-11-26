@@ -513,6 +513,8 @@
 
 # Local sidecar change detection lists scanned items and stores fingerprints.
 ./internal/metadata TestLocalSidecarRepositoryDB
+./internal/metadata TestApplyEpisodeRenumberDB
+./internal/metadata TestApplyEpisodeMergesDB
 
 # The process that discovers local artwork copies it, other drains wait out the
 # discovery hold, and a server without the library mount leaves local jobs to

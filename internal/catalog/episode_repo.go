@@ -141,6 +141,12 @@ func refreshSeriesAirDates(ctx context.Context, tx itemExecer, seriesIDs []strin
 	return nil
 }
 
+// RefreshSeriesAirDates is refreshSeriesAirDates for writers outside this
+// package, such as an episode order change that deletes duplicate rows.
+func RefreshSeriesAirDates(ctx context.Context, tx itemExecer, seriesIDs []string) error {
+	return refreshSeriesAirDates(ctx, tx, seriesIDs)
+}
+
 // dueSeriesAirDatesSQL claims up to $1 series whose next known episode has
 // aired since their air-date columns were last computed. It reads the partial
 // index idx_media_items_next_air_date_at. SKIP LOCKED passes over series an
