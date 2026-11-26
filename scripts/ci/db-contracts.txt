@@ -525,7 +525,10 @@
 ./internal/notifications TestProfileSetWakeDebounceDB
 ./internal/notifications TestProfileSetWakeIsNeverClaimedDB
 ./internal/notifications TestProfileSetWakeEndsWithinItsBudgetDB
+./internal/notifications TestProfileSetWakeTailIsOneBoundedWriteDB
+./internal/notifications TestProfileSetWakeGivesUpWaitingForTheCredentialLockDB
 ./internal/notifications TestProfileSetWakeWaitsForTheWakeInFlightDB
+./internal/notifications TestProfileSetWakeGuardFollowsTheCommitCheckDB
 ./internal/notifications TestProfileSetWakeSlowFirstPhoneDB
 ./internal/notifications TestProfileSetWakeBoundsSendsInFlightDB
 ./internal/notifications TestProfileSetWakePanickingSendDB

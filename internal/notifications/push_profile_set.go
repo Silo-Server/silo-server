@@ -26,8 +26,9 @@ const (
 	// profileSetEnqueueTimeout bounds the enqueue, which runs before the
 	// edit's response completes.
 	profileSetEnqueueTimeout = 5 * time.Second
-	// profileSetFinalizeTimeout bounds the write that records a wake its
-	// send left unfinished.
+	// profileSetFinalizeTimeout bounds a wake's tail: the one write, after
+	// every send has returned, that records the phones still in flight as
+	// failed.
 	profileSetFinalizeTimeout = 5 * time.Second
 	// profileSetWakeStale is when retention marks a wake whose send never
 	// finished (the process stopped mid-send) as failed.
@@ -36,16 +37,18 @@ const (
 	profileSetWakeRetention = 7 * 24 * time.Hour
 )
 
-// profileSetWakeBudget bounds one whole wake: every phone's send, from the
-// moment the wake is queued. It is half of profileSetWakeInterval. The limit
-// measures the interval from when a wake is recorded, and the wake is queued
-// up to profileSetEnqueueTimeout later, so the budget must stay under the
-// interval less that: then a wake has ended before the account's limit lets
-// the next one start, and two of an account's wakes never overlap (the
-// in-process guard, claimProfileSetWake, holds that on one server even if
-// the clocks disagree). TestProfileSetWakeBudgetIsShorterThanTheInterval
-// holds the constants to that. Each phone's send
-// gets what is left of it. One send can make up to seven relay requests
+// profileSetWakeBudget bounds every phone's send of one wake, from the
+// moment the wake is queued. It is half of profileSetWakeInterval. After it,
+// the wake's tail takes at most profileSetFinalizeTimeout, so a wake ends,
+// and releases the account's in-flight mark, within the budget plus that:
+// 35 seconds. The limit measures the interval from when a wake is recorded,
+// and the wake is queued up to profileSetEnqueueTimeout later, so the budget
+// plus the tail must stay under the interval less that: then a wake has
+// ended before the account's limit lets the next one start, and two of an
+// account's wakes never overlap (the in-process guard, claimProfileSetWake,
+// holds that on one server even if the clocks disagree).
+// TestProfileSetWakeBudgetIsShorterThanTheInterval holds the constants to
+// that. Each phone's send gets what is left of the budget. One send can make up to seven relay requests
 // (renewing and replacing the relay credential, a second post without the
 // push target or after idempotency_key_reuse, recovering a rejected
 // credential, and the send again), each under pushRelayRequestTimeout, which
@@ -84,14 +87,17 @@ const profileSetWakeMaxPhones = 20
 
 // EnqueueProfileSetWake queues a wake for the registered, enabled phones of
 // account userID on platforms whose login is live, at most
-// profileSetWakeMaxPhones of them in listProfileSetWakeDevices's order, unless the
-// account had one queued in the last profileSetWakeInterval. queued reports
-// whether a wake is queued now or was inside that interval, sent or not;
-// sendNow lists the attempts it created, in flight, for the caller to send.
+// profileSetWakeMaxPhones of them in listProfileSetWakeDevices's order, unless
+// the account had one queued in the last profileSetWakeInterval. sendNow
+// lists the attempts it created and committed, in flight, for the caller to
+// send; it is empty when no wake was queued.
 //
 // minRevision, when not nil, is the first profile_set_edits revision the
 // calling request recorded: the wake goes out only when an edit row at or
-// above it exists, that is, when one of the request's edits committed.
+// above it exists, that is, when one of the request's edits committed. claim
+// is called once that is known, before anything is recorded, and a false
+// answer queues nothing: it is the caller's in-flight guard, so an edit that
+// rolled back never takes it.
 //
 // One statement decides and records the wake in push_profile_set_wakes, so
 // edits recorded at the same moment on two API servers queue one wake, and
@@ -99,13 +105,13 @@ const profileSetWakeMaxPhones = 20
 // time is recorded in the transaction that queues the attempts: a failure
 // to queue rolls it back, and an account whose phones all went away in the
 // meantime records nothing.
-func (r *PushDeviceRepository) EnqueueProfileSetWake(ctx context.Context, userID int, platforms []string, minRevision *int64) (queued bool, sendNow []PushDeliveryAttempt, err error) {
+func (r *PushDeviceRepository) EnqueueProfileSetWake(ctx context.Context, userID int, platforms []string, minRevision *int64, claim func() bool) (sendNow []PushDeliveryAttempt, err error) {
 	if r == nil || r.pool == nil || len(platforms) == 0 {
-		return false, nil, nil
+		return nil, nil
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return false, nil, fmt.Errorf("begin profile set wake: %w", err)
+		return nil, fmt.Errorf("begin profile set wake: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -114,23 +120,22 @@ func (r *PushDeviceRepository) EnqueueProfileSetWake(ctx context.Context, userID
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (
 			SELECT 1 FROM profile_set_edits WHERE user_id = $1 AND revision >= $2)`,
 			userID, *minRevision).Scan(&committed); err != nil {
-			return false, nil, fmt.Errorf("check profile set edit: %w", err)
+			return nil, fmt.Errorf("check profile set edit: %w", err)
 		}
 		if !committed {
-			return false, nil, nil
+			return nil, nil
 		}
+	}
+	if claim != nil && !claim() {
+		return nil, nil
 	}
 	devices, err := listProfileSetWakeDevices(ctx, tx, userID, platforms)
 	if err != nil || len(devices) == 0 {
-		return false, nil, err
+		return nil, err
 	}
 	due, err := recordProfileSetWake(ctx, tx, userID)
-	if err != nil {
-		return false, nil, err
-	}
-	if !due {
-		// A wake went out inside the interval: this edit is covered by it.
-		return true, nil, nil
+	if err != nil || !due {
+		return nil, err
 	}
 
 	attempts := make([]PushDeliveryAttempt, 0, len(devices))
@@ -147,25 +152,25 @@ func (r *PushDeviceRepository) EnqueueProfileSetWake(ctx context.Context, userID
 		})
 	}
 	if err := enqueuePushAttempts(ctx, tx, attempts, PushOutcomeRetrying); err != nil {
-		return false, nil, err
+		return nil, err
 	}
 	// A device removed since the listing got no attempt. The rest keep the
 	// listing's order, which is the order a wake sends them in.
 	rows, err := tx.Query(ctx, `SELECT `+pushAttemptColumns+` FROM push_delivery_attempts
 		WHERE id = ANY($1) ORDER BY array_position($1::text[], id)`, ids)
 	if err != nil {
-		return false, nil, fmt.Errorf("read profile set wake attempts: %w", err)
+		return nil, fmt.Errorf("read profile set wake attempts: %w", err)
 	}
 	if sendNow, err = scanPushDeliveryAttempts(rows); err != nil {
-		return false, nil, fmt.Errorf("read profile set wake attempts: %w", err)
+		return nil, fmt.Errorf("read profile set wake attempts: %w", err)
 	}
 	if len(sendNow) == 0 {
-		return false, nil, nil
+		return nil, nil
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return false, nil, fmt.Errorf("commit profile set wake: %w", err)
+		return nil, fmt.Errorf("commit profile set wake: %w", err)
 	}
-	return true, sendNow, nil
+	return sendNow, nil
 }
 
 // listProfileSetWakeDevices lists the phones a wake of userID reaches: its
@@ -253,12 +258,15 @@ func (r *PushDeviceRepository) RetireProfileSetWakes(ctx context.Context) (int64
 
 // WakeProfileSetDevices is the profileedits.Waker: it wakes account
 // userID's phones after a profile from its profile set changed on this
-// server. It reports whether a wake was queued for at least one device, or
-// already was inside the debounce interval, even if that earlier send
-// failed: the phone has been told, or will be within the minute, and a
-// failed send is repaired by the app opening. It answers false when push
-// delivery is off for every platform, the account has no registered phone,
-// or the request that calls it recorded edits none of which committed.
+// server. It answers true when, and only when, this call queued a wake after
+// the edit committed: the wake's attempts were written and committed for at
+// least one phone. The answer is about the wake being queued, not delivered:
+// it stays true if the send then fails or runs out of budget. It answers
+// false when the account had a wake inside the last profileSetWakeInterval,
+// when a wake for the account is still in flight on this server, when the
+// request's edits all rolled back, when the account has no phone to wake,
+// and when push delivery is off for every platform. A wake that left before
+// this edit existed says nothing about it.
 //
 // It returns once the wake is queued, which takes at most
 // profileSetEnqueueTimeout, and sends it in the background. It never fails
@@ -278,27 +286,27 @@ func (s *System) WakeProfileSetDevices(ctx context.Context, userID int) bool {
 	if revision, ok := profileedits.FromContext(ctx).FirstRevision(userID); ok {
 		minRevision = &revision
 	}
-	// A wake for this account still in flight here was queued less than a
-	// budget ago, inside the account's limit: this edit is covered by it.
-	if !s.claimProfileSetWake(userID) {
-		return true
-	}
-	handedOff := false
+	claimed, handedOff := false, false
 	defer func() {
-		if !handedOff {
+		if claimed && !handedOff {
 			s.releaseProfileSetWake(userID)
 		}
 	}()
-	queued, sendNow, err := s.pushDeviceRepo.EnqueueProfileSetWake(enqueueCtx, userID, platforms, minRevision)
+	claim := func() bool {
+		claimed = s.claimProfileSetWake(userID)
+		return claimed
+	}
+	sendNow, err := s.pushDeviceRepo.EnqueueProfileSetWake(enqueueCtx, userID, platforms, minRevision, claim)
 	if err != nil {
 		s.logger.WarnContext(ctx, "queueing profile set wake failed", "user_id", userID, "error", err)
 		return false
 	}
-	if len(sendNow) > 0 {
-		s.sendProfileSetWakeDetached(ctx, userID, sendNow)
-		handedOff = true
+	if len(sendNow) == 0 {
+		return false
 	}
-	return queued
+	s.sendProfileSetWakeDetached(ctx, userID, sendNow)
+	handedOff = true
+	return true
 }
 
 // claimProfileSetWake marks a wake of userID as in flight on this server; it
@@ -335,44 +343,63 @@ func (s *System) profileSetWakeInFlight(userID int) bool {
 	return busy
 }
 
-// failUnfinishedProfileSetWake records as failed a wake its send left in
-// flight: its deadline passed, or it stopped before writing an outcome. A
-// row the send did finish is left as it is.
-func (r *PushDeviceRepository) failUnfinishedProfileSetWake(ctx context.Context, attemptID, reason string) error {
-	if _, err := r.pool.Exec(ctx, `UPDATE push_delivery_attempts
-		SET outcome = $2, attempt_number = attempt_number + 1, attempted_at = now(),
-		    upstream_reason = $3, failure_message = $3, updated_at = now()
-		WHERE id = $1 AND trigger_type = $4 AND outcome = $5 AND next_retry_at IS NULL`,
-		attemptID, PushOutcomeFailed, reason, PushTriggerProfileSet, PushOutcomeRetrying); err != nil {
-		return fmt.Errorf("fail unfinished profile set wake: %w", err)
+// failUnfinishedProfileSetWakes records as failed, in one statement, every
+// attempt of a wake its sends left in flight: wake_send_unfinished for those
+// in unfinished (a send that panicked or stopped before writing an outcome),
+// wake_out_of_time for the rest (the budget ended before they finished or
+// started). It runs once every send of the wake has returned, so no send can
+// write after it, and a row a send did finish is left as it is.
+func (r *PushDeviceRepository) failUnfinishedProfileSetWakes(ctx context.Context, attemptIDs, unfinished []string) error {
+	if _, err := r.pool.Exec(ctx, `UPDATE push_delivery_attempts a
+		SET outcome = $3, attempt_number = a.attempt_number + 1, attempted_at = now(),
+		    upstream_reason = CASE WHEN a.id = ANY($2) THEN 'wake_send_unfinished' ELSE 'wake_out_of_time' END,
+		    failure_message = CASE WHEN a.id = ANY($2) THEN 'wake_send_unfinished' ELSE 'wake_out_of_time' END,
+		    updated_at = now()
+		WHERE a.id = ANY($1) AND a.trigger_type = $4 AND a.outcome = $5 AND a.next_retry_at IS NULL`,
+		attemptIDs, unfinished, PushOutcomeFailed, PushTriggerProfileSet, PushOutcomeRetrying); err != nil {
+		return fmt.Errorf("fail unfinished profile set wakes: %w", err)
 	}
 	return nil
 }
 
 // sendProfileSetWakeDetached sends the wake on its own goroutine, as the
 // service's other detached sends do (PostServerChannelRequestEvent): the
-// caller never waits for the relay. The whole wake runs under
-// profileSetWakeBudget, started now, and holds the account's in-flight mark
-// until every send has returned and every failure write is done, a panic
-// included. The phones are started in order, profileSetWakeConcurrency at a
-// time; a send that did not record an outcome, a panicking one included, and
-// a phone the budget did not reach, are recorded failed on a fresh context
-// the budget cannot have canceled, so no wake row outlives its wake in
-// flight and no goroutine outlives the wake. Only a process that stops
-// mid-wake leaves a row in flight, which no claim selects, the queue gauge
-// leaves out, and retention marks failed.
+// caller never waits for the relay. The phones are started in order,
+// profileSetWakeConcurrency at a time, each under what is left of
+// profileSetWakeBudget, which starts now; the relay requests, the database
+// writes and the wait for the relay credential's lock all end with it. Once
+// every send has returned, one statement records every phone still in flight
+// as failed, on a fresh context limited to profileSetFinalizeTimeout. The
+// account's in-flight mark is released after that write, a panic included,
+// so a wake holds it for at most the budget plus profileSetFinalizeTimeout
+// (35 seconds), and no wake row or goroutine outlives the wake. Only a
+// process that stops mid-wake leaves a row in flight, which no claim
+// selects, the queue gauge leaves out, and retention marks failed.
 func (s *System) sendProfileSetWakeDetached(ctx context.Context, userID int, attempts []PushDeliveryAttempt) {
 	ctx = context.WithoutCancel(ctx)
 	budget, cancel := context.WithTimeout(ctx, profileSetWakeBudget)
 	go func() {
 		defer s.releaseProfileSetWake(userID)
+		defer func() {
+			if p := recover(); p != nil {
+				s.logProfileSetWakePanic(ctx, userID, "", p)
+			}
+		}()
 		defer cancel()
+		var (
+			mu         sync.Mutex
+			unfinished []string
+		)
 		next := make(chan PushDeliveryAttempt)
 		var senders sync.WaitGroup
 		for range min(profileSetWakeConcurrency, len(attempts)) {
 			senders.Go(func() {
 				for attempt := range next {
-					s.sendProfileSetWakeTo(ctx, budget, userID, attempt)
+					if !s.sendProfileSetWakeTo(budget, userID, attempt) {
+						mu.Lock()
+						unfinished = append(unfinished, attempt.ID)
+						mu.Unlock()
+					}
 				}
 			})
 		}
@@ -381,38 +408,33 @@ func (s *System) sendProfileSetWakeDetached(ctx context.Context, userID int, att
 		}
 		close(next)
 		senders.Wait()
+
+		ids := make([]string, len(attempts))
+		for i, attempt := range attempts {
+			ids[i] = attempt.ID
+		}
+		finalizeCtx, cancelFinalize := context.WithTimeout(ctx, profileSetFinalizeTimeout)
+		defer cancelFinalize()
+		if err := s.pushDeviceRepo.failUnfinishedProfileSetWakes(finalizeCtx, ids, unfinished); err != nil {
+			s.logger.WarnContext(ctx, "recording an unfinished profile set wake failed", "user_id", userID, "error", err)
+		}
 	}()
 }
 
-// sendProfileSetWakeTo sends one phone's wake under what is left of budget
-// and records its outcome. Its recover covers what runs after the send, the
-// failure write and its log, which run outside the HTTP recoverer: a panic
-// there must not end the process or skip the account's other phones.
-func (s *System) sendProfileSetWakeTo(ctx, budget context.Context, userID int, attempt PushDeliveryAttempt) {
-	defer func() {
-		if p := recover(); p != nil {
-			s.logProfileSetWakePanic(ctx, userID, attempt.ID, p)
-		}
-	}()
-	var (
-		finished *PushDeliveryAttempt
-		panicked bool
-	)
-	if budget.Err() == nil {
-		finished, panicked = s.attemptProfileSetWake(budget, userID, attempt)
+// sendProfileSetWakeTo sends one phone's wake under what is left of budget.
+// It reports false for a send that was started and neither recorded an
+// outcome nor ran out of budget: one that panicked or stopped early. A phone
+// the budget did not reach, or did not let finish, is left for the tail's
+// out-of-time write.
+func (s *System) sendProfileSetWakeTo(budget context.Context, userID int, attempt PushDeliveryAttempt) bool {
+	if budget.Err() != nil {
+		return true
 	}
-	if !panicked && finished != nil && finished.Outcome != PushOutcomeRetrying {
-		return
+	finished, panicked := s.attemptProfileSetWake(budget, userID, attempt)
+	if panicked {
+		return false
 	}
-	reason := "wake_send_unfinished"
-	if budget.Err() != nil && !panicked {
-		reason = "wake_out_of_time"
-	}
-	finalizeCtx, cancelFinalize := context.WithTimeout(ctx, profileSetFinalizeTimeout)
-	defer cancelFinalize()
-	if err := s.pushDeviceRepo.failUnfinishedProfileSetWake(finalizeCtx, attempt.ID, reason); err != nil {
-		s.logger.WarnContext(ctx, "recording an unfinished profile set wake failed", "attempt_id", attempt.ID, "error", err)
-	}
+	return (finished != nil && finished.Outcome != PushOutcomeRetrying) || budget.Err() != nil
 }
 
 // attemptProfileSetWake runs one phone's send under budget, turning a panic

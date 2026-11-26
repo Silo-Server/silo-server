@@ -172,9 +172,12 @@ type pushSender struct {
 	// serverID reads the deployment identity getServerIdentity reports.
 	serverID func(context.Context) (string, error)
 
-	// renewMu serializes credential renewal and replacement in this process;
-	// lastRelayReplacement is guarded by it.
-	renewMu              sync.Mutex
+	// renewLock serializes credential renewal and replacement in this
+	// process; lastRelayReplacement is guarded by it. It is a one-slot
+	// channel rather than a mutex so a send waiting for it gives up when its
+	// context ends (lockRenew): a profile set wake's sends wait under the
+	// wake's budget.
+	renewLock            chan struct{}
 	lastRelayReplacement time.Time
 
 	// targetMu guards relayWithoutTarget: per relay base URL, the time until
@@ -198,8 +201,23 @@ func newPushSender(devices *PushDeviceRepository, deliveries *DeliveryRepository
 		developmentRelayURL: os.Getenv("SILO_PUSH_RELAY_DEVELOPMENT_URL"),
 		now:                 time.Now,
 		relayWithoutTarget:  map[string]time.Time{},
+		renewLock:           make(chan struct{}, 1),
 	}
 }
+
+// lockRenew takes renewLock, or gives up with ctx's error when ctx ends
+// first.
+func (s *pushSender) lockRenew(ctx context.Context) error {
+	select {
+	case s.renewLock <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// unlockRenew releases renewLock.
+func (s *pushSender) unlockRenew() { <-s.renewLock }
 
 func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAttempt) *PushDeliveryAttempt {
 	device, loginLive, err := s.devices.getPushDeviceByID(ctx, attempt.PushDeviceID)
@@ -352,8 +370,10 @@ func (s *pushSender) relayTarget(ctx context.Context, device *PushDevice) (targe
 func relayTargetID(id string) bool { return id != "" && len(id) <= 128 }
 
 func (s *pushSender) prepareRelayCredential(ctx context.Context) (PushRelayCredential, error) {
-	s.renewMu.Lock()
-	defer s.renewMu.Unlock()
+	if err := s.lockRenew(ctx); err != nil {
+		return PushRelayCredential{}, err
+	}
+	defer s.unlockRenew()
 	current := LoadPushRelayCredential(ctx, s.settings)
 	relayURL, err := NormalizePushRelayURL(current.RelayURL, s.developmentRelayURL)
 	if err != nil {
@@ -425,8 +445,10 @@ func (s *pushSender) registerRelayCredential(ctx context.Context, relayURL strin
 // sent: an expired capability is renewed, and any other rejection is healed
 // by registering a fresh deployment.
 func (s *pushSender) recoverRelayCredential(ctx context.Context, failed PushRelayCredential, code string) (PushRelayCredential, error) {
-	s.renewMu.Lock()
-	defer s.renewMu.Unlock()
+	if err := s.lockRenew(ctx); err != nil {
+		return PushRelayCredential{}, err
+	}
+	defer s.unlockRenew()
 
 	current := LoadPushRelayCredential(ctx, s.settings)
 	if current.Parked() {
@@ -458,7 +480,7 @@ func (s *pushSender) recoverRelayCredential(ctx context.Context, failed PushRela
 }
 
 // handleRelayRejectionLocked parks a deployment the relay disabled and
-// replaces any other rejected capability. Callers hold renewMu.
+// replaces any other rejected capability. Callers hold renewLock.
 func (s *pushSender) handleRelayRejectionLocked(ctx context.Context, current PushRelayCredential, code string) (PushRelayCredential, error) {
 	if code == relayCodeDeploymentDisabled {
 		stored, parked, err := parkRelayCredential(ctx, s.settings, current)
@@ -492,7 +514,7 @@ func (s *pushSender) adoptStoredRelayCredential(stored PushRelayCredential) (Pus
 
 // replaceRejectedRelayCredentialLocked registers a new deployment in place of
 // a rejected capability, at most once per cooldown per process so a relay
-// that rejects fresh credentials too is not hammered. Callers hold renewMu.
+// that rejects fresh credentials too is not hammered. Callers hold renewLock.
 func (s *pushSender) replaceRejectedRelayCredentialLocked(ctx context.Context, current PushRelayCredential, code string) (PushRelayCredential, error) {
 	now := s.now()
 	if !s.lastRelayReplacement.IsZero() && now.Sub(s.lastRelayReplacement) < relayReplacementCooldown {

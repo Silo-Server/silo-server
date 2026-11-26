@@ -186,9 +186,10 @@ func TestProfileSetWakeDebounceDB(t *testing.T) {
 	nodeA := profileSetWakeSystem(t, pool, repo, nil, h.relayed)
 	nodeB := profileSetWakeSystem(t, pool, repo, nil, h.relayed)
 
-	// Two servers recording at the same moment queue one wake per phone.
-	if answers := h.wakeTogether(nodeA, nodeB); !answers[0] || !answers[1] || h.attempts() != 2 {
-		t.Fatalf("concurrent wakes answered %v with %d attempts, want true, true and 2", answers, h.attempts())
+	// Two servers recording at the same moment queue one wake per phone, and
+	// only the one that queued it answers true.
+	if answers := h.wakeTogether(nodeA, nodeB); answers[0] == answers[1] || h.attempts() != 2 {
+		t.Fatalf("concurrent wakes answered %v with %d attempts, want one true, one false and 2", answers, h.attempts())
 	}
 	paths := map[string]bool{}
 	for _, wake := range h.receive(2) {
@@ -202,17 +203,23 @@ func TestProfileSetWakeDebounceDB(t *testing.T) {
 	if !paths[relayAppleSendPath] || !paths[relayFcmSendPath] {
 		t.Fatalf("relay paths = %v, want the Apple and the Android phone", paths)
 	}
+	// The relay saw the requests before the send recorded them and released
+	// the account's mark; the next wake waits for that.
+	waitForWakeEnded(t, nodeA)
+	waitForWakeEnded(t, nodeB)
 
-	// A second edit inside the minute sends nothing more and still tells the
-	// owner a wake is on its way; one after the minute wakes again.
-	if !nodeB.WakeProfileSetDevices(ctx, 7) || h.attempts() != 2 {
-		t.Fatalf("wake inside the minute: %d attempts, want 2 and a true answer", h.attempts())
+	// A second edit inside the minute queues nothing and answers false: the
+	// earlier wake may have been read before this edit existed. One after the
+	// minute wakes again.
+	if nodeB.WakeProfileSetDevices(ctx, 7) || h.attempts() != 2 {
+		t.Fatalf("wake inside the minute: %d attempts, want 2 and a false answer", h.attempts())
 	}
 	h.pastTheMinute()
 	if !nodeA.WakeProfileSetDevices(ctx, 7) || h.attempts() != 4 {
 		t.Fatalf("wake after the minute: %d attempts, want 4 and a true answer", h.attempts())
 	}
 	h.receive(2)
+	waitForWakeEnded(t, nodeA)
 
 	// A request whose edit rolled back wakes nothing; one whose edit
 	// committed does.
@@ -224,6 +231,7 @@ func TestProfileSetWakeDebounceDB(t *testing.T) {
 		t.Fatalf("wake after a committed edit: %d attempts, want 6 and a true answer", h.attempts())
 	}
 	h.receive(2)
+	waitForWakeEnded(t, nodeA)
 
 	// No registered phone, or push off for both platforms: nothing queued,
 	// nothing recorded, no error.
@@ -436,8 +444,8 @@ func TestProfileSetWakeWaitsForTheWakeInFlightDB(t *testing.T) {
 	}
 	<-held
 	h.pastTheMinute() // the account's limit no longer holds the next wake back
-	if !node.WakeProfileSetDevices(t.Context(), 7) || h.attempts() != 1 || calls.Load() != 1 {
-		t.Fatalf("wake while one is in flight: %d rows, %d relay calls; want it covered by the one in flight (true, 1, 1)", h.attempts(), calls.Load())
+	if node.WakeProfileSetDevices(t.Context(), 7) || h.attempts() != 1 || calls.Load() != 1 {
+		t.Fatalf("wake while one is in flight: %d rows, %d relay calls; want a false answer, 1 and 1", h.attempts(), calls.Load())
 	}
 
 	close(release)
@@ -459,14 +467,17 @@ func TestProfileSetWakeWaitsForTheWakeInFlightDB(t *testing.T) {
 }
 
 // One wake of an account ends before the account's limit lets the next one
-// start. The limit measures the interval from when a wake is recorded, and
-// the wake is queued up to profileSetEnqueueTimeout later, so the budget
-// must stay under the interval less that. Regression: a budget raised, or an
-// interval or queue deadline changed, so that an account's wakes overlap.
+// start. A wake ends within its budget plus its tail's write, and is queued
+// up to profileSetEnqueueTimeout after the limit records it, so the two
+// together must stay under the interval less that. Regression: a budget or
+// tail raised, or an interval or queue deadline changed, so that an
+// account's wakes overlap, or one holds its in-flight mark past the minute
+// and the guard refuses an edit made after it.
 func TestProfileSetWakeBudgetIsShorterThanTheInterval(t *testing.T) {
-	if limit := profileSetWakeInterval - profileSetEnqueueTimeout; profileSetWakeBudget <= 0 || profileSetWakeBudget >= limit {
-		t.Fatalf("wake budget %v, want more than zero and less than the interval %v less the queue deadline %v",
-			profileSetWakeBudget, profileSetWakeInterval, profileSetEnqueueTimeout)
+	wake := profileSetWakeBudget + profileSetFinalizeTimeout
+	if limit := profileSetWakeInterval - profileSetEnqueueTimeout; profileSetWakeBudget <= 0 || wake >= limit {
+		t.Fatalf("wake budget %v plus its tail %v, want under the interval %v less the queue deadline %v",
+			profileSetWakeBudget, profileSetFinalizeTimeout, profileSetWakeInterval, profileSetEnqueueTimeout)
 	}
 }
 
@@ -556,27 +567,27 @@ func TestProfileSetWakeSurvivesDeviceRemovalDB(t *testing.T) {
 	platforms := []string{PushPlatformApple, PushPlatformAndroid}
 	wake := func() (bool, int) {
 		t.Helper()
-		queued, sendNow, err := repo.EnqueueProfileSetWake(ctx, 7, platforms, nil)
+		sendNow, err := repo.EnqueueProfileSetWake(ctx, 7, platforms, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return queued, len(sendNow)
+		return len(sendNow) > 0, len(sendNow)
 	}
 
 	registerAndroid(t, repo, "android-cycle", 1, false)
 	if queued, sent := wake(); !queued || sent != 1 || h.attempts() != 1 {
 		t.Fatalf("first wake: queued %v, %d sent, %d rows; want true, 1, 1", queued, sent, h.attempts())
 	}
-	if queued, sent := wake(); !queued || sent != 0 || h.attempts() != 1 {
-		t.Fatalf("wake inside the minute: queued %v, %d sent, %d rows; want true, 0, 1", queued, sent, h.attempts())
+	if queued, sent := wake(); queued || sent != 0 || h.attempts() != 1 {
+		t.Fatalf("wake inside the minute: queued %v, %d sent, %d rows; want false, 0, 1", queued, sent, h.attempts())
 	}
 	registerAndroid(t, repo, "android-cycle", 2, true)
 	if h.attempts() != 0 {
 		t.Fatalf("rows after the phone's removal = %d, want 0: its attempts go with it", h.attempts())
 	}
 	registerAndroid(t, repo, "android-cycle", 3, false)
-	if queued, sent := wake(); !queued || sent != 0 || h.attempts() != 0 {
-		t.Fatalf("wake inside the minute after remove and register: queued %v, %d sent, %d rows; want true, 0, 0", queued, sent, h.attempts())
+	if queued, sent := wake(); queued || sent != 0 || h.attempts() != 0 {
+		t.Fatalf("wake inside the minute after remove and register: queued %v, %d sent, %d rows; want false, 0, 0", queued, sent, h.attempts())
 	}
 	h.pastTheMinute()
 	if queued, sent := wake(); !queued || sent != 1 || h.attempts() != 1 {
@@ -628,7 +639,7 @@ func TestProfileSetWakeCapsPhonesDB(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			_, sendNow, err := repo.EnqueueProfileSetWake(ctx, 7, []string{PushPlatformAndroid}, nil)
+			sendNow, err := repo.EnqueueProfileSetWake(ctx, 7, []string{PushPlatformAndroid}, nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -781,5 +792,110 @@ func TestProfileSetWakeBoundsSendsInFlightDB(t *testing.T) {
 	waitForWakeEnded(t, node)
 	if got := most.Load(); got != profileSetWakeConcurrency || calls.Load() != profileSetWakeConcurrency {
 		t.Fatalf("held wake: %d relay calls, at most %d at once; want %d of each", calls.Load(), got, profileSetWakeConcurrency)
+	}
+}
+
+// The in-flight guard is taken only once the edit is known to have
+// committed: a request whose edits rolled back never takes it, so it can
+// neither be refused by it nor hold it against a committed edit. Regression:
+// the guard was claimed before the commit check, so a rolled-back edit made
+// while a wake was in flight answered differently from one made while none
+// was, and held the mark for its whole enqueue.
+func TestProfileSetWakeGuardFollowsTheCommitCheckDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	if _, err := pool.Exec(t.Context(), `
+		CREATE TABLE profile_set_edits (LIKE public.profile_set_edits INCLUDING ALL);
+		INSERT INTO profile_set_edits (user_id, sync_id, field, by, actor_user_id)
+		VALUES (7, gen_random_uuid(), 'name', 'account', 7)`); err != nil {
+		t.Fatal(err)
+	}
+	registerForSession(t, repo, "live")
+	var committed int64
+	if err := pool.QueryRow(t.Context(), `SELECT revision FROM profile_set_edits`).Scan(&committed); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name      string
+		revision  int64
+		wantClaim bool
+		wantSent  int
+	}{
+		{name: "rolled back", revision: committed + 1000, wantClaim: false, wantSent: 0},
+		{name: "committed", revision: committed, wantClaim: true, wantSent: 2},
+	} {
+		claimed := false
+		sendNow, err := repo.EnqueueProfileSetWake(t.Context(), 7, []string{PushPlatformApple, PushPlatformAndroid}, &tc.revision,
+			func() bool { claimed = true; return true })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if claimed != tc.wantClaim || len(sendNow) != tc.wantSent {
+			t.Errorf("%s edit: guard claimed %v, %d queued; want %v and %d", tc.name, claimed, len(sendNow), tc.wantClaim, tc.wantSent)
+		}
+	}
+}
+
+// A wake ends within its budget plus one bounded write, even when the rows
+// it records are locked: the phones still in flight are recorded in one
+// statement on one deadline, and the account's in-flight mark is released
+// after it. Regression: each phone got its own failure write with its own
+// deadline, one after another, so a wake with locked rows held the mark for
+// 15 seconds with three phones, and an edit made after the minute was
+// refused by the guard.
+func TestProfileSetWakeTailIsOneBoundedWriteDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	registerForSession(t, repo, "live")
+	registerAndroid(t, repo, "android-extra", 1, false)
+	defer func(previous time.Duration) { profileSetWakeBudget = previous }(profileSetWakeBudget)
+	profileSetWakeBudget = 300 * time.Millisecond
+
+	node := profileSetWakeSystem(t, pool, repo, nil, nil)
+	node.pushSender.client = &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		<-req.Context().Done() // the relay never answers
+		return nil, req.Context().Err()
+	})}
+	started := time.Now()
+	if !node.WakeProfileSetDevices(t.Context(), 7) {
+		t.Fatal("wake answered false")
+	}
+	// Another transaction holds the wake's rows, so no write to them can
+	// finish until it ends.
+	locker, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = locker.Rollback(context.Background()) }()
+	if _, err := locker.Exec(t.Context(), `SELECT id FROM push_delivery_attempts WHERE trigger_type = $1 FOR UPDATE`,
+		PushTriggerProfileSet); err != nil {
+		t.Fatal(err)
+	}
+	waitForWakeEnded(t, node)
+	if elapsed, bound := time.Since(started), profileSetWakeBudget+profileSetFinalizeTimeout; elapsed > bound+time.Second {
+		t.Fatalf("the wake held its mark for %v, want at most its budget plus its tail, %v", elapsed, bound)
+	}
+}
+
+// A send waiting for the relay credential's lock gives up when the wake's
+// budget ends, so a wake ends on time while another send holds the lock
+// across a slow credential request. Regression: the lock was a mutex, whose
+// wait no context ends, so a wake's send could outlive its budget there.
+func TestProfileSetWakeGivesUpWaitingForTheCredentialLockDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	registerForSession(t, repo, "live")
+	defer func(previous time.Duration) { profileSetWakeBudget = previous }(profileSetWakeBudget)
+	profileSetWakeBudget = 300 * time.Millisecond
+
+	node := profileSetWakeSystem(t, pool, repo, nil, nil)
+	node.pushSender.renewLock <- struct{}{} // another send holds the credential lock
+	defer node.pushSender.unlockRenew()
+	started := time.Now()
+	if !node.WakeProfileSetDevices(t.Context(), 7) {
+		t.Fatal("wake answered false")
+	}
+	outOfTime := PushOutcomeFailed + ":wake_out_of_time"
+	waitForWakeRows(t, pool, outOfTime, outOfTime)
+	waitForWakeEnded(t, node)
+	if elapsed, bound := time.Since(started), profileSetWakeBudget+profileSetFinalizeTimeout; elapsed > bound {
+		t.Fatalf("the wake took %v waiting for the credential lock, want at most %v", elapsed, bound)
 	}
 }
