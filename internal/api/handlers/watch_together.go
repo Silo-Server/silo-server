@@ -289,12 +289,18 @@ func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn 
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
-	reg, _, err := h.Service.Connect(ctx, roomID, userID, profileID, realtimeConn)
+	connect := h.Service.Connect
+	if otherApp {
+		connect = h.Service.ConnectOtherApp
+	}
+	reg, _, err := connect(ctx, roomID, userID, profileID, realtimeConn)
 	if err != nil {
 		// Terminal failures use room_closed so clients stop reconnecting
 		// instead of retrying a room that will never come back.
 		if errors.Is(err, watchtogether.ErrRoomNotFound) {
 			_ = writeWebSocketJSON(conn, map[string]string{watchTogetherTypeKey: watchTogetherRoomClosed, watchTogetherReasonKey: watchTogetherNotFound})
+		} else if errors.Is(err, watchtogether.ErrMemberAlreadyConnected) {
+			writeWebSocketError(conn, "forbidden", "This profile is already connected to the room from another device")
 		} else if errors.Is(err, watchtogether.ErrRoomClosed) {
 			_ = writeWebSocketJSON(conn, map[string]string{watchTogetherTypeKey: watchTogetherRoomClosed, watchTogetherReasonKey: "ended"})
 		} else {

@@ -1353,6 +1353,7 @@
 # A stuck settings store does not hold a Watch Party room while the host's
 # playback choice is saved.
 ./internal/watchtogether TestSlowGuestControlSaveDoesNotHoldTheRoomPG
+./internal/watchtogether TestOtherAppDoesNotTakeASeatOnAnotherServerPG
 
 # The catalog item change outbox: what each membership and file write queues
 # (and what routine scan writes do not), key moves, coalescing, the cluster-wide
