@@ -162,13 +162,8 @@ func (h *ProfileHandler) ListProfileSetEdits(ctx context.Context, userID int) ([
 			view.ProfileName = e.ProfileName
 		} else {
 			view.ProfileID, view.ProfileName = row.ID, row.Name
-			if err := h.describeEditValues(ctx, store, contract, row, snap.Settings[row.ID], &view); err != nil {
+			if err := h.describeEditValues(ctx, store, contract, userID, row, snap, &view); err != nil {
 				return nil, err
-			}
-			if view.Kind == ProfileSetEditOverride {
-				if view.Token, err = h.overrideToken(ctx, store, contract, userID, row, snap.Settings[row.ID], snap.Edits, e.Field); err != nil {
-					return nil, err
-				}
 			}
 		}
 		view.Actor = ProfileSetEditActor{UserID: e.ActorUserID, Username: h.actorUsername(ctx, actors, e.ActorUserID)}
@@ -195,10 +190,18 @@ func (h *ProfileHandler) actorUsername(ctx context.Context, seen map[int]string,
 }
 
 // describeEditValues fills a field record's value in force and the set's
-// value.
+// value, and an override's token.
 func (h *ProfileHandler) describeEditValues(ctx context.Context, store userstore.UserStore, contract *settingscontract.Manifest,
-	row *userstore.ProfileSetRow, settings map[string]json.RawMessage, view *ProfileSetEditView,
+	userID int, row *userstore.ProfileSetRow, snap userstore.ProfileSetSnapshot, view *ProfileSetEditView,
 ) error {
+	settings := snap.Settings[row.ID]
+	if view.Kind == ProfileSetEditOverride {
+		token, err := h.overrideToken(ctx, store, contract, userID, row, settings, snap.Edits, view.Field)
+		if err != nil {
+			return err
+		}
+		view.Token = token
+	}
 	if key, isSetting := strings.CutPrefix(view.Field, profileedits.FieldSettingsPrefix); isSetting {
 		value, inherited, err := h.settingInForce(ctx, store, contract, row.ID, settings, key)
 		if err != nil {

@@ -243,7 +243,6 @@ type overrideClearRig struct {
 	userID  int
 	service *handlers.ProfileHandler
 	h       http.Handler
-	admin   context.Context
 	main    map[string]any
 	version int
 	woke    bool
@@ -256,15 +255,29 @@ func newOverrideClearRig(t *testing.T) *overrideClearRig {
 	service.UserRepo = ownerRepo{2: {ID: 2, Role: models.RoleAdmin, IsOwner: true}, userID: {ID: userID, Role: "user"}}
 	r := &overrideClearRig{t: t, pool: pool, userID: userID, service: service, main: setDBItem(uuid.NewString(), "Parent"), woke: true}
 	service.ProfileSetWaker = func(context.Context, int) bool { return r.woke }
-	admin, req := profileedits.WithRequest(apimw.SetClaims(t.Context(), &auth.Claims{UserID: 2, Role: models.RoleAdmin, TokenType: auth.TokenTypeAccess}))
-	req.SetActor(2, true, nil)
-	r.admin = admin
 	deps := requestDeps(fixtureRequests())
 	deps.AdminAccounts = fixtureAdminAccounts()
 	deps.Profiles = service
 	deps.ProfileSetEdits = service
 	r.h = NewHandler(deps)
 	return r
+}
+
+// admin is a request context of the Owner acting on the account through
+// the admin routes, so the owner's writes record overrides.
+func (r *overrideClearRig) admin() context.Context {
+	ctx, req := profileedits.WithRequest(apimw.SetClaims(r.t.Context(), &auth.Claims{UserID: 2, Role: models.RoleAdmin, TokenType: auth.TokenTypeAccess}))
+	req.SetActor(2, true, nil)
+	return ctx
+}
+
+// ownerEdit saves the owner's change to a profile, recorded as an override.
+func (r *overrideClearRig) ownerEdit(profileID string, req handlers.ProfileUpdateRequest) {
+	r.t.Helper()
+	if _, err := r.service.UpdateProfile(r.admin(), handlers.ProfileUpdateCommand{UserID: r.userID, ProfileID: profileID,
+		Request: req, AccountAdmin: true}); err != nil {
+		r.t.Fatal(err)
+	}
 }
 
 // apply sends the next version of the set: the main profile and kid.
@@ -346,166 +359,163 @@ const clearedBody = `{"state":"cleared"}`
 // owner never saw, a clear without a precondition at all, and refusals
 // answered in another order than the documented one.
 func TestClearOverridePreconditionDB(t *testing.T) {
-	t.Run("a PIN the owner was told stays is not removed by a stale clear", func(t *testing.T) {
-		r := newOverrideClearRig(t)
-		kid := setDBItem(uuid.NewString(), "Kid")
-		kid["pin"] = map[string]any{"set": "1111"}
-		r.apply(kid)
-		p := r.kid(kid["sync_id"].(string))
-		if _, err := r.service.UpdateProfile(r.admin, handlers.ProfileUpdateCommand{UserID: r.userID, ProfileID: p.ID,
-			Request: handlers.ProfileUpdateRequest{PIN: new("2222")}, AccountAdmin: true}); err != nil {
-			t.Fatal(err)
-		}
-		shown := r.listed("pin")
-		if shown == nil || shown.ClearApplies || shown.ETag == "" {
-			t.Fatalf("list before = %+v; want a PIN the clear keeps, with an etag", shown)
-		}
-		kid["pin"] = map[string]any{"clear": true}
-		r.apply(kid)
-		if got := r.clear(p.ID, "pin", clearedBody, shown.ETag); got.status != http.StatusPreconditionFailed {
-			t.Fatalf("stale clear answered %d %+v", got.status, got.problem)
-		}
-		if r.kid(kid["sync_id"].(string)).PINHash == "" || r.listed("pin") == nil {
-			t.Fatal("a refused clear removed the PIN or the override")
-		}
-		current := r.listed("pin")
-		if !current.ClearApplies || current.ETag == shown.ETag {
-			t.Fatalf("list after the newer set = %+v", current)
-		}
-		if got := r.clear(p.ID, "pin", clearedBody, current.ETag); got.status != http.StatusOK {
-			t.Fatalf("current clear answered %d %+v", got.status, got.problem)
-		}
-		if r.kid(kid["sync_id"].(string)).PINHash != "" {
-			t.Fatal("the clear the owner confirmed did not remove the PIN")
-		}
-	})
-	t.Run("a value that changed since the owner saw it is not restored by a stale clear", func(t *testing.T) {
-		r := newOverrideClearRig(t)
-		kid := setDBItem(uuid.NewString(), "Kid")
-		kid["max_content_rating"] = "PG"
-		r.apply(kid)
-		p := r.kid(kid["sync_id"].(string))
-		if _, err := r.service.UpdateProfile(r.admin, handlers.ProfileUpdateCommand{UserID: r.userID, ProfileID: p.ID,
-			Request: handlers.ProfileUpdateRequest{MaxContentRating: new("G")}, AccountAdmin: true}); err != nil {
-			t.Fatal(err)
-		}
-		shown := r.listed("max_content_rating")
-		kid["max_content_rating"] = "R"
-		r.apply(kid)
-		if got := r.clear(p.ID, "max_content_rating", clearedBody, shown.ETag); got.status != http.StatusPreconditionFailed {
-			t.Fatalf("stale clear answered %d %+v", got.status, got.problem)
-		}
-		if got := r.kid(kid["sync_id"].(string)).MaxContentRating; got != "G" {
-			t.Fatalf("rating after a refused clear = %q", got)
-		}
-		if got := r.clear(p.ID, "max_content_rating", clearedBody, r.listed("max_content_rating").ETag); got.status != http.StatusOK {
-			t.Fatalf("current clear answered %d %+v", got.status, got.problem)
-		}
-		if got := r.kid(kid["sync_id"].(string)).MaxContentRating; got != "R" {
-			t.Fatalf("rating after the clear = %q", got)
-		}
-	})
-	t.Run("a mirrored setting whose other half changed is not restored by a stale clear", func(t *testing.T) {
-		r := newOverrideClearRig(t)
-		kid := setDBItem(uuid.NewString(), "Kid")
-		kid["settings"] = map[string]any{settingskeys.PlaybackIntroSkipMode: "always"}
-		r.apply(kid)
-		p := r.kid(kid["sync_id"].(string))
-		store, _ := pgstore.NewPostgresProvider(r.pool).ForUser(r.admin, r.userID)
-		if _, err := store.UpsertSettingValue(r.admin, userstore.SettingIdentity{Key: settingskeys.PlaybackAutoSkipIntro, Scope: "profile", ProfileID: p.ID}, json.RawMessage(`false`)); err != nil {
-			t.Fatal(err)
-		}
-		field := "settings." + settingskeys.PlaybackAutoSkipIntro
-		shown := r.listed(field)
-		kid["settings"] = map[string]any{settingskeys.PlaybackIntroSkipMode: "never"}
-		r.apply(kid)
-		if got := r.clear(p.ID, field, clearedBody, shown.ETag); got.status != http.StatusPreconditionFailed {
-			t.Fatalf("stale clear answered %d %+v", got.status, got.problem)
-		}
-		if got := r.clear(p.ID, field, clearedBody, r.listed(field).ETag); got.status != http.StatusOK {
-			t.Fatalf("current clear answered %d %+v", got.status, got.problem)
-		}
-		mode, err := store.GetSettingValue(t.Context(), userstore.SettingIdentity{Key: settingskeys.PlaybackIntroSkipMode, Scope: "profile", ProfileID: p.ID})
-		if err != nil || mode == nil || string(mode.Value) != `"never"` {
-			t.Fatalf("mode after the clear = %+v, %v", mode, err)
-		}
-	})
-	t.Run("no If-Match, or a body that is not the cleared state, is refused and writes nothing", func(t *testing.T) {
-		r := newOverrideClearRig(t)
-		kid := setDBItem(uuid.NewString(), "Kid")
-		kid["max_content_rating"] = "PG"
-		r.apply(kid)
-		p := r.kid(kid["sync_id"].(string))
-		if _, err := r.service.UpdateProfile(r.admin, handlers.ProfileUpdateCommand{UserID: r.userID, ProfileID: p.ID,
-			Request: handlers.ProfileUpdateRequest{MaxContentRating: new("G")}, AccountAdmin: true}); err != nil {
-			t.Fatal(err)
-		}
-		etag := r.listed("max_content_rating").ETag
-		if got := r.clear(p.ID, "max_content_rating", clearedBody, ""); got.status != http.StatusPreconditionRequired {
-			t.Fatalf("no If-Match answered %d %+v", got.status, got.problem)
-		}
-		for _, body := range []string{`{"state":"kept"}`, `{"state":"cleared","value":"PG"}`, `{"state":null}`, `{}`, `null`} {
-			if got := r.clear(p.ID, "max_content_rating", body, etag); got.status != http.StatusUnprocessableEntity && got.status != http.StatusBadRequest {
-				t.Fatalf("body %s answered %d %+v", body, got.status, got.problem)
-			}
-		}
-		if r.kid(kid["sync_id"].(string)).MaxContentRating != "G" || r.listed("max_content_rating") == nil {
-			t.Fatal("a refused clear wrote something")
-		}
-	})
-	t.Run("refusals come in order: not found, then the precondition, then a name", func(t *testing.T) {
-		r := newOverrideClearRig(t)
-		kid := setDBItem(uuid.NewString(), "Kid")
-		r.apply(kid)
-		p := r.kid(kid["sync_id"].(string))
-		if _, err := r.service.UpdateProfile(r.admin, handlers.ProfileUpdateCommand{UserID: r.userID, ProfileID: p.ID,
-			Request: handlers.ProfileUpdateRequest{Name: new("Kiddo")}, AccountAdmin: true}); err != nil {
-			t.Fatal(err)
-		}
-		shown := r.listed("name")
-		// The set renames the kid, so the owner's etag is stale; then a
-		// profile here takes the set's new name, so a clear would clash.
-		kid["name"] = "Kidd"
-		r.apply(kid)
-		if _, err := r.service.CreateProfile(r.admin, handlers.ProfileCreateCommand{UserID: r.userID,
-			Request: handlers.ProfileCreateRequest{Name: "Kidd"}, AccountAdmin: true}); err != nil {
-			t.Fatal(err)
-		}
-		if got := r.clear(p.ID, "name", clearedBody, shown.ETag); got.status != http.StatusPreconditionFailed {
-			t.Fatalf("stale etag and a taken name answered %d, want 412 first", got.status)
-		}
-		current := r.listed("name").ETag
-		if got := r.clear(p.ID, "name", clearedBody, current); got.status != http.StatusConflict {
-			t.Fatalf("current etag and a taken name answered %d, want 409", got.status)
-		}
-		if got := r.clear(p.ID, "pin", clearedBody, ""); got.status != http.StatusNotFound {
-			t.Fatalf("no override and no If-Match answered %d, want 404 first", got.status)
-		}
-		if got := r.clear(p.ID, "pin", clearedBody, current); got.status != http.StatusNotFound {
-			t.Fatalf("no override and a stale etag answered %d, want 404 first", got.status)
-		}
-	})
+	t.Run("a PIN the owner was told stays is not removed by a stale clear", clearStalePIN)
+	t.Run("a value that changed since the owner saw it is not restored by a stale clear", clearStaleValue)
+	t.Run("a mirrored setting whose other half changed is not restored by a stale clear", clearStaleMirror)
+	t.Run("no If-Match, or a body that is not the cleared state, is refused and writes nothing", clearRefusesBadRequests)
+	t.Run("refusals come in order: not found, then the precondition, then a name", clearRefusalOrder)
 	for _, woke := range []bool{true, false} {
-		t.Run(fmt.Sprintf("a current clear applies and answers wake_queued %v as the waker did", woke), func(t *testing.T) {
-			r := newOverrideClearRig(t)
-			r.woke = woke
-			kid := setDBItem(uuid.NewString(), "Kid")
-			kid["max_content_rating"] = "PG"
-			r.apply(kid)
-			p := r.kid(kid["sync_id"].(string))
-			if _, err := r.service.UpdateProfile(r.admin, handlers.ProfileUpdateCommand{UserID: r.userID, ProfileID: p.ID,
-				Request: handlers.ProfileUpdateRequest{MaxContentRating: new("G")}, AccountAdmin: true}); err != nil {
-				t.Fatal(err)
-			}
-			rec := do(t, r.h, http.MethodPatch, Prefix+"/admin/users/"+strconv.Itoa(r.userID)+"/profiles/"+p.ID+"/overrides/max_content_rating",
-				clearedBody, with(actingRequestAdmin, "If-Match", r.listed("max_content_rating").ETag))
-			var receipt AdminProfileSetCleared
-			if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &receipt) != nil || !receipt.Applied || receipt.WakeQueued != woke {
-				t.Fatalf("clear = %d %s", rec.Code, rec.Body)
-			}
-			if rec.Header().Get("ETag") != "" {
-				t.Fatal("a receipt carries no ETag")
-			}
-		})
+		t.Run(fmt.Sprintf("a current clear applies and answers wake_queued %v as the waker did", woke), func(t *testing.T) { clearReceipt(t, woke) })
+	}
+}
+
+func clearStalePIN(t *testing.T) {
+	r := newOverrideClearRig(t)
+	kid := setDBItem(uuid.NewString(), "Kid")
+	kid["pin"] = map[string]any{"set": "1111"}
+	r.apply(kid)
+	p := r.kid(kid["sync_id"].(string))
+	r.ownerEdit(p.ID, handlers.ProfileUpdateRequest{PIN: new("2222")})
+	shown := r.listed("pin")
+	if shown == nil || shown.ClearApplies || shown.ETag == "" {
+		t.Fatalf("list before = %+v; want a PIN the clear keeps, with an etag", shown)
+	}
+	kid["pin"] = map[string]any{"clear": true}
+	r.apply(kid)
+	if got := r.clear(p.ID, "pin", clearedBody, shown.ETag); got.status != http.StatusPreconditionFailed {
+		t.Fatalf("stale clear answered %d %+v", got.status, got.problem)
+	}
+	if r.kid(kid["sync_id"].(string)).PINHash == "" || r.listed("pin") == nil {
+		t.Fatal("a refused clear removed the PIN or the override")
+	}
+	current := r.listed("pin")
+	if !current.ClearApplies || current.ETag == shown.ETag {
+		t.Fatalf("list after the newer set = %+v", current)
+	}
+	if got := r.clear(p.ID, "pin", clearedBody, current.ETag); got.status != http.StatusOK {
+		t.Fatalf("current clear answered %d %+v", got.status, got.problem)
+	}
+	if r.kid(kid["sync_id"].(string)).PINHash != "" {
+		t.Fatal("the clear the owner confirmed did not remove the PIN")
+	}
+}
+
+func clearStaleValue(t *testing.T) {
+	r := newOverrideClearRig(t)
+	kid := setDBItem(uuid.NewString(), "Kid")
+	kid["max_content_rating"] = "PG"
+	r.apply(kid)
+	p := r.kid(kid["sync_id"].(string))
+	r.ownerEdit(p.ID, handlers.ProfileUpdateRequest{MaxContentRating: new("G")})
+	shown := r.listed("max_content_rating")
+	kid["max_content_rating"] = "R"
+	r.apply(kid)
+	if got := r.clear(p.ID, "max_content_rating", clearedBody, shown.ETag); got.status != http.StatusPreconditionFailed {
+		t.Fatalf("stale clear answered %d %+v", got.status, got.problem)
+	}
+	if got := r.kid(kid["sync_id"].(string)).MaxContentRating; got != "G" {
+		t.Fatalf("rating after a refused clear = %q", got)
+	}
+	if got := r.clear(p.ID, "max_content_rating", clearedBody, r.listed("max_content_rating").ETag); got.status != http.StatusOK {
+		t.Fatalf("current clear answered %d %+v", got.status, got.problem)
+	}
+	if got := r.kid(kid["sync_id"].(string)).MaxContentRating; got != "R" {
+		t.Fatalf("rating after the clear = %q", got)
+	}
+}
+
+func clearStaleMirror(t *testing.T) {
+	r := newOverrideClearRig(t)
+	kid := setDBItem(uuid.NewString(), "Kid")
+	kid["settings"] = map[string]any{settingskeys.PlaybackIntroSkipMode: "always"}
+	r.apply(kid)
+	p := r.kid(kid["sync_id"].(string))
+	store, _ := pgstore.NewPostgresProvider(r.pool).ForUser(r.admin(), r.userID)
+	if _, err := store.UpsertSettingValue(r.admin(), userstore.SettingIdentity{Key: settingskeys.PlaybackAutoSkipIntro, Scope: "profile", ProfileID: p.ID}, json.RawMessage(`false`)); err != nil {
+		t.Fatal(err)
+	}
+	field := "settings." + settingskeys.PlaybackAutoSkipIntro
+	shown := r.listed(field)
+	kid["settings"] = map[string]any{settingskeys.PlaybackIntroSkipMode: "never"}
+	r.apply(kid)
+	if got := r.clear(p.ID, field, clearedBody, shown.ETag); got.status != http.StatusPreconditionFailed {
+		t.Fatalf("stale clear answered %d %+v", got.status, got.problem)
+	}
+	if got := r.clear(p.ID, field, clearedBody, r.listed(field).ETag); got.status != http.StatusOK {
+		t.Fatalf("current clear answered %d %+v", got.status, got.problem)
+	}
+	mode, err := store.GetSettingValue(t.Context(), userstore.SettingIdentity{Key: settingskeys.PlaybackIntroSkipMode, Scope: "profile", ProfileID: p.ID})
+	if err != nil || mode == nil || string(mode.Value) != `"never"` {
+		t.Fatalf("mode after the clear = %+v, %v", mode, err)
+	}
+}
+
+func clearRefusesBadRequests(t *testing.T) {
+	r := newOverrideClearRig(t)
+	kid := setDBItem(uuid.NewString(), "Kid")
+	kid["max_content_rating"] = "PG"
+	r.apply(kid)
+	p := r.kid(kid["sync_id"].(string))
+	r.ownerEdit(p.ID, handlers.ProfileUpdateRequest{MaxContentRating: new("G")})
+	etag := r.listed("max_content_rating").ETag
+	if got := r.clear(p.ID, "max_content_rating", clearedBody, ""); got.status != http.StatusPreconditionRequired {
+		t.Fatalf("no If-Match answered %d %+v", got.status, got.problem)
+	}
+	for _, body := range []string{`{"state":"kept"}`, `{"state":"cleared","value":"PG"}`, `{"state":null}`, `{}`, `null`} {
+		if got := r.clear(p.ID, "max_content_rating", body, etag); got.status != http.StatusUnprocessableEntity && got.status != http.StatusBadRequest {
+			t.Fatalf("body %s answered %d %+v", body, got.status, got.problem)
+		}
+	}
+	if r.kid(kid["sync_id"].(string)).MaxContentRating != "G" || r.listed("max_content_rating") == nil {
+		t.Fatal("a refused clear wrote something")
+	}
+}
+
+func clearRefusalOrder(t *testing.T) {
+	r := newOverrideClearRig(t)
+	kid := setDBItem(uuid.NewString(), "Kid")
+	r.apply(kid)
+	p := r.kid(kid["sync_id"].(string))
+	r.ownerEdit(p.ID, handlers.ProfileUpdateRequest{Name: new("Kiddo")})
+	shown := r.listed("name")
+	// The set renames the kid, so the owner's etag is stale; then a
+	// profile here takes the set's new name, so a clear would clash.
+	kid["name"] = "Kidd"
+	r.apply(kid)
+	if _, err := r.service.CreateProfile(r.admin(), handlers.ProfileCreateCommand{UserID: r.userID,
+		Request: handlers.ProfileCreateRequest{Name: "Kidd"}, AccountAdmin: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.clear(p.ID, "name", clearedBody, shown.ETag); got.status != http.StatusPreconditionFailed {
+		t.Fatalf("stale etag and a taken name answered %d, want 412 first", got.status)
+	}
+	current := r.listed("name").ETag
+	if got := r.clear(p.ID, "name", clearedBody, current); got.status != http.StatusConflict {
+		t.Fatalf("current etag and a taken name answered %d, want 409", got.status)
+	}
+	if got := r.clear(p.ID, "pin", clearedBody, ""); got.status != http.StatusNotFound {
+		t.Fatalf("no override and no If-Match answered %d, want 404 first", got.status)
+	}
+	if got := r.clear(p.ID, "pin", clearedBody, current); got.status != http.StatusNotFound {
+		t.Fatalf("no override and a stale etag answered %d, want 404 first", got.status)
+	}
+}
+
+func clearReceipt(t *testing.T, woke bool) {
+	r := newOverrideClearRig(t)
+	r.woke = woke
+	kid := setDBItem(uuid.NewString(), "Kid")
+	kid["max_content_rating"] = "PG"
+	r.apply(kid)
+	p := r.kid(kid["sync_id"].(string))
+	r.ownerEdit(p.ID, handlers.ProfileUpdateRequest{MaxContentRating: new("G")})
+	rec := do(t, r.h, http.MethodPatch, Prefix+"/admin/users/"+strconv.Itoa(r.userID)+"/profiles/"+p.ID+"/overrides/max_content_rating",
+		clearedBody, with(actingRequestAdmin, "If-Match", r.listed("max_content_rating").ETag))
+	var receipt AdminProfileSetCleared
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &receipt) != nil || !receipt.Applied || receipt.WakeQueued != woke {
+		t.Fatalf("clear = %d %s", rec.Code, rec.Body)
+	}
+	if rec.Header().Get("ETag") != "" {
+		t.Fatal("a receipt carries no ETag")
 	}
 }
