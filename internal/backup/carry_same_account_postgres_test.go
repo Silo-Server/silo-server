@@ -1,0 +1,208 @@
+package backup
+
+import (
+	"bytes"
+	"context"
+	"path/filepath"
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/backup/backuptest"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/database"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/serveridentity"
+	"github.com/Silo-Server/silo-server/migrations"
+)
+
+const sameAccountDeployment = "same-account-restore-test"
+
+// sameAccountServer is one deployment the test backs up and restores in
+// full: its live database, where every backup lands, and the keys both use.
+type sameAccountServer struct {
+	url      string
+	tools    Tools
+	store    blobstore.Store
+	root     string
+	validate ValidateOptions
+}
+
+// backup takes a full backup of the live database and opens it.
+func (s sameAccountServer) backup(t *testing.T) *Source {
+	t.Helper()
+	pool, err := pgxpool.New(t.Context(), s.url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	svc := New(Options{
+		Pool: pool, DatabaseURL: s.url, Destination: NewStoreDestination(s.store),
+		Locker: PostgresLocker{Pool: pool}, KeyCheck: s.validate.KeyCheck, ManifestKey: s.validate.ManifestKey,
+		ServerID:  func(context.Context) (string, error) { return sameAccountDeployment, nil },
+		FindTools: func(context.Context) (Tools, error) { return s.tools, nil },
+	})
+	result, err := backupUnderLock(t, svc, KindManual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return openTestSource(t, filepath.Join(s.root, "backups", sameAccountDeployment, result.ID))
+}
+
+// restore restores src in full over the live database, carrying the live
+// server's credentials, and returns what it printed.
+func (s sameAccountServer) restore(t *testing.T, src *Source) string {
+	t.Helper()
+	ctx := t.Context()
+	ctl, err := ConnectControl(ctx, s.url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ctl.Close(ctx) }()
+	var out bytes.Buffer
+	var previous string
+	err = RestoreSwap(ctx, src, PGLoader{Tools: s.tools}, ctl, SwapOptions{
+		LiveURL: s.url, DatabaseOnly: true, Validate: s.validate, WorkDir: t.TempDir(), JournalKey: s.validate.ManifestKey, Out: &out,
+		Journaled: func(stamp string) { previous = "silo_before_restore_" + stamp },
+	})
+	if err != nil {
+		t.Fatalf("full restore: %v\n%s", err, out.String())
+	}
+	// The swap keeps the replaced database under a name of the second it
+	// ran; the test is done with it.
+	if err := ctl.Drop(ctx, previous); err != nil {
+		t.Fatal(err)
+	}
+	return out.String()
+}
+
+// with runs fn on a pool over the live database, closed again before the
+// next backup or restore, which refuse other clients.
+func (s sameAccountServer) with(t *testing.T, fn func(*pgxpool.Pool)) {
+	t.Helper()
+	pool, err := pgxpool.New(t.Context(), s.url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	fn(pool)
+}
+
+func createAccount(t *testing.T, pool *pgxpool.Pool, username string) int {
+	t.Helper()
+	user, err := auth.NewUserRepository(pool).Create(t.Context(), models.CreateUserInput{
+		Username: username, Email: username + "@example.test", Password: "password-" + username, Role: models.RoleUser,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return user.ID
+}
+
+// TestFullRestoreCarriesCredentialsOnlyOntoTheSameAccountDB: a full restore
+// carries a live account's credentials (an API key, an external sign-in
+// link) and its stricter switches only onto the same account in the
+// restored data, never onto another account that holds the same id there.
+// An account id can be held by two accounts once a restore has moved the id
+// sequence back: one in a backup, another created on the live server since.
+func TestFullRestoreCarriesCredentialsOnlyOntoTheSameAccountDB(t *testing.T) {
+	tools := testTools(t)
+	master := []byte("same-account-restore-test-key-0123456789abcdef")
+	keyCheck, err := secret.KeyCheckValue(master)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions, err := database.MigrationVersions(migrations.FS, "sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		// profile gives the backup's account a profile.
+		profile bool
+		// disabled disables the live account, which takes the backup
+		// account's name.
+		disabled bool
+	}{
+		{name: "account never used in the backup"},
+		{name: "account with a profile in the backup", profile: true},
+		{name: "live account disabled under the same name", disabled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			live, liveURL := backuptest.Database(t)
+			root := t.TempDir()
+			store, err := blobstore.NewFilesystem(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := sameAccountServer{url: liveURL, tools: tools, store: store, root: root,
+				validate: ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKeyOf(t, master), BinaryMigrations: versions}}
+			dbExec(t, live, `INSERT INTO server_settings (key, value) VALUES ($1, $2)`, serveridentity.Key, sameAccountDeployment)
+			var installation int64
+			if err := live.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path)
+				VALUES ('silo.auth.oidc', '1.0.0', '/plugins/oidc') RETURNING id`).Scan(&installation); err != nil {
+				t.Fatal(err)
+			}
+			live.Close()
+
+			before := server.backup(t)
+			var first int
+			server.with(t, func(pool *pgxpool.Pool) {
+				first = createAccount(t, pool, "first")
+				if tc.profile {
+					dbExec(t, pool, `INSERT INTO user_profiles (id, user_id, name, is_primary) VALUES ('first-profile', $1, 'First', true)`, first)
+				}
+			})
+			between := server.backup(t)
+			server.restore(t, before)
+
+			var second, third int
+			server.with(t, func(pool *pgxpool.Pool) {
+				name := "second"
+				if tc.disabled {
+					name = "first"
+				}
+				second = createAccount(t, pool, name)
+				if second != first {
+					t.Fatalf("the account created after restoring the older backup has id %d, want %d (the id the lost account had)", second, first)
+				}
+				third = createAccount(t, pool, "third")
+				dbExec(t, pool, `INSERT INTO api_keys (user_id, label, key_hash) VALUES ($1, 'second key', encode(sha256('second-key'), 'hex'))`, second)
+				dbExec(t, pool, `INSERT INTO plugin_auth_identities (plugin_installation_id, external_subject, user_id, username)
+					VALUES ($1, 'second-subject', $2, 'second')`, installation, second)
+				if tc.disabled {
+					dbExec(t, pool, `UPDATE users SET enabled = false WHERE id = $1`, second)
+				}
+			})
+			out := server.restore(t, between)
+
+			server.with(t, func(pool *pgxpool.Pool) {
+				var username string
+				var enabled bool
+				var keys, links int
+				if err := pool.QueryRow(ctx, `SELECT username, enabled,
+					(SELECT count(*) FROM api_keys WHERE user_id = $1),
+					(SELECT count(*) FROM plugin_auth_identities WHERE user_id = $1)
+					FROM users WHERE id = $1`, first).Scan(&username, &enabled, &keys, &links); err != nil {
+					t.Fatal(err)
+				}
+				if username != "first" {
+					t.Errorf("restored account %d is %q, want the backup's account", first, username)
+				}
+				if keys != 0 || links != 0 {
+					t.Errorf("the backup's account %d holds %d API keys and %d sign-in links of another live account\n%s", first, keys, links, out)
+				}
+				if !enabled {
+					t.Errorf("the backup's account %d was disabled by another live account's switch\n%s", first, out)
+				}
+				// The next account must not take an id the live server used.
+				if next := createAccount(t, pool, "next"); next <= third {
+					t.Errorf("the next account after the restore has id %d, want above %d, the live server's last", next, third)
+				}
+			})
+		})
+	}
+}
