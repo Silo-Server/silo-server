@@ -322,6 +322,8 @@
 ./internal/auth TestPasswordSignInForDB
 ./internal/auth TestCreatePersonalAPIKeyDB
 ./internal/auth TestAccountSignInChangesDuringPluginUninstallDB
+./internal/auth TestProfileDeleteLockOrderDB
+./internal/auth TestProfileSetLockOrderDB
 ./internal/auth TestExpiredSessionCleanupSkipsHeldRequestDB
 ./internal/auth TestAPIKeyCreationRefusesRevokedCredentialDB
 ./internal/auth TestPasswordSignInForRoutesDB

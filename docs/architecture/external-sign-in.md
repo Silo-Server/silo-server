@@ -49,8 +49,12 @@ SDK's `docs/auth-provider.md`.
   carry no identity (impersonation sessions), deletes an account created in
   the same request, or never waits (the expired-session and expired-request
   cleanups skip rows another transaction holds and delete them on a later
-  run). Deleting a profile is the exception: it clears several requests
-  approved for the profile without taking the identities. `signInRowWriters`
+  run). Deleting a profile clears the requests approved for the profile
+  through a foreign key, so it follows the rule too. A profile delete and a
+  profile set lock the account row before the profile's collections and
+  profile rows (approving a device sign-in for a profile locks the account
+  row and then, through the request's foreign key, the profile row), and
+  both lock the identities before the profile row goes. `signInRowWriters`
   in `internal/auth/signin_rows_writers_test.go` lists every writer with its
   rule, and the test fails on one it does not list.
 
