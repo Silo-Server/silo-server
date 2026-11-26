@@ -96,6 +96,11 @@ type ProfileHandler struct {
 	// ratelimit.ProfilePINPolicy). The router always sets it; nil, as in
 	// tests that do not exercise the limit, allows every attempt.
 	PINAttempts *ratelimit.AttemptLimiter
+	// GrantedAppPINAttempts bounds the PIN guesses of a login session
+	// another app's key opened, per profile and app key (see
+	// ratelimit.GrantedAppPINPolicy). Such a session never spends
+	// PINAttempts. The router always sets it; nil allows every attempt.
+	GrantedAppPINAttempts *ratelimit.AttemptLimiter
 	// RecWorker is told when an update changes a profile's access scope, so
 	// its recommendations are rebuilt under the new one. Optional.
 	RecWorker SignalsChangedNotifier
@@ -878,6 +883,11 @@ type ProfileVerifyPINCommand struct {
 	SessionID string
 	ProfileID string
 	PIN       string
+	// GrantedAppKeyID is the device key that opened the login session when
+	// another app's key opened it (auth.Claims.GrantedAppKey), and empty for
+	// every other caller. When set, the attempt counts under that app's own
+	// allowance instead of the household's.
+	GrantedAppKeyID string
 }
 
 // ProfileVerification is the outcome of a PIN check: whether the PIN
@@ -888,6 +898,34 @@ type ProfileVerification struct {
 	Valid        bool
 	ProfileToken string
 	ExpiresAt    time.Time
+}
+
+// reservePINAttempt counts one PIN attempt and returns the key and limiter
+// it was counted under, for the Reset a correct PIN makes, or the lockout.
+//
+// The household's devices share one count per profile (PINAttempts). A
+// login session another app's key opened counts under that app's key and
+// profile instead (GrantedAppPINAttempts), so its wrong guesses lock only
+// the app, and signing in again with the same key does not reset them. Such
+// a session reads the household's count and is refused while the profile is
+// locked there, but never writes it: neither its failures nor its correct
+// PIN move the household's count.
+func (h *ProfileHandler) reservePINAttempt(ctx context.Context, cmd ProfileVerifyPINCommand) (string, *ratelimit.AttemptLimiter, error) {
+	householdKey := ratelimit.ProfilePINKey(cmd.UserID, cmd.ProfileID)
+	if cmd.GrantedAppKeyID == "" {
+		if retryAfter, ok := h.PINAttempts.Reserve(ctx, householdKey); !ok {
+			return "", nil, PINLockedError(retryAfter)
+		}
+		return householdKey, h.PINAttempts, nil
+	}
+	if retryAfter, locked := h.PINAttempts.Locked(ctx, householdKey); locked {
+		return "", nil, PINLockedError(retryAfter)
+	}
+	appKey := ratelimit.GrantedAppPINKey(cmd.UserID, cmd.ProfileID, cmd.GrantedAppKeyID)
+	if retryAfter, ok := h.GrantedAppPINAttempts.Reserve(ctx, appKey); !ok {
+		return "", nil, PINLockedError(retryAfter)
+	}
+	return appKey, h.GrantedAppPINAttempts, nil
 }
 
 // VerifyPIN checks a profile's PIN and, on a match, mints the X-Profile-Token
@@ -928,9 +966,9 @@ func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINComm
 	// guesses cannot overrun the limit, and while the profile is locked even
 	// the right PIN is refused. The check then waits for a hashing turn ahead
 	// of sign-ins, and compares against the hash read with the revision above.
-	attemptKey := ratelimit.ProfilePINKey(cmd.UserID, cmd.ProfileID)
-	if retryAfter, ok := h.PINAttempts.Reserve(ctx, attemptKey); !ok {
-		return none, PINLockedError(retryAfter)
+	attemptKey, limiter, err := h.reservePINAttempt(ctx, cmd)
+	if err != nil {
+		return none, err
 	}
 	permit, err := passwordhash.AdmitAhead(ctx)
 	if apiErr := busyError(err); apiErr != nil {
@@ -942,7 +980,7 @@ func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINComm
 		return none, apiError(http.StatusNotFound, "not_found", "Profile not found or has no PIN")
 	}
 	if valid {
-		h.PINAttempts.Reset(ctx, attemptKey)
+		limiter.Reset(ctx, attemptKey)
 	}
 	if !valid || user == nil {
 		return ProfileVerification{Valid: valid}, nil

@@ -210,6 +210,7 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			// How the session was opened rides on the claims, from the
 			// same lookup, for the gates that decide by it.
 			claims.SessionKind = authority.Kind
+			claims.GrantedAppKeyID = authority.GrantedAppKeyID
 			am.sessionLastSeen.Touch(claims.SessionID)
 		}
 
@@ -284,6 +285,7 @@ func (am *AuthMiddleware) sessionClaims(r *http.Request) *auth.Claims {
 		return nil
 	}
 	claims.SessionKind = authority.Kind
+	claims.GrantedAppKeyID = authority.GrantedAppKeyID
 	am.sessionLastSeen.Touch(claims.SessionID)
 	return claims
 }
