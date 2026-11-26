@@ -46,8 +46,8 @@ func (h *SignInLinkHandler) IssueSignInLink(ctx context.Context, input signinlin
 }
 
 // RedeemSignInLink spends a link for the public page.
-func (h *SignInLinkHandler) RedeemSignInLink(ctx context.Context, token string, keysOn bool) (auth.SignInLinkRedemption, error) {
-	return h.service.Redeem(ctx, token, keysOn)
+func (h *SignInLinkHandler) RedeemSignInLink(ctx context.Context, token string, canDeliverCode bool) (auth.SignInLinkRedemption, error) {
+	return h.service.Redeem(ctx, token, canDeliverCode)
 }
 
 // SetPasswordWithSignInLink sets a password with a redeemed link's token.

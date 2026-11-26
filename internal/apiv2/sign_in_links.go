@@ -18,7 +18,7 @@ import (
 type SignInLinkService interface {
 	SignInLinkCapabilities(context.Context) (signinlinks.Capabilities, error)
 	IssueSignInLink(context.Context, signinlinks.IssueInput) (*signinlinks.IssueResult, error)
-	RedeemSignInLink(ctx context.Context, token string, keysOn bool) (auth.SignInLinkRedemption, error)
+	RedeemSignInLink(ctx context.Context, token string, canDeliverCode bool) (auth.SignInLinkRedemption, error)
 	SetPasswordWithSignInLink(ctx context.Context, token, newPassword string) error
 }
 
@@ -164,22 +164,11 @@ func (reg *Registry) redeemSignInLink(ctx context.Context, in *SignInLinkRedeemI
 	if p != nil {
 		return nil, p
 	}
-	keysOn := false
-	if keys := reg.deps.AppKeys; keys != nil {
-		on, err := reg.appKeySwitch(ctx, keys)
-		if err != nil {
-			return nil, serviceProblem(err)
-		}
-		keysOn = on
-	}
-	var address string
-	if keysOn {
-		var ok bool
-		if address, ok = reg.appCodeServerAddress(ctx); !ok {
-			return nil, NewProblem(TypeInternalError, "This server could not work out the address it was reached on.")
-		}
-	}
-	redeemed, err := svc.RedeemSignInLink(ctx, in.Body.Token, keysOn)
+	// Whether app keys are on is read inside the redemption's transaction;
+	// here only whether a code could be handed out: app keys are wired and
+	// the server address the app connects to is known.
+	address, ok := reg.appCodeServerAddress(ctx)
+	redeemed, err := svc.RedeemSignInLink(ctx, in.Body.Token, ok && reg.deps.AppKeys != nil)
 	if err != nil {
 		return nil, signInLinkProblem(err)
 	}
@@ -237,6 +226,8 @@ func signInLinkProblem(err error) error {
 		return NewProblem(TypeNotFound, signInLinkUnknownDetail)
 	case errors.Is(err, auth.ErrSignInLinkNeedsProvider):
 		return NewProblem(TypeProviderSignInRequired, signInLinkNeedsProviderDetail)
+	case errors.Is(err, auth.ErrSignInLinkNoAddress):
+		return NewProblem(TypeInternalError, "This server could not work out the address it was reached on.")
 	case errors.Is(err, auth.ErrSignInLinkNotPermitted):
 		return NewProblem(TypeNotPermitted, "The sign-in provider does not permit this account to sign in, so a sign-in link would not let it in.")
 	case errors.Is(err, auth.ErrNotFound):

@@ -4,16 +4,27 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"runtime"
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auditmutation/audittest"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/demomode"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+// setSettingRestored sets a server setting for the test and puts back what
+// was there before when it ends.
+func (e *keyEnv) setSettingRestored(t *testing.T, key, value string) {
+	t.Helper()
+	t.Cleanup(saveSettings(t, e.pool, key))
+	e.setSetting(t, key, value)
+}
 
 // exec runs a statement that sets up a case.
 func (e *keyEnv) exec(t *testing.T, sql string, args ...any) {
@@ -59,10 +70,30 @@ func TestRedeemSignInLinkDB(t *testing.T) {
 		}
 	})
 
-	t.Run("app keys off: only the set-password token", func(t *testing.T) {
-		got, err := env.signIn.RedeemSignInLink(ctx, env.issueLink(t, env.localAccount(t, "link-keysoff", models.RoleUser)).Token, false)
-		if err != nil || got.AppCode != nil || got.NoCode != NoCodeAppKeysOff || got.SetPasswordToken == "" {
-			t.Fatalf("redeem = %+v, %v", got, err)
+	// The switch is read inside the redemption: app key sign-in off, or demo
+	// mode on, answers the set-password token only. A caller that couldn't
+	// hand a code out while keys are on is refused and the link stays
+	// unspent.
+	for _, tc := range []struct{ name, key, value string }{
+		{"app key sign-in off", config.AuthAppKeySignInSettingKey, "false"},
+		{"demo mode on", demomode.SettingKey, "true"},
+	} {
+		t.Run(tc.name+": only the set-password token", func(t *testing.T) {
+			issued := env.issueLink(t, env.localAccount(t, "link-off-"+strconv.Itoa(len(tc.name)), models.RoleUser))
+			env.setSettingRestored(t, tc.key, tc.value)
+			got, err := env.signIn.RedeemSignInLink(ctx, issued.Token, true)
+			if err != nil || got.AppCode != nil || got.NoCode != NoCodeAppKeysOff || got.SetPasswordToken == "" {
+				t.Fatalf("redeem = %+v, %v", got, err)
+			}
+		})
+	}
+	t.Run("no address to hand a code out with", func(t *testing.T) {
+		issued := env.issueLink(t, env.localAccount(t, "link-noaddress", models.RoleUser))
+		if _, err := env.signIn.RedeemSignInLink(ctx, issued.Token, false); !errors.Is(err, ErrSignInLinkNoAddress) {
+			t.Fatalf("redeem: %v", err)
+		}
+		if _, err := env.signIn.RedeemSignInLink(ctx, issued.Token, true); err != nil {
+			t.Fatalf("the link was spent by the refused redeem: %v", err)
 		}
 	})
 
@@ -328,7 +359,7 @@ func TestSetPasswordWithSignInLinkDB(t *testing.T) {
 	issued := env.issueLink(t, user)
 	env.exec(t, `UPDATE users SET password_hash = NULL, local_password_login_enabled = false WHERE id = $1`, user.ID)
 	other := env.loginSession(t, user, models.SessionOpenedProvider, nil)
-	got, err := env.signIn.RedeemSignInLink(ctx, issued.Token, false)
+	got, err := env.signIn.RedeemSignInLink(ctx, issued.Token, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,4 +403,74 @@ func TestIssueSignInLinkAuditDB(t *testing.T) {
 		t.Fatalf("delivery = %s", got)
 	}
 	row.AssertNoSecrets(t, issued.Token)
+}
+
+// App key sign-in turned off while a redemption is on its way is the
+// answer's: the redemption reads the switch under the settings lock its
+// transaction holds, so a change committed before the redemption takes that
+// lock gives the token-only shape. A second connection holds the settings
+// lock, the redemption waits on it, the switch goes off and commits, and the
+// redemption answers with no code. Regression guard: the switch was read by
+// the caller before the transaction, so this answered with a code.
+func TestRedeemSignInLinkReadsSwitchInTransactionDB(t *testing.T) {
+	env := newKeyEnv(t, "signinlinkswitchtx")
+	ctx := t.Context()
+	issued := env.issueLink(t, env.localAccount(t, "link-switchtx", models.RoleUser))
+	t.Cleanup(saveSettings(t, env.pool, config.AuthAppKeySignInSettingKey))
+	env.setSetting(t, config.AuthAppKeySignInSettingKey, "true")
+
+	holder, err := env.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // committed below
+	var holderPID uint32
+	if err := holder.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holderPID); err != nil {
+		t.Fatal(err)
+	}
+	if err := lockServerSettings(ctx, holder); err != nil {
+		t.Fatal(err)
+	}
+	type answer struct {
+		got SignInLinkRedemption
+		err error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		got, err := env.signIn.RedeemSignInLink(ctx, issued.Token, true)
+		done <- answer{got, err}
+	}()
+	waitBlockedBy(t, env, holderPID)
+	if _, err := holder.Exec(ctx, `INSERT INTO server_settings (key, value) VALUES ($1, 'false')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, config.AuthAppKeySignInSettingKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got := <-done
+	if got.err != nil || got.got.AppCode != nil || got.got.NoCode != NoCodeAppKeysOff || got.got.SetPasswordToken == "" {
+		t.Fatalf("redeem = %+v, %v; want the set-password token only, app_keys_off", got.got, got.err)
+	}
+}
+
+// waitBlockedBy waits until some session of this database waits on a lock
+// the session with holderPID holds.
+func waitBlockedBy(t *testing.T, env *keyEnv, holderPID uint32) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var blocked bool
+		if err := env.pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid)))`, holderPID).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the redemption never waited on the settings lock")
+		}
+		runtime.Gosched()
+	}
 }

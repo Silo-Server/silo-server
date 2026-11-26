@@ -16,6 +16,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
+	"github.com/Silo-Server/silo-server/internal/demomode"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -46,6 +47,9 @@ var (
 	// network identity provider refuses: password sign-in refuses its
 	// password, so a link would let nobody in.
 	ErrSignInLinkNotPermitted = errors.New("the sign-in provider does not permit this account to sign in")
+	// ErrSignInLinkNoAddress refuses a redeem that would hand out an app
+	// code when the caller has no server address to give with it.
+	ErrSignInLinkNoAddress = errors.New("no server address for the app code")
 	// ErrSignInLinkAccountChanged refuses a link to be emailed when the
 	// account's address changed since the caller read it.
 	ErrSignInLinkAccountChanged = errors.New("the account's email address changed while the link was made")
@@ -74,6 +78,19 @@ func EndSignInLinksTx(ctx context.Context, db interface {
 		return fmt.Errorf("ending sign-in link codes: %w", err)
 	}
 	return nil
+}
+
+// appKeysOnTx reads whether app key sign-in is on, from the two settings
+// every key route reads: auth.app_key_sign_in, and demo mode (demo.enabled),
+// in which app keys are always off. The caller holds the settings lock, which
+// every settings write takes, so the answer cannot change under it.
+func appKeysOnTx(ctx context.Context, tx pgx.Tx) (bool, error) {
+	on, err := appKeySignInAllowed(ctx, tx)
+	if err != nil || !on {
+		return false, err
+	}
+	demo, err := readBoolSetting(ctx, tx, demomode.SettingKey, false)
+	return !demo, err
 }
 
 // signInLinkPolicy refuses a sign-in link for an account that may not sign in
@@ -298,9 +315,12 @@ func lockSignInLinkAccounts(ctx context.Context, tx pgx.Tx, userID, issuerID int
 }
 
 // RedeemSignInLink spends a sign-in link: in one transaction the link is
-// marked redeemed and, while app key sign-in is on (keysOn), an app code of
-// kind sign_in_link is stored for its account, so of two concurrent
-// redemptions exactly one succeeds. A set-password token comes with it; it
+// marked redeemed and, while app key sign-in is on (appKeysOnTx, read under
+// the settings lock in that transaction), an app code of kind sign_in_link is
+// stored for its account, so of two concurrent redemptions exactly one
+// succeeds. canDeliverCode says the caller can hand a code out (it knows the
+// server address); while app keys are on and it can't, the redeem is
+// ErrSignInLinkNoAddress and the link stays unspent. A set-password token comes with it; it
 // lives an hour, never past the link. An account that is an administrator's
 // when the link is redeemed, judged under its row lock in the transaction
 // that spends the link, gets the set-password token only: no app code and
@@ -308,7 +328,7 @@ func lockSignInLinkAccounts(ctx context.Context, tx pgx.Tx, userID, issuerID int
 // one whose account is disabled, is ErrSignInLinkInvalid; for an account
 // that may not sign in with a local password on this server it is
 // signInLinkPolicy's refusal and stays unspent.
-func (a *AppKeySignIn) RedeemSignInLink(ctx context.Context, token string, keysOn bool) (SignInLinkRedemption, error) {
+func (a *AppKeySignIn) RedeemSignInLink(ctx context.Context, token string, canDeliverCode bool) (SignInLinkRedemption, error) {
 	hash, ok := appCodeHash(token)
 	if !ok {
 		return SignInLinkRedemption{}, ErrSignInLinkInvalid
@@ -348,11 +368,20 @@ func (a *AppKeySignIn) RedeemSignInLink(ctx context.Context, token string, keysO
 		}
 		out.SetPasswordToken = passwordToken
 		values := keyAdded{"set_password_offered": true, auditFieldSignInLink: link.id}
+		// The switch is read here, under the settings lock this transaction
+		// holds (lockSignInLinkAccount), so a change of it is wholly before
+		// or after the answer.
+		keysOn, err := appKeysOnTx(ctx, tx)
+		if err != nil {
+			return err
+		}
 		switch {
 		case user.Role == models.RoleAdmin:
 			out.NoCode = NoCodeAdministrator
 		case !keysOn:
 			out.NoCode = NoCodeAppKeysOff
+		case !canDeliverCode:
+			return ErrSignInLinkNoAddress
 		default:
 			code, err := insertSignInLinkAppCodeTx(ctx, tx, userID, link)
 			if err != nil {

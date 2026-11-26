@@ -36,7 +36,7 @@ var (
 // store is the part of *auth.AppKeySignIn the service uses.
 type store interface {
 	IssueSignInLink(ctx context.Context, in auth.SignInLinkIssue) (auth.IssuedSignInLink, error)
-	RedeemSignInLink(ctx context.Context, token string, keysOn bool) (auth.SignInLinkRedemption, error)
+	RedeemSignInLink(ctx context.Context, token string, canDeliverCode bool) (auth.SignInLinkRedemption, error)
 	SetPasswordWithSignInLink(ctx context.Context, token, newPassword string) (int, error)
 }
 
@@ -161,10 +161,11 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (*IssueResult, error
 	return result, nil
 }
 
-// Redeem spends a link (auth.AppKeySignIn.RedeemSignInLink). keysOn says
-// whether app key sign-in is on; while it is off no app code is made.
-func (s *Service) Redeem(ctx context.Context, token string, keysOn bool) (auth.SignInLinkRedemption, error) {
-	return s.links.RedeemSignInLink(ctx, strings.TrimSpace(token), keysOn)
+// Redeem spends a link (auth.AppKeySignIn.RedeemSignInLink).
+// canDeliverCode says the caller can hand an app code out; whether app key
+// sign-in is on is read inside the redemption.
+func (s *Service) Redeem(ctx context.Context, token string, canDeliverCode bool) (auth.SignInLinkRedemption, error) {
+	return s.links.RedeemSignInLink(ctx, strings.TrimSpace(token), canDeliverCode)
 }
 
 // SetPassword sets the account's password with a redeemed link's
