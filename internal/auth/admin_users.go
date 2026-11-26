@@ -55,7 +55,8 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 	// or after them, never between a write and the edit it records. A
 	// username change takes them too: it may rename the primary profile,
 	// and checks the new name against the other profiles under them, as
-	// every other writer of a profile's name does.
+	// every other writer of a profile's name does. They are taken whenever
+	// the update carries a username, even one equal to the current name.
 	if input == nil || input.Username != nil {
 		if err = pgstore.LockAccountForImport(ctx, tx, id); err != nil {
 			return AdminUserSnapshot{}, err
