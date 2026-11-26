@@ -6353,7 +6353,7 @@ export interface paths {
     post?: never;
     /**
      * Let a profile the owner removed come back from the account's app.
-     * @description Clears the owner's removal. It does not recreate the profile: the next newer set the person's app sends does, as a new profile with no history here. Then the person's apps are told, where a push can be queued (wake_queued). 404 not_found when the owner removed no profile with that sync_id. Only the server Owner may change the Owner's or another admin account's profiles (403 permission_denied otherwise). 501 capability_unsupported where profiles are not kept in PostgreSQL.
+     * @description Clears the owner's removal. It does not recreate the profile: the next newer set the person's app sends does, as a new profile with no history here. Then the server tries to wake the person's apps (wake_queued says whether this call queued a push). 404 not_found when the owner removed no profile with that sync_id. Only the server Owner may change the Owner's or another admin account's profiles (403 permission_denied otherwise). 501 capability_unsupported where profiles are not kept in PostgreSQL.
      */
     delete: operations["clearAdminUserHiddenProfile"];
     options?: never;
@@ -23064,7 +23064,7 @@ export interface components {
        */
       applied: boolean;
       /**
-       * @description Whether a push was queued to tell the person's apps; when false, the change reaches them the next time the app syncs
+       * @description Whether this call queued a push telling the person's apps, after the clear committed. False with push off, with no phone registered, within a minute after an earlier wake of the account, and while a wake for the account is in flight on this server; the change then reaches the app the next time it syncs
        * @example false
        */
       wake_queued: boolean;

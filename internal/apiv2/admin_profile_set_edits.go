@@ -64,7 +64,7 @@ type AdminProfileSetEditsOutput struct {
 // AdminProfileSetCleared is what clearing an owner's record did.
 type AdminProfileSetCleared struct {
 	Applied    bool `json:"applied" doc:"Whether the set's value was written now. Always false for a hidden profile, which comes back with the next newer set" example:"true"`
-	WakeQueued bool `json:"wake_queued" doc:"Whether a push was queued to tell the person's apps; when false, the change reaches them the next time the app syncs" example:"false"`
+	WakeQueued bool `json:"wake_queued" doc:"Whether this call queued a push telling the person's apps, after the clear committed. False with push off, with no phone registered, within a minute after an earlier wake of the account, and while a wake for the account is in flight on this server; the change then reaches the app the next time it syncs" example:"false"`
 }
 
 // AdminProfileSetClearedOutput is the response of the two clears.
@@ -174,7 +174,7 @@ func registerAdminProfileSetEdits(reg *Registry) {
 
 	hidden := adminAccountOperation(http.MethodDelete, "/{id}/profile-set/hidden/{sync_id}", "clearAdminUserHiddenProfile", false)
 	hidden.Summary = "Let a profile the owner removed come back from the account's app."
-	hidden.Description = "Clears the owner's removal. It does not recreate the profile: the next newer set the person's app sends does, as a new profile with no history here. Then the person's apps are told, where a push can be queued (wake_queued). 404 not_found when the owner removed no profile with that sync_id." + adminProfileSetEditsRule
+	hidden.Description = "Clears the owner's removal. It does not recreate the profile: the next newer set the person's app sends does, as a new profile with no history here. Then the server tries to wake the person's apps (wake_queued says whether this call queued a push). 404 not_found when the owner removed no profile with that sync_id." + adminProfileSetEditsRule
 	hidden.Errors = append(hidden.Errors, http.StatusNotImplemented)
 	Register(reg, hidden, func(ctx context.Context, in *AdminProfileSetHiddenInput) (*AdminProfileSetClearedOutput, error) {
 		svc, id, p := reg.adminProfileSetEditsTarget(ctx, in.ID)

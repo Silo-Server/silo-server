@@ -436,10 +436,12 @@ either key clears both. Putting back a `name` that another profile on the accoun
 compared trimmed and without case as every profile write compares names, is
 refused with 409 `conflict`, as the owner's own rename to it is: nothing is
 written and the override stays until that profile is renamed. Clearing a hidden profile does not recreate it: the next
-newer set does, as a new profile. A cleared override or hidden profile asks the
-person's apps to sync, and `wake_queued` says whether this call queued a push
-after the clear committed; when it is false, the change reaches the app the
-next time it syncs. The hidden-profile clear and the dismissal restore no value,
+newer set does, as a new profile. After a clear of an override or a hidden
+profile commits, the server tries to wake the person's apps with a push, and
+`wake_queued` is true only when this call queued one. It is false with push
+off, with no phone registered, within a minute after an earlier wake of the
+account, and while a wake for the account is in flight on this server; the
+change then reaches the app the next time it syncs. The hidden-profile clear and the dismissal restore no value,
 so they stay unguarded `DELETE`s. Dismissing a
 settled record changes nothing else and tells no app.
 

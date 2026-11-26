@@ -984,7 +984,10 @@ by a set built elsewhere.
   finds the item missing and creates it, and a repeat of the held version
   creates nothing. Each clear then calls the wake hook
   (`profileedits.Waker`) itself, since its writes record nothing for the
-  request's middleware to wake on, and answers what the hook reported.
+  request's middleware to wake on, and answers what the hook reported: true
+  only when that call queued a wake. With nothing recorded in the request,
+  the hook skips its check that an edit committed; the clear calls it only
+  after its own transaction has.
 - *What an override clear must match.* The list gives each override a token:
   a SHA-256 over the account, the profile and the field and, for the field
   and a mirrored setting's other key, the value in force, the set's value and
