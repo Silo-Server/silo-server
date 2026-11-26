@@ -8304,6 +8304,7 @@ export type MessageKey =
   | "web.admin.settings.signIn.passwordsOff.matchExplain"
   | "web.admin.settings.signIn.passwordsOff.matchHeading"
   | "web.admin.settings.signIn.passwordsOff.more"
+  | "web.admin.settings.signIn.passwordsOff.moreFailed"
   | "web.admin.settings.signIn.passwordsOff.nobodyAffected"
   | "web.admin.settings.signIn.passwordsOff.reason.administrator"
   | "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff"

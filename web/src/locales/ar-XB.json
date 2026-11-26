@@ -83543,6 +83543,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn't load more accounts. Try again.\u202C"
+    }
+  ],
   "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
     {
       "type": 0,

@@ -79383,6 +79383,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load more accounts. Try again."
+    }
+  ],
   "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
     {
       "type": 0,
