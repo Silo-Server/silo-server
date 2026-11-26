@@ -387,6 +387,10 @@
 ./internal/auth TestKeyChallengeSpentOnKidMismatchDB
 ./internal/auth TestKeySessionRefusedPastItsLimitDB
 ./internal/auth TestGrantRedeemDB
+./internal/auth TestSignedInRepliesReportPersonKeyDB
+./internal/auth TestRepliesThatLeaveOutThePersonKeyDB
+./internal/auth TestRevokedPersonKeyIsNeverTakenAgainDB
+./internal/auth TestAccountCreatedAtSurvivesRenameDB
 ./internal/auth TestGrantRedeemRefusalsDB
 ./internal/auth TestGrantRedeemConcurrentDB
 ./internal/auth TestGrantRedeemUnderAnotherKidDB

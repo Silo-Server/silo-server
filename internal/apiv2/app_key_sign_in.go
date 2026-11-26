@@ -410,9 +410,11 @@ func personKeyIDMember(result *auth.KeySignInResult) json.RawMessage {
 
 // grantedAppTokenPair is a token pair as an answer to another app's key
 // (one enrolled through a grant) carries it: everything such an answer
-// leaves out of the pair is left out here.
+// leaves out of the pair is left out here. Its refreshes leave out
+// account_created_at too (handlers.RefreshedTokensView).
 func grantedAppTokenPair(tokens TokenPair) TokenPair {
 	tokens.User = grantedAppAccount(tokens.User)
+	tokens.AccountCreatedAt = nil
 	return tokens
 }
 

@@ -271,6 +271,9 @@ func TestAppKeyRoutesFollowTheSwitch(t *testing.T) {
 // another team's client parses its plaintext: only the reply key's holder can
 // open it, and its fields are the protocol's. A signed_in answer also carries
 // the pinned local route the device moves to; approval_required doesn't.
+// person_key_id has three states a client tells apart: a string, null (the
+// account has no person key) and absent (approval_required, and every answer
+// to another app's key, which also gets no email and no creation time).
 func TestAppKeySealedReply(t *testing.T) {
 	reply, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
@@ -283,7 +286,15 @@ func TestAppKeySealedReply(t *testing.T) {
 	challenge := make([]byte, appkeys.ChallengeSize)
 	user := &models.User{ID: 4}
 	tokens := &handlers.TokenPairView{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 28800,
-		User: handlers.UserView{ID: 4, Username: "sam", Role: "user"}}
+		User: handlers.UserView{ID: 4, Username: "sam", Email: "sam@example.test", Role: "user", CreatedAt: fixtureAccountCreatedAt}}
+	const (
+		deviceID = "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11"
+		ownUser  = `"user":{"id":"4","username":"sam","email":"sam@example.test","role":"user","permissions":[],"download_allowed":false,"password_change_required":false},"account_created_at":"2025-03-14T09:26:53.589793Z"}`
+		appUser  = `"user":{"id":"4","username":"sam","email":"","role":"user","permissions":[],"download_allowed":false,"password_change_required":false}}`
+		pair     = `"tokens":{"access_token":"access","refresh_token":"refresh","expires_in":28800,`
+		route    = `"local_route":{"spki_sha256":"n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=","url":"http://192.168.1.20:8080"}}`
+		signedIn = `{"status":"signed_in","device_id":"` + deviceID + `","account_id":"4",`
+	)
 	for _, tc := range []struct {
 		name   string
 		result auth.KeySignInResult
@@ -291,11 +302,17 @@ func TestAppKeySealedReply(t *testing.T) {
 		want   string
 	}{
 		{name: "signed in", tokens: tokens,
-			result: auth.KeySignInResult{Status: appkeys.ReplySignedIn, DeviceID: "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", User: user},
-			want:   `{"status":"signed_in","device_id":"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11","account_id":"4","tokens":{"access_token":"access","refresh_token":"refresh","expires_in":28800,"user":{"id":"4","username":"sam","email":"","role":"user","permissions":[],"download_allowed":false,"password_change_required":false}},"local_route":{"spki_sha256":"n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=","url":"http://192.168.1.20:8080"}}`},
+			result: auth.KeySignInResult{Status: appkeys.ReplySignedIn, DeviceID: deviceID, User: user, PersonKeyReported: true, PersonKeyID: "PgujdSfBbNNyXngLWCsOgw"},
+			want:   signedIn + pair + ownUser + `,"person_key_id":"PgujdSfBbNNyXngLWCsOgw",` + route},
+		{name: "signed in, no person key", tokens: tokens,
+			result: auth.KeySignInResult{Status: appkeys.ReplySignedIn, DeviceID: deviceID, User: user, PersonKeyReported: true},
+			want:   signedIn + pair + ownUser + `,"person_key_id":null,` + route},
+		{name: "another app's key", tokens: tokens,
+			result: auth.KeySignInResult{Status: appkeys.ReplySignedIn, DeviceID: deviceID, User: user, GrantedApp: true},
+			want:   signedIn + pair + appUser + `,` + route},
 		{name: "approval required",
-			result: auth.KeySignInResult{Status: appkeys.ReplyApprovalRequired, DeviceID: "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", User: user},
-			want:   `{"status":"approval_required","device_id":"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11","account_id":"4"}`},
+			result: auth.KeySignInResult{Status: appkeys.ReplyApprovalRequired, DeviceID: deviceID, User: user, PersonKeyReported: true, PersonKeyID: "PgujdSfBbNNyXngLWCsOgw"},
+			want:   `{"status":"approval_required","device_id":"` + deviceID + `","account_id":"4"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := tc.result
