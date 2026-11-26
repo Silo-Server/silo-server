@@ -37,7 +37,7 @@ type MatchGroupLookup interface {
 // MatchMetadataService exposes search and process operations needed by the
 // admin match endpoints.
 type MatchMetadataService interface {
-	SearchAndNormalize(ctx context.Context, query metadata.SearchQuery, folderID int) ([]metadata.MatchCandidate, error)
+	SearchAndNormalize(ctx context.Context, query metadata.SearchQuery, folderID int) ([]metadata.MatchCandidate, map[string]error, error)
 	Process(ctx context.Context, req metadata.ProcessRequest) (*metadata.ProcessResult, error)
 }
 
@@ -79,6 +79,8 @@ type matchSearchRequest struct {
 
 type matchSearchResponse struct {
 	Candidates []metadata.MatchCandidate `json:"candidates"`
+	// ProviderErrors holds the providers whose search failed, keyed by slug.
+	ProviderErrors map[string]error `json:"-"`
 }
 
 type matchApplyRequest struct {
@@ -119,13 +121,13 @@ func (h *AdminMatchHandler) SearchAdminItemMatches(ctx context.Context, contentI
 	setMatchProviderID(query.ProviderIDs, "tmdb", req.TmdbID)
 	setMatchProviderID(query.ProviderIDs, "tvdb", req.TvdbID)
 
-	candidates, err := h.metadata.SearchAndNormalize(ctx, query, folderID)
+	candidates, failed, err := h.metadata.SearchAndNormalize(ctx, query, folderID)
 	if err != nil {
 		slog.ErrorContext(ctx, "admin match: search failed", "component", "api", "content_id", contentID, "error", err)
 		return AdminMatchSearchResult{}, apiError(http.StatusInternalServerError, "internal_error", "Metadata search failed")
 	}
 
-	return AdminMatchSearchResult{Candidates: candidates}, nil
+	return AdminMatchSearchResult{Candidates: candidates, ProviderErrors: failed}, nil
 }
 
 // AdminMatchHints is what the scanner read from an item's folder and file

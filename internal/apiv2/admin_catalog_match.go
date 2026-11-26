@@ -40,6 +40,9 @@ type AdminMatchSearchInput struct {
 type AdminMatchCandidates struct {
 	Candidates []metadata.MatchCandidate `json:"candidates" doc:"Bounded provider-ranked candidates; empty, never null."`
 	Truncated  bool                      `json:"truncated" doc:"More candidates were returned by providers; refine the search to narrow results."`
+	// ProviderErrors is additive: a provider that fails no longer looks like a
+	// provider that found nothing.
+	ProviderErrors map[string]string `json:"provider_errors,omitempty" doc:"Providers whose search failed, keyed by provider slug, with a generic failure message; absent when every provider answered. Candidates from the other providers are still returned."`
 }
 type AdminMatchSearchOutput struct{ Body AdminMatchCandidates }
 type AdminMatchApplyInput struct {
@@ -111,7 +114,14 @@ func registerAdminCatalogMatch(reg *Registry) {
 				rows[i].AgreementHints = []string{}
 			}
 		}
-		return &AdminMatchSearchOutput{Body: AdminMatchCandidates{Candidates: rows, Truncated: truncated}}, nil
+		var failures map[string]string
+		if len(result.ProviderErrors) > 0 {
+			failures = make(map[string]string, len(result.ProviderErrors))
+			for provider := range result.ProviderErrors {
+				failures[provider] = "Metadata search failed"
+			}
+		}
+		return &AdminMatchSearchOutput{Body: AdminMatchCandidates{Candidates: rows, Truncated: truncated, ProviderErrors: failures}}, nil
 	})
 	Register(reg, op("apply", "applyAdminItemMatch"), func(ctx context.Context, in *AdminMatchApplyInput) (*AdminMatchApplyOutput, error) {
 		if reg.deps.AdminCatalogMatch == nil {

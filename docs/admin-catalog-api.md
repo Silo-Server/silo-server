@@ -748,6 +748,13 @@ Search's optional `limit` defaults to 100 and accepts 1–500. The response cont
 This bounds the response, not the provider fetch or normalization work, and
 provides no snapshot or continuation guarantee. The web requests 500 candidates
 and displays the refinement notice when needed.
+A provider whose search fails does not fail the request: the response adds
+`provider_errors`, keyed by provider slug with the generic message
+`Metadata search failed`, and still returns the other providers' candidates.
+The field is absent when every provider answered, so an empty `candidates`
+without it means no provider found a match. The provider's own error is logged,
+never returned. The Match Item and Split dialogs name the failed providers
+instead of showing "No candidates found."
 
 Hints return the `title`, `year` and `provider_ids` (`tmdb`, `imdb`, `tvdb`)
 the scanner read from the folder and file names of the content group holding

@@ -20366,6 +20366,10 @@ export interface components {
     AdminMatchCandidates: {
       /** @description Bounded provider-ranked candidates; empty, never null. */
       candidates: components["schemas"]["MatchCandidate"][];
+      /** @description Providers whose search failed, keyed by provider slug, with a generic failure message; absent when every provider answered. Candidates from the other providers are still returned. */
+      provider_errors?: {
+        [key: string]: string;
+      };
       /** @description More candidates were returned by providers; refine the search to narrow results. */
       truncated: boolean;
     };

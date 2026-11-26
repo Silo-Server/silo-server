@@ -5705,7 +5705,10 @@ func mergedImageThumbhash(previousPath, previousThumbhash, nextPath, nextThumbha
 }
 
 // SearchProviders runs only the search phase and returns results for the UI.
-func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery, folderID int) ([]SearchResult, error) {
+// A provider whose search fails does not stop the others: its error is
+// returned keyed by provider slug, so callers can tell an outage from a miss.
+// The error result is non-nil only when the provider chain cannot be resolved.
+func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery, folderID int) ([]SearchResult, map[string]error, error) {
 	if strings.TrimSpace(query.Language) == "" && folderID > 0 {
 		query.Language = s.resolveFolderLanguage(ctx, folderID)
 	}
@@ -5715,10 +5718,11 @@ func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery
 	contentLevel := providerChainContentLevel(query.ContentType)
 	chain, err := s.resolveChainCached(ctx, folderID, contentLevel)
 	if err != nil {
-		return nil, fmt.Errorf("resolving provider chain: %w", err)
+		return nil, nil, fmt.Errorf("resolving provider chain: %w", err)
 	}
 
 	var allResults []SearchResult
+	var failed map[string]error
 	for _, p := range chain {
 		sp, ok := p.(SearchProvider)
 		if !ok {
@@ -5726,11 +5730,17 @@ func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery
 		}
 		results, err := sp.Search(ctx, query)
 		if err != nil {
+			slog.WarnContext(ctx, "metadata: match search provider error", "component", "metadata",
+				"provider", p.Slug(), "error", logredact.SanitizeText(err.Error()))
+			if failed == nil {
+				failed = map[string]error{}
+			}
+			failed[p.Slug()] = err
 			continue
 		}
 		allResults = append(allResults, results...)
 	}
-	return allResults, nil
+	return allResults, failed, nil
 }
 
 // ResolveSeriesTVDBID asks the enabled series providers for the TVDB ID of a

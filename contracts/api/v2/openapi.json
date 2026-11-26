@@ -16470,6 +16470,13 @@
             },
             "type": "array"
           },
+          "provider_errors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Providers whose search failed, keyed by provider slug, with a generic failure message; absent when every provider answered. Candidates from the other providers are still returned.",
+            "type": "object"
+          },
           "truncated": {
             "description": "More candidates were returned by providers; refine the search to narrow results.",
             "type": "boolean"

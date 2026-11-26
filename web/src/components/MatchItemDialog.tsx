@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { FileVersion, ItemDetail, ItemMatchSearchRequest, MatchCandidate } from "@/api/types";
 import MediaLocations from "@/components/MediaLocations";
+import { MatchSearchProviderErrors } from "@/components/MatchSearchProviderErrors";
 import { ItemLibraryPicker } from "@/components/ItemLibraryPicker";
 import { PathText } from "@/components/PathText";
 import {
@@ -175,6 +176,8 @@ export default function MatchItemDialog({
   // e.g. after a split left the item in a single library.
   const searchResults = searchedScope === searchScope ? searchMutation.data : undefined;
   const candidates = searchResults?.candidates ?? [];
+  // Providers whose search failed: an outage, not a missing title.
+  const failedProviders = Object.keys(searchResults?.provider_errors ?? {});
   const scopedCandidate = searchResults ? selectedCandidate : null;
   const effectiveItem = needsItemDetail ? (enrichedItem ?? item) : item;
   const genericProviderIds = useMemo(() => {
@@ -445,6 +448,7 @@ export default function MatchItemDialog({
             </Button>
           </form>
 
+          <MatchSearchProviderErrors providers={failedProviders} />
           {searchResults?.truncated && (
             <p className="text-muted-foreground text-sm">{t("web.item.match.truncated")}</p>
           )}
@@ -569,11 +573,14 @@ export default function MatchItemDialog({
             </div>
           )}
 
-          {searchMutation.isSuccess && searchResults && candidates.length === 0 && (
-            <p className="text-muted-foreground text-center text-sm">
-              {t("web.item.dialog.noCandidates")}
-            </p>
-          )}
+          {searchMutation.isSuccess &&
+            searchResults &&
+            candidates.length === 0 &&
+            failedProviders.length === 0 && (
+              <p className="text-muted-foreground text-center text-sm">
+                {t("web.item.dialog.noCandidates")}
+              </p>
+            )}
         </div>
 
         {/* Apply button — pinned below scroll area */}

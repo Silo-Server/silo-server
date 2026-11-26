@@ -15,8 +15,8 @@ import (
 
 type curationFollowUp struct{ contexts chan error }
 
-func (s *curationFollowUp) SearchAndNormalize(context.Context, metadata.SearchQuery, int) ([]metadata.MatchCandidate, error) {
-	return nil, errors.New("provider transport disabled")
+func (s *curationFollowUp) SearchAndNormalize(context.Context, metadata.SearchQuery, int) ([]metadata.MatchCandidate, map[string]error, error) {
+	return nil, nil, errors.New("provider transport disabled")
 }
 
 func (s *curationFollowUp) Process(ctx context.Context, _ metadata.ProcessRequest) (*metadata.ProcessResult, error) {

@@ -51,8 +51,8 @@ type fakeMatchMetadataService struct {
 	lastProcess   metadata.ProcessRequest
 }
 
-func (f *fakeMatchMetadataService) SearchAndNormalize(_ context.Context, _ metadata.SearchQuery, _ int) ([]metadata.MatchCandidate, error) {
-	return f.searchResults, f.searchErr
+func (f *fakeMatchMetadataService) SearchAndNormalize(_ context.Context, _ metadata.SearchQuery, _ int) ([]metadata.MatchCandidate, map[string]error, error) {
+	return f.searchResults, nil, f.searchErr
 }
 
 func (f *fakeMatchMetadataService) Process(_ context.Context, req metadata.ProcessRequest) (*metadata.ProcessResult, error) {
@@ -63,20 +63,3 @@ func (f *fakeMatchMetadataService) Process(_ context.Context, req metadata.Proce
 // --- Helpers ---
 
 // --- Tests ---
-
-// capturingMetadataService wraps a fake to capture the query passed to SearchAndNormalize.
-type capturingMetadataService struct {
-	inner        *fakeMatchMetadataService
-	lastQuery    metadata.SearchQuery
-	lastFolderID int
-}
-
-func (c *capturingMetadataService) SearchAndNormalize(ctx context.Context, query metadata.SearchQuery, folderID int) ([]metadata.MatchCandidate, error) {
-	c.lastQuery = query
-	c.lastFolderID = folderID
-	return c.inner.SearchAndNormalize(ctx, query, folderID)
-}
-
-func (c *capturingMetadataService) Process(ctx context.Context, req metadata.ProcessRequest) (*metadata.ProcessResult, error) {
-	return c.inner.Process(ctx, req)
-}
