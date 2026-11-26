@@ -281,25 +281,40 @@ func signInWorksForEveryone(ctx context.Context, db plugins.SignInQuerier) (bool
 // nobody in without a public URL (OAuthSignInServed), so neither counts. A
 // credentials (directory) provider needs no public URL.
 func signInProviderEnabled(ctx context.Context, db plugins.SignInQuerier, publicURL string) (bool, error) {
-	rows, err := db.Query(ctx, `SELECT COALESCE((SELECT c.metadata->'auth_modes' FROM plugin_capabilities c
+	providers, err := signInProviders(ctx, db, publicURL)
+	return len(providers) > 0, err
+}
+
+// signInProviders answers the installations that can sign people in, by the
+// rule signInProviderEnabled states: an enabled installation with an enabled
+// OIDC or LDAP binding, and for an OpenID Connect binding a public URL. The
+// guard asks whether there is one; LocalPasswordOffAccounts asks whether an
+// account's link is to one.
+func signInProviders(ctx context.Context, db plugins.SignInQuerier, publicURL string) ([]int, error) {
+	rows, err := db.Query(ctx, `SELECT p.id, COALESCE((SELECT c.metadata->'auth_modes' FROM plugin_capabilities c
 			WHERE c.plugin_installation_id = b.plugin_installation_id AND c.capability_type = 'auth_provider.v1'
 				AND c.capability_id = b.capability_id), '[]'::jsonb)
 		FROM plugin_installations p
 		JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND `+primarySignInBindingSQL("b")+`
 		WHERE p.enabled`)
 	if err != nil {
-		return false, fmt.Errorf("checking for an enabled sign-in provider: %w", err)
+		return nil, fmt.Errorf("checking for an enabled sign-in provider: %w", err)
 	}
-	modes, err := pgx.CollectRows(rows, pgx.RowTo[[]string])
+	type binding struct {
+		InstallationID int
+		Modes          []string
+	}
+	bindings, err := pgx.CollectRows(rows, pgx.RowToStructByPos[binding])
 	if err != nil {
-		return false, fmt.Errorf("checking for an enabled sign-in provider: %w", err)
+		return nil, fmt.Errorf("checking for an enabled sign-in provider: %w", err)
 	}
-	for _, binding := range modes {
-		if ProviderModeForAuthModes(binding) != ProviderModeOAuth || OAuthSignInServed(publicURL) {
-			return true, nil
+	providers := []int{}
+	for _, b := range bindings {
+		if ProviderModeForAuthModes(b.Modes) != ProviderModeOAuth || OAuthSignInServed(publicURL) {
+			providers = append(providers, b.InstallationID)
 		}
 	}
-	return false, nil
+	return providers, nil
 }
 
 // primarySignInBindingSQL is the SQL test that the plugin_auth_bindings row
@@ -377,7 +392,8 @@ type LocalPasswordOffPage struct {
 
 // localPasswordOffSQL answers LocalPasswordOffAccounts in one query: $1 is
 // whether email matching is on, $2 whether the email_match group is asked
-// for, $3 and $4 the last row of the previous page, $5 the row limit.
+// for, $3 and $4 the last row of the previous page, $5 the row limit, $6
+// the installations that can sign people in (signInProviders).
 func localPasswordOffSQL() string {
 	return `WITH affected AS (
 			SELECT u.id, COALESCE(u.username::text, '') AS username, COALESCE(u.email, '')::text AS email,
@@ -390,7 +406,7 @@ func localPasswordOffSQL() string {
 				END AS reason
 			FROM users u
 			WHERE u.enabled AND ` + passwordSignsInSQL("u") + ` AND NOT u.break_glass
-				AND NOT EXISTS (SELECT 1 FROM plugin_auth_identities i WHERE i.user_id = u.id AND ` + identitySignsInSQL("i", false) + `)),
+				AND NOT EXISTS (SELECT 1 FROM plugin_auth_identities i WHERE i.user_id = u.id AND i.plugin_installation_id = ANY($6))),
 		totals AS (
 			SELECT COUNT(*) FILTER (WHERE reason = 'email_match') AS matched,
 				COUNT(*) FILTER (WHERE reason <> 'email_match') AS unmatched
@@ -409,7 +425,8 @@ func localPasswordOffSQL() string {
 // password sign-in is turned off: enabled accounts that can sign in with a
 // password today (passwordSignsInSQL), are not break-glass
 // (localPasswordPolicy exempts those), and have no linked identity at an
-// enabled OIDC or LDAP provider (identitySignsInSQL without network links).
+// provider that can sign people in (signInProviders, the guard's rule: no
+// network provider, and an OpenID Connect one only with a public URL).
 // Each is grouped by whether email auto-match can link it at its first
 // provider sign-in,
 // with the rule account resolution applies (emailMatchCandidateSQL); a link
@@ -435,8 +452,16 @@ func (s *IdentityService) LocalPasswordOffAccounts(ctx context.Context, q LocalP
 		matching = saved
 	}
 	page.EmailAutoMatch = matching
+	publicURL, err := readServerSetting(ctx, s.pool, config.ServerPublicURLSettingKey)
+	if err != nil {
+		return page, err
+	}
+	providers, err := signInProviders(ctx, s.pool, publicURL)
+	if err != nil {
+		return page, err
+	}
 	rows, err := s.pool.Query(ctx, localPasswordOffSQL(),
-		matching, q.Group == LocalPasswordOffEmailMatch, q.AfterUsername, q.AfterID, q.Limit+1)
+		matching, q.Group == LocalPasswordOffEmailMatch, q.AfterUsername, q.AfterID, q.Limit+1, providers)
 	if err != nil {
 		return page, fmt.Errorf("listing accounts that lose password sign-in: %w", err)
 	}

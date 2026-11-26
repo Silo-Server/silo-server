@@ -213,11 +213,13 @@ ordered against each other.
   admin turning password sign-in back on, and `silo auth local-login enable`.
 - `listAdminLocalPasswordOffAccounts` answers who the switch would lock out.
   It shares with sign-in the email-match rule (`emailMatchCandidateSQL`, also
-  used by account resolution) and the usable-identity rule
-  (`identitySignsInSQL`, also used by `usableIdentityCount`). It passes
-  `withNetwork` false there because a network link signs the account in only
-  from that network once passwords are off, while unlinking counts it as a
-  fallback. "Has a password that signs in" is `models.User.HasLocalPassword`
+  used by account resolution), and with the guard the rule for which
+  providers can sign people in (`signInProviders`): a link counts as a way in
+  only to one of those, so not to a network provider (it signs the account in
+  only from its network) and not to an OpenID Connect provider without a
+  public URL. Unlinking asks a different question (`usableIdentityCount`:
+  any enabled binding, network ones included, as a fallback while the
+  password still works) and is unchanged. "Has a password that signs in" is `models.User.HasLocalPassword`
   in Go and `passwordSignsInSQL` in SQL, kept side by side; the password reset
   repository restates it in its own SQL (`eligibleAccount`). Change them
   together, not in a copy.

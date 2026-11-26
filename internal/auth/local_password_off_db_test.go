@@ -255,3 +255,35 @@ func TestLocalPasswordOffKeepsOpenSessionsDB(t *testing.T) {
 		t.Fatalf("approved device poll = %+v, %v", poll, err)
 	}
 }
+
+// TestLocalPasswordOffCountsOpenIDConnectLinkOnlyWithPublicURLDB: the read
+// counts a link as a way in by the guard's rule (signInProviders). An OpenID
+// Connect provider signs nobody in without a public URL, so an account linked
+// only to one is listed then; a directory provider needs no public URL.
+func TestLocalPasswordOffCountsOpenIDConnectLinkOnlyWithPublicURLDB(t *testing.T) {
+	env := newExternalSignInEnv(t)
+	ctx := t.Context()
+	t.Cleanup(saveSettings(t, env.pool, config.ServerPublicURLSettingKey))
+	link := func(label string, installation int) {
+		user := env.localAccount(t, label, models.RoleUser)
+		if _, err := insertIdentity(ctx, env.pool, user.ID, installation, env.identity(label+"-idp"), false, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link("oidc-only", env.authInstallation(t, "url-oidc", "oidc", "oauth2", true))
+	link("ldap-only", env.authInstallation(t, "url-ldap", "ldap", "password", true))
+	matching := true
+	for _, tc := range []struct {
+		publicURL  string
+		oidcListed bool
+	}{{"", true}, {"https://silo.example.test", false}} {
+		env.setSetting(t, config.ServerPublicURLSettingKey, tc.publicURL)
+		got, _ := localPasswordOffOutcomes(t, env, &matching)
+		if _, listed := got["oidc-only"]; listed != tc.oidcListed {
+			t.Errorf("public URL %q: account linked only to OpenID Connect listed = %v, want %v", tc.publicURL, listed, tc.oidcListed)
+		}
+		if _, listed := got["ldap-only"]; listed {
+			t.Errorf("public URL %q: account linked to a directory provider listed", tc.publicURL)
+		}
+	}
+}
