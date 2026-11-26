@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { Link, useLocation } from "react-router";
 import { ChevronDown, HelpCircle, LogOut, Monitor, Smartphone, Tv } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { useT } from "@/i18n";
 import { loginSessionDevice, sessionActive, sessionLastSeen } from "@/lib/loginSessionDevice";
 import type { LoginSession } from "@/hooks/queries/loginSessions";
+import { deviceAnchor } from "@/components/appKeys/devicePaths";
 
 // Lets a button label wrap inside the card at narrow widths and large text sizes.
 const WRAPPING_BUTTON = "h-auto min-h-8 max-w-full py-1 text-start wrap-anywhere whitespace-normal";
@@ -14,13 +16,21 @@ const WRAPPING_BUTTON = "h-auto min-h-8 max-w-full py-1 text-start wrap-anywhere
 export function LoginSessionRow({
   session,
   onSignOut,
+  keyMark = "hidden",
 }: {
   session: LoginSession;
+  /**
+   * How a session a Silo app key opened says it signs back in: as a link to
+   * its device, as words alone (no devices list to link to), or not at all
+   * (app key sign-in isn't available, or the account is disabled).
+   */
+  keyMark?: "link" | "text" | "hidden";
   onSignOut?: (session: LoginSession) => void;
 }) {
   const t = useT();
   const [expanded, setExpanded] = useState(false);
   const detailsId = useId();
+  const location = useLocation();
   const device = loginSessionDevice(session);
   const Icon =
     device.kind === "tv"
@@ -61,6 +71,26 @@ export function LoginSessionRow({
               ),
             })}
           </p>
+          {session.device_key_id && keyMark !== "hidden" && (
+            // Signing this session out doesn't stop it: the link goes to the
+            // device in the Silo app devices list on the same page.
+            <p className="text-muted-foreground mt-1 text-xs">
+              {keyMark === "link" ? (
+                <Link
+                  to={{
+                    pathname: location.pathname,
+                    search: location.search,
+                    hash: deviceAnchor(session.device_key_id),
+                  }}
+                  className="text-muted-foreground hover:text-foreground underline underline-offset-4"
+                >
+                  {t("web.settings.sessions.row.signsBackIn")}
+                </Link>
+              ) : (
+                t("web.settings.sessions.row.signsBackIn")
+              )}
+            </p>
+          )}
         </div>
         <div className="ms-auto flex max-w-full min-w-0 flex-wrap items-center gap-1">
           {onSignOut && (

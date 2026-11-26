@@ -6,6 +6,7 @@ import { formatDateTime } from "@/lib/datetime";
 import { loginSessionDevice } from "@/lib/loginSessionDevice";
 import { useT } from "@/i18n";
 import type { V2Result } from "@/api/v2/request";
+import { deviceAnchor } from "./devicePaths";
 
 type OwnAppKey = V2Result<"GET /api/v2/auth/keys">["devices"][number];
 
@@ -51,12 +52,14 @@ const ICONS = { tv: Tv, phone: Smartphone, desktop: Monitor, unknown: HelpCircle
  * badges, detail lines and the row's buttons.
  */
 function DeviceRow({
+  anchorId,
   name,
   platform,
   badges,
   lines,
   actions = [],
 }: {
+  anchorId?: string;
   name: string;
   platform: string;
   badges?: ReactNode;
@@ -66,7 +69,7 @@ function DeviceRow({
   const device = loginSessionDevice({ device_name: name, device_platform: platform });
   const Icon = ICONS[device.kind];
   return (
-    <li className="surface-panel-subtle px-3 py-3 sm:px-4">
+    <li id={anchorId} className="surface-panel-subtle scroll-mt-24 px-3 py-3 sm:px-4">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="border-border text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-xl border">
           <Icon className="size-4" aria-hidden="true" />
@@ -159,6 +162,7 @@ export function AppKeyRow({
   }
   return (
     <DeviceRow
+      anchorId={deviceAnchor(appKey.id)}
       name={appKey.name}
       platform={appKey.platform}
       badges={
