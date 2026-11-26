@@ -24,7 +24,11 @@ func registerWatchTogetherSuggestionPromote(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/watch-together/rooms/{room_id}/suggestions/promote", "promoteWatchTogetherSuggestion", "realtime", "Promote an eligible suggestion as the host. Already-selected content is a no-op; a changed selection resets playback readiness. Never replay after an intervening selection."), Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
 	op.MaxBodyBytes = 4096
 	op.Errors = []int{409}
+	op.Description = watchTogetherHostOtherAppRule
 	Register(reg, op, func(ctx context.Context, in *WatchTogetherSuggestionPromoteInput) (*WatchTogetherRoomReadOutput, error) {
+		if p := reg.otherDevicesProblem(ctx); p != nil {
+			return nil, p
+		}
 		svc := reg.deps.WatchTogetherSuggestionPromote
 		if svc == nil {
 			return nil, unavailable("suggestion promotion")

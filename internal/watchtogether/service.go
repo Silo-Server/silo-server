@@ -22,14 +22,17 @@ import (
 )
 
 var (
-	ErrRoomClosed            = errors.New("watch together room is closed")
-	ErrRoomForbidden         = errors.New("watch together room action forbidden")
-	ErrInvalidJoinRequest    = errors.New("watch together join request is invalid")
-	ErrSessionMismatch       = errors.New("watch together playback session mismatch")
-	ErrTransportNotAllowed   = errors.New("watch together transport action not allowed")
-	ErrConnectionNotAttached = errors.New("watch together session is not attached")
-	ErrInvalidSelection      = errors.New("watch together selection is invalid")
-	ErrSuggestionNotFound    = errors.New("watch together suggestion not found")
+	ErrRoomClosed    = errors.New("watch together room is closed")
+	ErrRoomForbidden = errors.New("watch together room action forbidden")
+	// ErrMemberAlreadyConnected refuses a session another app opened that
+	// would take over a member already connected (Service.ConnectOtherApp).
+	ErrMemberAlreadyConnected = fmt.Errorf("%w: the member is already connected", ErrRoomForbidden)
+	ErrInvalidJoinRequest     = errors.New("watch together join request is invalid")
+	ErrSessionMismatch        = errors.New("watch together playback session mismatch")
+	ErrTransportNotAllowed    = errors.New("watch together transport action not allowed")
+	ErrConnectionNotAttached  = errors.New("watch together session is not attached")
+	ErrInvalidSelection       = errors.New("watch together selection is invalid")
+	ErrSuggestionNotFound     = errors.New("watch together suggestion not found")
 	// ErrSuggestionLimitReached refuses a new suggestion in a room that
 	// already holds maxRoomSuggestions.
 	ErrSuggestionLimitReached = errors.New("watch together room suggestion limit reached")
@@ -548,6 +551,7 @@ func (s *Service) connect(
 	profileID string,
 	conn RoomConnection,
 	displayName string,
+	otherApp bool,
 ) (*Registration, Snapshot, error) {
 	room, live, err := s.getOrLoadLiveRoom(ctx, roomID)
 	if err != nil {
@@ -558,6 +562,10 @@ func (s *Service) connect(
 
 	s.mu.Lock()
 	current := live.members[memberKey]
+	if otherApp && memberConnected(current) && current.connection != conn {
+		s.mu.Unlock()
+		return nil, Snapshot{}, ErrMemberAlreadyConnected
+	}
 	var previousConn RoomConnection
 	if current == nil {
 		current = &memberState{userID: userID, profileID: profileID}
@@ -2847,6 +2855,17 @@ func (s *Service) DeleteSuggestion(
 	userID int,
 	profileID string,
 ) ([]Suggestion, error) {
+	return s.deleteSuggestion(ctx, roomID, suggestionID, userID, profileID, true)
+}
+
+// DeleteOwnSuggestion is DeleteSuggestion without the host's power to delete
+// any suggestion, for a session another app opened: it deletes only one its
+// account and profile made.
+func (s *Service) DeleteOwnSuggestion(ctx context.Context, roomID, suggestionID string, userID int, profileID string) ([]Suggestion, error) {
+	return s.deleteSuggestion(ctx, roomID, suggestionID, userID, profileID, false)
+}
+
+func (s *Service) deleteSuggestion(ctx context.Context, roomID, suggestionID string, userID int, profileID string, hostMay bool) ([]Suggestion, error) {
 	if s == nil || s.suggestions == nil {
 		return nil, fmt.Errorf("watch together suggestions unavailable")
 	}
@@ -2866,7 +2885,7 @@ func (s *Service) DeleteSuggestion(
 	}
 
 	s.mu.Lock()
-	isHost := live.room.HostUserID == userID && live.room.HostProfileID == profileID
+	isHost := hostMay && live.room.HostUserID == userID && live.room.HostProfileID == profileID
 	s.mu.Unlock()
 
 	isSuggester := existing.SuggesterUserID == userID && existing.SuggesterProfileID == profileID

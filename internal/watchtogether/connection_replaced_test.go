@@ -89,7 +89,7 @@ func TestReplacementIsNotSentBeforeCommitPG(t *testing.T) {
 	}
 	failure := errors.New("rollback replacement")
 	_, err := withRoomOperation(t.Context(), f.host, f.roomID, func(ctx context.Context) (Snapshot, error) {
-		if _, _, err := f.host.connect(ctx, f.roomID, 7, "host", new(replacementConn), "Host"); err != nil {
+		if _, _, err := f.host.connect(ctx, f.roomID, 7, "host", new(replacementConn), "Host", false); err != nil {
 			t.Fatal(err)
 		}
 		if old.closed {
@@ -132,5 +132,54 @@ func TestRuntimeDisconnectIsNotConnectionReplacement(t *testing.T) {
 				t.Fatalf("%s treated as replacement: %+v", cause, old)
 			}
 		})
+	}
+}
+
+// TestOtherAppDoesNotTakeAConnectedSeat: a member is its account and
+// profile, so a session another app opened, connecting while the person's
+// own device holds that seat, would close the device's socket and inherit its
+// attached stream. It is refused and the device stays connected; with the
+// seat free it connects, and the person's device connecting later still
+// replaces it. An ordinary connection replaces as before
+// (TestConnectionReplacementPreservesWinner).
+func TestOtherAppDoesNotTakeAConnectedSeat(t *testing.T) {
+	now := time.Now()
+	repo := &stubRepo{room: baseRoom(now)}
+	s := newServiceForTest(now, repo, nil, nil, nil)
+	t.Cleanup(s.Close)
+	device, app := new(replacementConn), new(replacementConn)
+	if _, _, err := s.Connect(t.Context(), repo.room.ID, 8, "guest", device); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ConnectOtherApp(t.Context(), repo.room.ID, 8, "guest", app); !errors.Is(err, ErrMemberAlreadyConnected) {
+		t.Fatalf("another app taking a connected seat: err = %v", err)
+	}
+	if device.closed {
+		t.Fatal("the refused app closed the device's connection")
+	}
+
+	seatless, later := new(replacementConn), new(replacementConn)
+	if _, _, err := s.ConnectOtherApp(t.Context(), repo.room.ID, 9, "free", seatless); err != nil {
+		t.Fatalf("another app on a free seat: err = %v", err)
+	}
+	if _, _, err := s.Connect(t.Context(), repo.room.ID, 9, "free", later); err != nil || !seatless.replaced {
+		t.Fatalf("the person's device did not replace the app: err = %v, replaced %v", err, seatless.replaced)
+	}
+}
+
+// TestOtherAppDoesNotTakeASeatOnAnotherServerPG: the seat check reads the
+// room's stored runtime under its row lock, so a device connected to another
+// API server holds its seat against a session another app opened here.
+func TestOtherAppDoesNotTakeASeatOnAnotherServerPG(t *testing.T) {
+	f := newRoomClusterFixture(t)
+	app := new(replacementConn)
+	if _, _, err := f.guest.ConnectOtherApp(t.Context(), f.roomID, 7, "host", app); !errors.Is(err, ErrMemberAlreadyConnected) {
+		t.Fatalf("another app taking a seat held on another server: err = %v", err)
+	}
+	if err := f.host.reconcileRoom(t.Context(), f.roomID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.host.HandlePingForConnection(t.Context(), f.hostReg, 7, "host", 10); err != nil {
+		t.Fatalf("the device lost its seat on the other server: %v", err)
 	}
 }

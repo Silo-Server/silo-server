@@ -78,7 +78,7 @@ func (f *controlSocketFixture) identity(userID int, profileID string) evt.Socket
 
 func (f *controlSocketFixture) mint(t *testing.T, installation string) string {
 	t.Helper()
-	ticket, _, err := f.handler.Mint(t.Context(), f.identity(7, "profile-7"), f.session.ID, installation)
+	ticket, _, err := f.handler.Mint(t.Context(), f.identity(7, "profile-7"), f.session.ID, installation, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,12 +135,12 @@ func waitForCondition(t *testing.T, cond func() bool, message string) {
 func TestControlSocketMintAdmitsOnlyTheOwner(t *testing.T) {
 	f := newControlSocketFixture(t)
 	ctx := t.Context()
-	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, controlInstallation); err != nil {
+	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, controlInstallation, nil); err != nil {
 		t.Fatal(err)
 	}
 	// A bridge-started client presents no installation and is admitted on
 	// account and profile alone.
-	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, ""); err != nil {
+	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, "", nil); err != nil {
 		t.Fatalf("bridge mint: %v", err)
 	}
 	for name, tc := range map[string]struct {
@@ -154,7 +154,7 @@ func TestControlSocketMintAdmitsOnlyTheOwner(t *testing.T) {
 		"unknown session":    {f.identity(7, "profile-7"), "missing", controlInstallation, playback.ErrSessionNotFound},
 		"wrong installation": {f.identity(7, "profile-7"), f.session.ID, controlOtherInstallation, ErrPlaybackControlSocketInstallation},
 	} {
-		if _, _, err := f.handler.Mint(ctx, tc.identity, tc.session, tc.installation); !errors.Is(err, tc.want) {
+		if _, _, err := f.handler.Mint(ctx, tc.identity, tc.session, tc.installation, nil); !errors.Is(err, tc.want) {
 			t.Fatalf("%s: err = %v, want %v", name, err, tc.want)
 		}
 	}
@@ -162,13 +162,51 @@ func TestControlSocketMintAdmitsOnlyTheOwner(t *testing.T) {
 	if err := f.manager.StopSession(f.session.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, controlInstallation); !errors.Is(err, playback.ErrSessionNotFound) {
+	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, controlInstallation, nil); !errors.Is(err, playback.ErrSessionNotFound) {
 		t.Fatalf("stopped session err = %v", err)
 	}
 	// Login authority is validated before any session lookup.
 	f.invalid.Store(true)
-	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, ""); !errors.Is(err, evt.ErrSocketTicket) {
+	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, "", nil); !errors.Is(err, evt.ErrSocketTicket) {
 		t.Fatalf("invalid login err = %v", err)
+	}
+}
+
+// TestControlSocketMintKeepsAnotherAppToItsStreams: the mint checks the
+// account and profile, so a session another app opened could take over the
+// control lane of a stream the person's other device started. It is refused
+// a stream with no recorded login session and another login session's, and
+// admitted to the one its own session started.
+func TestControlSocketMintKeepsAnotherAppToItsStreams(t *testing.T) {
+	f := newControlSocketFixture(t)
+	ctx := t.Context()
+	refuse := func(context.Context) error { return auth.ErrSessionNotAllowed }
+	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, controlInstallation, refuse); !errors.Is(err, auth.ErrSessionNotAllowed) {
+		t.Fatalf("another app, a stream it did not start: err = %v", err)
+	}
+	if err := f.pb.PlanStoreV3.SaveAttempt(ctx, playback.AttemptRecordV3{
+		PlaybackAttemptID: uuid.NewString(), SessionID: f.session.ID, UserID: 7, ProfileID: "profile-7",
+		RequestedMediaFileID: 100, EffectiveMediaFileID: 100, ExpiresAt: time.Now().Add(time.Hour), LoginSessionID: f.identity(7, "profile-7").SessionID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, controlInstallation, refuse); err != nil {
+		t.Fatalf("another app, its own stream: err = %v", err)
+	}
+	other := f.identity(7, "profile-7")
+	other.SessionID = "login-another-app"
+	if _, _, err := f.handler.Mint(ctx, other, f.session.ID, controlInstallation, refuse); !errors.Is(err, auth.ErrSessionNotAllowed) {
+		t.Fatalf("another app, another device's stream: err = %v", err)
+	}
+	// A failed attempt read is an outage for a caller the rule limits, not
+	// a refusal; a caller the rule doesn't concern mints as before.
+	f.pb.PlanStoreV3 = failingAttemptStore{f.pb.PlanStoreV3}
+	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, controlInstallation, refuse); !errors.Is(err, ErrPlaybackControlSocketUnavailable) {
+		t.Fatalf("another app, attempt unreadable: err = %v", err)
+	}
+	allow := func(context.Context) error { return nil }
+	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), f.session.ID, controlInstallation, allow); err != nil {
+		t.Fatalf("an ordinary caller, attempt unreadable: err = %v", err)
 	}
 }
 
@@ -260,7 +298,7 @@ func TestControlSocketReconnectResumesOnlySameOwnerAndInstallation(t *testing.T)
 
 	// While the lane is held by an installation-bound client, a bridge client
 	// (no installation) cannot even mint.
-	if _, _, err := f.handler.Mint(t.Context(), f.identity(7, "profile-7"), f.session.ID, ""); !errors.Is(err, ErrPlaybackControlSocketLaneHeld) {
+	if _, _, err := f.handler.Mint(t.Context(), f.identity(7, "profile-7"), f.session.ID, "", nil); !errors.Is(err, ErrPlaybackControlSocketLaneHeld) {
 		t.Fatalf("other installation err = %v", err)
 	}
 
@@ -365,7 +403,7 @@ func TestControlSocketClosesOnAuthorityOrSessionLoss(t *testing.T) {
 				// Authority stays valid; only the access expiry ends the socket.
 				identity.AccessExpiresAt = time.Now().Add(time.Second)
 			}
-			ticket, _, err := f.handler.Mint(t.Context(), identity, f.session.ID, controlInstallation)
+			ticket, _, err := f.handler.Mint(t.Context(), identity, f.session.ID, controlInstallation, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -484,7 +522,7 @@ func TestControlSocketMintReadsTheDurableAttemptOnAMemoryMiss(t *testing.T) {
 		"other account sees not found":         {f.identity(8, "profile-7"), endedID, playback.ErrSessionNotFound},
 		"other profile sees not found":         {f.identity(7, "profile-8"), liveID, playback.ErrSessionNotFound},
 	} {
-		if _, _, err := f.handler.Mint(ctx, tc.identity, tc.session, controlInstallation); !errors.Is(err, tc.want) {
+		if _, _, err := f.handler.Mint(ctx, tc.identity, tc.session, controlInstallation, nil); !errors.Is(err, tc.want) {
 			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
 		}
 	}
@@ -493,7 +531,7 @@ func TestControlSocketMintReadsTheDurableAttemptOnAMemoryMiss(t *testing.T) {
 	// An id that is not a UUID never reaches the store: a durable one would
 	// fail the query instead of missing.
 	f.pb.PlanStoreV3 = failingAttemptStore{store}
-	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), liveID, ""); !errors.Is(err, ErrPlaybackControlSocketUnavailable) {
+	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), liveID, "", nil); !errors.Is(err, ErrPlaybackControlSocketUnavailable) {
 		t.Fatalf("store failure err = %v", err)
 	}
 	for _, malformed := range []string{
@@ -504,7 +542,7 @@ func TestControlSocketMintReadsTheDurableAttemptOnAMemoryMiss(t *testing.T) {
 		strings.ReplaceAll(liveID, "-", ""),
 		strings.ToUpper(liveID),
 	} {
-		if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), malformed, ""); !errors.Is(err, playback.ErrSessionNotFound) {
+		if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), malformed, "", nil); !errors.Is(err, playback.ErrSessionNotFound) {
 			t.Fatalf("malformed id %q err = %v", malformed, err)
 		}
 	}

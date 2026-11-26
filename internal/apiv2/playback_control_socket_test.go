@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -21,14 +22,16 @@ type fakeControlSocket struct {
 	identity     evt.SocketIdentity
 	session      string
 	installation string
-	err          error
-	served       int
+	// reach is the rule the last mint carried.
+	reach  func(context.Context) error
+	err    error
+	served int
 }
 
 func (f *fakeControlSocket) Available() bool { return f.available }
-func (f *fakeControlSocket) Mint(_ context.Context, identity evt.SocketIdentity, session, installation string) (string, time.Time, error) {
+func (f *fakeControlSocket) Mint(_ context.Context, identity evt.SocketIdentity, session, installation string, reach func(context.Context) error) (string, time.Time, error) {
 	f.calls++
-	f.identity, f.session, f.installation = identity, session, installation
+	f.identity, f.session, f.installation, f.reach = identity, session, installation, reach
 	if f.err != nil {
 		return "", time.Time{}, f.err
 	}
@@ -51,13 +54,20 @@ func controlSocketDeps(f *fakeControlSocket) Dependencies {
 
 func TestPlaybackControlSocketTicketDelegatesOwnerAuthority(t *testing.T) {
 	f := &fakeControlSocket{available: true}
-	h := NewHandler(controlSocketDeps(f))
+	deps := controlSocketDeps(f)
+	deps.AppKeys = &fakeAppKeys{reachErr: auth.ErrSessionNotAllowed}
+	h := NewHandler(deps)
 	path := Prefix + "/playback/sessions/" + controlSocketSession + "/control/ws-ticket"
 	body := `{"installation_id":"` + playbackTestInstallation + `"}`
 
 	rec := do(t, h, http.MethodPost, path, body, profileOwner())
 	if rec.Code != 200 || f.calls != 1 || f.identity.UserID != 1 || f.identity.SessionID != "s1" || f.identity.ProfileID != "p-owner" || f.session != controlSocketSession || f.installation != playbackTestInstallation {
 		t.Fatalf("delegation: %d %s %+v", rec.Code, rec.Body.String(), f)
+	}
+	// The mint carries the rule it asks for a stream another login session
+	// started.
+	if f.reach == nil || !errors.Is(f.reach(t.Context()), auth.ErrSessionNotAllowed) {
+		t.Fatal("the mint did not carry the caller's other-device rule")
 	}
 	if !strings.Contains(rec.Body.String(), `"protocol":"silo.playback-control.v2"`) || !strings.Contains(rec.Body.String(), `"max_connection_seconds":14400`) || rec.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("ticket body/headers: %s %v", rec.Body.String(), rec.Header())
@@ -88,6 +98,8 @@ func TestPlaybackControlSocketTicketDelegatesOwnerAuthority(t *testing.T) {
 		want ProblemType
 	}{
 		{handlers.ErrPlaybackControlSocketNotOwner, TypePermissionDenied},
+		{auth.ErrSessionNotAllowed, TypePermissionDenied},
+		{auth.ErrSessionRevoked, TypeSessionExpired},
 		{playback.ErrSessionNotFound, TypeNotFound},
 		{handlers.ErrPlaybackControlSocketStale, TypeConflict},
 		{handlers.ErrPlaybackControlSocketInstallation, TypeConflict},

@@ -111,7 +111,11 @@ func registerOrderedApplePush(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/devices/push/apple", "registerApplePushDevice", "notifications", "Apply an ordered Apple installation intent; exact replay may renew display credentials without changing registration state."), Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyDomainIdentity}
 	op.Errors = []int{409}
 	op.MaxBodyBytes = 4096
+	op.Description = nativePushOtherAppRule
 	Register(reg, op, func(ctx context.Context, in *ApplePushRegistrationInput) (*ApplePushRegistrationOutput, error) {
+		if p := reg.otherDevicesProblem(ctx); p != nil {
+			return nil, p
+		}
 		if reg.deps.OrderedApplePush == nil || !reg.deps.OrderedApplePush.OrderedApplePushAvailable() {
 			return nil, unavailable("ordered Apple push registration")
 		}
@@ -163,7 +167,11 @@ func registerOrderedApplePush(reg *Registry) {
 	reset := Operation{Operation: humaOp(http.MethodPost, Prefix+"/devices/push/apple/reset", "resetApplePushInstallation", "notifications", "Clear this account's Apple installation for a device_id so an app that lost its installation key, as after a reinstall, can register again from any generation."), Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyDomainIdentity}
 	reset.Errors = []int{http.StatusForbidden}
 	reset.MaxBodyBytes = 1024
+	reset.Description = nativePushOtherAppRule
 	Register(reg, reset, func(ctx context.Context, in *ApplePushResetInput) (*ApplePushResetOutput, error) {
+		if p := reg.otherDevicesProblem(ctx); p != nil {
+			return nil, p
+		}
 		if reg.deps.ApplePushReset == nil || !reg.deps.ApplePushReset.ApplePushResetAvailable() {
 			return nil, unavailable("Apple push installation reset")
 		}

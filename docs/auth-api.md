@@ -454,6 +454,66 @@ ids. A device sign-in session opened before the column from a device that isn't 
 recorded mark and stays ordinary until it ends; an account holder ends shared devices'
 sessions from their session list, or an administrator ends all of the account's sessions.
 
+### Other devices' playback and web push
+
+One rule decides which sessions are limited: the one above. Each surface applies it as its
+shape allows. The login session list redacts the other entries. The surfaces below show or
+act on one device's entries from another, and they apply only the half of the rule about
+another app the person allowed (`auth.SessionMayReachOtherDevices`, the grant-enrolled key
+of `SessionOrigin`). A device signed in by code is not limited on them:
+
+- `listHouseholdSessions` (`GET /profiles/household/sessions`) gives such a session only the
+  playback sessions its own login session started, in full. Every other entry is left out,
+  including a stream with no recorded login session (one started through the
+  Jellyfin-compatible or Audiobookshelf-compatible surface, or before the record). The item
+  shape is unchanged.
+- The web push routes (`listNotificationWebPushSubscriptions`, `subscribeNotificationWebPush`,
+  `unsubscribeNotificationWebPush`, `deleteNotificationWebPushSubscription`) refuse it with
+  403 `permission_denied` before anything is read or written: a profile's subscriptions
+  belong to every browser it registered, and subscribing takes an endpoint's registration
+  over.
+- Reporting progress (`updatePlaybackProgress`), stopping (`stopPlayback`), replanning
+  (`replanPlayback`) and minting a control ticket (`createPlaybackControlSocketTicket`) check
+  the account and profile, and for such a session also that its own login session started
+  the playback session: another login session's stream, or one with no recorded login
+  session, is 403 `permission_denied`. Progress, stop and replan read the attempt anyway, and
+  ask the rule only when the stream's login session is not the caller's, so a client acting
+  on its own stream adds no query there. Minting a control ticket adds one read of the
+  attempt for every caller. Replan refuses as unavailable when that read fails, for every
+  caller with a login session, not only such a session; the replan would read the attempt
+  again and fail anyway.
+- The native push writes (`registerPushDevice`, `unregisterPushDevice`,
+  `registerApplePushDevice`, `resetApplePushInstallation`) refuse it with 403
+  `permission_denied` before anything is read or written. A registration with no ordered
+  record yet (a legacy Android one, or an Apple installation after a reset) is bound only to
+  the account and device id, and a reset needs no installation key, so the session could
+  remove or take over another device's registration. Its own app could receive nothing through
+  them: the Apple topic and the Android relay are the first-party apps'. The session-less
+  retirements stay as they are; they need the installation key.
+- Watch Together: a room's host is the account and profile, so such a session acting as the
+  host's profile would steer the room of the person's own device. It is refused creating a
+  room and every host operation (`createWatchTogetherRoom`, `closeWatchTogetherRoom`,
+  `startWatchTogetherRoomPlayback`, `stopWatchTogetherRoomPlayback`,
+  `updateWatchTogetherRoomPolicy`, `selectWatchTogetherRoomItem`,
+  `updateWatchTogetherRoomSelectionMode`, `stageWatchTogetherRoomItem`,
+  `promoteWatchTogetherSuggestion`), and `fallbackWatchTogetherSource`, which any member may
+  send and which switches what every member plays. `createWatchTogetherSocketTicket` refuses
+  it for a room its account and profile host. As a member of another host's room it may
+  connect: it reports its own state, suggests and votes, but the socket refuses its
+  `transport_request` frames with the error frame any refused request gets, whatever the
+  room's guest policy. Like any member, a `buffering` frame from it can still pause the room
+  for everyone while it catches up, within the room's spacing and cooldown. A member is its
+  account and profile, so connecting replaces a connection already held for them; such a
+  session is instead refused (an error frame with code `forbidden`, then the socket closes)
+  while that member is connected, on this API server or another, as the room's stored
+  runtime records. The person's own device connecting later still replaces the app. Deleting
+  a suggestion (`deleteWatchTogetherSuggestion`) is limited to one its account and profile
+  made, without the host's power to delete any; the suggester is recorded only as an account
+  and profile, so that includes the person's own devices' suggestions on that profile.
+
+The refusals carry the same detail as the key routes' refusal of a session that may not make
+a change.
+
 ### Access tokens after a role change
 
 An access token carries the account's role, and admin checks trust it. When an
@@ -1227,7 +1287,10 @@ the app opens can't enroll keys, replace the person key, approve a device
 sign-in now or in advance, read the key list, or revoke any key but its own.
 It is also refused (403 `permission_denied`) on creating a personal API key
 (`createPersonalAPIKey`) and on the operations that link a sign-in provider
-account.
+account. It is kept off the other devices' playback, web push and native push
+registrations, and may not host or drive a Watch Together room
+([Other devices' playback and web push](#other-devices-playback-and-web-push)). The
+settings device registry (`/devices`) does not limit it yet.
 
 | Refusal | Problem |
 | --- | --- |

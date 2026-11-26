@@ -488,7 +488,9 @@ func (reg *Registry) playbackCaller(ctx context.Context, headers PlaybackRequest
 		return handlers.PlaybackCaller{}, validationProblem("body.installation_id", "invalid", "Expected the installation identifier from capabilities.")
 	}
 	client := headers.clientInfo()
-	return handlers.PlaybackCaller{UserID: userID, ProfileID: profileID, InstallationID: string(installation), DeviceID: headers.DeviceID, ConnectionDeviceID: headers.SiloDeviceID, UserAgent: headers.UserAgent, ClientName: client.Name, ClientVersion: client.Version, ClientBuild: client.Build, ClientChannel: client.Channel, DeviceName: headers.ClientModel, Platform: headers.ClientPlatform, RemoteAddr: clientip.FromContext(ctx)}, nil
+	caller := handlers.PlaybackCaller{UserID: userID, ProfileID: profileID, InstallationID: string(installation), DeviceID: headers.DeviceID, ConnectionDeviceID: headers.SiloDeviceID, UserAgent: headers.UserAgent, ClientName: client.Name, ClientVersion: client.Version, ClientBuild: client.Build, ClientChannel: client.Channel, DeviceName: headers.ClientModel, Platform: headers.ClientPlatform, RemoteAddr: clientip.FromContext(ctx)}
+	caller.LoginSessionID, caller.MayReachOtherDevices = reg.otherDevicesRule(ctx)
+	return caller, nil
 }
 
 // playbackProblem maps a service error onto the shared problem catalog: the

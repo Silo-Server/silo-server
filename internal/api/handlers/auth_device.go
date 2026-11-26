@@ -147,9 +147,10 @@ type DeviceLoginDecision struct {
 // SessionNotAllowedDetail answers a caller auth.ErrSessionNotAllowed
 // refuses: a session a device sign-in or another app opened, one with no
 // record of how it was opened, an API key or a remote-playback session.
-// Each of them can do the change from a fresh sign-in of the account or
-// from the person's own app.
-const SessionNotAllowedDetail = "This sign-in can't do that. Sign in again with your password or sign-in provider, or use your own Silo app."
+// Each of them can do the change from one of the person's own apps or from
+// another sign-in of the account; the detail names no method, since an
+// account may have neither a password nor a sign-in provider.
+const SessionNotAllowedDetail = "This sign-in can't do that: use one of your own Silo apps, or sign in again another way."
 
 // ActingAsAccountDetail answers an administrator acting as the account
 // (auth.ErrActingAsAccount), who cannot sign in again as it.

@@ -34,7 +34,9 @@ type keyRoutesDB struct {
 	claims  map[string]*auth.Claims
 }
 
-func newKeyRoutesDB(t *testing.T) *keyRoutesDB {
+// newKeyRoutesDB builds it; with changes the dependencies before the
+// handler is built.
+func newKeyRoutesDB(t *testing.T, with ...func(*Dependencies)) *keyRoutesDB {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -99,6 +101,9 @@ func newKeyRoutesDB(t *testing.T) *keyRoutesDB {
 	deps.Devices = handler
 	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{roles}, fakeAPIKeys{},
 		fakeUsers{map[int]*models.User{userID: {ID: userID, Role: "user", Enabled: true}}})
+	for _, change := range with {
+		change(&deps)
+	}
 	return &keyRoutesDB{pool: pool, handler: NewHandler(deps), devices: devices, userID: userID, claims: claims}
 }
 
