@@ -142,14 +142,15 @@ func readProfileScopeSettings(ctx context.Context, tx pgx.Tx, userID int) (map[s
 // rules the other writers keep. Every writer that takes a profile row and
 // then the account row takes the preference-settings lock first, so it runs
 // wholly before or after the set: a profile save that bumps the access
-// revision is one. Every writer that does not take that lock takes the
-// account row before any profile row, the set's order: approving a device
-// sign-in for a profile locks the account row and then, through the
-// request's foreign key, the profile row; an allowance change locks the
-// account row and then the acting profile; creating an API key share-locks
-// the account row and then the profile; renaming the main profile with the
-// username locks the account row and then writes the profile. Recording an
-// avatar hash writes one profile row and no account row.
+// revision is one; so is an administrator's change of the username, which
+// takes it before the account row and then may rename the main profile.
+// Every writer that does not take that lock takes the account row before any
+// profile row, the set's order: approving a device sign-in for a profile
+// locks the account row and then, through the request's foreign key, the
+// profile row; an allowance change locks the account row and then the acting
+// profile; creating an API key share-locks the account row and then the
+// profile. Recording an avatar hash writes one profile row and no account
+// row.
 func (s *PostgresUserStore) WithProfileSetTransaction(ctx context.Context, inSet []string, fn func(userstore.ProfileSetWriter) error) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

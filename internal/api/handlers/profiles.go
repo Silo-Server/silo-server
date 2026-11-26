@@ -242,9 +242,9 @@ type ProfileListView struct {
 // This early check answers the common case without opening a transaction.
 // There is no unique index on names (neither user store carries one); a
 // create and a rename check again inside their transaction, after the
-// account's preference-settings lock (profileNameTaken), as the profile set
-// and the owner's clear of a name do, so two overlapping writes can't both
-// take one name.
+// account's preference-settings lock (profileNameTaken), as the profile set,
+// the owner's clear of a name and an administrator's change of the account's
+// username do, so two overlapping writes can't both take one name.
 func profileNameConflicts(profiles []userstore.Profile, name, excludeID string) bool {
 	for _, p := range profiles {
 		if p.ID != excludeID && sameProfileName(p.Name, name) {

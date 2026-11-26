@@ -38,10 +38,14 @@ func updatePreviousUsername(ctx context.Context, db interface {
 //
 // A primary profile from a profile set keeps its name: the set names it.
 //
-// The account row is already locked, and a profile save locks the profile row
-// before it touches the account row, so waiting here for a profile a save
-// holds could deadlock. A primary profile being saved at that moment is
-// skipped instead and keeps its name.
+// The caller holds the account's profile locks (pgstore.LockAccountForImport),
+// which every other writer of a profile's name takes before it reads the
+// names, so the names read here stay true until this transaction ends.
+//
+// The account row is already locked, and a writer that does not take those
+// locks may hold the primary profile's row and then wait for the account
+// row, so waiting here for that row could deadlock. A primary profile locked
+// at that moment is skipped instead and keeps its name.
 func renamePrimaryProfileWithAccount(ctx context.Context, db interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 	QueryRow(context.Context, string, ...any) pgx.Row

@@ -1193,10 +1193,16 @@ hidden by the owner counts, and so does one whose profile keeps a name the
 owner gave it: clearing that name would otherwise bring the clash back with
 nobody sending anything. Then the household as the set leaves it is checked,
 so a rename chain applies, and an item named like a profile outside the set
-refuses the whole set. There is no unique index on names. A profile create,
-a profile rename, the set, and the owner's clear of a name override each take
-the account's preference-settings lock before they read the names they check,
-so they run one at a time and none can take a name another just took.
+refuses the whole set. There is no unique index on names. Five writers set a
+profile's name to one the account's other profiles might hold, and each checks
+it under the account's preference-settings lock, taken before it reads the
+names: a profile create and a profile rename (inside
+`WithPreferenceSettingsTransaction`), the person's set and the owner's clear
+of a name override (inside `WithProfileSetTransaction`), and an
+administrator's change of the account's username, which renames the main
+profile when it still carries the old username (`MutateAdminAccount` takes
+`LockAccountForImport` first). They run one at a time, so none can take a name
+another just took.
 
 **What a new profile starts with.** The item's fields and settings, no picture
 unless the item names a preset this server knows, and no PIN unless the item
@@ -1241,10 +1247,11 @@ profile row and then the account row takes the preference-settings lock first,
 so it runs wholly before or after a set: a profile save that bumps the access
 revision, and the pool-level profile update the avatar routes use, both take
 it before the profile row. A profile delete takes it too, and then locks the
-account row before the profile row. A writer that does not take that lock
-locks the account row before any profile row, the set's own order: approving a
-device sign-in, an allowance change, creating an API key for a profile, and
-renaming the main profile with the username. Deleting an account takes the
+account row before the profile row. An administrator's change of the account's
+username takes it before the account row, since it may rename the main
+profile. A writer that does not take that lock locks the account row before
+any profile row, the set's own order: approving a device sign-in, an allowance
+change, and creating an API key for a profile. Deleting an account takes the
 preference-settings lock before the account row at both deletion sites, so a
 set and an account deletion run one after the other rather than deadlocking.
 The set still starts over when PostgreSQL aborts it as a deadlock victim, as a
