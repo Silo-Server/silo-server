@@ -3,8 +3,11 @@ package backup
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -150,8 +153,12 @@ func TestFullRestoreCarriesCredentialsOnlyOntoTheSameAccountDB(t *testing.T) {
 
 			before := server.backup(t)
 			var first int
+			var created time.Time
 			server.with(t, func(pool *pgxpool.Pool) {
 				first = createAccount(t, pool, "first")
+				if err := pool.QueryRow(ctx, `SELECT created_at FROM users WHERE id = $1`, first).Scan(&created); err != nil {
+					t.Fatal(err)
+				}
 				if tc.profile {
 					dbExec(t, pool, `INSERT INTO user_profiles (id, user_id, name, is_primary) VALUES ('first-profile', $1, 'First', true)`, first)
 				}
@@ -161,6 +168,15 @@ func TestFullRestoreCarriesCredentialsOnlyOntoTheSameAccountDB(t *testing.T) {
 
 			var second, third int
 			server.with(t, func(pool *pgxpool.Pool) {
+				// The restore moves the account id sequence past the ids the
+				// live server used. A server restored before it did can
+				// already hold such ids, so the sequence is put back as
+				// such a restore left it.
+				var next int64
+				if err := pool.QueryRow(ctx, `SELECT nextval(pg_get_serial_sequence('users', 'id'))`).Scan(&next); err != nil || next <= int64(first) {
+					t.Fatalf("the next account id after the restore is %d (%v), want above %d, the live server's last", next, err, first)
+				}
+				dbExec(t, pool, `SELECT setval(pg_get_serial_sequence('users', 'id'), $1, false)`, first)
 				name := "second"
 				if tc.disabled {
 					name = "first"
@@ -183,20 +199,24 @@ func TestFullRestoreCarriesCredentialsOnlyOntoTheSameAccountDB(t *testing.T) {
 				var username string
 				var enabled bool
 				var keys, links int
-				if err := pool.QueryRow(ctx, `SELECT username, enabled,
+				var restoredCreated time.Time
+				if err := pool.QueryRow(ctx, `SELECT username, enabled, created_at,
 					(SELECT count(*) FROM api_keys WHERE user_id = $1),
 					(SELECT count(*) FROM plugin_auth_identities WHERE user_id = $1)
-					FROM users WHERE id = $1`, first).Scan(&username, &enabled, &keys, &links); err != nil {
+					FROM users WHERE id = $1`, first).Scan(&username, &enabled, &restoredCreated, &keys, &links); err != nil {
 					t.Fatal(err)
 				}
-				if username != "first" {
-					t.Errorf("restored account %d is %q, want the backup's account", first, username)
+				if username != "first" || !restoredCreated.Equal(created) {
+					t.Errorf("restored account %d is %q created %s, want the backup's account, created %s", first, username, restoredCreated, created)
 				}
 				if keys != 0 || links != 0 {
 					t.Errorf("the backup's account %d holds %d API keys and %d sign-in links of another live account\n%s", first, keys, links, out)
 				}
 				if !enabled {
 					t.Errorf("the backup's account %d was disabled by another live account's switch\n%s", first, out)
+				}
+				if dropped := fmt.Sprintf("'second key' (account %d)", first); !strings.Contains(out, dropped) {
+					t.Errorf("the restore does not report the dropped key %s\n%s", dropped, out)
 				}
 				// The next account must not take an id the live server used.
 				if next := createAccount(t, pool, "next"); next <= third {

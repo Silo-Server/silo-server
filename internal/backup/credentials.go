@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -149,6 +150,16 @@ const (
 // account's role deletes its keys for the same reason.
 func ownerCarried(column string) string {
 	return `EXISTS (SELECT 1 FROM carried_owners o WHERE o.id = r.` + column + `)`
+}
+
+// sameAccount is the SQL condition, over the live row r, that the account in
+// column is the same account in the restored data (same_accounts): an
+// account there has its id and was created at the same time. An id alone
+// does not say so: a full restore puts the account id sequence back, so an
+// account created on the live server since can hold an id that another
+// account has in the backup.
+func sameAccount(column string) string {
+	return `EXISTS (SELECT 1 FROM same_accounts s WHERE s.id = r.` + column + `)`
 }
 
 // grantCarried is the SQL condition, over the live row r of table, that the
@@ -446,8 +457,8 @@ type CarriedCredentials struct {
 	// Kept counts the live rows kept, by table.
 	Kept map[string]int
 	// Dropped names the live credentials left out because their owner is
-	// not in the restored data or has more authority there, without key
-	// material.
+	// not in the restored data, is another account there (sameAccount), or
+	// has more authority there, without key material.
 	Dropped []string
 	// Stricter names the security switches kept at the live server's
 	// stricter value (stricterFlags).
@@ -491,7 +502,7 @@ func carryCredentials(ctx context.Context, loader DatabaseLoader, dbURL, liveURL
 	}
 	_, _ = fmt.Fprintf(out, "Kept this server's %s in place of the backup's: %s.\n", carriedKinds, strings.Join(kept, ", "))
 	if len(carriedRows.Dropped) > 0 {
-		_, _ = fmt.Fprintf(out, "Dropped %d whose owner is not in the backup or has more authority there than here, or that the backup's older schema cannot hold beside another account's: %s\n",
+		_, _ = fmt.Fprintf(out, "Dropped %d whose owner is not in the backup, is another account there with the same id, or has more authority there than here, or that the backup's older schema cannot hold beside another account's: %s\n",
 			len(carriedRows.Dropped), strings.Join(carriedRows.Dropped, ", "))
 	}
 	if len(carriedRows.Cleared) > 0 {
@@ -549,6 +560,9 @@ func (l PGLoader) CarryCredentials(ctx context.Context, dbURL, liveURL string) (
 		}
 		tables, live = keepWhere(tables, live, keep)
 		scrubbed, liveState.scrubbed = keepWhere(scrubbed, liveState.scrubbed, keep)
+		if err := sameAccounts(ctx, tx, liveState.accounts); err != nil {
+			return err
+		}
 		// The stricter switches first, so the authority the carry compares
 		// is the restored server's as it will start: an account kept
 		// disabled, a library deleted since restored disabled.
@@ -578,7 +592,7 @@ func (l PGLoader) CarryCredentials(ctx context.Context, dbURL, liveURL string) (
 				return fmt.Errorf("%s: %w", table.name, err)
 			}
 		}
-		return nil
+		return advanceAccountIDs(ctx, tx, liveState.accounts)
 	})
 	return result, err
 }
@@ -613,11 +627,60 @@ func keepWhere(tables []secretTable, rows []string, keep func(secretTable) bool)
 	return keptTables, keptRows
 }
 
+// liveAccounts are the live server's accounts: their ids and when each was
+// created, which together tell an account from another that holds its id
+// in the restored data (sameAccount).
+type liveAccounts struct {
+	ids     []int64
+	created []time.Time
+}
+
+// readLiveAccounts reads every account of the live snapshot tx.
+func readLiveAccounts(ctx context.Context, tx pgx.Tx) (liveAccounts, error) {
+	var a liveAccounts
+	err := tx.QueryRow(ctx, `SELECT coalesce(array_agg(id ORDER BY id), '{}'), coalesce(array_agg(created_at ORDER BY id), '{}')
+		FROM users`).Scan(&a.ids, &a.created)
+	if err != nil {
+		return a, fmt.Errorf("reading the live accounts: %w", err)
+	}
+	return a, nil
+}
+
+// sameAccounts writes same_accounts, the live accounts that are the same
+// account in the restored data (sameAccount). A creation time survives a
+// backup and a restore exactly: the column is a timestamptz only its
+// default writes, and the dump copies it at full precision.
+func sameAccounts(ctx context.Context, tx pgx.Tx, live liveAccounts) error {
+	_, err := tx.Exec(ctx, `CREATE TEMP TABLE same_accounts ON COMMIT DROP AS
+		SELECT u.id FROM users u JOIN unnest($1::bigint[], $2::timestamptz[]) AS l(id, created_at)
+			ON l.id = u.id AND l.created_at = u.created_at`, live.ids, live.created)
+	return err
+}
+
+// advanceAccountIDs moves the restored account id sequence past every id the
+// live server has used, as carryInto does for the carried tables. The
+// backup's sequence would otherwise give the next account an id the live
+// server gave an account the restore removes, and a later restore would meet
+// two accounts under it.
+func advanceAccountIDs(ctx context.Context, tx pgx.Tx, live liveAccounts) error {
+	if len(live.ids) == 0 {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `SELECT setval(pg_get_serial_sequence('users', 'id'), GREATEST(
+		coalesce(pg_sequence_last_value(pg_get_serial_sequence('users', 'id')::regclass), 0),
+		(SELECT coalesce(max(id), 0) FROM users), $1, 1))`, live.ids[len(live.ids)-1])
+	return err
+}
+
 // carriedOwners writes carried_owners, the accounts whose live credentials
-// the restored database keeps: those in it with no more authority there
-// than live.
+// the restored database keeps: those that are the same account in it
+// (same_accounts) with no more authority there than live.
 func carriedOwners(ctx context.Context, tx pgx.Tx, live map[int]accountAuthority) error {
-	ids := slices.Sorted(maps.Keys(live))
+	var ids []int
+	if err := tx.QueryRow(ctx, `SELECT coalesce(array_agg(id ORDER BY id), '{}') FROM same_accounts WHERE id = ANY($1)`,
+		slices.Sorted(maps.Keys(live))).Scan(&ids); err != nil {
+		return err
+	}
 	restored, err := readAuthority(ctx, tx, ids)
 	if err != nil {
 		return err
@@ -660,6 +723,7 @@ type liveCredentials struct {
 	pluginCallbackMode bool
 
 	authority map[int]accountAuthority
+	accounts  liveAccounts
 	grants    map[grantKey]grantPolicy
 	// stricter is each stricterFlags entry's live rows.
 	stricter []liveFlags
@@ -694,6 +758,9 @@ func readLiveCredentials(ctx context.Context, liveURL string, tables []secretTab
 			return err
 		}
 		if state.authority, err = readAuthority(ctx, tx, owners); err != nil {
+			return err
+		}
+		if state.accounts, err = readLiveAccounts(ctx, tx); err != nil {
 			return err
 		}
 		if state.grants, err = inviteePolicies(ctx, tx, tables, into); err != nil {

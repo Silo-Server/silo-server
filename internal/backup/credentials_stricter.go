@@ -59,9 +59,13 @@ const (
 	tablePersonalCollections = "user_personal_collections"
 )
 
-// The keys a row is matched by.
+// The keys a row is matched by. An account is matched by its name and when
+// it was created, as sameAccount matches one: a live account created since
+// the backup can hold an id, and even a name, that another account has in
+// the backup. The time is written in UTC, so neither session's time zone
+// changes it.
 const (
-	accountKey = `lower(coalesce(t.username, t.email, ''))`
+	accountKey = `lower(coalesce(t.username, t.email, '')) || ' ' || to_char(t.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US')`
 	pluginKey  = `t.plugin_id`
 	noKey      = `''`
 	profileKey = `t.user_id::text`
