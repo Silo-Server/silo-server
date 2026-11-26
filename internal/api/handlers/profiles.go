@@ -950,9 +950,9 @@ func (h *ProfileHandler) reservePINAttempt(ctx context.Context, cmd ProfileVerif
 }
 
 // VerifyPIN checks a profile's PIN and, on a match, mints the X-Profile-Token
-// the profile gates accept. v1 POST /profiles/{id}/verify-pin and v2
-// verifyProfilePIN both call it; a failure is an *APIError carrying the v1
-// status, code and message.
+// the profile gates accept. Only v2 verifyProfilePIN calls it (the v1 route
+// is retired); a failure is an *APIError carrying the status, code and
+// message that operation maps to its problem.
 func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINCommand) (ProfileVerification, error) {
 	var none ProfileVerification
 	// Another app's session must be counted by its key. Without the key it

@@ -482,7 +482,10 @@ resolver (`TestPluginContentMountsAllReachTheContentHandler`,
   signing in again with the same key does not reset them. They never spend
   the household's count: the app's wrong guesses lock only the app, never the
   person's own devices. While the household's own devices have locked the
-  profile, the app is refused too, with the same 429 and retry time. The
+  profile, the app is refused too, with the same 429 and retry time. A
+  session whose device key row is missing is still treated as another app's
+  and counted by the key id the session names; a key row is revoked, never
+  deleted, while its account exists, so this is only a guard. The
   profile list carries every profile's limits, as for any session;
 - reading the catalog, home, libraries, collections, recommendations,
   subtitles, settings and preferences. Reading a person can queue that
