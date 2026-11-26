@@ -28,6 +28,11 @@ var (
 	// ErrApproverNotAdmin refuses approving a waiting key on an account that
 	// is no longer an administrator: only an administrator's devices wait.
 	ErrApproverNotAdmin = errors.New("only an administrator account approves a waiting device")
+	// ErrKeyDecidesItself is ErrSessionNotAllowed for a session a device key
+	// opened that approves or refuses that same key. errors.Is matches both;
+	// a caller that tells the person what to do next checks this one first,
+	// since that session already is the person's own app.
+	ErrKeyDecidesItself = fmt.Errorf("%w: a key cannot approve or refuse itself", ErrSessionNotAllowed)
 )
 
 // auditFieldDeviceKey names the device key a pending key decision acted on.
@@ -43,7 +48,7 @@ func (a *AppKeySignIn) pendingDecisionAllowed(ctx context.Context, claims *Claim
 		return err
 	}
 	if origin.DeviceKeyID != "" && origin.DeviceKeyID == id {
-		return ErrSessionNotAllowed
+		return ErrKeyDecidesItself
 	}
 	return nil
 }

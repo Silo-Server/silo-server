@@ -33,6 +33,12 @@ func (a *AppKeySignIn) SessionMayIssueCredential(ctx context.Context, claims *Cl
 	return SessionMayIssueCredential(ctx, a.pool, claims)
 }
 
+// SessionMayReachOtherDevices reports whether the claims' session may see
+// or change what the account's other devices hold (SessionMayReachOtherDevices).
+func (a *AppKeySignIn) SessionMayReachOtherDevices(ctx context.Context, claims *Claims) error {
+	return SessionMayReachOtherDevices(ctx, a.pool, claims)
+}
+
 // ListOwnKeys lists the keys of the claims' account, for a session the
 // person opened themselves (ActionReadKeys).
 func (a *AppKeySignIn) ListOwnKeys(ctx context.Context, claims *Claims) (OwnAppKeys, error) {

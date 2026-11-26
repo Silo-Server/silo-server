@@ -8943,7 +8943,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Apply an ordered Apple installation intent; exact replay may renew display credentials without changing registration state. */
+    /**
+     * Apply an ordered Apple installation intent; exact replay may renew display credentials without changing registration state.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: a registration is bound only to the account and device id until it has an ordered record, and a reset needs no installation key, so the session could remove or take over another device's. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     post: operations["registerApplePushDevice"];
     delete?: never;
     options?: never;
@@ -8977,7 +8980,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Clear this account's Apple installation for a device_id so an app that lost its installation key, as after a reinstall, can register again from any generation. */
+    /**
+     * Clear this account's Apple installation for a device_id so an app that lost its installation key, as after a reinstall, can register again from any generation.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: a registration is bound only to the account and device id until it has an ordered record, and a reset needs no installation key, so the session could remove or take over another device's. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     post: operations["resetApplePushInstallation"];
     delete?: never;
     options?: never;
@@ -11046,7 +11052,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Apply one ordered Android installation registration intent. Replay only the exact persisted generation, credential and payload; never advance a generation to retry uncertainty. */
+    /**
+     * Apply one ordered Android installation registration intent. Replay only the exact persisted generation, credential and payload; never advance a generation to retry uncertainty.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: a registration is bound only to the account and device id until it has an ordered record, and a reset needs no installation key, so the session could remove or take over another device's. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     post: operations["registerPushDevice"];
     delete?: never;
     options?: never;
@@ -11064,7 +11073,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Apply an ordered removal for the installation's current account/profile. Tombstones prevent stale registration replay. */
+    /**
+     * Apply an ordered removal for the installation's current account/profile. Tombstones prevent stale registration replay.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: a registration is bound only to the account and device id until it has an ordered record, and a reset needs no installation key, so the session could remove or take over another device's. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     delete: operations["unregisterPushDevice"];
     options?: never;
     head?: never;
@@ -11247,10 +11259,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Manage the acting profile's notification inbox. */
+    /**
+     * Manage the acting profile's notification inbox.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: the profile's subscriptions belong to every browser it registered. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     get: operations["listNotificationWebPushSubscriptions"];
     put?: never;
-    /** Register or reassign a browser endpoint to the current profile. Send once; replay can replace newer intent or re-enable delivery. */
+    /**
+     * Register or reassign a browser endpoint to the current profile. Send once; replay can replace newer intent or re-enable delivery.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: the profile's subscriptions belong to every browser it registered. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     post: operations["subscribeNotificationWebPush"];
     delete?: never;
     options?: never;
@@ -11268,7 +11286,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Remove a server subscription belonging to the current profile. Does not unsubscribe the browser or order concurrent registration intents. */
+    /**
+     * Remove a server subscription belonging to the current profile. Does not unsubscribe the browser or order concurrent registration intents.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: the profile's subscriptions belong to every browser it registered. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     delete: operations["deleteNotificationWebPushSubscription"];
     options?: never;
     head?: never;
@@ -11284,7 +11305,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Remove the account's current registration for a browser endpoint. Send once; a retry can delete a newer registration. */
+    /**
+     * Remove the account's current registration for a browser endpoint. Send once; a retry can delete a newer registration.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: the profile's subscriptions belong to every browser it registered. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     post: operations["unsubscribeNotificationWebPush"];
     delete?: never;
     options?: never;
@@ -12117,7 +12141,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the live playback sessions on the signed-in account, for a household manager. */
+    /**
+     * List the live playback sessions on the signed-in account, for a household manager.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) gets only the playback sessions that login session started; every other entry is left out, including a stream with no recorded login session, such as one started through the Jellyfin-compatible or Audiobookshelf-compatible surface. A session the person's own app key opened, and one opened by device sign-in, get every entry.
+     */
     get: operations["listHouseholdSessions"];
     put?: never;
     post?: never;
@@ -13984,7 +14011,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create a room with a retained caller-selected identity. Exact replay returns current active state and retained invite credentials without connecting or resetting members. Room proof is not a session-bound socket credential. */
+    /**
+     * Create a room with a retained caller-selected identity. Exact replay returns current active state and retained invite credentials without connecting or resetting members. Room proof is not a session-bound socket credential.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     post: operations["createWatchTogetherRoom"];
     delete?: never;
     options?: never;
@@ -14003,7 +14033,10 @@ export interface paths {
     get: operations["getWatchTogetherRoom"];
     put?: never;
     post?: never;
-    /** End the room as its host account and profile. Already-ended rooms return conflict; closing does not cancel already-dispatched playback. */
+    /**
+     * End the room as its host account and profile. Already-ended rooms return conflict; closing does not cancel already-dispatched playback.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     delete: operations["closeWatchTogetherRoom"];
     options?: never;
     head?: never;
@@ -14053,7 +14086,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Start the staged content for everyone as the host. The room moves to playing and waits for members to buffer, exactly as a direct selection does. An already playing room returns its current snapshot unchanged. */
+    /**
+     * Start the staged content for everyone as the host. The room moves to playing and waits for members to buffer, exactly as a direct selection does. An already playing room returns its current snapshot unchanged.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     post: operations["startWatchTogetherRoomPlayback"];
     delete?: never;
     options?: never;
@@ -14070,7 +14106,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Stop playback for everyone as the host without ending the room. The room returns to the lobby with the same item still staged, so the host can start it again or pick something else. A room that is not playing returns its current snapshot unchanged. */
+    /**
+     * Stop playback for everyone as the host without ending the room. The room returns to the lobby with the same item still staged, so the host can start it again or pick something else. A room that is not playing returns its current snapshot unchanged.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     post: operations["stopWatchTogetherRoomPlayback"];
     delete?: never;
     options?: never;
@@ -14091,7 +14130,10 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    /** Set guest transport permissions as the host. Use the returned authoritative snapshot; concurrent persistence may retain a competing policy. */
+    /**
+     * Set guest transport permissions as the host. Use the returned authoritative snapshot; concurrent persistence may retain a competing policy.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     patch: operations["updateWatchTogetherRoomPolicy"];
     trace?: never;
   };
@@ -14103,7 +14145,10 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Select playable content as the host in a host-pick room. An identical current resolved selection is a no-op; changing selection resets readiness and playback anchor. Never replay an uncertain selection after another selection. */
+    /**
+     * Select playable content as the host in a host-pick room. An identical current resolved selection is a no-op; changing selection resets readiness and playback anchor. Never replay an uncertain selection after another selection.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     put: operations["selectWatchTogetherRoomItem"];
     post?: never;
     delete?: never;
@@ -14125,7 +14170,10 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    /** Switch a lobby between host picks and voting as the host. Switching drops the staged item and every member's lobby ready state; suggestions and votes are kept. Refused once the room is playing. */
+    /**
+     * Switch a lobby between host picks and voting as the host. Switching drops the staged item and every member's lobby ready state; suggestions and votes are kept. Refused once the room is playing.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     patch: operations["updateWatchTogetherRoomSelectionMode"];
     trace?: never;
   };
@@ -14138,7 +14186,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Report a playback refusal as a connected room member. Atomically replace the shared source with a lower-ranked version of the same edition and part, preserve the anchor, and reset readiness. A stale file or selection revision returns the current snapshot without changing it. */
+    /**
+     * Report a playback refusal as a connected room member. Atomically replace the shared source with a lower-ranked version of the same edition and part, preserve the anchor, and reset readiness. A stale file or selection revision returns the current snapshot without changing it.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: a fallback changes what every member plays. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     post: operations["fallbackWatchTogetherSource"];
     delete?: never;
     options?: never;
@@ -14154,7 +14205,10 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Stage playable content in a host-pick lobby without starting it. The room stays in the lobby until the host starts playback; staging the same resolved content, file, and library again is a no-op. Refused once the room is playing. */
+    /**
+     * Stage playable content in a host-pick lobby without starting it. The room stays in the lobby until the host starts playback; staging the same resolved content, file, and library again is a no-op. Refused once the room is playing.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     put: operations["stageWatchTogetherRoomItem"];
     post?: never;
     delete?: never;
@@ -14191,7 +14245,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Delete one suggestion as its suggester or the room host. Missing suggestions return 404; uncertain deletion must be reconciled by reading the room. */
+    /**
+     * Delete one suggestion as its suggester or the room host. Missing suggestions return 404; uncertain deletion must be reconciled by reading the room.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) deletes only a suggestion its account and profile made; it does not get the host's power to delete any suggestion, so another one is 403 permission_denied.
+     */
     delete: operations["deleteWatchTogetherSuggestion"];
     options?: never;
     head?: never;
@@ -14225,7 +14282,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Promote an eligible suggestion as the host. Already-selected content is a no-op; a changed selection resets playback readiness. Never replay after an intervening selection. */
+    /**
+     * Promote an eligible suggestion as the host. Already-selected content is a no-op; a changed selection resets playback readiness. Never replay after an intervening selection.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     post: operations["promoteWatchTogetherSuggestion"];
     delete?: never;
     options?: never;
@@ -14259,7 +14319,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Delegate a current login session and original room proof for one room handshake. */
+    /**
+     * Delegate a current login session and original room proof for one room handshake.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied when the room's host is its own account and profile: it may not host a room. As a member of another host's room it may connect, but the socket refuses its transport_request frames (play, pause, seek for everyone) with the error frame any refused request gets.
+     */
     post: operations["createWatchTogetherSocketTicket"];
     delete?: never;
     options?: never;

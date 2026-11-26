@@ -12,8 +12,24 @@ import (
 
 const roomSocketPathParameter = "path"
 
+// watchTogetherHostOtherAppRule and watchTogetherMemberOtherAppRule describe
+// the Watch Together operations that drive a room for a session another app
+// opened. Host authority is the account and profile, so such a session acting
+// as the host's profile would steer the room of the person's own device.
+const (
+	watchTogetherHostOtherAppRule = "A login session opened by another app the person allowed (its app key was enrolled through a grant) " +
+		"is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, " +
+		"so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused."
+	watchTogetherMemberOtherAppRule = "A login session opened by another app the person allowed (its app key was enrolled through a grant) " +
+		"is refused with 403 permission_denied before the room is read or changed: a fallback changes what every member plays. " +
+		"A session the person's own app key opened, and one opened by device sign-in, are not refused."
+)
+
 type WatchTogetherSocketService interface {
-	MintRoomSocket(context.Context, string, string, evt.SocketIdentity) (string, time.Time, error)
+	// otherApp marks a session another app opened with a grant: refused
+	// when it would connect as the room's host, and refused transport
+	// requests once connected.
+	MintRoomSocket(ctx context.Context, roomID, proof string, identity evt.SocketIdentity, otherApp bool) (string, time.Time, error)
 	ServeHTTP(http.ResponseWriter, *http.Request)
 }
 type WatchTogetherSocketTicketInput struct {
@@ -24,6 +40,9 @@ type WatchTogetherSocketTicketInput struct {
 func registerWatchTogetherSocket(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/watch-together/rooms/{room_id}/ws-ticket", "createWatchTogetherSocketTicket", "realtime", "Delegate a current login session and original room proof for one room handshake."), Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	op.Errors = []int{409}
+	op.Description = "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied " +
+		"when the room's host is its own account and profile: it may not host a room. As a member of another host's room it may connect, " +
+		"but the socket refuses its transport_request frames (play, pause, seek for everyone) with the error frame any refused request gets."
 	Register(reg, op, func(ctx context.Context, in *WatchTogetherSocketTicketInput) (*EventsSocketTicketOutput, error) {
 		if reg.deps.WatchTogetherSocket == nil {
 			return nil, unavailable("room socket")
@@ -33,7 +52,11 @@ func registerWatchTogetherSocket(reg *Registry) {
 			return nil, p
 		}
 
-		ticket, expiry, err := reg.deps.WatchTogetherSocket.MintRoomSocket(ctx, in.RoomID, in.RoomToken, identity)
+		reaches, p := reg.sessionReachesOtherDevices(ctx)
+		if p != nil {
+			return nil, p
+		}
+		ticket, expiry, err := reg.deps.WatchTogetherSocket.MintRoomSocket(ctx, in.RoomID, in.RoomToken, identity, !reaches)
 		if p := socketAuthorityUnavailable(err); p != nil {
 			return nil, p
 		}

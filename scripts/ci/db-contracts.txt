@@ -351,6 +351,11 @@
 ./internal/auth TestKeyOperationsRecheckActingProfileDB
 ./internal/auth TestExpiredPendingKeySweepDB
 ./internal/apiv2 TestKeyRoutesRefuseSessionsDB
+./internal/apiv2 TestHouseholdSessionsForAnotherAppDB
+./internal/apiv2 TestWebPushRefusesAnotherAppDB
+./internal/apiv2 TestWatchTogetherRefusesAnotherAppDB
+./internal/apiv2 TestNativePushRefusesAnotherAppDB
+./internal/apiv2 TestSuggestionDeleteForAnotherAppDB
 ./internal/auth TestKeyAddingOperationsAuditedDB
 ./internal/auth TestKeyAddingRefusalsLeaveNoAuditDB
 ./internal/auth TestKeyWithoutAddressListsEmptyDB
@@ -1362,6 +1367,7 @@
 # A stuck settings store does not hold a Watch Party room while the host's
 # playback choice is saved.
 ./internal/watchtogether TestSlowGuestControlSaveDoesNotHoldTheRoomPG
+./internal/watchtogether TestOtherAppDoesNotTakeASeatOnAnotherServerPG
 
 # The catalog item change outbox: what each membership and file write queues
 # (and what routine scan writes do not), key moves, coalescing, the cluster-wide

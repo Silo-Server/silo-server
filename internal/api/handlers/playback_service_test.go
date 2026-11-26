@@ -1556,3 +1556,79 @@ func (s *claimRacePlanStoreV3) ClaimStopFinalization(ctx context.Context, sessio
 	}
 	return s.MemoryPlanStoreV3.ClaimStopFinalization(ctx, sessionID, lease)
 }
+
+// TestPlaybackMutationsV2KeepAnotherAppToItsStreams: progress, stop and
+// replan check the account and profile, so a session another app opened,
+// acting as the same profile, could move or end a stream the person's other
+// device started once it knew the id. Such a caller is refused another login
+// session's stream and one with no recorded login session, and acts on the
+// stream its own session started without the rule being asked.
+func TestPlaybackMutationsV2KeepAnotherAppToItsStreams(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	phone, err := f.manager.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attemptID := uuid.NewString()
+	if err := f.handler.PlanStoreV3.SaveAttempt(context.Background(), playback.AttemptRecordV3{
+		PlaybackAttemptID: attemptID, SessionID: phone.ID, UserID: 1, ProfileID: "profile-1",
+		RequestedMediaFileID: 100, EffectiveMediaFileID: 100, ExpiresAt: time.Now().Add(time.Hour), LoginSessionID: "login-phone",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	asked := 0
+	app := f.caller
+	app.LoginSessionID = "login-app"
+	app.MayReachOtherDevices = func(context.Context) error {
+		asked++
+		return auth.ErrSessionNotAllowed
+	}
+	for _, session := range []string{phone.ID, f.session.ID} {
+		_, err = f.handler.ApplyProgressV2(f.ctx, app, session, PlaybackProgressCommand{Sequence: 1, Position: 10})
+		assertPlaybackOperationError(t, err, http.StatusForbidden, "forbidden")
+		_, err = f.handler.StopPlaybackV2(f.ctx, app, session, PlaybackStopCommand{StopID: uuid.NewString()})
+		assertPlaybackOperationError(t, err, http.StatusForbidden, "forbidden")
+	}
+	// A well-formed replan: with the rule passing it gets past validation and
+	// answers 409 stale_playback_plan here (the fixture has no current plan),
+	// so the 403 is the rule's.
+	start := v3HandlerStartRequest()
+	replan := PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: attemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto", Failure: playback.FailureV3{Classification: "network_error"}, Capabilities: start.Capabilities, ClientPlaybackContext: start.ClientPlaybackContext}, Digest: "d"}
+	_, err = f.handler.ReplanPlaybackV2(f.ctx, app, phone.ID, replan)
+	assertPlaybackOperationError(t, err, http.StatusForbidden, "forbidden")
+
+	own := app
+	own.LoginSessionID = "login-phone"
+	asked = 0
+	if _, err := f.handler.ApplyProgressV2(f.ctx, own, phone.ID, PlaybackProgressCommand{Sequence: 1, Position: 10}); err != nil {
+		t.Fatalf("progress on the caller's own stream = %v", err)
+	}
+	if asked != 0 {
+		t.Fatalf("the rule was asked %d times for the caller's own stream", asked)
+	}
+}
+
+// failingAttemptReadPlanStoreV3 is a plan store whose attempt read fails.
+type failingAttemptReadPlanStoreV3 struct{ *playback.MemoryPlanStoreV3 }
+
+func (failingAttemptReadPlanStoreV3) GetAttempt(context.Context, string) (*playback.AttemptRecordV3, error) {
+	return nil, errors.New("store unreachable")
+}
+
+// TestReplanV2FailsClosedForAnotherApp: the replan reads the attempt to tell
+// whose stream it is; when that read fails, a caller the rule applies to is
+// refused as unavailable instead of being let through unchecked.
+func TestReplanV2FailsClosedForAnotherApp(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	memory, ok := f.handler.PlanStoreV3.(*playback.MemoryPlanStoreV3)
+	if !ok {
+		t.Fatalf("plan store = %T", f.handler.PlanStoreV3)
+	}
+	f.handler.PlanStoreV3 = failingAttemptReadPlanStoreV3{memory}
+	app := f.caller
+	app.LoginSessionID = "login-app"
+	app.MayReachOtherDevices = func(context.Context) error { return auth.ErrSessionNotAllowed }
+	command := PlaybackReplanCommand{Request: playback.ReplanRequestV3{PlaybackAttemptID: uuid.NewString(), ReplanRequestID: uuid.NewString()}}
+	_, err := f.handler.ReplanPlaybackV2(f.ctx, app, f.session.ID, command)
+	assertPlaybackOperationError(t, err, http.StatusServiceUnavailable, "unavailable")
+}

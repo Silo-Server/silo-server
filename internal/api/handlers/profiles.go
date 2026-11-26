@@ -1086,6 +1086,10 @@ type HouseholdSessionsQuery struct {
 	// VerifyProfile confirms a PIN-locked primary profile is verified for
 	// this request; it returns access.ErrProfileUnverified when it is not.
 	VerifyProfile func(profile *userstore.Profile) error
+	// OnlyLoginSessionID, when set, lists only the playback sessions that
+	// login session started (PlaybackSessionsQuery.LoginSessionID). The
+	// caller sets it for a session another app opened with a grant.
+	OnlyLoginSessionID string
 }
 
 // ListHouseholdSessions lists the account's live playback sessions for a
@@ -1108,7 +1112,7 @@ func (h *ProfileHandler) ListHouseholdSessions(ctx context.Context, q HouseholdS
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Playback sessions are not configured")
 	}
 
-	sessions, err := h.SessionsReader.Load(ctx, PlaybackSessionsQuery{UserID: q.UserID})
+	sessions, err := h.SessionsReader.Load(ctx, PlaybackSessionsQuery{UserID: q.UserID, LoginSessionID: q.OnlyLoginSessionID})
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to list household playback sessions", "component", "api", "user_id", q.UserID, "error", err)
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list playback sessions")

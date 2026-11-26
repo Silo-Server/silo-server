@@ -448,6 +448,21 @@ func (s *Service) reconcileRooms(ctx context.Context, rooms []string) {
 }
 
 func (s *Service) Connect(ctx context.Context, roomID string, user int, profile string, conn RoomConnection) (*Registration, Snapshot, error) {
+	return s.connectAs(ctx, roomID, user, profile, conn, false)
+}
+
+// ConnectOtherApp is Connect for a session another app the person allowed
+// opened. A member is its account and profile, so connecting replaces the
+// connection of a member already connected; this one refuses with
+// ErrMemberAlreadyConnected instead of taking the person's own device's seat,
+// whether that device is connected to this server or to another one (the
+// room's stored runtime, read under its row lock, says so). The person's
+// device connecting later still replaces the app's connection.
+func (s *Service) ConnectOtherApp(ctx context.Context, roomID string, user int, profile string, conn RoomConnection) (*Registration, Snapshot, error) {
+	return s.connectAs(ctx, roomID, user, profile, conn, true)
+}
+
+func (s *Service) connectAs(ctx context.Context, roomID string, user int, profile string, conn RoomConnection, otherApp bool) (*Registration, Snapshot, error) {
 	type connected struct {
 		reg      *Registration
 		snapshot Snapshot
@@ -457,7 +472,7 @@ func (s *Service) Connect(ctx context.Context, roomID string, user int, profile 
 		displayName = s.profileNames.ProfileDisplayName(ctx, user, profile)
 	}
 	result, err := withRoomOperation(ctx, s, roomID, func(ctx context.Context) (connected, error) {
-		reg, snapshot, err := s.connect(ctx, roomID, user, profile, conn, displayName)
+		reg, snapshot, err := s.connect(ctx, roomID, user, profile, conn, displayName, otherApp)
 		return connected{reg, snapshot}, err
 	})
 	return result.reg, result.snapshot, err

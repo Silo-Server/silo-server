@@ -23,7 +23,11 @@ func registerWatchTogetherCreate(reg *Registry) {
 	op.DefaultStatus = http.StatusCreated
 	op.MaxBodyBytes = 4096
 	op.Errors = []int{409}
+	op.Description = watchTogetherHostOtherAppRule
 	Register(reg, op, func(ctx context.Context, in *WatchTogetherCreateInput) (*WatchTogetherRoomReadOutput, error) {
+		if p := reg.otherDevicesProblem(ctx); p != nil {
+			return nil, p
+		}
 		if reg.deps.WatchTogetherCreate == nil {
 			return nil, unavailable("watch together")
 		}

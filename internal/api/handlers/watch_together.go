@@ -280,7 +280,7 @@ func (h *WatchTogetherHandler) buildRoomResponse(
 // closeTransport ends the connection on the way out, before the room's own
 // writer is torn down, so a close frame the caller owes the peer is sent
 // while the transport is still open.
-func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn *websocket.Conn, roomID string, userID int, profileID string, closeTransport func()) {
+func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn *websocket.Conn, roomID string, userID int, profileID string, otherApp bool, closeTransport func()) {
 	realtimeConn := newWatchTogetherRoomConn(conn)
 	defer func() {
 		closeTransport()
@@ -289,12 +289,18 @@ func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn 
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
-	reg, _, err := h.Service.Connect(ctx, roomID, userID, profileID, realtimeConn)
+	connect := h.Service.Connect
+	if otherApp {
+		connect = h.Service.ConnectOtherApp
+	}
+	reg, _, err := connect(ctx, roomID, userID, profileID, realtimeConn)
 	if err != nil {
 		// Terminal failures use room_closed so clients stop reconnecting
 		// instead of retrying a room that will never come back.
 		if errors.Is(err, watchtogether.ErrRoomNotFound) {
 			_ = writeWebSocketJSON(conn, map[string]string{watchTogetherTypeKey: watchTogetherRoomClosed, watchTogetherReasonKey: watchTogetherNotFound})
+		} else if errors.Is(err, watchtogether.ErrMemberAlreadyConnected) {
+			writeWebSocketError(conn, "forbidden", "This profile is already connected to the room from another device")
 		} else if errors.Is(err, watchtogether.ErrRoomClosed) {
 			_ = writeWebSocketJSON(conn, map[string]string{watchTogetherTypeKey: watchTogetherRoomClosed, watchTogetherReasonKey: "ended"})
 		} else {
@@ -330,11 +336,15 @@ func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn 
 			continue
 		}
 
-		if err := h.handleRoomClientMessage(ctx, realtimeConn, reg, userID, profileID, data); err != nil {
+		if err := h.handleRoomClientMessage(ctx, realtimeConn, reg, userID, profileID, otherApp, data); err != nil {
 			realtimeConn.WriteError("bad_request", err.Error())
 		}
 	}
 }
+
+// errOtherAppTransport refuses a transport request from a session another
+// app opened, as the error frame any refused request gets.
+var errOtherAppTransport = errors.New("watch together transport is not allowed for a sign-in another app opened")
 
 func (h *WatchTogetherHandler) handleRoomClientMessage(
 	ctx context.Context,
@@ -342,6 +352,7 @@ func (h *WatchTogetherHandler) handleRoomClientMessage(
 	reg *watchtogether.Registration,
 	userID int,
 	profileID string,
+	otherApp bool,
 	data []byte,
 ) error {
 	var base watchTogetherClientMessage
@@ -361,6 +372,11 @@ func (h *WatchTogetherHandler) handleRoomClientMessage(
 		_, err := h.Service.AttachSessionForConnection(ctx, reg, userID, profileID, msg.SessionID)
 		return err
 	case "transport_request":
+		// A session another app opened watches along; it does not play,
+		// pause or seek for the room, whatever the room's guest policy.
+		if otherApp {
+			return errOtherAppTransport
+		}
 		var msg watchTogetherTransportRequestMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return err

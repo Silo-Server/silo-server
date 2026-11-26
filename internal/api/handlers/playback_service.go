@@ -45,6 +45,11 @@ type PlaybackCaller struct {
 	// profile's device registry. It is separate from DeviceID, the playback
 	// device named by the v2 X-Device-ID header.
 	DeclaredDevice DeviceMetadata
+	// LoginSessionID is the caller's login session ("" for an API key);
+	// MayReachOtherDevices is asked before it acts on a stream another
+	// login session started (mayActOnAttempt). Nil allows that.
+	LoginSessionID       string
+	MayReachOtherDevices func(context.Context) error
 }
 
 // PlaybackCapabilitiesView is the v2 capabilities body. State is always
@@ -714,22 +719,6 @@ func (h *PlaybackHandler) attemptSessionV2(ctx context.Context, record *playback
 	return session
 }
 
-// ownedAttemptV2 loads the live attempt row for sessionID and checks it
-// belongs to the caller.
-func (h *PlaybackHandler) ownedAttemptV2(ctx context.Context, caller PlaybackCaller, sessionID string) (*playback.AttemptRecordV3, error) {
-	record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID)
-	if err != nil {
-		if errors.Is(err, playback.ErrSessionNotFound) {
-			return nil, playbackSessionNotFoundOperationError()
-		}
-		return nil, playbackStoreOperationError()
-	}
-	if !attemptOwnedBy(record, caller) {
-		return nil, playbackOperationError(http.StatusForbidden, "forbidden", "Session belongs to another profile")
-	}
-	return record, nil
-}
-
 // attemptOwnedBy reports whether the attempt belongs to the caller's profile.
 func attemptOwnedBy(record *playback.AttemptRecordV3, caller PlaybackCaller) bool {
 	return record != nil && record.UserID == caller.UserID && record.ProfileID == caller.ProfileID
@@ -763,7 +752,11 @@ func (h *PlaybackHandler) ReplanPlaybackV2(ctx context.Context, caller PlaybackC
 	// refuse to serve. The store's commit predicate refuses stopped rows too.
 	// Only the attempt's owner learns how it ended; anyone else gets the 403
 	// the replan itself answers.
-	if record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && record != nil && record.StoppedAt != nil {
+	record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID)
+	if refused := refuseOtherStream(ctx, caller, record, err); refused != nil {
+		return playback.DecisionResponseV3{}, refused
+	}
+	if err == nil && record != nil && record.StoppedAt != nil {
 		if !attemptOwnedBy(record, caller) {
 			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusForbidden, "forbidden", "Session belongs to another profile")
 		}

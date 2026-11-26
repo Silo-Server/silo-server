@@ -599,6 +599,18 @@ action per kind of change:
   than the column, is refused the same way.
 - `ActionApproveDeviceSignIn` (approving a device sign-in that is waiting now)
   refuses only the grant-enrolled app's session.
+- `ActionReachOtherDevices` refuses only the grant-enrolled app's session too,
+  and, unlike the actions above, passes every caller that is not the
+  account's own login session, through `auth.SessionMayReachOtherDevices`.
+  It keeps the app off the person's other devices: the household playback
+  list leaves their streams out, the web push and native push writes refuse
+  it, the playback progress, stop, replan and control-ticket routes refuse a
+  stream another login session started, and Watch Together refuses it hosting
+  or driving a room
+  ([Other devices' playback and web push](../auth-api.md#other-devices-playback-and-web-push)).
+  A device sign-in keeps what it has there; only the login session list
+  limits it ([Sessions limited to
+  themselves](../auth-api.md#sessions-limited-to-themselves)).
 - `DELETE /auth/keys/devices/{id}` follows `ActionManageKeys`, except that a
   grant-enrolled app may revoke its own key. A device may revoke its own key,
   which ends the session asking.

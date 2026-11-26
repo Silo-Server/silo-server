@@ -38,6 +38,7 @@ func TestRoomSocketCredentialRedisSingleUse(t *testing.T) {
 	a, b := roomSocketRedis(t)
 	mint, consume := NewRoomSocketCredentialStore(a), NewRoomSocketCredentialStore(b)
 	credential := roomSocketCredential()
+	credential.OtherApp = true
 	ticket, err := mint.Mint(t.Context(), credential)
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +55,7 @@ func TestRoomSocketCredentialRedisSingleUse(t *testing.T) {
 			got, err := consume.Consume(t.Context(), ticket, credential.RoomID)
 			if err == nil {
 				success.Add(1)
-				if got.RoomID != credential.RoomID || got.Session.SessionID != credential.Session.SessionID || got.Session.ProfileToken != credential.Session.ProfileToken || got.Session.AccessFingerprint != credential.Session.AccessFingerprint {
+				if got.RoomID != credential.RoomID || got.Session.SessionID != credential.Session.SessionID || got.Session.ProfileToken != credential.Session.ProfileToken || got.Session.AccessFingerprint != credential.Session.AccessFingerprint || !got.OtherApp {
 					t.Error("authority changed")
 				}
 			}
@@ -182,6 +183,26 @@ func TestRoomSocketCredentialRequiresAuthorityAndStorage(t *testing.T) {
 		}
 		if _, err := store.Mint(t.Context(), c); !errors.Is(err, ErrRoomSocketCredential) {
 			t.Fatalf("%s: %v", field, err)
+		}
+	}
+}
+
+// TestRoomSocketCredentialKeepsTheOtherAppMark: the store keeps a credential
+// as JSON between the mint and the handshake, often on two servers, so the
+// mark for a session another app opened must survive that encoding, or the
+// connection would serve its transport requests. A credential written
+// without the mark, as a server before it writes one, reads as unmarked.
+func TestRoomSocketCredentialKeepsTheOtherAppMark(t *testing.T) {
+	for _, marked := range []bool{true, false} {
+		credential := roomSocketCredential()
+		credential.OtherApp = marked
+		payload, err := json.Marshal(credential)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got RoomSocketCredential
+		if err = json.Unmarshal(payload, &got); err != nil || got.OtherApp != marked {
+			t.Fatalf("mark %v read back as %v (%v)", marked, got.OtherApp, err)
 		}
 	}
 }

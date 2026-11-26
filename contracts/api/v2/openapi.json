@@ -179447,6 +179447,7 @@
     },
     "/api/v2/devices/push/apple": {
       "post": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: a registration is bound only to the account and device id until it has an ordered record, and a reset needs no installation key, so the session could remove or take over another device's. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "registerApplePushDevice",
         "parameters": [
           {
@@ -179866,6 +179867,7 @@
     },
     "/api/v2/devices/push/apple/reset": {
       "post": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: a registration is bound only to the account and device id until it has an ordered record, and a reset needs no installation key, so the session could remove or take over another device's. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "resetApplePushInstallation",
         "parameters": [
           {
@@ -210237,6 +210239,7 @@
     },
     "/api/v2/notifications/push/devices": {
       "post": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: a registration is bound only to the account and device id until it has an ordered record, and a reset needs no installation key, so the session could remove or take over another device's. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "registerPushDevice",
         "parameters": [
           {
@@ -210656,6 +210659,7 @@
     },
     "/api/v2/notifications/push/devices/{device_id}": {
       "delete": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: a registration is bound only to the account and device id until it has an ordered record, and a reset needs no installation key, so the session could remove or take over another device's. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "unregisterPushDevice",
         "parameters": [
           {
@@ -212472,6 +212476,7 @@
     },
     "/api/v2/notifications/web-push/subscriptions": {
       "get": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: the profile's subscriptions belong to every browser it registered. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "listNotificationWebPushSubscriptions",
         "parameters": [
           {
@@ -212638,6 +212643,7 @@
         "x-silo-service-backed": true
       },
       "post": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: the profile's subscriptions belong to every browser it registered. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "subscribeNotificationWebPush",
         "parameters": [
           {
@@ -212823,6 +212829,7 @@
     },
     "/api/v2/notifications/web-push/subscriptions/{id}": {
       "delete": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: the profile's subscriptions belong to every browser it registered. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "deleteNotificationWebPushSubscription",
         "parameters": [
           {
@@ -212969,6 +212976,7 @@
     },
     "/api/v2/notifications/web-push/unsubscribe": {
       "post": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: the profile's subscriptions belong to every browser it registered. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "unsubscribeNotificationWebPush",
         "parameters": [
           {
@@ -222374,6 +222382,7 @@
     },
     "/api/v2/profiles/household/sessions": {
       "get": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) gets only the playback sessions that login session started; every other entry is left out, including a stream with no recorded login session, such as one started through the Jellyfin-compatible or Audiobookshelf-compatible surface. A session the person's own app key opened, and one opened by device sign-in, get every entry.",
         "operationId": "listHouseholdSessions",
         "parameters": [
           {
@@ -249606,6 +249615,7 @@
     },
     "/api/v2/watch-together/rooms": {
       "post": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "createWatchTogetherRoom",
         "parameters": [
           {
@@ -249801,6 +249811,7 @@
     },
     "/api/v2/watch-together/rooms/{room_id}": {
       "delete": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "closeWatchTogetherRoom",
         "parameters": [
           {
@@ -250517,6 +250528,7 @@
     },
     "/api/v2/watch-together/rooms/{room_id}/playback/start": {
       "post": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "startWatchTogetherRoomPlayback",
         "parameters": [
           {
@@ -250680,6 +250692,7 @@
     },
     "/api/v2/watch-together/rooms/{room_id}/playback/stop": {
       "post": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "stopWatchTogetherRoomPlayback",
         "parameters": [
           {
@@ -250843,6 +250856,7 @@
     },
     "/api/v2/watch-together/rooms/{room_id}/policy": {
       "patch": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "updateWatchTogetherRoomPolicy",
         "parameters": [
           {
@@ -251046,6 +251060,7 @@
     },
     "/api/v2/watch-together/rooms/{room_id}/selection": {
       "put": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "selectWatchTogetherRoomItem",
         "parameters": [
           {
@@ -251249,6 +251264,7 @@
     },
     "/api/v2/watch-together/rooms/{room_id}/selection-mode": {
       "patch": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "updateWatchTogetherRoomSelectionMode",
         "parameters": [
           {
@@ -251452,6 +251468,7 @@
     },
     "/api/v2/watch-together/rooms/{room_id}/source-fallback": {
       "post": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: a fallback changes what every member plays. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "fallbackWatchTogetherSource",
         "parameters": [
           {
@@ -251663,6 +251680,7 @@
     },
     "/api/v2/watch-together/rooms/{room_id}/staged-selection": {
       "put": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "stageWatchTogetherRoomItem",
         "parameters": [
           {
@@ -252259,6 +252277,7 @@
     },
     "/api/v2/watch-together/rooms/{room_id}/suggestions/promote": {
       "post": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before the room is read or changed: it may not host a room, and the host is the account and profile, so it would otherwise act for the person's own device. A session the person's own app key opened, and one opened by device sign-in, are not refused.",
         "operationId": "promoteWatchTogetherSuggestion",
         "parameters": [
           {
@@ -252470,6 +252489,7 @@
     },
     "/api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}": {
       "delete": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) deletes only a suggestion its account and profile made; it does not get the host's power to delete any suggestion, so another one is 403 permission_denied.",
         "operationId": "deleteWatchTogetherSuggestion",
         "parameters": [
           {
@@ -253095,6 +253115,7 @@
     },
     "/api/v2/watch-together/rooms/{room_id}/ws-ticket": {
       "post": {
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied when the room's host is its own account and profile: it may not host a room. As a member of another host's room it may connect, but the socket refuses its transport_request frames (play, pause, seek for everyone) with the error frame any refused request gets.",
         "operationId": "createWatchTogetherSocketTicket",
         "parameters": [
           {
