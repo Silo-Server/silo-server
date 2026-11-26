@@ -373,21 +373,38 @@ every request too; cleanup removes only sessions that have already expired.
 ### Sessions opened by device sign-in
 
 A session opened by device sign-in may sit on a device the account holder doesn't control,
-such as a shared TV, so it sees and ends only itself. `auth_sessions.via_device_sign_in`
-records how each session was opened: `true` when a device sign-in request (a code a
-signed-in person approved, Jellyfin Quick Connect, or a remote-playback handoff) opened it,
-`false` for any other sign-in, and no value for a session that existed before the column.
-`auth.LimitedToItself` decides; the two routes below read it, no other request does.
+such as a shared TV, so it sees and ends only itself. `auth_sessions.opened_via` records how
+each session was opened and is the one record the server reads: `device_login` when a device
+sign-in request (a code a signed-in person approved, Jellyfin Quick Connect, or a
+remote-playback handoff) opened it, otherwise `password`, `provider`, `app_key` or
+`impersonation`. `auth.LimitedToItself` decides; the two routes below read it, no other
+request does.
 
-A session is limited to itself when its flag is `true`, whatever its platform, or when it
-has no value and its recorded `device_platform` is a TV's: `tvOS`, `android-tv` or `roku`,
-in any case. That covers TVs signed in by code before the column; an older TV session opened
-with a password is limited too, which costs nothing because no TV app reads more of the list
-than `id` and `current` or ends another session. A session with `false`, a TV that signed in
-with a password after the upgrade included, or with no value and any other platform, is
-ordinary, as are a session an administrator opened to act as the account and an API-key
-caller. During a rolling deploy a server of the previous release inserts sessions with no
-value, so they are judged as sessions from before the column. The limit covers only the
+A session is limited to itself when its `opened_via` is `device_login`, whatever its
+platform. Two kinds of session have no `opened_via`:
+
+- One a server of the previous release wrote. That release recorded only
+  `auth_sessions.via_device_sign_in`, `true` for a device sign-in and `false` for any other,
+  and the session is limited when the flag is `true`. The flag answers this one question. A
+  session with `false` and no `opened_via` is ordinary for the session list and is still a
+  session with no record of how it was opened: `false` does not mean a password sign-in, so
+  it may do nothing that needs a recorded `opened_via` (see
+  [app keys](architecture/app-keys.md#who-decides)).
+- One older than both columns. It is limited when its recorded `device_platform` is a TV's:
+  `tvOS`, `android-tv` or `roku`, in any case. That covers TVs signed in by code before
+  either column; an older TV session opened with a password is limited too, which costs
+  nothing because no TV app reads more of the list than `id` and `current` or ends another
+  session.
+
+Every other session is ordinary, a TV that signs in with a password included, as are a
+session an administrator opened to act as the account and an API-key caller.
+
+`via_device_sign_in` is still stored, because a server of the previous release names it in
+every sign-in and must keep working against this database during a rolling deploy or after
+going back a release. The one session insert writes it from `opened_via`, and a check
+constraint (`auth_sessions_opened_via_matches_flag`) refuses a row in which the two disagree.
+A session such a server inserts carries the flag and no `opened_via`, and is judged as the
+first kind above. The column goes when no supported server writes it. The limit covers only the
 account's own session list: a device signed in by code on an administrator's account still
 holds that account's administrator powers, including ending any account's sessions, so a code
 on a shared device should not be approved from an administrator's account.

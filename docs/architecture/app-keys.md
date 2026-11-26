@@ -356,8 +356,14 @@ refuses the grant by its `exp`.
 
 The operations on keys check how the calling session was opened
 (`auth_sessions.opened_via`, written at every session creation: `password`,
-`provider`, `device_login`, `app_key` or `impersonation`). The rule is one
-function, `auth.SessionAllows`, with one action per kind of change:
+`provider`, `device_login`, `app_key` or `impersonation`). It is the only
+record these rules read. The older `auth_sessions.via_device_sign_in` flag,
+which a server of the previous release writes on its own, settles only
+whether a session sees and ends just itself ([Sessions opened by device
+sign-in](../auth-api.md#sessions-opened-by-device-sign-in)): a session with
+that flag and no `opened_via` is refused here like any session with no record
+of how it was opened. The rule is one function, `auth.SessionAllows`, with one
+action per kind of change:
 
 - Every action needs the account's own login session
   (`Claims.IsOwnLoginSession`: no API key, no administrator acting as the

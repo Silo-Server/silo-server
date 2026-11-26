@@ -933,16 +933,15 @@ func (s *DeviceLoginService) deviceLoginSession(record *deviceLoginRecord, user 
 		DeviceName:     record.DeviceName,
 		DevicePlatform: clampClientDeviceValue(record.DevicePlatform, maxClientDevicePlatformLen),
 		IPAddress:      record.IPAddress,
-		// Device sign-in, Quick Connect and the remote-playback handoff all
-		// open their session here; LimitedToItself reads the mark.
-		ViaDeviceSignIn: true,
-		ExpiresAt:       sessionExpiresAt,
+		ExpiresAt:      sessionExpiresAt,
 		// The device continues the approving session's provider chain, so a
 		// provider that cannot re-check it ends the device's session when it
 		// would have ended the approver's.
 		IdentityID:    record.ApprovedIdentityID,
 		ProviderSince: record.ApprovedProviderSince,
-		OpenedVia:     models.SessionOpenedDeviceLogin,
+		// Device sign-in, Quick Connect and the remote-playback handoff all
+		// open their session here; LimitedToItself reads this.
+		OpenedVia: models.SessionOpenedDeviceLogin,
 	}
 	claims := Claims{
 		UserID:                 user.ID,

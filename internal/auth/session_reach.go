@@ -24,17 +24,27 @@ var tvDevicePlatforms = []string{"tvos", "android-tv", "roku"}
 // LimitedToItself reports whether a login session may see and end only
 // itself among its account's sessions. A device sign-in or Quick Connect
 // request opens a session on a device the account holder may not control,
-// such as a shared TV. viaDeviceSignIn is the stored
-// auth_sessions.via_device_sign_in: true for such a session, false for any
-// other, nil for a session opened before the column existed or by an older
-// server during a rolling deploy. Nothing recorded tells those apart, so a
-// nil session is limited when its recorded platform is a TV's, the devices
-// that sign in by code; an old TV session opened with a password is limited
-// too, which costs nothing, since no TV app reads more of the list than id
-// and current or ends another session. An administrator acting as an
-// account opens an ordinary session; an API-key caller has no session and
-// is never limited.
-func LimitedToItself(viaDeviceSignIn *bool, devicePlatform string) bool {
+// such as a shared TV.
+//
+// openedVia is the stored auth_sessions.opened_via, the record of how the
+// session was opened, and decides whenever it is recorded: limited when it
+// is models.SessionOpenedDeviceLogin. Two kinds of session have none.
+// One a server of the previous release wrote carries only
+// viaDeviceSignIn, the stored auth_sessions.via_device_sign_in: true for a
+// device sign-in, false for any other. That flag answers this question and
+// no other: false does not say which other way the session was opened, so it
+// unlocks nothing that needs a recorded openedVia (SessionOrigin.Allows).
+// A session older than both columns has neither, and nothing recorded tells
+// those apart, so it is limited when its recorded platform is a TV's, the
+// devices that sign in by code; an old TV session opened with a password is
+// limited too, which costs nothing, since no TV app reads more of the list
+// than id and current or ends another session. An administrator acting as an
+// account opens an ordinary session; an API-key caller has no session and is
+// never limited.
+func LimitedToItself(openedVia string, viaDeviceSignIn *bool, devicePlatform string) bool {
+	if openedVia != "" {
+		return openedVia == models.SessionOpenedDeviceLogin
+	}
 	if viaDeviceSignIn != nil {
 		return *viaDeviceSignIn
 	}
@@ -46,16 +56,16 @@ func LimitedToItself(viaDeviceSignIn *bool, devicePlatform string) bool {
 // that is no longer stored is limited: it fails closed.
 func (r *SessionRepository) limitedToItself(ctx context.Context, sessionID string) (bool, error) {
 	var via *bool
-	var platform string
-	err := r.pool.QueryRow(ctx, `SELECT via_device_sign_in, COALESCE(device_platform, '')
-		FROM auth_sessions WHERE id = $1`, sessionID).Scan(&via, &platform)
+	var openedVia, platform string
+	err := r.pool.QueryRow(ctx, `SELECT COALESCE(opened_via, ''), via_device_sign_in, COALESCE(device_platform, '')
+		FROM auth_sessions WHERE id = $1`, sessionID).Scan(&openedVia, &via, &platform)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return true, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("reading session reach: %w", err)
 	}
-	return LimitedToItself(via, platform), nil
+	return LimitedToItself(openedVia, via, platform), nil
 }
 
 // ListByUserPageByID is ListByUserPage in ascending id order, strictly after

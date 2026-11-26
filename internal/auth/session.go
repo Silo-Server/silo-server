@@ -173,7 +173,9 @@ func (r *SessionRepository) createWithQuerier(
 		session.AbsoluteExpiresAt,
 		session.DeviceKeyID,
 		session.OpenedVia,
-		session.ViaDeviceSignIn,
+		// via_device_sign_in is derived, never set on its own: see
+		// models.AuthSession.OpenedVia.
+		session.OpenedVia == models.SessionOpenedDeviceLogin,
 	)
 	if err != nil {
 		return fmt.Errorf("creating session: %w", err)

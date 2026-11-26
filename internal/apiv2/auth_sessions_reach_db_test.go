@@ -74,9 +74,12 @@ func (d *reachDB) account(t *testing.T) int {
 }
 
 // reachSession is one stored session; via is nil for a session stored
-// without a value, as before the column existed.
+// without a value, as before the column existed, and opened is empty for one
+// with no record of how it was opened, as a server of the previous release
+// stores it.
 type reachSession struct {
 	id, platform string
+	opened       string
 	via          *bool
 	createdAt    time.Time
 }
@@ -92,9 +95,9 @@ func (d *reachDB) store(t *testing.T, userID int, s reachSession) string {
 		s.createdAt = time.Now().Add(-time.Hour)
 	}
 	if _, err := d.pool.Exec(t.Context(), `INSERT INTO auth_sessions
-		(id, user_id, device_name, ip_address, device_id, device_platform, via_device_sign_in, created_at, expires_at, last_seen_at)
-		VALUES ($1, $2, 'Device '||$1, '192.0.2.10', 'device-'||$1, NULLIF($3, ''), $4, $5, NOW() + INTERVAL '1 day', NOW())`,
-		s.id, userID, s.platform, s.via, s.createdAt); err != nil {
+		(id, user_id, device_name, ip_address, device_id, device_platform, via_device_sign_in, created_at, expires_at, last_seen_at, opened_via)
+		VALUES ($1, $2, 'Device '||$1, '192.0.2.10', 'device-'||$1, NULLIF($3, ''), $4, $5, NOW() + INTERVAL '1 day', NOW(), NULLIF($6, ''))`,
+		s.id, userID, s.platform, s.via, s.createdAt, s.opened); err != nil {
 		t.Fatal(err)
 	}
 	token := "reach-token-" + s.id
@@ -172,23 +175,31 @@ func TestSessionReachRuleDB(t *testing.T) {
 	yes, no := true, false
 	for _, tc := range []struct {
 		label    string
+		opened   string
 		via      *bool
 		platform string
 		limited  bool
 	}{
-		{"device sign-in, TV", &yes, "tvOS", true},
-		{"device sign-in, phone", &yes, "iOS", true},
-		{"device sign-in, no platform", &yes, "", true},
-		{"before the column, tvOS", nil, "TVOS", true},
-		{"before the column, Android TV", nil, "Android-TV", true},
-		{"before the column, Roku", nil, "ROKU", true},
-		{"before the column, phone", nil, "iOS", false},
-		{"before the column, no platform", nil, "", false},
-		{"password sign-in, TV", &no, "tvOS", false},
+		// A recorded opened_via decides, with or without the flag.
+		{"recorded device sign-in, phone", models.SessionOpenedDeviceLogin, &yes, "iOS", true},
+		{"recorded device sign-in, no flag", models.SessionOpenedDeviceLogin, nil, "", true},
+		{"recorded password sign-in, TV", models.SessionOpenedPassword, &no, "tvOS", false},
+		{"recorded password sign-in, no flag, TV", models.SessionOpenedPassword, nil, "tvOS", false},
+		// The flag alone, as a server of the previous release writes it.
+		{"device sign-in, TV", "", &yes, "tvOS", true},
+		{"device sign-in, phone", "", &yes, "iOS", true},
+		{"device sign-in, no platform", "", &yes, "", true},
+		{"password sign-in, TV", "", &no, "tvOS", false},
+		// Neither: a session older than both columns.
+		{"before the column, tvOS", "", nil, "TVOS", true},
+		{"before the column, Android TV", "", nil, "Android-TV", true},
+		{"before the column, Roku", "", nil, "ROKU", true},
+		{"before the column, phone", "", nil, "iOS", false},
+		{"before the column, no platform", "", nil, "", false},
 	} {
 		t.Run(tc.label, func(t *testing.T) {
 			account := d.account(t)
-			caller := reachSession{id: uuid.NewString(), via: tc.via, platform: tc.platform, createdAt: time.Now().Add(-2 * time.Hour)}
+			caller := reachSession{id: uuid.NewString(), opened: tc.opened, via: tc.via, platform: tc.platform, createdAt: time.Now().Add(-2 * time.Hour)}
 			token := d.store(t, account, caller)
 			other := uuid.NewString()
 			d.store(t, account, reachSession{id: other, platform: "web"})

@@ -51,11 +51,6 @@ type AuthSession struct {
 	// as evidence of which of an account's registrations has no live login.
 	DeviceID       string
 	DevicePlatform string
-	// ViaDeviceSignIn is set on a session a device sign-in, Quick Connect or
-	// remote-playback handoff request opened
-	// (auth_sessions.via_device_sign_in). Written once at creation;
-	// auth.LimitedToItself reads the stored value.
-	ViaDeviceSignIn bool
 	// Purpose is SessionPurposeAccount or SessionPurposeRemotePlayback; empty
 	// is read as an account session.
 	Purpose string
@@ -70,7 +65,10 @@ type AuthSession struct {
 	// the key ends the session.
 	DeviceKeyID *string
 	// OpenedVia is how the session was opened, one of the SessionOpened
-	// values; written once at creation.
+	// values; written once at creation. It is the one record of that:
+	// auth_sessions.via_device_sign_in, which a server of the previous
+	// release reads and writes, is stored from it (SessionOpenedDeviceLogin
+	// or not) and a check constraint keeps the two equal.
 	OpenedVia string
 }
 
