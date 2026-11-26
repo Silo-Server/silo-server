@@ -651,6 +651,11 @@
 ./internal/requests TestClosingRequestForgetsFollowsDatabase
 ./internal/requests TestDiscoverLayoutDatabase
 ./internal/requests TestRoutingFactsMergeDatabase
+./internal/requests TestRebindOrphanedRouterServersDatabase
+./internal/requests TestDeleteUnboundRouterServerFailsItsTargetsDatabase
+./internal/requests TestDeleteReinstalledRouterServerRebindsFirstDatabase
+./internal/requests TestRouterServerMovedToMissingInstallationForgetsItsPluginDatabase
+./internal/requests TestRouterServerWrittenByPreviousReleaseKeepsItsPluginDatabase
 ./internal/requests/discoverrows TestDiscoverListSnapshotLeaseDatabase
 
 # Request cleanup, prepared downloads and user-store transactions.
@@ -969,6 +974,7 @@
 # Cleaning up duplicate installations keeps a break-glass account's local
 # credentials and moves a deleted duplicate's marker provider settings.
 ./migrations TestUniquePluginInstallationCleanupPostgres
+./migrations TestRequestIntegrationPluginIDBackfillPostgres
 
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset

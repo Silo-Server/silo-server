@@ -1271,6 +1271,15 @@ func (r *Repository) deleteIntegration(ctx context.Context, tx pgx.Tx, id string
 		return fmt.Errorf("lock request integration: %w", err)
 	}
 
+	// A server whose plugin was installed again is rebound first, as the
+	// lifecycle hook would, so a delete that runs before the hook refuses
+	// while the reinstalled plugin still tracks its requests.
+	if _, err := rebindOrphanedIntegrations(ctx, tx, &id); err != nil {
+		return err
+	}
+	if err := r.failUnboundTargets(ctx, tx, id); err != nil {
+		return err
+	}
 	var hasLiveTargets bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (
