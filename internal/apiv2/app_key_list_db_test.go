@@ -102,8 +102,9 @@ func newKeyRoutesDB(t *testing.T) *keyRoutesDB {
 	return &keyRoutesDB{pool: pool, handler: NewHandler(deps), devices: devices, userID: userID, claims: claims}
 }
 
-// TestKeyRoutesRefuseSessionsDB: the key list and the device sign-ins
-// approved in advance name the devices the person signed in, so only a
+// TestKeyRoutesRefuseSessionsDB: the key list, the list of devices waiting
+// for approval and the device sign-ins approved in advance name the devices
+// the person signed in (and where each key was enrolled from), so only a
 // session the person opened by password (or provider, or their own key)
 // lists them or withdraws one. Through the real services: a TV's session
 // (device sign-in), a session another app's key opened, a session with no
@@ -141,6 +142,7 @@ func TestKeyRoutesRefuseSessionsDB(t *testing.T) {
 
 	routes := []struct{ method, path string }{
 		{http.MethodGet, Prefix + "/auth/keys"},
+		{http.MethodGet, Prefix + "/auth/keys/pending"},
 		{http.MethodGet, Prefix + "/auth/device/preapprovals"},
 		{http.MethodDelete, Prefix + "/auth/device/preapprovals/" + waiting.ID},
 	}
