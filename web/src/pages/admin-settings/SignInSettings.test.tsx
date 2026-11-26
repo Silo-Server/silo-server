@@ -190,6 +190,10 @@ let testResult: unknown;
 let localOff: Record<string, { items: unknown[]; total: number }>;
 type LocalOffQuery = { group: string; email_auto_match: string; limit: number; cursor?: string };
 
+// Totals a group's response reports instead of the current ones, to stand
+// for a response answered at another moment than the other group's.
+let staleTotals: Record<string, { email_match: number; admin_link: number }>;
+
 /** One page of the fake read: the cursor is the index of the next row. */
 function localOffPage(query: LocalOffQuery) {
   const group = localOff[query.group]!;
@@ -200,7 +204,10 @@ function localOffPage(query: LocalOffQuery) {
     items: group.items.slice(start, end),
     page: more ? { has_more: true, next_cursor: String(end) } : { has_more: false },
     email_auto_match: query.email_auto_match === "true",
-    totals: { email_match: localOff.email_match!.total, admin_link: localOff.admin_link!.total },
+    totals: staleTotals[query.group] ?? {
+      email_match: localOff.email_match!.total,
+      admin_link: localOff.admin_link!.total,
+    },
   };
 }
 
@@ -276,6 +283,7 @@ beforeEach(() => {
     ],
   };
   localOff = { email_match: { items: [], total: 0 }, admin_link: { items: [], total: 0 } };
+  staleTotals = {};
   calls.length = 0;
   vi.mocked(v2).mockImplementation(((
     op: string,
@@ -1165,6 +1173,23 @@ describe("SignInSettings password sign-in", () => {
     );
     await user.click(within(dialog).getByRole("button", { name: "Turn off password sign-in" }));
     expect(state.setValue).toHaveBeenCalledWith("auth.local_password_login", "false");
+  });
+
+  it("takes each group's count from its own response", async () => {
+    const user = userEvent.setup();
+    // The email-match response saw nobody; the admin-link one, a moment
+    // later, sees an account.
+    localOff.admin_link = { items: [account(60, "administrator")], total: 1 };
+    staleTotals = { email_match: { email_match: 0, admin_link: 0 } };
+    mount();
+    await user.click(passwordSwitch());
+    const dialog = await screen.findByRole("alertdialog");
+    expect(
+      await within(dialog).findByRole("region", {
+        name: "1 account can't sign in until an admin links it",
+      }),
+    ).toHaveTextContent("person60");
+    expect(within(dialog).queryByText("Every account can still sign in after this.")).toBeNull();
   });
 
   it("does not confirm against the previous answer when reopened", async () => {

@@ -102,8 +102,11 @@ export function LocalPasswordOffDialog({
   const unmatched = groupState(unmatchedQuery);
   const loading = matched.loading || unmatched.loading;
   const failed = matched.failed || unmatched.failed;
-  const totals = matched.totals ?? unmatched.totals;
-  const nobody = totals !== undefined && totals.email_match + totals.admin_link === 0;
+  // Each group's count comes from its own response: the two are answered at
+  // different moments, so one's totals can be older than the other's list.
+  const matchedTotal = matched.totals?.email_match;
+  const unmatchedTotal = unmatched.totals?.admin_link;
+  const nobody = matchedTotal === 0 && unmatchedTotal === 0;
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -133,21 +136,21 @@ export function LocalPasswordOffDialog({
             <p>{t("web.admin.settings.signIn.passwordsOff.nobodyAffected")}</p>
           ) : (
             <>
-              {totals && totals.email_match > 0 ? (
+              {matchedTotal ? (
                 <AccountGroup
                   heading={t("web.admin.settings.signIn.passwordsOff.matchHeading", {
-                    count: totals.email_match,
+                    count: matchedTotal,
                   })}
                   notes={[t("web.admin.settings.signIn.passwordsOff.matchExplain", { provider })]}
                   accounts={matched.accounts}
-                  total={totals.email_match}
+                  total={matchedTotal}
                   query={matchedQuery}
                 />
               ) : null}
-              {totals && totals.admin_link > 0 ? (
+              {unmatchedTotal ? (
                 <AccountGroup
                   heading={t("web.admin.settings.signIn.passwordsOff.linkHeading", {
-                    count: totals.admin_link,
+                    count: unmatchedTotal,
                   })}
                   notes={[
                     t("web.admin.settings.signIn.passwordsOff.linkExplain", { provider }),
@@ -156,7 +159,7 @@ export function LocalPasswordOffDialog({
                       : []),
                   ]}
                   accounts={unmatched.accounts}
-                  total={totals.admin_link}
+                  total={unmatchedTotal}
                   query={unmatchedQuery}
                   showReason
                 />
