@@ -2264,7 +2264,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if err != nil {
 			return nil, err
 		}
-		seasonResults := make(map[int]*SeasonResult)
+		// Each provider's seasons and episodes are kept apart until both are
+		// fetched: one provider numbers the series (mergeSeriesStructure).
+		structures := newProviderStructures()
 		seasonsComplete := true
 		for _, p := range seasonChain {
 			ep, ok := p.(EpisodeProvider)
@@ -2303,6 +2305,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				slog.WarnContext(ctx, "metadata: season provider error", "component", "metadata",
 					"provider", p.Slug(), "error", err)
 				if !errors.Is(err, ErrLocalMetadataUnavailable) {
+					structures.of(p.Slug(), isIdentityHinter).failed = true
 					continue
 				}
 				// A fill-empty pass keeps the seasons the local provider could read.
@@ -2314,9 +2317,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			if isIdentityHinter {
 				localArtworkSearched |= localArtworkSeason
 			}
-			accumulateSeasonResults(seasonResults, seasons, req.Language)
+			structure := structures.of(p.Slug(), isIdentityHinter)
+			structure.seasons = append(structure.seasons, seasons...)
 		}
-		allSeasons = flattenSeasonResults(seasonResults)
 		ctx = withSeasonBackdropAuthority(ctx, seasonBackdropAuthorityFor(req.Mode, seasonsComplete))
 
 		// Phase 4b: Episodes — resolve with "episode" content level. The
@@ -2324,10 +2327,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// derived on-disk seasons, so local episode NFOs are read even when
 		// no provider returned their season (persist then creates the
 		// implicit "Season N" rows).
-		episodeSeasonNumbers := make([]int, 0, len(allSeasons)+len(childCtx.episodeFilePaths))
-		for _, season := range allSeasons {
-			episodeSeasonNumbers = append(episodeSeasonNumbers, season.SeasonNumber)
-		}
+		episodeSeasonNumbers := structures.seasonNumbers()
 		for seasonNumber := range childCtx.episodeFilePaths {
 			if !slices.Contains(episodeSeasonNumbers, seasonNumber) {
 				episodeSeasonNumbers = append(episodeSeasonNumbers, seasonNumber)
@@ -2339,7 +2339,6 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			if err != nil {
 				return nil, err
 			}
-			episodeResults := make(map[episodeResultKey]*EpisodeResult)
 			showFiles := showFilePaths(childCtx.episodeFilePaths)
 			for _, seasonNumber := range episodeSeasonNumbers {
 				for _, p := range episodeChain {
@@ -2374,6 +2373,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						slog.WarnContext(ctx, "metadata: episode provider error", "component", "metadata",
 							"provider", p.Slug(), "season", seasonNumber, "error", err)
 						if !errors.Is(err, ErrLocalMetadataUnavailable) {
+							structures.of(p.Slug(), isIdentityHinter).failed = true
 							continue
 						}
 						// A fill-empty pass keeps the episodes the local provider could read.
@@ -2386,11 +2386,12 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						localArtworkSearched |= localArtworkEpisode
 						markLocalEpisodeTitles(episodes)
 					}
-					accumulateEpisodeResults(episodeResults, episodes, req.Language)
+					structure := structures.of(p.Slug(), isIdentityHinter)
+					structure.episodes = append(structure.episodes, episodes...)
 				}
 			}
-			allEpisodes = flattenEpisodeResults(episodeResults)
 		}
+		allSeasons, allEpisodes = mergeSeriesStructure(structures.list, "", req.Language)
 	}
 	// Phase 5: Merge & Persist.
 	if !accumulator.HasMetadata && accumulator.Title == "" {
@@ -5396,13 +5397,20 @@ func accumulateEpisodeResults(accumulator map[episodeResultKey]*EpisodeResult, e
 			continue
 		}
 
-		foldEpisodeTitle(existing, episode, language)
-		preferRequestedLanguageText(&existing.Overview, &existing.OverviewLanguage, episode.Overview, episode.OverviewLanguage, language)
-
-		recordEpisodeStillFallback(existing, episode)
-		preferLocalEpisodeStill(existing, &episode)
-		MergeEpisodeResult(&episode, existing, MergeFillEmpty)
+		mergeEpisodeInto(existing, episode, language)
 	}
+}
+
+// mergeEpisodeInto folds a later provider's episode into one an earlier
+// provider returned: text in the requested language wins, other fields fill
+// only where existing is empty.
+func mergeEpisodeInto(existing *EpisodeResult, episode EpisodeResult, language string) {
+	foldEpisodeTitle(existing, episode, language)
+	preferRequestedLanguageText(&existing.Overview, &existing.OverviewLanguage, episode.Overview, episode.OverviewLanguage, language)
+
+	recordEpisodeStillFallback(existing, episode)
+	preferLocalEpisodeStill(existing, &episode)
+	MergeEpisodeResult(&episode, existing, MergeFillEmpty)
 }
 
 func flattenEpisodeResults(accumulator map[episodeResultKey]*EpisodeResult) []EpisodeResult {
