@@ -39,7 +39,11 @@ func profileSetWakeSystem(t *testing.T, pool *pgxpool.Pool, repo *PushDeviceRepo
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 			t.Errorf("decode relay body: %v", err)
 		}
-		relayed <- relayedWake{path: req.URL.Path, idempotencyKey: req.Header.Get("Idempotency-Key"), body: body}
+		select {
+		case relayed <- relayedWake{path: req.URL.Path, idempotencyKey: req.Header.Get("Idempotency-Key"), body: body}:
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
 		return relayResponse(http.StatusOK, `{"request_id":"relay-request","status":"accepted"}`), nil
 	})}
 	return &System{Settings: sender.settings, pushDeviceRepo: repo, pushSender: sender, logger: slog.Default()}
@@ -89,9 +93,9 @@ func (h wakeHarness) receive(n int) []relayedWake {
 	return got
 }
 
-// editThenWake records a name edit of account 7's profile in a request that
-// commits or rolls it back, then wakes with that request's context.
-func (h wakeHarness) editThenWake(node *System, commit bool) bool {
+// edit records an edit of field of account 7's profile in a new request that
+// commits or rolls it back, and returns that request's context.
+func (h wakeHarness) edit(field string, commit bool) context.Context {
 	h.t.Helper()
 	ctx, req := profileedits.WithRequest(h.t.Context())
 	req.SetActor(7, false, nil)
@@ -99,26 +103,32 @@ func (h wakeHarness) editThenWake(node *System, commit bool) bool {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	if err := profileedits.RecordFields(ctx, tx, 7, "default", []string{profileedits.FieldName}); err != nil {
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	if err := profileedits.RecordFields(ctx, tx, 7, "default", []string{field}); err != nil {
 		h.t.Fatal(err)
 	}
 	if commit {
-		err = tx.Commit(ctx)
-	} else {
-		err = tx.Rollback(ctx)
+		if err := tx.Commit(ctx); err != nil {
+			h.t.Fatal(err)
+		}
 	}
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	return node.WakeProfileSetDevices(ctx, 7)
+	return ctx
+}
+
+// editThenWake records a name edit of account 7's profile in a request that
+// commits or rolls it back, then wakes with that request's context.
+func (h wakeHarness) editThenWake(node *System, commit bool) bool {
+	h.t.Helper()
+	return node.WakeProfileSetDevices(h.edit(profileedits.FieldName, commit), 7)
 }
 
 // wakeTogether wakes account 7 from every node at once, staged so that the
 // wakes overlap: a third connection holds the account's wake time row until
 // every node is waiting on it. A node that never waits on that row fails the
 // test, so it fails whenever the wake is not decided on the row, not only
-// when the timing happens to line up.
-func (h wakeHarness) wakeTogether(nodes ...*System) []bool {
+// when the timing happens to line up. released is the holder's clock just
+// before it let the row go.
+func (h wakeHarness) wakeTogether(nodes ...*System) (answers []bool, released time.Time) {
 	h.t.Helper()
 	ctx := h.t.Context()
 	if _, err := h.pool.Exec(ctx, `INSERT INTO push_profile_set_wakes (user_id, last_wake_at)
@@ -135,7 +145,7 @@ func (h wakeHarness) wakeTogether(nodes ...*System) []bool {
 		h.t.Fatal(err)
 	}
 
-	answers := make([]bool, len(nodes))
+	answers = make([]bool, len(nodes))
 	var wg sync.WaitGroup
 	for i, node := range nodes {
 		wg.Go(func() { answers[i] = node.WakeProfileSetDevices(context.Background(), 7) })
@@ -160,11 +170,14 @@ func (h wakeHarness) wakeTogether(nodes ...*System) []bool {
 			h.t.Fatal(err)
 		}
 	}
+	if err := holder.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&released); err != nil {
+		h.t.Fatal(err)
+	}
 	if err := holder.Commit(ctx); err != nil {
 		h.t.Fatal(err)
 	}
 	<-finished
-	return answers
+	return answers, released
 }
 
 // An edit to a profile from the account's set wakes each of the account's
@@ -187,9 +200,20 @@ func TestProfileSetWakeDebounceDB(t *testing.T) {
 	nodeB := profileSetWakeSystem(t, pool, repo, nil, h.relayed)
 
 	// Two servers recording at the same moment queue one wake per phone, and
-	// only the one that queued it answers true.
-	if answers := h.wakeTogether(nodeA, nodeB); answers[0] == answers[1] || h.attempts() != 2 {
+	// only the one that queued it answers true. The time recorded is when
+	// the wake was admitted, after its wait on the account's row, so the next
+	// wake is a full interval after this one. Regression: the upsert stored
+	// the time it proposed before the wait, earlier than its admission.
+	answers, released := h.wakeTogether(nodeA, nodeB)
+	if answers[0] == answers[1] || h.attempts() != 2 {
 		t.Fatalf("concurrent wakes answered %v with %d attempts, want one true, one false and 2", answers, h.attempts())
+	}
+	var recordedAt time.Time
+	if err := pool.QueryRow(ctx, `SELECT last_wake_at FROM push_profile_set_wakes WHERE user_id = 7`).Scan(&recordedAt); err != nil {
+		t.Fatal(err)
+	}
+	if recordedAt.Before(released) {
+		t.Fatalf("wake recorded at %v, before the account's row was released at %v", recordedAt, released)
 	}
 	paths := map[string]bool{}
 	for _, wake := range h.receive(2) {
@@ -250,6 +274,37 @@ func TestProfileSetWakeDebounceDB(t *testing.T) {
 		t.Fatalf("unexpected relay request to %s", wake.path)
 	default:
 	}
+}
+
+// A request's wake answers for that request's own edits: one whose edit
+// rolled back answers false and queues nothing, even when another request's
+// later edit of the same account committed first, and that other request
+// queues its own wake. Regression: the commit check looked for any edit row at
+// or above the request's first revision, so the rolled-back request found the
+// other's row, queued a wake and answered true, and the request whose edit did
+// commit then met the limit and answered false.
+func TestProfileSetWakeAnswersForItsOwnEditDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	if _, err := pool.Exec(t.Context(), `
+		CREATE TABLE profile_set_edits (LIKE public.profile_set_edits INCLUDING ALL);
+		CREATE TABLE user_profiles (user_id integer NOT NULL, id text NOT NULL, sync_id uuid);
+		INSERT INTO user_profiles VALUES (7, 'default', gen_random_uuid())`); err != nil {
+		t.Fatal(err)
+	}
+	registerForSession(t, repo, "live")
+	h := wakeHarness{t: t, pool: pool, relayed: make(chan relayedWake, 4)}
+	node := profileSetWakeSystem(t, pool, repo, nil, h.relayed)
+
+	rolledBack := h.edit(profileedits.FieldName, false)
+	committed := h.edit(profileedits.FieldPicture, true)
+	if node.WakeProfileSetDevices(rolledBack, 7) || h.attempts() != 0 {
+		t.Fatalf("wake of the rolled-back request: %d attempts, want 0 and a false answer", h.attempts())
+	}
+	if !node.WakeProfileSetDevices(committed, 7) || h.attempts() != 2 {
+		t.Fatalf("wake of the committed request: %d attempts, want 2 and a true answer", h.attempts())
+	}
+	h.receive(2)
+	waitForWakeEnded(t, node)
 }
 
 // The relay mode follows the attempt's trigger: alerts and the
@@ -357,35 +412,61 @@ func TestProfileSetWakeIsNeverClaimedDB(t *testing.T) {
 	h := wakeHarness{t: t, pool: pool}
 	arrived, gate := make(chan struct{}, 4), make(chan int)
 	node := profileSetWakeSystem(t, pool, repo, nil, nil)
-	node.pushSender.client = &http.Client{Transport: relayRoundTripFunc(func(*http.Request) (*http.Response, error) {
+	node.pushSender.client = &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		arrived <- struct{}{}
-		status := <-gate
-		return relayResponse(status, `{"request_id":"r","status":"accepted"}`), nil
+		select {
+		case status := <-gate:
+			return relayResponse(status, `{"request_id":"r","status":"accepted"}`), nil
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
 	})}
 
 	if !node.WakeProfileSetDevices(t.Context(), 7) {
 		t.Fatal("first wake answered false")
 	}
-	<-arrived // the first phone's send is in flight; the second waits behind it
+	awaitRelay(t, arrived, "the first wake's first phone") // in flight; the second waits behind it
 	h.assertNeverClaimed(repo, "in flight")
-	gate <- http.StatusServiceUnavailable
-	<-arrived
-	gate <- http.StatusServiceUnavailable
+	answerRelay(t, gate, http.StatusServiceUnavailable, "the first wake's first phone")
+	awaitRelay(t, arrived, "the first wake's second phone")
+	answerRelay(t, gate, http.StatusServiceUnavailable, "the first wake's second phone")
 	h.waitForOutcome(PushOutcomeFailed)
 	h.assertNeverClaimed(repo, "after a retryable relay failure")
+	waitForWakeEnded(t, node)
 
 	if !node.WakeProfileSetDevices(t.Context(), 7) {
 		t.Fatal("wake after the minute answered false")
 	}
-	for range 2 {
-		<-arrived
-		gate <- http.StatusOK
+	for _, phone := range []string{"first", "second"} {
+		awaitRelay(t, arrived, "the second wake's "+phone+" phone")
+		answerRelay(t, gate, http.StatusOK, "the second wake's "+phone+" phone")
 	}
 	if _, err := pool.Exec(t.Context(), `DELETE FROM push_delivery_attempts WHERE outcome = $1`, PushOutcomeFailed); err != nil {
 		t.Fatal(err)
 	}
 	h.waitForOutcome(PushOutcomeDelivered)
 	h.assertNeverClaimed(repo, "delivered")
+	waitForWakeEnded(t, node)
+}
+
+// awaitRelay waits for the stub relay to report the call named what.
+func awaitRelay(t *testing.T, arrived <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-arrived:
+	case <-time.After(30 * time.Second):
+		t.Fatalf("the relay was never called for %s", what)
+	}
+}
+
+// answerRelay lets the stub relay's waiting call, named what, answer status.
+func answerRelay(t *testing.T, gate chan<- int, status int, what string) {
+	t.Helper()
+	select {
+	case gate <- status:
+	case <-time.After(30 * time.Second):
+		t.Fatalf("no relay call was waiting to answer %s", what)
+	}
 }
 
 // A wake ends within its budget, however the relay behaves: with a relay
@@ -431,10 +512,14 @@ func TestProfileSetWakeWaitsForTheWakeInFlightDB(t *testing.T) {
 	held, release := make(chan struct{}, 1), make(chan struct{})
 	var calls atomic.Int32
 	node := profileSetWakeSystem(t, pool, repo, nil, nil)
-	node.pushSender.client = &http.Client{Transport: relayRoundTripFunc(func(*http.Request) (*http.Response, error) {
+	node.pushSender.client = &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if calls.Add(1) == 1 {
 			held <- struct{}{}
-			<-release // the first wake's send stays in flight until the test lets it go
+			select { // the first wake's send stays in flight until the test lets it go
+			case <-release:
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			}
 		}
 		return relayResponse(http.StatusOK, `{"request_id":"r","status":"accepted"}`), nil
 	})}
@@ -442,28 +527,20 @@ func TestProfileSetWakeWaitsForTheWakeInFlightDB(t *testing.T) {
 	if !node.WakeProfileSetDevices(t.Context(), 7) {
 		t.Fatal("first wake answered false")
 	}
-	<-held
+	awaitRelay(t, held, "the first wake")
 	h.pastTheMinute() // the account's limit no longer holds the next wake back
 	if node.WakeProfileSetDevices(t.Context(), 7) || h.attempts() != 1 || calls.Load() != 1 {
 		t.Fatalf("wake while one is in flight: %d rows, %d relay calls; want a false answer, 1 and 1", h.attempts(), calls.Load())
 	}
 
 	close(release)
-	deadline := time.After(30 * time.Second)
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	for node.profileSetWakeInFlight(7) {
-		select {
-		case <-deadline:
-			t.Fatal("the first wake never ended")
-		case <-poll.C:
-		}
-	}
+	waitForWakeEnded(t, node)
 	h.pastTheMinute()
 	if !node.WakeProfileSetDevices(t.Context(), 7) || h.attempts() != 2 {
 		t.Fatalf("wake after the first ended: %d rows, want 2", h.attempts())
 	}
 	waitForWakeRows(t, pool, PushOutcomeDelivered+":", PushOutcomeDelivered+":")
+	waitForWakeEnded(t, node)
 }
 
 // One wake of an account ends before the account's limit lets the next one
@@ -581,6 +658,25 @@ func TestProfileSetWakeSurvivesDeviceRemovalDB(t *testing.T) {
 	if queued, sent := wake(); queued || sent != 0 || h.attempts() != 1 {
 		t.Fatalf("wake inside the minute: queued %v, %d sent, %d rows; want false, 0, 1", queued, sent, h.attempts())
 	}
+	// Inside the minute no registration is read: with another transaction
+	// holding the registrations table, the wake still answers at once.
+	// Regression: every edit inside the minute listed and sorted all of the
+	// account's registrations before the limit turned it away.
+	func() {
+		locker, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = locker.Rollback(context.Background()) }()
+		if _, err := locker.Exec(ctx, `LOCK TABLE push_devices IN ACCESS EXCLUSIVE MODE`); err != nil {
+			t.Fatal(err)
+		}
+		limited, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if sendNow, err := repo.EnqueueProfileSetWake(limited, 7, platforms, nil, nil); err != nil || len(sendNow) != 0 {
+			t.Fatalf("wake inside the minute with the registrations locked: %d queued, error %v; want none and no error", len(sendNow), err)
+		}
+	}()
 	registerAndroid(t, repo, "android-cycle", 2, true)
 	if h.attempts() != 0 {
 		t.Fatalf("rows after the phone's removal = %d, want 0: its attempts go with it", h.attempts())
@@ -824,7 +920,7 @@ func TestProfileSetWakeGuardFollowsTheCommitCheckDB(t *testing.T) {
 		{name: "committed", revision: committed, wantClaim: true, wantSent: 2},
 	} {
 		claimed := false
-		sendNow, err := repo.EnqueueProfileSetWake(t.Context(), 7, []string{PushPlatformApple, PushPlatformAndroid}, &tc.revision,
+		sendNow, err := repo.EnqueueProfileSetWake(t.Context(), 7, []string{PushPlatformApple, PushPlatformAndroid}, []int64{tc.revision},
 			func() bool { claimed = true; return true })
 		if err != nil {
 			t.Fatal(err)
@@ -902,7 +998,7 @@ func TestProfileSetWakeGivesUpWaitingForTheCredentialLockDB(t *testing.T) {
 
 // A wake whose queueing fails answers false and leaves nothing behind: no
 // attempt, no recorded wake time, and no in-flight mark. Regression: an
-// error answering true, telling the caller a phone was told that was not.
+// error answering true, telling the caller a wake was queued that was not.
 func TestProfileSetWakeFailingToQueueAnswersFalseDB(t *testing.T) {
 	repo, pool := loginSessionPushDB(t)
 	registerForSession(t, repo, "live")

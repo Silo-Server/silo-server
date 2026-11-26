@@ -38,9 +38,10 @@ type Request struct {
 	actorIsAdmin bool
 	impersonator int
 	accounts     []int
-	// firstRevision is, per account, the lowest edit revision this request
-	// recorded: a row at or above it exists only if an edit committed.
-	firstRevision map[int]int64
+	// revisions is, per account, every edit revision this request recorded.
+	// Revisions come from a sequence, so a row carrying one of them exists
+	// only if that edit committed.
+	revisions map[int][]int64
 }
 
 type requestKey struct{}
@@ -77,8 +78,8 @@ func (r *Request) SetActor(userID int, admin bool, impersonator *int) {
 }
 
 // noteAccount remembers that account got an edit in this request, written
-// at revision.
-func (r *Request) noteAccount(account int, revision int64) {
+// at revisions.
+func (r *Request) noteAccount(account int, revisions ...int64) {
 	if r == nil {
 		return
 	}
@@ -87,26 +88,25 @@ func (r *Request) noteAccount(account int, revision int64) {
 	if !slices.Contains(r.accounts, account) {
 		r.accounts = append(r.accounts, account)
 	}
-	if first, ok := r.firstRevision[account]; !ok || revision < first {
-		if r.firstRevision == nil {
-			r.firstRevision = map[int]int64{}
-		}
-		r.firstRevision[account] = revision
+	if r.revisions == nil {
+		r.revisions = map[int][]int64{}
 	}
+	r.revisions[account] = append(r.revisions[account], revisions...)
 }
 
-// FirstRevision is the lowest edit revision this request recorded for
-// account; false when it recorded none. Revisions come from a sequence, so
-// an edit row of account at or above it exists only when one of the
-// request's edits committed, or another edit came after them.
-func (r *Request) FirstRevision(account int) (int64, bool) {
+// Revisions lists every edit revision this request recorded for account;
+// nil when it recorded none. Revisions come from a sequence, so an edit row
+// of account carrying one of them exists only when that edit committed and
+// no later edit of the same profile field has replaced it: a later edit
+// writes a new revision over the row, and the request that made it has its
+// own wake.
+func (r *Request) Revisions(account int) []int64 {
 	if r == nil {
-		return 0, false
+		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	revision, ok := r.firstRevision[account]
-	return revision, ok
+	return slices.Clone(r.revisions[account])
 }
 
 // Accounts lists the accounts that got an edit in this request.
@@ -169,7 +169,7 @@ func ActorFor(ctx context.Context, account int) (Actor, bool) {
 // It reports whether this call queued a wake for at least one device after
 // the edit committed; a wake queued earlier answers false. A nil
 // Waker queues nothing. Called with a request's context after an edit, it
-// wakes only when the edit committed (Request.FirstRevision).
+// wakes only when one of its own edits committed (Request.Revisions).
 //
 // A caller that needs the answer, to word a message, calls it after its
 // write commits and waits for it: the server's waker returns once the wake is
@@ -188,8 +188,8 @@ func (w Waker) Wake(ctx context.Context, userID int) bool {
 // wakes every account that got an edit. The wakes run on their own goroutine,
 // detached from the request's cancellation, so the response never waits for
 // them; the waker bounds its own work. It calls the waker for an edit whose
-// transaction rolled back too; the waker reads FirstRevision from the context
-// and wakes only when an edit committed.
+// transaction rolled back too; the waker reads Revisions from the context
+// and wakes only when one of the request's edits committed.
 func Middleware(wake Waker) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
