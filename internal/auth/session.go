@@ -189,6 +189,24 @@ func (r *SessionRepository) GetByID(ctx context.Context, id string) (*models.Aut
 	return scanSession(r.pool.QueryRow(ctx, query, id))
 }
 
+// OpenedByGrantedApp reports whether another app's key opened the session:
+// a device key enrolled through a grant, or one whose row is not stored,
+// failing closed as ReadSessionOrigin's GrantKey does.
+func (r *SessionRepository) OpenedByGrantedApp(ctx context.Context, session *models.AuthSession) (bool, error) {
+	if session.DeviceKeyID == nil {
+		return false, nil
+	}
+	var enrolledVia string
+	err := r.pool.QueryRow(ctx, `SELECT enrolled_via FROM auth_device_keys WHERE id = $1`, *session.DeviceKeyID).Scan(&enrolledVia)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("reading the session's device key: %w", err)
+	}
+	return enrolledVia == models.AppKeyEnrolledGrant, nil
+}
+
 // SessionKey is the keyset position of one session in the
 // (created_at DESC, id DESC) order ListByUserPage serves.
 type SessionKey struct {

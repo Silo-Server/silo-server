@@ -458,6 +458,11 @@ func (f fakeAdminUsers) ListAdminUsersPage(_ context.Context, afterID, limit int
 
 var errStore = errors.New("store unavailable")
 
+// fixtureAccountCreatedAt is the fake account's creation time, at the
+// stored microsecond precision: account_created_at must keep all six
+// digits, which Instant would cut to three.
+var fixtureAccountCreatedAt = time.Date(2025, 3, 14, 9, 26, 53, 589793000, time.UTC)
+
 func fixedTime() time.Time { return time.Date(2026, 1, 2, 3, 4, 5, 678_000_000, time.UTC) }
 
 func fixtureProfileView() handlers.ProfileView {
@@ -474,7 +479,7 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 	deps := parityDeps(false)
 	deps.Accounts = fakeAccounts{
 		users: map[int]handlers.UserView{
-			1: {ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{"marker_edit"}, DownloadAllowed: true},
+			1: {ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{"marker_edit"}, DownloadAllowed: true, CreatedAt: fixtureAccountCreatedAt},
 			2: {ID: 2, Username: "ada", Email: "ada@example.test", Role: "admin", PolicyPermissions: []string{"marker_edit", "metadata_curation"}},
 		},
 	}
@@ -1131,7 +1136,7 @@ func (f fakeDevices) PollDeviceLogin(_ context.Context, deviceCode, bindingSecre
 	}
 	if r.Status == auth.DeviceLoginStatusApproved {
 		view.Tokens = &handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
-			User: handlers.UserView{ID: r.approvedBy, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{}, DownloadAllowed: true}}
+			User: handlers.UserView{ID: r.approvedBy, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{}, DownloadAllowed: true, CreatedAt: fixtureAccountCreatedAt}}
 		if r.Temporary {
 			view.Temporary = true
 			view.ProfileID = r.profileID
@@ -1333,7 +1338,7 @@ func (f *fakeSessionService) Login(ctx context.Context, in handlers.LoginInput) 
 	switch {
 	case in.Username == "laura" && in.Password == "pw":
 		return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
-			User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
+			User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{"marker_edit"}, DownloadAllowed: true, CreatedAt: fixtureAccountCreatedAt}}, nil
 	case in.Username == "off":
 		return handlers.TokenPairView{}, &handlers.APIError{Status: 403, Code: "user_disabled", Message: "User account is disabled"}
 	case in.Username == "newcomer":
@@ -1393,13 +1398,13 @@ func (f *fakeSessionService) NetworkSignIn(_ context.Context, in handlers.Networ
 		return handlers.TokenPairView{}, &handlers.APIError{Status: 404, Code: "not_found", Message: "No enabled network sign-in provider has this installation"}
 	}
 	return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
-		User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
+		User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", PolicyPermissions: []string{"marker_edit"}, DownloadAllowed: true, CreatedAt: fixtureAccountCreatedAt}}, nil
 }
 
 func (f *fakeSessionService) Refresh(_ context.Context, token string) (handlers.RefreshedTokensView, error) {
 	switch token {
 	case "ref":
-		return handlers.RefreshedTokensView{AccessToken: "acc2", RefreshToken: "ref2", ExpiresIn: 3600}, nil
+		return handlers.RefreshedTokensView{AccessToken: "acc2", RefreshToken: "ref2", ExpiresIn: 3600, AccountCreatedAt: fixtureAccountCreatedAt}, nil
 	case "revoked":
 		return handlers.RefreshedTokensView{}, &handlers.APIError{Status: 401, Code: "session_revoked", Message: "Session has been revoked"}
 	case "provider-down":
