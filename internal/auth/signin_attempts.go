@@ -332,7 +332,8 @@ func (s *Service) trustSignInSource(ctx context.Context, user *models.User) {
 // ownSignInKeys are the budget keys of user's username and email, folded by
 // the database (signInNameKeys), without repeats, and whether it answered.
 // A name signs in to the account LookupLogin finds for it, by username
-// first, then by email, and a name that finds another account is left out:
+// first, then by an email that looks like one, and a name that finds
+// another account is left out:
 // an account kept from before the single login identity space can have
 // another account's username as its email, and that name is the other
 // account's to clear or extend.
@@ -346,8 +347,10 @@ func ownSignInKeys(ctx context.Context, users *UserRepository, user *models.User
 		return nil, false
 	}
 	names := make([]string, 0, 2)
-	for _, name := range []string{user.Username, user.Email} {
-		if name = NormalizeUsername(name); name != "" {
+	for i, name := range []string{user.Username, user.Email} {
+		// An email signs in only when it looks like one (LookupLogin); any
+		// other stored value is not a name of this account at sign-in.
+		if name = NormalizeUsername(name); name != "" && (i == 0 || looksLikeEmail(name)) {
 			names = append(names, name)
 		}
 	}
