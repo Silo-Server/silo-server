@@ -351,7 +351,7 @@ func (h *ProfileHandler) ClearProfileSetHidden(ctx context.Context, cmd ProfileS
 		if n == 0 {
 			return errProfileSetEditNotFound()
 		}
-		return run.auditOwnerClear(ctx, w, auditmutation.ActionProfileHiddenCleared, cmd.SyncID, auditmutation.Removed("hidden_sync_id", cmd.SyncID))
+		return run.auditOwnerClear(ctx, w, auditmutation.ActionProfileHiddenCleared, cmd.SyncID, auditmutation.Removed("sync_id", cmd.SyncID))
 	})
 	if err != nil {
 		return ProfileSetClearResult{}, err
@@ -455,6 +455,9 @@ func (r *profileSetRun) clearOverride(ctx context.Context, w userstore.ProfileSe
 	applied := false
 	if record, ok := decodeProfileSetApplied(row.SyncApplied); ok {
 		applied = clearApplies(record, &row.Profile, cmd.Field)
+		if err := checkRestoredName(snap.Rows, row, record, fields); err != nil {
+			return false, err
+		}
 		if err := r.applyRecordFields(ctx, w, row, record, edits, fields); err != nil {
 			return false, err
 		}
@@ -511,6 +514,24 @@ func (r *profileSetRun) auditOwnerClear(ctx context.Context, w userstore.Profile
 		return err
 	}
 	r.audits = append(r.audits, entry)
+	return nil
+}
+
+// checkRestoredName refuses, before anything is written, a clear that would
+// give the profile back the set's name while another profile on the account
+// has it, compared as every other profile write compares names. The answer
+// is the one an administrator's rename to that name gets.
+func checkRestoredName(rows []userstore.ProfileSetRow, row *userstore.ProfileSetRow, record profileSetApplied, fields []string) error {
+	if !slices.Contains(fields, profileedits.FieldName) || sameProfileName(row.Name, record.Name) {
+		return nil
+	}
+	profiles := make([]userstore.Profile, len(rows))
+	for i := range rows {
+		profiles[i] = rows[i].Profile
+	}
+	if profileNameConflicts(profiles, record.Name, row.ID) {
+		return apiError(http.StatusConflict, "name_conflict", "A profile with this name already exists")
+	}
 	return nil
 }
 

@@ -95,6 +95,7 @@ func TestClearProfileSetOverrideDB(t *testing.T) {
 		_, err = c.handler.ClearProfileSetOverride(c.admin(), ProfileSetClearCommand{UserID: c.userID, ProfileID: c.primary + "x", Field: "name"})
 		requireNotFound(t, "clear on no profile", err)
 	})
+	t.Run("a name another profile now has is refused, and writes nothing", c.refusesATakenName)
 	t.Run("the list names who changed a field before and after the app merges it", c.listsWhoChanged)
 	t.Run("no row is recorded by a clear", func(t *testing.T) {
 		for _, e := range c.edits(t) {
@@ -164,6 +165,34 @@ func (c *clearFixture) clearsHidden(t *testing.T) {
 	}
 	_, err := c.handler.ClearProfileSetHidden(c.admin(), hidden)
 	requireNotFound(t, "clear hidden again", err)
+}
+
+// refusesATakenName: the owner renames the kid, then gives the set's name to
+// a new profile on this server. Putting the set's name back would leave two
+// profiles with one name, and the person's next set refused at that item, so
+// the clear is refused as the owner's own rename to that name would be.
+func (c *clearFixture) refusesATakenName(t *testing.T) {
+	c.update(t, c.admin(), c.kidID, ProfileUpdateRequest{Name: new("Kiddo")}, true)
+	local, err := c.handler.CreateProfile(c.admin(), ProfileCreateCommand{UserID: c.userID, Request: ProfileCreateRequest{Name: "kid "}, AccountAdmin: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := c.state(t)
+	_, err = c.clearField("name")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusConflict || apiErr.Code != "name_conflict" {
+		t.Fatalf("clear of a taken name: err = %v; want 409 name_conflict", err)
+	}
+	if after := c.state(t); after != before || !slices.Contains(overriddenFields(c.held(t), c.kid.syncID()), "name") {
+		t.Fatalf("a refused clear wrote something or dropped the override:\nbefore %s\nafter  %s", before, after)
+	}
+	c.update(t, c.admin(), local.ID, ProfileUpdateRequest{Name: new("Visitor")}, true)
+	if res, err := c.clearField("name"); err != nil || !res.Applied {
+		t.Fatalf("clear once the name is free = %+v, %v", res, err)
+	}
+	if p := c.profileBySyncID(t, c.kid.syncID()); p.Name != "Kid" {
+		t.Fatalf("name after the clear = %q, want the set's", p.Name)
+	}
 }
 
 func (c *clearFixture) listsWhoChanged(t *testing.T) {

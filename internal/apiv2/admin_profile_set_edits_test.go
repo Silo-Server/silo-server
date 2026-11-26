@@ -24,7 +24,7 @@ func adminProfileSetEditFixtureCases() []fixtureCase {
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminProfileSetCleared"},
 		{name: "admin_profile_override_clear_not_found", operationID: "clearAdminUserProfileOverride",
 			scenario: "A field with no override, such as one the person has since changed themselves.",
-			method:   http.MethodDelete, path: base + "/profiles/p-kid/overrides/name", headers: actingRequestAdmin,
+			method:   http.MethodDelete, path: base + "/profiles/p-kid/overrides/pin", headers: actingRequestAdmin,
 			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Problem"},
 		{name: "admin_profile_hidden_clear_ok", operationID: "clearAdminUserHiddenProfile",
 			scenario: "The owner lets a removed profile come back; it returns with the person's next set, and their phone was told.",
@@ -34,6 +34,10 @@ func adminProfileSetEditFixtureCases() []fixtureCase {
 			scenario: "The owner dismisses the record that the person's own change replaced the owner's value.",
 			method:   http.MethodDelete, path: base + "/profiles/p-kid/settled-edits/max_content_rating", headers: actingRequestAdmin,
 			status: http.StatusNoContent},
+		{name: "admin_profile_override_clear_name_taken", operationID: "clearAdminUserProfileOverride",
+			scenario: "Putting the set's name back would give two profiles one name, so the clear is refused as the owner's own rename would be, and the override stays.",
+			method:   http.MethodDelete, path: base + "/profiles/p-kid/overrides/name", headers: actingRequestAdmin,
+			status: http.StatusConflict, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Problem"},
 	}
 }
 
@@ -55,6 +59,9 @@ func (fixtureProfileSets) ListProfileSetEdits(context.Context, int) ([]handlers.
 }
 
 func (fixtureProfileSets) ClearProfileSetOverride(_ context.Context, cmd handlers.ProfileSetClearCommand) (handlers.ProfileSetClearResult, error) {
+	if cmd.Field == "name" {
+		return handlers.ProfileSetClearResult{}, &handlers.APIError{Status: http.StatusConflict, Code: "name_conflict", Message: "A profile with this name already exists"}
+	}
 	if cmd.Field != "max_content_rating" {
 		return handlers.ProfileSetClearResult{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "No such edit on this profile"}
 	}

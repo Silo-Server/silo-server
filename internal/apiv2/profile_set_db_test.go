@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/profileedits"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
@@ -99,6 +101,102 @@ func TestProfileSetNameConflictOnTheWireDB(t *testing.T) {
 	if profiles, err := store.ListProfiles(ctx); err != nil || len(profiles) != 2 {
 		t.Fatalf("a refused set changed the household: %+v, %v", profiles, err)
 	}
+}
+
+// TestClearOverrideNameConflictOnTheWireDB: clearing the owner's name for a
+// profile from a set, when another profile now has the set's name, is
+// refused through the real service exactly as the owner's own rename to that
+// name is, and the override stays. It catches a clear that leaves two
+// profiles with one name, and the two routes answering a clash differently.
+func TestClearOverrideNameConflictOnTheWireDB(t *testing.T) {
+	pool, userID := newSetAccountDB(t)
+	provider := pgstore.NewPostgresProvider(pool)
+	service := handlers.NewProfileHandler(provider)
+	service.ProfileSetAvailable = true
+	service.UserRepo = ownerRepo{2: {ID: 2, Role: models.RoleAdmin, IsOwner: true}, userID: {ID: userID, Role: "user"}}
+	ctx := t.Context()
+	syncID := uuid.NewString()
+	set, _ := json.Marshal(map[string]any{"version": 1, "items": []any{setDBItem(uuid.NewString(), "Parent"), setDBItem(syncID, "Kid")}})
+	held, err := service.ApplyProfileSet(ctx, handlers.ProfileSetCommand{UserID: userID, Set: set, Signed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kidID := held.Profiles[1].ID
+	admin, req := profileedits.WithRequest(apimw.SetClaims(ctx, &auth.Claims{UserID: 2, Role: models.RoleAdmin, TokenType: auth.TokenTypeAccess}))
+	req.SetActor(2, true, nil)
+	if _, err := service.UpdateProfile(admin, handlers.ProfileUpdateCommand{UserID: userID, ProfileID: kidID,
+		Request: handlers.ProfileUpdateRequest{Name: new("Kiddo")}, AccountAdmin: true}); err != nil {
+		t.Fatal(err)
+	}
+	local, err := service.CreateProfile(admin, handlers.ProfileCreateCommand{UserID: userID, Request: handlers.ProfileCreateRequest{Name: "Guest"}, AccountAdmin: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := requestDeps(fixtureRequests())
+	deps.AdminAccounts = fixtureAdminAccounts()
+	deps.Profiles = service
+	deps.ProfileSetEdits = service
+	h := NewHandler(deps)
+	base := Prefix + "/admin/users/" + strconv.Itoa(userID) + "/profiles/"
+	// The answer an administrator's own rename to a taken name gets.
+	rename := readProblemAnswer(t, do(t, h, http.MethodPatch, base+local.ID, `{"name":"kiddo"}`, actingRequestAdmin))
+	// Then the local profile takes the set's name, which is free now.
+	if _, err := service.UpdateProfile(admin, handlers.ProfileUpdateCommand{UserID: userID, ProfileID: local.ID,
+		Request: handlers.ProfileUpdateRequest{Name: new("Kid")}, AccountAdmin: true}); err != nil {
+		t.Fatal(err)
+	}
+	clear := readProblemAnswer(t, do(t, h, http.MethodDelete, base+kidID+"/overrides/name", "", actingRequestAdmin))
+	if rename.status != http.StatusConflict || clear.status != rename.status || clear.problem.Type != rename.problem.Type || clear.problem.Detail != rename.problem.Detail {
+		t.Fatalf("clear answered %d %+v; the owner's rename to a taken name answers %d %+v", clear.status, clear.problem, rename.status, rename.problem)
+	}
+	after, err := service.HeldProfileSet(ctx, userID)
+	if err != nil || len(after.Overrides) != 1 || after.Overrides[0].Field != "name" || after.Items[1].Name != "Kiddo" {
+		t.Fatalf("after a refused clear: %+v, %v", after, err)
+	}
+}
+
+// newSetAccountDB is a user account on the test database, deleted with its
+// profiles and edit rows when the test ends.
+func newSetAccountDB(t *testing.T) (*pgxpool.Pool, int) {
+	t.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	pool, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	name := "setclear-" + uuid.NewString()[:8]
+	var userID int
+	if err := pool.QueryRow(t.Context(), `INSERT INTO users (username, email, password_hash, role, permissions)
+		VALUES ($1, $2, 'x', 'user', '{}') RETURNING id`, name, name+"@example.test").Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		bg := context.WithoutCancel(t.Context())
+		_, _ = pool.Exec(bg, `DELETE FROM profile_set_edits WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(bg, `DELETE FROM user_profiles WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(bg, `DELETE FROM users WHERE id = $1`, userID)
+	})
+	return pool, userID
+}
+
+func setDBItem(syncID, name string) map[string]any {
+	return map[string]any{"sync_id": syncID, "name": name, "picture": "", "pin": map[string]any{"keep": true},
+		"is_child": false, "max_content_rating": "", "max_advisory_age": nil, "require_advisory_age": false,
+		"requests_blocked": false, "settings": map[string]any{}}
+}
+
+// ownerRepo answers the accounts the Owner rules load.
+type ownerRepo map[int]*models.User
+
+func (r ownerRepo) GetByID(_ context.Context, id int) (*models.User, error) {
+	if u, ok := r[id]; ok {
+		return u, nil
+	}
+	return nil, auth.ErrNotFound
 }
 
 // onlyProfileResolver verifies one profile, as the production resolver does

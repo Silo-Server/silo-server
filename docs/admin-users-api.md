@@ -413,13 +413,17 @@ be put back, because the server never stores digits: the owner's PIN stays until
 the person's app sends a newer set. A picture this server doesn't hold waits for
 its upload. `clear_applies` on the record and `applied` in the answer say which
 happened. For a setting the settings contract mirrors in another key, clearing
-either key clears both. Clearing a hidden profile does not recreate it: the next
+either key clears both. Putting back a `name` that another profile on the account now has,
+compared trimmed and without case as every profile write compares names, is
+refused with 409 `conflict`, as the owner's own rename to it is: nothing is
+written and the override stays until that profile is renamed. Clearing a hidden profile does not recreate it: the next
 newer set does, as a new profile. A cleared override or hidden profile asks the
 person's apps to sync, and `wake_queued` says whether a push could be queued; when
 it is false, the change reaches the app the next time it syncs. Dismissing a
 settled record changes nothing else and tells no app.
 
-The clears and the dismissal follow the Owner rules above and are audited as
+The clears and the dismissal follow the Owner rules above and are audited (see
+[admin-api.md](admin-api.md#account-and-permission-audit-details)) as
 `profile.override_cleared`, `profile.hidden_cleared` and `profile.edit_dismissed`.
 A record that does not exist answers 404, including an override the person has
 since replaced. Where profiles are not kept in PostgreSQL, the list is empty and

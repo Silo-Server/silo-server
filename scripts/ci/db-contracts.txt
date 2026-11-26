@@ -352,6 +352,7 @@
 ./internal/auth TestExpiredPendingKeySweepDB
 ./internal/apiv2 TestKeyRoutesRefuseSessionsDB
 ./internal/apiv2 TestProfileSetNameConflictOnTheWireDB
+./internal/apiv2 TestClearOverrideNameConflictOnTheWireDB
 ./internal/auth TestRevokeOwnDeviceKeyRulesDB
 ./internal/auth TestKeySignInLocalPasswordsOffDB
 ./internal/auth TestKeySessionContinuesProviderChainDB
