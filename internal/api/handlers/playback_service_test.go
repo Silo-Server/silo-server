@@ -1589,7 +1589,9 @@ func TestPlaybackMutationsV2KeepAnotherAppToItsStreams(t *testing.T) {
 		_, err = f.handler.StopPlaybackV2(f.ctx, app, session, PlaybackStopCommand{StopID: uuid.NewString()})
 		assertPlaybackOperationError(t, err, http.StatusForbidden, "forbidden")
 	}
-	// A replan that would otherwise be accepted, so the refusal is the rule's.
+	// A well-formed replan: with the rule passing it gets past validation and
+	// answers 409 stale_playback_plan here (the fixture has no current plan),
+	// so the 403 is the rule's.
 	start := v3HandlerStartRequest()
 	replan := PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: attemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto", Failure: playback.FailureV3{Classification: "network_error"}, Capabilities: start.Capabilities, ClientPlaybackContext: start.ClientPlaybackContext}, Digest: "d"}
 	_, err = f.handler.ReplanPlaybackV2(f.ctx, app, phone.ID, replan)

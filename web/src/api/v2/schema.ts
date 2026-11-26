@@ -14165,7 +14165,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Delete one suggestion as its suggester or the room host. Missing suggestions return 404; uncertain deletion must be reconciled by reading the room. */
+    /**
+     * Delete one suggestion as its suggester or the room host. Missing suggestions return 404; uncertain deletion must be reconciled by reading the room.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) deletes only a suggestion its account and profile made; it does not get the host's power to delete any suggestion, so another one is 403 permission_denied.
+     */
     delete: operations["deleteWatchTogetherSuggestion"];
     options?: never;
     head?: never;

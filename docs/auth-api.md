@@ -499,9 +499,17 @@ of `SessionOrigin`). A device signed in by code is not limited on them:
   `promoteWatchTogetherSuggestion`), and `fallbackWatchTogetherSource`, which any member may
   send and which switches what every member plays. `createWatchTogetherSocketTicket` refuses
   it for a room its account and profile host. As a member of another host's room it may
-  connect and watch along: it reports its own state, suggests and votes, but the socket
-  refuses its `transport_request` frames with the error frame any refused request gets,
-  whatever the room's guest policy.
+  connect: it reports its own state, suggests and votes, but the socket refuses its
+  `transport_request` frames with the error frame any refused request gets, whatever the
+  room's guest policy. Like any member, a `buffering` frame from it can still pause the room
+  for everyone while it catches up, within the room's spacing and cooldown. A member is its
+  account and profile, so connecting replaces a connection already held for them; such a
+  session is instead refused (an error frame with code `forbidden`, then the socket closes)
+  while that member is connected, on this API server or another, as the room's stored
+  runtime records. The person's own device connecting later still replaces the app. Deleting
+  a suggestion (`deleteWatchTogetherSuggestion`) is limited to one its account and profile
+  made, without the host's power to delete any; the suggester is recorded only as an account
+  and profile, so that includes the person's own devices' suggestions on that profile.
 
 The refusals carry the same detail as the key routes' refusal of a session that may not make
 a change.
