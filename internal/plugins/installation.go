@@ -763,7 +763,14 @@ func (s *InstallationStore) Delete(ctx context.Context, id int) error {
 // the delete has committed and before the plugin's files are removed: the
 // caller stops the plugin there, so a refused delete never stopped it and its
 // files go only once it no longer runs.
+//
+// A store on a caller's transaction (WithTx) cannot take a callback: its
+// delete only releases a savepoint, and the caller's transaction can still
+// roll it back.
 func (s *InstallationStore) DeleteThen(ctx context.Context, id int, afterCommit func()) error {
+	if _, inTx := s.pool.(pgx.Tx); inTx && afterCommit != nil {
+		return errDeleteThenInTx
+	}
 	installation, err := s.deleteWithIdentityRetry(ctx, id)
 	if err != nil {
 		return err
@@ -781,6 +788,10 @@ func (s *InstallationStore) DeleteThen(ctx context.Context, id int, afterCommit 
 	return nil
 }
 
+// errDeleteThenInTx refuses DeleteThen with a callback on a store that runs
+// in a caller's transaction, where nothing commits yet.
+var errDeleteThenInTx = errors.New("plugins: DeleteThen with an after-commit callback needs a pool-backed store")
+
 // ErrInstallationBusy answers an uninstall that found the plugin's sign-in
 // identities held by another change on every bounded attempt: nothing was
 // changed, and repeating it in a moment succeeds.
@@ -794,8 +805,10 @@ const sqlStateLockNotAvailable = "55P03"
 var errIdentitiesHeld = errors.New("plugin identities are locked")
 
 // Uninstall attempts and the pause between them. The pauses add about 150 ms
-// in all; each attempt still waits its turn for the server-settings lock, and
-// the request's deadline bounds the whole call.
+// in all. Each attempt still waits, with no timeout of its own, for the
+// plugin-bindings lock, then the installation row, then the server-settings
+// lock; the call ends when those are free or when ctx is canceled (for an
+// admin request, when the client or a proxy in front of it disconnects).
 const (
 	deleteIdentityAttempts = 3
 	deleteIdentityBackoff  = 50 * time.Millisecond

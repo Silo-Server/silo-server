@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
@@ -26,6 +27,8 @@ func newLockOrderEnv(t *testing.T) *lockOrderEnv {
 	t.Helper()
 	e := &lockOrderEnv{signInGuardEnv: newSignInGuardEnv(t)}
 	ctx := t.Context()
+	// Password sign-in on, so the member's password lets it unlink.
+	e.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "true")
 	e.member = e.localAccount(t, "lock-member", models.RoleUser)
 	link, err := insertIdentity(ctx, e.pool, e.member.ID, e.oidc, e.identity("lock-member-idp"), false, false)
 	if err != nil {
@@ -56,24 +59,38 @@ func (e *lockOrderEnv) begin(t *testing.T) (pgx.Tx, int) {
 	return tx, pid
 }
 
-// waitBlocked waits until a session other than those in skip runs a query
-// containing fragment (any query for "") and is blocked by another session,
-// and answers its pid. It reads pg_stat_activity, so it waits on the observable lock wait.
-func (e *lockOrderEnv) waitBlocked(t *testing.T, fragment string, skip ...int) int {
+// waitBlockedDeadline bounds waitBlocked, and waitBlockedPoll is the pause
+// between its reads.
+const (
+	waitBlockedDeadline = 10 * time.Second
+	waitBlockedPoll     = 10 * time.Millisecond
+)
+
+// waitBlocked waits until a session in the test database runs a query
+// containing fragment (any query for "") and is blocked by blocker, and
+// answers its pid. It reads pg_stat_activity, so it waits on the observable
+// lock wait.
+func (e *lockOrderEnv) waitBlocked(t *testing.T, fragment string, blocker int) int {
 	t.Helper()
+	deadline := time.After(waitBlockedDeadline)
+	poll := time.NewTicker(waitBlockedPoll)
+	defer poll.Stop()
 	for {
 		var pid int
 		err := e.pool.QueryRow(t.Context(), `SELECT pid FROM pg_stat_activity
-			WHERE cardinality(pg_blocking_pids(pid)) > 0 AND position($1 in query) > 0 AND NOT pid = ANY($2)
-			LIMIT 1`, fragment, append([]int{0}, skip...)).Scan(&pid)
+			WHERE datname = current_database() AND $2 = ANY(pg_blocking_pids(pid)) AND position($1 in query) > 0
+			LIMIT 1`, fragment, blocker).Scan(&pid)
 		if err == nil {
 			return pid
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			t.Fatal(err)
 		}
-		if t.Context().Err() != nil {
-			t.Fatalf("no session blocked on %q", fragment)
+		select {
+		case <-deadline:
+			t.Fatalf("staging timed out: no session ran %q blocked by pid %d within %s (a slow host, not the lock order under test)",
+				fragment, blocker, waitBlockedDeadline)
+		case <-poll.C:
 		}
 	}
 }
@@ -107,14 +124,15 @@ func (e *lockOrderEnv) installed(t *testing.T) bool {
 
 // pauseUninstall holds the installation row with a key-share lock, so the
 // uninstall's DELETE waits after it has taken the settings lock and the
-// installation's identities; the returned function releases it.
-func (e *lockOrderEnv) pauseUninstall(t *testing.T) func() {
+// installation's identities. It answers its session's pid and a function
+// that releases it.
+func (e *lockOrderEnv) pauseUninstall(t *testing.T) (int, func()) {
 	t.Helper()
-	tx, _ := e.begin(t)
+	tx, pid := e.begin(t)
 	if _, err := tx.Exec(t.Context(), `SELECT id FROM plugin_installations WHERE id = $1 FOR KEY SHARE`, e.oidc); err != nil {
 		t.Fatal(err)
 	}
-	return func() { _ = tx.Rollback(context.Background()) }
+	return pid, func() { _ = tx.Rollback(context.Background()) }
 }
 
 func noDeadlock(t *testing.T, side string, err error) {
@@ -130,9 +148,10 @@ func noDeadlock(t *testing.T, side string, err error) {
 // settings lock in either order: unlinking an identity and deleting an
 // account (identity, then settings lock) and an account update that ends
 // sessions (settings lock, then identities). Each side goes first. Without
-// the uninstall's no-wait identity lock, the uninstall-first cases with
+// the uninstall's identities lock statement, the uninstall-first cases with
 // unlink and account delete deadlock, and the identity-first cases wait out
-// uninstallDeadline.
+// uninstallDeadline. Keeping the statement but dropping only NOWAIT fails
+// just the identity-first cases.
 func TestUninstallAddsNoLockCycleDB(t *testing.T) {
 	// The identity-first paths, replayed in their order. Each takes an
 	// identity row, then the settings lock.
@@ -191,9 +210,9 @@ func TestUninstallAddsNoLockCycleDB(t *testing.T) {
 
 func uninstallFirstThenUnlink(t *testing.T) {
 	e := newLockOrderEnv(t)
-	release := e.pauseUninstall(t)
+	pausePID, release := e.pauseUninstall(t)
 	done := e.uninstall()
-	uninstallPID := e.waitBlocked(t, "DELETE FROM plugin_installations")
+	uninstallPID := e.waitBlocked(t, "DELETE FROM plugin_installations", pausePID)
 	unlinked := make(chan error, 1)
 	go func() {
 		unlinked <- NewIdentityService(e.pool).UnlinkOwn(context.Background(), e.member.ID, e.memberLink)
@@ -210,9 +229,9 @@ func uninstallFirstThenUnlink(t *testing.T) {
 
 func uninstallFirstThenAccountDelete(t *testing.T) {
 	e := newLockOrderEnv(t)
-	release := e.pauseUninstall(t)
+	pausePID, release := e.pauseUninstall(t)
 	done := e.uninstall()
-	uninstallPID := e.waitBlocked(t, "DELETE FROM plugin_installations")
+	uninstallPID := e.waitBlocked(t, "DELETE FROM plugin_installations", pausePID)
 	tx, _ := e.begin(t)
 	deleted := make(chan error, 1)
 	go func() {
@@ -260,9 +279,9 @@ func accountUpdateFirst(t *testing.T) {
 
 func uninstallFirstThenAccountUpdate(t *testing.T) {
 	e := newLockOrderEnv(t)
-	release := e.pauseUninstall(t)
+	pausePID, release := e.pauseUninstall(t)
 	done := e.uninstall()
-	uninstallPID := e.waitBlocked(t, "DELETE FROM plugin_installations")
+	uninstallPID := e.waitBlocked(t, "DELETE FROM plugin_installations", pausePID)
 	tx, _ := e.begin(t)
 	updated := make(chan error, 1)
 	go func() {

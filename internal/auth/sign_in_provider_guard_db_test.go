@@ -273,6 +273,8 @@ func TestBreakGlassWithoutPasswordIsNotCountedDB(t *testing.T) {
 func TestUnlinkNeedsAPasswordThatSignsInDB(t *testing.T) {
 	e := newSignInGuardEnv(t)
 	ctx := t.Context()
+	// Password sign-in on for the server, so only the missing hash refuses.
+	e.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "true")
 	account := e.localAccount(t, "unlink-no-password", models.RoleUser)
 	link, err := insertIdentity(ctx, e.pool, account.ID, e.oidc, e.identity("unlink-no-password-idp"), false, false)
 	if err != nil {

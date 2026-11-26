@@ -46,8 +46,11 @@ SDK's `docs/auth-provider.md`.
   rolls the whole attempt back, releasing the settings lock, and tries again
   a bounded number of times, then answers busy (`plugins.ErrInstallationBusy`,
   503 `dependency_unavailable` with `Retry-After`) with nothing changed. The
-  pauses between attempts add about 150 ms; each attempt still waits its turn
-  for the settings lock, and the request's deadline bounds the call.
+  pauses between attempts add about 150 ms. Each attempt still waits, with no
+  timeout of its own, for the plugin-bindings lock, then the installation
+  row, then the settings lock; the uninstall request carries no deadline, so
+  the call ends when those are free or when the client (or a proxy in front
+  of it) disconnects and cancels the request's context.
   `TestUninstallAddsNoLockCycleDB` stages each of those paths against it,
   each side first.
 - Every other writer of those rows writes one row, writes only sessions that
