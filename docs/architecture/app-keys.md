@@ -541,8 +541,8 @@ The operations on keys check how the calling session was opened
 `provider`, `device_login`, `app_key` or `impersonation`). It is the only
 record these rules read. The older `auth_sessions.via_device_sign_in` flag,
 which a server of the previous release writes on its own, settles only
-whether a session sees and ends just itself ([Sessions opened by device
-sign-in](../auth-api.md#sessions-opened-by-device-sign-in)): a session with
+whether a session sees and ends just itself ([Sessions limited to
+themselves](../auth-api.md#sessions-limited-to-themselves)): a session with
 that flag and no `opened_via` is refused here like any session with no record
 of how it was opened. The rule is one function, `auth.SessionAllows`, with one
 action per kind of change:
@@ -554,8 +554,10 @@ action per kind of change:
   is revoked, so it must not mint access that outlives that, nor read the
   person's devices.
 - `ActionManageKeys` (`enroll`, `PUT /auth/keys/person`,
-  `pending/{id}/approve`, `POST /auth/device/preapprove`) and `ActionReadKeys`
-  (`GET /auth/keys`, `GET /auth/keys/pending`, `pending/{id}/deny`) also need a
+  `pending/{id}/approve`, `POST /auth/device/preapprove`,
+  `DELETE /auth/device/preapprovals/{id}`) and `ActionReadKeys`
+  (`GET /auth/keys`, `GET /auth/keys/pending`, `pending/{id}/deny`,
+  `GET /auth/device/preapprovals`) also need a
   session opened by a password, a provider or the person's own device key. A
   session opened by device sign-in (a TV, a shared tablet, a browser approved
   by QR code) is refused: whoever holds it isn't necessarily the person, the
@@ -575,7 +577,7 @@ The key routes against each kind of session:
 
 | Route | Password, provider, own device key | Device sign-in (a TV) | Grant-enrolled app | No `opened_via` | Admin acting as the account, API key, remote playback |
 |---|---|---|---|---|---|
-| `GET /auth/keys`, `GET /auth/keys/pending`, `pending/{id}/deny` | allowed | refused | refused | refused | refused |
+| `GET /auth/keys`, `GET /auth/keys/pending`, `pending/{id}/deny`, `GET /auth/device/preapprovals`, `DELETE /auth/device/preapprovals/{id}` | allowed | refused | refused | refused | refused |
 | `enroll`, `PUT /auth/keys/person`, `pending/{id}/approve`, `POST /auth/device/preapprove` | main profile only | refused | refused | refused | refused |
 | `DELETE /auth/keys/devices/{id}` | allowed | refused | its own key only | refused | refused |
 
