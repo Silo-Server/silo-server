@@ -35,12 +35,21 @@ const (
 	profileSetWakeRetention = 7 * 24 * time.Hour
 )
 
-// profileSetPhoneTimeout bounds one phone's whole send: up to four relay
-// requests (renewing the relay credential, the send, recovering a rejected
-// credential, and the send again), each under pushRelayRequestTimeout. The
-// cap ends the send when it passes, whichever request is running. Each phone
-// gets its own, so a slow one costs the others nothing.
-var profileSetPhoneTimeout = 2*pushRelayRequestTimeout + 5*time.Second
+// profileSetRelayRequests is the most relay requests one phone's send can
+// make, each bounded by pushRelayRequestTimeout: preparing the relay
+// credential can renew it and then replace it (2); the send can post twice,
+// once more without the push target or after idempotency_key_reuse (2); a
+// rejected credential can be renewed and replaced again (2), though the
+// replacement cooldown allows one replace per process, so preparing and
+// recovering make at most 3 credential requests together; and the send can
+// post twice again (2). That is 3 + 4.
+const profileSetRelayRequests = 7
+
+// profileSetPhoneTimeout bounds one phone's whole send. It is at least the
+// sum of the relay requests' own timeouts, so it never cuts off a send those
+// timeouts would let finish; it ends a send stuck elsewhere, such as on the
+// database. Each phone gets its own, so a slow one costs the others nothing.
+var profileSetPhoneTimeout = profileSetRelayRequests*pushRelayRequestTimeout + 5*time.Second
 
 // A wake is sent once and never retried: the next edit or the app opening
 // repairs a missed one. Its row is never in a state any server's claim
@@ -51,23 +60,30 @@ var profileSetPhoneTimeout = 2*pushRelayRequestTimeout + 5*time.Second
 // flight, as retrying with no next_retry_at, which no claim selects since
 // NULL <= now() is never true, and the send records delivered or failed.
 
-// profileSetWakeLock names the advisory lock that serializes one account's
-// wakes across API servers; the account ID is its second half.
-const profileSetWakeLock = "push_profile_set_wake"
+// profileSetWakeMaxPhones caps the phones one wake reaches: the account's
+// most recently seen registrations. A wake writes one attempt and makes one
+// relay call per phone, and a person can set one off from their own
+// session, so its fan-out is bounded. A household's phones, tablets and
+// computers stay well under it.
+const profileSetWakeMaxPhones = 20
 
-// EnqueueProfileSetWake queues a wake for every registered, enabled phone
-// of account userID on platforms whose login is live, unless the account had
-// one queued in the last profileSetWakeInterval. queued reports whether a
-// wake is queued now or was inside that interval, sent or not; sendNow lists
-// the attempts it created, in flight, for the caller to send.
+// EnqueueProfileSetWake queues a wake for the registered, enabled phones of
+// account userID on platforms whose login is live, at most
+// profileSetWakeMaxPhones of them, most recently seen first, unless the
+// account had one queued in the last profileSetWakeInterval. queued reports
+// whether a wake is queued now or was inside that interval, sent or not;
+// sendNow lists the attempts it created, in flight, for the caller to send.
 //
 // minRevision, when not nil, is the first profile_set_edits revision the
 // calling request recorded: the wake goes out only when an edit row at or
 // above it exists, that is, when one of the request's edits committed.
 //
-// The account's advisory lock makes the check and the insert one step on
-// every API server, so edits recorded at the same moment on two servers
-// queue one wake.
+// One statement decides and records the wake in push_profile_set_wakes, so
+// edits recorded at the same moment on two API servers queue one wake, and
+// removing and registering a device again does not reset the limit. The
+// time is recorded in the transaction that queues the attempts: a failure
+// to queue rolls it back, and an account whose phones all went away in the
+// meantime records nothing.
 func (r *PushDeviceRepository) EnqueueProfileSetWake(ctx context.Context, userID int, platforms []string, minRevision *int64) (queued bool, sendNow []PushDeliveryAttempt, err error) {
 	if r == nil || r.pool == nil || len(platforms) == 0 {
 		return false, nil, nil
@@ -89,54 +105,19 @@ func (r *PushDeviceRepository) EnqueueProfileSetWake(ctx context.Context, userID
 			return false, nil, nil
 		}
 	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, $2))`,
-		profileSetWakeLock, userID); err != nil {
-		return false, nil, fmt.Errorf("lock profile set wake: %w", err)
+	devices, err := listProfileSetWakeDevices(ctx, tx, userID, platforms)
+	if err != nil || len(devices) == 0 {
+		return false, nil, err
 	}
-	// attempted_at is set at insert and again when the send finishes, so it
-	// is never before created_at. Its bound changes no answer; it lets
-	// push_delivery_attempts_device_history_idx (push_device_id,
-	// attempted_at DESC) read only each device's last minute of attempts
-	// instead of its whole alert history.
-	var recent bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (
-		SELECT 1 FROM push_delivery_attempts a
-		JOIN push_devices d ON d.id = a.push_device_id
-		WHERE d.user_id = $1 AND a.trigger_type = $2
-		  AND a.created_at > now() - $3::interval AND a.attempted_at > now() - $3::interval)`,
-		userID, PushTriggerProfileSet, profileSetWakeInterval).Scan(&recent); err != nil {
-		return false, nil, fmt.Errorf("check recent profile set wake: %w", err)
+	due, err := recordProfileSetWake(ctx, tx, userID)
+	if err != nil {
+		return false, nil, err
 	}
-	if recent {
+	if !due {
+		// A wake went out inside the interval: this edit is covered by it.
 		return true, nil, nil
 	}
 
-	rows, err := tx.Query(ctx, `SELECT `+pushDeviceColumns+`
-		FROM push_devices
-		WHERE user_id = $1
-		  AND platform = ANY($2)
-		  AND provider = $3
-		  AND push_mode = $4
-		  AND enabled
-		  AND `+pushDeviceLoginLive+`
-		ORDER BY id`,
-		userID, platforms, PushProviderSiloRelay, PushModePrivatePush)
-	if err != nil {
-		return false, nil, fmt.Errorf("list profile set wake devices: %w", err)
-	}
-	devices, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (PushDevice, error) {
-		device, err := scanPushDevice(row)
-		if err != nil {
-			return PushDevice{}, err
-		}
-		return *device, nil
-	})
-	if err != nil {
-		return false, nil, fmt.Errorf("list profile set wake devices: %w", err)
-	}
-	if len(devices) == 0 {
-		return false, nil, nil
-	}
 	attempts := make([]PushDeliveryAttempt, 0, len(devices))
 	ids := make([]string, 0, len(devices))
 	for _, device := range devices {
@@ -154,22 +135,77 @@ func (r *PushDeviceRepository) EnqueueProfileSetWake(ctx context.Context, userID
 		return false, nil, err
 	}
 	// A device removed since the listing got no attempt.
-	rows, err = tx.Query(ctx, `SELECT `+pushAttemptColumns+` FROM push_delivery_attempts WHERE id = ANY($1) ORDER BY id`, ids)
+	rows, err := tx.Query(ctx, `SELECT `+pushAttemptColumns+` FROM push_delivery_attempts WHERE id = ANY($1) ORDER BY id`, ids)
 	if err != nil {
 		return false, nil, fmt.Errorf("read profile set wake attempts: %w", err)
 	}
 	if sendNow, err = scanPushDeliveryAttempts(rows); err != nil {
 		return false, nil, fmt.Errorf("read profile set wake attempts: %w", err)
 	}
+	if len(sendNow) == 0 {
+		return false, nil, nil
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, nil, fmt.Errorf("commit profile set wake: %w", err)
 	}
-	return len(sendNow) > 0, sendNow, nil
+	return true, sendNow, nil
 }
 
-// RetireProfileSetWakes marks wakes whose send never finished as failed and
-// deletes wakes past their retention. Wakes name no notification delivery,
-// so delivery retention never reaches them.
+// listProfileSetWakeDevices lists the phones a wake of userID reaches: its
+// enabled registrations on platforms whose login is live, the
+// profileSetWakeMaxPhones most recently seen.
+func listProfileSetWakeDevices(ctx context.Context, tx pgx.Tx, userID int, platforms []string) ([]PushDevice, error) {
+	rows, err := tx.Query(ctx, `SELECT `+pushDeviceColumns+`
+		FROM push_devices
+		WHERE user_id = $1
+		  AND platform = ANY($2)
+		  AND provider = $3
+		  AND push_mode = $4
+		  AND enabled
+		  AND `+pushDeviceLoginLive+`
+		ORDER BY last_seen_at DESC NULLS LAST, created_at DESC, id
+		LIMIT $5`,
+		userID, platforms, PushProviderSiloRelay, PushModePrivatePush, profileSetWakeMaxPhones)
+	if err != nil {
+		return nil, fmt.Errorf("list profile set wake devices: %w", err)
+	}
+	devices, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (PushDevice, error) {
+		device, err := scanPushDevice(row)
+		if err != nil {
+			return PushDevice{}, err
+		}
+		return *device, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list profile set wake devices: %w", err)
+	}
+	return devices, nil
+}
+
+// recordProfileSetWake records a wake of userID now, unless one was
+// recorded within profileSetWakeInterval, and reports whether it recorded
+// one. It is one statement: a second server recording at the same moment
+// waits on the account's row and then finds the new time.
+func recordProfileSetWake(ctx context.Context, tx pgx.Tx, userID int) (bool, error) {
+	rows, err := tx.Query(ctx, `INSERT INTO push_profile_set_wakes AS w (user_id, last_wake_at)
+		VALUES ($1, now())
+		ON CONFLICT (user_id) DO UPDATE SET last_wake_at = excluded.last_wake_at
+		WHERE w.last_wake_at <= now() - $2::interval
+		RETURNING w.user_id`, userID, profileSetWakeInterval)
+	if err != nil {
+		return false, fmt.Errorf("record profile set wake: %w", err)
+	}
+	recorded, err := pgx.CollectRows(rows, pgx.RowTo[int])
+	if err != nil {
+		return false, fmt.Errorf("record profile set wake: %w", err)
+	}
+	return len(recorded) > 0, nil
+}
+
+// RetireProfileSetWakes marks wakes whose send never finished as failed,
+// deletes wakes past their retention, and deletes wake times a day old.
+// Wakes name no notification delivery, so delivery retention never reaches
+// them.
 func (r *PushDeviceRepository) RetireProfileSetWakes(ctx context.Context) (int64, error) {
 	if _, err := r.pool.Exec(ctx, `UPDATE push_delivery_attempts
 		SET outcome = $2, failure_message = 'wake send did not finish', updated_at = now()
@@ -182,6 +218,11 @@ func (r *PushDeviceRepository) RetireProfileSetWakes(ctx context.Context) (int64
 		PushTriggerProfileSet, profileSetWakeRetention)
 	if err != nil {
 		return 0, fmt.Errorf("delete old profile set wakes: %w", err)
+	}
+	// A wake time only matters for profileSetWakeInterval; this also clears
+	// the rows of deleted accounts.
+	if _, err := r.pool.Exec(ctx, `DELETE FROM push_profile_set_wakes WHERE last_wake_at < now() - interval '1 day'`); err != nil {
+		return 0, fmt.Errorf("delete old profile set wake times: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }

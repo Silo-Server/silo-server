@@ -512,6 +512,8 @@
 ./internal/notifications TestProfileSetWakeIsNeverClaimedDB
 ./internal/notifications TestProfileSetWakeSlowPhoneDB
 ./internal/notifications TestProfileSetWakePanickingSendDB
+./internal/notifications TestProfileSetWakeSurvivesDeviceRemovalDB
+./internal/notifications TestProfileSetWakeCapsPhonesDB
 ./internal/notifications TestPushEnqueueSkipsTargetsRemovedAfterListingDB
 ./internal/notifications TestPushRetentionSkipsTargetsADeliveryHoldsDB
 ./internal/notifications TestPushRetentionKeepsTheLastChanceForAnExpiredAppleLoginDB

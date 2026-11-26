@@ -209,11 +209,13 @@ func Middleware(wake Waker) func(http.Handler) http.Handler {
 }
 
 // wakeRecovered calls wake for account, logging a panic instead of letting
-// it end the process: the wake runs outside the HTTP recoverer.
+// it end the process: the wake runs outside the HTTP recoverer. It logs the
+// panic's type only: the server's waker handles push tokens and the relay
+// credential, so the panic's text could carry either.
 func wakeRecovered(ctx context.Context, wake Waker, account int) {
 	defer func() {
 		if p := recover(); p != nil {
-			slog.ErrorContext(ctx, "profile set wake panicked", "user_id", account, "panic", fmt.Sprint(p))
+			slog.ErrorContext(ctx, "profile set wake panicked", "user_id", account, "panic_type", fmt.Sprintf("%T", p))
 		}
 	}()
 	wake.Wake(ctx, account)

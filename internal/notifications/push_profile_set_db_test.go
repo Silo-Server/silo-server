@@ -2,10 +2,13 @@ package notifications
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -63,7 +66,9 @@ func (h wakeHarness) attempts() int {
 // pastTheMinute ages every wake past the debounce interval.
 func (h wakeHarness) pastTheMinute() {
 	h.t.Helper()
-	if _, err := h.pool.Exec(h.t.Context(), `UPDATE push_delivery_attempts SET created_at = created_at - interval '61 seconds'`); err != nil {
+	if _, err := h.pool.Exec(h.t.Context(), `
+		UPDATE push_delivery_attempts SET created_at = created_at - interval '61 seconds';
+		UPDATE push_profile_set_wakes SET last_wake_at = last_wake_at - interval '61 seconds'`); err != nil {
 		h.t.Fatal(err)
 	}
 }
@@ -109,21 +114,24 @@ func (h wakeHarness) editThenWake(node *System, commit bool) bool {
 }
 
 // wakeTogether wakes account 7 from every node at once, staged so that the
-// wakes overlap: a third connection holds the account's wake lock until every
-// node is waiting on it. A node that never waits on the lock fails the test,
-// so it fails whenever the lock is missing, not only when the timing happens
-// to line up.
+// wakes overlap: a third connection holds the account's wake time row until
+// every node is waiting on it. A node that never waits on that row fails the
+// test, so it fails whenever the wake is not decided on the row, not only
+// when the timing happens to line up.
 func (h wakeHarness) wakeTogether(nodes ...*System) []bool {
 	h.t.Helper()
 	ctx := h.t.Context()
+	if _, err := h.pool.Exec(ctx, `INSERT INTO push_profile_set_wakes (user_id, last_wake_at)
+		VALUES (7, now() - interval '1 hour')
+		ON CONFLICT (user_id) DO UPDATE SET last_wake_at = excluded.last_wake_at`); err != nil {
+		h.t.Fatal(err)
+	}
 	holder, err := h.pool.Begin(ctx)
 	if err != nil {
 		h.t.Fatal(err)
 	}
 	defer func() { _ = holder.Rollback(context.Background()) }()
-	var key int64
-	if err := holder.QueryRow(ctx, `SELECT hashtextextended($1, $2) FROM (SELECT pg_advisory_xact_lock(hashtextextended($1, $2))) held`,
-		profileSetWakeLock, 7).Scan(&key); err != nil {
+	if _, err := holder.Exec(ctx, `SELECT 1 FROM push_profile_set_wakes WHERE user_id = 7 FOR UPDATE`); err != nil {
 		h.t.Fatal(err)
 	}
 
@@ -141,15 +149,14 @@ func (h wakeHarness) wakeTogether(nodes ...*System) []bool {
 	for waiting := 0; waiting < len(nodes); {
 		select {
 		case <-finished:
-			h.t.Fatal("the wakes finished without waiting on the account's wake lock")
+			h.t.Fatal("the wakes finished without waiting on the account's wake time")
 		case <-deadline:
-			h.t.Fatalf("%d of %d wakes waiting on the account's wake lock", waiting, len(nodes))
+			h.t.Fatalf("%d of %d wakes waiting on the account's wake time", waiting, len(nodes))
 		case <-poll.C:
 		}
-		if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks
-			WHERE locktype = 'advisory' AND NOT granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
-			  AND classid = (($1::bigint >> 32) & 4294967295)::oid AND objid = ($1::bigint & 4294967295)::oid AND objsubid = 1`,
-			key).Scan(&waiting); err != nil {
+		if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock'
+			  AND query LIKE 'INSERT INTO push_profile_set_wakes%'`).Scan(&waiting); err != nil {
 			h.t.Fatal(err)
 		}
 	}
@@ -277,6 +284,9 @@ func TestRelayModeFollowsTheTrigger(t *testing.T) {
 func (h wakeHarness) assertNeverClaimed(repo *PushDeviceRepository, state string) {
 	h.t.Helper()
 	ctx := h.t.Context()
+	if _, err := h.pool.Exec(ctx, `UPDATE push_profile_set_wakes SET last_wake_at = last_wake_at - interval '2 hours'`); err != nil {
+		h.t.Fatal(err)
+	}
 	rows, err := h.pool.Query(ctx, `UPDATE push_delivery_attempts
 		SET attempted_at = attempted_at - interval '2 hours', created_at = created_at - interval '2 hours'
 		WHERE trigger_type = $1 RETURNING id`, PushTriggerProfileSet)
@@ -449,5 +459,92 @@ func TestProfileSetWakePanickingSendDB(t *testing.T) {
 	waitForWakeRows(t, pool, PushOutcomeDelivered+":", PushOutcomeFailed+":wake_send_unfinished")
 	if calls.Load() != 2 {
 		t.Fatalf("relay calls = %d, want 2: the next phone must still be sent", calls.Load())
+	}
+}
+
+// registerAndroid registers, or with remove removes, one Android phone of
+// account 7 through the ordered route's repository call at generation.
+func registerAndroid(t *testing.T, repo *PushDeviceRepository, deviceID string, generation int64, remove bool) {
+	t.Helper()
+	key := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))
+	cmd := AndroidPushCommand{UserID: 7, ProfileID: "default", DeviceID: deviceID, InstallationKey: key, Generation: generation, Remove: remove}
+	if !remove {
+		cmd.Token, cmd.PushMode, cmd.LoginSessionID = strings.Repeat("a", 64), PushModePrivatePush, "live"
+	}
+	if _, err := repo.ApplyAndroidPush(t.Context(), cmd, testPushCipher(t)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Removing a phone and registering it again does not reset the
+// once-a-minute limit. Regression: the limit was read from the account's
+// wake attempts, which a device removal deletes with the device, so a
+// remove-and-register cycle of three requests allowed another wake every
+// time, against the server's shared relay allowance.
+func TestProfileSetWakeSurvivesDeviceRemovalDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	h := wakeHarness{t: t, pool: pool}
+	ctx := t.Context()
+	platforms := []string{PushPlatformApple, PushPlatformAndroid}
+	wake := func() (bool, int) {
+		t.Helper()
+		queued, sendNow, err := repo.EnqueueProfileSetWake(ctx, 7, platforms, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return queued, len(sendNow)
+	}
+
+	registerAndroid(t, repo, "android-cycle", 1, false)
+	if queued, sent := wake(); !queued || sent != 1 || h.attempts() != 1 {
+		t.Fatalf("first wake: queued %v, %d sent, %d rows; want true, 1, 1", queued, sent, h.attempts())
+	}
+	if queued, sent := wake(); !queued || sent != 0 || h.attempts() != 1 {
+		t.Fatalf("wake inside the minute: queued %v, %d sent, %d rows; want true, 0, 1", queued, sent, h.attempts())
+	}
+	registerAndroid(t, repo, "android-cycle", 2, true)
+	if h.attempts() != 0 {
+		t.Fatalf("rows after the phone's removal = %d, want 0: its attempts go with it", h.attempts())
+	}
+	registerAndroid(t, repo, "android-cycle", 3, false)
+	if queued, sent := wake(); !queued || sent != 0 || h.attempts() != 0 {
+		t.Fatalf("wake inside the minute after remove and register: queued %v, %d sent, %d rows; want true, 0, 0", queued, sent, h.attempts())
+	}
+	h.pastTheMinute()
+	if queued, sent := wake(); !queued || sent != 1 || h.attempts() != 1 {
+		t.Fatalf("wake after the minute: queued %v, %d sent, %d rows; want true, 1, 1", queued, sent, h.attempts())
+	}
+}
+
+// A wake reaches at most profileSetWakeMaxPhones of the account's phones,
+// the most recently seen. Regression: a wake wrote one attempt and made one
+// relay call for every registration the account had, with no bound.
+func TestProfileSetWakeCapsPhonesDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	ctx := t.Context()
+	for i := range profileSetWakeMaxPhones + 1 {
+		registerAndroid(t, repo, fmt.Sprintf("android-%02d", i), 1, false)
+	}
+	// android-00 was seen longest ago.
+	if _, err := pool.Exec(ctx, `UPDATE push_devices
+		SET last_seen_at = now() - (100 - substring(device_id from 9)::int) * interval '1 minute'`); err != nil {
+		t.Fatal(err)
+	}
+	_, sendNow, err := repo.EnqueueProfileSetWake(ctx, 7, []string{PushPlatformAndroid}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := pool.Query(ctx, `SELECT d.device_id FROM push_delivery_attempts a
+		JOIN push_devices d ON d.id = a.push_device_id ORDER BY d.device_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	woken, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sendNow) != profileSetWakeMaxPhones || len(woken) != profileSetWakeMaxPhones || slices.Contains(woken, "android-00") {
+		t.Fatalf("woke %d phones (%d to send): %v; want the %d most recently seen, without android-00",
+			len(woken), len(sendNow), woken, profileSetWakeMaxPhones)
 	}
 }
