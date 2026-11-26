@@ -157,7 +157,7 @@ func registerAppKeySignIn(reg *Registry) {
 	introduce.Description = "The body is an introduce envelope signed with the account's person key, with device_sig from the device key in the payload. The device key is enrolled and opens the session. For an administrator's account it is stored waiting for approval, and the device repeats signInWithAppKey until it is approved. An account holds at most 10 waiting keys inside their 24 hours; an introduce that would add an eleventh is 409 conflict, after its challenge is spent. A waiting key past its 24 hours does not count, and a retention task later revokes it. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + sealedReplyDescription + providerAnswersDescription
 	introduce.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
 	introduceOp := Operation{Operation: introduce, RetrySafety: RetrySafetyNonRetryable,
-		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
+		Class: ClassPublic, ServiceBacked: true, Audited: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
 	Register(reg, introduceOp, reg.introduceAppKey)
 
 	signIn := humaOp(http.MethodPost, Prefix+"/auth/keys/sign-in", "signInWithAppKey", "app-keys",
@@ -173,7 +173,7 @@ func registerAppKeySignIn(reg *Registry) {
 	enroll.Description = "Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. When the account has no person key, person_key is registered and takes the provider identity of the session that enrolls it. When person_key is the account's person key already, it is reused as it is, binding unchanged. A different person key on the account is 409 conflict, and so is a device key already enrolled on this server. The new device key takes the session's provider identity. The client drops the session it called with. Keys enrolled here start active, also on an administrator's account, so enroll never answers approval_required. A malformed payload field is 422 at body.message.payload." + mainProfileRule + appKeySignedBodyNote + enrollSealedReply + providerAnswersDescription
 	enroll.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
 	enrollOp := mainProfileOnly(Operation{Operation: enroll, RetrySafety: RetrySafetyNonRetryable,
-		ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10})
+		ServiceBacked: true, Audited: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10})
 	Register(reg, enrollOp, reg.enrollAppKeys)
 
 	redeem := humaOp(http.MethodPost, Prefix+"/auth/grants/redeem", "redeemAppKeyGrant", "app-keys",
@@ -181,7 +181,7 @@ func registerAppKeySignIn(reg *Registry) {
 	redeem.Description = "The body is a grant-redeem envelope signed with the app's own key, the app_key the grant inside it names, with no device_sig. The grant is a grant envelope signed by the account's person key away from this server: good for at most five minutes, for this server_id, and once. origin must be one of the grant's origins. The app's key is enrolled as kind app, enrolled_by grant, named device_name or else the grant's app_name, and takes the provider identity of the person key that signed the grant. A session it opens cannot enroll keys, replace the person key, approve a device sign-in or revoke any key but its own. 403 app_grant_invalid is about the grant itself: it was already used, is for another server or address, does not verify by the account's live person key, or names an administrator's or disabled account. 403 app_grant_expired: the grant's own exp has passed. 401 signature_invalid: the redeemer does not hold the grant's app_key (the outer signature does not verify under it, or the envelope's kid is not that key's ID), or the grant-redeem envelope is outside its own iat and exp. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + sealedReplyDescriptionSignedIn + providerAnswersDescription
 	redeem.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
 	redeemOp := Operation{Operation: redeem, RetrySafety: RetrySafetyNonRetryable,
-		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
+		Class: ClassPublic, ServiceBacked: true, Audited: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
 	Register(reg, redeemOp, reg.redeemAppKeyGrant)
 
 	declareRetryAfter(reg, "Seconds to wait before repeating the empty POST.", challengeOp)

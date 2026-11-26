@@ -74,7 +74,7 @@ func registerDevicePreapprovals(reg *Registry) {
 	create.Errors = []int{http.StatusForbidden, http.StatusConflict}
 	Register(reg, mainProfileOnly(Operation{
 		Operation: create, RetrySafety: RetrySafetyNonRetryable,
-		ServiceBacked: true, RateLimitBucket: bucketDeviceStart, DemoRestricted: true,
+		ServiceBacked: true, Audited: true, RateLimitBucket: bucketDeviceStart, DemoRestricted: true,
 	}), reg.preapproveDeviceLogin)
 	list := humaOp(http.MethodGet, Prefix+"/auth/device/preapprovals", "listDevicePreapprovals", "device-login",
 		"List the account's device sign-ins approved in advance and not yet redeemed.")

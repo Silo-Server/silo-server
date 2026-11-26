@@ -41,8 +41,11 @@ type AppPersonKey struct {
 	// identity, and stays true after the identity is deleted.
 	ProviderBound bool
 	EnrolledVia   string
-	CreatedAt     time.Time
-	RevokedAt     *time.Time
+	// EnrolledIP is the client address of the request that enrolled the
+	// key, as a login session records its own; empty when unknown.
+	EnrolledIP string
+	CreatedAt  time.Time
+	RevokedAt  *time.Time
 }
 
 // AppDeviceKey is a row in auth_device_keys: a key that opens login sessions
@@ -62,7 +65,9 @@ type AppDeviceKey struct {
 	PersonKeyID   *string
 	IdentityID    *int64
 	ProviderBound bool
-	CreatedAt     time.Time
+	// EnrolledIP is as on AppPersonKey.
+	EnrolledIP string
+	CreatedAt  time.Time
 	// LastUsedAt is when the key last opened a login session; nil for a key
 	// that never has (a key waiting for approval).
 	LastUsedAt *time.Time

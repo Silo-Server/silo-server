@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -129,6 +132,8 @@ func (s *DeviceLoginService) Preapprove(ctx context.Context, input DevicePreappr
 	}
 	now := s.now().UTC()
 	result := &DevicePreapprovalResult{ID: uuid.New().String(), DeviceCode: deviceCode, ExpiresAt: now.Add(DevicePreapprovalTTL)}
+	deviceName := fallbackDeviceName(input.DeviceName, "")
+	var audit *auditmutation.Entry
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		chain, err := s.approvingProviderChain(ctx, tx, approverUserID)
 		if err != nil {
@@ -172,7 +177,7 @@ func (s *DeviceLoginService) Preapprove(ctx context.Context, input DevicePreappr
 			hashDeviceLoginSecret(browserCode),
 			hashDeviceLoginSecret(userCode),
 			matchCode,
-			fallbackDeviceName(input.DeviceName, ""),
+			deviceName,
 			trimDeviceField(input.DevicePlatform, maxDevicePlatformLen),
 			DeviceLoginStatusApproved,
 			approverUserID,
@@ -187,11 +192,19 @@ func (s *DeviceLoginService) Preapprove(ctx context.Context, input DevicePreappr
 		if err != nil {
 			return fmt.Errorf("create device pre-approval: %w", err)
 		}
-		return nil
+		// The request's ID and device name only: never its device code or
+		// binding.
+		audit, err = auditmutation.RecordMutation(ctx, tx, auditmutation.ActionDeviceSignInPreapproved, auditmutation.TargetUser,
+			strconv.Itoa(approverUserID), http.StatusCreated, auditmutation.Changes(nil, map[string]any{
+				auditFieldDeviceLoginRequest: result.ID, auditFieldDeviceName: deviceName,
+				auditFieldExpiresAt: auditInstant(result.ExpiresAt),
+			}))
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	return result, nil
 }
 

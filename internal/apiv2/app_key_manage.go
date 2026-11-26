@@ -10,22 +10,24 @@ import (
 
 // AppPersonKey is the account's person key as its owner sees it.
 type AppPersonKey struct {
-	KeyID      string  `json:"kid" doc:"The person key's ID" example:"PgujdSfBbNNyXngLWCsOgw"`
-	EnrolledAt Instant `json:"enrolled_at" doc:"When the key was enrolled"`
+	KeyID             string  `json:"kid" doc:"The person key's ID" example:"PgujdSfBbNNyXngLWCsOgw"`
+	EnrolledAt        Instant `json:"enrolled_at" doc:"When the key was enrolled"`
+	EnrolledIPAddress string  `json:"enrolled_ip_address" doc:"Client address of the request that enrolled the key, decided as a login session's ip_address is; empty when unknown, which includes every key enrolled before this server recorded it" example:"203.0.113.7"`
 }
 
 // AppDeviceKey is one device or app key of the account.
 type AppDeviceKey struct {
-	ID         string   `json:"id" format:"uuid" doc:"The server's ID for the device key" example:"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11"`
-	KeyID      string   `json:"kid" doc:"The device key's ID" example:"zT321tSgcB7emUH9k0B0oA"`
-	Kind       string   `json:"kind" enum:"device,app" doc:"device: an install of the person's own app; app: another app the person allowed" example:"device"`
-	Name       string   `json:"name" doc:"The name the device gave itself" example:"Sam's iPhone"`
-	Platform   string   `json:"platform" doc:"The platform the device named; empty when it named none" example:"ios"`
-	Status     string   `json:"status" enum:"active,pending" doc:"active, or pending while an administrator's device waits for approval. A waiting key older than 24 hours is left out of the list without anyone denying or revoking it" example:"active"`
-	EnrolledBy string   `json:"enrolled_by" enum:"introduce,session,app-code,grant" doc:"How the key was enrolled: introduced by the person key, from a signed-in session, with an app code, or through a grant" example:"introduce"`
-	AllowedBy  *string  `json:"allowed_by" nullable:"true" doc:"For a key a grant enrolled, the name of the account whose person key signed the grant; null otherwise" example:"sam"`
-	EnrolledAt Instant  `json:"enrolled_at" doc:"When the key was enrolled"`
-	LastUsedAt *Instant `json:"last_used_at" nullable:"true" doc:"When the key last opened a login session. enroll and an introduce that signs in open one, so a key not used since shows enrolled_at; null for a key that has never opened one: a key waiting for approval, and a key approved since that has not signed in yet. status, not this member, says whether a key is waiting"`
+	ID                string   `json:"id" format:"uuid" doc:"The server's ID for the device key" example:"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11"`
+	KeyID             string   `json:"kid" doc:"The device key's ID" example:"zT321tSgcB7emUH9k0B0oA"`
+	Kind              string   `json:"kind" enum:"device,app" doc:"device: an install of the person's own app; app: another app the person allowed" example:"device"`
+	Name              string   `json:"name" doc:"The name the device gave itself" example:"Sam's iPhone"`
+	Platform          string   `json:"platform" doc:"The platform the device named; empty when it named none" example:"ios"`
+	Status            string   `json:"status" enum:"active,pending" doc:"active, or pending while an administrator's device waits for approval. A waiting key older than 24 hours is left out of the list without anyone denying or revoking it" example:"active"`
+	EnrolledBy        string   `json:"enrolled_by" enum:"introduce,session,app-code,grant" doc:"How the key was enrolled: introduced by the person key, from a signed-in session, with an app code, or through a grant" example:"introduce"`
+	AllowedBy         *string  `json:"allowed_by" nullable:"true" doc:"For a key a grant enrolled, the name of the account whose person key signed the grant; null otherwise" example:"sam"`
+	EnrolledAt        Instant  `json:"enrolled_at" doc:"When the key was enrolled"`
+	EnrolledIPAddress string   `json:"enrolled_ip_address" doc:"Client address of the request that enrolled the key, decided as a login session's ip_address is; empty when unknown, which includes every key enrolled before this server recorded it" example:"203.0.113.7"`
+	LastUsedAt        *Instant `json:"last_used_at" nullable:"true" doc:"When the key last opened a login session. enroll and an introduce that signs in open one, so a key not used since shows enrolled_at; null for a key that has never opened one: a key waiting for approval, and a key approved since that has not signed in yet. status, not this member, says whether a key is waiting"`
 }
 
 // AppKeyList is a person's own keys.
@@ -83,7 +85,7 @@ func registerAppKeyManagement(reg *Registry) {
 		"Replace the signed-in account's person key.")
 	replace.Description = ownKeySessionRule + " A session opened by device sign-in or by another app's key is refused too. The old person key is revoked: new devices need the new one, and devices already enrolled keep their own keys. A device the old key introduced that is still waiting for approval is denied with it. Sending the current key again changes nothing; a public key enrolled anywhere else on this server is 409 conflict. 409 capability_disabled while auth.app_key_sign_in is off." + mainProfileRule
 	replace.Errors = []int{http.StatusForbidden, http.StatusConflict}
-	Register(reg, mainProfileOnly(Operation{Operation: replace, RetrySafety: RetrySafetyNaturalIdempotent, ServiceBacked: true}), reg.replacePersonKey)
+	Register(reg, mainProfileOnly(Operation{Operation: replace, RetrySafety: RetrySafetyNaturalIdempotent, ServiceBacked: true, Audited: true}), reg.replacePersonKey)
 }
 
 func (reg *Registry) listAppKeys(ctx context.Context, _ *struct{}) (*AppKeyListOutput, error) {
@@ -97,7 +99,8 @@ func (reg *Registry) listAppKeys(ctx context.Context, _ *struct{}) (*AppKeyListO
 	}
 	out := AppKeyList{Devices: make([]AppDeviceKey, 0, len(keys.Devices))}
 	if keys.Person != nil {
-		out.PersonKey = &AppPersonKey{KeyID: keys.Person.KeyID, EnrolledAt: NewInstant(keys.Person.CreatedAt)}
+		person := appPersonKeyOf(keys.Person)
+		out.PersonKey = &person
 	}
 	for _, key := range keys.Devices {
 		out.Devices = append(out.Devices, appDeviceKeyOf(key, keys.AllowedBy))
@@ -105,12 +108,17 @@ func (reg *Registry) listAppKeys(ctx context.Context, _ *struct{}) (*AppKeyListO
 	return &AppKeyListOutput{Body: out}, nil
 }
 
+// appPersonKeyOf is the person key object of a key.
+func appPersonKeyOf(key *models.AppPersonKey) AppPersonKey {
+	return AppPersonKey{KeyID: key.KeyID, EnrolledAt: NewInstant(key.CreatedAt), EnrolledIPAddress: key.EnrolledIP}
+}
+
 // appDeviceKeyOf is the device object of a key. allowedBy is the account
 // name shown beside a key a grant enrolled.
 func appDeviceKeyOf(key *models.AppDeviceKey, allowedBy string) AppDeviceKey {
 	device := AppDeviceKey{
 		ID: key.ID, KeyID: key.KeyID, Kind: key.Kind, Name: key.Name, Platform: key.Platform, Status: key.Status,
-		EnrolledBy: enrolledBy(key.EnrolledVia), EnrolledAt: NewInstant(key.CreatedAt),
+		EnrolledBy: enrolledBy(key.EnrolledVia), EnrolledAt: NewInstant(key.CreatedAt), EnrolledIPAddress: key.EnrolledIP,
 	}
 	if key.EnrolledVia == models.AppKeyEnrolledGrant {
 		device.AllowedBy = &allowedBy

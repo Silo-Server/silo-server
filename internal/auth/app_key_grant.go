@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/appkeys"
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -106,6 +108,7 @@ func (a *AppKeySignIn) RedeemGrant(ctx context.Context, req KeyRequest) (*KeySig
 		name = grant.AppName
 	}
 	gone := false
+	var audit *auditmutation.Entry
 	out := &KeySignInResult{ReplyKey: *payload.ReplyKey, Challenge: payload.Challenge}
 	err = a.inTx(ctx, func(tx pgx.Tx) error {
 		user, err := lockUser(ctx, tx, person.UserID)
@@ -140,13 +143,17 @@ func (a *AppKeySignIn) RedeemGrant(ctx context.Context, req KeyRequest) (*KeySig
 			UserID: user.ID, PublicKey: *grant.AppKey, Kind: models.DeviceKeyKindApp,
 			Name: name, Platform: payload.DevicePlatform,
 			EnrolledVia: models.AppKeyEnrolledGrant, PersonKeyID: &locked.ID,
-			IdentityID: locked.IdentityID, ProviderBound: locked.ProviderBound,
+			IdentityID: locked.IdentityID, ProviderBound: locked.ProviderBound, IP: req.IP,
 		})
 		if err != nil {
 			return err
 		}
 		out.User, out.DeviceID, out.Status = user, key.ID, appkeys.ReplySignedIn
 		out.Pair, err = a.service.openKeySessionTx(ctx, tx, user, key, chain.session(req.IP, expiry))
+		if err != nil {
+			return err
+		}
+		audit, err = recordKeyAdded(ctx, tx, auditmutation.ActionAppGrantRedeemed, user.ID, http.StatusOK, keyAdded{}.withDevice(key))
 		return err
 	})
 	if err != nil {
@@ -155,6 +162,7 @@ func (a *AppKeySignIn) RedeemGrant(ctx context.Context, req KeyRequest) (*KeySig
 	if gone {
 		return nil, ErrGrantInvalid
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	return a.signedIn(ctx, out), nil
 }
 
