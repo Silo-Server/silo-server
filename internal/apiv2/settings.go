@@ -314,7 +314,7 @@ func registerSettings(reg *Registry) {
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		ServiceBacked:   true,
-		Origins:         grantedNotDecided,
+		Origins:         grantedRefusedPluginSettings,
 	}, reg.listPluginSettings)
 
 	Register(reg, Operation{
@@ -323,7 +323,7 @@ func registerSettings(reg *Registry) {
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		ServiceBacked:   true,
-		Origins:         grantedNotDecided,
+		Origins:         grantedRefusedPluginSettings,
 	}, reg.getPluginSettings)
 
 	Register(reg, Operation{
@@ -334,7 +334,7 @@ func registerSettings(reg *Registry) {
 		ProfileOptional: true,
 		DemoRestricted:  true,
 		ServiceBacked:   true,
-		Origins:         grantedNotDecided,
+		Origins:         grantedRefusedPluginSettings,
 	}, reg.updatePluginSettings)
 
 	Register(reg, Operation{
@@ -379,7 +379,7 @@ func registerSettings(reg *Registry) {
 		Class:          ClassProfileScoped,
 		DemoRestricted: isMutatingMethod(shortcut.Method),
 		ServiceBacked:  true,
-		Origins:        grantedNotDecided,
+		Origins:        grantedRefusedSettingByKey,
 	}, reg.updateNavigationShortcut)
 
 	Register(reg, Operation{
@@ -397,7 +397,7 @@ func registerSettings(reg *Registry) {
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
 		ServiceBacked:  true,
-		Origins:        grantedNotDecided,
+		Origins:        grantedRefusedSettingByKey,
 	}, reg.updateSettingValue)
 
 	Register(reg, Operation{
@@ -407,7 +407,7 @@ func registerSettings(reg *Registry) {
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
 		ServiceBacked:  true,
-		Origins:        grantedNotDecided,
+		Origins:        grantedRefusedSettingByKey,
 	}, reg.deleteSettingValue)
 }
 

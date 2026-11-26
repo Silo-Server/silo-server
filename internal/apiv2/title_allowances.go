@@ -156,7 +156,7 @@ func registerTitleAllowances(reg *Registry) {
 		"Whether the household's primary profile can allow limited profiles specific titles above their rating limits.")), grantedCapability), reg.getTitleAllowanceCapability)
 
 	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/profiles/{id}/allowed-titles", opListAllowedTitles, "profiles",
-		"List the movies and series allowed for a profile above its limits, as catalog cards, newest first, paged by cursor. Titles allowed only through a collection are not listed, and titles the acting profile may not see are omitted, so a page can hold fewer cards than its limit. Household managers only.")), grantedNotDecided),
+		"List the movies and series allowed for a profile above its limits, as catalog cards, newest first, paged by cursor. Titles allowed only through a collection are not listed, and titles the acting profile may not see are omitted, so a page can hold fewer cards than its limit. Household managers only.")), grantedRefusedOtherProfiles),
 		func(ctx context.Context, in *AllowedTitlesInput) (*AllowedTitleCollectionOutput, error) {
 			return reg.listAllowedTitles(ctx, cursors, in)
 		})
@@ -171,11 +171,11 @@ func registerTitleAllowances(reg *Registry) {
 			return reg.setTitleAllowance(ctx, in, false)
 		})
 	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}/title-allowances", "listTitleAllowanceProfiles", "profiles",
-		"For a movie or series, the standing of every other profile on the account: within its limits, allowed, or above its limits and allowable. Household managers only.")), grantedNotDecided),
+		"For a movie or series, the standing of every other profile on the account: within its limits, allowed, or above its limits and allowable. Household managers only.")), grantedRefusedOtherProfiles),
 		reg.listTitleAllowanceProfiles)
 
 	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/profiles/{id}/allowed-collections", "listAllowedCollections", "profiles",
-		"List the personal collections allowed for a profile, newest first. Household managers only.")), grantedNotDecided),
+		"List the personal collections allowed for a profile, newest first. Household managers only.")), grantedRefusedOtherProfiles),
 		reg.listAllowedCollections)
 	Register(reg, withOrigins(allowanceMutation(humaOp(http.MethodPut, Prefix+"/profiles/{id}/allowed-collections/{collection_id}", "allowCollection", "profiles",
 		"Allow a profile every title in a personal collection, including titles added later. Only a manual collection the acting primary profile created can be allowed (422 collection_not_live); copy other collections' titles with allowCollectionTitles. A profile sees at most 10,000 of its allowed titles, from its own allowances and its live collections together, and at most 50,000 entries of its live collections together are read; the rest stay hidden. Household managers only.")), grantedRefusedHousehold),

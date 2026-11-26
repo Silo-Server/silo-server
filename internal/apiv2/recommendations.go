@@ -251,7 +251,7 @@ func registerRecommendations(reg *Registry) {
 		RetrySafety:    RetrySafetyNonRetryable,
 		DemoRestricted: true,
 		ServiceBacked:  true,
-		Origins:        grantedNotDecided,
+		Origins:        grantedRefusedTasteSeed,
 	}, reg.createTasteSeed)
 	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/watch-tonight", "getWatchTonight", "recommendations",
 		"The acting profile's Watch Tonight list: in-progress and next-up items merged with taste candidates, best first.")), grantedRecommendRead), reg.getWatchTonight)

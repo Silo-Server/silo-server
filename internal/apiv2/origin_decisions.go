@@ -167,7 +167,6 @@ const (
 	reasonRefusedRefresh      = "refused for now: refreshing the shared catalog"
 	reasonRefusedNotifyPrefs  = "refused for now: changing notification preferences"
 	reasonRefusedCatalogEdit  = "refused for now: catalog edits under a delegated permission"
-	reasonNotDecided          = "not decided"
 
 	reasonRefusedOtherDevicesShow = "refused by decision: the profile's own, but it changes what the person's other devices show"
 	reasonRefusedOnboarding       = "refused by decision: onboarding is set up from the person's own apps"
@@ -183,6 +182,11 @@ const (
 	reasonRefusedProviderSearch   = "refused by decision: a provider search spends the server's allowance with its subtitle providers"
 	reasonRefusedChannelReads     = "refused by decision: reads the person's email address or Discord link"
 	reasonRefusedProfileSet       = "refused: the profile set is read and sent only by a session that may manage the account's keys"
+	reasonRefusedSettingByKey     = "refused by decision: some setting keys and scopes reach beyond the profile, and none has been read for that yet"
+	reasonRefusedPluginSettings   = "refused by decision: a plugin's per-user values may hold tokens for other services, and a plugin acting on what an app wrote is the plugin proxy's problem again"
+	reasonRefusedOtherProfiles    = "refused by decision: it is about the account's other profiles"
+	reasonRefusedTasteSeed        = "refused by decision: not yet read for whether it touches the profile's own state only"
+	reasonRefusedImpersonationEnd = "refused by decision: such a session is never a View as user session"
 )
 
 // Decisions shared by whole families: what a session another app's key
@@ -246,7 +250,6 @@ var (
 	grantedRefusedRefresh      = grantedApp(decideRefused(reasonRefusedRefresh))
 	grantedRefusedNotifyPrefs  = grantedApp(decideRefused(reasonRefusedNotifyPrefs))
 	grantedRefusedCatalogEdit  = grantedApp(decideRefused(reasonRefusedCatalogEdit))
-	grantedNotDecided          = grantedApp(decideRefused(reasonNotDecided))
 
 	grantedRefusedOtherDevicesShow = grantedApp(decideRefused(reasonRefusedOtherDevicesShow))
 	grantedRefusedOnboarding       = grantedApp(decideRefused(reasonRefusedOnboarding))
@@ -262,6 +265,11 @@ var (
 	grantedRefusedProviderSearch   = grantedApp(decideRefused(reasonRefusedProviderSearch))
 	grantedRefusedChannelReads     = grantedApp(decideRefused(reasonRefusedChannelReads))
 	grantedRefusedProfileSet       = grantedApp(decideRefused(reasonRefusedProfileSet))
+	grantedRefusedSettingByKey     = grantedApp(decideRefused(reasonRefusedSettingByKey))
+	grantedRefusedPluginSettings   = grantedApp(decideRefused(reasonRefusedPluginSettings))
+	grantedRefusedOtherProfiles    = grantedApp(decideRefused(reasonRefusedOtherProfiles))
+	grantedRefusedTasteSeed        = grantedApp(decideRefused(reasonRefusedTasteSeed))
+	grantedRefusedImpersonationEnd = grantedApp(decideRefused(reasonRefusedImpersonationEnd))
 )
 
 // extOriginDecisions documents OriginDecisions as {kind: {verdict, reason,

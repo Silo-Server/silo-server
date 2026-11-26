@@ -157486,7 +157486,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "not decided"
+            "reason": "refused by decision: such a session is never a View as user session"
           }
         },
         "x-silo-retry-safety": "natural_idempotent",
@@ -169532,7 +169532,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "not decided"
+            "reason": "refused by decision: it is about the account's other profiles"
           }
         },
         "x-silo-service-backed": true
@@ -224366,7 +224366,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "not decided"
+            "reason": "refused by decision: it is about the account's other profiles"
           }
         },
         "x-silo-service-backed": true
@@ -225000,7 +225000,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "not decided"
+            "reason": "refused by decision: it is about the account's other profiles"
           }
         },
         "x-silo-service-backed": true
@@ -230190,7 +230190,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "not decided"
+            "reason": "refused by decision: not yet read for whether it touches the profile's own state only"
           }
         },
         "x-silo-retry-safety": "non_retryable",
@@ -236804,7 +236804,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "not decided"
+            "reason": "refused by decision: a plugin's per-user values may hold tokens for other services, and a plugin acting on what an app wrote is the plugin proxy's problem again"
           }
         },
         "x-silo-service-backed": true
@@ -236966,7 +236966,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "not decided"
+            "reason": "refused by decision: a plugin's per-user values may hold tokens for other services, and a plugin acting on what an app wrote is the plugin proxy's problem again"
           }
         },
         "x-silo-service-backed": true
@@ -237167,7 +237167,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "not decided"
+            "reason": "refused by decision: a plugin's per-user values may hold tokens for other services, and a plugin acting on what an app wrote is the plugin proxy's problem again"
           }
         },
         "x-silo-retry-safety": "natural_idempotent",
@@ -238405,7 +238405,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "not decided"
+            "reason": "refused by decision: some setting keys and scopes reach beyond the profile, and none has been read for that yet"
           }
         },
         "x-silo-retry-safety": "natural_idempotent",
@@ -238700,7 +238700,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "not decided"
+            "reason": "refused by decision: some setting keys and scopes reach beyond the profile, and none has been read for that yet"
           }
         },
         "x-silo-retry-safety": "natural_idempotent",
@@ -239338,7 +239338,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "not decided"
+            "reason": "refused by decision: some setting keys and scopes reach beyond the profile, and none has been read for that yet"
           }
         },
         "x-silo-retry-safety": "natural_idempotent",
