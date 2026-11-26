@@ -91,5 +91,5 @@ func getxattr(path, attr string) (string, error) {
 }
 
 func isNoData(err error) bool {
-	return errors.Is(err, unix.ENODATA) || errors.Is(err, unix.ENOTSUP)
+	return errors.Is(err, errNoAttr) || errors.Is(err, unix.ENOTSUP)
 }
