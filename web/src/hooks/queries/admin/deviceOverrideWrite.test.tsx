@@ -6,6 +6,7 @@ import { setAccessToken, setProfileId, setRefreshToken } from "@/api/client";
 import {
   useAdminUserSettings,
   useDeleteAdminUserDeviceSetting,
+  useDeleteAdminUserSetting,
   useDeleteAllAdminUserDeviceSettingsForDevice,
   useUpdateAdminUserDeviceSetting,
 } from "./users";
@@ -123,6 +124,18 @@ it.each([
           profileId: "profile-a",
           deviceId: "device-a",
           keys: ["playback.subtitle_appearance"],
+        });
+    },
+  ],
+  [
+    "a removal on the user's Preferences tab",
+    () => {
+      const remove = useDeleteAdminUserSetting();
+      return () =>
+        remove.mutateAsync({
+          userId: 1,
+          key: "playback.subtitle_appearance",
+          identity: { scope: "profile_device", profileId: "profile-a", deviceId: "device-a" },
         });
     },
   ],
