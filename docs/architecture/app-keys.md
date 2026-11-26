@@ -1838,7 +1838,7 @@ sessions (`deleteSession`), or an administrator ends one of the account's
 sessions (`deleteAdminUserLoginSession`) or all of them
 (`deleteAdminUserLoginSessions`, which also deletes the account's
 Jellyfin-compatible and Audiobookshelf sessions). An uncollected device
-sign-in a key session approved in advance is no longer honoured once that
+sign-in a key session approved in advance is no longer honored once that
 session has ended, by the switch or any other way: collection refuses it
 ([device-login.md](device-login.md), "The approving session").
 
@@ -1877,7 +1877,7 @@ exclusive, the pattern that would deadlock two of them.
 The sweep ends key sessions in one order (`endKeySessionsTx`): every plugin
 installation row (share), then the sessions in id order. Ending a session
 writes only its row: a device sign-in the session approved in advance stops
-being honoured because collection reads the session's state, not because a
+being honored because collection reads the session's state, not because a
 trigger rewrites the request (a migration dropped the trigger that did; no
 row was rewritten). A schema check (`TestNoUnlistedSideWritesDB`) fails on
 any trigger or foreign-key action that writes another table on a write to

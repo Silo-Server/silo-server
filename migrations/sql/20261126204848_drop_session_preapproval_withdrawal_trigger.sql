@@ -1,6 +1,6 @@
 -- +goose Up
 -- Ending a login session no longer writes device_login_requests. A device
--- sign-in approved in advance is honoured at collection only while the
+-- sign-in approved in advance is honored at collection only while the
 -- session that approved it is live (not revoked, not expired), and the lists
 -- show only those, so the trigger that withdrew them when the session was
 -- revoked goes. Ending a session then touches session rows only.

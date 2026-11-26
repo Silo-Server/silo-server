@@ -201,7 +201,7 @@ func TestSessionEndersStagedDB(t *testing.T) {
 
 // Two revokes of one session, with a sign-in approved in advance from it
 // committing between them: neither waits on the request, and the request is
-// no longer honoured once the session has ended.
+// no longer honored once the session has ended.
 func TestTwoRevokesAroundAPreapprovalDB(t *testing.T) {
 	env := newKeyEnv(t, "tworevokes")
 	ctx := t.Context()

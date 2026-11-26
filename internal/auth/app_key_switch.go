@@ -101,7 +101,7 @@ func EndAppKeySessionsTx(ctx context.Context, tx pgx.Tx) (int64, error) {
 //     commit, or this waits there, holding no session row.
 //   - the sessions, in id order (lockSessionsInOrder), as every path that
 //     ends several sessions takes them. Ending a session writes only its
-//     row: a device sign-in it approved in advance stops being honoured
+//     row: a device sign-in it approved in advance stops being honored
 //     because collection reads the session's state (approverLive).
 func endKeySessionsTx(ctx context.Context, tx pgx.Tx, only []string) (int64, error) {
 	if _, err := tx.Exec(ctx, `SELECT id FROM plugin_installations ORDER BY id FOR SHARE`); err != nil {
