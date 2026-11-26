@@ -632,6 +632,25 @@ func TestProfileSetWakeSurvivesDeviceRemovalDB(t *testing.T) {
 	if queued, sent := wake(); queued || sent != 0 || h.attempts() != 1 {
 		t.Fatalf("wake inside the minute: queued %v, %d sent, %d rows; want false, 0, 1", queued, sent, h.attempts())
 	}
+	// Inside the minute no registration is read: with another transaction
+	// holding the registrations table, the wake still answers at once.
+	// Regression: every edit inside the minute listed and sorted all of the
+	// account's registrations before the limit turned it away.
+	func() {
+		locker, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = locker.Rollback(context.Background()) }()
+		if _, err := locker.Exec(ctx, `LOCK TABLE push_devices IN ACCESS EXCLUSIVE MODE`); err != nil {
+			t.Fatal(err)
+		}
+		limited, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if sendNow, err := repo.EnqueueProfileSetWake(limited, 7, platforms, nil, nil); err != nil || len(sendNow) != 0 {
+			t.Fatalf("wake inside the minute with the registrations locked: %d queued, error %v; want none and no error", len(sendNow), err)
+		}
+	}()
 	registerAndroid(t, repo, "android-cycle", 2, true)
 	if h.attempts() != 0 {
 		t.Fatalf("rows after the phone's removal = %d, want 0: its attempts go with it", h.attempts())

@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -119,6 +120,13 @@ func (r *PushDeviceRepository) EnqueueProfileSetWake(ctx context.Context, userID
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// The limit is consulted before anything else is read: inside the
+	// interval an edit costs one primary-key read and reads no registration.
+	// recordProfileSetWake decides again, on the locked row, once the devices
+	// are known.
+	if due, err := profileSetWakeDue(ctx, tx, userID); err != nil || !due {
+		return nil, err
+	}
 	if revisions != nil {
 		var committed bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (
@@ -211,6 +219,23 @@ func listProfileSetWakeDevices(ctx context.Context, tx pgx.Tx, userID int, platf
 		return nil, fmt.Errorf("list profile set wake devices: %w", err)
 	}
 	return devices, nil
+}
+
+// profileSetWakeDue reports whether userID's last wake is at least
+// profileSetWakeInterval old, or there is none. It is a plain read that
+// takes no lock, so it only lets the caller skip the work of a wake the
+// limit would refuse; recordProfileSetWake makes the decision.
+func profileSetWakeDue(ctx context.Context, tx pgx.Tx, userID int) (bool, error) {
+	var inside bool
+	err := tx.QueryRow(ctx, `SELECT last_wake_at > clock_timestamp() - $2::interval
+		FROM push_profile_set_wakes WHERE user_id = $1`, userID, profileSetWakeInterval).Scan(&inside)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return true, nil
+	case err != nil:
+		return false, fmt.Errorf("read profile set wake time: %w", err)
+	}
+	return !inside, nil
 }
 
 // recordProfileSetWake records a wake of userID now, unless one was
