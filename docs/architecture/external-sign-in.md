@@ -34,9 +34,10 @@ SDK's `docs/auth-provider.md`.
   same rule for the sessions, since a session a key opened carries the identity
   the key was bound to: the identities are locked before those sessions. Where
   the key rows fall varies. Revoking every key of the account
-  (`revokeAccountKeysTx`) takes the identities, then the key rows, then the
-  sessions. Unlinking an identity (`deleteIdentity`) locks only that identity
-  (`identityForUser`, `FOR UPDATE`), then the key rows bound to it, then the
+  (`revokeAccountKeysTx`) takes the identities, then the key rows (person keys
+  before device keys), then the sessions. Unlinking an identity
+  (`deleteIdentity`) locks only that identity (`identityForUser`, `FOR UPDATE`),
+  then the key rows bound to it (person key before device keys), then the
   sessions those keys opened, which carry that identity alone; revoking one key takes its
   key row first (`lockDeviceKey`), then the identities, then the sessions
   (`endDeviceKeySessions`). Each order is safe: every writer of key rows

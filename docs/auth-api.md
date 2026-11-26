@@ -457,7 +457,7 @@ sessions from their session list, or an administrator ends all of the account's 
 ### Other devices' playback and web push
 
 One rule decides which sessions are limited: the one above. Each surface applies it as its
-shape allows. The login session list redacts the other entries. Two other surfaces show or
+shape allows. The login session list redacts the other entries. The surfaces below show or
 act on one device's entries from another, and they apply only the half of the rule about
 another app the person allowed (`auth.SessionMayReachOtherDevices`, the grant-enrolled key
 of `SessionOrigin`). A device signed in by code is not limited on them:
@@ -476,8 +476,32 @@ of `SessionOrigin`). A device signed in by code is not limited on them:
   (`replanPlayback`) and minting a control ticket (`createPlaybackControlSocketTicket`) check
   the account and profile, and for such a session also that its own login session started
   the playback session: another login session's stream, or one with no recorded login
-  session, is 403 `permission_denied`. The check runs only when the stream's login session is
-  not the caller's, so a client acting on its own stream pays nothing for it.
+  session, is 403 `permission_denied`. Progress, stop and replan read the attempt anyway, and
+  ask the rule only when the stream's login session is not the caller's, so a client acting
+  on its own stream adds no query there. Minting a control ticket adds one read of the
+  attempt for every caller. Replan refuses as unavailable when that read fails, for every
+  caller with a login session, not only such a session; the replan would read the attempt
+  again and fail anyway.
+- The native push writes (`registerPushDevice`, `unregisterPushDevice`,
+  `registerApplePushDevice`, `resetApplePushInstallation`) refuse it with 403
+  `permission_denied` before anything is read or written. A registration with no ordered
+  record yet (a legacy Android one, or an Apple installation after a reset) is bound only to
+  the account and device id, and a reset needs no installation key, so the session could
+  remove or take over another device's registration. Its own app could receive nothing through
+  them: the Apple topic and the Android relay are the first-party apps'. The session-less
+  retirements stay as they are; they need the installation key.
+- Watch Together: a room's host is the account and profile, so such a session acting as the
+  host's profile would steer the room of the person's own device. It is refused creating a
+  room and every host operation (`createWatchTogetherRoom`, `closeWatchTogetherRoom`,
+  `startWatchTogetherRoomPlayback`, `stopWatchTogetherRoomPlayback`,
+  `updateWatchTogetherRoomPolicy`, `selectWatchTogetherRoomItem`,
+  `updateWatchTogetherRoomSelectionMode`, `stageWatchTogetherRoomItem`,
+  `promoteWatchTogetherSuggestion`), and `fallbackWatchTogetherSource`, which any member may
+  send and which switches what every member plays. `createWatchTogetherSocketTicket` refuses
+  it for a room its account and profile host. As a member of another host's room it may
+  connect and watch along: it reports its own state, suggests and votes, but the socket
+  refuses its `transport_request` frames with the error frame any refused request gets,
+  whatever the room's guest policy.
 
 The refusals carry the same detail as the key routes' refusal of a session that may not make
 a change.
@@ -1247,8 +1271,10 @@ the app opens can't enroll keys, replace the person key, approve a device
 sign-in now or in advance, read the key list, or revoke any key but its own.
 It is also refused (403 `permission_denied`) on creating a personal API key
 (`createPersonalAPIKey`) and on the operations that link a sign-in provider
-account. It doesn't reach the person's other devices
-([Other devices' playback and web push](#other-devices-playback-and-web-push)).
+account. It is kept off the other devices' playback, web push and native push
+registrations, and may not host or drive a Watch Together room
+([Other devices' playback and web push](#other-devices-playback-and-web-push)). The
+settings device registry (`/devices`) does not limit it yet.
 
 | Refusal | Problem |
 | --- | --- |

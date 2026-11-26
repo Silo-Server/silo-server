@@ -53,8 +53,9 @@ func mayActOnAttempt(ctx context.Context, attemptLoginSessionID string, caller P
 // refuseOtherStream is mayActOnAttempt for a route that read the attempt
 // itself: record and err are what GetAttempt answered. An attempt of
 // another profile, or none, is left to the route's own answer. A store
-// error refuses a caller the rule applies to, since the check needs the
-// attempt.
+// error refuses every caller that carries the rule (any login session when
+// app keys are wired), not only another app's: the check needs the attempt,
+// and the route would read it again and fail anyway.
 func refuseOtherStream(ctx context.Context, caller PlaybackCaller, record *playback.AttemptRecordV3, err error) error {
 	if caller.MayReachOtherDevices != nil && err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
 		return playbackStoreOperationError()

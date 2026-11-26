@@ -576,9 +576,10 @@ action per kind of change:
   and, unlike the actions above, passes every caller that is not the
   account's own login session, through `auth.SessionMayReachOtherDevices`.
   It keeps the app off the person's other devices: the household playback
-  list leaves their streams out, the web push routes refuse it, and the
-  playback progress, stop, replan and control-ticket routes refuse a stream
-  another login session started
+  list leaves their streams out, the web push and native push writes refuse
+  it, the playback progress, stop, replan and control-ticket routes refuse a
+  stream another login session started, and Watch Together refuses it hosting
+  or driving a room
   ([Other devices' playback and web push](../auth-api.md#other-devices-playback-and-web-push)).
   A device sign-in keeps what it has there; only the login session list
   limits it ([Sessions limited to
