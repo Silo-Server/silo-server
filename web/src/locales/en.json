@@ -32241,7 +32241,7 @@
     },
     {
       "type": 0,
-      "value": ". Their other devices stay signed in. The client can sign in again with the account's password."
+      "value": ". Their other devices stay signed in. The client can sign in again."
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -86436,18 +86436,6 @@
       "value": "count"
     }
   ],
-  "web.admin.users.detail.appKeys.actionFailed": [
-    {
-      "type": 0,
-      "value": "Couldn’t make that change. Try again."
-    }
-  ],
-  "web.admin.users.detail.appKeys.confirm.deny": [
-    {
-      "type": 0,
-      "value": "Deny device"
-    }
-  ],
   "web.admin.users.detail.appKeys.confirm.denyDescription": [
     {
       "type": 1,
@@ -86464,20 +86452,6 @@
     {
       "type": 0,
       "value": "’s account. If it was theirs, they add it again in the Silo app."
-    }
-  ],
-  "web.admin.users.detail.appKeys.confirm.denyTitle": [
-    {
-      "type": 0,
-      "value": "Deny "
-    },
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": "?"
     }
   ],
   "web.admin.users.detail.appKeys.confirm.personKey": [
@@ -86514,12 +86488,6 @@
       "value": "’s account key?"
     }
   ],
-  "web.admin.users.detail.appKeys.confirm.remove": [
-    {
-      "type": 0,
-      "value": "Remove device"
-    }
-  ],
   "web.admin.users.detail.appKeys.confirm.removeDescription": [
     {
       "type": 1,
@@ -86546,26 +86514,6 @@
       "value": " adds it again in the Silo app."
     }
   ],
-  "web.admin.users.detail.appKeys.confirm.removeTitle": [
-    {
-      "type": 0,
-      "value": "Remove "
-    },
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": "?"
-    }
-  ],
-  "web.admin.users.detail.appKeys.confirm.withdraw": [
-    {
-      "type": 0,
-      "value": "Withdraw approval"
-    }
-  ],
   "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
     {
       "type": 1,
@@ -86584,36 +86532,6 @@
       "value": "’s account."
     }
   ],
-  "web.admin.users.detail.appKeys.confirm.withdrawTitle": [
-    {
-      "type": 0,
-      "value": "Withdraw the approval for "
-    },
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": "?"
-    }
-  ],
-  "web.admin.users.detail.appKeys.confirm.working": [
-    {
-      "type": 0,
-      "value": "Saving…"
-    }
-  ],
-  "web.admin.users.detail.appKeys.denied": [
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": " denied"
-    }
-  ],
   "web.admin.users.detail.appKeys.description": [
     {
       "type": 0,
@@ -86628,34 +86546,16 @@
       "value": "’s account with the Silo app, without a password."
     }
   ],
-  "web.admin.users.detail.appKeys.devices.title": [
-    {
-      "type": 0,
-      "value": "Devices"
-    }
-  ],
   "web.admin.users.detail.appKeys.empty": [
     {
       "type": 0,
       "value": "No devices use the Silo app on this account."
     }
   ],
-  "web.admin.users.detail.appKeys.footnote": [
-    {
-      "type": 0,
-      "value": "Removing a device signs it out and stops its key working. Signing out a session doesn’t remove the device: it signs back in with its key."
-    }
-  ],
   "web.admin.users.detail.appKeys.loadFailed": [
     {
       "type": 0,
       "value": "Couldn’t load devices."
-    }
-  ],
-  "web.admin.users.detail.appKeys.loading": [
-    {
-      "type": 0,
-      "value": "Loading devices…"
     }
   ],
   "web.admin.users.detail.appKeys.off": [
@@ -86712,12 +86612,6 @@
       "value": "Remove account key"
     }
   ],
-  "web.admin.users.detail.appKeys.personKey.title": [
-    {
-      "type": 0,
-      "value": "Account key"
-    }
-  ],
   "web.admin.users.detail.appKeys.personKeyRemoved": [
     {
       "type": 0,
@@ -86738,46 +86632,6 @@
       "value": " approved for a device that hasn’t connected yet."
     }
   ],
-  "web.admin.users.detail.appKeys.preapprovals.loadFailed": [
-    {
-      "type": 0,
-      "value": "Couldn’t load the sign-ins approved in advance."
-    }
-  ],
-  "web.admin.users.detail.appKeys.preapprovals.title": [
-    {
-      "type": 0,
-      "value": "Approved in advance"
-    }
-  ],
-  "web.admin.users.detail.appKeys.refreshLabel": [
-    {
-      "type": 0,
-      "value": "Refresh Silo app devices"
-    }
-  ],
-  "web.admin.users.detail.appKeys.removed": [
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": " removed"
-    }
-  ],
-  "web.admin.users.detail.appKeys.title": [
-    {
-      "type": 0,
-      "value": "Silo app devices"
-    }
-  ],
-  "web.admin.users.detail.appKeys.unavailable": [
-    {
-      "type": 0,
-      "value": "Silo app sign-in isn’t available on this server, so these devices can’t sign in. You can still remove them."
-    }
-  ],
   "web.admin.users.detail.appKeys.waiting.description": [
     {
       "type": 0,
@@ -86796,12 +86650,6 @@
     {
       "type": 0,
       "value": "Waiting for approval"
-    }
-  ],
-  "web.admin.users.detail.appKeys.withdrawn": [
-    {
-      "type": 0,
-      "value": "Approval withdrawn"
     }
   ],
   "web.admin.users.detail.common.allProfiles": [
@@ -134945,7 +134793,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "Other browsers and apps must sign in again with the new password. This browser stays signed in, and API keys keep working."
+      "value": "Other browsers and apps are signed out. This browser stays signed in, and API keys keep working."
     }
   ],
   "web.settings.account.password.title": [

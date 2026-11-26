@@ -35089,7 +35089,7 @@
     },
     {
       "type": 0,
-      "value": ". Ţĥéîŕ öţĥéŕ đéṽîçéš šţåý šîĝñéđ îñ. Ţĥé çļîéñţ çåñ šîĝñ îñ åĝåîñ ŵîţĥ ţĥé åççöûñţ'š þåššŵöŕđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": ". Ţĥéîŕ öţĥéŕ đéṽîçéš šţåý šîĝñéđ îñ. Ţĥé çļîéñţ çåñ šîĝñ îñ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -93892,18 +93892,6 @@
       "value": "~~~~⟧"
     }
   ],
-  "web.admin.users.detail.appKeys.actionFailed": [
-    {
-      "type": 0,
-      "value": "⟦Çöûļđñ’ţ ɱåķé ţĥåţ çĥåñĝé. Ţŕý åĝåîñ.~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.users.detail.appKeys.confirm.deny": [
-    {
-      "type": 0,
-      "value": "⟦Đéñý đéṽîçé~~~~~⟧"
-    }
-  ],
   "web.admin.users.detail.appKeys.confirm.denyDescription": [
     {
       "type": 0,
@@ -93924,20 +93912,6 @@
     {
       "type": 0,
       "value": "’š åççöûñţ. Îƒ îţ ŵåš ţĥéîŕš, ţĥéý åđđ îţ åĝåîñ îñ ţĥé Šîļö åþþ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.users.detail.appKeys.confirm.denyTitle": [
-    {
-      "type": 0,
-      "value": "⟦Đéñý "
-    },
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": "?~~~⟧"
     }
   ],
   "web.admin.users.detail.appKeys.confirm.personKey": [
@@ -93974,12 +93948,6 @@
       "value": "’š åççöûñţ ķéý?~~~~~~~~~⟧"
     }
   ],
-  "web.admin.users.detail.appKeys.confirm.remove": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéɱöṽé đéṽîçé~~~~~~⟧"
-    }
-  ],
   "web.admin.users.detail.appKeys.confirm.removeDescription": [
     {
       "type": 0,
@@ -94010,26 +93978,6 @@
       "value": " åđđš îţ åĝåîñ îñ ţĥé Šîļö åþþ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
-  "web.admin.users.detail.appKeys.confirm.removeTitle": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéɱöṽé "
-    },
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": "?~~~~⟧"
-    }
-  ],
-  "web.admin.users.detail.appKeys.confirm.withdraw": [
-    {
-      "type": 0,
-      "value": "⟦Ŵîţĥđŕåŵ åþþŕöṽåļ~~~~~~~⟧"
-    }
-  ],
   "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
     {
       "type": 0,
@@ -94052,40 +94000,6 @@
       "value": "’š åççöûñţ.~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
-  "web.admin.users.detail.appKeys.confirm.withdrawTitle": [
-    {
-      "type": 0,
-      "value": "⟦Ŵîţĥđŕåŵ ţĥé åþþŕöṽåļ ƒöŕ "
-    },
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": "?~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.users.detail.appKeys.confirm.working": [
-    {
-      "type": 0,
-      "value": "⟦Šåṽîñĝ…~~~⟧"
-    }
-  ],
-  "web.admin.users.detail.appKeys.denied": [
-    {
-      "type": 0,
-      "value": "⟦"
-    },
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": " đéñîéđ~~~⟧"
-    }
-  ],
   "web.admin.users.detail.appKeys.description": [
     {
       "type": 0,
@@ -94100,34 +94014,16 @@
       "value": "’š åççöûñţ ŵîţĥ ţĥé Šîļö åþþ, ŵîţĥöûţ å þåššŵöŕđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
-  "web.admin.users.detail.appKeys.devices.title": [
-    {
-      "type": 0,
-      "value": "⟦Đéṽîçéš~~~⟧"
-    }
-  ],
   "web.admin.users.detail.appKeys.empty": [
     {
       "type": 0,
       "value": "⟦Ñö đéṽîçéš ûšé ţĥé Šîļö åþþ öñ ţĥîš åççöûñţ.~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
-  "web.admin.users.detail.appKeys.footnote": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéɱöṽîñĝ å đéṽîçé šîĝñš îţ öûţ åñđ šţöþš îţš ķéý ŵöŕķîñĝ. Šîĝñîñĝ öûţ å šéššîöñ đöéšñ’ţ ŕéɱöṽé ţĥé đéṽîçé: îţ šîĝñš ƀåçķ îñ ŵîţĥ îţš ķéý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
   "web.admin.users.detail.appKeys.loadFailed": [
     {
       "type": 0,
       "value": "⟦Çöûļđñ’ţ ļöåđ đéṽîçéš.~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.users.detail.appKeys.loading": [
-    {
-      "type": 0,
-      "value": "⟦Ļöåđîñĝ đéṽîçéš…~~~~~~~⟧"
     }
   ],
   "web.admin.users.detail.appKeys.off": [
@@ -94184,12 +94080,6 @@
       "value": "⟦Ŕéɱöṽé åççöûñţ ķéý~~~~~~~~⟧"
     }
   ],
-  "web.admin.users.detail.appKeys.personKey.title": [
-    {
-      "type": 0,
-      "value": "⟦Åççöûñţ ķéý~~~~~⟧"
-    }
-  ],
   "web.admin.users.detail.appKeys.personKeyRemoved": [
     {
       "type": 0,
@@ -94210,50 +94100,6 @@
       "value": " åþþŕöṽéđ ƒöŕ å đéṽîçé ţĥåţ ĥåšñ’ţ çöññéçţéđ ýéţ.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
-  "web.admin.users.detail.appKeys.preapprovals.loadFailed": [
-    {
-      "type": 0,
-      "value": "⟦Çöûļđñ’ţ ļöåđ ţĥé šîĝñ-îñš åþþŕöṽéđ îñ åđṽåñçé.~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.users.detail.appKeys.preapprovals.title": [
-    {
-      "type": 0,
-      "value": "⟦Åþþŕöṽéđ îñ åđṽåñçé~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.users.detail.appKeys.refreshLabel": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéƒŕéšĥ Šîļö åþþ đéṽîçéš~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.users.detail.appKeys.removed": [
-    {
-      "type": 0,
-      "value": "⟦"
-    },
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": " ŕéɱöṽéđ~~~~⟧"
-    }
-  ],
-  "web.admin.users.detail.appKeys.title": [
-    {
-      "type": 0,
-      "value": "⟦Šîļö åþþ đéṽîçéš~~~~~~~⟧"
-    }
-  ],
-  "web.admin.users.detail.appKeys.unavailable": [
-    {
-      "type": 0,
-      "value": "⟦Šîļö åþþ šîĝñ-îñ îšñ’ţ åṽåîļåƀļé öñ ţĥîš šéŕṽéŕ, šö ţĥéšé đéṽîçéš çåñ’ţ šîĝñ îñ. Ýöû çåñ šţîļļ ŕéɱöṽé ţĥéɱ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
   "web.admin.users.detail.appKeys.waiting.description": [
     {
       "type": 0,
@@ -94272,12 +94118,6 @@
     {
       "type": 0,
       "value": "⟦Ŵåîţîñĝ ƒöŕ åþþŕöṽåļ~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.users.detail.appKeys.withdrawn": [
-    {
-      "type": 0,
-      "value": "⟦Åþþŕöṽåļ ŵîţĥđŕåŵñ~~~~~~~~⟧"
     }
   ],
   "web.admin.users.detail.common.allProfiles": [
@@ -146717,7 +146557,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "⟦Öţĥéŕ ƀŕöŵšéŕš åñđ åþþš ɱûšţ šîĝñ îñ åĝåîñ ŵîţĥ ţĥé ñéŵ þåššŵöŕđ. Ţĥîš ƀŕöŵšéŕ šţåýš šîĝñéđ îñ, åñđ ÅÞÎ ķéýš ķééþ ŵöŕķîñĝ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Öţĥéŕ ƀŕöŵšéŕš åñđ åþþš åŕé šîĝñéđ öûţ. Ţĥîš ƀŕöŵšéŕ šţåýš šîĝñéđ îñ, åñđ ÅÞÎ ķéýš ķééþ ŵöŕķîñĝ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.settings.account.password.title": [

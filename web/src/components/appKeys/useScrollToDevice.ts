@@ -12,9 +12,13 @@ export function useScrollToDevice(ready: boolean) {
   const { hash } = useLocation();
   useEffect(() => {
     if (!ready || (hash !== "#devices" && !hash.startsWith("#device-"))) return;
-    const target =
-      document.getElementById(decodeURIComponent(hash.slice(1))) ??
-      document.getElementById("devices");
+    let id: string;
+    try {
+      id = decodeURIComponent(hash.slice(1));
+    } catch {
+      return; // A malformed hash (`#device-%zz`) scrolls nowhere.
+    }
+    const target = document.getElementById(id) ?? document.getElementById("devices");
     target?.scrollIntoView?.({ block: "start", behavior: motionScrollBehavior() });
   }, [hash, ready]);
 }

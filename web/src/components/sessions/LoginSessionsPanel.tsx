@@ -31,14 +31,14 @@ export function LoginSessionsPanel({
   manageable = true,
   manageOthers = true,
 }: {
-  adminUser?: { id: number; username: string };
+  adminUser?: { id: number; username: string; enabled?: boolean };
   manageable?: boolean;
   /** False when the server refuses signing out sessions but this one (demo mode). */
   manageOthers?: boolean;
 }) {
   const t = useT();
   const { query, sessions, currentSession, revoke, revokeAll } = useLoginSessions(adminUser?.id);
-  const { clearLoginSession } = useAuth();
+  const { clearLoginSession, isImpersonating } = useAuth();
   const navigate = useNavigate();
   const [selection, setSelection] = useState<Selection | null>(null);
   const [actionError, setActionError] = useState("");
@@ -50,13 +50,22 @@ export function LoginSessionsPanel({
   const others = sessions.filter((row) => !row.current);
   const adminRows =
     current && !sessions.some((row) => row.id === current.id) ? [current, ...sessions] : sessions;
+  // An administrator acting as the account has no devices list to go to.
+  const linkDevices = Boolean(adminUser) || !isImpersonating;
   const devicesPath = (anchor?: string) =>
-    adminUser ? adminDevicesPath(adminUser.id, anchor) : ownDevicesPath(anchor);
+    !linkDevices
+      ? undefined
+      : adminUser
+        ? adminDevicesPath(adminUser.id, anchor)
+        : ownDevicesPath(anchor);
+  // A disabled account's keys are refused at sign-in: nothing comes back.
+  const accountEnabled = adminUser?.enabled !== false;
   // Signing out everywhere, or one session a Silo app key opened, leaves the
   // key: the device signs in again by itself.
   const signsBackIn =
-    selection?.kind === "all" ||
-    (selection && !selection.session.current && selection.session.device_key_id);
+    accountEnabled &&
+    (selection?.kind === "all" ||
+      (selection && !selection.session.current && selection.session.device_key_id));
 
   function open(next: Selection) {
     returnFocus.current =
@@ -102,6 +111,7 @@ export function LoginSessionsPanel({
       {rows.map((session) => (
         <LoginSessionRow
           key={session.id}
+          linkDevice={linkDevices}
           session={session}
           onSignOut={canSignOut ? signOut : undefined}
         />
@@ -250,7 +260,7 @@ export function LoginSessionsPanel({
                 </Link>
               ),
             })}
-        <SignsBackInNote to={devicesPath()} />
+        {accountEnabled && <SignsBackInNote to={devicesPath()} />}
       </p>
       <AlertDialog
         open={Boolean(selection)}

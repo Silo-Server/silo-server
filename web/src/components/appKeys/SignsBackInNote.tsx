@@ -9,14 +9,17 @@ import { useT } from "@/i18n";
  * the devices list where one is removed. `onNavigate` closes the dialog the
  * sentence sits in. It is a line of its own inside the text it follows.
  * Shown only while the server signs devices in with their keys: with app key
- * sign-in off the devices don't come back.
+ * sign-in off the devices don't come back. Without `to` (an administrator
+ * acting as the account, who has no devices list to go to) the words stay
+ * and the link goes. A caller showing a disabled account leaves the note
+ * out: key sign-in is refused while the account is disabled.
  */
 export function SignsBackInNote({
   to,
   onNavigate,
   className,
 }: {
-  to: To;
+  to?: To;
   onNavigate?: () => void;
   className?: string;
 }) {
@@ -26,11 +29,14 @@ export function SignsBackInNote({
   return (
     <span className={className ?? "mt-1 block"}>
       {t("web.settings.appKeys.signsBackIn", {
-        link: (chunks) => (
-          <Link to={to} onClick={onNavigate} className="underline underline-offset-4">
-            {chunks}
-          </Link>
-        ),
+        link: (chunks) =>
+          to === undefined ? (
+            chunks
+          ) : (
+            <Link to={to} onClick={onNavigate} className="underline underline-offset-4">
+              {chunks}
+            </Link>
+          ),
       })}
     </span>
   );

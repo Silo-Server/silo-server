@@ -16,8 +16,11 @@ const WRAPPING_BUTTON = "h-auto min-h-8 max-w-full py-1 text-start wrap-anywhere
 export function LoginSessionRow({
   session,
   onSignOut,
+  linkDevice = true,
 }: {
   session: LoginSession;
+  /** False where no devices list is on the page to link to. */
+  linkDevice?: boolean;
   onSignOut?: (session: LoginSession) => void;
 }) {
   const t = useT();
@@ -67,17 +70,21 @@ export function LoginSessionRow({
           {session.device_key_id && (
             // Signing this session out doesn't stop it: the link goes to the
             // device in the Silo app devices list on the same page.
-            <p className="mt-1 text-xs">
-              <Link
-                to={{
-                  pathname: location.pathname,
-                  search: location.search,
-                  hash: deviceAnchor(session.device_key_id),
-                }}
-                className="text-muted-foreground hover:text-foreground underline underline-offset-4"
-              >
-                {t("web.settings.sessions.row.signsBackIn")}
-              </Link>
+            <p className="text-muted-foreground mt-1 text-xs">
+              {linkDevice ? (
+                <Link
+                  to={{
+                    pathname: location.pathname,
+                    search: location.search,
+                    hash: deviceAnchor(session.device_key_id),
+                  }}
+                  className="text-muted-foreground hover:text-foreground underline underline-offset-4"
+                >
+                  {t("web.settings.sessions.row.signsBackIn")}
+                </Link>
+              ) : (
+                t("web.settings.sessions.row.signsBackIn")
+              )}
             </p>
           )}
         </div>

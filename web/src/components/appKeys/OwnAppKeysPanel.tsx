@@ -50,18 +50,24 @@ function Name({ children }: { children: string }) {
  * in advance. What this browser session may do comes from the server first
  * (useAppKeySessionAccess): a session that can't list devices gets
  * SignInAgainNotice instead of an error, and a profile that isn't the
- * household's main one gets the list without Approve. An administrator
- * acting as the account sees nothing here.
+ * household's main one gets the list without Approve (the route guard keeps
+ * such a profile off this page today). An administrator acting as the
+ * account sees nothing here and nothing is asked.
  */
 export function OwnAppKeysPanel() {
   const t = useT();
   const { isImpersonating } = useAuth();
   const capability = useAppKeyCapability();
   const state = capability.data?.state;
-  const shown = !isImpersonating && capability.isSuccess && state !== "unsupported";
-  const access = useAppKeySessionAccess(shown);
+  // A failed capability read shows the panel's own error, not nothing.
+  const shown =
+    !isImpersonating && (capability.isError || (capability.isSuccess && state !== "unsupported"));
+  const asks = shown && capability.isSuccess;
+  const access = useAppKeySessionAccess(asks);
   const heading = useRef<HTMLHeadingElement>(null);
-  useScrollToDevice(shown && !access.isPending);
+  // Without the list there is no device row: a link lands on the section.
+  // DeviceLists scrolls once its rows are on the page.
+  useScrollToDevice(asks && access.isSuccess && !access.data.list);
   if (!shown) return null;
 
   const header = (
@@ -80,7 +86,9 @@ export function OwnAppKeysPanel() {
     </div>
   );
   let body: ReactNode;
-  if (access.isPending) body = <Loading />;
+  if (capability.isError)
+    body = <LoadFailed onRetry={() => void capability.refetch()} busy={capability.isFetching} />;
+  else if (access.isPending) body = <Loading />;
   else if (access.isError)
     body = <LoadFailed onRetry={() => void access.refetch()} busy={access.isFetching} />;
   else if (!access.data.list) body = <SignInAgainNotice signInAgain={access.data.sign_in_again} />;
@@ -155,6 +163,7 @@ function DeviceLists({
   const t = useT();
   const { profile, selectProfile, verifyProfilePin } = useAuth();
   const { keys, preapprovals, revokeDevice, deny, approve, withdraw } = useOwnAppKeys(true);
+  useScrollToDevice(!keys.isPending);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [error, setError] = useState("");
   const [askPin, setAskPin] = useState(false);

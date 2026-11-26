@@ -15,6 +15,7 @@ import {
   usePasswordPolicy,
 } from "@/hooks/queries/account";
 import { useT } from "@/i18n";
+import { useOptionalAuth } from "@/hooks/useAuth";
 import { SignsBackInNote } from "@/components/appKeys/SignsBackInNote";
 import { ownDevicesPath } from "@/components/appKeys/devicePaths";
 import {
@@ -26,6 +27,8 @@ import { AccountSignInSection } from "./AccountSignInSection";
 
 export default function AccountSettings() {
   const t = useT();
+  // An administrator acting as the account has no devices list to go to.
+  const isImpersonating = useOptionalAuth()?.isImpersonating ?? false;
   const capability = useAccountPasswordCapability();
   const passwordPolicy = usePasswordPolicy();
   const ruleHint = newPasswordRuleHint(passwordPolicy);
@@ -185,7 +188,7 @@ export default function AccountSettings() {
                     className="text-muted-foreground text-xs"
                   >
                     {t("web.settings.account.password.signOutOthersDescription")}
-                    <SignsBackInNote to={ownDevicesPath()} />
+                    <SignsBackInNote to={isImpersonating ? undefined : ownDevicesPath()} />
                   </p>
                 </div>
               </div>
