@@ -2460,10 +2460,15 @@ func isNotFound(err error) bool {
 // CanViewFilePaths reports whether the caller may see on-disk paths and file
 // names: the acting admin always, any other caller when the account's
 // effective permissions, after the access group's mask, include metadata
-// curation.
+// curation. A session another app's key opened never does: a permission
+// the account holds counts for such a session only while an operation it
+// gates is open to it (apiv2's permittedPermissions), and every metadata
+// curation operation is refused to it. This must agree with that rule;
+// apiv2's TestFilePathsFollowTheGrantedAppPermissionRule fails if a metadata
+// curation operation is opened to such a session without changing this.
 func (h *ItemsHandler) CanViewFilePaths(ctx context.Context) bool {
 	claims := apimw.GetClaims(ctx)
-	if claims == nil {
+	if claims == nil || claims.IsGrantedApp() {
 		return false
 	}
 	if claims.Role == "admin" {

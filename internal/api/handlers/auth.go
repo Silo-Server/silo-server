@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -106,6 +107,9 @@ type UserView struct {
 	// after the access-group mask, without the admin role grant that the
 	// frozen v1 Permissions list keeps (v1AccountPermissions).
 	PolicyPermissions []string `json:"-"`
+	// CreatedAt is v2-only (TokenPair.account_created_at): when the
+	// account was made, as stored.
+	CreatedAt time.Time `json:"-"`
 }
 
 // errorResponse represents an error in JSON responses.
@@ -355,6 +359,7 @@ func buildUserResponse(user *models.User, policy accountPolicy, impersonatorUser
 		// An impersonating administrator is not restricted (auth.Service.Refresh).
 		PasswordChangeRequired: user.PasswordChangeRequired && impersonatorUserID == nil,
 		PolicyPermissions:      policy.Permissions,
+		CreatedAt:              user.CreatedAt,
 	}
 	if resp.PolicyPermissions == nil {
 		// Clients iterate permissions; never serialize it as null.
