@@ -1165,6 +1165,8 @@ describe("SignInSettings password sign-in", () => {
     await user.click(within(group).getByRole("button", { name: "Show more" }));
     await waitFor(() => expect(within(group).getAllByRole("listitem")).toHaveLength(8));
     expect(within(group).queryByRole("button", { name: /Show/ })).toBeNull();
+    // The heading counts from the newest page, as the list does.
+    expect(group).toHaveAccessibleName("8 accounts connect by email");
   });
 
   it("returns focus to the switch when the confirmation is cancelled", async () => {

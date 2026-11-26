@@ -66,9 +66,8 @@ function groupState(query: GroupQuery) {
     loading: query.isPending || (query.isFetching && !query.isFetchingNextPage),
     failed: query.isError && !query.isFetchNextPageError,
     accounts: pages.flatMap((page) => page.items),
-    totals: pages[0]?.totals,
-    /** The newest count, for how many remain after the pages shown. */
-    latestTotals: pages.at(-1)?.totals,
+    /** The newest page's counts: accounts can change between pages. */
+    totals: pages.at(-1)?.totals,
   };
 }
 
@@ -145,7 +144,7 @@ export function LocalPasswordOffDialog({
                   })}
                   notes={[t("web.admin.settings.signIn.passwordsOff.matchExplain", { provider })]}
                   accounts={matched.accounts}
-                  latestTotal={matched.latestTotals?.email_match ?? matchedTotal}
+                  latestTotal={matchedTotal}
                   query={matchedQuery}
                 />
               ) : null}
@@ -161,7 +160,7 @@ export function LocalPasswordOffDialog({
                       : []),
                   ]}
                   accounts={unmatched.accounts}
-                  latestTotal={unmatched.latestTotals?.admin_link ?? unmatchedTotal}
+                  latestTotal={unmatchedTotal}
                   query={unmatchedQuery}
                   showReason
                 />
