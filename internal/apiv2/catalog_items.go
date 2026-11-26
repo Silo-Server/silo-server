@@ -736,6 +736,29 @@ func (reg *Registry) itemViewerOnDevice(ctx context.Context, deviceID string, ar
 	return handlers.ItemViewer{Access: filter, ProfileID: profileID, IncludeCardAvailability: cardAvailabilityWanted(ctx)}, nil
 }
 
+// readWithLibraryFallback runs read with the request's library_id and, when
+// that read finds nothing, once more as if no library_id were sent. library_id
+// picks how a title is presented, not whether the viewer may open it: a server
+// collection holds titles from several libraries, and a client browsing it
+// sends the library it opened it from. The second read keeps every access rule
+// of the first, so a title the viewer may not open stays not found.
+func readWithLibraryFallback[T any](filter catalogpkg.AccessFilter, read func(catalogpkg.AccessFilter) (T, error)) (T, error) {
+	out, err := read(filter)
+	if err == nil || filter.PresentationLibraryID == nil || serviceProblem(err).Status != http.StatusNotFound {
+		return out, err
+	}
+	return read(filter.WithoutPresentationLibrary())
+}
+
+// readViewerWithLibraryFallback is readWithLibraryFallback for a read that
+// takes the viewer.
+func readViewerWithLibraryFallback[T any](viewer handlers.ItemViewer, read func(handlers.ItemViewer) (T, error)) (T, error) {
+	return readWithLibraryFallback(viewer.Access, func(filter catalogpkg.AccessFilter) (T, error) {
+		viewer.Access = filter
+		return read(viewer)
+	})
+}
+
 // versionsScopedToLibrary reads catalog.scope_versions_to_library. A read
 // failure keeps the default (off) rather than failing the catalog read: the
 // setting only narrows a document, it never protects one.
@@ -1219,7 +1242,10 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemDeviceIn
 	if p != nil {
 		return nil, p
 	}
-	detail, err := svc.ItemDetail(ctx, viewer, in.ID)
+	detail, err := readViewerWithLibraryFallback(viewer, func(v handlers.ItemViewer) (*catalogpkg.ItemDetail, error) {
+		viewer = v
+		return svc.ItemDetail(ctx, v, in.ID)
+	})
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -1262,7 +1288,9 @@ func (reg *Registry) listCatalogItemVersions(ctx context.Context, in *CatalogIte
 	if p != nil {
 		return nil, p
 	}
-	versions, err := svc.ItemVersions(ctx, viewer, in.ID)
+	versions, err := readViewerWithLibraryFallback(viewer, func(v handlers.ItemViewer) ([]catalogpkg.FileVersion, error) {
+		return svc.ItemVersions(ctx, v, in.ID)
+	})
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -1299,7 +1327,9 @@ func (reg *Registry) listCatalogItemEpisodes(ctx context.Context, in *CatalogIte
 	if p != nil {
 		return nil, p
 	}
-	episodes, err := svc.ItemEpisodes(ctx, viewer, in.ID)
+	episodes, err := readViewerWithLibraryFallback(viewer, func(v handlers.ItemViewer) ([]handlers.EpisodeView, error) {
+		return svc.ItemEpisodes(ctx, v, in.ID)
+	})
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -1315,7 +1345,9 @@ func (reg *Registry) listSeriesSeasons(ctx context.Context, in *CatalogSeasonsIn
 	if p != nil {
 		return nil, p
 	}
-	seasons, err := svc.SeriesSeasons(ctx, viewer, in.ID, in.IncludeArtwork)
+	seasons, err := readViewerWithLibraryFallback(viewer, func(v handlers.ItemViewer) ([]handlers.SeasonView, error) {
+		return svc.SeriesSeasons(ctx, v, in.ID, in.IncludeArtwork)
+	})
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -1335,7 +1367,9 @@ func (reg *Registry) getSeriesSeason(ctx context.Context, in *CatalogSeasonInput
 	if p != nil {
 		return nil, p
 	}
-	season, err := svc.SeriesSeason(ctx, viewer, in.ID, in.Number)
+	season, err := readViewerWithLibraryFallback(viewer, func(v handlers.ItemViewer) (handlers.SeasonView, error) {
+		return svc.SeriesSeason(ctx, v, in.ID, in.Number)
+	})
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -1351,7 +1385,9 @@ func (reg *Registry) listSeasonEpisodes(ctx context.Context, in *CatalogSeasonIn
 	if p != nil {
 		return nil, p
 	}
-	episodes, err := svc.SeasonEpisodes(ctx, viewer, in.ID, in.Number)
+	episodes, err := readViewerWithLibraryFallback(viewer, func(v handlers.ItemViewer) ([]handlers.EpisodeView, error) {
+		return svc.SeasonEpisodes(ctx, v, in.ID, in.Number)
+	})
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

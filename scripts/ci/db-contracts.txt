@@ -5,6 +5,7 @@
 # Library visibility, rating ceilings, mixed catalogs, and section results.
 ./internal/catalog TestDualLibraryItemDeniedByDisabledLibraryDB
 ./internal/catalog TestEpisodeOpensUnderEveryLibraryOfItsSeriesDB
+./internal/apiv2 TestItemReadsIgnoreLibraryWithoutTheItemDB
 ./internal/catalog TestCatalogQueryRequestedLibraryOutsideAccessDB
 ./internal/catalog TestCatalogSearchSortsByProfilePlaysDB
 ./internal/catalog TestCatalogQuerySortsDateViewedUnwatchedLastDB

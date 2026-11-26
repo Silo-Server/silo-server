@@ -79,6 +79,15 @@ type AccessFilter struct {
 	ExcludedMediaTypes []string
 }
 
+// WithoutPresentationLibrary is f read as if no library were named: no
+// presentation library and nothing scoped to one. Access is unchanged.
+func (f AccessFilter) WithoutPresentationLibrary() AccessFilter {
+	f.PresentationLibraryID = nil
+	f.ScopeFilesToLibrary = false
+	f.SeriesLibraryCoversEpisodes = false
+	return f
+}
+
 // LibraryScope resolves the libraries a read may touch: the requested
 // libraries (none requested means every library), limited to
 // AllowedLibraryIDs, minus DisabledLibraryIDs. A nil AllowedLibraryIDs is
