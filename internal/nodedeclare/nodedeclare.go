@@ -96,6 +96,40 @@ var (
 	}
 )
 
+// JobCapVariables names the variable that caps one kind of work on a
+// transcode node, under its job cap (SILO_NODE_MAX_TRANSCODES). Unlike the
+// declaration these never reach the node's row: the node enforces them and
+// reports them on health, where the core's planner reads them. Trickplay has
+// none: the core's trickplay node capacity already bounds it.
+var JobCapVariables = []struct {
+	Kind nodepool.JobKind
+	Name string
+}{
+	{nodepool.JobKindVideoTranscode, "SILO_NODE_MAX_VIDEO_TRANSCODES"},
+	{nodepool.JobKindAudioTranscode, "SILO_NODE_MAX_AUDIO_TRANSCODES"},
+	{nodepool.JobKindRemux, "SILO_NODE_MAX_REMUXES"},
+}
+
+// JobCapsByKindFromEnv reads a transcode node's caps per job kind. A
+// variable that is unset, blank or 0 leaves its kind to the job cap alone.
+func JobCapsByKindFromEnv(getenv func(string) string) (map[nodepool.JobKind]int, error) {
+	caps := make(map[nodepool.JobKind]int, len(JobCapVariables))
+	for _, v := range JobCapVariables {
+		value := strings.TrimSpace(getenv(v.Name))
+		if value == "" {
+			continue
+		}
+		n, err := strconv.ParseInt(value, 10, 32)
+		if err != nil || n < 0 {
+			return nil, &Error{Variable: v.Name, Detail: "must be a whole number, 0 for unlimited"}
+		}
+		if n > 0 {
+			caps[v.Kind] = int(n)
+		}
+	}
+	return caps, nil
+}
+
 // Variables lists the variables a node of nodeType reads.
 func Variables(nodeType string) []Variable {
 	switch nodeType {

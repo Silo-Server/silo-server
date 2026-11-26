@@ -71,7 +71,8 @@ running sessions are unaffected. Its health `status` is `draining`, then
 `drained`.
 
 A transcode node that declares a job cap (`SILO_NODE_MAX_TRANSCODES`, see
-[transcode nodes](transcode-nodes.md#what-the-node-enforces)) refuses new work
+[transcode nodes](transcode-nodes.md#what-the-node-enforces)), or a cap on one
+kind of work ([caps by kind](../admin-api.md#caps-by-kind)), refuses new work
 past it with `503`, `Retry-After: 5` and `X-Silo-Node-Refusal: at_capacity`
 (`nodepool.NodeRefusalHeader`). It counts what health reports as
 `active_jobs`, which includes work it has admitted and not yet started (a

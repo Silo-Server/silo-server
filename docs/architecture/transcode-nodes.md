@@ -273,6 +273,7 @@ cipher or event bus.
 | `PORT` | Listen port, default `8080`. |
 | `SILO_NODE_DRAIN_TIMEOUT` | See [node drain](node-drain.md). |
 | `SILO_NODE_NAME`, `SILO_NODE_URL`, `SILO_NODE_GROUP`, `SILO_NODE_MAX_TRANSCODES`, `SILO_NODE_SOURCE_ACCESS`, `SILO_NODE_HW_ACCEL`, `SILO_NODE_HW_DEVICE`, `SILO_NODE_DOWNLOAD_ARTIFACT_DIR`, `SILO_NODE_DOWNLOAD_ARTIFACT_MAX_BYTES` | Optional. The node's declaration of its own row; see [Registration](#registration). A bad value refuses startup, naming the variable (`nodedeclare.FromEnv`). |
+| `SILO_NODE_MAX_VIDEO_TRANSCODES`, `SILO_NODE_MAX_AUDIO_TRANSCODES`, `SILO_NODE_MAX_REMUXES` | Optional. Caps on one kind of work under `SILO_NODE_MAX_TRANSCODES`; see [caps by kind](../admin-api.md#caps-by-kind). Not part of the declaration: the node reports them on health. A bad value refuses startup, naming the variable (`nodedeclare.JobCapsByKindFromEnv`). |
 | `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY` (and their `_FILE` variants), `NODE_URL`, `NODE_NAME` | Ignored, with one warning, so a shared env file keeps working. `NODE_URL` and `NODE_NAME` stay ignored although the node declares a URL and name: an env file shared with a proxy sets them, and honoring them would rewrite rows on upgrade. |
 
 Before its first configuration read the node sends its declaration
@@ -365,6 +366,7 @@ says, whatever its row or its configuration document says:
 | Variable | Enforced by |
 |---|---|
 | `SILO_NODE_MAX_TRANSCODES` | The node: it refuses new work past the cap ([worker protocol](worker-http-protocol.md)). The planner also reads the row's `max_jobs`. |
+| `SILO_NODE_MAX_VIDEO_TRANSCODES`, `SILO_NODE_MAX_AUDIO_TRANSCODES`, `SILO_NODE_MAX_REMUXES` | The node: it refuses new work of the kind past its cap. The planner reads the caps from the node's health report, not its row. |
 | `SILO_NODE_HW_ACCEL` | The node: `nodeconfig.Remote` uses it over the document's `hw_accel`, and a start runs with it whatever backend the request names (`Server.jobHWAccel`). The core may still ask for `none`. Only a node that declares `auto` lets a hardware tone map name its backend, chosen from the node's own capability report; a node that declares a backend runs that one for a hardware tone map too. |
 | `SILO_NODE_HW_DEVICE` | The node: used over the document's `hw_device`. |
 | `SILO_NODE_SOURCE_ACCESS` | The node: `Remote.SourceAccess` returns it over the document's. With `local` the node never fetches source bytes over HTTP; with `core` it never opens a local path. The core still grants and serves sources either way. |

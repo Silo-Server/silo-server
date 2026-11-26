@@ -572,7 +572,7 @@ func (p *Planner) ReserveTranscodeWorkWith(workID string, kind JobKind, eligible
 
 	best := p.pickNode(p.transcodes.Nodes(), "", now, func(node *Node) bool {
 		return node.TakesNewWork() && p.transcodes.HasKey(node) && p.underCap(node, now) &&
-			(eligible == nil || eligible(node))
+			p.underKindCap(node, "", kind, now) && (eligible == nil || eligible(node))
 	}, kind, nil)
 	if best != nil {
 		p.reserved[reservationID] = &reservation{transcodeURL: best.URL, kind: kind, createdAt: now}
@@ -750,7 +750,8 @@ func (p *Planner) jobLoads(candidates []*Node, kind JobKind, now time.Time) map[
 // still occupies the same GPU.
 func (p *Planner) pickTranscode(transcodes, pool, proxies []*Node, groupHealthy map[string]bool, currentURL string, kind JobKind, estKbps int, now time.Time) *Node {
 	return p.pickWithScratchGuard(transcodes, pool, currentURL, now, func(n *Node) bool {
-		return admitsSession(n, currentURL) && p.transcodeEligible(n, proxies, groupHealthy, estKbps, now)
+		return admitsSession(n, currentURL) && p.transcodeEligible(n, proxies, groupHealthy, estKbps, now) &&
+			p.underKindCap(n, currentURL, kind, now)
 	}, kind, p.physicalGPULoadScore(pool, now))
 }
 
@@ -946,7 +947,8 @@ func (p *Planner) physicalGPULoadScore(pool []*Node, now time.Time) func(*Node) 
 // and group-healthy, with no proxy partner required.
 func (p *Planner) pickLocalEgressTranscode(transcodes, pool []*Node, groupHealthy map[string]bool, currentURL string, kind JobKind, now time.Time) *Node {
 	return p.pickWithScratchGuard(transcodes, pool, currentURL, now, func(n *Node) bool {
-		return admitsSession(n, currentURL) && p.transcodeEligible(n, nil, groupHealthy, 0, now)
+		return admitsSession(n, currentURL) && p.transcodeEligible(n, nil, groupHealthy, 0, now) &&
+			p.underKindCap(n, currentURL, kind, now)
 	}, kind, p.physicalGPULoadScore(pool, now))
 }
 
@@ -1041,6 +1043,24 @@ func (p *Planner) underCap(n *Node, now time.Time) bool {
 		return false
 	}
 	return n.MaxJobs == nil || p.effectiveJobs(n, now) < *n.MaxJobs
+}
+
+// underKindCap reports whether a transcode node can take one more job of kind
+// under the cap it reported for that kind: its reported jobs of the kind plus
+// this planner's reservations of it the report does not include yet. A node
+// with no cap for the kind, or work of no kind, always can; the job cap is
+// underCap's to judge. So can the node at currentURL: a replan of a session
+// it runs is counted there already, and the node never refuses it at the cap.
+func (p *Planner) underKindCap(n *Node, currentURL string, kind JobKind, now time.Time) bool {
+	if kind == "" || (currentURL != "" && sameNodeURL(n.URL, currentURL)) {
+		return true
+	}
+	view, ok := reportedJobStats(n)
+	limit := view.JobCapsByKind[kind]
+	if !ok || limit <= 0 {
+		return true
+	}
+	return max(view.ActiveJobsByKind[kind], 0)+p.pendingTranscodeReservations(n, kind, now) < limit
 }
 
 // underBandwidthCap reports whether a proxy has bandwidth headroom for a

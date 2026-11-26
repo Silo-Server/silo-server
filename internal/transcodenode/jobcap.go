@@ -42,6 +42,19 @@ func (s *Server) SetJobCap(limit int) {
 	s.jobCap.Store(int32(min(max(limit, 0), math.MaxInt32)))
 }
 
+// SetJobCapsByKind sets the most jobs of each kind the node runs at once,
+// under the job cap SetJobCap sets: a kind it does not name has no cap of
+// its own. The node reports them on health, where the core's planner reads
+// them. Set it before serving.
+func (s *Server) SetJobCapsByKind(caps map[nodepool.JobKind]int) {
+	s.kindCaps = make(map[nodepool.JobKind]int, len(caps))
+	for kind, limit := range caps {
+		if limit > 0 {
+			s.kindCaps[kind] = limit
+		}
+	}
+}
+
 // SetDeclaredHWAccel sets the hardware acceleration the node's operator
 // declared, which a start request cannot widen; see jobHWAccel. Empty
 // leaves the request's choice. Set it before serving.
@@ -55,25 +68,27 @@ func (s *Server) SetArtifactBudget(bytes int64) {
 	s.artifactBudget.Store(max(bytes, 0))
 }
 
-// jobSlot is new work admitted under the job cap and not yet counted in
-// activeJobs. The admitted-but-uncounted slots count against the cap too, so
-// two starts arriving together at the cap less one cannot both pass.
+// jobSlot is new work of kind admitted under the job caps and not yet
+// counted in activeJobs. The admitted-but-uncounted slots count against the
+// caps too, so two starts arriving together at a cap less one cannot both
+// pass.
 type jobSlot struct {
 	s    *Server
 	kind nodepool.JobKind
 	done bool
 }
 
-// admitJob admits new work of kind under the job cap: work that is not a
-// session, remux or preparation the node already holds. It reports false at
-// the cap. The health report counts the slot from here, so the core sees the
-// job while it gets ready (a RequireReady start waiting on its first segment).
-// The caller counts the slot with countJob once the job runs, and releases
-// it on every other return (release after count does nothing).
+// admitJob admits new work of kind under the job cap and the kind's own cap:
+// work that is not a session, remux or preparation the node already holds.
+// It reports false at either cap. The health report counts the slot from
+// here, so the core sees the job while it gets ready (a RequireReady start
+// waiting on its first segment). The caller counts the slot with countJob
+// once the job runs, and releases it on every other return (release after
+// count does nothing).
 func (s *Server) admitJob(kind nodepool.JobKind) (*jobSlot, bool) {
 	s.admission.Lock()
 	defer s.admission.Unlock()
-	if s.fullLocked() {
+	if s.fullLocked(kind) {
 		return nil, false
 	}
 	s.admitted++
@@ -150,6 +165,12 @@ func (c *jobKindCounts) add(kind nodepool.JobKind, delta int) {
 	c.jobs[kind] += delta
 }
 
+func (c *jobKindCounts) count(kind nodepool.JobKind) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return max(c.jobs[kind], 0)
+}
+
 // snapshot names every kind, idle ones as zero, so the core can tell a node
 // with no jobs of a kind from a node that cannot say. extra adds jobs not
 // counted here, such as admitted slots.
@@ -183,11 +204,14 @@ func (slot *jobSlot) release() {
 	}
 }
 
-// fullLocked reports whether the counted and admitted jobs fill the cap. The
-// caller holds s.admission.
-func (s *Server) fullLocked() bool {
-	limit := int(s.jobCap.Load())
-	return limit > 0 && int(s.activeJobs.Load())+s.admitted >= limit
+// fullLocked reports whether the counted and admitted jobs fill the job cap,
+// or those of kind fill the kind's own cap. The caller holds s.admission.
+func (s *Server) fullLocked(kind nodepool.JobKind) bool {
+	if limit := int(s.jobCap.Load()); limit > 0 && int(s.activeJobs.Load())+s.admitted >= limit {
+		return true
+	}
+	limit := s.kindCaps[kind]
+	return limit > 0 && s.jobKinds.count(kind)+s.admittedKinds[kind] >= limit
 }
 
 // setRefusal adds the headers of a capacity or storage refusal.
@@ -336,7 +360,8 @@ func (s *Server) claimContinuation(playbackSessionID string, now time.Time) (*co
 	return &continuation{s: s, playbackSessionID: playbackSessionID}, true
 }
 
-// admitStart admits a start under the job cap. One that replaces a session
+// admitStart admits a start under the job caps, classed by its target codecs
+// as sessionJobKind classes the session it starts. One that replaces a session
 // the node runs, or that holds the overlap allowance of its playback session,
 // continues a job and takes no slot; any other is new work. release gives
 // back whatever was held and is called once the start has registered its
@@ -399,7 +424,7 @@ func (s *Server) noteRemux(playbackSessionID string, now time.Time) {
 func jobCapRefusalHeaders() map[string]*huma.Param {
 	return map[string]*huma.Param{
 		nodepool.NodeRefusalHeader: {Schema: &huma.Schema{Type: huma.TypeString, Enum: []any{nodepool.RefusalAtCapacity, nodepool.RefusalStorageFull}},
-			Description: "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal."},
+			Description: "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES) or the cap it declares for the work's kind (SILO_NODE_MAX_VIDEO_TRANSCODES, SILO_NODE_MAX_AUDIO_TRANSCODES, SILO_NODE_MAX_REMUXES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal."},
 		"Retry-After": {Schema: &huma.Schema{Type: huma.TypeString}, Description: "Seconds, with the refusal header."},
 	}
 }

@@ -28,7 +28,10 @@ type healthResponse struct {
 	// planner reads it from the node row without a column of its own. A node
 	// that predates job kinds omits it.
 	ActiveJobsByKind json.RawMessage `json:"active_jobs_by_kind"`
-	EgressKbps       int             `json:"egress_kbps"`
+	// JobCapsByKind is the node's own cap per job kind, stored and read
+	// beside ActiveJobsByKind. Omitted when the node caps no kind.
+	JobCapsByKind json.RawMessage `json:"job_caps_by_kind"`
+	EgressKbps    int             `json:"egress_kbps"`
 	// CapabilitiesHash identifies the node's current hardware capability
 	// snapshot. A node that predates capability snapshots reports none, which
 	// is how the sweep tells "nothing changed" from "cannot say".
@@ -232,6 +235,7 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 	build := trimJSONNull(hr.Build)
 	artifacts := trimJSONNull(hr.Artifacts)
 	jobsByKind := trimJSONNull(hr.ActiveJobsByKind)
+	capsByKind := trimJSONNull(hr.JobCapsByKind)
 	if system == nil && gpu == nil && attribution == nil && build == nil && artifacts == nil && jobsByKind == nil {
 		return nil
 	}
@@ -245,7 +249,8 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 		// ActiveJobsByKind is read back by reportedJobsByKind: unlike the
 		// rest of the sample, transcode selection routes on it.
 		ActiveJobsByKind json.RawMessage `json:"active_jobs_by_kind,omitempty"`
-	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt, Build: build, Artifacts: artifacts, ActiveJobsByKind: jobsByKind}
+		JobCapsByKind    json.RawMessage `json:"job_caps_by_kind,omitempty"`
+	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt, Build: build, Artifacts: artifacts, ActiveJobsByKind: jobsByKind, JobCapsByKind: capsByKind}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil
@@ -254,22 +259,24 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 		slog.WarnContext(ctx, "node resource sample too large to store", "component", "nodepool",
 			"id", n.ID, "name", n.Name, "url", n.URL,
 			"bytes", len(encoded), "limit_bytes", maxLastStatsBytes)
-		return routingStatsOnly(jobsByKind)
+		return routingStatsOnly(jobsByKind, capsByKind)
 	}
 	return encoded
 }
 
 // routingStatsOnly keeps the part of an oversized sample that routes work: the
-// job breakdown is a few dozen bytes, and dropping it with the dashboard
-// numbers would return every placement this node is eligible for to total
-// jobs. nil when there is none, or when it is itself too large.
-func routingStatsOnly(jobsByKind json.RawMessage) []byte {
+// job breakdown and the node's caps by kind are a few dozen bytes, and
+// dropping them with the dashboard numbers would return every placement this
+// node is eligible for to total jobs and stop the planner skipping a node at a
+// kind's cap. nil when there is no breakdown, or when it is itself too large.
+func routingStatsOnly(jobsByKind, capsByKind json.RawMessage) []byte {
 	if jobsByKind == nil {
 		return nil
 	}
 	encoded, err := json.Marshal(struct {
 		ActiveJobsByKind json.RawMessage `json:"active_jobs_by_kind"`
-	}{jobsByKind})
+		JobCapsByKind    json.RawMessage `json:"job_caps_by_kind,omitempty"`
+	}{jobsByKind, capsByKind})
 	if err != nil || len(encoded) > maxLastStatsBytes {
 		return nil
 	}

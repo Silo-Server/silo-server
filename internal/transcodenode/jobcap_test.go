@@ -70,7 +70,7 @@ func TestJobCapAdmissionIsRaceFree(t *testing.T) {
 	)
 	for range 64 {
 		wg.Go(func() {
-			if slot, ok := s.admitJob(nodepool.JobKindVideoTranscode); ok {
+			if slot, ok := s.admitJob(nodepool.JobKindRemux); ok {
 				mu.Lock()
 				admitted = append(admitted, slot)
 				mu.Unlock()
@@ -86,7 +86,7 @@ func TestJobCapAdmissionIsRaceFree(t *testing.T) {
 	if s.activeJobs.Load() != 3 || s.admitted != 0 {
 		t.Fatalf("after counting the slot: active %d, admitted %d", s.activeJobs.Load(), s.admitted)
 	}
-	if _, ok := s.admitJob(nodepool.JobKindVideoTranscode); ok {
+	if _, ok := s.admitJob(nodepool.JobKindRemux); ok {
 		t.Fatal("a job was admitted at the cap")
 	}
 }
@@ -263,5 +263,33 @@ func TestDrainedHealthReportsNoJobs(t *testing.T) {
 	if health.Status != HealthStatusDrained || health.ActiveJobs != 0 || health.ActiveJobsByKind[nodepool.JobKindVideoTranscode] != 0 {
 		t.Fatalf("health: status %q, active_jobs %d, by kind %v; want drained with no jobs",
 			health.Status, health.ActiveJobs, health.ActiveJobsByKind)
+	}
+}
+
+// A kind's own cap refuses new work of that kind, admitted or counted, and
+// leaves every other kind to the job cap.
+func TestJobCapByKind(t *testing.T) {
+	s := newTestServer(t)
+	s.SetJobCap(3)
+	s.SetJobCapsByKind(map[nodepool.JobKind]int{nodepool.JobKindVideoTranscode: 1})
+	video, ok := s.admitJob(nodepool.JobKindVideoTranscode)
+	if !ok {
+		t.Fatal("the first video transcode was refused")
+	}
+	if _, ok := s.admitJob(nodepool.JobKindVideoTranscode); ok {
+		t.Fatal("a second video transcode was admitted while the first was admitted")
+	}
+	s.countJob(video, nodepool.JobKindVideoTranscode)
+	if _, ok := s.admitJob(nodepool.JobKindVideoTranscode); ok {
+		t.Fatal("a second video transcode was admitted while the first ran")
+	}
+	remux, ok := s.admitJob(nodepool.JobKindRemux)
+	if !ok {
+		t.Fatal("a remux was refused at the video cap")
+	}
+	s.countJob(remux, nodepool.JobKindRemux)
+	s.endJob(nodepool.JobKindVideoTranscode)
+	if _, ok := s.admitJob(nodepool.JobKindVideoTranscode); !ok {
+		t.Fatal("a video transcode was refused once the first ended")
 	}
 }

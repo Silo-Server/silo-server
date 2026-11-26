@@ -333,6 +333,10 @@ type HealthResponse struct {
 	// every kind. The core's planner spreads each kind of work evenly across
 	// nodes from it.
 	ActiveJobsByKind map[nodepool.JobKind]int `json:"active_jobs_by_kind"`
+	// JobCapsByKind names the kinds the node caps on their own, under its
+	// job cap (see SetJobCapsByKind), so the planner skips a node whose cap
+	// for the kind it places is full. Omitted when no kind has a cap.
+	JobCapsByKind map[nodepool.JobKind]int `json:"job_caps_by_kind,omitempty"`
 	// CapabilitiesHash identifies this node's last computed hardware capability
 	// snapshot. It is read from the stored snapshot only — health must stay a
 	// cheap liveness answer, so it never triggers a probe — and is empty until
@@ -479,8 +483,10 @@ type Server struct {
 	// (admittedKinds by kind; health reports both, see reportedJobs),
 	// remuxSeen, when each progressive remux transport was last served, and
 	// continuing, the overlap allowances granted per playback session and
-	// not yet registered. See jobcap.go.
+	// not yet registered. kindCaps, the caps per job kind, is set before
+	// serving and only read after. See jobcap.go.
 	jobCap          atomic.Int32
+	kindCaps        map[nodepool.JobKind]int
 	admission       sync.Mutex
 	admitted        int
 	admittedKinds   map[nodepool.JobKind]int
@@ -1450,6 +1456,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		Status:             status,
 		ActiveJobs:         activeJobs,
 		ActiveJobsByKind:   activeJobsByKind,
+		JobCapsByKind:      s.kindCaps,
 		CapabilitiesHash:   s.storedCapabilityHash(),
 		System:             snapshot.System,
 		GPU:                snapshot.GPU,

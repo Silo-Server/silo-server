@@ -56,9 +56,10 @@ func isCopyCodec(codec string) bool {
 }
 
 // jobsByKindStatsView is the part of a node's stored last_stats that carries
-// its active jobs by kind; see marshalLastStats.
+// its active jobs by kind and its caps by kind; see marshalLastStats.
 type jobsByKindStatsView struct {
 	ActiveJobsByKind map[JobKind]int `json:"active_jobs_by_kind"`
+	JobCapsByKind    map[JobKind]int `json:"job_caps_by_kind"`
 }
 
 // reportedJobsByKind returns the active jobs by kind from the node's last
@@ -66,12 +67,20 @@ type jobsByKindStatsView struct {
 // from before job kinds), which callers must treat as "cannot say", never as
 // zero: a node that reports nothing would otherwise always look idle.
 func reportedJobsByKind(n *Node) (jobs map[JobKind]int, ok bool) {
+	view, ok := reportedJobStats(n)
+	return view.ActiveJobsByKind, ok
+}
+
+// reportedJobStats returns the node's last reported jobs by kind and caps by
+// kind (SILO_NODE_MAX_VIDEO_TRANSCODES and the like; a kind without a cap is
+// absent). ok is false when the node reported no breakdown, which it always
+// sends with its caps.
+func reportedJobStats(n *Node) (view jobsByKindStatsView, ok bool) {
 	if n == nil || len(n.LastStats) == 0 {
-		return nil, false
+		return jobsByKindStatsView{}, false
 	}
-	var view jobsByKindStatsView
 	if err := json.Unmarshal(n.LastStats, &view); err != nil || view.ActiveJobsByKind == nil {
-		return nil, false
+		return jobsByKindStatsView{}, false
 	}
-	return view.ActiveJobsByKind, true
+	return view, true
 }
