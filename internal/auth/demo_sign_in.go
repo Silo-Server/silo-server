@@ -85,7 +85,9 @@ func (d *DemoSignIn) Run(ctx context.Context) {
 }
 
 // Refresh re-reads which names belong to the demo account. When a read
-// fails it holds no names, so nothing is exempted until a read succeeds.
+// fails it holds no names, so nothing is exempted until a read succeeds;
+// that includes a read cut short by ctx ending (shutdown), which leaves
+// nothing that grants.
 // The names only select which attempts read again in any case: an attempt
 // at one of them is exempted only when that read succeeds and still finds
 // the name.
@@ -115,9 +117,15 @@ func (d *DemoSignIn) exempts(ctx context.Context, spend *signInSpend, providerID
 	if known := d.keys.Load(); known == nil || !slices.Contains(*known, spend.key) {
 		return false
 	}
-	ctx, cancel := context.WithTimeout(ctx, signInLookupTimeout)
+	readCtx, cancel := context.WithTimeout(ctx, signInLookupTimeout)
 	defer cancel()
-	keys, ok := d.accountKeys(ctx)
+	keys, ok := d.accountKeys(readCtx)
+	if !ok && ctx.Err() != nil {
+		// The request itself ended (its client went away): this attempt is
+		// not exempted, and the names every other attempt relies on stay as
+		// they were. Only a read that failed for another reason clears them.
+		return false
+	}
 	if !ok {
 		keys = nil
 	}
