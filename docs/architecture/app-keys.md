@@ -825,8 +825,10 @@ its payload. The challenge is spent once the signature verifies. Then:
   holds it already, otherwise in place of the account's key, which is revoked
   with the devices it introduced that still wait for approval (as
   `PUT /auth/keys/person` does). Devices already enrolled keep their keys; the
-  person may want to remove the lost devices from the key list. Both keys are
-  unbound to a provider.
+  person may want to remove the lost devices from the key list. A new or
+  replacing person key and its device start unbound; the account's own person
+  key sent again keeps its provider binding, and its device takes it (see
+  [Sign-in links](#sign-in-links)).
 
 The hourly cleanup of expired codes never waits on any of these: it skips a
 code row a request holds (`FOR UPDATE SKIP LOCKED`) and deletes it on a later
