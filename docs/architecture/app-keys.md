@@ -1158,8 +1158,9 @@ person changes the password from their own device.
 ## The account's creation time
 
 Every answer that carries a token pair for one of the person's own sessions
-carries `account_created_at` beside `user`, set where the pair is built, so no
-such path leaves it out; the current-user read and the administrator's views
+carries `account_created_at` (beside `user` where the answer has one; a refresh
+answer has no `user`), set where the pair is built, so no such path leaves it
+out; the current-user read and the administrator's views
 do not carry it. It is the account's `users.created_at`, RFC 3339 in UTC at the stored
 microsecond precision. Nothing rewrites that column after the account is made,
 and a full restore brings it back exactly. Its JSON form drops trailing zeros
