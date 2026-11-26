@@ -472,3 +472,39 @@ func TestRefusedOperationsDeclareTheir403(t *testing.T) {
 		}
 	}
 }
+
+// recordingPluginContent records the requests the plugin-content mounts hand
+// to the content handler.
+type recordingPluginContent struct{ served []string }
+
+func (r *recordingPluginContent) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	r.served = append(r.served, req.Method+" "+req.URL.Path)
+	w.WriteHeader(http.StatusNoContent)
+}
+func (*recordingPluginContent) ContentAvailable() bool { return true }
+
+// TestPluginContentMountsAllReachTheContentHandler: the plugin-content mounts
+// sit outside the operation registry, so no origin gate runs on them; what
+// holds a session another app's key opened there is the content handler's
+// access resolver, which answers it as no session. Every mount pattern and
+// method in the closed list reaches that one handler (which resolves access
+// before the proxy for pages and assets, TestContentHandlerResolvesEveryRequest
+// in internal/plugins). Catches a mount added that serves without it.
+func TestPluginContentMountsAllReachTheContentHandler(t *testing.T) {
+	content := &recordingPluginContent{}
+	deps := parityDeps(false)
+	deps.PluginContent = content
+	h := newTestHandler(t, deps)
+	for _, mount := range describePluginContent().Mounts {
+		path := strings.ReplaceAll(strings.ReplaceAll(mount.Path, "{installation_id}", "1"), "*", "asset.txt")
+		for _, method := range mount.Methods {
+			before := len(content.served)
+			req := httptest.NewRequest(method, path, nil)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if len(content.served) != before+1 {
+				t.Errorf("%s %s did not reach the content handler: %d", method, mount.Path, rec.Code)
+			}
+		}
+	}
+}

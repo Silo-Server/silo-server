@@ -350,6 +350,7 @@
 ./internal/auth TestPendingKeyCapDB
 ./internal/auth TestKeyOperationsRecheckActingProfileDB
 ./internal/auth TestActiveSessionKindDB
+./internal/api TestPluginAccessTreatsAnotherAppAsNoSessionDB
 ./internal/auth TestExpiredPendingKeySweepDB
 ./internal/apiv2 TestKeyRoutesRefuseSessionsDB
 ./internal/apiv2 TestAllowedOperationsAnswerGrantedAppsDB
