@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -63,7 +64,7 @@ describe("AccountSettings", () => {
 
   it("changes the shared account password", async () => {
     const user = userEvent.setup();
-    render(<AccountSettings />);
+    render(<AccountSettings />, { wrapper: MemoryRouter });
 
     await user.type(screen.getByLabelText("Current password"), "old password");
     await user.type(screen.getByLabelText("New password"), "new password");
@@ -80,7 +81,7 @@ describe("AccountSettings", () => {
 
   it("signs out of other devices only when asked", async () => {
     const user = userEvent.setup();
-    render(<AccountSettings />);
+    render(<AccountSettings />, { wrapper: MemoryRouter });
 
     const signOut = screen.getByRole("checkbox", { name: "Sign out of other devices" });
     expect(signOut).not.toBeChecked();
@@ -99,7 +100,7 @@ describe("AccountSettings", () => {
 
   it("stops mismatched passwords before calling the API", async () => {
     const user = userEvent.setup();
-    render(<AccountSettings />);
+    render(<AccountSettings />, { wrapper: MemoryRouter });
 
     await user.type(screen.getByLabelText("Current password"), "old password");
     await user.type(screen.getByLabelText("New password"), "new password");
@@ -112,7 +113,7 @@ describe("AccountSettings", () => {
 
   it("shows the server's refusal, and its own message when the server never answered", async () => {
     const user = userEvent.setup();
-    render(<AccountSettings />);
+    render(<AccountSettings />, { wrapper: MemoryRouter });
     const submit = async () => {
       const fill = async (label: string, value: string) => {
         await user.clear(screen.getByLabelText(label));
@@ -161,7 +162,7 @@ describe("AccountSettings", () => {
       isError: false,
     });
 
-    render(<AccountSettings />);
+    render(<AccountSettings />, { wrapper: MemoryRouter });
 
     expect(screen.getByText("Local password changes are unavailable.")).toBeInTheDocument();
     expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();

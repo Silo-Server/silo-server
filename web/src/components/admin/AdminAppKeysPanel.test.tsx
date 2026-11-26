@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AdminAppKeysPanel } from "./AdminAppKeysPanel";
 
@@ -77,7 +78,9 @@ afterEach(cleanup);
 // The server refuses an admin acting on another admin's or the Owner's keys;
 // the panel must not offer buttons it would refuse.
 it("offers no actions on an account the viewer may not change", () => {
-  render(<AdminAppKeysPanel user={{ id: 2, username: "sam" }} manageable={false} />);
+  render(<AdminAppKeysPanel user={{ id: 2, username: "sam" }} manageable={false} />, {
+    wrapper: MemoryRouter,
+  });
   expect(screen.getByText("Old laptop")).toBeInTheDocument();
   expect(screen.queryAllByRole("button", { name: /Remove|Deny|Withdraw/ })).toHaveLength(0);
   expect(
@@ -90,7 +93,9 @@ it("offers no actions on an account the viewer may not change", () => {
 it("still offers to remove a device that can no longer sign in", async () => {
   mocks.revokeDevice.mockResolvedValueOnce(undefined);
   const user = userEvent.setup();
-  render(<AdminAppKeysPanel user={{ id: 2, username: "sam" }} manageable />);
+  render(<AdminAppKeysPanel user={{ id: 2, username: "sam" }} manageable />, {
+    wrapper: MemoryRouter,
+  });
   await user.click(screen.getByRole("button", { name: "Remove Old laptop" }));
   await user.click(
     within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove device" }),
@@ -103,6 +108,7 @@ it("still offers to remove a device that can no longer sign in", async () => {
 it("shows the address each key was added from, and none when it is unknown", () => {
   const { container } = render(
     <AdminAppKeysPanel user={{ id: 2, username: "sam" }} manageable={false} />,
+    { wrapper: MemoryRouter },
   );
   const shown = [...container.querySelectorAll("bdi")].map((el) => el.parentElement?.textContent);
   expect(shown).toHaveLength(2);
