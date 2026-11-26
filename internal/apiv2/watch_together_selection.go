@@ -24,7 +24,11 @@ func registerWatchTogetherSelection(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodPut, Prefix+"/watch-together/rooms/{room_id}/selection", "selectWatchTogetherRoomItem", "realtime", "Select playable content as the host in a host-pick room. An identical current resolved selection is a no-op; changing selection resets readiness and playback anchor. Never replay an uncertain selection after another selection."), Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
 	op.MaxBodyBytes = 4096
 	op.Errors = []int{409}
+	op.Description = watchTogetherHostOtherAppRule
 	Register(reg, op, func(ctx context.Context, in *WatchTogetherSelectionInput) (*WatchTogetherRoomReadOutput, error) {
+		if p := reg.otherDevicesProblem(ctx); p != nil {
+			return nil, p
+		}
 		if reg.deps.WatchTogetherSelection == nil {
 			return nil, unavailable("watch together")
 		}

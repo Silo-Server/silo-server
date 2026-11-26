@@ -22,7 +22,11 @@ func registerWatchTogetherSelectionMode(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodPatch, Prefix+"/watch-together/rooms/{room_id}/selection-mode", "updateWatchTogetherRoomSelectionMode", "realtime", "Switch a lobby between host picks and voting as the host. Switching drops the staged item and every member's lobby ready state; suggestions and votes are kept. Refused once the room is playing."), Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	op.MaxBodyBytes = 1024
 	op.Errors = []int{409}
+	op.Description = watchTogetherHostOtherAppRule
 	Register(reg, op, func(ctx context.Context, in *WatchTogetherSelectionModeInput) (*WatchTogetherRoomReadOutput, error) {
+		if p := reg.otherDevicesProblem(ctx); p != nil {
+			return nil, p
+		}
 		if reg.deps.WatchTogetherSelectionMode == nil {
 			return nil, unavailable("watch together")
 		}

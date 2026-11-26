@@ -28,6 +28,9 @@ type RoomSocketCredential struct {
 	Session            events.SocketIdentity `json:"session"`
 	RoomProofExpiresAt time.Time             `json:"room_proof_expires_at"`
 	ExpiresAt          time.Time             `json:"expires_at"`
+	// OtherApp marks a session another app opened with a grant: once
+	// connected, its transport requests are refused.
+	OtherApp bool `json:"other_app,omitempty"`
 }
 
 type RoomSocketCredentialStore struct{ redis *redis.Client }

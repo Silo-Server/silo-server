@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"slices"
 	"testing"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -137,5 +139,55 @@ func TestWebPushRefusesAnotherAppDB(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestWatchTogetherRefusesAnotherAppDB: a room's host is the account and
+// profile, so a session another app's key opened, acting as the host's
+// profile, could start, stop, select for and close a room the person's own
+// device hosts, and a member can switch the room's source for everyone. Each
+// of those routes refuses such a session with 403 permission_denied before
+// the service is reached. A password session and a device sign-in session
+// pass the rule and reach the service (unwired here, so 503). The socket
+// ticket route tells the room socket which caller it is minting for.
+// Regression: the routes ignored how the caller's session was opened.
+func TestWatchTogetherRefusesAnotherAppDB(t *testing.T) {
+	socket := new(fakeRoomSocket)
+	d := newKeyRoutesDB(t, func(deps *Dependencies) { deps.WatchTogetherSocket = socket })
+	room := "/watch-together/rooms/" + uuid.NewString()
+	routes := []struct{ method, path, body string }{
+		{http.MethodPost, "/watch-together/rooms", `{"room_id":"` + uuid.NewString() + `","selection_mode":"host_pick"}`},
+		{http.MethodDelete, room, ""},
+		{http.MethodPost, room + "/playback/start", ""},
+		{http.MethodPost, room + "/playback/stop", ""},
+		{http.MethodPatch, room + "/policy", `{"guest_control_policy":"guest_play_pause"}`},
+		{http.MethodPut, room + "/selection", `{"content_id":"movie-1"}`},
+		{http.MethodPatch, room + "/selection-mode", `{"selection_mode":"vote"}`},
+		{http.MethodPut, room + "/staged-selection", `{"content_id":"movie-1"}`},
+		{http.MethodPost, room + "/suggestions/promote", `{"suggestion_id":"s-1"}`},
+		{http.MethodPost, room + "/source-fallback", `{"selection_revision":1,"failed_file_id":"7","reason":"no_alternate_version"}`},
+	}
+	headers := func(token string) map[string]string {
+		return with(with(bearer(token), "X-Profile-Id", "p-owner"), "X-Room-Token", "room-proof")
+	}
+	for _, r := range routes {
+		t.Run(r.method+" "+r.path, func(t *testing.T) {
+			if p := requireProblem(t, do(t, d.handler, r.method, Prefix+r.path, r.body, headers("tok-app")), TypePermissionDenied); p.Detail != handlers.SessionNotAllowedDetail {
+				t.Fatalf("detail = %q", p.Detail)
+			}
+			for _, token := range []string{"tok-phone", "tok-tv"} {
+				requireProblem(t, do(t, d.handler, r.method, Prefix+r.path, r.body, headers(token)), TypeDependencyUnavailable)
+			}
+		})
+	}
+	ticket := Prefix + room + "/ws-ticket"
+	// A socket ticket needs an access token with a bounded expiry.
+	for _, claims := range d.claims {
+		claims.ExpiresAt = jwt.NewNumericDate(time.Now().Add(time.Minute))
+	}
+	for token, otherApp := range map[string]bool{"tok-app": true, "tok-phone": false, "tok-tv": false} {
+		if rec := do(t, d.handler, http.MethodPost, ticket, "", headers(token)); rec.Code != http.StatusOK || socket.otherApp != otherApp {
+			t.Fatalf("%s: ticket status %d, minted as another app %v: %s", token, rec.Code, socket.otherApp, rec.Body.String())
+		}
 	}
 }

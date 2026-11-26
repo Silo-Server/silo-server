@@ -22,7 +22,11 @@ func registerWatchTogetherPolicy(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodPatch, Prefix+"/watch-together/rooms/{room_id}/policy", "updateWatchTogetherRoomPolicy", "realtime", "Set guest transport permissions as the host. Use the returned authoritative snapshot; concurrent persistence may retain a competing policy."), Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	op.MaxBodyBytes = 1024
 	op.Errors = []int{409}
+	op.Description = watchTogetherHostOtherAppRule
 	Register(reg, op, func(ctx context.Context, in *WatchTogetherPolicyInput) (*WatchTogetherRoomReadOutput, error) {
+		if p := reg.otherDevicesProblem(ctx); p != nil {
+			return nil, p
+		}
 		if reg.deps.WatchTogetherPolicy == nil {
 			return nil, unavailable("watch together")
 		}

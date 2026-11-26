@@ -38,7 +38,13 @@ func NewWatchTogetherSocketV2(room *WatchTogetherHandler, tickets *watchtogether
 func (h *WatchTogetherSocketV2) available() bool {
 	return h != nil && h.Room != nil && h.Room.Service != nil && h.Room.TokenService != nil && h.Tickets != nil && h.Validate != nil
 }
-func (h *WatchTogetherSocketV2) MintRoomSocket(ctx context.Context, roomID, proof string, identity evt.SocketIdentity) (string, time.Time, error) {
+
+// MintRoomSocket validates the room proof and the caller's login authority
+// and issues one single-use room credential. otherApp marks a session another
+// app opened with a grant: it may not connect as the room's host (the host is
+// the account and profile, so it would act for the person's own device), and
+// once connected as a member its transport requests are refused.
+func (h *WatchTogetherSocketV2) MintRoomSocket(ctx context.Context, roomID, proof string, identity evt.SocketIdentity, otherApp bool) (string, time.Time, error) {
 	if !h.available() {
 		return "", time.Time{}, apiError(503, "unavailable", "Room socket is unavailable")
 	}
@@ -57,12 +63,16 @@ func (h *WatchTogetherSocketV2) MintRoomSocket(ctx context.Context, roomID, proo
 	if !ok {
 		return "", time.Time{}, apiError(403, "forbidden", "Current room authority is required")
 	}
-	if _, err = h.Room.Service.GetRoom(ctx, roomID); err != nil {
+	room, err := h.Room.Service.GetRoom(ctx, roomID)
+	if err != nil {
 		return "", time.Time{}, err
+	}
+	if otherApp && room.HostUserID == identity.UserID && room.HostProfileID == identity.ProfileID {
+		return "", time.Time{}, apiError(403, "forbidden", SessionNotAllowedDetail)
 	}
 	identity.AccessFingerprint = eventsScopeFingerprint(scope)
 	identity.EffectiveRole = effective.Role
-	credential := watchtogether.RoomSocketCredential{RoomID: roomID, Session: identity, RoomProofExpiresAt: expiry}
+	credential := watchtogether.RoomSocketCredential{RoomID: roomID, Session: identity, RoomProofExpiresAt: expiry, OtherApp: otherApp}
 	until := time.Now().Add(watchtogether.RoomSocketTicketTTL)
 	for _, limit := range []time.Time{expiry, identity.AccessExpiresAt} {
 		if limit.Before(until) {
@@ -152,7 +162,7 @@ func (h *WatchTogetherSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request
 		_, err := h.Room.Service.GetRoom(checkCtx, roomID)
 		return err
 	})
-	h.Room.serveRoomConnection(ctx, conn, roomID, claims.UserID, credential.Session.ProfileID, func() { closer.close(context.Cause(ctx)) })
+	h.Room.serveRoomConnection(ctx, conn, roomID, claims.UserID, credential.Session.ProfileID, credential.OtherApp, func() { closer.close(context.Cause(ctx)) })
 }
 
 func (h *WatchTogetherSocketV2) currentPublicOrigin() string {

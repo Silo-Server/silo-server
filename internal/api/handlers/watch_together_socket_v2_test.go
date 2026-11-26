@@ -305,11 +305,11 @@ func TestRoomSocketV2MintValidatesRoomAndCurrentPIN(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, room := range []string{"other", ""} {
-		if _, _, err = h.MintRoomSocket(t.Context(), room, proof, identity); err == nil {
+		if _, _, err = h.MintRoomSocket(t.Context(), room, proof, identity, false); err == nil {
 			t.Fatal("foreign room proof minted")
 		}
 	}
-	if _, _, err = h.MintRoomSocket(t.Context(), "room", proof, identity); err != nil {
+	if _, _, err = h.MintRoomSocket(t.Context(), "room", proof, identity, false); err != nil {
 		t.Fatal(err)
 	}
 	delegated := h.Tickets.(*roomSocketFakeTickets).credential.Session
@@ -334,5 +334,43 @@ func TestRoomSocketV2MintValidatesRoomAndCurrentPIN(t *testing.T) {
 	viewer.err = errors.New("PIN revoked")
 	if _, _, err = h.Validate(t.Context(), delegated); err == nil {
 		t.Fatal("lost PIN")
+	}
+}
+
+// TestRoomSocketV2KeepsAnotherAppFromHosting: the host is the account and
+// profile, so a session another app opened, acting as the host's profile,
+// would connect as the host and steer the room for the person's own device.
+// It is refused a credential for a room it would host, admitted as a member
+// of another host's room (the credential remembers what it is), and once
+// connected its transport requests are refused whatever the room's guest
+// policy. Other sessions are unchanged.
+func TestRoomSocketV2KeepsAnotherAppFromHosting(t *testing.T) {
+	h, _, _ := roomSocketHandler(t)
+	mint := func(userID int, profileID string, otherApp bool) error {
+		t.Helper()
+		proof, _, err := h.Room.TokenService.Mint(watchtogether.RoomTokenClaims{RoomID: "room", UserID: userID, ProfileID: profileID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		identity := evt.SocketIdentity{UserID: userID, SessionID: "session", Role: "user", ProfileID: profileID, AccessExpiresAt: time.Now().Add(time.Minute)}
+		_, _, err = h.MintRoomSocket(t.Context(), "room", proof, identity, otherApp)
+		return err
+	}
+	var refused *APIError
+	if err := mint(99, "host", true); !errors.As(err, &refused) || refused.Status != http.StatusForbidden || refused.Message != SessionNotAllowedDetail {
+		t.Fatalf("another app as the host: err = %v", err)
+	}
+	if err := mint(99, "host", false); err != nil {
+		t.Fatalf("the host's own session: err = %v", err)
+	}
+	if err := mint(7, "profile", true); err != nil || !h.Tickets.(*roomSocketFakeTickets).credential.OtherApp {
+		t.Fatalf("another app as a member: err = %v, credential %+v", err, h.Tickets.(*roomSocketFakeTickets).credential)
+	}
+	play := []byte(`{"type":"transport_request","action":"play"}`)
+	if err := h.Room.handleRoomClientMessage(t.Context(), nil, nil, 7, "profile", true, play); !errors.Is(err, errOtherAppTransport) {
+		t.Fatalf("another app's transport request: err = %v", err)
+	}
+	if err := h.Room.handleRoomClientMessage(t.Context(), nil, nil, 7, "profile", false, play); errors.Is(err, errOtherAppTransport) {
+		t.Fatal("an ordinary member's transport request was refused as another app's")
 	}
 }
