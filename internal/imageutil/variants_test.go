@@ -165,3 +165,37 @@ func TestDecodeBudgetBoundsSourcesInFlight(t *testing.T) {
 		t.Fatalf("after release: %v", err)
 	}
 }
+
+// TestDecodeBudgetReturnsFreedMemoryOnceIdle pins when malloc's free pages go
+// back to the operating system: never while a decode holds the budget, and
+// once it has been empty for idleReleaseDelay.
+func TestDecodeBudgetReturnsFreedMemoryOnceIdle(t *testing.T) {
+	budget := useDecodeBudget(t, int64(1)<<30)
+	previousDelay := idleReleaseDelay
+	idleReleaseDelay = time.Millisecond
+	t.Cleanup(func() { idleReleaseDelay = previousDelay })
+	freed := make(chan struct{}, 1)
+	budget.freeMemory = func() {
+		select {
+		case freed <- struct{}{}:
+		default:
+		}
+	}
+
+	release, err := budget.reserve(bimg.ImageSize{Width: 10, Height: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	budget.releaseIfIdle(budget.idle)
+	select {
+	case <-freed:
+		t.Fatal("freed memory while a decode held the budget")
+	default:
+	}
+	release()
+	select {
+	case <-freed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("memory was not freed after the budget emptied")
+	}
+}
