@@ -1065,17 +1065,27 @@ write commits and gets it within five seconds. The waker queues a
 from their own session, and each phone costs an attempt row and a relay call.
 The 20 are the phones a push was most recently accepted for, then the most
 recently registered. APNs and FCM accept a push only for a real token of the
-app, so registrations that never received a push, such as ones with made-up
-tokens, cannot take the place of the person's phones. With more than 20 live
-registrations, a new phone that has not had a push accepted yet ranks behind
-20 that have, and gets no wake until another push reaches it. It wakes only for an edit that
-committed: the request remembers the first edit revision it recorded per
-account, and the waker checks that a row at or above it exists, so a write
-that rolled back sends nothing. At most one wake goes out a minute per
-account, on every API server, measured from when each wake is recorded. One
-statement decides and records it: an upsert of the account's row in
-`push_profile_set_wakes` that writes the new time, from the statement's own
-clock, only when the last one is a minute old. Two servers recording at once
+app, so registrations that never had a push accepted, such as ones with
+made-up tokens, cannot take the place of a phone that has. That protects only
+phones that have had a push accepted: a genuine phone that never has ranks by
+registration time among the rest, so 20 more recently registered made-up
+registrations rank ahead of it. With more than 20 live registrations, a new
+phone that has not had a push accepted yet ranks behind 20 that have, and may
+get no wake until a push to it is accepted. It wakes only for the request's
+own edits that committed: the request remembers every edit revision it
+recorded per account, and the waker checks that a row carrying one of them
+exists. Revisions come from a sequence, so a write that rolled back sends
+nothing, even when another request's edit of the account committed; that
+request has its own wake. A later edit of the same field writes a new
+revision over the row, so a request whose only edit was replaced that way
+answers false and the later request's wake covers it. At most one wake goes
+out a minute per account, on every API server, measured from when each wake
+is admitted. The waker first reads the account's row in
+`push_profile_set_wakes` without a lock, and inside the minute answers false
+before reading any registration. Otherwise one statement decides and records
+the wake: an upsert of that row that writes the new time, read from the clock
+when it writes the row, after any wait for it, only when the last one is a
+minute old. Two servers recording at once
 queue one wake, no server keeps a timer, and removing a phone and registering
 it again does not reset the limit, since the row is not tied to the account's
 devices. The time is recorded in the transaction that queues the wake's
@@ -1091,11 +1101,12 @@ then a deleted account's row is harmless, since account IDs are not reused.
 The waker answers true when, and only when, this call queued a wake after the
 edit committed: the wake's attempts were written and committed for at least
 one phone. The answer is about the wake being queued, not delivered; it stays
-true if the send then fails or runs out of time. It answers false inside the
-minute after another wake, while a wake for the account is still in flight on
-this server, for an edit that rolled back, and with push off or no phone to
-wake. A wake that left before the edit existed says nothing about it, and a
-caller may tell a person that their phone has been told. The waker never
+true if the send then fails or runs out of time, so a caller may say a wake
+was queued for the edit, not that a phone was reached. It answers false inside
+the minute after another wake, while a wake for the account is still in
+flight on this server, for an edit that rolled back, and with push off or no
+phone to wake. A wake that left before the edit existed says nothing about
+it. The waker never
 fails the edit: errors are logged and the send runs in the background.
 
 A wake is sent once and never retried. Its attempt row is inserted in flight,
@@ -1120,11 +1131,18 @@ sends through the same relay with.
 Once every send has returned, one statement records every phone still in
 flight as `failed`, on a fresh context limited to five seconds: a send that
 panicked or stopped before it recorded an outcome as `wake_send_unfinished`,
-a phone the budget didn't reach or let finish as `wake_out_of_time`. Such a
-phone gets the next wake, and the app reads the set when it opens. The
-account's in-flight mark is released after that write, a panic included, so
-a wake ends within 35 seconds of being queued. A wake is queued up to five
-seconds after its time is recorded, so it has ended within 40 seconds of
+a phone the budget didn't reach or let finish as `wake_out_of_time`. A
+later wake may reach such a phone; nothing retries it, and the app reads the
+set when it opens. The relay requests stop when the 30-second budget ends,
+and that last write follows on its own five-second context, so the account's
+in-flight mark, released after that write, a panic included, is held at most
+35 seconds after the wake is queued. If that write fails or times out, the
+server logs it and the rows stay in flight: no claim query selects them, so
+nothing sends them, until the notification retention task marks them failed
+once they are ten minutes old. By default that task runs daily; an
+administrator can change or disable its schedule, which leaves such rows in
+flight longer. A wake is queued up to five
+seconds after its time is admitted, so it has ended within 40 seconds of
 that, before the account's limit lets another start; a test holds the budget
 plus the final write under the interval less those five seconds.
 
@@ -1132,12 +1150,17 @@ On each server, a wake of an account also does not start while the previous
 one is still in flight there. That guard is a mark in the process, taken
 only once the edit is known to have committed; a row in the database would
 outlive a process that stopped mid-wake and hold the account's wakes until
-retention. Across servers, the budget and the account's limit row keep wakes
-apart. The worst case for one account is one wake at a time on a server,
-each ending within 35 seconds of being queued. Only a process that stops
-mid-wake leaves a row in flight. The push queue gauge leaves wake rows out,
-because no worker ever claims one, and the daily notification retention run
-marks a row that has been in flight for more than ten minutes as failed.
+retention. A committed edit that meets the mark answers false and queues
+nothing. If the wake holding it then queues nothing (every phone went away
+before its insert, or the insert failed), neither edit is woken; the app
+reads the set when it opens and at the next wake. Across servers, the
+budget and the account's limit row keep wakes apart. The worst case for one
+account is one wake at a time on a server, each ending within 35 seconds of
+being queued. Only a process that stops mid-wake, or a last write that fails,
+leaves a row in flight. The push queue gauge leaves wake rows out,
+because no worker ever claims one, and the notification retention task (by
+default daily; the schedule can be changed) marks a row that has been in
+flight for more than ten minutes as failed.
 Retention deletes wake rows after seven days.
 
 **Mapping.** The first item is always the main profile, which the set never
