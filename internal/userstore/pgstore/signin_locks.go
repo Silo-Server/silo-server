@@ -32,11 +32,12 @@ func LockSignInIdentities(ctx context.Context, db interface {
 
 // lockAccountForProfileDelete takes a KEY SHARE lock on the account row, and
 // on the audit row's accounts when withActors (auditmutation.LockActors), in
-// one id order. Every transaction that writes the account's sign-in requests
-// or sessions holds the account row FOR UPDATE, so a profile delete, which
-// clears the requests approved for the profile, runs before or after it. It
-// comes before the profile's row: approving a request for a profile locks the
-// account row and then, through the request's foreign key, the profile row.
+// one id order, before any other row. Signing the account out everywhere
+// locks the account row FOR UPDATE and the identities in the same shared mode
+// as a profile delete, then withdraws the account's device sign-in approvals
+// in an order of its own; the profile delete clears the ones approved for the
+// profile in its foreign key's order. Without this lock the two can each hold
+// one of those requests and wait for the other's (TestProfileDeleteLockOrderDB).
 func lockAccountForProfileDelete(ctx context.Context, tx pgx.Tx, userID int, withActors bool) error {
 	ids := []int{userID}
 	if withActors {

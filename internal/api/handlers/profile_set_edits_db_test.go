@@ -679,13 +679,20 @@ func allowedAfterAccountDelete(racer string, err error) bool {
 	// or, for the admin edit that passed its account check first, a
 	// profile gone by the time its write ran (500 whose cause is the
 	// store's "profile <id> not found"); the store finds no profile;
-	// a setting insert has no account to refer to (23503).
+	// a setting insert has no account to refer to (23503). The web edit,
+	// once its target was read, finds the main profile it acts as gone, so
+	// it acts as no manager and may change only the profile it acts as,
+	// which it does not (403 forbidden). The profile delete finds the main
+	// profile it acts as gone and so may not manage the household
+	// (403 forbidden).
 	var apiErr *APIError
 	var pgErr *pgconn.PgError
 	if errors.As(err, &apiErr) {
 		switch {
 		case apiErr.Status == http.StatusNotFound, apiErr.Code == "conflict",
-			racer == "web edit" && apiErr.Code == "profile_management":
+			racer == "web edit" && apiErr.Code == "profile_management",
+			(racer == "web edit" || racer == "profile delete") &&
+				apiErr.Status == http.StatusForbidden && apiErr.Code == "forbidden":
 			return true
 		case racer == "admin edit" && apiErr.Code == "internal_error":
 			return storeProfileNotFound(errors.Unwrap(apiErr))

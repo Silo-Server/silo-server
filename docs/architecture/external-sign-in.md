@@ -42,9 +42,11 @@ SDK's `docs/auth-provider.md`.
   the same request, or never waits (the expired-session and expired-request
   cleanups skip rows another transaction holds and delete them on a later
   run). Deleting a profile clears the requests approved for the profile
-  through a foreign key, so it follows the rule too: a profile delete locks
-  the account row before the profile row, a profile set holds it already,
-  and both lock the identities before the profile row goes. `signInRowWriters`
+  through a foreign key, so it follows the rule too. A profile delete locks
+  the account row before its collections and the profile row. A profile set
+  locks every profile row of the account and then the account row, so it
+  holds the account row by the time it deletes a profile. Both lock the
+  identities before the profile row goes. `signInRowWriters`
   in `internal/auth/signin_rows_writers_test.go` lists every writer with its
   rule, and the test fails on one it does not list.
 
