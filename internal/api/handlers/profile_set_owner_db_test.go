@@ -340,3 +340,71 @@ func requireEdit(t *testing.T, f *editsFixture, kind string, actor int) ProfileS
 	}
 	return views[0]
 }
+
+// TestClearMirroredSettingDB: two settings the contract keeps as one
+// preference under two keys are cleared together and restored together from
+// the half the set sent. The list's clear_applies, the clear's applied and
+// the write must agree whichever half the set carried and whichever half
+// the owner clears. It catches a clear that restores the pair while the list
+// and the answer say the value stays until the app syncs.
+func TestClearMirroredSettingDB(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		sent            map[string]any
+		ownerKey, owner string
+		cleared         string
+		want            map[string]string
+	}{
+		{name: "the set sent the mode, the owner clears the boolean",
+			sent:     map[string]any{settingskeys.PlaybackIntroSkipMode: "always"},
+			ownerKey: settingskeys.PlaybackIntroSkipMode, owner: `"never"`, cleared: settingskeys.PlaybackAutoSkipIntro,
+			want: map[string]string{settingskeys.PlaybackIntroSkipMode: `"always"`, settingskeys.PlaybackAutoSkipIntro: `true`}},
+		{name: "the set sent the mode, the owner clears the mode",
+			sent:     map[string]any{settingskeys.PlaybackIntroSkipMode: "always"},
+			ownerKey: settingskeys.PlaybackIntroSkipMode, owner: `"never"`, cleared: settingskeys.PlaybackIntroSkipMode,
+			want: map[string]string{settingskeys.PlaybackIntroSkipMode: `"always"`, settingskeys.PlaybackAutoSkipIntro: `true`}},
+		{name: "the set sent the boolean, the owner clears the mode",
+			sent:     map[string]any{settingskeys.PlaybackAutoSkipIntro: true},
+			ownerKey: settingskeys.PlaybackAutoSkipIntro, owner: `false`, cleared: settingskeys.PlaybackIntroSkipMode,
+			want: map[string]string{settingskeys.PlaybackIntroSkipMode: `"always"`, settingskeys.PlaybackAutoSkipIntro: `true`}},
+		{name: "the set sent the boolean, the owner clears the boolean",
+			sent:     map[string]any{settingskeys.PlaybackAutoSkipIntro: true},
+			ownerKey: settingskeys.PlaybackAutoSkipIntro, owner: `false`, cleared: settingskeys.PlaybackAutoSkipIntro,
+			want: map[string]string{settingskeys.PlaybackIntroSkipMode: `"always"`, settingskeys.PlaybackAutoSkipIntro: `true`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newEditsFixture(t)
+			kid := newSetItem("Kid").with("settings", tc.sent)
+			f.mustApply(t, setDoc(t, 1, newSetItem("Parent"), kid))
+			kidID := f.profileBySyncID(t, kid.syncID()).ID
+			f.mustPutSetting(t, f.admin(), userstore.SettingIdentity{Key: tc.ownerKey, Scope: "profile", ProfileID: kidID}, tc.owner)
+			field := profileedits.FieldSettingsPrefix + tc.cleared
+			views, err := f.handler.ListProfileSetEdits(t.Context(), f.userID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			listed, setValue := false, ""
+			for _, v := range views {
+				if v.Field == field {
+					listed, setValue = v.ClearApplies, string(v.SetValue)
+				}
+			}
+			if setValue != tc.want[tc.cleared] {
+				t.Fatalf("the list says the set's value of %s is %s; the clear writes %s", tc.cleared, setValue, tc.want[tc.cleared])
+			}
+			res, err := f.handler.ClearProfileSetOverride(f.admin(), ProfileSetClearCommand{UserID: f.userID, ProfileID: kidID, Field: field})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for key, want := range tc.want {
+				got, err := f.store.GetSettingValue(t.Context(), userstore.SettingIdentity{Key: key, Scope: "profile", ProfileID: kidID})
+				if err != nil || got == nil || string(got.Value) != want {
+					t.Fatalf("%s after the clear = %+v, %v; want %s", key, got, err, want)
+				}
+			}
+			if !listed || !res.Applied {
+				t.Fatalf("the clear restored the pair, but the list said clear_applies %v and the clear answered applied %v", listed, res.Applied)
+			}
+		})
+	}
+}

@@ -193,13 +193,13 @@ func (h *ProfileHandler) describeEditValues(ctx context.Context, store userstore
 		item := heldItemStored(contract, row, settings)
 		view.Value = overrideValue(&item, view.Field)
 	}
-	applied, ok := decodeProfileSetApplied(row.SyncApplied)
-	if !ok {
-		return nil
+	record, ok, err := restoreRecord(contract, row)
+	if err != nil || !ok {
+		return err
 	}
-	view.SetValue, view.SetResets = appliedValue(applied, view.Field)
+	view.SetValue, view.SetResets = record.value(view.Field)
 	if view.Kind == ProfileSetEditOverride {
-		view.ClearApplies = clearApplies(applied, &row.Profile, view.Field)
+		view.ClearApplies = record.applies(&row.Profile, view.Field)
 	}
 	return nil
 }
@@ -232,18 +232,44 @@ func (h *ProfileHandler) resolveProfileSetting(ctx context.Context, store userst
 	return values[0].Value, nil
 }
 
-func decodeProfileSetApplied(raw json.RawMessage) (profileSetApplied, bool) {
-	var applied profileSetApplied
-	if len(raw) == 0 || json.Unmarshal(raw, &applied) != nil {
-		return applied, false
-	}
-	return applied, true
+// restoredRecord is what a clear puts back on a profile: the record of
+// what its last accepted set asked of it, as the set item it rebuilds, and
+// the settings plan that item makes, mirror halves included. The list's
+// set_value, set_resets and clear_applies, and the clear's write, all read
+// it, so they can't disagree.
+type restoredRecord struct {
+	applied  profileSetApplied
+	item     profileSetItem
+	settings profileSetSettings
 }
 
-// appliedValue is the set's value of field, encoded as a set item encodes
-// it; resets marks a setting the set resets. nil when the set did not carry
-// it.
-func appliedValue(applied profileSetApplied, field string) (value json.RawMessage, resets bool) {
+// restoreRecord rebuilds the record of row's last accepted set; ok is false
+// when the profile has none.
+func restoreRecord(contract *settingscontract.Manifest, row *userstore.ProfileSetRow) (restoredRecord, bool, error) {
+	var out restoredRecord
+	if len(row.SyncApplied) == 0 || json.Unmarshal(row.SyncApplied, &out.applied) != nil {
+		return out, false, nil
+	}
+	a := out.applied
+	out.item = profileSetItem{
+		SyncID: row.SyncID, Name: a.Name, Picture: a.Picture, PIN: profileSetPIN{kind: a.PIN},
+		IsChild: a.IsChild, MaxContentRating: a.MaxContentRating, RequireAdvisoryAge: a.RequireAdvisoryAge,
+		RequestsBlocked: a.RequestsBlocked, Settings: a.Settings, SettingsReset: a.SettingsReset,
+	}
+	if a.MaxAdvisoryAge != nil {
+		out.item.MaxAdvisoryAge = *a.MaxAdvisoryAge
+	}
+	var err error
+	out.settings, err = planProfileSetSettings(contract, out.item)
+	return out, true, err
+}
+
+// value is the set's value of field, encoded as a set item encodes it;
+// resets marks a setting the set resets. For a setting it is what the clear
+// writes, the half of a mirrored pair the set didn't send included. nil
+// when the set asks nothing of it.
+func (r restoredRecord) value(field string) (value json.RawMessage, resets bool) {
+	applied := r.applied
 	var v any
 	switch field {
 	case profileedits.FieldName:
@@ -264,10 +290,10 @@ func appliedValue(applied profileSetApplied, field string) (value json.RawMessag
 		v = applied.RequestsBlocked
 	default:
 		key, _ := strings.CutPrefix(field, profileedits.FieldSettingsPrefix)
-		if slices.Contains(applied.SettingsReset, key) {
+		if slices.Contains(r.settings.reset, key) {
 			return nil, true
 		}
-		return applied.Settings[key], false
+		return r.settings.write[key], false
 	}
 	encoded, err := json.Marshal(v)
 	if err != nil {
@@ -276,20 +302,21 @@ func appliedValue(applied profileSetApplied, field string) (value json.RawMessag
 	return encoded, false
 }
 
-// clearApplies reports whether clearing the owner's field writes the set's
-// value now: the set carried it, and it is not a PIN the set sent as digits
+// applies reports whether clearing the owner's field writes the set's
+// value now: the set asks something of it (for a setting, either half of a
+// mirrored pair it sent counts), and it is not a PIN the set sent as digits
 // or kept (this server never stores digits), nor a picture it can't show.
-func clearApplies(applied profileSetApplied, row *userstore.Profile, field string) bool {
+func (r restoredRecord) applies(row *userstore.Profile, field string) bool {
 	switch field {
 	case profileedits.FieldPIN:
-		return applied.PIN == profileSetPINClear
+		return r.applied.PIN == profileSetPINClear
 	case profileedits.FieldPicture:
-		_, _, available := heldPicture(row, applied.Picture)
+		_, _, available := heldPicture(row, r.applied.Picture)
 		return available
 	}
 	if key, isSetting := strings.CutPrefix(field, profileedits.FieldSettingsPrefix); isSetting {
-		_, sent := applied.Settings[key]
-		return sent || slices.Contains(applied.SettingsReset, key)
+		_, written := r.settings.write[key]
+		return written || slices.Contains(r.settings.reset, key)
 	}
 	return true
 }
@@ -470,9 +497,13 @@ func (r *profileSetRun) clearOverride(ctx context.Context, w userstore.ProfileSe
 	}
 	fields := clearedFields(edits, row.SyncID, cmd.Field)
 	applied := false
-	if record, ok := decodeProfileSetApplied(row.SyncApplied); ok {
-		applied = clearApplies(record, &row.Profile, cmd.Field)
-		if err := checkRestoredName(snap.Rows, row, record, fields); err != nil {
+	record, ok, err := restoreRecord(r.contract, row)
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		applied = record.applies(&row.Profile, cmd.Field)
+		if err := checkRestoredName(snap.Rows, row, record.applied, fields); err != nil {
 			return false, err
 		}
 		if err := r.applyRecordFields(ctx, w, row, record, edits, fields); err != nil {
@@ -493,22 +524,10 @@ func (r *profileSetRun) clearOverride(ctx context.Context, w userstore.ProfileSe
 // the record of what its last accepted set asked, with the set's own apply
 // (updateProfile) limited to those fields.
 func (r *profileSetRun) applyRecordFields(ctx context.Context, w userstore.ProfileSetWriter, row *userstore.ProfileSetRow,
-	record profileSetApplied, edits profileSetEdits, fields []string,
+	record restoredRecord, edits profileSetEdits, fields []string,
 ) error {
-	item := profileSetItem{
-		SyncID: row.SyncID, Name: record.Name, Picture: record.Picture, PIN: profileSetPIN{kind: record.PIN},
-		IsChild: record.IsChild, MaxContentRating: record.MaxContentRating, RequireAdvisoryAge: record.RequireAdvisoryAge,
-		RequestsBlocked: record.RequestsBlocked, Settings: record.Settings, SettingsReset: record.SettingsReset,
-	}
-	if record.MaxAdvisoryAge != nil {
-		item.MaxAdvisoryAge = *record.MaxAdvisoryAge
-	}
-	plan, err := planProfileSetSettings(r.contract, item)
-	if err != nil {
-		return err
-	}
-	r.doc = &profileSetDoc{Items: []profileSetItem{item}}
-	r.settings = []profileSetSettings{plan}
+	r.doc = &profileSetDoc{Items: []profileSetItem{record.item}}
+	r.settings = []profileSetSettings{record.settings}
 	r.edits = itemEdits{profileSetEdits: edits, ids: []string{row.SyncID}}
 	r.only = map[string]bool{}
 	for _, field := range fields {

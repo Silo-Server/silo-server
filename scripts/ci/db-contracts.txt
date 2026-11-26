@@ -1287,6 +1287,7 @@
 ./internal/api/handlers TestProfileEditRecorderDB
 ./internal/api/handlers TestProfileSetOwnerOverridesDB
 ./internal/api/handlers TestClearProfileSetOverrideDB
+./internal/api/handlers TestClearMirroredSettingDB
 ./internal/api/handlers TestProfileSetOwnerEditsFollowTheProfileDB
 ./internal/api/handlers TestProfileSetNamesWithOwnerRenamesDB
 ./internal/api/handlers TestProfileSetRefusalOrderDB
