@@ -123,7 +123,7 @@ func readProblemAnswer(t *testing.T, rec interface {
 ) *problemAnswer {
 	t.Helper()
 	res := rec.Result()
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	out := &problemAnswer{status: res.StatusCode}
 	_ = json.NewDecoder(res.Body).Decode(&out.problem)
 	return out
