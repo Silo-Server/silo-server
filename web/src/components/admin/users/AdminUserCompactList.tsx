@@ -22,7 +22,7 @@ const SEPARATOR = "·";
 const MENU_ITEM_CLASS = "min-h-11";
 
 /**
- * The admin users list below the `lg` breakpoint: one compact row per account
+ * The admin users list below the `xl` breakpoint: one compact row per account
  * in a single panel, each row a link to the account with its actions in a menu.
  */
 export function AdminUserCompactList({ rows }: { rows: AdminUserRow[] }) {

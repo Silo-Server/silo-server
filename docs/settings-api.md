@@ -359,9 +359,14 @@ Content-Type: application/json
 ### Device override and plugin writes answer `200` with the document
 
 `PUT /api/v2/settings/device/subtitle-appearance` takes a `{value}` body (the appearance as a
-JSON document in a string; only JSON validity is checked) and answers `200` with the resolved
+JSON document in a string, which must satisfy the contract's `subtitle-appearance.json` schema;
+anything else is `422` at `body.value`) and answers `200` with the resolved
 `EffectiveSubtitleAppearance`, the same document
 `GET /api/v2/settings/subtitle-appearance/effective` serves.
+That document reads the canonical `playback.subtitle_appearance` setting: `global_value` is the
+profile-scope value, `device_value` the `profile_device` override for the declared device, and
+`effective_value` the override when there is one, otherwise the profile value (empty when neither
+is stored).
 `X-Silo-Device-Id` is a required declared header on both device-override mutations (a missing id
 is `422` at `header.X-Silo-Device-Id`); `DELETE` answers `204`, including when no override
 existed. The device headers declare length bounds (128/120/40), so an over-long value is a `422`.

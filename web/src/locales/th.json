@@ -365,6 +365,30 @@
       "value": "ค่านี้อยู่นอกช่วงที่กำหนด"
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "ใส่อักขระพิเศษอย่างน้อยหนึ่งตัว เช่น ! หรือ #"
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "ใส่ตัวพิมพ์ใหญ่อย่างน้อยหนึ่งตัว"
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "รหัสผ่านนี้ยาวเกินไป"
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "รหัสผ่านนี้สั้นเกินไป"
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

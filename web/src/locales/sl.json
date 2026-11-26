@@ -365,6 +365,30 @@
       "value": "Ta vrednost je zunaj dovoljenega obsega."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Vključite vsaj en poseben znak, na primer ! ali #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Vključite vsaj eno veliko črko."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "To geslo je predolgo."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "To geslo je prekratko."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

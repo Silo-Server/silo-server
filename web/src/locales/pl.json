@@ -365,6 +365,30 @@
       "value": "Ta wartość jest poza zakresem."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Użyj co najmniej jednego znaku specjalnego, np. ! lub #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Użyj co najmniej jednej wielkiej litery."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "To hasło jest za długie."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "To hasło jest za krótkie."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

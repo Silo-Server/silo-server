@@ -568,3 +568,29 @@ func TestCorrectionNamesDifferentShow(t *testing.T) {
 		})
 	}
 }
+
+// A league Sportarr matched carries only its sportarr ID, so an Identify to a
+// numbered TVDB show names no trusted ID to differ from and is no correction.
+// The date labels belong to the old match all the same and must go.
+func TestIdentifyDropsEpisodeLabelsTheNewMatchLacks(t *testing.T) {
+	h := newTestHarness()
+	const contentID = "153160435388976946"
+	if err := h.itemRepo.Upsert(context.Background(), &models.MediaItem{
+		ContentID: contentID, Type: "series", Title: "NBA", Status: "matched",
+		EpisodeLabels: models.EpisodeLabelsAirDate,
+		Studios:       []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+	}); err != nil {
+		t.Fatalf("seed series: %v", err)
+	}
+	provider := &capturingMetadataProvider{response: &MetadataResult{
+		HasMetadata: true, Title: "A Show", ProviderIDs: map[string]string{"tvdb": "81189"},
+	}}
+	if _, err := h.service.ProcessWithProviders(t.Context(), ProcessRequest{
+		ContentID: contentID, ProviderIDs: map[string]string{"tvdb": "81189"}, Mode: ModeIdentify,
+	}, []Provider{provider}); err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+	if got := h.itemRepo.items[contentID].EpisodeLabels; got != "" {
+		t.Fatalf("EpisodeLabels = %q after Identify to a numbered show, want empty", got)
+	}
+}

@@ -365,6 +365,30 @@
       "value": "Ši reikšmė nepatenka į leistiną intervalą."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Įtraukite bent vieną specialųjį simbolį, pavyzdžiui, ! arba #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Įtraukite bent vieną didžiąją raidę."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Šis slaptažodis per ilgas."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Šis slaptažodis per trumpas."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

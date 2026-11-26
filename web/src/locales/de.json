@@ -365,6 +365,30 @@
       "value": "Dieser Wert liegt außerhalb des zulässigen Bereichs."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Verwende mindestens ein Sonderzeichen, zum Beispiel ! oder #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Verwende mindestens einen Großbuchstaben."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Dieses Passwort ist zu lang."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Dieses Passwort ist zu kurz."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

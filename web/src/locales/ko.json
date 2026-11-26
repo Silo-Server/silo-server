@@ -365,6 +365,30 @@
       "value": "허용 범위를 벗어난 값이에요."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "! 또는 # 같은 특수 문자를 1개 이상 포함하세요."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "대문자를 1개 이상 포함하세요."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "비밀번호가 너무 길어요."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "비밀번호가 너무 짧아요."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

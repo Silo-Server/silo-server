@@ -365,6 +365,30 @@
       "value": "Denne værdi er uden for det tilladte interval."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Brug mindst ét specialtegn, f.eks. ! eller #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Brug mindst ét stort bogstav."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Denne adgangskode er for lang."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Denne adgangskode er for kort."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

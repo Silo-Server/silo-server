@@ -41,6 +41,11 @@ type AuthSession struct {
 	// as evidence of which of an account's registrations has no live login.
 	DeviceID       string
 	DevicePlatform string
+	// ViaDeviceSignIn is set on a session a device sign-in, Quick Connect or
+	// remote-playback handoff request opened
+	// (auth_sessions.via_device_sign_in). Written once at creation;
+	// auth.LimitedToItself reads the stored value.
+	ViaDeviceSignIn bool
 	// Purpose is SessionPurposeAccount or SessionPurposeRemotePlayback; empty
 	// is read as an account session.
 	Purpose string

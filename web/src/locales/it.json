@@ -365,6 +365,30 @@
       "value": "Questo valore è fuori dall’intervallo consentito."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Includi almeno un carattere speciale, come ! o #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Includi almeno una lettera maiuscola."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Questa password è troppo lunga."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Questa password è troppo corta."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

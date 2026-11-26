@@ -365,6 +365,30 @@
       "value": "Nilai ini di luar rentang."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Sertakan setidaknya satu karakter khusus, seperti ! atau #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Sertakan setidaknya satu huruf kapital."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Kata sandi ini terlalu panjang."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Kata sandi ini terlalu pendek."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

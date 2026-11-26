@@ -365,6 +365,30 @@
       "value": "This value is out of range."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Include at least one special character, such as ! or #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Include at least one capital letter."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "This password is too long."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "This password is too short."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

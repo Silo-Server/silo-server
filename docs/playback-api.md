@@ -431,7 +431,11 @@ and native players keep the `200`; native players skip the bytes they already
 have. An audio-only remux (`audio/mp4`) arrives as MP4 fragments of about 2
 seconds each, so a player can start on the first one. A failure before the first
 byte is a Problem Details response; a failure after it ends the stream. A stopped, expired or
-terminated session answers `410 playback_session_ended`. A subtitle sidecar the
+terminated session answers `410 playback_session_ended`. When the hls delivery
+lists `hls_transport_marker_v1`, the plan's HLS URLs carry `silo_transport`, and
+a request from a playlist that a replan replaced answers `404 playback_transport_superseded`:
+the session is still live, so stop that player and play the current plan
+([playback protocol v3 §6](architecture/playback-protocol-v3.md#6-replan)). A subtitle sidecar the
 node has no room to read yet answers `503` with `Retry-After`; retry it then.
 
 A plan may carry `stream.parallel_range_url`: a URL the client may read the

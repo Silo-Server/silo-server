@@ -365,6 +365,30 @@
       "value": "הערך הזה מחוץ לטווח."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "יש לכלול לפחות תו מיוחד אחד, כמו ! או #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "יש לכלול לפחות אות גדולה אחת."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "הסיסמה הזו ארוכה מדי."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "הסיסמה הזו קצרה מדי."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

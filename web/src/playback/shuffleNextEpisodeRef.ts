@@ -30,7 +30,7 @@ export function shuffleNextEpisodeRef(shuffle: Shuffle): EpisodeRef {
       isStill(urlFromPoster) === false && isStill(thumbhashFromPoster) === false
         ? false
         : undefined,
-    airDate: next.release_date ?? null,
+    airDate: next.air_date ?? next.release_date ?? null,
     watchState: episode
       ? { played: next.user_state?.played, position_seconds: next.position_seconds }
       : undefined,

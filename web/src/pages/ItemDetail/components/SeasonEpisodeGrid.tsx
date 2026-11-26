@@ -18,6 +18,7 @@ import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/ove
 import { cn } from "@/lib/utils";
 import { EpisodeGridSkeleton } from "./SectionSkeletons";
 import { useT } from "@/i18n";
+import { episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import EpisodeCardCaption from "./EpisodeCardCaption";
 import { episodeLinkLibraryId, type EpisodeNavigationState } from "../itemDetailLayout";
 import WatchProgressBar from "@/components/WatchProgressBar";
@@ -45,6 +46,8 @@ interface SeasonEpisodeGridProps {
   episodeLinkState?: EpisodeNavigationState;
   /** The page's library scope, kept on each episode link. */
   libraryId?: number;
+  /** The series' episode labels; "air_date" leads each caption with its title, not its code. */
+  episodeLabels?: string;
 }
 
 export default function SeasonEpisodeGrid({
@@ -53,6 +56,7 @@ export default function SeasonEpisodeGrid({
   isLoading,
   episodeLinkState,
   libraryId,
+  episodeLabels,
 }: SeasonEpisodeGridProps) {
   const t = useT();
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
@@ -89,6 +93,7 @@ export default function SeasonEpisodeGrid({
           playbackEpisode={playbackById.get(episode.content_id) ?? episode}
           episodeLinkState={episodeLinkState}
           libraryId={libraryId}
+          episodeLabels={episodeLabels}
           overlayPrefs={overlayPrefs}
           quickActionMode={quickActionMode}
           spoilerPrefs={spoilerPrefs}
@@ -103,6 +108,7 @@ function SeasonEpisodeCard({
   playbackEpisode,
   episodeLinkState,
   libraryId,
+  episodeLabels,
   overlayPrefs,
   quickActionMode,
   spoilerPrefs,
@@ -111,6 +117,7 @@ function SeasonEpisodeCard({
   playbackEpisode: EpisodeListItem;
   episodeLinkState?: EpisodeNavigationState;
   libraryId?: number;
+  episodeLabels?: string;
   overlayPrefs: CardOverlayPrefs | null;
   quickActionMode: CardQuickActionMode;
   spoilerPrefs: EpisodeSpoilerPrefs;
@@ -122,7 +129,9 @@ function SeasonEpisodeCard({
     (episode.user_data?.position_seconds ?? 0) > 0 &&
     (episode.user_data?.duration_seconds ?? 0) > 0;
   const episodeTitle =
-    episode.title || t("web.detail.episodes.numbered", { episode: episode.episode_number });
+    episode.title ||
+    episodeAirDateLabel(episodeLabels, episode.air_date) ||
+    t("web.detail.episodes.numbered", { episode: episode.episode_number });
   const unwatched = isEpisodeUnwatched(episode.user_data);
   const hideImage =
     spoilerPrefs.hideImages && unwatched && isEpisodeStill(episode.still_is_episode_still);
@@ -202,6 +211,7 @@ function SeasonEpisodeCard({
       <ViewTransitionLink to={episodeHref} state={episodeLinkState} className="block">
         <EpisodeCardCaption
           episode={episode}
+          episodeLabels={episodeLabels}
           hideOverview={hideOverview}
           badges={episode.user_data?.played && <WatchedCheckIndicator />}
           notice={unreadable && <UnreadableFileBadge />}

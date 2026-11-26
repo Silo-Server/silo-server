@@ -365,6 +365,30 @@
       "value": "Táto hodnota je mimo rozsahu."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Použite aspoň jeden špeciálny znak, napríklad ! alebo #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Použite aspoň jedno veľké písmeno."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Toto heslo je príliš dlhé."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Toto heslo je príliš krátke."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

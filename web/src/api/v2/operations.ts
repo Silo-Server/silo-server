@@ -341,6 +341,7 @@ export const v2Operations = {
   "GET /api/v2/auth/oauth/{install_id}/callback": "finishOAuthCallback",
   "GET /api/v2/auth/oauth/{install_id}/native/start": "startNativeOAuthLogin",
   "GET /api/v2/auth/oauth/{install_id}/start": "startOAuthLogin",
+  "GET /api/v2/auth/password-policy": "getPasswordPolicy",
   "GET /api/v2/auth/provider-logout": "getProviderLogout",
   "GET /api/v2/auth/providers": "listAuthProviders",
   "GET /api/v2/auth/sessions": "listSessions",

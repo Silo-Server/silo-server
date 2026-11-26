@@ -29,8 +29,9 @@ type LoginSessionCapabilities struct {
 	LastSeen        bool `json:"last_seen" doc:"Real authenticated request activity is recorded, at most once per minute per session"`
 	AdminManagement bool `json:"admin_management" doc:"Admin login-session operations are served; normal administrator authorization and owner protection still apply"`
 	// RevokeOtherSessions is false in demo mode for a caller that is not an
-	// administrator: deleteSession then ends only the caller's own session.
-	RevokeOtherSessions bool `json:"revoke_other_sessions" doc:"Whether deleteSession may revoke the caller's sessions other than the one making the request. False in demo mode for a caller that is not an administrator, who may still revoke the current session"`
+	// administrator, and for a session limited to itself (opened by device
+	// sign-in): deleteSession then ends only the caller's own session.
+	RevokeOtherSessions bool `json:"revoke_other_sessions" doc:"Whether deleteSession may revoke the caller's sessions other than the one making the request. False in demo mode for a caller that is not an administrator, and for a session opened by device sign-in (see listSessions); either may still revoke the current session"`
 }
 
 func registerLoginSessionCapabilities(reg *Registry) {
@@ -40,8 +41,15 @@ func registerLoginSessionCapabilities(reg *Registry) {
 		if available {
 			state = StateAvailable
 		}
+		revokeOthers := available && demoAllows(ctx, reg.deps.DemoSettings)
+		if claims := claimsFrom(ctx); revokeOthers && claims != nil && claims.SessionID != "" {
+			// A session limited to itself can end no other; when that can't
+			// be read the capability says no, as deleteSession would refuse.
+			limited, err := reg.deps.Sessions.SessionLimitedToItself(ctx, claims.SessionID)
+			revokeOthers = err == nil && !limited
+		}
 		return &LoginSessionCapabilitiesOutput{Body: LoginSessionCapabilities{Capability: Capability{State: state}, Available: available, LastSeen: available, AdminManagement: reg.deps.AdminLoginSessions != nil && reg.deps.AdminLoginSessions.AdminLoginSessionsAvailable(),
-			RevokeOtherSessions: available && demoAllows(ctx, reg.deps.DemoSettings)}}, nil
+			RevokeOtherSessions: revokeOthers}}, nil
 	})
 }
 

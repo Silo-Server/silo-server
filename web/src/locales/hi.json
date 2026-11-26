@@ -365,6 +365,30 @@
       "value": "यह वैल्यू सीमा से बाहर है।"
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "कम से कम एक विशेष वर्ण शामिल करें, जैसे ! या #।"
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "कम से कम एक कैपिटल अक्षर शामिल करें।"
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "यह पासवर्ड बहुत लंबा है।"
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "यह पासवर्ड बहुत छोटा है।"
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

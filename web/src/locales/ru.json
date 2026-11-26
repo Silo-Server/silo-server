@@ -365,6 +365,30 @@
       "value": "Значение вне допустимого диапазона."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Используйте хотя бы один специальный символ, например ! или #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Используйте хотя бы одну заглавную букву."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Слишком длинный пароль."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Слишком короткий пароль."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

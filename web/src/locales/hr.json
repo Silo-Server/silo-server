@@ -365,6 +365,30 @@
       "value": "Ova je vrijednost izvan raspona."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Uključite barem jedan poseban znak, primjerice ! ili #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Uključite barem jedno veliko slovo."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Ova je lozinka predugačka."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Ova je lozinka prekratka."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

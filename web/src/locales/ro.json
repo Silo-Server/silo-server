@@ -365,6 +365,30 @@
       "value": "Această valoare este în afara intervalului permis."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Includeți cel puțin un caracter special, cum ar fi ! sau #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Includeți cel puțin o literă mare."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Această parolă este prea lungă."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Această parolă este prea scurtă."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

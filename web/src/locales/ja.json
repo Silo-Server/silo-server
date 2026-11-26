@@ -365,6 +365,30 @@
       "value": "この値は範囲外です。"
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "!や#などの記号を少なくとも1文字含めてください。"
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "大文字を少なくとも1文字含めてください。"
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "このパスワードは長すぎます。"
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "このパスワードは短すぎます。"
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

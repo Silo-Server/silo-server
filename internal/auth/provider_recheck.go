@@ -689,14 +689,14 @@ func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *
 			// them), and an account whose primary provider still vouches for
 			// it keeps what that provider opened: the refusal ends only the
 			// sessions opened through the identity.
-			if _, err := tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at = NOW()
-				WHERE identity_id = $1 AND user_id = $2 AND revoked_at IS NULL`, identity.ID, identity.UserID); err != nil {
-				return fmt.Errorf("revoking provider sessions: %w", err)
-			}
 			if _, err := tx.Exec(ctx, `UPDATE device_login_requests SET status = $3, updated_at = NOW()
 				WHERE approved_identity_id = $1 AND approved_by_user_id = $2 AND status = $4`,
 				identity.ID, identity.UserID, DeviceLoginStatusDenied, DeviceLoginStatusApproved); err != nil {
 				return fmt.Errorf("withdrawing provider device sign-in approvals: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at = NOW()
+				WHERE identity_id = $1 AND user_id = $2 AND revoked_at IS NULL`, identity.ID, identity.UserID); err != nil {
+				return fmt.Errorf("revoking provider sessions: %w", err)
 			}
 			// A Jellyfin-compatible session does not record the identity it
 			// signed in through, so every one the account holds ends.

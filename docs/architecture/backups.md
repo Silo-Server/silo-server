@@ -1874,7 +1874,8 @@ another key needs `--accept-lost-credentials`: its encrypted settings and creden
 read with this key. Silo refuses to start on a setting it cannot decrypt, so
 after verification such a restore deletes, in the restored database, every
 encrypted `server_settings` row this key cannot open and prints their key
-names (never values) for the admin to enter again. Rows are only deleted,
+names (never values) for the admin to enter again, except, on a replace, the
+server-specific ones the live server supplies (below). Rows are only deleted,
 never renamed: a value is bound to its key name.
 
 ### Connections to outside services
@@ -1899,7 +1900,15 @@ builds no provider from the backup's legacy endpoint settings or the
 Ollama default (`config.PlanAIProviderConversion`). A binding left without
 its list, as a restore with another key leaves it, clears the unit too. A
 full restore then takes the list and bindings from the live server with its
-server-specific settings (below). `TestEveryCredentialSettingIsDecided`
+server-specific settings (below), so it lists a cleared unit with a
+credential the live server supplies that way as kept, not for re-entry, and
+leaves the settings it supplies out of the list of those the key cannot read
+(`ServerSpecificSettingKeys`). Only a connection counts: an empty value, an
+encrypted one this key cannot open, a provider list that does not parse or
+has no providers (as a server's first start writes it), ChatGPT credentials with no connected
+account, and a job binding, which only names a provider, supply nothing, and
+a unit's other settings without its credential, such as a push relay waiting
+to be registered again, connect nowhere. `TestEveryCredentialSettingIsDecided`
 fails on an encrypted setting that is neither in a unit nor this server's
 own (signing keys, storage, Redis, the web push key pair).
 

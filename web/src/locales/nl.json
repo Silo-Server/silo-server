@@ -365,6 +365,30 @@
       "value": "Deze waarde valt buiten het bereik."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Gebruik minstens één speciaal teken, zoals ! of #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Gebruik minstens één hoofdletter."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Dit wachtwoord is te lang."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Dit wachtwoord is te kort."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

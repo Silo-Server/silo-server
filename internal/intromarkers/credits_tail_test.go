@@ -2,6 +2,7 @@ package intromarkers
 
 import (
 	"context"
+	"errors"
 	"math"
 	"os/exec"
 	"path/filepath"
@@ -89,5 +90,66 @@ func TestSampleCreditsTailWithRealFFmpeg(t *testing.T) {
 	segment, ok := combineCredits(candidate, creditsEvidence{Keyframes: keyframes, Silences: sample.Tail.Silences}, creditsLimitsFor(false))
 	if !ok || math.Abs(segment.Start-70) > 1 || segment.End != 100 || segment.Algorithm != CreditsVideoAlgorithm {
 		t.Fatalf("credits %+v (placed %t), want video credits from 70 s to the end", segment, ok)
+	}
+}
+
+// Issue #5260: a tail pass without keyframe statistics is sparse only when
+// ffmpeg counted no frame in the window; otherwise the parsers missed them
+// and the pass fails, to be retried.
+func TestCheckTailFrames(t *testing.T) {
+	zero, some := int64(0), int64(12)
+	for _, tc := range []struct {
+		name   string
+		result mediasample.Result
+		want   error
+	}{
+		{"keyframes", mediasample.Result{Frames: []mediasample.FrameStats{{Seconds: 1}}, VideoFrames: &some}, nil},
+		{"no frame in the window", mediasample.Result{VideoFrames: &zero}, nil},
+		{"frames ffmpeg counted but not parsed", mediasample.Result{VideoFrames: &some}, errNoTailFrames},
+		{"no count, as from an older node", mediasample.Result{}, errNoTailFrames},
+	} {
+		if got := checkTailFrames(tc.result); !errors.Is(got, tc.want) {
+			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestSampleCreditsTailWithoutVideoInTheWindow runs the tail pass on an
+// episode whose video stops long before its audio, so the tail window holds
+// no video: the pass succeeds with no keyframes rather than failing. It runs
+// real ffmpeg twice, about three seconds, because only ffmpeg shows that such
+// a window reports a zero frame count, in a plain and in a colored log.
+func TestSampleCreditsTailWithoutVideoInTheWindow(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	candidate := Candidate{FileID: 1, DurationSeconds: 100, CodecVideo: "h264", CodecAudio: "aac"}
+	caps, err := mediasample.LoadCapabilities(ctx, ffmpeg)
+	if err != nil {
+		t.Skipf("ffmpeg capabilities unavailable: %v", err)
+	}
+	if err := caps.Require(creditsTailRequest(ctx, candidate, tailWindow(candidate), false)); err != nil {
+		t.Skipf("ffmpeg cannot run the tail pass: %v", err)
+	}
+	candidate.FilePath = filepath.Join(t.TempDir(), "episode.mkv")
+	generate := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "color=c=gray:s=320x180:r=10:d=20", "-f", "lavfi", "-i", "aevalsrc=0.3*sin(2*PI*330*t):d=100:s=44100",
+		"-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "ultrafast", "-g", "10", candidate.FilePath)
+	if output, err := generate.CombinedOutput(); err != nil {
+		t.Skipf("cannot generate the clip: %v: %s", err, output)
+	}
+
+	// ffmpeg's colored log puts a color reset in front of its progress line.
+	for _, color := range []bool{false, true} {
+		if color {
+			t.Setenv("AV_LOG_FORCE_COLOR", "1")
+		}
+		sample, err := NewChromaprintExtractor(DefaultConfig(ffmpeg)).SampleCreditsTail(ctx, candidate, false)
+		if err != nil || sample.TailErr != nil || len(sample.Tail.Frames) != 0 {
+			t.Fatalf("color %t: SampleCreditsTail: %d keyframes, %v, tail %v; want none and no error", color, len(sample.Tail.Frames), err, sample.TailErr)
+		}
 	}
 }

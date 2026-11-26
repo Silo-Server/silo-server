@@ -365,6 +365,30 @@
       "value": "\u200F\u202EThis value is out of range.\u202C"
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInclude at least one special character, such as ! or #.\u202C"
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInclude at least one capital letter.\u202C"
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis password is too long.\u202C"
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis password is too short.\u202C"
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

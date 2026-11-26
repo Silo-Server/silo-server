@@ -47,14 +47,14 @@ func (s *ABSProgressStore) GetProgress(ctx context.Context, userID, profileID, c
 		       CASE WHEN completed THEN 1.0
 		            WHEN duration_seconds > 0 THEN position_seconds / duration_seconds
 		            ELSE 0 END AS progress_pct,
-		       updated_at
+		       updated_at, COALESCE(hide_from_continue, FALSE)
 		FROM user_watch_progress
 		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
 		uid, profileID, contentID,
 	)
 	err = dbRow.Scan(
 		&row.ContentID, &positionSeconds, &durationSeconds, &completed,
-		&progressPct, &updatedAt,
+		&progressPct, &updatedAt, &row.HideFromContinue,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -95,7 +95,8 @@ func (s *ABSProgressStore) ListProgressForAudiobooks(ctx context.Context, userID
 		       CASE WHEN wp.completed THEN 1.0
 		            WHEN wp.duration_seconds > 0 THEN wp.position_seconds / wp.duration_seconds
 		            ELSE 0 END,
-		       wp.updated_at
+		       wp.updated_at,
+		       COALESCE(wp.hide_from_continue, FALSE)
 		FROM user_watch_progress wp
 		JOIN media_items mi ON mi.content_id = wp.media_item_id
 		WHERE wp.user_id = $1
@@ -122,6 +123,7 @@ func (s *ABSProgressStore) ListProgressForAudiobooks(ctx context.Context, userID
 			&p.IsFinished,
 			&p.ProgressPct,
 			&updatedAt,
+			&p.HideFromContinue,
 		); err != nil {
 			return nil, fmt.Errorf("abs_progress_store: scan progress row: %w", err)
 		}

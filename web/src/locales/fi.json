@@ -365,6 +365,30 @@
       "value": "Tämä arvo on sallitun alueen ulkopuolella."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Lisää vähintään yksi erikoismerkki, kuten ! tai #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Lisää vähintään yksi iso kirjain."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Tämä salasana on liian pitkä."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Tämä salasana on liian lyhyt."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

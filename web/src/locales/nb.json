@@ -365,6 +365,30 @@
       "value": "Denne verdien er utenfor gyldig område."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Ta med minst ett spesialtegn, for eksempel ! eller #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Ta med minst én stor bokstav."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Dette passordet er for langt."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Dette passordet er for kort."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

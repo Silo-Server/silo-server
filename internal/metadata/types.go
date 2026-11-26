@@ -407,6 +407,9 @@ type MetadataResult struct {
 	// ShowStatus is the publication/airing status ("Ongoing", "Completed",
 	// "Continuing", "Ended") when the provider reports one.
 	ShowStatus string
+	// EpisodeLabels is how clients label a series' episodes: "" for season
+	// and episode numbers, models.EpisodeLabelsAirDate for the air date.
+	EpisodeLabels string
 	// Videos are remote promotional/supplemental videos (trailers, teasers,
 	// ...) hosted on external sites. Accumulated across providers with
 	// (Provider, ProviderKey) dedup, gated by FieldVideos and the library's

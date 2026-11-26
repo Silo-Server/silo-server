@@ -365,6 +365,30 @@
       "value": "Тази стойност е извън допустимия диапазон."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Включете поне един специален знак, например ! или #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Включете поне една главна буква."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Тази парола е твърде дълга."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Тази парола е твърде кратка."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

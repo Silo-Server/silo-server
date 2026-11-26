@@ -23,6 +23,7 @@ import {
   formatShortCalendarDate,
   insightsHrefWith,
   type InsightsFilterState,
+  insightRefreshProps,
 } from "./insightsHelpers";
 import { InsightKpiCard, InsightSectionError } from "./insightsShared";
 import { formatInsightsTitle } from "./insightsTitleFormat";
@@ -47,7 +48,7 @@ export function LibraryTab({ filters }: { filters: InsightsFilterState }) {
   const t = useT();
   const [searchParams] = useSearchParams();
   const queryParams = useMemo(() => buildInsightsWindowQueryParams(filters), [filters]);
-  const query = useAdminInsightsLibrary(queryParams);
+  const query = useAdminInsightsLibrary(queryParams, { keepPrevious: true });
   const data = query.data;
 
   if (query.isLoading) {
@@ -87,7 +88,7 @@ export function LibraryTab({ filters }: { filters: InsightsFilterState }) {
     }));
 
   return (
-    <div className="space-y-5">
+    <div {...insightRefreshProps(query.isPlaceholderData, "space-y-5")}>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <InsightKpiCard
           label={t("web.admin.insights.library.kpi.played")}

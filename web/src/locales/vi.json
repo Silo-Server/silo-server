@@ -365,6 +365,30 @@
       "value": "Giá trị này nằm ngoài phạm vi."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Thêm ít nhất một ký tự đặc biệt, chẳng hạn như ! hoặc #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Thêm ít nhất một chữ cái viết hoa."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Mật khẩu này quá dài."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Mật khẩu này quá ngắn."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,

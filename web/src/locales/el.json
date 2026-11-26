@@ -365,6 +365,30 @@
       "value": "Αυτή η τιμή είναι εκτός εύρους."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Συμπεριλάβετε τουλάχιστον έναν ειδικό χαρακτήρα, όπως ! ή #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Συμπεριλάβετε τουλάχιστον ένα κεφαλαίο γράμμα."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Αυτός ο κωδικός πρόσβασης είναι πολύ μεγάλος."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Αυτός ο κωδικός πρόσβασης είναι πολύ σύντομος."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
