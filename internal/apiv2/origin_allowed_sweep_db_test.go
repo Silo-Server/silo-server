@@ -22,6 +22,8 @@ func TestAllowedOperationsAnswerGrantedAppsDB(t *testing.T) {
 	// Services whose handlers check the session after asking whether the
 	// service is wired are given one, so the check is reached.
 	d := newKeyRoutesDB(t, func(deps *Dependencies) { deps.ProfileSet = &fakeProfileSets{} })
+	// The live half of the capability rule, through the real session lookup.
+	checkLivePermissionMembers(t, d.handler, "tok-app")
 	for _, op := range documentOperations(t) {
 		dec := documentedDecision(t, op)
 		if !judgedClass(op.Class) || dec == nil || dec.Verdict != VerdictAllowed {

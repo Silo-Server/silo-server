@@ -301,7 +301,7 @@ func (reg *Registry) Declared() []Declared {
 // not a request failure.
 func Register[I, O any](reg *Registry, op Operation, handler func(context.Context, *I) (*O, error)) {
 	if op.CapabilityFor == nil {
-		op.CapabilityFor = capabilityGoverns[op.OperationID]
+		op.CapabilityFor = capabilityMembers[op.OperationID+" allowed"].governs
 	}
 	handler = prepareCapabilityOperation(&op, handler, reg.capabilityPermitted(op.CapabilityFor))
 	reg.recordOrigins(op.OperationID, op.Origins)

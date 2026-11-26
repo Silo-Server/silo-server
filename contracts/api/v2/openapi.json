@@ -161750,6 +161750,10 @@
         "tags": [
           "auth"
         ],
+        "x-silo-capability-for": [
+          "listSessions",
+          "deleteSession"
+        ],
         "x-silo-class": "authenticated",
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
@@ -163550,6 +163554,11 @@
         "tags": [
           "ebooks"
         ],
+        "x-silo-capability-for": [
+          "readEbookFile",
+          "saveEbookProgress",
+          "createEbookAnnotation"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
@@ -163966,6 +163975,10 @@
         "tags": [
           "not-interested"
         ],
+        "x-silo-capability-for": [
+          "markNotInterested",
+          "listNotInterested"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
@@ -164305,6 +164318,10 @@
         "summary": "Discover the favorites and watchlist membership reads.",
         "tags": [
           "favorites"
+        ],
+        "x-silo-capability-for": [
+          "addFavorite",
+          "addToWatchlist"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
@@ -164723,6 +164740,9 @@
         "summary": "Whether item detail carries the ratings list, and the rating sources title pages and cards show.",
         "tags": [
           "catalog"
+        ],
+        "x-silo-capability-for": [
+          "setRating"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
@@ -171453,6 +171473,10 @@
         "tags": [
           "catalog"
         ],
+        "x-silo-capability-for": [
+          "queryCatalogItems",
+          "listCatalogItems"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
@@ -172526,6 +172550,9 @@
         "tags": [
           "catalog"
         ],
+        "x-silo-capability-for": [
+          "createThemeSongPlayback"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
@@ -173262,6 +173289,11 @@
         "summary": "The collection features this server supports.",
         "tags": [
           "collections"
+        ],
+        "x-silo-capability-for": [
+          "listCollections",
+          "getCollection",
+          "createCollection"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
@@ -191936,6 +191968,9 @@
         "tags": [
           "realtime"
         ],
+        "x-silo-capability-for": [
+          "createEventsSocketTicket"
+        ],
         "x-silo-class": "authenticated",
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
@@ -195240,6 +195275,10 @@
         "summary": "The home page features this server supports, such as the cards of the first sections on getHomeLayout.",
         "tags": [
           "home"
+        ],
+        "x-silo-capability-for": [
+          "listHomeSections",
+          "getHomeLayout"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
@@ -207127,6 +207166,10 @@
         "tags": [
           "notifications"
         ],
+        "x-silo-capability-for": [
+          "listNotifications",
+          "markNotificationRead"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
@@ -217676,6 +217719,9 @@
         "tags": [
           "playback"
         ],
+        "x-silo-capability-for": [
+          "startPlayback"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
@@ -218515,6 +218561,9 @@
         "summary": "Discover whether the session-bound playback control handshake is served.",
         "tags": [
           "playback"
+        ],
+        "x-silo-capability-for": [
+          "createPlaybackControlSocketTicket"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
@@ -226480,6 +226529,10 @@
         "summary": "The watch progress features this server supports, such as clearing a resume position.",
         "tags": [
           "progress"
+        ],
+        "x-silo-capability-for": [
+          "syncProgress",
+          "listProgress"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
@@ -236027,6 +236080,9 @@
         "tags": [
           "settings"
         ],
+        "x-silo-capability-for": [
+          "getSettingsContract"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
@@ -239790,6 +239846,9 @@
         "summary": "Whether the server can shuffle, and the scopes a shuffle can draw from.",
         "tags": [
           "playback"
+        ],
+        "x-silo-capability-for": [
+          "createShuffle"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
@@ -243852,6 +243911,10 @@
         "tags": [
           "subtitles"
         ],
+        "x-silo-capability-for": [
+          "createSubtitleAIJob",
+          "cancelSubtitleAIJob"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
@@ -244634,6 +244697,10 @@
         "summary": "Read configured subtitle capabilities without starting work.",
         "tags": [
           "subtitles"
+        ],
+        "x-silo-capability-for": [
+          "searchSubtitles",
+          "downloadSubtitle"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
@@ -246042,6 +246109,12 @@
         "summary": "Read whether stored subtitles can be synced to their file's audio, and whether new ones are synced automatically.",
         "tags": [
           "subtitles"
+        ],
+        "x-silo-capability-for": [
+          "startSubtitleSync",
+          "syncStoredSubtitle",
+          "setSubtitleTiming",
+          "setStoredSubtitleTiming"
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
@@ -248986,6 +249059,9 @@
         "tags": [
           "libraries"
         ],
+        "x-silo-capability-for": [
+          "listUserLibraries"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-origin-decisions": {
@@ -251036,6 +251112,10 @@
         "summary": "Read which watch-together room behaviors this server supports.",
         "tags": [
           "realtime"
+        ],
+        "x-silo-capability-for": [
+          "joinWatchTogetherRoom",
+          "createWatchTogetherRoom"
         ],
         "x-silo-class": "authenticated",
         "x-silo-conditional": true,

@@ -453,22 +453,78 @@ func (reg *Registry) capabilityPermitted(governed []string) func(context.Context
 	}
 }
 
-// capabilityGoverns names, for each capability read whose permission answer
-// describes actions some judged kind of session is refused, the operations
-// it describes (Operation.CapabilityFor). A capability not listed describes
-// only actions every judged kind may take, or none.
-var capabilityGoverns = map[string][]string{
-	"getAccountPasswordCapability":                 {"changePassword"},
-	"getApplePushRegistrationCapabilities":         {"registerApplePushDevice", "resetApplePushInstallation"},
-	"getPushRegistrationCapabilities":              {"registerPushDevice", "unregisterPushDevice"},
-	"getDiagnosticsCapabilities":                   {"uploadDiagnosticsReport", "createDiagnosticsUpload", "putDiagnosticsUploadChunk", "completeDiagnosticsUpload", "abortDiagnosticsUpload"},
-	"getDownloadCapability":                        {"createDownloads", "listDownloads", "createDirectDownloadLink", "getDirectDownload", "createDownloadSubscription"},
-	"getHistoryImportCapability":                   {"createHistoryImportRun", "createPlexPin", "loginEmbyConnect", "listHistoryImportRuns", "listHistoryImportSources"},
-	"getNotificationEmailVerificationCapabilities": {"requestNotificationEmailVerification"},
-	"getOnboardingCapabilities":                    {"getOnboardingFlow", "getOnboardingState", "updateOnboardingProgress"},
-	"getProfileExportCapability":                   {"exportProfile", "importProfile"},
-	opProgressBootstrapCapabilities:                {opCreateProgressSnapshot, opGetProgressSnapshot},
-	"getTitleAllowanceCapability":                  {"allowTitle", "disallowTitle", "allowCollectionTitles", "listTitleAllowanceProfiles", "listAllowedTitles"},
-	"getTrailersCapability":                        {"refreshCatalogItemTrailers"},
-	"getMetadataAICapability":                      {"translateCatalogItemDescription"},
+// capabilityMember is one permission member of a response a judged kind of
+// session may read: a boolean named allowed or ending in _allowed. Either it
+// governs (names the operations whose action it answers for, and is false for
+// a session to which every one of them is refused), or it is exempt with a
+// reason. TestPermissionMembersStateTheirCase fails on a member with neither.
+type capabilityMember struct {
+	governs []string
+	exempt  string
+}
+
+// downloadOperations are the actions a download permission answers for.
+var downloadOperations = []string{"createDownloads", "listDownloads", "createDirectDownloadLink", "getDirectDownload", "createDownloadSubscription"}
+
+// capabilityMembers is the table of permission members, keyed by operation
+// and member path ("getX allowed", "listY items[].z_allowed"). A capability
+// read's top-level allowed is applied by the shared capability adapter
+// (Operation.CapabilityFor); a member deeper in a response by its handler
+// (memberPermitted).
+var capabilityMembers = map[string]capabilityMember{
+	"getAccountPasswordCapability allowed":                 {governs: []string{"changePassword"}},
+	"getApplePushRegistrationCapabilities allowed":         {governs: []string{"registerApplePushDevice", "resetApplePushInstallation"}},
+	"getPushRegistrationCapabilities allowed":              {governs: []string{"registerPushDevice", "unregisterPushDevice"}},
+	"getDiagnosticsCapabilities allowed":                   {governs: []string{"uploadDiagnosticsReport", "createDiagnosticsUpload", "putDiagnosticsUploadChunk", "completeDiagnosticsUpload", "abortDiagnosticsUpload"}},
+	"getDownloadCapability allowed":                        {governs: downloadOperations},
+	"getDownloadCapability download_allowed":               {governs: downloadOperations},
+	"getDownloadCapability transcode_user_allowed":         {governs: downloadOperations},
+	"getCurrentUser download_allowed":                      {governs: downloadOperations},
+	"getHistoryImportCapability allowed":                   {governs: []string{"createHistoryImportRun", "createPlexPin", "loginEmbyConnect", "listHistoryImportRuns", "listHistoryImportSources"}},
+	"getNotificationEmailVerificationCapabilities allowed": {governs: []string{"requestNotificationEmailVerification"}},
+	"getOnboardingCapabilities allowed":                    {governs: []string{"getOnboardingFlow", "getOnboardingState", "updateOnboardingProgress"}},
+	"getProfileExportCapability allowed":                   {governs: []string{"exportProfile", "importProfile"}},
+	opProgressBootstrapCapabilities + " allowed":           {governs: []string{opCreateProgressSnapshot, opGetProgressSnapshot}},
+	"getTitleAllowanceCapability allowed":                  {governs: []string{"allowTitle", "disallowTitle", "allowCollectionTitles", "listTitleAllowanceProfiles", "listAllowedTitles"}},
+	"getTrailersCapability allowed":                        {governs: []string{"refreshCatalogItemTrailers"}},
+	"getMetadataAICapability allowed":                      {governs: []string{"translateCatalogItemDescription"}},
+	"getSubtitleSyncStatus allowed":                        {governs: []string{"startSubtitleSync", "syncStoredSubtitle", "setSubtitleTiming", "setStoredSubtitleTiming"}},
+	"getSubtitleAIStatus allowed":                          {governs: []string{"createSubtitleAIJob", "cancelSubtitleAIJob"}},
+	"getSubtitleProviderStatus allowed":                    {governs: []string{"searchSubtitles", "downloadSubtitle"}},
+	"listProfiles items[].requests_allowed":                {governs: []string{"createRequest", "followRequestMedia", "searchRequestMedia"}},
+	// Capabilities whose actions are open to such a session; the answer
+	// stays the capability's own.
+	"getCatalogSearchCapabilities allowed":         {governs: []string{"queryCatalogItems", "listCatalogItems"}},
+	"getCollectionCapabilities allowed":            {governs: []string{"listCollections", "getCollection", "createCollection"}},
+	"getEbookCapability allowed":                   {governs: []string{"readEbookFile", "saveEbookProgress", "createEbookAnnotation"}},
+	"getEventsCapabilities allowed":                {governs: []string{"createEventsSocketTicket"}},
+	"getHomeCapabilities allowed":                  {governs: []string{"listHomeSections", "getHomeLayout"}},
+	"getLoginSessionCapabilities allowed":          {governs: []string{"listSessions", "deleteSession"}},
+	"getNotInterestedCapability allowed":           {governs: []string{"markNotInterested", "listNotInterested"}},
+	"getNotificationCapabilities allowed":          {governs: []string{"listNotifications", "markNotificationRead"}},
+	"getPersonalListCapability allowed":            {governs: []string{"addFavorite", "addToWatchlist"}},
+	"getPlaybackCapabilities allowed":              {governs: []string{"startPlayback"}},
+	"getPlaybackControlSocketCapabilities allowed": {governs: []string{"createPlaybackControlSocketTicket"}},
+	"getProgressCapabilities allowed":              {governs: []string{"syncProgress", "listProgress"}},
+	"getRatingsCapability allowed":                 {governs: []string{"setRating"}},
+	"getSettingsContractCapabilities allowed":      {governs: []string{"getSettingsContract"}},
+	"getShuffleCapability allowed":                 {governs: []string{"createShuffle"}},
+	"getThemeSongsCapability allowed":              {governs: []string{"createThemeSongPlayback"}},
+	"getUserLibraryCapabilities allowed":           {governs: []string{"listUserLibraries"}},
+	"getWatchTogetherCapabilities allowed":         {governs: []string{"joinWatchTogetherRoom", "createWatchTogetherRoom"}},
+	// Documents that describe server behavior. Believing allowed, the app
+	// would read the document, which every caller of the class may do: the
+	// gate refuses it no action the member stands for.
+	"getImageCapabilities allowed":         {exempt: "believing it, the app reads how the server sizes and serves images, which it may; the document offers no action the gate refuses"},
+	"getNetworkAccessCapabilities allowed": {exempt: "believing it, the app reads the installed network access providers, which it may; the document offers no action the gate refuses"},
+	"getPolicyCapability allowed":          {exempt: "believing it, the app reads the policy engine's decision types and state, which it may; the document offers no action the gate refuses"},
+	"getServerConnections allowed":         {exempt: "believing it, the app reads the addresses the deployment offers, which it may; the document offers no action the gate refuses"},
+}
+
+// memberPermitted applies a governed permission member below a capability
+// read's top level: false when the caller's kind of session is refused every
+// operation it names, else true (the handler's own answer then stands).
+func (reg *Registry) memberPermitted(ctx context.Context, key string) bool {
+	permitted := reg.capabilityPermitted(capabilityMembers[key].governs)
+	return permitted == nil || permitted(ctx)
 }

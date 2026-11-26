@@ -712,6 +712,7 @@ func (reg *Registry) listProfiles(ctx context.Context, _ *struct{}) (*ProfileCol
 		if p != nil {
 			return nil, p
 		}
+		profile.RequestsAllowed = profile.RequestsAllowed && reg.memberPermitted(ctx, "listProfiles items[].requests_allowed")
 		items = append(items, profile)
 	}
 	var maxProfiles *int

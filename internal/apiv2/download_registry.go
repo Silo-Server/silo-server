@@ -286,7 +286,7 @@ func (reg *Registry) getDownloadCapability(ctx context.Context, _ *CapabilityInp
 			return nil, downloadProblem(err)
 		}
 		out.Enabled = view.Enabled
-		out.DownloadAllowed = view.DownloadAllowed
+		out.DownloadAllowed = view.DownloadAllowed && reg.memberPermitted(ctx, "getDownloadCapability download_allowed")
 		out.OrderedStatus = true
 		out.FileDelivery = reg.deps.DownloadDelivery != nil
 		out.DirectDownloadLinks = reg.deps.DirectDownloadLinks != nil
@@ -310,7 +310,7 @@ func (reg *Registry) getDownloadCapability(ctx context.Context, _ *CapabilityInp
 		}
 		out.MonitoringModes = append([]string{}, view.MonitoringModes...)
 		out.TranscodeEnabled = view.TranscodeEnabled
-		out.TranscodeUserAllowed = view.TranscodeUserAllowed
+		out.TranscodeUserAllowed = view.TranscodeUserAllowed && reg.memberPermitted(ctx, "getDownloadCapability transcode_user_allowed")
 		out.SeasonDownload = view.SeasonDownload
 		out.SeriesMonitoring = view.SeriesMonitoring
 		out.State = enabledCapabilityState(view.Enabled)

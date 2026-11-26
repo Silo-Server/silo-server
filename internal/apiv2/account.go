@@ -201,6 +201,7 @@ func (reg *Registry) getCurrentUser(ctx context.Context, _ *struct{}) (*AccountO
 		return nil, serviceProblem(err)
 	}
 	out := accountFromView(view)
+	out.DownloadAllowed = out.DownloadAllowed && reg.memberPermitted(ctx, "getCurrentUser download_allowed")
 	if grantedAppSession(claims) {
 		// The person's email is not an app's to read; the shape's "none".
 		out.Email = ""
