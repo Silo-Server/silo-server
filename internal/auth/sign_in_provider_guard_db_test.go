@@ -264,3 +264,26 @@ func TestBreakGlassWithoutPasswordIsNotCountedDB(t *testing.T) {
 		t.Fatalf("turning password sign-in off = %v, want ErrBreakGlassRequired", err)
 	}
 }
+
+// TestUnlinkNeedsAPasswordThatSignsInDB: an account may disconnect its only
+// identity only while its password still signs in, by the same definition
+// the break-glass count uses (models.User.HasLocalPassword): password
+// sign-in on for the account is not enough without a stored password. Every
+// account on main has a stored hash, so the row is written with SQL.
+func TestUnlinkNeedsAPasswordThatSignsInDB(t *testing.T) {
+	e := newSignInGuardEnv(t)
+	ctx := t.Context()
+	account := e.localAccount(t, "unlink-no-password", models.RoleUser)
+	link, err := insertIdentity(ctx, e.pool, account.ID, e.oidc, e.identity("unlink-no-password-idp"), false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.exec(t, `UPDATE users SET local_password_login_enabled = true, password_hash = NULL WHERE id = $1`, account.ID)
+	svc := NewIdentityService(e.pool)
+	if can, err := svc.CanUnlinkOwn(ctx, account.ID); err != nil || can {
+		t.Fatalf("can unlink with no stored password = %v, %v", can, err)
+	}
+	if err := svc.UnlinkOwn(ctx, account.ID, link.ID); !errors.Is(err, ErrLastSignInMethod) {
+		t.Fatalf("unlink with no stored password = %v, want ErrLastSignInMethod", err)
+	}
+}
