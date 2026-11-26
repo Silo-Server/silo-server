@@ -189,7 +189,9 @@ ordered against each other.
   Deployment provisioning applies the operator's declared configuration and is
   never refused for this: it runs the same check, and a declaration that
   leaves no provider is applied with a warning in the log and in the declared
-  sign-in plugins' provisioning status (`provisionSignInWarning`).
+  sign-in plugins' provisioning status (`provisionSignInWarning`). The warning
+  (`SignInProviderWarning`) names the ways back: the declaration, a break-glass
+  admin turning password sign-in back on, and `silo auth local-login enable`.
 - `listAdminLocalPasswordOffAccounts` answers who the switch would lock out,
   reading the predicates sign-in uses: `passwordSignsInSQL` for a password that
   signs in, `primarySignInIdentitySQL` for a link that still signs the account

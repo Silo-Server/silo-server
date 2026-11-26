@@ -16,7 +16,14 @@ var ErrSignInProviderRequired = errors.New("a sign-in provider people can use is
 // SignInProviderWarning is what a provisioning apply logs and reports on the
 // declared sign-in plugins when it leaves that state: the deployment's
 // declaration is applied, not refused (provisionSignInWarning).
-const SignInProviderWarning = "Password sign-in is off and no sign-in provider can sign people in, so only break-glass administrators can sign in. Turn password sign-in back on or enable a sign-in provider."
+//
+// It names the ways back in the order to try them: the declaration itself, a
+// break-glass administrator (who keeps a password while it is off), and the
+// recovery command, which needs only a shell with the server's DATABASE_URL.
+const SignInProviderWarning = "Password sign-in is off and no sign-in provider can sign people in, so only break-glass administrators can sign in. " +
+	"To restore sign-in for everyone else: put the sign-in provider back in SILO_CONFIG or SILO_PLUGINS and restart the server; " +
+	"or have a break-glass administrator sign in with their password at /login?local=1 and turn on Allow password sign-in under Settings > Sign-in; " +
+	"or run `silo auth local-login enable` on a server with its DATABASE_URL."
 
 // SignInProviderGuard refuses a plugin write that would leave the server with
 // password sign-in off and no sign-in provider people can use. It runs in

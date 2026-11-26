@@ -993,8 +993,12 @@ admins can sign in with a password either way. Deployment provisioning
 declared configuration at startup and is never refused for this, so a
 declaration that leaves no such provider is applied, logged as a warning, and
 reported in the provisioning status of its sign-in plugins
-(`listAdminPluginProvisioningStatus`). A full restore likewise applies the
-backup's state without the check.
+(`listAdminPluginProvisioningStatus`). Break-glass admins can still sign in
+then. The warning names the ways back, in this order: put the provider back
+in the declaration and restart; have a break-glass admin sign in with a
+password at `/login?local=1` and turn password sign-in back on; or run
+`silo auth local-login enable` with the server's `DATABASE_URL`. A full
+restore likewise applies the backup's state without the check.
 
 Provider re-check: a login session opened through the provider (an OAuth or
 LDAP sign-in, a device sign-in approved from such a session, or a session of
