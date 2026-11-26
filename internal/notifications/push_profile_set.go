@@ -42,7 +42,7 @@ const (
 // moment the wake is queued. It is half of profileSetWakeInterval. After it,
 // the wake's tail takes at most profileSetFinalizeTimeout, so a wake ends,
 // and releases the account's in-flight mark, within the budget plus that:
-// 35 seconds. The limit measures the interval from when a wake is recorded,
+// 35 seconds. The limit measures the interval from when a wake is admitted,
 // and the wake is queued up to profileSetEnqueueTimeout later, so the budget
 // plus the tail must stay under the interval less that: then a wake has
 // ended before the account's limit lets the next one start, and two of an
@@ -56,7 +56,7 @@ const (
 // is more than the budget, so no per-phone deadline is set: the phones are
 // started in listProfileSetWakeDevices's order, phones that receive pushes
 // first, profileSetWakeConcurrency at a time, and one the budget does not
-// reach is recorded failed and gets the next wake. A var so tests can
+// reach is recorded failed; a later wake may reach it. A var so tests can
 // shorten it.
 var profileSetWakeBudget = profileSetWakeInterval / 2
 
@@ -104,7 +104,9 @@ const profileSetWakeMaxPhones = 20
 // answer queues nothing: it is the caller's in-flight guard, so an edit that
 // rolled back never takes it.
 //
-// One statement decides and records the wake in push_profile_set_wakes, so
+// A plain read of the account's wake time comes first: inside the interval
+// it answers before any edit or registration is read. Then one statement
+// decides and records the wake in push_profile_set_wakes, so
 // edits recorded at the same moment on two API servers queue one wake, and
 // removing and registering a device again does not reset the limit. The
 // time is recorded in the transaction that queues the attempts: a failure
@@ -191,8 +193,15 @@ func (r *PushDeviceRepository) EnqueueProfileSetWake(ctx context.Context, userID
 // accepted, newest first and never last, then by when they last
 // registered. APNs and FCM accept a push only for a real token of the app,
 // so a registration whose push was never accepted, such as one with a
-// made-up token, cannot take the place of a phone that receives pushes.
+// made-up token, cannot take the place of a phone that has had one accepted.
+// A genuine phone that never has ranks by registration time among the rest.
 // last_seen_at is written when a phone registers, not when it is used.
+//
+// It reads through the index on push_devices.user_id and sorts every live
+// registration of the account to keep the first profileSetWakeMaxPhones.
+// Registrations per account are not capped, so that read grows with their
+// number; EnqueueProfileSetWake consults the limit first, so it runs at most
+// once per profileSetWakeInterval per account.
 func listProfileSetWakeDevices(ctx context.Context, tx pgx.Tx, userID int, platforms []string) ([]PushDevice, error) {
 	rows, err := tx.Query(ctx, `SELECT `+pushDeviceColumns+`
 		FROM push_devices
@@ -341,7 +350,9 @@ func (s *System) WakeProfileSetDevices(ctx context.Context, userID int) bool {
 // reports false when one already is. The mark lives in this process only: a
 // row in the database would outlive a process that stopped mid-wake and
 // hold the account's wakes until retention. Across servers, the budget and
-// the limit row keep an account's wakes apart.
+// the limit row keep an account's wakes apart. A committed edit that meets
+// the mark is not woken; if the holder then queues nothing, neither edit is,
+// and the app reads the set when it opens and at the next wake.
 func (s *System) claimProfileSetWake(userID int) bool {
 	s.wakesMu.Lock()
 	defer s.wakesMu.Unlock()
@@ -400,9 +411,10 @@ func (r *PushDeviceRepository) failUnfinishedProfileSetWakes(ctx context.Context
 // as failed, on a fresh context limited to profileSetFinalizeTimeout. The
 // account's in-flight mark is released after that write, a panic included,
 // so a wake holds it for at most the budget plus profileSetFinalizeTimeout
-// (35 seconds), and no wake row or goroutine outlives the wake. Only a
-// process that stops mid-wake leaves a row in flight, which no claim
-// selects, the queue gauge leaves out, and retention marks failed.
+// (35 seconds), and no goroutine outlives the wake. A process that stops
+// mid-wake, or a tail write that fails or times out, leaves rows in flight,
+// which no claim selects, the queue gauge leaves out, and the daily
+// retention run marks failed once they are profileSetWakeStale old.
 func (s *System) sendProfileSetWakeDetached(ctx context.Context, userID int, attempts []PushDeliveryAttempt) {
 	ctx = context.WithoutCancel(ctx)
 	budget, cancel := context.WithTimeout(ctx, profileSetWakeBudget)

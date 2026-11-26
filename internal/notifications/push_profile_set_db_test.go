@@ -998,7 +998,7 @@ func TestProfileSetWakeGivesUpWaitingForTheCredentialLockDB(t *testing.T) {
 
 // A wake whose queueing fails answers false and leaves nothing behind: no
 // attempt, no recorded wake time, and no in-flight mark. Regression: an
-// error answering true, telling the caller a phone was told that was not.
+// error answering true, telling the caller a wake was queued that was not.
 func TestProfileSetWakeFailingToQueueAnswersFalseDB(t *testing.T) {
 	repo, pool := loginSessionPushDB(t)
 	registerForSession(t, repo, "live")
