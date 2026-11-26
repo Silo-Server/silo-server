@@ -345,3 +345,22 @@ func TestKeyChangesRecordSessionOpenedViaDB(t *testing.T) {
 		})
 	}
 }
+
+// A key row stores no address for the unspecified address the client-address
+// resolver answers when it can't tell the client (0.0.0.0, or ::), so the
+// lists show none rather than "0.0.0.0"; any other address is stored as
+// given. Regression: such a key listed, and the panel showed, "From 0.0.0.0".
+func TestKeyStoresNoUnspecifiedAddressDB(t *testing.T) {
+	env := newKeyEnv(t, "keyunspec")
+	user := env.localAccount(t, "keyunspec-user", models.RoleUser)
+	for _, tc := range []struct{ ip, want string }{{"0.0.0.0", ""}, {"::", ""}, {"", ""}, {"192.0.2.9", "192.0.2.9"}} {
+		device := newTestKey(t)
+		if _, err := env.signIn.keys.InsertDeviceKey(t.Context(), NewDeviceKey{UserID: user.ID, PublicKey: device.pub,
+			Kind: models.DeviceKeyKindDevice, Name: "Phone", EnrolledVia: models.AppKeyEnrolledSession, IP: tc.ip}); err != nil {
+			t.Fatal(err)
+		}
+		if got := env.keyIP(t, "auth_device_keys", "key_id", device.pub.KeyID()); got != tc.want {
+			t.Fatalf("enrolled from %q: stored %q, want %q", tc.ip, got, tc.want)
+		}
+	}
+}

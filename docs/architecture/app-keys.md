@@ -45,9 +45,12 @@ request that enrolled it. It is the value the login session that request opens
 records as `ip_address`: the address the client-address middleware resolved,
 which reads forwarding headers only from `clientip.trusted_proxies` and
 otherwise takes the connection's peer. Replacing the person key opens no
-session and records the same resolved address. A key enrolled before the
-column existed, or by a request with no resolved address, has none, and both
-key lists show an empty string. The key lists that show it are refused to a
+session and records the same resolved address. The one difference from the
+session row: when the resolver could not tell the client and answered the
+unspecified address (`0.0.0.0` or `::`), the key row stores none, where the
+session row keeps that value. A key enrolled before the column existed, or
+whose address was unknown, has none, and the key lists show an empty
+string. The key lists that show it are refused to a
 session opened by device sign-in or by another app's key, like the session
 list's other sessions' addresses. Like `auth_sessions.ip_address` it is
 personal data, and it travels in backups with the rest of the key row.

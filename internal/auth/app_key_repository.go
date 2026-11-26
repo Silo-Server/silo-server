@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/google/uuid"
@@ -212,8 +213,20 @@ func insertPersonKeyTx(ctx context.Context, tx pgx.Tx, k NewPersonKey) (*models.
 		(id, user_id, public_key, key_id, identity_id, provider_bound, enrolled_via, enrolled_ip_address)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::inet)
 		RETURNING `+personKeyColumns,
-		uuid.NewString(), k.UserID, k.PublicKey.Bytes(), k.PublicKey.KeyID(), k.IdentityID, k.ProviderBound || k.IdentityID != nil, k.EnrolledVia, k.IP))
+		uuid.NewString(), k.UserID, k.PublicKey.Bytes(), k.PublicKey.KeyID(), k.IdentityID, k.ProviderBound || k.IdentityID != nil, k.EnrolledVia, enrolledAddress(k.IP)))
 	return row, appKeyInsertError(err)
+}
+
+// enrolledAddress is the address a key row records for the enrolling
+// request's ip: none for the unspecified address (0.0.0.0 or ::), which the
+// client-address resolver answers for a client it could not tell, so the
+// lists show none rather than a made-up address. A login session's row keeps
+// what it is given; this is the one place a key's address differs from it.
+func enrolledAddress(ip string) string {
+	if parsed := net.ParseIP(ip); parsed == nil || parsed.IsUnspecified() {
+		return ""
+	}
+	return ip
 }
 
 // validDeviceKey reports whether k's kind, status and way of enrolling are
@@ -266,7 +279,7 @@ func insertDeviceKeyTx(ctx context.Context, tx pgx.Tx, k NewDeviceKey) (*models.
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11, $12, NULLIF($13, '')::inet)
 		RETURNING `+deviceKeyColumns,
 		uuid.NewString(), k.UserID, k.PublicKey.Bytes(), k.PublicKey.KeyID(), k.Kind, k.Name, k.Platform, status,
-		k.EnrolledVia, k.PersonKeyID, k.IdentityID, k.ProviderBound || k.IdentityID != nil, k.IP))
+		k.EnrolledVia, k.PersonKeyID, k.IdentityID, k.ProviderBound || k.IdentityID != nil, enrolledAddress(k.IP)))
 	return row, appKeyInsertError(err)
 }
 
