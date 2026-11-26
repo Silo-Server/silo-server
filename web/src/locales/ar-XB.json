@@ -95244,7 +95244,7 @@
   "web.admin.users.detail.profiles.setEdits.allowDescription": [
     {
       "type": 0,
-      "value": "\u200F"
+      "value": "\u200F\u202ETheir app can add \u202C"
     },
     {
       "type": 1,
@@ -95252,7 +95252,15 @@
     },
     {
       "type": 0,
-      "value": "\u202E comes back the next time their app syncs, as a new profile without its history on this server.\u202C"
+      "value": "\u202E back the next time it syncs, as a new profile without its history on this server, if its profiles still include \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E and this account has room for another profile.\u202C"
     }
   ],
   "web.admin.users.detail.profiles.setEdits.allowTitle": [
@@ -95674,7 +95682,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E comes back the next time \u202C"
+      "value": "\u202E can come back the next time \u202C"
     },
     {
       "type": 1,
@@ -95682,7 +95690,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E’s app syncs.\u202C"
+      "value": "\u202E’s app syncs, if its profiles still include it.\u202C"
     }
   ],
   "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
@@ -95696,7 +95704,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E comes back once their app syncs. \u202C"
+      "value": "\u202E can come back when their app next syncs, if its profiles still include it. \u202C"
     },
     {
       "type": 1,

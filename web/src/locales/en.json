@@ -90555,12 +90555,24 @@
   ],
   "web.admin.users.detail.profiles.setEdits.allowDescription": [
     {
+      "type": 0,
+      "value": "Their app can add "
+    },
+    {
       "type": 1,
       "value": "profile"
     },
     {
       "type": 0,
-      "value": " comes back the next time their app syncs, as a new profile without its history on this server."
+      "value": " back the next time it syncs, as a new profile without its history on this server, if its profiles still include "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " and this account has room for another profile."
     }
   ],
   "web.admin.users.detail.profiles.setEdits.allowTitle": [
@@ -90950,7 +90962,7 @@
     },
     {
       "type": 0,
-      "value": " comes back the next time "
+      "value": " can come back the next time "
     },
     {
       "type": 1,
@@ -90958,7 +90970,7 @@
     },
     {
       "type": 0,
-      "value": "’s app syncs."
+      "value": "’s app syncs, if its profiles still include it."
     }
   ],
   "web.admin.users.detail.profiles.setEdits.noticeHiddenWoken": [
@@ -90968,7 +90980,7 @@
     },
     {
       "type": 0,
-      "value": " comes back once their app syncs. "
+      "value": " can come back when their app next syncs, if its profiles still include it. "
     },
     {
       "type": 1,
