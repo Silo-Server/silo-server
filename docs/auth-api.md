@@ -27,7 +27,7 @@ devices and playback sessions. All paths below use `/api/v2`.
 | Operation | Authorization and behavior |
 | --- | --- |
 | `GET /auth/sessions/capabilities` (`getLoginSessionCapabilities`) | Authenticated account. Reports `available`, `last_seen`, `admin_management` and `revoke_other_sessions`, with the standard capability state, permission answer and revision. `revoke_other_sessions` is false in [demo mode](#demo-mode) for a caller that is not an administrator, and for a session opened by device sign-in, which may end only itself. |
-| `GET /auth/sessions` (`listSessions`) | Lists the caller's live, unrevoked login sessions, newest first, with cursor pagination. Account-level access does not require profile selection. |
+| `GET /auth/sessions` (`listSessions`) | Lists the caller's live, unrevoked login sessions, newest first, with cursor pagination. A caller that gets the reduced page, a session limited to itself or a [demo](#demo-mode) visitor, is listed by id instead (see [sessions opened by device sign-in](#sessions-opened-by-device-sign-in)). Account-level access does not require profile selection. |
 | `DELETE /auth/sessions/{id}` (`deleteSession`) | Revokes a session owned by the caller. Unknown or another account's session returns 404. Ending another session of the same account is 403 `permission_denied` for a session opened by device sign-in, which may end only itself, and in [demo mode](#demo-mode) for a caller that is not an administrator. |
 | `GET /admin/users/{user_id}/login-sessions` (`listAdminUserLoginSessions`) | Acting admin. Lists a selected account's live login sessions. The cursor is bound to the operation, administrator and target account. |
 | `DELETE /admin/users/{user_id}/login-sessions/{session_id}` (`deleteAdminUserLoginSession`) | Acting admin. Revokes one session of the selected account; 204 on success, 404 for an unknown or mismatched session. |
@@ -1098,14 +1098,14 @@ A visitor cannot:
 - change the account password (`changePassword`), and so cannot sign the account out
   everywhere either;
 - see another session of the account in `listSessions` beyond its `id` and `current`: the
-  page is the one a [session opened by device sign-in](#sessions-opened-by-device-sign-in)
-  gets, ordered by id. A visitor whose page changes when demo mode is switched on or off gets
-  `400 invalid_cursor` for a cursor from before the switch; a session opened by device sign-in
-  gets the reduced page either way, so its cursor stays valid. When the process has never read
-  the setting, `listSessions` is `500 internal_error` rather than the full page for a visitor
-  whose page depends on demo mode (a session opened by device sign-in gets its reduced page
-  without reading it), and a personal API key of the account, which has no session of its
-  own, is `403 permission_denied`;
+  page is the reduced one a session limited to itself gets (see
+  [sessions opened by device sign-in](#sessions-opened-by-device-sign-in)), ordered by id. A
+  session that already gets that page is unaffected by demo mode: the setting is not read for
+  it, and its cursor stays valid when demo mode is switched on or off. For any other visitor,
+  a cursor from before the switch is `400 invalid_cursor`, and when the process has never read
+  the setting, `listSessions` is `500 internal_error` rather than the full page. A personal
+  API key of the account, which has no session of its own, gets that `500` too, and
+  `403 permission_denied` once the setting has been read and demo mode is on;
 - link or unlink an external sign-in (`createAccountIdentityLinkTicket`,
   `startAccountIdentityLink`, `completeAccountIdentityLink`,
   `linkAccountIdentityWithCredentials`, `linkAccountIdentityWithNetwork`,

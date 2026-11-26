@@ -80,7 +80,7 @@ it("shows reduced sessions on every page without the caller's own times", async 
   expect(reducedRows).toHaveLength(2);
   for (const row of reducedRows) {
     expect(within(row).queryByRole("button", { name: /Details/ })).toBeNull();
-    expect(row).not.toHaveTextContent(/Signed in|Last seen|Expires|2026|Not sent/);
+    expect(row).not.toHaveTextContent(/Signed in|Last seen|Expires|2026|Not sent|Unknown$/);
   }
   // The current row and a full row on either page render as before.
   for (const name of ["Chrome on Windows", "Edge on Windows", "Firefox on Linux"]) {
@@ -89,4 +89,9 @@ it("shows reduced sessions on every page without the caller's own times", async 
     await user.click(within(row).getByRole("button", { name: /Details/ }));
     expect(row).toHaveTextContent("Expires");
   }
+  for (const name of ["Chrome on Windows", "Edge on Windows"])
+    expect(screen.getByText(name).closest("li")!).toHaveTextContent(
+      "Last seen not recorded yet · Signed in",
+    );
+  expect(screen.getByText("Firefox on Linux").closest("li")!).toHaveTextContent("192.0.2.1");
 });
