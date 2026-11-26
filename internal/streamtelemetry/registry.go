@@ -381,14 +381,18 @@ func (r *Registry) truncatedAt(at time.Time) bool {
 	if last == 0 {
 		return false
 	}
-	window := r.cfg.Freshness
-	if window <= 0 {
-		window = defaultFreshness
-	}
 	if at.IsZero() {
 		at = now()
 	}
-	return at.Sub(time.Unix(0, last)) < window
+	return at.Sub(time.Unix(0, last)) < r.freshness()
+}
+
+// freshness is how long a published snapshot stays current.
+func (r *Registry) freshness() time.Duration {
+	if r.cfg.Freshness <= 0 {
+		return defaultFreshness
+	}
+	return r.cfg.Freshness
 }
 
 // maxPendingRealtimePerShard spreads the session budget over the shards so held
@@ -466,7 +470,15 @@ func (r *Registry) Start(ctx context.Context) {
 				case sweepStart := <-ticker.C:
 					snapshot := r.sweep(sweepStart)
 					snapshot.Sequence = r.sequence.Add(1)
-					if err := r.store.Publish(ctx, snapshot); err != nil {
+					// A publish that takes longer than Freshness lands a snapshot
+					// readers already treat as stale, so waiting longer buys
+					// nothing; without a deadline a stalled Redis connection blocks
+					// this loop and every later publish. The deadline only reaches
+					// the socket on a client with ContextTimeoutEnabled.
+					publishCtx, cancel := context.WithTimeout(ctx, r.freshness())
+					err := r.store.Publish(publishCtx, snapshot)
+					cancel()
+					if err != nil {
 						r.warnRateLimited("failed to publish stream telemetry snapshot", &r.lastPublishWarnUnixNano, "error", err)
 					}
 				}

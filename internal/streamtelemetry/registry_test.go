@@ -219,6 +219,43 @@ func TestStartContinuesAfterPublishError(t *testing.T) {
 	}
 }
 
+// stalledStore models a Redis connection that never answers: Publish returns
+// only when its context ends.
+type stalledStore struct {
+	published     atomic.Int64
+	secondPublish chan struct{}
+}
+
+func (s *stalledStore) Publish(ctx context.Context, _ Snapshot) error {
+	if s.published.Add(1) == 2 {
+		close(s.secondPublish)
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+func (s *stalledStore) Load(context.Context) (Snapshot, error) { return Snapshot{}, nil }
+
+func TestStartRetriesAfterStalledPublish(t *testing.T) {
+	cfg := testConfig()
+	cfg.SweepInterval = time.Millisecond
+	cfg.Freshness = 5 * time.Millisecond
+	store := &stalledStore{secondPublish: make(chan struct{})}
+	registry := NewRegistry(cfg, store, slog.New(slog.DiscardHandler))
+	ctx, cancel := context.WithCancel(context.Background())
+	registry.Start(ctx)
+	select {
+	case <-store.secondPublish:
+	case <-time.After(time.Second):
+		t.Error("a stalled publish blocked every later publish")
+	}
+	cancel()
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+	defer stopCancel()
+	if err := registry.Stop(stopCtx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type lifecycleStore struct {
 	mu             sync.Mutex
 	published      []Snapshot
