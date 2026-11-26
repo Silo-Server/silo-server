@@ -76,17 +76,18 @@ func (l PGLoader) StrandedAccounts(ctx context.Context, dbURL string) ([]string,
 	if err != nil {
 		return nil, "", err
 	}
-	var (
-		names      []string
-		name       string
-		glass      bool
-		breakGlass bool
-	)
-	if _, err := pgx.ForEachRow(rows, []any{&name, &glass}, func() error {
-		names, breakGlass = append(names, name), breakGlass || glass
-		return nil
-	}); err != nil {
+	type stranded struct {
+		Name       string
+		BreakGlass bool
+	}
+	found, err := pgx.CollectRows(rows, pgx.RowToStructByPos[stranded])
+	if err != nil {
 		return nil, "", err
+	}
+	names := make([]string, 0, len(found))
+	breakGlass := false
+	for _, a := range found {
+		names, breakGlass = append(names, a.Name), breakGlass || a.BreakGlass
 	}
 	return names, auth.WayInRemedy(localOn, breakGlass), nil
 }
