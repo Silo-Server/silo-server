@@ -119,10 +119,10 @@ func registerAppKeyPending(reg *Registry) {
 
 	deny := humaOp(http.MethodPost, Prefix+"/auth/keys/pending/{id}/deny", "denyPendingAppKey", "app-keys",
 		"Refuse a device waiting to sign in to the signed-in account.")
-	deny.Description = pendingSessionRule + " Send an empty JSON object. The device's next signInWithAppKey that reaches the key answers 403 key_denied (409 capability_disabled comes first while auth.app_key_sign_in is off), and neither listAppKeys nor listPendingAppKeys shows the key. Denying a denied key changes nothing; an active, revoked or unknown key is 404 not_found. Answers while auth.app_key_sign_in is off."
+	deny.Description = pendingSessionRule + " Send an empty JSON object. The device's next signInWithAppKey that reaches the key answers 403 key_denied (409 capability_disabled comes first while auth.app_key_sign_in is off), and neither listAppKeys nor listPendingAppKeys shows the key. Denying a denied key changes nothing; an active, revoked or unknown key is 404 not_found. Answers while auth.app_key_sign_in is off. Refused in demo mode for a caller who is not an administrator."
 	deny.DefaultStatus = http.StatusNoContent
 	deny.Errors = []int{http.StatusForbidden, http.StatusNotFound}
-	Register(reg, Operation{Operation: deny, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true}, reg.denyPendingAppKey)
+	Register(reg, Operation{Operation: deny, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true, DemoRestricted: true}, reg.denyPendingAppKey)
 }
 
 func (reg *Registry) listPendingAppKeys(ctx context.Context, _ *struct{}) (*PendingAppKeyListOutput, error) {

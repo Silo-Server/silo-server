@@ -46,6 +46,11 @@ func TestDemoModeAccountChanges(t *testing.T) {
 		{"link complete", http.MethodPost, "/account/identities/link-complete", `{"code":"c","code_verifier":"v"}`},
 		// s9 is another session of the member's account (memberToken is s1).
 		{"end another session", http.MethodDelete, "/auth/sessions/s9", ""},
+		// A key enrolled before demo mode was turned on: revoking it ends
+		// every session it opened.
+		{"revoke device key", http.MethodDelete, "/auth/keys/devices/7", ""},
+		{"deny waiting device", http.MethodPost, "/auth/keys/pending/7/deny", "{}"},
+		{"revoke device pre-approval", http.MethodDelete, "/auth/device/preapprovals/7", ""},
 	}
 	headers := map[string]map[string]string{
 		"member": with(bearer(memberToken), "X-Profile-Id", "p-primary"),
@@ -273,11 +278,17 @@ var demoAllowedAccountOperations = map[string]string{
 	"deleteSession":        "the handler refuses any session but the caller's own in demo mode",
 	"createPluginLaunch":   "issues a plugin cookie for the caller's own session; changes nothing",
 	"verifyProfilePIN":     "a wrong guess spends the profile's attempt budget, but visitors can't set a PIN, so the demo has none to lock",
+	// appKeysOn answers capability_disabled in demo mode, administrators
+	// included, so these four never run on a demo server.
+	"enrollAppKeys":        "the handler refuses every caller while demo mode is on (appKeysOn)",
+	"replacePersonKey":     "the handler refuses every caller while demo mode is on (appKeysOn)",
+	"createAppCode":        "the handler refuses every caller while demo mode is on (appKeysOn)",
+	"approvePendingAppKey": "the handler refuses every caller while demo mode is on (appKeysOn)",
 }
 
 // demoAccountDomains are the tags of operations that change the account, how
 // it signs in, or who holds a session on it.
-var demoAccountDomains = map[string]bool{"account": true, "api-keys": true, "auth": true, "device-login": true, "notifications": true, "profiles": true}
+var demoAccountDomains = map[string]bool{"account": true, "api-keys": true, "app-keys": true, "auth": true, "device-login": true, "notifications": true, "profiles": true}
 
 // TestDemoModeCoversAccountOperations fails when an account-changing
 // operation a non-administrator can call is added without deciding its
