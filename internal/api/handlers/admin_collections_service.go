@@ -483,11 +483,7 @@ func (h *LibraryCollectionHandler) PreviewAdminCollection(ctx context.Context, r
 		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 
-	resp := previewLibraryCollectionResponse{Items: make([]itemListResponse, 0, len(items)), Total: total}
-	for _, item := range items {
-		resp.Items = append(resp.Items, h.itemListResponseOf(ctx, item))
-	}
-	return resp, nil
+	return previewLibraryCollectionResponse{Items: h.itemListResponsesOf(ctx, items), Total: total}, nil
 }
 
 func (h *LibraryCollectionHandler) importAdminMDBList(ctx context.Context, req AdminCollectionImportMDBList, artwork adminCollectionArtwork) (AdminCollectionImportResult, error) {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -140,8 +141,32 @@ func TestPersonalListPagesKeepVisibleEpisodesDB(t *testing.T) {
 			if strings.Join(watchIDs, ",") != tc.want || len(watchCards) != len(watchlist) {
 				t.Errorf("%s %s watchlist: entries %v, %d cards; want %s", backend.name, tc.name, watchIDs, len(watchCards), tc.want)
 			}
+			// An episode card names its series and its numbers, so a client
+			// can label it "Series · S2:E3" rather than the bare "Pilot".
+			for list, cards := range map[string][]CollectionItemView{"favorites": favCards, "watchlist": watchCards} {
+				for _, c := range cards {
+					if c.ContentID != episode {
+						continue
+					}
+					if got := episodeCardContextOf(c); got != (series + " Series S2E3") {
+						t.Errorf("%s %s %s episode card context = %q, want %q", backend.name, tc.name, list, got, series+" Series S2E3")
+					}
+				}
+			}
 		}
 	}
+}
+
+// episodeCardContextOf renders the series and numbers an episode card
+// carries, "<series id> <series title> S<season>E<episode>".
+func episodeCardContextOf(c CollectionItemView) string {
+	num := func(n *int) string {
+		if n == nil {
+			return "?"
+		}
+		return strconv.Itoa(*n)
+	}
+	return c.SeriesID + " " + c.SeriesTitle + " S" + num(c.SeasonNumber) + "E" + num(c.EpisodeNumber)
 }
 
 // seedListEpisodeCatalog adds a TV library holding a series with one
@@ -169,7 +194,7 @@ func seedListEpisodeCatalog(t *testing.T, pool *pgxpool.Pool, series, episode, m
 	}{
 		{`INSERT INTO media_items (content_id, type, title) VALUES ($1, 'series', 'Series'), ($2, 'movie', 'Movie')`, []any{series, movie}},
 		{`INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2), ($3, $4)`, []any{series, tv, movie, movies}},
-		{`INSERT INTO episodes (content_id, series_id, season_number, episode_number, title) VALUES ($1, $2, 1, 1, 'Pilot')`, []any{episode, series}},
+		{`INSERT INTO episodes (content_id, series_id, season_number, episode_number, title) VALUES ($1, $2, 2, 3, 'Pilot')`, []any{episode, series}},
 	} {
 		if _, err := pool.Exec(ctx, q.sql, q.args...); err != nil {
 			t.Fatalf("seed catalog: %v", err)

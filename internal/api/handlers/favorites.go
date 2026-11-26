@@ -863,11 +863,14 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 					}
 					parent := parentByID[ep.SeriesID]
 					resp := itemListResponse{
-						ContentID:  ep.ContentID,
-						Type:       "episode",
-						Title:      ep.Title,
-						RatingIMDB: ep.RatingIMDB,
-						Overview:   ep.Overview,
+						ContentID:     ep.ContentID,
+						Type:          itemTypeEpisode,
+						Title:         ep.Title,
+						SeriesID:      ep.SeriesID,
+						SeasonNumber:  new(ep.SeasonNumber),
+						EpisodeNumber: new(ep.EpisodeNumber),
+						RatingIMDB:    ep.RatingIMDB,
+						Overview:      ep.Overview,
 					}
 					// Use episode still as backdrop, fall back to parent series images.
 					if ep.StillPath != "" {
@@ -880,6 +883,7 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 					if parent != nil {
 						images.add(&resp.PosterURL, sizedPosterPath(parent.PosterPath, art.For(imagesize.SlotPoster)), posterHint)
 						resp.PosterThumbhash = parent.PosterThumbhash
+						resp.SeriesTitle = parent.Title
 						resp.Year = parent.Year
 						resp.Genres = parent.Genres
 						resp.ContentRating = parent.ContentRating

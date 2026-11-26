@@ -72,6 +72,9 @@ type LibraryCollectionHandler struct {
 	// hand-picked and imported personal collections opted into a library
 	// tab and remembers the counts between reads; nil counts on every read.
 	PersonalMemberCounts *catalog.PersonalCollectionMemberCounts
+	// EpisodeRepo gives episode cards their series and numbers; nil leaves
+	// them out.
+	EpisodeRepo *catalog.EpisodeRepository
 }
 
 var errLibraryCollectionInUse = catalog.ErrLibraryCollectionInUse
@@ -2163,6 +2166,24 @@ func validateTMDBDiscoverRequest(req importTMDBDiscoverRequest) error {
 		return fmt.Errorf("limit must be greater than 0")
 	}
 	return nil
+}
+
+// itemListResponsesOf renders the cards of items in order, looking up the
+// series and numbers of the episodes among them in one query.
+func (h *LibraryCollectionHandler) itemListResponsesOf(ctx context.Context, items []*models.MediaItem) []itemListResponse {
+	episodes := listEpisodeCardMetadata(ctx, h.EpisodeRepo, items)
+	out := make([]itemListResponse, 0, len(items))
+	for _, item := range items {
+		resp := h.itemListResponseOf(ctx, item)
+		if meta, ok := episodes[item.ContentID]; ok && item.Type == itemTypeEpisode {
+			resp.SeriesID = meta.SeriesID
+			resp.SeriesTitle = meta.SeriesTitle
+			resp.SeasonNumber = meta.SeasonNumber
+			resp.EpisodeNumber = meta.EpisodeNumber
+		}
+		out = append(out, resp)
+	}
+	return out
 }
 
 func (h *LibraryCollectionHandler) itemListResponseOf(ctx context.Context, item *models.MediaItem) itemListResponse {

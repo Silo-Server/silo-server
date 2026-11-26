@@ -1193,6 +1193,7 @@
 ./internal/api/handlers TestItemCollectionsDB
 ./internal/api/handlers TestItemCollectionsPreviewDB
 ./internal/api/handlers TestItemCollectionsPreviewLibraryDB
+./internal/api/handlers TestLibraryCollectionEpisodeCardsNameTheirSeriesDB
 ./internal/sections TestRowOfCollectionsReferencesItsCollectionsPostgres
 
 # A scan that adds or removes titles refreshes the stored counts of the smart

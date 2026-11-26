@@ -2352,6 +2352,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		libraryCollectionHandler.ArtworkSigner = deps.ArtworkSigner
 		libraryCollectionHandler.FrontendFS = deps.FrontendFS
 		libraryCollectionHandler.Executor = &catalog.QueryExecutor{Pool: deps.DB}
+		libraryCollectionHandler.EpisodeRepo = episodeRepo
 		libraryCollectionHandler.SectionRepo = sectionRepo
 		libraryCollectionHandler.UserCollectionPool = deps.DB
 		libraryCollectionHandler.CollectionOwners = collectionOwners
