@@ -535,7 +535,13 @@ resolver (`TestPluginContentMountsAllReachTheContentHandler`,
   absent for it. `self_role` stays: it names the profile's seat, not what
   this session may do. The strip follows who is asking: it marks the app's
   connection, never the seat, so the person's own device in the same profile
-  is told its powers while the app holds the seat and after it leaves. The
+  is told its powers while the app holds the seat and after it leaves. For
+  the host's seat this strip is a guard behind the ticket rule, which already
+  refuses such a session a socket for a room its own account and profile
+  hosts (`TestRoomSocketV2KeepsAnotherAppFromHosting`). For a guest's seat it
+  is what keeps the person's own device's view right while such a session is
+  connected as the same profile (`TestGuestSeatAnotherAppKeepsOwnDeviceViewDB`
+  drives it through the routes). The
   room read leaves out the playback session id
   attached to the member (a member is the account and profile, so it may be
   the person's own device's), and a connection of such a session starts with

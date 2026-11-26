@@ -358,6 +358,7 @@
 ./internal/apiv2 TestFilePathsHiddenFromAnotherAppDB
 ./internal/apiv2 TestWebPushRefusesAnotherAppDB
 ./internal/apiv2 TestWatchTogetherRefusesAnotherAppDB
+./internal/apiv2 TestGuestSeatAnotherAppKeepsOwnDeviceViewDB
 ./internal/apiv2 TestNativePushRefusesAnotherAppDB
 ./internal/apiv2 TestSuggestionDeleteForAnotherAppDB
 ./internal/apiv2 TestGrantedAppPINAllowanceDB
