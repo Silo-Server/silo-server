@@ -1112,7 +1112,12 @@ The field leaves `overrides` and the next newer set applies to it. Clearing a
 hidden profile takes it out of `hidden_by_owner` and creates nothing. A newer
 set creates the profile only if it has an item with that `sync_id` and the
 household has room for another profile; otherwise the item is in `left_off`,
-or not in the set, and nothing comes back. After either commits, the server wakes the
+or not in the set, and nothing comes back. A set that has the item can
+still be refused as a whole (for example, its name is now another profile's on
+the account), and then nothing is written. If it pairs the `sync_id` with a
+profile of the account outside the set, that profile takes the `sync_id` and
+keeps its history instead of a new profile being created. After either
+commits, the server wakes the
 person's apps with a push where it can (at most one a minute per account, and
 only with push on, a phone registered and the wake queued in time); otherwise
 the app sees the change

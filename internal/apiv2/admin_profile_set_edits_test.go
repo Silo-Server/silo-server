@@ -28,7 +28,7 @@ func adminProfileSetEditFixtureCases() []fixtureCase {
 			method:   http.MethodPatch, path: base + "/profiles/p-kid/overrides/pin", body: `{"state":"cleared"}`, headers: with(actingRequestAdmin, "If-Match", `"pso1-fixture"`),
 			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Problem"},
 		{name: "admin_profile_hidden_clear_ok", operationID: "clearAdminUserHiddenProfile",
-			scenario: "The owner lets a removed profile come back; it returns with the person's next set, and their phone was told.",
+			scenario: "The owner clears a removed profile's hidden mark; it can return with the person's next set if that set still has it, and a push to their phone was queued.",
 			method:   http.MethodDelete, path: base + "/profile-set/hidden/6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11", headers: actingRequestAdmin,
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminProfileSetCleared"},
 		{name: "admin_profile_settled_edit_dismiss", operationID: "dismissAdminUserSettledProfileEdit",

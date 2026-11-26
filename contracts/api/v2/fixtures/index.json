@@ -3286,7 +3286,7 @@
     {
       "name": "admin_profile_hidden_clear_ok",
       "operation_id": "clearAdminUserHiddenProfile",
-      "scenario": "The owner lets a removed profile come back; it returns with the person's next set, and their phone was told.",
+      "scenario": "The owner clears a removed profile's hidden mark; it can return with the person's next set if that set still has it, and a push to their phone was queued.",
       "request": {
         "method": "DELETE",
         "path": "/api/v2/admin/users/7/profile-set/hidden/6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11",

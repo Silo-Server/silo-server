@@ -984,8 +984,11 @@ by a set built elsewhere.
   setting clears both rows, since a set writes the pair together. Clearing a
   hidden profile deletes the removal row only and creates nothing: the next
   accepted newer set creates the profile only if it has an item with that
-  `sync_id` and the household has room (otherwise the item is left off), and
-  a repeat of the held version creates nothing. Each clear then calls the wake hook
+  `sync_id` and the household has room (otherwise the item is left off); a
+  set refused as a whole (a name clash, say) writes nothing; a set that
+  pairs the `sync_id` with a profile outside the set gives it to that
+  profile, which keeps its history; and a repeat of the held version
+  creates nothing. Each clear then calls the wake hook
   (`profileedits.Waker`) itself, since its writes record nothing for the
   request's middleware to wake on, and answers what the hook reported: true
   only when that call queued a wake. With nothing recorded in the request,

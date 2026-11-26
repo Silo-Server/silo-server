@@ -89,8 +89,9 @@ func (c *clearFixture) nextSet(t *testing.T, items ...setItem) {
 }
 
 // TestClearProfileSetOverrideDB: the owner's Clear puts the set's value back
-// at once and hands the field back to the set; a hidden profile comes back
-// only once cleared, and only with the next set. It catches a clear that
+// at once and hands the field back to the set; a set brings a hidden
+// profile back only after the owner clears it, and the clear itself creates
+// nothing. It catches a clear that
 // does nothing, applies the wrong value, records itself as an edit, or
 // forgets to tell the person's apps; and a PIN the server can't know
 // written from nothing.
@@ -108,7 +109,7 @@ func TestClearProfileSetOverrideDB(t *testing.T) {
 	t.Run("a waker that panics leaves the clear standing", func(t *testing.T) {
 		c.wakeFailing(t, func(context.Context, int) bool { panic("relay down") })
 	})
-	t.Run("a hidden profile comes back only with a set after the owner clears it", c.clearsHidden)
+	t.Run("a hidden profile stays away until cleared, the clear creates nothing, and a set that lists it then creates it", c.clearsHidden)
 	t.Run("a clear of something not there is not found", func(t *testing.T) {
 		_, err := c.clearField("max_content_rating")
 		requireNotFound(t, "clear again", err)

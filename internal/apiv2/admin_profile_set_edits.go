@@ -63,7 +63,7 @@ type AdminProfileSetEditsOutput struct {
 
 // AdminProfileSetCleared is what clearing an owner's record did.
 type AdminProfileSetCleared struct {
-	Applied    bool `json:"applied" doc:"Whether the set's value was written now. Always false for a hidden profile, which comes back with the next newer set" example:"true"`
+	Applied    bool `json:"applied" doc:"Whether the set's value was written now. Always false for a hidden profile: the clear creates nothing" example:"true"`
 	WakeQueued bool `json:"wake_queued" doc:"Whether this call queued a push telling the person's apps, after the clear committed. False with push off, with no phone registered, within a minute after an earlier wake of the account, while a wake for the account is in flight on this server, and when queueing the wake failed or timed out; the change then reaches the app the next time it syncs" example:"false"`
 }
 
@@ -178,7 +178,7 @@ func registerAdminProfileSetEdits(reg *Registry) {
 
 	hidden := adminAccountOperation(http.MethodDelete, "/{id}/profile-set/hidden/{sync_id}", "clearAdminUserHiddenProfile", false)
 	hidden.Summary = "Let a profile the owner removed come back from the account's app."
-	hidden.Description = "Clears the owner's removal, and creates nothing: the profile is not recreated here. A newer set from the person's app creates it, as a new profile with no history here, only if that set has an item with this sync_id and the household has room for another profile; otherwise the item is in the set's left_off, or not in the set at all, and nothing comes back. Then the server tries to wake the person's apps: wake_queued says only that this call queued a push, not that the profile returned. 404 not_found when the owner removed no profile with that sync_id. 409 conflict when the household kept changing while the clear ran: nothing was written; read the list again and retry." + adminProfileSetEditsRule
+	hidden.Description = "Clears the owner's removal, and creates nothing: the profile is not recreated here. A newer set from the person's app creates it, as a new profile with no history here, only if that set has an item with this sync_id and the household has room for another profile; otherwise the item is in the set's left_off, or not in the set at all, and nothing comes back. A newer set that has the item can still be refused as a whole (for example, its name is now another profile's on the account), and then nothing is written. If that set pairs the sync_id with a profile of the account outside the set, that profile takes the sync_id and keeps its history instead of a new profile being created. Then the server tries to wake the person's apps: wake_queued says only that this call queued a push, not that the profile returned. 404 not_found when the owner removed no profile with that sync_id. 409 conflict when the household kept changing while the clear ran: nothing was written; read the list again and retry." + adminProfileSetEditsRule
 	hidden.Errors = append(hidden.Errors, http.StatusConflict, http.StatusNotImplemented)
 	Register(reg, hidden, func(ctx context.Context, in *AdminProfileSetHiddenInput) (*AdminProfileSetClearedOutput, error) {
 		svc, id, p := reg.adminProfileSetEditsTarget(ctx, in.ID)

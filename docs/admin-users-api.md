@@ -449,6 +449,10 @@ written and the override stays until that profile is renamed. Clearing a hidden 
 creates the profile, as a new profile with no history here, only if it has an
 item with that `sync_id` and the household has room for another profile;
 otherwise the item is in `left_off`, or not in the set, and nothing comes back.
+A set that has the item can still be refused as a whole (for example, its name
+is now another profile's on the account), and then nothing is written. If it
+pairs the `sync_id` with a profile of the account outside the set, that
+profile takes the `sync_id` and keeps its history instead.
 `wake_queued` says only that a push was queued, not that the profile returned.
 After a clear of an override or a hidden
 profile commits, the server tries to wake the person's apps with a push, and
