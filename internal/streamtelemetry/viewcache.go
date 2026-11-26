@@ -155,8 +155,8 @@ func (v GlobalMonitoringView) Egress() EgressView {
 // view, stale, rather than starting another.
 //
 // The reader that starts a rebuild, and any reader with no view at all, waits
-// for it up to its own ctx; a reader that gives up gets an unavailable status
-// and the rebuild carries on. Other readers take the cached view, stale,
+// for it up to its own ctx; a reader that gives up gets the older view, stale,
+// or an unavailable status when there is none, and the rebuild carries on. Other readers take the cached view, stale,
 // rather than queueing behind a rebuild that may take hundreds of
 // milliseconds.
 func (c *ViewCache) read(ctx context.Context, failureCooldown bool, project func()) ViewCacheStatus {
@@ -183,14 +183,20 @@ func (c *ViewCache) read(ctx context.Context, failureCooldown bool, project func
 	wait := c.buildDone
 	c.mu.Unlock()
 
+	// Like a reader that found the rebuild already running, one that gives up
+	// on it takes the older view, stale, when there is one.
+	gaveUp := false
 	select {
 	case <-wait:
 	case <-ctx.Done():
-		return ViewCacheStatus{}
+		gaveUp = true
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.snapshotLocked(now().Sub(c.status.RefreshedAt), c.status.LastError != "", project)
+	if gaveUp && !c.status.Available {
+		return ViewCacheStatus{}
+	}
+	return c.snapshotLocked(now().Sub(c.status.RefreshedAt), gaveUp || c.status.LastError != "", project)
 }
 
 // startBuildLocked must be called with c.mu held and c.building false. The

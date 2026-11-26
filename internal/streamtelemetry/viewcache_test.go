@@ -253,3 +253,45 @@ func TestViewCacheReaderThatGivesUpLeavesTheRebuildRunning(t *testing.T) {
 		})
 	}
 }
+
+// A reader that starts a rebuild and gives up on it still gets the older view,
+// marked stale, the same as a reader that arrives while the rebuild runs, so a
+// monitor that polls about once per TTL isn't left without egress whenever
+// Redis is slow.
+func TestViewCacheReaderThatGivesUpGetsTheOlderView(t *testing.T) {
+	cache, _, store := newCacheFixture(t, time.Minute)
+	if _, status := cache.View(context.Background()); !status.Available {
+		t.Fatalf("first read = %+v", status)
+	}
+	restore := now
+	now = func() time.Time { return restore().Add(2 * time.Minute) }
+	t.Cleanup(func() { now = restore })
+	gate := make(chan struct{})
+	store.mu.Lock()
+	store.gate = gate
+	store.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	egress, status := cache.SessionEgress(ctx)
+	if !status.Available || !status.Stale || status.LastError != "" {
+		t.Fatalf("reader that gave up on the rebuild = %+v, want the older view, stale", status)
+	}
+	if egress.Sessions == nil {
+		t.Fatalf("reader that gave up got no projection: %+v", egress)
+	}
+
+	// Let the rebuild finish before the clock is restored under it.
+	close(gate)
+	deadline := time.After(5 * time.Second)
+	for {
+		if _, status := cache.View(context.Background()); status.Refreshes >= 2 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("the rebuild never finished")
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
