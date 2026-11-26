@@ -67,7 +67,7 @@ func (reg *Registry) requireVerifiedMainProfile(ctx context.Context, svc mainPro
 	none := auth.ActingProfile{}
 	claims := claimsFrom(ctx)
 	if !claims.IsOwnLoginSession() {
-		return none, appKeyProblem(auth.ErrSessionNotAllowed)
+		return none, appKeyProblem(auth.NotOwnSessionError(claims))
 	}
 	// The session before the profile: one that may not do this is told so,
 	// not sent to switch profile and prove a PIN for nothing.
@@ -131,7 +131,7 @@ func (reg *Registry) listPendingAppKeys(ctx context.Context, _ *struct{}) (*Pend
 		return nil, err
 	}
 	if !claimsFrom(ctx).IsOwnLoginSession() {
-		return nil, appKeyProblem(auth.ErrSessionNotAllowed)
+		return nil, appKeyProblem(auth.NotOwnSessionError(claimsFrom(ctx)))
 	}
 	keys, err := svc.ListPendingAppKeys(ctx, claimsFrom(ctx))
 	if err != nil {
@@ -172,7 +172,7 @@ func (reg *Registry) denyPendingAppKey(ctx context.Context, in *PendingAppKeyDec
 		return nil, err
 	}
 	if !claimsFrom(ctx).IsOwnLoginSession() {
-		return nil, appKeyProblem(auth.ErrSessionNotAllowed)
+		return nil, appKeyProblem(auth.NotOwnSessionError(claimsFrom(ctx)))
 	}
 	if err := svc.DenyPendingAppKey(ctx, claimsFrom(ctx), in.ID); err != nil {
 		return nil, appKeyProblem(err)

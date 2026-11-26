@@ -35,10 +35,14 @@ func (h *AuthHandler) PreapproveDeviceLogin(ctx context.Context, input auth.Devi
 	return result, nil
 }
 
-// ListDevicePreapprovals lists the account's waiting pre-approved sign-ins.
+// ListDevicePreapprovals lists the account's waiting pre-approved sign-ins,
+// for the caller's own login session (auth.SessionAllows).
 func (h *AuthHandler) ListDevicePreapprovals(ctx context.Context, userID int) ([]auth.DevicePreapproval, error) {
 	if h.device == nil {
 		return nil, apiError(http.StatusServiceUnavailable, "unavailable", "Device login is not configured")
+	}
+	if claims := apimw.GetClaims(ctx); claims != nil {
+		ctx = auth.WithClaims(ctx, claims)
 	}
 	items, err := h.device.ListPreapprovals(ctx, userID)
 	if err != nil {
@@ -48,10 +52,13 @@ func (h *AuthHandler) ListDevicePreapprovals(ctx context.Context, userID int) ([
 }
 
 // RevokeDevicePreapproval withdraws one of the account's pre-approved
-// sign-ins.
+// sign-ins, for the caller's own login session (auth.SessionAllows).
 func (h *AuthHandler) RevokeDevicePreapproval(ctx context.Context, userID int, id string) error {
 	if h.device == nil {
 		return apiError(http.StatusServiceUnavailable, "unavailable", "Device login is not configured")
+	}
+	if claims := apimw.GetClaims(ctx); claims != nil {
+		ctx = auth.WithClaims(ctx, claims)
 	}
 	if err := h.device.RevokePreapproval(ctx, userID, id); err != nil {
 		return devicePreapprovalError(err)

@@ -483,7 +483,9 @@ var appKeyProblems = []struct {
 	{auth.ErrPendingKeyLimit, TypeConflict, "This account already has the most devices waiting for approval; approve or deny one first."},
 	{auth.ErrApproverNotAdmin, TypePermissionDenied, "Only an administrator account approves a waiting device."},
 	{auth.ErrAppKeyNotFound, TypeNotFound, "No such device key on this account."},
-	{auth.ErrSessionNotAllowed, TypePermissionDenied, "This sign-in cannot manage app keys."},
+	// The administrator's row comes first: errors.Is matches it to both.
+	{auth.ErrActingAsAccount, TypePermissionDenied, handlers.ActingAsAccountDetail},
+	{auth.ErrSessionNotAllowed, TypePermissionDenied, handlers.SessionNotAllowedDetail},
 	{auth.ErrSessionRevoked, TypeSessionExpired, "The login session is no longer valid."},
 	{auth.ErrUserDisabled, TypePermissionDenied, "The account is disabled."},
 	{auth.ErrLocalLoginDisabled, TypeLocalLoginDisabled, "This server signs this account in only through its sign-in provider."},
