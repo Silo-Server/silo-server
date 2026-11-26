@@ -69,6 +69,29 @@ func EndSignInLinksTx(ctx context.Context, db interface {
 	return nil
 }
 
+// endSignInLinksForUpdateTx ends the account's sign-in links when an account
+// update ends them: it sets a password, changes the email address (the link
+// may have been emailed to the old one; compared as sign-in compares
+// addresses) or disables the account. Re-enabling it never brings one back.
+// email is the update's normalized address, nil when it sets none. It runs in
+// the update's transaction, before the update; a failed update rolls it back.
+func endSignInLinksForUpdateTx(ctx context.Context, db interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, id int, input models.UpdateUserInput, email *string) error {
+	ends := input.Password != nil || (input.Enabled != nil && !*input.Enabled)
+	if !ends && email != nil {
+		err := db.QueryRow(ctx, `SELECT email IS DISTINCT FROM $2::citext FROM users WHERE id = $1`, id, *email).Scan(&ends)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("reading the account's email: %w", err)
+		}
+	}
+	if !ends {
+		return nil
+	}
+	return EndSignInLinksTx(ctx, db, id)
+}
+
 // SignInLinkIssue is an administrator's request for a sign-in link.
 type SignInLinkIssue struct {
 	UserID int

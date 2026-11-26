@@ -468,13 +468,8 @@ func updateUser(ctx context.Context, db interface {
 	if err != nil {
 		return err
 	}
-	// A changed address ends the account's sign-in links, which may have
-	// been emailed to the old one; compared as sign-in compares addresses.
-	emailChanging := false
-	if email != nil {
-		if err := db.QueryRow(ctx, `SELECT email IS DISTINCT FROM $2::citext FROM users WHERE id = $1`, id, *email).Scan(&emailChanging); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("reading the account's email: %w", err)
-		}
+	if err := endSignInLinksForUpdateTx(ctx, db, id, input, email); err != nil {
+		return err
 	}
 	var permissions []string
 	if input.Permissions != nil {
@@ -591,14 +586,6 @@ func updateUser(ctx context.Context, db interface {
 			return err
 		}
 	}
-	// A password set by an administrator, a changed email address, or
-	// disabling the account ends its sign-in links; re-enabling it never
-	// brings one back.
-	if input.Password != nil || emailChanging || (input.Enabled != nil && !*input.Enabled) {
-		if err := EndSignInLinksTx(ctx, db, id); err != nil {
-			return err
-		}
-	}
 	// The promoted account's keys go before any session is touched: key rows
 	// are locked before sessions on every path.
 	if promoting {
@@ -664,9 +651,8 @@ func endImpersonationsInvolving(ctx context.Context, db interface {
 	return nil
 }
 
-// revokeCredentialsIssuedToNonAdmin deletes the API keys, reset links and
-// sign-in links (with the app codes redeemed links left) of an account being
-// made an admin or the Owner, and revokes its app keys.
+// revokeCredentialsIssuedToNonAdmin deletes the API keys, reset and sign-in
+// links of an account being made an admin or the Owner; revokes its app keys.
 // Other admins may have minted them and kept them; afterwards they would
 // carry authority that only the Owner grants. An admin's app keys also need
 // the admin's own approval, which keys enrolled before were never given.
@@ -748,7 +734,6 @@ func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, exp
 		return fmt.Errorf("updating password: %w", err)
 	}
 	if tag.RowsAffected() == 1 {
-		// A password the person chose ends the account's sign-in links.
 		if err := EndSignInLinksTx(ctx, tx, id); err != nil {
 			return err
 		}
