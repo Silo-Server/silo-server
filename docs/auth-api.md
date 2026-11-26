@@ -1448,8 +1448,8 @@ invitation lookup reports `app_join: false`. The capability,
 `pending/{id}/deny` stay open. A server in demo
 mode (`demo.enabled`) behaves as if the switch were off, for administrators
 too, and its capability reports `disabled`: every visitor shares one account
-there, so no key is enrolled on it and none signs in. There the key deletes and
-`pending/{id}/deny` are open to administrators only: a caller who is not one gets
+there, so no key is enrolled on it and none signs in. There
+`DELETE /auth/keys/devices/{id}` and `pending/{id}/deny` are open to administrators only: a caller who is not one gets
 the [demo refusal](#demo-mode). For the same reason
 `POST /auth/device/preapprove` is refused in demo mode for a caller who is not
 an administrator, and the device login capability reports `preapprove: false`.

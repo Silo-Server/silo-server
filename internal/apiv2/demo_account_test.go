@@ -56,26 +56,47 @@ func TestDemoModeAccountChanges(t *testing.T) {
 		"member": with(bearer(memberToken), "X-Profile-Id", "p-primary"),
 		"admin":  with(bearer(adminToken), "X-Profile-Id", "p-primary"),
 	}
+	// These rows reach a fake that succeeds, so the administrator, and the
+	// member with demo mode off, must get 204 and not merely another refusal.
+	// The two key rows also count calls on the app key fake.
+	succeeds := map[string]bool{"revoke device key": true, "deny waiting device": true, "revoke device pre-approval": true}
+	keyRow := map[string]bool{"revoke device key": true, "deny waiting device": true}
+	keys := &fakeAppKeys{}
 	handler := func(demo bool) http.Handler {
 		deps := externalSignInDeps(&fakeExternalSignIn{allowUnlink: true})
 		deps.Sessions = &fakeSessionService{}
+		deps.AppKeys = keys
 		deps.DemoSettings = fakeSettings{demo: demo}
 		return newTestHandler(t, deps)
 	}
 	on, off := handler(true), handler(false)
 	for _, tc := range restricted {
 		t.Run(tc.name, func(t *testing.T) {
+			// answered checks one non-demo answer: 204 with the key service
+			// run once for a row that succeeds, anything but the demo
+			// refusal otherwise.
+			answered := func(who string, h http.Handler, hdr map[string]string) {
+				t.Helper()
+				before := keys.calls
+				rec := do(t, h, tc.method, Prefix+tc.path, tc.body, hdr)
+				if isDemoRefusal(rec) || (succeeds[tc.name] && rec.Code != http.StatusNoContent) {
+					t.Fatalf("%s: %d %s", who, rec.Code, rec.Body.String())
+				}
+				if keyRow[tc.name] && keys.calls != before+1 {
+					t.Fatalf("%s: key service ran %d times", who, keys.calls-before)
+				}
+			}
+			before := keys.calls
 			rec := do(t, on, tc.method, Prefix+tc.path, tc.body, headers["member"])
 			if !isDemoRefusal(rec) {
 				t.Fatalf("demo visitor: %d %s", rec.Code, rec.Body.String())
 			}
 			requireProblem(t, rec, TypePermissionDenied)
-			if rec := do(t, on, tc.method, Prefix+tc.path, tc.body, headers["admin"]); isDemoRefusal(rec) {
-				t.Fatalf("administrator refused in demo mode: %s", rec.Body.String())
+			if keys.calls != before {
+				t.Fatalf("demo visitor: key service ran %d times", keys.calls-before)
 			}
-			if rec := do(t, off, tc.method, Prefix+tc.path, tc.body, headers["member"]); isDemoRefusal(rec) {
-				t.Fatalf("refused with demo mode off: %s", rec.Body.String())
-			}
+			answered("administrator in demo mode", on, headers["admin"])
+			answered("member with demo mode off", off, headers["member"])
 		})
 	}
 
