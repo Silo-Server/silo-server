@@ -458,10 +458,15 @@ its payload. The challenge is spent once the signature verifies. Then:
   opens the device key's session. A code nobody redeems leaves the invitation
   open and no account.
 - A session code locks the account, spends the code, and enrolls the device
-  key. The account's person key is enrolled when it has none and replaced when
-  it has a different one: the old key is revoked, devices waiting on it are
-  refused, devices already enrolled keep their keys. The issuing session's row
-  is read last; one that ended rolls the redeem back.
+  key. The request's person key is enrolled when the account has none (a
+  provider-bound key whose identity is gone counts as none). An account with
+  a different person key keeps it: the device key is enrolled under the
+  account's key, nothing is revoked, devices waiting for approval stay
+  waiting, and the request's person key, which only proved the device signed
+  the envelope, is not stored. A redeem never replaces the person key; a
+  person who has lost every other device redeems a code and then calls
+  `PUT /auth/keys/person` from the new session as the main profile. The
+  issuing session's row is read last; one that ended rolls the redeem back.
 
 The hourly cleanup of expired codes never waits on any of these: it skips a
 code row a request holds (`FOR UPDATE SKIP LOCKED`) and deletes it on a later
@@ -489,8 +494,9 @@ challenge. Every refusal after the code is found returns inside the redeem's
 transaction, so the code's spend rolls back and only the challenge is used up
 (`docs/auth-api.md` has the table). Issuing a join code answers a taken name
 with `duplicate` at `body.username` or `body.email`, whichever clashed. The sealed
-plaintext is the usual `signed_in` answer plus `username` and `person_key`
-(`enrolled` or `replaced`). An unknown, spent or expired code, and one whose
+plaintext is the usual `signed_in` answer plus `username`, `person_key_id`
+(the account's person key once the redeem commits) and `person_key`
+(`enrolled`, or `kept` when the account kept a different key). An unknown, spent or expired code, and one whose
 invitation or session can no longer be used, is `app_code_invalid` (404). Of
 two redemptions of one code, on any API processes, exactly one succeeds.
 
