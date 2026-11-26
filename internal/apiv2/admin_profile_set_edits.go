@@ -178,8 +178,8 @@ func registerAdminProfileSetEdits(reg *Registry) {
 
 	hidden := adminAccountOperation(http.MethodDelete, "/{id}/profile-set/hidden/{sync_id}", "clearAdminUserHiddenProfile", false)
 	hidden.Summary = "Let a profile the owner removed come back from the account's app."
-	hidden.Description = "Clears the owner's removal. It does not recreate the profile: the next newer set the person's app sends does, as a new profile with no history here. Then the server tries to wake the person's apps (wake_queued says whether this call queued a push). 404 not_found when the owner removed no profile with that sync_id." + adminProfileSetEditsRule
-	hidden.Errors = append(hidden.Errors, http.StatusNotImplemented)
+	hidden.Description = "Clears the owner's removal, and creates nothing: the profile is not recreated here. A newer set from the person's app creates it, as a new profile with no history here, only if that set has an item with this sync_id and the household has room for another profile; otherwise the item is in the set's left_off, or not in the set at all, and nothing comes back. Then the server tries to wake the person's apps: wake_queued says only that this call queued a push, not that the profile returned. 404 not_found when the owner removed no profile with that sync_id. 409 conflict when the household kept changing while the clear ran: nothing was written; read the list again and retry." + adminProfileSetEditsRule
+	hidden.Errors = append(hidden.Errors, http.StatusConflict, http.StatusNotImplemented)
 	Register(reg, hidden, func(ctx context.Context, in *AdminProfileSetHiddenInput) (*AdminProfileSetClearedOutput, error) {
 		svc, id, p := reg.adminProfileSetEditsTarget(ctx, in.ID)
 		if p != nil {
@@ -194,9 +194,9 @@ func registerAdminProfileSetEdits(reg *Registry) {
 
 	dismiss := adminAccountOperation(http.MethodDelete, "/{id}/profiles/{profile_id}/settled-edits/{field}", "dismissAdminUserSettledProfileEdit", false)
 	dismiss.Summary = "Dismiss the settled record of the person's edit over the owner's value."
-	dismiss.Description = "Deletes the record only; the profile is unchanged and the person's apps are not told. 404 not_found when the field has no settled record." + adminProfileSetEditsRule
+	dismiss.Description = "Deletes the record only; the profile is unchanged and the person's apps are not told. 404 not_found when the field has no settled record. 409 conflict when the household kept changing while the dismissal ran: nothing was written; read the list again and retry." + adminProfileSetEditsRule
 	dismiss.DefaultStatus = http.StatusNoContent
-	dismiss.Errors = append(dismiss.Errors, http.StatusNotImplemented)
+	dismiss.Errors = append(dismiss.Errors, http.StatusConflict, http.StatusNotImplemented)
 	Register(reg, dismiss, func(ctx context.Context, in *AdminProfileSetFieldInput) (*struct{}, error) {
 		svc, id, p := reg.adminProfileSetEditsTarget(ctx, in.ID)
 		if p != nil {

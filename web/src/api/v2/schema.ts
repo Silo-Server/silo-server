@@ -6353,7 +6353,7 @@ export interface paths {
     post?: never;
     /**
      * Let a profile the owner removed come back from the account's app.
-     * @description Clears the owner's removal. It does not recreate the profile: the next newer set the person's app sends does, as a new profile with no history here. Then the server tries to wake the person's apps (wake_queued says whether this call queued a push). 404 not_found when the owner removed no profile with that sync_id. Only the server Owner may change the Owner's or another admin account's profiles (403 permission_denied otherwise). 501 capability_unsupported where profiles are not kept in PostgreSQL.
+     * @description Clears the owner's removal, and creates nothing: the profile is not recreated here. A newer set from the person's app creates it, as a new profile with no history here, only if that set has an item with this sync_id and the household has room for another profile; otherwise the item is in the set's left_off, or not in the set at all, and nothing comes back. Then the server tries to wake the person's apps: wake_queued says only that this call queued a push, not that the profile returned. 404 not_found when the owner removed no profile with that sync_id. 409 conflict when the household kept changing while the clear ran: nothing was written; read the list again and retry. Only the server Owner may change the Owner's or another admin account's profiles (403 permission_denied otherwise). 501 capability_unsupported where profiles are not kept in PostgreSQL.
      */
     delete: operations["clearAdminUserHiddenProfile"];
     options?: never;
@@ -6490,7 +6490,7 @@ export interface paths {
     post?: never;
     /**
      * Dismiss the settled record of the person's edit over the owner's value.
-     * @description Deletes the record only; the profile is unchanged and the person's apps are not told. 404 not_found when the field has no settled record. Only the server Owner may change the Owner's or another admin account's profiles (403 permission_denied otherwise). 501 capability_unsupported where profiles are not kept in PostgreSQL.
+     * @description Deletes the record only; the profile is unchanged and the person's apps are not told. 404 not_found when the field has no settled record. 409 conflict when the household kept changing while the dismissal ran: nothing was written; read the list again and retry. Only the server Owner may change the Owner's or another admin account's profiles (403 permission_denied otherwise). 501 capability_unsupported where profiles are not kept in PostgreSQL.
      */
     delete: operations["dismissAdminUserSettledProfileEdit"];
     options?: never;
@@ -98171,6 +98171,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Unprocessable Entity */
       422: {
         headers: {
@@ -99602,6 +99611,15 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

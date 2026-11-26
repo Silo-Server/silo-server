@@ -466,9 +466,11 @@ func (h *ProfileHandler) wakeAfterClear(ctx context.Context, userID int) (queued
 	return h.ProfileSetWaker.Wake(ctx, userID)
 }
 
-// ClearProfileSetHidden clears an owner's removal of a profile of the set.
-// It does not bring the profile back: the next accepted newer set does.
-// Then the person's apps are woken.
+// ClearProfileSetHidden clears an owner's removal of a profile of the set,
+// and creates nothing. A newer accepted set creates the profile only if it
+// has an item with that sync ID and the household has room; otherwise
+// nothing comes back. Then the person's apps are woken where a wake can be
+// queued.
 func (h *ProfileHandler) ClearProfileSetHidden(ctx context.Context, cmd ProfileSetClearCommand) (ProfileSetClearResult, error) {
 	run, err := h.ownerClearRun(ctx, cmd.UserID)
 	if err != nil {
