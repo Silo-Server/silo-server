@@ -365,6 +365,30 @@
       "value": "此值超出範圍。"
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "請至少包含一個特殊字元，例如 ! 或 #。"
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "請至少包含一個大寫字母。"
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "此密碼太長。"
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "此密碼太短。"
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -92845,6 +92869,18 @@
           "value": "選填"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "隱藏已觀看的作品"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "每個個人檔案在這個合輯的頁面、列和數量中，都不會看到自己已觀看的作品。不會移除任何內容。設有作品數量上限的智慧合輯會先選出作品，因此顯示的作品可能較少。"
     }
   ],
   "web.collections.details.label": [

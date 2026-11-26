@@ -365,6 +365,30 @@
       "value": "यह वैल्यू सीमा से बाहर है।"
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "कम से कम एक विशेष वर्ण शामिल करें, जैसे ! या #।"
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "कम से कम एक कैपिटल अक्षर शामिल करें।"
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "यह पासवर्ड बहुत लंबा है।"
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "यह पासवर्ड बहुत छोटा है।"
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -100726,6 +100750,18 @@
           "value": "वैकल्पिक"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "देखे गए टाइटल छिपाएँ"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "हर प्रोफ़ाइल को यह कलेक्शन उन टाइटल के बिना दिखता है जो उस प्रोफ़ाइल ने देखे हैं: कलेक्शन के पेज पर, उसकी पंक्तियों में और उसकी गिनती में। कुछ भी हटाया नहीं जाता। टाइटल की सीमा वाला स्मार्ट कलेक्शन पहले अपने टाइटल चुनता है, इसलिए उसमें कम टाइटल दिख सकते हैं।"
     }
   ],
   "web.collections.details.label": [

@@ -139,8 +139,8 @@ func (r *SessionRepository) createWithQuerier(
 	}
 
 	query := `INSERT INTO auth_sessions
-		(id, user_id, device_name, ip_address, expires_at, impersonator_user_id, impersonation_started_at, identity_id, provider_since, device_id, device_platform, purpose, bound_profile_id, absolute_expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, ''), $14)`
+		(id, user_id, device_name, ip_address, expires_at, impersonator_user_id, impersonation_started_at, identity_id, provider_since, device_id, device_platform, purpose, bound_profile_id, absolute_expires_at, via_device_sign_in)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, ''), $14, $15)`
 
 	// ip_address is a Postgres inet column; an empty string fails the
 	// inet input parser (SQLSTATE 22P02). Pass NULL when the caller
@@ -166,6 +166,7 @@ func (r *SessionRepository) createWithQuerier(
 		session.Purpose,
 		session.BoundProfileID,
 		session.AbsoluteExpiresAt,
+		session.ViaDeviceSignIn,
 	)
 	if err != nil {
 		return fmt.Errorf("creating session: %w", err)
@@ -423,6 +424,18 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 	if err := CheckOwnerTarget(OwnerActor{ID: actor.ID, IsOwner: actor.IsOwner}, target); err != nil {
 		return 0, err
 	}
+	// Sign out everywhere takes the account's identities, then its device
+	// sign-in approvals, then its sessions, as revokeSignInsInTransaction
+	// does (see lockIdentitiesBeforeSessions).
+	var withdrawn int64
+	if sessionID == nil {
+		if err := lockIdentitiesBeforeSessions(ctx, tx, userID, false); err != nil {
+			return 0, err
+		}
+		if withdrawn, err = withdrawDeviceSignInApprovalsInTransaction(ctx, tx, []int{userID}); err != nil {
+			return 0, err
+		}
+	}
 	query := `UPDATE auth_sessions SET revoked_at = NOW()
 		WHERE (user_id = $1 OR impersonator_user_id = $1)
 		AND revoked_at IS NULL AND expires_at > NOW()`
@@ -451,10 +464,10 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 	}
 	// Sign out everywhere also ends the account's other sign-ins; ending any
 	// of them is worth a domain row, even with no login session left.
-	ended := tag.RowsAffected()
+	ended := tag.RowsAffected() + withdrawn
 	if sessionID == nil {
 		for _, revoke := range []func(context.Context, pgx.Tx, []int) (int64, error){
-			revokeAudiobookshelfSessionsInTransaction, deleteJellyfinSessionsInTransaction, withdrawDeviceSignInApprovalsInTransaction,
+			revokeAudiobookshelfSessionsInTransaction, deleteJellyfinSessionsInTransaction,
 		} {
 			n, err := revoke(ctx, tx, []int{userID})
 			if err != nil {
@@ -505,8 +518,24 @@ func (r *SessionRepository) ExtendExpiresAt(ctx context.Context, id string, newE
 
 // DeleteExpired removes all sessions whose expires_at is in the past,
 // regardless of their revocation status. Returns the number of deleted rows.
+//
+// Deleting a session clears device_login_requests.auth_session_id, so the
+// delete takes sessions before requests, the reverse of a plugin uninstall
+// (see lockIdentitiesBeforeSessions). It therefore never waits: it skips a
+// session or request row another transaction holds, and leaves that session
+// for the next run.
 func (r *SessionRepository) DeleteExpired(ctx context.Context) (int, error) {
-	query := `DELETE FROM auth_sessions WHERE expires_at < NOW()`
+	query := `
+		WITH expired AS (
+			SELECT id FROM auth_sessions WHERE expires_at < NOW() FOR UPDATE SKIP LOCKED
+		), requests AS (
+			SELECT id FROM device_login_requests
+			WHERE auth_session_id IN (SELECT id FROM expired) FOR UPDATE SKIP LOCKED
+		)
+		DELETE FROM auth_sessions s USING expired e
+		WHERE s.id = e.id AND NOT EXISTS (
+			SELECT 1 FROM device_login_requests d
+			WHERE d.auth_session_id = s.id AND d.id NOT IN (SELECT id FROM requests))`
 	tag, err := r.pool.Exec(ctx, query)
 	if err != nil {
 		return 0, fmt.Errorf("deleting expired sessions: %w", err)

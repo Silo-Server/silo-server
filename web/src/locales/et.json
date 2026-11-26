@@ -365,6 +365,30 @@
       "value": "See väärtus on lubatud vahemikust väljas."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Lisage vähemalt üks erimärk, näiteks ! või #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Lisage vähemalt üks suurtäht."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "See parool on liiga pikk."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "See parool on liiga lühike."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -101956,6 +101980,18 @@
           "value": "Valikuline"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Peida vaadatud pealkirjad"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Iga profiil näeb seda kollektsiooni ilma pealkirjadeta, mida see profiil on vaadanud: kollektsiooni lehel, ridades ja pealkirjade arvus. Midagi ei eemaldata. Pealkirjade piiranguga nutikas kollektsioon valib oma pealkirjad kõigepealt, nii et see võib näidata vähem pealkirju."
     }
   ],
   "web.collections.details.label": [

@@ -365,6 +365,30 @@
       "value": "Värdet ligger utanför det tillåtna intervallet."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Ta med minst ett specialtecken, till exempel ! eller #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Ta med minst en versal."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Lösenordet är för långt."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Lösenordet är för kort."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -101214,6 +101238,18 @@
           "value": "Valfritt"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Dölj sedda titlar"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Varje profil ser den här samlingen utan de titlar som profilen har sett, på samlingens sida, i dess rader och i dess antal. Inget tas bort. En smart samling med en titelgräns väljer sina titlar först, så den kan visa färre."
     }
   ],
   "web.collections.details.label": [

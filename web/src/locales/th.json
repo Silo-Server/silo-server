@@ -365,6 +365,30 @@
       "value": "ค่านี้อยู่นอกช่วงที่กำหนด"
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "ใส่อักขระพิเศษอย่างน้อยหนึ่งตัว เช่น ! หรือ #"
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "ใส่ตัวพิมพ์ใหญ่อย่างน้อยหนึ่งตัว"
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "รหัสผ่านนี้ยาวเกินไป"
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "รหัสผ่านนี้สั้นเกินไป"
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -93069,6 +93093,18 @@
           "value": "ไม่บังคับ"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "ซ่อนชื่อเรื่องที่ดูแล้ว"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "แต่ละโปรไฟล์จะเห็นคอลเลกชันนี้โดยไม่มีชื่อเรื่องที่โปรไฟล์นั้นดูแล้ว ทั้งในหน้าคอลเลกชัน ในแถว และในจำนวนชื่อเรื่อง โดยไม่ได้นำสิ่งใดออก คอลเลกชันอัจฉริยะที่จำกัดจำนวนชื่อเรื่องจะเลือกชื่อเรื่องก่อน จึงอาจแสดงได้น้อยลง"
     }
   ],
   "web.collections.details.label": [

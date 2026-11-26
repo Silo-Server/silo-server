@@ -365,6 +365,30 @@
       "value": "هذه القيمة خارج النطاق المسموح."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "أدرج رمزًا خاصًا واحدًا على الأقل، مثل ! أو #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "أدرج حرفًا لاتينيًا كبيرًا واحدًا على الأقل."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "كلمة المرور هذه طويلة جدًا."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "كلمة المرور هذه قصيرة جدًا."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -137117,6 +137141,18 @@
           "value": "اختياري"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "إخفاء العناوين التي تمت مشاهدتها"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "يرى كل ملف شخصي هذه المجموعة دون العناوين التي شاهدها، في صفحتها وفي صفوفها وفي عددها. لا يُحذف أي شيء. المجموعة الذكية التي لها حد للعناوين تختار عناوينها أولًا، لذا قد تعرض عددًا أقل."
     }
   ],
   "web.collections.details.label": [

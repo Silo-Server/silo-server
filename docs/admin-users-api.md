@@ -158,7 +158,7 @@ sessions.
 
 A password set on create or update follows the server's
 [password policy](auth-api.md#account-passwords); a refused one returns
-`422 validation_failed` at `body.password`, with a detail that names the rule.
+`422 validation_failed` at `body.password`, with a code and detail that name the rule.
 
 `POST /api/v2/admin/users/{id}/password-reset` issues a password reset link, so an
 administrator can help a locked-out account without handling its password. The body

@@ -365,6 +365,30 @@
       "value": "此值超出范围。"
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "请至少包含一个特殊字符，例如!或#。"
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "请至少包含一个大写字母。"
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "此密码过长。"
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "此密码过短。"
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -92589,6 +92613,18 @@
           "value": "可选"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "隐藏已观看的作品"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "每个个人资料看到的此合集都不包含它已观看的作品，在合集页面、行和数量中都是如此。不会移除任何内容。设有作品数量上限的智能合集会先选出作品，因此显示的作品可能更少。"
     }
   ],
   "web.collections.details.label": [

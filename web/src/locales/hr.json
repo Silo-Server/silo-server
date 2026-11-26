@@ -365,6 +365,30 @@
       "value": "Ova je vrijednost izvan raspona."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Uključite barem jedan poseban znak, primjerice ! ili #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Uključite barem jedno veliko slovo."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Ova je lozinka predugačka."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Ova je lozinka prekratka."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -110965,6 +110989,18 @@
           "value": "Neobavezno"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Sakrij pogledane naslove"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Svaki profil vidi ovu kolekciju bez naslova koje je pogledao, na stranici kolekcije, u njezinim retcima i u broju naslova. Ništa se ne uklanja. Pametna kolekcija s ograničenjem broja naslova najprije odabire naslove, pa može prikazati manje."
     }
   ],
   "web.collections.details.label": [

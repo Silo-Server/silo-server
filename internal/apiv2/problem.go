@@ -427,6 +427,12 @@ const (
 	codeMalformedForm    = "malformed_form"
 	// codeManagedByEnvironment refuses a change owned by an environment declaration.
 	codeManagedByEnvironment = "managed_by_environment"
+	// A new password the server's password policy refused, by the rule it
+	// broke (auth.PasswordPolicy.Check).
+	codePasswordTooShort       = "password_too_short"
+	codePasswordTooLong        = "password_too_long"
+	codePasswordNeedsUppercase = "password_needs_uppercase"
+	codePasswordNeedsSpecial   = "password_needs_special"
 
 	locationBody     = "body"
 	locationBodyFile = "body.file"
