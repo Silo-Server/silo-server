@@ -183,11 +183,13 @@ func lockServerSettings(ctx context.Context, tx pgx.Tx) error {
 }
 
 // usableBreakGlassCount counts enabled break-glass admins that can still
-// use a local password, other than excludeID.
+// use a local password, other than excludeID: the same test as
+// usableBreakGlass, so a password sign-in that is on with no password stored
+// does not count.
 func usableBreakGlassCount(ctx context.Context, db rowQuerier, excludeID int) (int, error) {
 	var count int
 	err := db.QueryRow(ctx, `SELECT COUNT(*) FROM users
-		WHERE break_glass AND role = 'admin' AND enabled AND local_password_login_enabled AND id <> $1`,
+		WHERE break_glass AND role = 'admin' AND enabled AND `+passwordSignsInSQL("users")+` AND id <> $1`,
 		excludeID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("counting break-glass accounts: %w", err)
@@ -475,9 +477,10 @@ func settingBool(value string, fallback bool) bool {
 }
 
 // usableBreakGlass reports whether user, as stored, counts toward the
-// break-glass requirement.
+// break-glass requirement: an enabled break-glass admin with a password that
+// signs in (models.User.HasLocalPassword).
 func usableBreakGlass(user *models.User) bool {
-	return user != nil && user.BreakGlass && user.Role == models.RoleAdmin && user.Enabled && user.LocalPasswordLoginEnabled
+	return user != nil && user.BreakGlass && user.Role == models.RoleAdmin && user.Enabled && user.HasLocalPassword()
 }
 
 // EnsureBreakGlassAfterAdminChange refuses an administrator change to current

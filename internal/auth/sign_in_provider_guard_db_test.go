@@ -239,3 +239,35 @@ func TestServerWithoutUsableProviderCanStillBeRepairedAndManagedDB(t *testing.T)
 		})
 	}
 }
+
+// TestBreakGlassWithoutPasswordIsNotCountedDB: a break-glass admin counts
+// only with a password that signs in (models.User.HasLocalPassword), so
+// password sign-in cannot be turned off on the strength of an account with
+// its password sign-in on but no password stored. Every account on main has
+// a stored hash, so the row is written with SQL; the rule keeps the count
+// true once accounts without a password exist.
+func TestBreakGlassWithoutPasswordIsNotCountedDB(t *testing.T) {
+	e := newSignInGuardEnv(t)
+	ctx := t.Context()
+	if count, err := usableBreakGlassCount(ctx, e.pool, 0); err != nil || count != 0 {
+		t.Skipf("%d usable break-glass accounts already in the database (%v)", count, err)
+	}
+	glass := e.localAccount(t, "glass-no-password", models.RoleAdmin)
+	e.exec(t, `UPDATE users SET break_glass = true, local_password_login_enabled = true, password_hash = NULL WHERE id = $1`, glass.ID)
+	stored, err := NewUserRepository(e.pool).GetByID(ctx, glass.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usableBreakGlass(stored) {
+		t.Error("an account with no stored password counts as a usable break-glass admin")
+	}
+	if count, err := usableBreakGlassCount(ctx, e.pool, 0); err != nil || count != 0 {
+		t.Fatalf("usable break-glass count = %d, %v; want 0", count, err)
+	}
+	err = CheckLocalLoginSettingChange(ctx, e.pool,
+		LocalLoginSettings{LocalPasswordLogin: "true", PublicURL: "https://silo.example.test"},
+		LocalLoginSettings{LocalPasswordLogin: "false", PublicURL: "https://silo.example.test"})
+	if !errors.Is(err, ErrBreakGlassRequired) {
+		t.Fatalf("turning password sign-in off = %v, want ErrBreakGlassRequired", err)
+	}
+}

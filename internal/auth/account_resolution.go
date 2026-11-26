@@ -674,7 +674,7 @@ func demotionBlocked(ctx context.Context, tx pgx.Tx, user *models.User) (string,
 	switch {
 	case user.IsOwner:
 		return demotionReasonOwner, nil
-	case user.BreakGlass && user.LocalPasswordLoginEnabled:
+	case user.BreakGlass && user.HasLocalPassword():
 		// Break-glass exists for local recovery; an account that cannot use
 		// its password gets no immunity from it.
 		return demotionReasonBreakGlass, nil

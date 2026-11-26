@@ -330,6 +330,7 @@
 ./internal/auth TestPluginAuthBindingCallbackModeDB
 ./internal/auth TestLocalPasswordOffAccountsDB
 ./internal/auth TestEnableAccountLocalLoginDB
+./internal/auth TestBreakGlassWithoutPasswordIsNotCountedDB
 ./internal/auth TestLocalPasswordOffKeepsOpenSessionsDB
 ./internal/auth TestSignInProviderGuardDB
 ./internal/auth TestSignInProviderGuardSerializesWithSettingsSaveDB

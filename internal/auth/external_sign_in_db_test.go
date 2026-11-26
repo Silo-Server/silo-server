@@ -72,9 +72,8 @@ func newExternalSignInEnv(t *testing.T) *externalSignInEnv {
 // a local password, across the whole test database.
 func (e *externalSignInEnv) usableBreakGlass(t *testing.T) int {
 	t.Helper()
-	var count int
-	if err := e.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM users
-		WHERE break_glass AND role = 'admin' AND enabled AND local_password_login_enabled`).Scan(&count); err != nil {
+	count, err := usableBreakGlassCount(t.Context(), e.pool, 0)
+	if err != nil {
 		t.Fatal(err)
 	}
 	return count
