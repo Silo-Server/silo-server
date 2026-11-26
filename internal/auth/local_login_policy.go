@@ -286,19 +286,9 @@ func primarySignInBindingSQL(alias string) string {
 	return alias + `.enabled AND NOT ` + plugins.AuthBindingIsNetworkSQL(alias+".plugin_installation_id", alias+".capability_id")
 }
 
-// primarySignInIdentitySQL is the SQL test that the plugin_auth_identities
-// row named by alias still signs its account in once passwords are off: its
-// installation is enabled with an enabled OIDC or LDAP binding
-// (primarySignInBindingSQL). A link only to a network provider is not one.
-func primarySignInIdentitySQL(alias string) string {
-	return `EXISTS (SELECT 1 FROM plugin_installations p
-		JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND ` + primarySignInBindingSQL("b") + `
-		WHERE p.id = ` + alias + `.plugin_installation_id AND p.enabled)`
-}
-
-// passwordSignsInSQL is the SQL test that the users row named by alias can
-// use a local password, as the sign-in path requires: password sign-in on
-// for the account and a password set.
+// passwordSignsInSQL is the SQL form of models.User.HasLocalPassword, which
+// the sign-in path asks: password sign-in on for the account and a password
+// set. Change both together.
 func passwordSignsInSQL(alias string) string {
 	return alias + `.local_password_login_enabled AND COALESCE(` + alias + `.password_hash, '') <> ''`
 }
@@ -377,7 +367,7 @@ func localPasswordOffSQL() string {
 				END AS reason
 			FROM users u
 			WHERE u.enabled AND ` + passwordSignsInSQL("u") + ` AND NOT u.break_glass
-				AND NOT EXISTS (SELECT 1 FROM plugin_auth_identities i WHERE i.user_id = u.id AND ` + primarySignInIdentitySQL("i") + `)),
+				AND NOT EXISTS (SELECT 1 FROM plugin_auth_identities i WHERE i.user_id = u.id AND ` + identitySignsInSQL("i", false) + `)),
 		totals AS (
 			SELECT COUNT(*) FILTER (WHERE reason = 'email_match') AS matched,
 				COUNT(*) FILTER (WHERE reason <> 'email_match') AS unmatched
@@ -396,8 +386,9 @@ func localPasswordOffSQL() string {
 // password sign-in is turned off: enabled accounts that can sign in with a
 // password today (passwordSignsInSQL), are not break-glass
 // (localPasswordPolicy exempts those), and have no linked identity at an
-// enabled OIDC or LDAP provider (primarySignInIdentitySQL). Each is grouped
-// by whether email auto-match can link it at its first provider sign-in,
+// enabled OIDC or LDAP provider (identitySignsInSQL without network links).
+// Each is grouped by whether email auto-match can link it at its first
+// provider sign-in,
 // with the rule account resolution applies (emailMatchCandidateSQL); a link
 // to a network provider elsewhere does not stop that match. Both group
 // totals and the page come from one query, ordered by username (empty for

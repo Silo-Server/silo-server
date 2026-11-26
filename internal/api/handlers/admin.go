@@ -351,7 +351,7 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserVie
 		DownloadTranscodeAllowed:   clonePtr(u.DownloadTranscodeAllowed),
 		RequestsAllowed:            clonePtr(u.RequestsAllowed),
 		AccessGroupID:              clonePtr(u.AccessGroupID),
-		PasswordLogin:              u.LocalPasswordLoginEnabled && u.PasswordHash != "",
+		PasswordLogin:              u.HasLocalPassword(),
 		PasswordChangeRequired:     u.PasswordChangeRequired,
 		IsOwner:                    u.IsOwner,
 		BreakGlass:                 u.BreakGlass,

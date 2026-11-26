@@ -47,6 +47,15 @@ type User struct {
 	UpdatedAt  time.Time
 }
 
+// HasLocalPassword reports whether the account has a usable local password:
+// a stored hash, and local password sign-in on for the account. An account
+// with no password (password_hash NULL, local sign-in off) and an account a
+// provider manages (local sign-in off) both answer false. Whether the server
+// accepts local passwords at all is a separate setting.
+func (u *User) HasLocalPassword() bool {
+	return u.LocalPasswordLoginEnabled && u.PasswordHash != ""
+}
+
 // CreateUserInput contains the fields required to create a new user.
 //
 // Account roles. An admin account is never a member of an access group: group

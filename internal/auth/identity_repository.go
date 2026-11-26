@@ -129,14 +129,30 @@ func lockIdentitiesBeforeSessions(ctx context.Context, db dbQuerier, userID int,
 	return nil
 }
 
+// identitySignsInSQL is the SQL test that the plugin_auth_identities row
+// named by alias still signs its account in: its installation is enabled with
+// an enabled sign-in binding. withNetwork decides whether a network identity
+// binding counts. It signs the account in only from that provider's network:
+// unlinking counts it as a fallback (usableIdentityCount), while turning
+// password sign-in off does not (LocalPasswordOffAccounts), since the account
+// could then sign in only from that network.
+func identitySignsInSQL(alias string, withNetwork bool) string {
+	binding := "b.enabled"
+	if !withNetwork {
+		binding = primarySignInBindingSQL("b")
+	}
+	return `EXISTS (SELECT 1 FROM plugin_installations p
+		JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND ` + binding + `
+		WHERE p.id = ` + alias + `.plugin_installation_id AND p.enabled)`
+}
+
 // usableIdentityCount counts links whose installation and sign-in binding
-// are enabled. A disabled provider cannot be a fallback after unlinking.
+// are enabled (identitySignsInSQL, network links included). A disabled
+// provider cannot be a fallback after unlinking.
 func usableIdentityCount(ctx context.Context, db rowQuerier, userID int, excludeID int64) (int, error) {
 	var count int
 	err := db.QueryRow(ctx, `SELECT COUNT(*) FROM plugin_auth_identities i
-		JOIN plugin_installations p ON p.id = i.plugin_installation_id AND p.enabled
-		WHERE i.user_id = $1 AND i.id <> $2 AND EXISTS (
-			SELECT 1 FROM plugin_auth_bindings b WHERE b.plugin_installation_id = p.id AND b.enabled)`,
+		WHERE i.user_id = $1 AND i.id <> $2 AND `+identitySignsInSQL("i", true),
 		userID, excludeID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("counting enabled sign-in identities: %w", err)

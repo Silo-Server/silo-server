@@ -198,11 +198,16 @@ ordered against each other.
   a provider is usable. The warning
   (`SignInProviderWarning`) names the ways back: the declaration, a break-glass
   admin turning password sign-in back on, and `silo auth local-login enable`.
-- `listAdminLocalPasswordOffAccounts` answers who the switch would lock out,
-  reading the predicates sign-in uses: `passwordSignsInSQL` for a password that
-  signs in, `primarySignInIdentitySQL` for a link that still signs the account
-  in once passwords are off, and `emailMatchCandidateSQL` for the accounts
-  email auto-match may link. Change them there, not in a copy.
+- `listAdminLocalPasswordOffAccounts` answers who the switch would lock out.
+  It shares with sign-in the email-match rule (`emailMatchCandidateSQL`, also
+  used by account resolution) and the usable-identity rule
+  (`identitySignsInSQL`, also used by `usableIdentityCount`). It passes
+  `withNetwork` false there because a network link signs the account in only
+  from that network once passwords are off, while unlinking counts it as a
+  fallback. "Has a password that signs in" is `models.User.HasLocalPassword`
+  in Go and `passwordSignsInSQL` in SQL, kept side by side; the password reset
+  repository restates it in its own SQL (`eligibleAccount`). Change them
+  together, not in a copy.
 - Turning the switch off ends no session: refresh does not read it
   (`checkSessionStanding`) and slides the session forward, so an affected
   account stays signed in until it signs out or an administrator ends its
