@@ -388,7 +388,8 @@ The grant names no profile: the app acts as whichever profile of the account
 it names in `X-Profile-Id`. A profile with a PIN needs its PIN, as from any
 device; a profile without one needs nothing. "The acting profile's own
 state" means the profile it acts as, and the PIN is the household's boundary
-between profiles for this session as for any other. Revoking its key ends the sessions it
+between profiles for this session as for any other (see "PIN-protected
+profiles" below). Revoking its key ends the sessions it
 opened and their access, and nothing the app could create still acts for it
 afterwards: no credential, delivery channel, registration, device row,
 external link, secret URL or media request. What stays is the acting
@@ -417,12 +418,25 @@ operation refused or own-only for any judged kind declares 403 in the
 document. A capability read never reports as allowed an action whose
 operations are all refused to the session asking; see
 [the capability rule](api-contract.md#discovery-and-capability-detection).
+Two reads answer member by member: `getCollectionCapabilities` tells such a
+session it may read collections and offers it no collection write (`imports`,
+`item_reorder`, `create_description`, `sync_schedule_editable`, `artwork` and
+the sort preference flag false, no import source), and
+`getWatchTogetherCapabilities` tells it it may join a room and offers it no
+host power (the host flags false). Every published reason states a decision:
+`TestPublishedReasonsReadAsDecisions` fails on one that reads as pending, and
+the six "refused for now" reasons are a closed list (`forNowReasons`), each
+beside the policy question it waits on.
 
 **What such a session reads about what it may do describes that session,
 never the account.** The rule has three shapes, each checked:
 
 - a boolean permission member (`allowed`, `*_allowed`, `can_*`): a row in
-  `capabilityMembers`, checked by `TestPermissionMembersStateTheirCase`;
+  `capabilityMembers`, checked by `TestPermissionMembersStateTheirCase`. A
+  member that says what the caller may do under another name has a row there
+  too: the collection read's write flags, `import_sources` and
+  `sort_preference_kinds`, and the Watch Together read's host flags, checked
+  for both kinds of session by `TestCapabilityReadsAnswerForTheSession`;
 - a list of named powers (`permissions`, `*_permissions`, `*_actions`,
   `*_capabilities`): a row in `powerListMembers`, checked by
   `TestPowerListsStateTheirCase`. The account's `permissions` keep only the
@@ -476,6 +490,67 @@ the requests of each stream for administrators and runs before
 authentication, still sees what was sent: it records the device id on each
 stream's own media requests, in memory, for administrators, and writes
 nothing that lasts.
+
+**The server names its client.** Such an app chooses the client name its
+requests carry, and the household streams, playback history, insights and
+session views show it, so it could name its plays after the person's own
+apps. The same gate sets both client name headers (`X-Client-Name` when the
+app sent it, and `X-Silo-Client` always) to `Granted App`
+(`playback.GrantedAppClientName`), so every reader, whichever header family
+the app used, records that name, and an app that sends none is recorded
+under it too. The label beside the name is built from the version, and the
+full label adds the build and channel, so for such a session, in the headers
+or in the start body's `client_playback_context`, a version or build is kept
+only as numbers with a couple of known suffixes: an optional `v`, one to
+four dot-separated numbers, then at most two suffixes introduced by `-`, `+`
+or `.`, each digits, a hexadecimal run of 7 to 12 characters (optionally
+after `g`), or one of `alpha`, `beta`, `rc`, `dev`, `pre`, `snapshot`,
+`nightly`, `build`, `a` or `b` with up to six digits; at most 32 characters
+(`playback.LooksLikeClientVersion`). A channel is kept only when it is one
+of `release`, `stable`, `beta`, `alpha`, `rc`, `testflight`, `debug`, `dev`,
+`nightly`, `canary` or `internal` (`playback.IsKnownClientChannel`).
+Anything else is dropped, so what a version may still say is a number with
+one of those suffixes. A play named `Granted App` never gets the Jellyfin
+badge.
+
+Every other caller that declares `Granted App` itself has it dropped: the
+request proceeds as if it named no client in that header. The
+Jellyfin-compatible and Audiobookshelf-compatible listeners apply the same
+function (`playback.IsGrantedAppClientName`). It compares the name as it
+would be stored (trimmed, controls removed, cut to 128 characters), lower
+cased, with separators, format characters, combining marks,
+default-ignorable code points (the Hangul fillers among them) and the braille
+blank (U+2800) dropped, to the reserved name built the same way. Nothing else is reserved: a different
+letter, symbol or punctuation mark is a different name, however it looks.
+The request log shows `Granted App` only for a request the origin gate named;
+any other request whose logged name is `Granted App` is logged with none.
+The name in these lists is what a client says about itself, except for a
+granted app's, which the server sets; a client that is not a granted app can
+still choose a name that looks like `Granted App`, so the lists are not proof
+of which app played.
+
+Nothing in the server decides anything by the client name: it is shown,
+filtered and grouped on in admin lists, used as a metrics label and logged.
+The limit that remains: the lists show that another app made a play, not
+which app. What the app still chooses is shown beside the name, never in it:
+the `User-Agent`, which the household streams and session views show as
+sent, and the model and platform it declares (`X-Client-Model`,
+`X-Client-Platform` and the start body's device description), which playback
+diagnosis reads. The history and live rows take their device platform from
+the declared device, which the gate removes, so it is empty there for such a
+session. A Jellyfin Quick Connect request's app name (the `Client` of its
+authorization header) is shown to the approver as the request's platform and
+becomes that login session's platform in the sessions list; it is never a
+play's client name, which comes from each playback request.
+
+Stream telemetry runs before authentication and sees the name the app sent
+on each stream's media requests. It keeps that in memory on each API
+process and in short-lived Redis snapshots that expire after the
+membership interval (a minute by default); no read shows the client name
+from it. A media request authorized by a stream reference is judged without
+the session's kind, so its request-log line and stream telemetry carry the
+name the app sent; nothing stored or shown takes the client name from that
+request.
 
 The handler checks that need only this fact read the claim
 (`sessionReachesOtherDevices`, `otherDevicesRule`, `grantedAppStreamError`).
@@ -600,20 +675,25 @@ stream its ticket names, which is its own.
   and Discord link, watch-provider links, history-import links and runs;
 - reaches the person's other devices: web push, and native push registration
   (a request can name another device's id);
-- until the server knows the session's own device: the device registry
-  (`listDevices`, `updateDevice`, `forgetDevice`, `clearDeviceSettings`),
-  managed downloads, download subscriptions, direct downloads, the device
-  subtitle-appearance override, and the device-keyed playback connection
-  reads and writes (`getPlaybackConnection`, `resetPlaybackLearnedLimit`,
-  `reportPlaybackBandwidthProbe`; playback works without them);
+- refused by decision, device-keyed state stays with the person's own apps:
+  the device registry (`listDevices`, `updateDevice`, `forgetDevice`,
+  `clearDeviceSettings`), managed downloads, download subscriptions, direct
+  downloads, the device subtitle-appearance override, and the device-keyed
+  playback connection reads and writes (`getPlaybackConnection`,
+  `resetPlaybackLearnedLimit`, `reportPlaybackBandwidthProbe`). Without them
+  such an app plays with the profile's settings and no device-scoped values,
+  has no remembered bandwidth limit (each start measures or estimates anew),
+  has no entry in the device list, and has no downloads;
 - changes the household's profiles, PINs or limits: creating, changing and
   deleting profiles, avatars, title and collection allowances, profile import;
 - acts as a room's host or changes what other members play: creating a room
   and every host operation, and the source fallback;
-- refused for now, by decision: making media requests, editing subtitles every
-  account sees, importing collections, refreshing the shared catalog,
-  changing notification preferences, and catalog edits under a delegated
-  permission;
+- refused for now, each waiting on a policy question: making media requests,
+  editing subtitles every account sees, importing collections, refreshing the
+  shared catalog, changing notification preferences, and catalog edits under
+  a delegated permission. This list is closed (`forNowReasons`): a seventh
+  "for now" reason fails `TestPublishedReasonsReadAsDecisions` until it is
+  added beside its question;
 - refused by decision, each with its own reason: personal collection writes
   and home row overrides (the profile's own, but they change what the
   person's other devices show); onboarding reads and writes; muting a
@@ -632,9 +712,13 @@ stream its ticket names, which is its own.
   by key (some keys and scopes reach beyond the profile, and none has been
   read for that), per-user plugin settings (a plugin's values may hold tokens
   for other services), the title and collection allowance reads (they are
-  about other profiles), the taste seed (not yet read for whether it touches
-  only the profile's own state), and ending a View as user session (such a
-  session never is one). No operation is left undecided.
+  about other profiles), the taste seed (it records up to 200 picks as the
+  profile's favorites at once and, when any is new, refreshes the profile's
+  taste in one of the few immediate refreshes each API process runs at a
+  time, or queues the refresh when none is free; such a session adds
+  favorites one at a time instead), and ending a
+  View as user session (such a session never is one). No operation is left
+  undecided.
 
 **Revoking the key takes with it everything the app was allowed to leave.**
 `RevokeDeviceKey` marks the key revoked and ends every login session it
@@ -647,28 +731,17 @@ on the account for such a session, and what happens to it then:
 | playback, audio and subtitle preferences, ebook reader settings | the profile's own state, per series, library or title | stays, as the profile's |
 | starting playback | which version and quality the profile last played for that title (`user_series_playback_preferences`) | stays, as the profile's state; it is written as a side effect of starting playback, not by a request to change a preference, and the person's other devices start that title from it |
 | shuffles | a shuffle of the profile | stays as the profile's; an abandoned one is deleted with other abandoned shuffles |
-| starting playback, theme songs, the bandwidth probe download | a playback attempt bound to its login session, and the play's history row, which carries the client name the app sent | the attempt's media, stream reference and control socket are refused once the session ends, and the stream ends at its idle expiry; the history row stays as the profile's |
-| route events | diagnostics about its own streams, carrying its client name | stay; they grant nothing |
+| starting playback, theme songs, the bandwidth probe download | a playback attempt bound to its login session, and the play's history row, which carries the client name `Granted App` | the attempt's media, stream reference and control socket are refused once the session ends, and the stream ends at its idle expiry; the history row stays as the profile's |
+| route events | diagnostics about its own streams, carrying the client name `Granted App` | stay; they grant nothing |
 | verifying a PIN with a wrong guess | spent attempts on the app's own PIN allowance for that profile, which lock only the app | expire within an hour of the attempt that locked it, or of the first attempt when it never locked; a later correct PIN clears them |
 | reading a person | a metadata refresh queued when one is due | runs as any refresh; grants nothing |
 | Watch Together membership, suggestions, votes, member state | the profile's place and choices in a room the person put it in | stay as the profile's; the room socket closes on the session's next authority check |
 | events socket ticket | a short-lived ticket | the socket closes on its next authority check (at most 15 seconds) |
 | suggestions in a room | suggestions up to the room's cap, as the profile's | stay until the host deletes them or the room closes |
-| any request with client name headers | the client name the app sends, which is not stripped. A person sees it today in the web app's household streams panel, beside their own devices' plays; administrators see it in playback history, insights and session views | stays in playback history after the key is revoked; whether to strip it is a later decision |
+| any request with client name headers | the client name `Granted App`, which the gate sets whatever the app sends. A person sees it in the web app's household streams panel, beside their own devices' plays; administrators see it in playback history, insights and session views | stays in playback history after the key is revoked. It says another app made the play, not which app |
+| joining or reading a Watch Together room | nothing; the room's `code` stays in what it reads | the code gives the app nothing it did not present to get in: a room proof is minted only by creating a room (refused to it) or by joining with the code or a join token (`JoinRoom`), there is no join by room id and no room listing, and the proof is bound to the room, the account and the profile (`CheckSuggestionRoomProof`). The host's `invite_path`, which carries a join token, is left out for it |
 | its own media requests | the declared device label, in stream telemetry (in memory, administrators only) | gone with the process; nothing lasts |
 | sign out, ending its own session, revoking its own key | nothing | nothing to take |
-
-Capability reads that still tell such a session it may do what the gate
-refuses, to be closed by the next change:
-
-- `getCollectionCapabilities` answers `allowed: true` (it governs a mix:
-  listing and reading collections are allowed) with `imports`,
-  `import_sources`, `item_reorder`, `create_description` and
-  `sync_schedule_editable`. The app is told it may import, reorder, describe
-  and schedule collections; the gate refuses every collection write.
-- `getWatchTogetherCapabilities` answers `allowed: true` (joining is allowed)
-  with host flags that say what the host may do; the gate refuses such a
-  session every host operation.
 
 No device registry row and no connection record is left: the declared device
 is removed before anything reads it. Nothing on the list acts for the app
@@ -676,9 +749,29 @@ after its key is revoked: no credential, delivery channel, registration,
 link to an external account, secret URL, media request or session on another
 surface. Every operation that would leave one is refused above.
 
-**Not covered.** The server does not yet know which device is the session's
-own, so the device-keyed operations above are refused rather than limited to
-the app's device. The plugin-content proxy is outside the registry and has no
+**PIN-protected profiles.** Such a session acts as a PIN-protected profile
+only after it proves the PIN in that login session. Viewer access, which
+every profile-scoped operation runs, resolves the profile with
+`SkipPINVerification` false for it (`RequireViewerAccess` and
+`ResolveIfPresent` in `internal/api/middleware/viewer_access.go`):
+`Claims.SkipsProfilePIN()` is true only for an API key and an administrator
+acting as the account, and the other tokens that skip the check (an Apple
+push display token, a direct-download link, a stream reference) are issued
+to a profile that was already verified, by operations refused to such a
+session or, for a stream reference, by a playback start that ran viewer
+access. Every operation open to it that is not profile-scoped names no
+profile. It proves the PIN with `verifyProfilePIN`
+(`ProfileHandler.VerifyPIN`), which counts its attempts under its own
+allowance and on a match mints an `X-Profile-Token`. `CheckProfileToken`
+accepts that token only for the same account, login session, profile and PIN
+revision, so a proof the person's own device holds does not work for the app,
+and the app's does not work for another session. The token has no expiry of
+its own: it lasts until the login session ends (which revoking the app's key
+does), the profile's PIN changes or the profile is deleted.
+
+**Not covered.** Device-keyed state is refused by decision (above), so such
+an app plays with the profile's settings, has no remembered bandwidth limit,
+no entry in the device list and no downloads. The plugin-content proxy is outside the registry and has no
 decisions; its resolver holds such a session to public plugin routes (above).
 The Jellyfin-compatible and Audiobookshelf-compatible listeners accept no Silo
 session. A coverage test over operations sees neither the proxy nor socket

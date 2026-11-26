@@ -10,6 +10,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 // What each operation lets a login session do, by how the session was
@@ -159,7 +160,7 @@ const (
 	reasonRefusedSignIn       = "changes how the account signs in, or reads or hands out its other credentials"
 	reasonRefusedOtherDevice  = "reaches the person's other devices"
 	reasonRefusedLeaves       = "leaves something behind that outlives the app's key"
-	reasonRefusedOwnDevice    = "until the server knows the session's own device"
+	reasonRefusedDeviceState  = "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
 	reasonRefusedHousehold    = "changes the household's profiles, PINs or limits"
 	reasonRefusedRoomHost     = "acts as a room's host or changes what other members play"
 	reasonRefusedRequests     = "refused for now: making media requests"
@@ -186,7 +187,7 @@ const (
 	reasonRefusedSettingByKey     = "refused by decision: some setting keys and scopes reach beyond the profile, and none has been read for that yet"
 	reasonRefusedPluginSettings   = "refused by decision: a plugin's per-user values may hold tokens for other services, and a plugin acting on what an app wrote is the plugin proxy's problem again"
 	reasonRefusedOtherProfiles    = "refused by decision: it is about the account's other profiles"
-	reasonRefusedTasteSeed        = "refused by decision: not yet read for whether it touches the profile's own state only"
+	reasonRefusedTasteSeed        = "refused by decision: it records up to 200 picks as the profile's favorites at once and, when any is new, refreshes the profile's taste in one of the few immediate refreshes each API process runs at a time, or queues the refresh when none is free; such a session adds favorites one at a time instead"
 	reasonRefusedImpersonationEnd = "refused by decision: such a session is never a View as user session"
 )
 
@@ -242,7 +243,7 @@ var (
 	grantedRefusedSignIn       = grantedApp(decideRefused(reasonRefusedSignIn))
 	grantedRefusedOtherDevice  = grantedApp(decideRefused(reasonRefusedOtherDevice))
 	grantedRefusedLeaves       = grantedApp(decideRefused(reasonRefusedLeaves))
-	grantedRefusedOwnDevice    = grantedApp(decideRefused(reasonRefusedOwnDevice))
+	grantedRefusedDeviceState  = grantedApp(decideRefused(reasonRefusedDeviceState))
 	grantedRefusedHousehold    = grantedApp(decideRefused(reasonRefusedHousehold))
 	grantedRefusedRoomHost     = grantedApp(decideRefused(reasonRefusedRoomHost))
 	grantedRefusedRequests     = grantedApp(decideRefused(reasonRefusedRequests))
@@ -330,18 +331,23 @@ func recordOriginDecisions(op *Operation) {
 // authentication gate put on the claims, so it costs no query. An operation
 // that states no decision for the kind refuses it: every operation a
 // non-administrator reaches states one, and one that does not has not been
-// decided. Every caller of no judged kind passes untouched.
+// decided. Every caller of no judged kind passes, with only the client name
+// reserved for another app's session dropped (nameDeclaredClient).
 func originGate(decisions OriginDecisions) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims := claimsFrom(r.Context())
 			kind := judgedKind(claims)
+			nameDeclaredClient(r.Header, stripsDeclaredDevice(kind))
 			if kind == "" {
 				next.ServeHTTP(w, r)
 				return
 			}
 			if stripsDeclaredDevice(kind) {
 				stripDeclaredDevice(r.Header)
+				if o := observationFrom(r.Context()); o != nil {
+					o.clientNamedByGate = true
+				}
 			}
 			if d := decisions.decisionFor(kind); d != nil && d.Verdict != VerdictRefused {
 				next.ServeHTTP(w, r)
@@ -390,6 +396,62 @@ var declaredDeviceHeaders = []string{auth.ClientDeviceIDHeader, auth.ClientDevic
 func stripDeclaredDevice(h http.Header) {
 	for _, name := range declaredDeviceHeaders {
 		h.Del(name)
+	}
+}
+
+// clientNameHeaders are the headers a client names its app with: the declared
+// v2 header, which wins when it is not blank (PlaybackRequestHeaders), and the
+// one the first-party apps send, which the media routes, stream telemetry and
+// the request log read.
+var clientNameHeaders = []string{"X-Client-Name", "X-Silo-Client"}
+
+// clientVersionHeaders are the version, build and channel paired with either
+// name header, each with the shape a session another app's key opened must
+// keep: the label beside a client name shows the version, and the full label
+// adds the build and channel, so for such a session one that does not look
+// like a version, or a channel not on the known list, is dropped.
+var clientVersionHeaders = map[string]func(string) bool{
+	"X-Client-Version": playback.LooksLikeClientVersion, "X-Client-Build": playback.LooksLikeClientVersion, "X-Client-Channel": playback.IsKnownClientChannel,
+	"X-Silo-Client-Version": playback.LooksLikeClientVersion, "X-Silo-Client-Build": playback.LooksLikeClientVersion, "X-Silo-Client-Channel": playback.IsKnownClientChannel,
+}
+
+// nameDeclaredClient sets the client name a session another app's key opened
+// is recorded under: the app could otherwise name its plays after the
+// person's own apps in the household streams, playback history and insights.
+// Both headers carry playback.GrantedAppClientName, the declared one only when
+// the app sent it, so the same header family supplies the rest of the client
+// identity (version, build, channel). A version or build stays as declared
+// when it looks like one, and a channel when it is on the known list; any
+// other value is dropped, so it cannot carry a client name into the label.
+// Every other caller has the reserved name itself dropped from either header
+// (playback.IsGrantedAppClientName), so the request proceeds as if it named
+// no client there. Like the device strip, this edits the request's shared
+// header map before anything after the gate reads it.
+func nameDeclaredClient(h http.Header, grantedApp bool) {
+	if grantedApp {
+		if strings.TrimSpace(h.Get(clientNameHeaders[0])) != "" {
+			h.Set(clientNameHeaders[0], playback.GrantedAppClientName)
+		} else {
+			h.Del(clientNameHeaders[0])
+		}
+		h.Set(clientNameHeaders[1], playback.GrantedAppClientName)
+		for name, keeps := range clientVersionHeaders {
+			for _, v := range h.Values(name) {
+				if !keeps(strings.TrimSpace(v)) {
+					h.Del(name)
+					break
+				}
+			}
+		}
+		return
+	}
+	for _, name := range clientNameHeaders {
+		for _, v := range h.Values(name) {
+			if playback.IsGrantedAppClientName(v) {
+				h.Del(name)
+				break
+			}
+		}
 	}
 }
 
@@ -451,8 +513,10 @@ func (reg *Registry) recordPermission(permission, operationID string) {
 // permittedPermissions is the part of an account's permissions a kind of
 // session may be told of: a read never tells a session it may do what every
 // operation a permission gates refuses it. A permission whose operations are
-// all refused to that kind is left out; one with an open operation stays, so
-// opening a permission's actions to such a session needs no change here.
+// all refused to that kind is left out, and so is one that gates no
+// operation at all (a power checked only by hand); one with an open operation
+// stays, so opening a permission's actions to such a session needs no change
+// here.
 func (reg *Registry) permittedPermissions(kind auth.SessionKind, permissions []Permission) []Permission {
 	if kind == "" {
 		return permissions
@@ -462,7 +526,7 @@ func (reg *Registry) permittedPermissions(kind auth.SessionKind, permissions []P
 		reg.mu.Lock()
 		governed := slices.Clone(reg.permissionOps[string(permission)])
 		reg.mu.Unlock()
-		if len(governed) == 0 || reg.permittedFor(kind, governed) {
+		if len(governed) > 0 && reg.permittedFor(kind, governed) {
 			out = append(out, permission)
 		}
 	}
@@ -504,10 +568,13 @@ func (reg *Registry) permittedFor(kind auth.SessionKind, governed []string) bool
 }
 
 // capabilityMember is one permission member of a response a judged kind of
-// session may read: a boolean named allowed or ending in _allowed. Either it
-// governs (names the operations whose action it answers for, and is false for
-// a session to which every one of them is refused), or it is exempt with a
-// reason. TestPermissionMembersStateTheirCase fails on a member with neither.
+// session may read: a boolean named allowed, ending in _allowed or starting
+// can_ or self_can_, and any other member a row names because it says what
+// the caller may do under another name (a flag such as imports, or a list of
+// the sources it may import from). Either it governs (names the operations
+// whose action it answers for, and is false, or an empty list, for a session
+// to which every one of them is refused), or it is exempt with a reason.
+// TestPermissionMembersStateTheirCase fails on a member with neither.
 type capabilityMember struct {
 	governs []string
 	exempt  string
@@ -520,6 +587,9 @@ var (
 	watchTogetherHostOperations      = []string{"closeWatchTogetherRoom", "updateWatchTogetherRoomPolicy", "selectWatchTogetherRoomItem", "updateWatchTogetherRoomSelectionMode", "stageWatchTogetherRoomItem", "promoteWatchTogetherSuggestion"}
 	watchTogetherTransportOperations = []string{"startWatchTogetherRoomPlayback", "stopWatchTogetherRoomPlayback"}
 )
+
+// collectionImportOperations are what importing a collection means.
+var collectionImportOperations = []string{"importMDBListCollection", "importTMDBCollection", "importTMDBListCollection"}
 
 // downloadOperations are the actions a download permission answers for.
 var downloadOperations = []string{"createDownloads", "listDownloads", "createDirectDownloadLink", "getDirectDownload", "createDownloadSubscription"}
@@ -560,9 +630,8 @@ var capabilityMembers = map[string]capabilityMember{
 	"startPlayback playback_plan.timeline.can_seek_anywhere":  {exempt: "describes the stream's timeline, not a permission: believing it, the app seeks within its own stream, which it may"},
 	"replanPlayback playback_plan.timeline.can_seek_anywhere": {exempt: "describes the stream's timeline, not a permission: believing it, the app seeks within its own stream, which it may"},
 	// Capabilities some of whose actions are open to such a session; the
-	// answer stays the capability's own. Its finer flags can still describe
-	// refused actions: see getCollectionCapabilities and
-	// getWatchTogetherCapabilities in docs/architecture/app-keys.md.
+	// answer stays the capability's own. A finer member that says what the
+	// caller may do has its own row below.
 	"getCatalogSearchCapabilities allowed":         {governs: []string{"queryCatalogItems", "listCatalogItems"}},
 	"getCollectionCapabilities allowed":            {governs: []string{"listCollections", "getCollection", "createCollection"}},
 	"getEbookCapability allowed":                   {governs: []string{"readEbookFile", "saveEbookProgress", "createEbookAnnotation"}},
@@ -581,6 +650,43 @@ var capabilityMembers = map[string]capabilityMember{
 	"getThemeSongsCapability allowed":              {governs: []string{"createThemeSongPlayback"}},
 	"getUserLibraryCapabilities allowed":           {governs: []string{"listUserLibraries"}},
 	"getWatchTogetherCapabilities allowed":         {governs: []string{"joinWatchTogetherRoom", "createWatchTogetherRoom"}},
+	// The collection read's finer members. Every collection write is
+	// refused to such a session, so a member that offers one describes the
+	// session (false, or no import source); a member that describes how the
+	// server reads collections stays the server's.
+	"getCollectionCapabilities imports":                     {governs: collectionImportOperations},
+	"getCollectionCapabilities import_sources":              {governs: collectionImportOperations},
+	"getCollectionCapabilities sync_schedule_editable":      {governs: []string{"updateCollection"}},
+	"getCollectionCapabilities item_reorder":                {governs: []string{"reorderCollectionItems"}},
+	"getCollectionCapabilities create_description":          {governs: []string{"createCollection"}},
+	"getCollectionCapabilities artwork":                     {governs: []string{"uploadCollectionPoster", "deleteCollectionImage"}},
+	"getCollectionCapabilities collection_sort_preferences": {governs: []string{"setCollectionSortPreference", "clearCollectionSortPreference"}},
+	"getCollectionCapabilities sort_preference_kinds":       {governs: []string{"setCollectionSortPreference", "clearCollectionSortPreference"}},
+	"getCollectionCapabilities groups":                      {exempt: "always false: no session may create a collection group, so the app offers none"},
+	"getCollectionCapabilities login_sharing":               {exempt: "describes what listCollections returns (other profiles' shared collections) and that only a creator changes a collection; believing it, the app shows shared collections it may read"},
+	"getCollectionCapabilities mdblist_search":              {governs: []string{"searchMDBListLists", "listTopMDBListLists"}},
+	"getCollectionCapabilities contains_item":               {governs: []string{"listCollections"}},
+	"getCollectionCapabilities preview_posters":             {governs: []string{"previewCollection"}},
+	"getCollectionCapabilities poster_collages":             {exempt: "describes the posters the collection reads carry; believing it, the app shows the collage a read returns"},
+	"getCollectionCapabilities collection_default_sort":     {exempt: "describes the order the collection reads use; believing it, the app shows collections in the order a read returns"},
+	"getCollectionCapabilities effective_collection_sort":   {exempt: "describes the sort the collection reads report; believing it, the app shows the sort a read returns"},
+	"getCollectionCapabilities display_filter_fields":       {exempt: "the vocabulary of a collection's display filter, which collection reads carry; it offers no action, and every write that would set a filter is refused with the flags above false"},
+	"getCollectionCapabilities display_filter_presets":      {exempt: "the vocabulary of a collection's display filter, which collection reads carry; it offers no action, and every write that would set a filter is refused with the flags above false"},
+	"getCollectionCapabilities schedule_time_zone":          {exempt: "the server's time zone for sync schedules; it offers no action, and the app could do nothing with it that the gate does not refuse"},
+	// The Watch Together read's finer members. A host flag describes what a
+	// room's host may do; such a session never hosts a room (creating one
+	// and every host operation are refused), so it reads them false. The
+	// member features stay: such a session joins rooms as a member.
+	"getWatchTogetherCapabilities staged_selection":      {governs: []string{"stageWatchTogetherRoomItem", "startWatchTogetherRoomPlayback"}},
+	"getWatchTogetherCapabilities selection_mode_switch": {governs: []string{"updateWatchTogetherRoomSelectionMode"}},
+	"getWatchTogetherCapabilities vote_host_override":    {governs: []string{"promoteWatchTogetherSuggestion"}},
+	"getWatchTogetherCapabilities stop_playback":         {governs: []string{"stopWatchTogetherRoomPlayback"}},
+	"getWatchTogetherCapabilities lobby_ready":           {exempt: "a member marks itself ready over the room socket, which such a session may; believing it, the app sends lobby_ready"},
+	"getWatchTogetherCapabilities connection_replaced":   {exempt: "describes how the server closes a displaced room socket; believing it, the app reads the closing message it is sent"},
+	"getWatchTogetherCapabilities member_state":          {governs: []string{"queryWatchTogetherMemberState"}},
+	"getWatchTogetherCapabilities picker":                {governs: []string{"getWatchTogetherRoomPicker"}},
+	"getWatchTogetherCapabilities max_member_state_ids":  {governs: []string{"queryWatchTogetherMemberState"}},
+	"getWatchTogetherCapabilities socket_protocol":       {exempt: "names the room socket's protocol, which a member's connection speaks; believing it, the app connects as a member, which it may"},
 	// Documents that describe server behavior. Believing allowed, the app
 	// would read the document, which every caller of the class may do: the
 	// gate refuses it no action the member stands for.

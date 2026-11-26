@@ -34633,7 +34633,7 @@
             "type": "boolean"
           },
           "artwork": {
-            "description": "The acting account supports collection artwork",
+            "description": "The caller may upload and remove collection artwork: the acting account supports it and the session may make those operations (false for a session another app's key opened)",
             "type": "boolean"
           },
           "collection_default_sort": {
@@ -34643,6 +34643,7 @@
             "type": "boolean"
           },
           "collection_sort_preferences": {
+            "description": "The caller may set and clear collection sort preferences; false for a session another app's key opened",
             "examples": [
               true
             ],
@@ -34656,7 +34657,7 @@
             "type": "boolean"
           },
           "create_description": {
-            "description": "createCollection stores a description for the acting account",
+            "description": "The caller may create a collection, and createCollection stores its description; false for a session another app's key opened, which may not create one",
             "examples": [
               true
             ],
@@ -34689,7 +34690,7 @@
             "type": "boolean"
           },
           "import_sources": {
-            "description": "Import sources the acting account can create a collection from; empty when imports is false",
+            "description": "Import sources the caller may create a collection from; empty when imports is false",
             "examples": [
               [
                 "mdblist",
@@ -34708,11 +34709,11 @@
             "type": "array"
           },
           "imports": {
-            "description": "The acting account supports imported collections",
+            "description": "The caller may import collections: the acting account supports them and the session may make the import operations (false for a session another app's key opened)",
             "type": "boolean"
           },
           "item_reorder": {
-            "description": "The acting account supports reordering collection items",
+            "description": "The caller may reorder collection items: the acting account supports it and the session may make that operation (false for a session another app's key opened)",
             "type": "boolean"
           },
           "login_sharing": {
@@ -34748,7 +34749,7 @@
             "$ref": "#/components/schemas/CollectionScheduleTimeZone"
           },
           "sort_preference_kinds": {
-            "description": "collection_kind values the sort-preference operations accept",
+            "description": "collection_kind values the sort-preference operations accept; empty when the caller may not use them",
             "examples": [
               [
                 "library",
@@ -34773,7 +34774,7 @@
             "type": "string"
           },
           "sync_schedule_editable": {
-            "description": "updateCollection accepts sync_schedule on a synced list; false when imports is false",
+            "description": "The caller may set sync_schedule on a synced list with updateCollection; false when imports is false",
             "examples": [
               true
             ],
@@ -63518,14 +63519,14 @@
             "type": "string"
           },
           "selection_mode_switch": {
-            "description": "The host may switch a lobby between host picks and voting",
+            "description": "The host may switch a lobby between host picks and voting; false for a session another app's key opened, which may not host a room",
             "type": "boolean"
           },
           "socket_protocol": {
             "type": "string"
           },
           "staged_selection": {
-            "description": "Lobbies stage an item and the host starts it explicitly",
+            "description": "Lobbies stage an item and the host starts it explicitly; false for a session another app's key opened, which may not host a room",
             "type": "boolean"
           },
           "state": {
@@ -63539,11 +63540,11 @@
             "type": "string"
           },
           "stop_playback": {
-            "description": "The host may stop playback and return the room to the lobby without ending it",
+            "description": "The host may stop playback and return the room to the lobby without ending it; false for a session another app's key opened, which may not host a room",
             "type": "boolean"
           },
           "vote_host_override": {
-            "description": "The host may promote any suggestion in a vote room, not only the leader",
+            "description": "The host may promote any suggestion in a vote room, not only the leader; false for a session another app's key opened, which may not host a room",
             "type": "boolean"
           }
         },
@@ -181107,7 +181108,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-service-backed": true
@@ -182082,7 +182083,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-retry-safety": "non_retryable",
@@ -182302,7 +182303,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-retry-safety": "natural_idempotent",
@@ -182469,7 +182470,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-retry-safety": "non_retryable",
@@ -184130,7 +184131,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-raw-protocol": "download-bytes",
@@ -184420,7 +184421,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-raw-protocol": "download-bytes",
@@ -185020,7 +185021,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-raw-protocol": "download-bytes",
@@ -185320,7 +185321,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-raw-protocol": "download-bytes",
@@ -185511,7 +185512,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-retry-safety": "natural_idempotent",
@@ -185984,7 +185985,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-service-backed": true
@@ -186236,7 +186237,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-retry-safety": "non_retryable",
@@ -186425,7 +186426,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-service-backed": true
@@ -186611,7 +186612,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-service-backed": true
@@ -186838,7 +186839,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-retry-safety": "non_retryable",
@@ -187069,7 +187070,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-retry-safety": "natural_idempotent",
@@ -187278,7 +187279,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-retry-safety": "natural_idempotent",
@@ -187457,7 +187458,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-service-backed": true
@@ -187722,7 +187723,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-retry-safety": "natural_idempotent",
@@ -187883,7 +187884,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-retry-safety": "natural_idempotent",
@@ -188100,7 +188101,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-retry-safety": "domain_identity",
@@ -188329,7 +188330,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-raw-protocol": "managed-download-artwork",
@@ -188821,7 +188822,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-raw-protocol": "managed-download-file",
@@ -189251,7 +189252,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-raw-protocol": "managed-download-file",
@@ -189795,7 +189796,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-raw-protocol": "managed-download-file",
@@ -190270,7 +190271,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-raw-protocol": "managed-download-file",
@@ -190460,7 +190461,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-service-backed": true
@@ -190650,7 +190651,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-retry-safety": "natural_idempotent",
@@ -190965,7 +190966,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-raw-protocol": "managed-download-subtitle",
@@ -219310,7 +219311,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-retry-safety": "non_retryable",
@@ -219685,7 +219686,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-service-backed": true
@@ -219837,7 +219838,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-retry-safety": "non_retryable",
@@ -231984,7 +231985,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "refused by decision: not yet read for whether it touches the profile's own state only"
+            "reason": "refused by decision: it records up to 200 picks as the profile's favorites at once and, when any is new, refreshes the profile's taste in one of the few immediate refreshes each API process runs at a time, or queues the refresh when none is free; such a session adds favorites one at a time instead"
           }
         },
         "x-silo-retry-safety": "non_retryable",
@@ -238065,7 +238066,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-retry-safety": "natural_idempotent",
@@ -238294,7 +238295,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "until the server knows the session's own device"
+            "reason": "refused by decision: device-keyed state (the device list, device settings, the connection record, downloads) stays with the person's own apps"
           }
         },
         "x-silo-retry-safety": "natural_idempotent",

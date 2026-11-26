@@ -24,6 +24,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -115,10 +116,10 @@ type observation struct {
 	errorCode   string
 	authClass   string
 	userID      *int
-	// clientName and clientVersion are the clamped X-Silo-Client identity,
-	// read once when the request arrives.
-	clientName    string
-	clientVersion string
+	// clientNamedByGate marks a request whose client name the origin gate set
+	// (a session another app's key opened); only then is the reserved name
+	// logged.
+	clientNamedByGate bool
 }
 
 type observationKey struct{}
@@ -143,7 +144,6 @@ func observe(next http.Handler) http.Handler {
 		ctx, db := queryattr.StartRequest(ctx)
 		r = r.WithContext(ctx)
 		o := &observation{db: db, operationID: labelNone, errorCode: labelNone, authClass: authClassAnonymous}
-		o.clientName, o.clientVersion = clientIdentity(r)
 		r = r.WithContext(context.WithValue(r.Context(), observationKey{}, o))
 		sw := &statusRecorder{ResponseWriter: w}
 		httpstream.Serve(recoverRaw(next, sw), sw, r, func(aborted bool) {
@@ -309,7 +309,10 @@ func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 }
 
 func report(r *http.Request, o *observation, status int, aborted, hijacked bool, bodyBytes int64, elapsed time.Duration) {
-	name, version := o.clientName, o.clientVersion
+	// Read when the line is written, not when the request arrives: the origin
+	// gate names the client of a session another app's key opened, and drops
+	// that name from every other caller, on the request's shared headers.
+	name, version := clientIdentity(r, o.clientNamedByGate)
 	major := strconv.Itoa(APIMajor)
 	method := methodLabel(r.Method)
 	class := statusClass(status)
@@ -380,10 +383,21 @@ func statusClass(status int) string {
 
 // clientIdentity reads the client's self-reported name and version, clamped
 // to a printable bounded string. The values are opaque: trimmed, length
-// limited, control characters dropped, never parsed or validated.
-func clientIdentity(r *http.Request) (name, version string) {
-	return clampLabel(r.Header.Get("X-Silo-Client"), maxClientNameLen),
-		clampLabel(r.Header.Get("X-Silo-Client-Version"), maxClientVersionLen)
+// limited, control characters dropped, never parsed or validated. The
+// reserved client name is logged only for a request the origin gate named
+// (namedByGate); any other request whose logged name is the reserved name is
+// logged with none, whether it never reached the gate (a public operation, a
+// refused credential, an unknown route) or the log's shorter cut left only
+// the reserved name.
+func clientIdentity(r *http.Request, namedByGate bool) (name, version string) {
+	name = clampLabel(r.Header.Get("X-Silo-Client"), maxClientNameLen)
+	switch {
+	case namedByGate:
+		name = playback.GrantedAppClientName
+	case playback.IsGrantedAppClientName(name):
+		name = ""
+	}
+	return name, clampLabel(r.Header.Get("X-Silo-Client-Version"), maxClientVersionLen)
 }
 
 func clampLabel(v string, limit int) string {

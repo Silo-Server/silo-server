@@ -520,7 +520,7 @@ func enrichPlaybackSessionRow(row *playbackSessionRow, audioTracksJSON []byte) {
 		row.OutputContainer = row.SourceContainer
 		row.OutputProtocol = playback.OutputProtocolHTTP
 	}
-	row.IsJellyfinClient = row.CompatOrigin || isJellyfinEcosystemClient(row.ClientName, row.ClientUserAgent)
+	row.IsJellyfinClient = row.CompatOrigin || jellyfinBadge(row.ClientName, row.ClientUserAgent)
 
 	var audioTracks []models.AudioTrack
 	if len(audioTracksJSON) > 0 {

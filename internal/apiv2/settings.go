@@ -295,7 +295,7 @@ func registerSettings(reg *Registry) {
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
 		ServiceBacked:  true,
-		Origins:        grantedRefusedOwnDevice,
+		Origins:        grantedRefusedDeviceState,
 	}, reg.updateSubtitleAppearanceDeviceOverride)
 
 	Register(reg, Operation{
@@ -305,7 +305,7 @@ func registerSettings(reg *Registry) {
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
 		ServiceBacked:  true,
-		Origins:        grantedRefusedOwnDevice,
+		Origins:        grantedRefusedDeviceState,
 	}, reg.deleteSubtitleAppearanceDeviceOverride)
 
 	Register(reg, Operation{
