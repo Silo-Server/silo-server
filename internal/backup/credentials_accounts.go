@@ -20,10 +20,12 @@ func sameAccount(column string) string {
 
 // liveAccounts are the live server's accounts: their ids and when each was
 // created, which together tell an account from another that holds its id
-// in the restored data (sameAccount).
+// in the restored data (sameAccount), and the highest account id its
+// sequence has handed out (accountIDsUsed).
 type liveAccounts struct {
 	ids     []int64
 	created []time.Time
+	used    int64
 }
 
 // readLiveAccounts reads every account of the live snapshot tx.
@@ -34,7 +36,26 @@ func readLiveAccounts(ctx context.Context, tx pgx.Tx) (liveAccounts, error) {
 	if err != nil {
 		return a, fmt.Errorf("reading the live accounts: %w", err)
 	}
+	if a.used, err = accountIDsUsed(ctx, tx); err != nil {
+		return a, fmt.Errorf("reading the live account id sequence: %w", err)
+	}
 	return a, nil
+}
+
+// accountIDsUsed is the highest id the account id sequence of tx's database
+// has handed out, 0 for none. It reads the sequence itself: last_value is
+// handed out only once is_called is set, which a sequence never used, or one
+// set back with setval(..., false), does not have. pg_sequence_last_value
+// gives NULL for both and so loses the position a setval left.
+func accountIDsUsed(ctx context.Context, tx pgx.Tx) (int64, error) {
+	var seq string
+	if err := tx.QueryRow(ctx, `SELECT pg_get_serial_sequence('users', 'id')`).Scan(&seq); err != nil {
+		return 0, err
+	}
+	var used int64
+	// seq is the catalog's own quoted name of the sequence.
+	err := tx.QueryRow(ctx, `SELECT CASE WHEN is_called THEN last_value ELSE last_value - 1 END FROM `+seq).Scan(&used)
+	return used, err
 }
 
 // sameAccounts writes same_accounts, the live accounts that are the same
@@ -49,16 +70,26 @@ func sameAccounts(ctx context.Context, tx pgx.Tx, live liveAccounts) error {
 }
 
 // advanceAccountIDs moves the restored account id sequence past every id the
-// live server has used, as carryInto does for the carried tables. The
-// backup's sequence would otherwise give the next account an id the live
-// server gave an account the restore removes, and a later restore would meet
-// two accounts under it.
+// live server has used: the highest its sequence handed out, an account
+// deleted since included, and its highest account, as carryInto does for the
+// carried tables. The backup's sequence would otherwise give the next account
+// an id the live server gave an account the restore removes, and a later
+// restore would meet two accounts under it. Restoring the same backup again
+// keeps the position the first restore reached. With no live server (no
+// position and no accounts) the sequence stays as the backup has it.
 func advanceAccountIDs(ctx context.Context, tx pgx.Tx, live liveAccounts) error {
-	if len(live.ids) == 0 {
+	highest := live.used
+	if n := len(live.ids); n > 0 {
+		highest = max(highest, live.ids[n-1])
+	}
+	if highest == 0 {
 		return nil
 	}
-	_, err := tx.Exec(ctx, `SELECT setval(pg_get_serial_sequence('users', 'id'), GREATEST(
-		coalesce(pg_sequence_last_value(pg_get_serial_sequence('users', 'id')::regclass), 0),
-		(SELECT coalesce(max(id), 0) FROM users), $1, 1))`, live.ids[len(live.ids)-1])
+	restored, err := accountIDsUsed(ctx, tx)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `SELECT setval(pg_get_serial_sequence('users', 'id'), GREATEST($1::bigint, $2::bigint, (SELECT coalesce(max(id), 0) FROM users)))`,
+		highest, restored)
 	return err
 }

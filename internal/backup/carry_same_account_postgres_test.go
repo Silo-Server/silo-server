@@ -31,6 +31,34 @@ type sameAccountServer struct {
 	store    blobstore.Store
 	root     string
 	validate ValidateOptions
+	// lastRestore is when the last restore ran. A swap names its databases
+	// by the second, so each restore runs at least a second after the last.
+	lastRestore *time.Time
+}
+
+// newSameAccountServer creates a deployment with a migrated database of its
+// own and an empty backup destination.
+func newSameAccountServer(t *testing.T, tools Tools) sameAccountServer {
+	t.Helper()
+	master := []byte("same-account-restore-test-key-0123456789abcdef")
+	keyCheck, err := secret.KeyCheckValue(master)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions, err := database.MigrationVersions(migrations.FS, "sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, liveURL := backuptest.Database(t)
+	dbExec(t, live, `INSERT INTO server_settings (key, value) VALUES ($1, $2)`, serveridentity.Key, sameAccountDeployment)
+	live.Close()
+	root := t.TempDir()
+	store, err := blobstore.NewFilesystem(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sameAccountServer{url: liveURL, tools: tools, store: store, root: root, lastRestore: new(time.Time),
+		validate: ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKeyOf(t, master), BinaryMigrations: versions}}
 }
 
 // backup takes a full backup of the live database and opens it.
@@ -69,6 +97,14 @@ func (s sameAccountServer) restore(t *testing.T, src *Source) string {
 	err = RestoreSwap(ctx, src, PGLoader{Tools: s.tools}, ctl, SwapOptions{
 		LiveURL: s.url, DatabaseOnly: true, Validate: s.validate, WorkDir: t.TempDir(), JournalKey: s.validate.ManifestKey, Out: &out,
 		Journaled: func(stamp string) { previous = "silo_before_restore_" + stamp },
+		Now: func() time.Time {
+			next := s.lastRestore.Add(time.Second)
+			if now := time.Now(); now.After(next) {
+				next = now
+			}
+			*s.lastRestore = next
+			return next
+		},
 	})
 	if err != nil {
 		t.Fatalf("full restore: %v\n%s", err, out.String())
@@ -112,15 +148,6 @@ func createAccount(t *testing.T, pool *pgxpool.Pool, username string) int {
 // sequence back: one in a backup, another created on the live server since.
 func TestFullRestoreCarriesCredentialsOnlyOntoTheSameAccountDB(t *testing.T) {
 	tools := testTools(t)
-	master := []byte("same-account-restore-test-key-0123456789abcdef")
-	keyCheck, err := secret.KeyCheckValue(master)
-	if err != nil {
-		t.Fatal(err)
-	}
-	versions, err := database.MigrationVersions(migrations.FS, "sql")
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, tc := range []struct {
 		name string
 		// profile gives the backup's account a profile.
@@ -128,28 +155,24 @@ func TestFullRestoreCarriesCredentialsOnlyOntoTheSameAccountDB(t *testing.T) {
 		// disabled disables the live account, which takes the backup
 		// account's name.
 		disabled bool
+		// deleteNewest deletes the newest live account before the restore.
+		deleteNewest bool
 	}{
 		{name: "account never used in the backup"},
 		{name: "account with a profile in the backup", profile: true},
 		{name: "live account disabled under the same name", disabled: true},
+		{name: "newest live account deleted", deleteNewest: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
-			live, liveURL := backuptest.Database(t)
-			root := t.TempDir()
-			store, err := blobstore.NewFilesystem(root)
-			if err != nil {
-				t.Fatal(err)
-			}
-			server := sameAccountServer{url: liveURL, tools: tools, store: store, root: root,
-				validate: ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKeyOf(t, master), BinaryMigrations: versions}}
-			dbExec(t, live, `INSERT INTO server_settings (key, value) VALUES ($1, $2)`, serveridentity.Key, sameAccountDeployment)
+			server := newSameAccountServer(t, tools)
 			var installation int64
-			if err := live.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path)
-				VALUES ('silo.auth.oidc', '1.0.0', '/plugins/oidc') RETURNING id`).Scan(&installation); err != nil {
-				t.Fatal(err)
-			}
-			live.Close()
+			server.with(t, func(pool *pgxpool.Pool) {
+				if err := pool.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path)
+					VALUES ('silo.auth.oidc', '1.0.0', '/plugins/oidc') RETURNING id`).Scan(&installation); err != nil {
+					t.Fatal(err)
+				}
+			})
 
 			before := server.backup(t)
 			var first int
@@ -192,6 +215,9 @@ func TestFullRestoreCarriesCredentialsOnlyOntoTheSameAccountDB(t *testing.T) {
 				if tc.disabled {
 					dbExec(t, pool, `UPDATE users SET enabled = false WHERE id = $1`, second)
 				}
+				if tc.deleteNewest {
+					dbExec(t, pool, `DELETE FROM users WHERE id = $1`, third)
+				}
 			})
 			out := server.restore(t, between)
 
@@ -232,5 +258,41 @@ func checkSameAccountRestored(t *testing.T, pool *pgxpool.Pool, first, third int
 	// The next account must not take an id the live server used.
 	if next := createAccount(t, pool, "next"); next <= third {
 		t.Errorf("the next account after the restore has id %d, want above %d, the live server's last", next, third)
+	}
+}
+
+// TestFullRestoreKeepsTheLiveAccountIDSequenceDB: after a full restore the
+// next account takes an id above every one the live server's sequence handed
+// out, also when no account that held them is left there.
+func TestFullRestoreKeepsTheLiveAccountIDSequenceDB(t *testing.T) {
+	tools := testTools(t)
+	for _, tc := range []struct {
+		name string
+		// again restores the same backup a second time before checking.
+		again bool
+	}{
+		{name: "every live account deleted"},
+		{name: "the same backup restored twice", again: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newSameAccountServer(t, tools)
+			empty := server.backup(t)
+			var used int
+			server.with(t, func(pool *pgxpool.Pool) {
+				used = createAccount(t, pool, "gone")
+				if !tc.again {
+					dbExec(t, pool, `DELETE FROM users WHERE id = $1`, used)
+				}
+			})
+			server.restore(t, empty)
+			if tc.again {
+				server.restore(t, empty)
+			}
+			server.with(t, func(pool *pgxpool.Pool) {
+				if next := createAccount(t, pool, "next"); next <= used {
+					t.Errorf("the next account after the restore has id %d, want above %d, which the live server used", next, used)
+				}
+			})
+		})
 	}
 }

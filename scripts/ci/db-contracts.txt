@@ -1394,6 +1394,7 @@
 ./internal/backup TestCustomPoliciesComeFromTheLiveServerDB
 ./internal/backup TestCarryMatchesAProfileWithinItsAccountDB
 ./internal/backup TestFullRestoreCarriesCredentialsOnlyOntoTheSameAccountDB
+./internal/backup TestFullRestoreKeepsTheLiveAccountIDSequenceDB
 ./internal/backup TestCarrySwapsDestinationNamesDB
 ./internal/backup TestBackupWritesManifestLastDB
 ./internal/backup TestSubsystemLockSerializesBackupsAndDeletesDB
