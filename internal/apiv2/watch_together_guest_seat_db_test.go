@@ -177,7 +177,6 @@ func (r *guestSeatRoutes) dial(token, proof string) *websocket.Conn {
 	}
 	_ = resp.Body.Close()
 	r.t.Cleanup(func() { _ = conn.Close() })
-	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	return conn
 }
 
@@ -186,6 +185,9 @@ func (r *guestSeatRoutes) dial(token, proof string) *websocket.Conn {
 // snapshot, its room.
 func (r *guestSeatRoutes) next(conn *websocket.Conn, types ...string) (string, guestSeatView) {
 	r.t.Helper()
+	// Each wait is bounded on its own: a deadline set when the connection
+	// opened would also count the requests made since.
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	for {
 		var frame struct {
 			Type string        `json:"type"`
@@ -217,9 +219,13 @@ func (r *guestSeatRoutes) snapshot(conn *websocket.Conn) guestSeatView {
 // host never connects), so a closed socket has reached the room.
 func (r *guestSeatRoutes) connected(count int) {
 	r.t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	deadline := time.After(5 * time.Second)
 	for r.read("tok-host", r.hostProof).MemberCount != count {
-		if time.Now().After(deadline) {
+		select {
+		case <-tick.C:
+		case <-deadline:
 			r.t.Fatalf("room never counted %d connected members", count)
 		}
 	}
