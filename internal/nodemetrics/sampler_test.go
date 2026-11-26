@@ -126,6 +126,56 @@ func TestCPUBusyPercentFromProcStatDeltas(t *testing.T) {
 	}
 }
 
+// When the cgroup usage file a pass reads from changes, the previous reading
+// came from a different counter, so the two cannot be differenced. Here a
+// cpuset pins the process to two of four cores; the leaf's usage file goes
+// unreadable for a pass and the reading falls back to the root's, which
+// carries the same two-core budget but counts far more CPU time.
+func TestCgroupCPUStartsAFreshPairWhenTheUsageSourceChanges(t *testing.T) {
+	tree := newProcTree(t)
+	clock := newFakeClock()
+	tree.writeIdleHost()
+	tree.write("stat", "cpu  0 0 0 0 0 0 0 0\ncpu0 0 0 0 0\ncpu1 0 0 0 0\ncpu2 0 0 0 0\ncpu3 0 0 0 0\n")
+	tree.write("cgroup/cpuset.cpus.effective", "0-1\n")
+	tree.write("cgroup/leaf/cpu.max", "max 100000\n")
+	tree.write("cgroup/leaf/cpu.stat", "usage_usec 1000000\n")
+	tree.write("cgroup/cpu.max", "max 100000\n")
+	tree.write("cgroup/cpu.stat", "usage_usec 900000000\n")
+	level := func(dir string) cgroupCPUPath {
+		return cgroupCPUPath{
+			usage:     filepath.Join(tree.root, dir, "cpu.stat"),
+			usageKey:  cgroupCPUUsageKey,
+			usageUnit: time.Microsecond,
+			quota:     filepath.Join(tree.root, dir, "cpu.max"),
+		}
+	}
+
+	s := newTestSampler(t, tree, clock, Options{})
+	s.cgroupCPUPaths = []cgroupCPUPath{level("cgroup/leaf"), level("cgroup")}
+	s.cgroupCPUSetPaths = []string{filepath.Join(tree.root, "cgroup/cpuset.cpus.effective")}
+	s.sample(context.Background())
+
+	if err := os.Remove(filepath.Join(tree.root, "cgroup/leaf/cpu.stat")); err != nil {
+		t.Fatal(err)
+	}
+	clock.advance(5 * time.Second)
+	s.sample(context.Background())
+	snap := s.Snapshot()
+	if snap.System.CPUPct != 0 || snap.Attribution.CPU.Available {
+		t.Fatalf("CPUPct = %d (available %v) after the usage source changed, want 0 and unavailable", snap.System.CPUPct, snap.Attribution.CPU.Available)
+	}
+
+	// The root's own counter now has a baseline: 5s of CPU over 5s on a
+	// two-core budget is half of it.
+	tree.write("cgroup/cpu.stat", "usage_usec 905000000\n")
+	clock.advance(5 * time.Second)
+	s.sample(context.Background())
+	snap = s.Snapshot()
+	if snap.System.CPUPct != 50 || !snap.Attribution.CPU.Available {
+		t.Fatalf("CPUPct = %d (available %v) on the second reading of one source, want 50 and available", snap.System.CPUPct, snap.Attribution.CPU.Available)
+	}
+}
+
 // In a container /proc/meminfo describes the host. The cgroup limit is what the
 // kernel will actually OOM-kill against, so it has to win.
 func TestMemoryCorrectedByCgroupLimitAndUsage(t *testing.T) {

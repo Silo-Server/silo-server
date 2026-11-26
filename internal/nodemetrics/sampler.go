@@ -350,9 +350,10 @@ func (s *Sampler) cpuStats(now time.Time) (busyPct, cores int) {
 	// population's CPU time by another's capacity.
 	//
 	// Once the cgroup can be read it is the only honest source, so its answer
-	// stands even when this pass cannot derive one (the first sample, or a
-	// counter reset). Falling back to the host figure would silently mix two
-	// different machines' busyness across intervals.
+	// stands even when this pass cannot derive one (the first sample, a counter
+	// reset, or a reading from a different cgroup than the last). Falling back
+	// to the host figure would silently mix two different machines' busyness
+	// across intervals.
 	cgroupPct, available := cgroupCPUPercent(s.prevCgroupCPU, sample, quota)
 	s.cpuSource = ResourceSource{Scope: scopeCgroup, Source: "cgroup_" + s.cgroupCPUDetails.Version, Available: available}
 	s.prevCgroupCPU = sample
