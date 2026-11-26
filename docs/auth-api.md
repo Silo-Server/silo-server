@@ -1145,7 +1145,7 @@ operation contract.
 | `POST /auth/grants/redeem` (`redeemAppKeyGrant`) | a `grant-redeem` envelope signed by the app's own key (the grant's `app_key`), without `device_sig` | Enrolls another app's key with a grant the account's person key signed, and opens the app's session. The key is listed with `kind` `app`, `enrolled_by` `grant` and `allowed_by`. Refused for an administrator's account. See "Grants" below. |
 | `POST /invitations/app-code` (`createInvitationAppCode`) | none; the invitation `token` in the body | Body `{ "token", "username", "email" }`. Starts a join through the Silo app and answers `{ "code", "expires_in", "server_address" }`; see "App codes" below. |
 | `POST /auth/app-codes` (`createAppCode`) | the account's own login session acting as the household's main profile | Body `{}`. Answers `{ "code", "expires_in", "server_address" }` for "Open in Silo"; see "App codes" below. |
-| `POST /auth/app-codes/redeem` (`redeemAppCode`) | `{ "person_key", "message" }` where `message` is a `redeem` envelope signed with that person key, with `device_sig`, the app code in its payload | Enrolls both keys and opens the device key's session. The sealed plaintext adds `username` and `person_key` (`enrolled` or `replaced`). 404 `app_code_invalid` for an unknown, used or expired code. |
+| `POST /auth/app-codes/redeem` (`redeemAppCode`) | `{ "person_key", "message" }` where `message` is a `redeem` envelope signed with that person key, with `device_sig`, the app code in its payload | Enrolls the device key and opens its session. The person key is enrolled when the account has none; an account that already has a different person key keeps it, the device key is enrolled under the account's key, and nothing is revoked. The sealed plaintext adds `username`, `person_key_id` (the account's person key once the redeem commits) and `person_key`: `enrolled` when `person_key` is now the account's person key, `kept` when the account kept a different one. A person who has lost every other device redeems a code, then calls `PUT /auth/keys/person` from the new session as the main profile. 404 `app_code_invalid` for an unknown, used or expired code. |
 | `GET /auth/keys/session` (`getAppKeySessionAccess`) | any login session | `{ "list", "manage", "approve", "sign_in_again" }`: what this session may do with the account's keys, and whether signing in again would help. Answers while the switch is off. |
 | `GET /auth/keys` (`listAppKeys`) | the account's own login session, opened by password, provider or the person's own device key | `person_key` (`kid`, `enrolled_at`; absent when the account has none) and `devices[]` (`id`, `kid`, `kind` `device`\|`app`, `name`, `platform`, `status` `active`\|`pending`, `enrolled_by` `introduce`\|`session`\|`app-code`\|`grant`, `allowed_by`, `enrolled_at`, `last_used_at`), newest first. Revoked and denied keys are left out, and so is a waiting key older than 24 hours, without anyone denying or revoking it. `last_used_at` is the last time the key opened a session: a key enrolled and not used since shows it equal to `enrolled_at`, and a key waiting for approval shows `null`. |
 | `DELETE /auth/keys/devices/{id}` (`revokeAppDeviceKey`) | the account's own login session | 204. Revokes the key and ends every session it opened. A device may revoke its own key, which ends the session making the request. 404 for a key that isn't the account's. |
@@ -1387,8 +1387,11 @@ request arrived on.
   if local password sign-in was turned off since, 404 `app_code_invalid` if the
   invitation was revoked, replaced or accepted since. For a session code it
   enrolls the device key on that account, enrolling `person_key` when the
-  account has none and replacing a different one (the old one is revoked,
-  devices already enrolled keep their keys). Keys from a code start active,
+  account has none. An account with a different person key keeps it: the
+  device key is enrolled under the account's key and nothing is revoked
+  (`person_key: kept`). To start fresh after losing every other device, the
+  person redeems a code and then calls `PUT /auth/keys/person` from the new
+  session as the main profile. Keys from a code start active,
   also on an administrator's account. Of two redemptions of one code exactly
   one succeeds.
 
