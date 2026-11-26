@@ -590,6 +590,16 @@ var capabilityMembers = map[string]capabilityMember{
 	"getServerConnections allowed":         {exempt: "believing it, the app reads the addresses the deployment offers, which it may; the document offers no action the gate refuses"},
 }
 
+// powerListMembers says, for each list of named powers a session another
+// app's key opened may read, keyed as capabilityMembers is, how the answer
+// keeps the list to that session's own powers. TestPowerListsStateTheirCase
+// fails on such a list with no row. A sealed reply's tokens.user is the same
+// account object as getCurrentUser's (accountForSession); the scan cannot see
+// inside the sealed plaintext, so this row stands for both.
+var powerListMembers = map[string]string{
+	"getCurrentUser permissions": "accountForSession keeps a permission only while an operation it gates is open to the session (permittedPermissions)",
+}
+
 // memberPermitted applies a governed permission member below a capability
 // read's top level: false when the caller's kind of session is refused every
 // operation it names, else true (the handler's own answer then stands).
