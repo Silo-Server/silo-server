@@ -275,7 +275,7 @@ func registerCatalogActions(reg *Registry) {
 	translate.Errors = []int{http.StatusConflict, http.StatusTooManyRequests}
 	translateOperation := viewerOperation(translate)
 	translateOperation.RetrySafety = RetrySafetyCoalescing
-	Register(reg, withOrigins(translateOperation, grantedRefusedRefresh), reg.translateCatalogItemDescription)
+	Register(reg, withOrigins(translateOperation, grantedRefusedSharedWrite), reg.translateCatalogItemDescription)
 
 	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/people", "listPeople", "catalog",
 		"Search people by name, with exact matches first, then the most credited for a specific query, and optional media scope.")), grantedCatalogRead), reg.listPeople)

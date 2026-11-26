@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/policy"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // documentedDecision reads an operation's published decision for a session
@@ -214,6 +216,69 @@ func TestRefusedFamiliesNeverReachTheirService(t *testing.T) {
 			}
 			if rec := do(t, h, tc.method, Prefix+tc.path, tc.body, headers(memberToken)); rec.Code != http.StatusInternalServerError {
 				t.Fatalf("password session did not reach the service: %d %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestGrantedAppPlayerStateWritesStayOnTheActingProfile: the playback, audio
+// and subtitle preference writes and the ebook reader settings are a player's
+// own state, so a session another app's key opened may make them, and each
+// lands on the profile the request acts as and on no other profile. Catches
+// one of them being refused again, or a write that reaches past the acting
+// profile (another profile's row, or none keyed by profile at all).
+func TestGrantedAppPlayerStateWritesStayOnTheActingProfile(t *testing.T) {
+	const other = "p-kid"
+	audio := &fakeAudioPreferences{prefs: map[string]userstore.AudioPreference{other + "/series-8f2c1a": fixtureAudioPreference()}}
+	library := &fakeLibraryPlaybackPreferences{known: map[int]bool{1: true}, prefs: []userstore.LibraryPlaybackPreference{{ProfileID: other, LibraryID: 1}}}
+	deps := preferenceDeps(audio, library)
+	subtitles := &fakeSubtitlePreferences{prefs: map[string]userstore.SubtitlePreference{other + "/series-8f2c1a": fixtureSubtitlePreference()}}
+	deps.SubtitlePreferences = subtitles
+	ebook := &fakeEbookConfig{}
+	deps.EbookConfig = ebook
+	h := newTestHandler(t, deps)
+	app := with(bearer(grantedAppToken), "X-Profile-Id", "p-owner")
+	for _, tc := range []struct {
+		name, method, path, body string
+		headers                  map[string]string
+		landed                   func() bool
+	}{
+		{"audio preference", http.MethodPut, "/audio-prefs/series-8f2c1a", `{"audio_track_index":3}`, app, func() bool {
+			return audio.prefs["p-owner/series-8f2c1a"].AudioTrackIndex == 3 && audio.prefs[other+"/series-8f2c1a"].AudioTrackIndex == fixtureAudioPreference().AudioTrackIndex
+		}},
+		{"audio preference delete", http.MethodDelete, "/audio-prefs/series-8f2c1a", "", app, func() bool {
+			_, own := audio.prefs["p-owner/series-8f2c1a"]
+			_, kept := audio.prefs[other+"/series-8f2c1a"]
+			return !own && kept
+		}},
+		{"subtitle preference", http.MethodPut, "/subtitle-prefs/series-8f2c1a", `{"subtitle_language":"eng","subtitle_track_index":0,"subtitle_mode":"always"}`, app, func() bool {
+			return subtitles.last != nil && subtitles.last.ProfileID == "p-owner" && subtitles.prefs[other+"/series-8f2c1a"].SubtitleMode == fixtureSubtitlePreference().SubtitleMode
+		}},
+		{"subtitle preference delete", http.MethodDelete, "/subtitle-prefs/series-8f2c1a", "", app, func() bool {
+			_, own := subtitles.prefs["p-owner/series-8f2c1a"]
+			_, kept := subtitles.prefs[other+"/series-8f2c1a"]
+			return !own && kept
+		}},
+		{"library playback preference", http.MethodPatch, "/library-playback-prefs/1", `{"audio_language":"eng"}`, app, func() bool {
+			return slices.ContainsFunc(library.prefs, func(p userstore.LibraryPlaybackPreference) bool { return p.ProfileID == "p-owner" && p.LibraryID == 1 }) &&
+				slices.ContainsFunc(library.prefs, func(p userstore.LibraryPlaybackPreference) bool { return p.ProfileID == other && p.AudioLanguage == "" })
+		}},
+		{"library playback preference delete", http.MethodDelete, "/library-playback-prefs/1", "", app, func() bool {
+			return !slices.ContainsFunc(library.prefs, func(p userstore.LibraryPlaybackPreference) bool { return p.ProfileID == "p-owner" }) &&
+				slices.ContainsFunc(library.prefs, func(p userstore.LibraryPlaybackPreference) bool { return p.ProfileID == other })
+		}},
+		{"ebook reader settings", http.MethodPut, "/ebooks/book/reader-config", `{"config":{"settings":{"theme":"dark"}}}`,
+			with(app, "If-Match", ebookConfigTag(1, "p-owner", "book", nil).String()), func() bool {
+				return ebook.current != nil && ebook.current.ProfileID == "p-owner" && ebook.current.UserID == 1
+			}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := do(t, h, tc.method, Prefix+tc.path, tc.body, tc.headers)
+			if rec.Code < 200 || rec.Code > 299 {
+				t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+			}
+			if !tc.landed() {
+				t.Fatal("the write did not land on the acting profile alone")
 			}
 		})
 	}

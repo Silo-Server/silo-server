@@ -190,7 +190,7 @@ func registerPreferences(reg *Registry) {
 		DemoRestricted: true,
 		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
-		Origins:        grantedNotDecided,
+		Origins:        grantedPlayerState,
 	}, reg.updateAudioPreference)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodDelete, pathAudioPreference, "deleteAudioPreference", tagPreferences,
@@ -199,7 +199,7 @@ func registerPreferences(reg *Registry) {
 		DemoRestricted: true,
 		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
-		Origins:        grantedNotDecided,
+		Origins:        grantedPlayerState,
 	}, reg.deleteAudioPreference)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, pathSubtitlePreference, "getSubtitlePreference", tagPreferences,
@@ -215,7 +215,7 @@ func registerPreferences(reg *Registry) {
 		DemoRestricted: true,
 		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
-		Origins:        grantedNotDecided,
+		Origins:        grantedPlayerState,
 	}, reg.updateSubtitlePreference)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodDelete, pathSubtitlePreference, "deleteSubtitlePreference", tagPreferences,
@@ -224,7 +224,7 @@ func registerPreferences(reg *Registry) {
 		DemoRestricted: true,
 		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
-		Origins:        grantedNotDecided,
+		Origins:        grantedPlayerState,
 	}, reg.deleteSubtitlePreference)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, pathLibraryPlaybackPreference, "listLibraryPlaybackPreferences", tagPreferences,
@@ -240,7 +240,7 @@ func registerPreferences(reg *Registry) {
 		DemoRestricted: true,
 		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
-		Origins:        grantedNotDecided,
+		Origins:        grantedPlayerState,
 	}, reg.updateLibraryPlaybackPreference)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodDelete, pathLibraryPlaybackPreference+"/{library_id}", "deleteLibraryPlaybackPreference", tagPreferences,
@@ -249,7 +249,7 @@ func registerPreferences(reg *Registry) {
 		DemoRestricted: true,
 		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
-		Origins:        grantedNotDecided,
+		Origins:        grantedPlayerState,
 	}, reg.deleteLibraryPlaybackPreference)
 }
 

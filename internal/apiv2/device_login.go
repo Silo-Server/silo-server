@@ -283,7 +283,7 @@ func registerDeviceLogin(reg *Registry) {
 	Register(reg, Operation{
 		Operation: deny, RetrySafety: RetrySafetyDomainIdentity,
 		Class: ClassAuthenticated, ServiceBacked: true, RateLimitBucket: bucketDeviceLookup,
-		Origins: grantedNotDecided,
+		Origins: grantedRefusedAccountSetup,
 	}, reg.denyDeviceLogin)
 	poll := humaOp(http.MethodPost, Prefix+"/auth/device/poll", "pollDeviceLogin", "device-login",
 		"Poll a pairing request from the device and collect its tokens once approved.")

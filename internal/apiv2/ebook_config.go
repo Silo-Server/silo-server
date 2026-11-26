@@ -49,7 +49,7 @@ type EbookConfigOutput struct {
 
 func registerEbookConfig(reg *Registry) {
 	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/ebooks/{content_id}/reader-config", "getEbookReaderConfig", "ebooks", "Read reader configuration and its current validator."), Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedSettingsRead}, reg.getEbookReaderConfig)
-	Register(reg, Operation{Operation: humaOp(http.MethodPut, Prefix+"/ebooks/{content_id}/reader-config", "saveEbookReaderConfig", "ebooks", "Replace reader configuration using its current validator."), Class: ClassProfileScoped, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyNaturalIdempotent, MaxBodyBytes: 256 << 10, Origins: grantedNotDecided}, reg.saveEbookReaderConfig)
+	Register(reg, Operation{Operation: humaOp(http.MethodPut, Prefix+"/ebooks/{content_id}/reader-config", "saveEbookReaderConfig", "ebooks", "Replace reader configuration using its current validator."), Class: ClassProfileScoped, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyNaturalIdempotent, MaxBodyBytes: 256 << 10, Origins: grantedPlayerState}, reg.saveEbookReaderConfig)
 }
 
 func ebookConfigTag(userID int, profileID, contentID string, current *handlers.EbookReaderConfig) EntityTag {

@@ -111,7 +111,7 @@ func registerAdminTaskJobs(reg *Registry) {
 	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/jobs", "listAdminJobs", "admin-tasks", "List retained administrator jobs with bounded cursor pagination."), Class: ClassActingAdmin, ServiceBacked: true}, func(ctx context.Context, in *AdminTaskJobsInput) (*AdminTaskJobsOutput, error) {
 		return reg.listAdminTaskJobs(ctx, cursors, in)
 	})
-	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/jobs/{id}", "getAdminJob", "admin-tasks", "Read a retained job. Administrators acting through the account's primary profile may read all jobs; item refresh owners may read their own safe result."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, Origins: grantedNotDecided}, reg.getAdminTaskJob)
+	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/jobs/{id}", "getAdminJob", "admin-tasks", "Read a retained job. Administrators acting through the account's primary profile may read all jobs; item refresh owners may read their own safe result."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, Origins: grantedRefusedJobReads}, reg.getAdminTaskJob)
 	cancel := humaOp("POST", Prefix+"/admin/jobs/{id}/cancel", "cancelAdminJob", "admin-tasks", "Request cancellation of a job that reports cancelable: library refresh, storage transition, or image cache cleanup. Completed effects and verified storage-copy checkpoints are retained.")
 	cancel.DefaultStatus = 202
 	cancel.Errors = []int{409}

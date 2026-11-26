@@ -104,6 +104,7 @@ const (
 	reasonRoomMember     = "as a member of a room the person put it in"
 	reasonOwnSession     = "its own session and its own key"
 	reasonDiagnostics    = "a diagnostics upload, for the administrator to read"
+	reasonPlayerState    = "a player's own state for the profile it acts as"
 )
 
 // Reasons for the operations such a session is refused.
@@ -122,6 +123,16 @@ const (
 	reasonRefusedNotifyPrefs  = "refused for now: changing notification preferences"
 	reasonRefusedCatalogEdit  = "refused for now: catalog edits under a delegated permission"
 	reasonNotDecided          = "not decided"
+
+	reasonRefusedOtherDevicesShow = "refused by decision: the profile's own, but it changes what the person's other devices show"
+	reasonRefusedOnboarding       = "refused by decision: onboarding is set up from the person's own apps"
+	reasonRefusedSeriesMute       = "refused by decision: muting a series changes what the person is told on every device"
+	reasonRefusedRequestFlow      = "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+	reasonRefusedExternalReads    = "refused by decision: reads the person's links to external accounts"
+	reasonRefusedProfileExport    = "refused by decision: exports the profile's whole data at once"
+	reasonRefusedJobReads         = "refused by decision: library and administration jobs are not a player's"
+	reasonRefusedAccountSetup     = "refused by decision: the account's sign-in, credential and plugin setup is not a player's"
+	reasonRefusedSharedWrite      = "refused by decision: writes shared catalog data"
 )
 
 // Decisions shared by whole families: what a session another app's key
@@ -144,6 +155,7 @@ var (
 	grantedRoomMember     = grantedApp(decideAllowed(reasonRoomMember))
 	grantedOwnSession     = grantedApp(decideAllowed(reasonOwnSession))
 	grantedDiagnostics    = grantedApp(decideAllowed(reasonDiagnostics))
+	grantedPlayerState    = grantedApp(decideAllowed(reasonPlayerState))
 
 	grantedOwnSessionList = grantedApp(decideOwnOnly(
 		"SessionLimitedToItself: every other session's item is redacted to its id", reasonOwnSession))
@@ -176,6 +188,16 @@ var (
 	grantedRefusedNotifyPrefs  = grantedApp(decideRefused(reasonRefusedNotifyPrefs))
 	grantedRefusedCatalogEdit  = grantedApp(decideRefused(reasonRefusedCatalogEdit))
 	grantedNotDecided          = grantedApp(decideRefused(reasonNotDecided))
+
+	grantedRefusedOtherDevicesShow = grantedApp(decideRefused(reasonRefusedOtherDevicesShow))
+	grantedRefusedOnboarding       = grantedApp(decideRefused(reasonRefusedOnboarding))
+	grantedRefusedSeriesMute       = grantedApp(decideRefused(reasonRefusedSeriesMute))
+	grantedRefusedRequestFlow      = grantedApp(decideRefused(reasonRefusedRequestFlow))
+	grantedRefusedExternalReads    = grantedApp(decideRefused(reasonRefusedExternalReads))
+	grantedRefusedProfileExport    = grantedApp(decideRefused(reasonRefusedProfileExport))
+	grantedRefusedJobReads         = grantedApp(decideRefused(reasonRefusedJobReads))
+	grantedRefusedAccountSetup     = grantedApp(decideRefused(reasonRefusedAccountSetup))
+	grantedRefusedSharedWrite      = grantedApp(decideRefused(reasonRefusedSharedWrite))
 )
 
 // extOriginDecisions documents OriginDecisions as {kind: {verdict, reason,

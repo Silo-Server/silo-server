@@ -362,7 +362,7 @@ func registerExternalSignIn(reg *Registry) {
 	list := humaOp(http.MethodGet, Prefix+"/account/identities", "listAccountIdentities", "account",
 		"List the external sign-in identities linked to the caller's account.")
 	list.Description = "Every profile on the account may read the list. can_unlink answers for the profile X-Profile-Id names, or for a request that names none, by deleteAccountIdentity's rule: a profile other than the account's primary one reads false."
-	Register(reg, Operation{Operation: list, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, Origins: grantedNotDecided},
+	Register(reg, Operation{Operation: list, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, Origins: grantedRefusedAccountSetup},
 		func(ctx context.Context, _ *struct{}) (*AccountIdentityCollectionOutput, error) {
 			svc, p := reg.externalSignIn()
 			if p != nil {

@@ -157,28 +157,28 @@ func registerPersonalCollectionLifecycle(reg *Registry) {
 	}
 	upload := op(http.MethodPut, "/collections/{id}/poster", "uploadCollectionPoster", "Upload the creator's collection poster.")
 	upload.MaxBodyBytes = maxPosterBytes + posterFormOverhead
-	Register(reg, withOrigins(upload, grantedNotDecided), reg.uploadPersonalCollectionPoster)
+	Register(reg, withOrigins(upload, grantedRefusedOtherDevicesShow), reg.uploadPersonalCollectionPoster)
 	Register(reg, withOrigins(op(http.MethodGet, "/collections/{id}", "getCollection", "Read a collection visible to the acting profile."), grantedCollectionRead), reg.getPersonalCollection)
 	update := op(http.MethodPatch, "/collections/{id}", "updateCollection", "Update the creator's collection; omitted fields are unchanged. Another profile's shared collection answers permission_denied.")
 	update.Errors = append(update.Errors, http.StatusNotImplemented) // group_id, or a feature the account's store lacks
-	Register(reg, withOrigins(update, grantedNotDecided), reg.updatePersonalCollection)
+	Register(reg, withOrigins(update, grantedRefusedOtherDevicesShow), reg.updatePersonalCollection)
 	noContent := func(method, path, id, summary string) Operation {
 		o := op(method, path, id, summary)
 		o.DefaultStatus = http.StatusNoContent
 		return o
 	}
-	Register(reg, withOrigins(noContent(http.MethodDelete, "/collections/{id}", "deleteCollection", "Delete the creator's collection."), grantedNotDecided), reg.deletePersonalCollection)
-	Register(reg, withOrigins(noContent(http.MethodPut, "/collections/{id}/items/{item_id}", "addCollectionItem", "Add an item to the creator's manual collection."), grantedNotDecided), reg.addPersonalCollectionItem)
-	Register(reg, withOrigins(noContent(http.MethodDelete, "/collections/{id}/items/{item_id}", "removeCollectionItem", "Remove an item from the creator's manual collection."), grantedNotDecided), reg.removePersonalCollectionItem)
-	Register(reg, withOrigins(op(http.MethodPut, "/collections/{id}/items/order", "reorderCollectionItems", "Replace the manual collection item order."), grantedNotDecided), reg.reorderPersonalCollectionItems)
+	Register(reg, withOrigins(noContent(http.MethodDelete, "/collections/{id}", "deleteCollection", "Delete the creator's collection."), grantedRefusedOtherDevicesShow), reg.deletePersonalCollection)
+	Register(reg, withOrigins(noContent(http.MethodPut, "/collections/{id}/items/{item_id}", "addCollectionItem", "Add an item to the creator's manual collection."), grantedRefusedOtherDevicesShow), reg.addPersonalCollectionItem)
+	Register(reg, withOrigins(noContent(http.MethodDelete, "/collections/{id}/items/{item_id}", "removeCollectionItem", "Remove an item from the creator's manual collection."), grantedRefusedOtherDevicesShow), reg.removePersonalCollectionItem)
+	Register(reg, withOrigins(op(http.MethodPut, "/collections/{id}/items/order", "reorderCollectionItems", "Replace the manual collection item order."), grantedRefusedOtherDevicesShow), reg.reorderPersonalCollectionItems)
 	preview := op(http.MethodPost, "/collections/preview", "previewCollection", "Preview a smart query within the acting profile's access.")
 	preview.RetrySafety = RetrySafetyNaturalIdempotent
 	Register(reg, withOrigins(preview, grantedCollectionRead), reg.previewPersonalCollection)
-	Register(reg, withOrigins(noContent(http.MethodDelete, "/collections/{id}/image", "deleteCollectionImage", "Remove the creator's collection poster."), grantedNotDecided), reg.deletePersonalCollectionImage)
-	Register(reg, withOrigins(op(http.MethodPut, "/collections/sort-preference", "setCollectionSortPreference", "Save the acting profile's collection sort preference."), grantedNotDecided), reg.setPersonalCollectionSortPreference)
-	Register(reg, withOrigins(noContent(http.MethodDelete, "/collections/sort-preference", "clearCollectionSortPreference", "Clear the acting profile's collection sort preference."), grantedNotDecided), reg.clearPersonalCollectionSortPreference)
+	Register(reg, withOrigins(noContent(http.MethodDelete, "/collections/{id}/image", "deleteCollectionImage", "Remove the creator's collection poster."), grantedRefusedOtherDevicesShow), reg.deletePersonalCollectionImage)
+	Register(reg, withOrigins(op(http.MethodPut, "/collections/sort-preference", "setCollectionSortPreference", "Save the acting profile's collection sort preference."), grantedRefusedOtherDevicesShow), reg.setPersonalCollectionSortPreference)
+	Register(reg, withOrigins(noContent(http.MethodDelete, "/collections/sort-preference", "clearCollectionSortPreference", "Clear the acting profile's collection sort preference."), grantedRefusedOtherDevicesShow), reg.clearPersonalCollectionSortPreference)
 	Register(reg, withOrigins(op(http.MethodGet, "/collections/templates", "listCollectionTemplates", "List supported collection import templates."), grantedCollectionRead), reg.listPersonalCollectionTemplates)
-	Register(reg, withOrigins(op(http.MethodPost, "/collections/{id}/sync", "syncCollection", "Synchronize the creator's imported collection. The operation is not retryable and does not provide cluster-wide coalescing."), grantedNotDecided), reg.syncPersonalCollection)
+	Register(reg, withOrigins(op(http.MethodPost, "/collections/{id}/sync", "syncCollection", "Synchronize the creator's imported collection. The operation is not retryable and does not provide cluster-wide coalescing."), grantedRefusedOtherDevicesShow), reg.syncPersonalCollection)
 	Register(reg, withOrigins(op(http.MethodGet, "/collections/server", "listServerCollections", "List visible server collections grouped by library."), grantedCollectionRead), reg.listServerCollections)
 }
 func (reg *Registry) getPersonalCollection(ctx context.Context, in *PersonalCollectionIDInput) (*PersonalCollectionOutput, error) {

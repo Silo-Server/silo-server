@@ -76,7 +76,7 @@ func registerOnboarding(reg *Registry) {
 		out.Body.RevisionGuarded = true
 		return out, nil
 	})
-	Register(reg, withOrigins(op(http.MethodGet, "/flow", "getOnboardingFlow"), grantedNotDecided), func(ctx context.Context, in *OnboardingFlowInput) (*OnboardingFlowOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "/flow", "getOnboardingFlow"), grantedRefusedOnboarding), func(ctx context.Context, in *OnboardingFlowInput) (*OnboardingFlowOutput, error) {
 		if reg.deps.Onboarding == nil {
 			return nil, unavailable("onboarding")
 		}
@@ -88,7 +88,7 @@ func registerOnboarding(reg *Registry) {
 	})
 	read := op(http.MethodGet, "/state", "getOnboardingState")
 	read.Conditional = true
-	Register(reg, withOrigins(read, grantedNotDecided), func(ctx context.Context, in *OnboardingStateInput) (*OnboardingStateOutput, error) {
+	Register(reg, withOrigins(read, grantedRefusedOnboarding), func(ctx context.Context, in *OnboardingStateInput) (*OnboardingStateOutput, error) {
 		if reg.deps.Onboarding == nil {
 			return nil, unavailable("onboarding")
 		}
@@ -110,7 +110,7 @@ func registerOnboarding(reg *Registry) {
 	write.RetrySafety = RetrySafetyNonRetryable
 	write.DemoRestricted = true
 	write.Errors = []int{http.StatusConflict}
-	Register(reg, withOrigins(write, grantedNotDecided), func(ctx context.Context, in *OnboardingProgressInput) (*OnboardingStateOutput, error) {
+	Register(reg, withOrigins(write, grantedRefusedOnboarding), func(ctx context.Context, in *OnboardingProgressInput) (*OnboardingStateOutput, error) {
 		svc := reg.deps.Onboarding
 		if svc == nil {
 			return nil, unavailable("onboarding")

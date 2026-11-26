@@ -56,7 +56,7 @@ type ImageCapabilitiesOutput struct {
 }
 
 func registerOperationalDiscovery(reg *Registry) {
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/compat/connect-info", "getCompatConnectInfo", "compat", "Connection information for compatibility clients."), Class: ClassAuthenticated, ServiceBacked: true, Origins: grantedNotDecided},
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/compat/connect-info", "getCompatConnectInfo", "compat", "Connection information for compatibility clients."), Class: ClassAuthenticated, ServiceBacked: true, Origins: grantedRefusedAccountSetup},
 		func(ctx context.Context, _ *struct{}) (*CompatConnectInfoOutput, error) {
 			if reg.deps.CompatConnectInfo == nil {
 				return nil, NewProblem(TypeDependencyUnavailable, "Compatibility connection information is not configured.")

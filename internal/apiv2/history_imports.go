@@ -307,10 +307,10 @@ func registerHistoryImports(reg *Registry) {
 	}
 
 	Register(reg, withOrigins(accountOp(humaOp(http.MethodGet, Prefix+"/history-imports/sources", "listHistoryImportSources", "history-imports",
-		"List the configured servers a user may import watch history from.")), grantedNotDecided), reg.listHistoryImportSources)
+		"List the configured servers a user may import watch history from.")), grantedRefusedExternalReads), reg.listHistoryImportSources)
 
 	Register(reg, withOrigins(accountOp(humaOp(http.MethodGet, Prefix+"/history-imports/runs", opListHistoryImportRuns, "history-imports",
-		"List the account's import runs, newest first.")), grantedNotDecided), func(ctx context.Context, in *HistoryImportRunListInput) (*HistoryImportRunCollectionOutput, error) {
+		"List the account's import runs, newest first.")), grantedRefusedExternalReads), func(ctx context.Context, in *HistoryImportRunListInput) (*HistoryImportRunCollectionOutput, error) {
 		return reg.listHistoryImportRuns(ctx, cursors, in)
 	})
 
@@ -323,7 +323,7 @@ func registerHistoryImports(reg *Registry) {
 	get := accountOp(humaOp(http.MethodGet, Prefix+"/history-imports/runs/{id}", "getHistoryImportRun", "history-imports",
 		"Read one of the account's import runs."))
 	get.Conditional = true
-	Register(reg, withOrigins(get, grantedNotDecided), reg.getHistoryImportRun)
+	Register(reg, withOrigins(get, grantedRefusedExternalReads), reg.getHistoryImportRun)
 
 	Register(reg, withOrigins(accountOp(humaOp(http.MethodPost, Prefix+"/history-imports/plex/auth/pin", "createPlexPin", "history-imports",
 		"Start a plex.tv sign-in: a PIN the user completes in a browser and a session to poll.")), grantedRefusedLeaves), reg.createPlexPin)

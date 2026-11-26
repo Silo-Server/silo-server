@@ -71,13 +71,13 @@ func registerDownloadSubscriptionMutations(reg *Registry) {
 	create := Operation{Operation: humaOp(http.MethodPost, Prefix+"/downloads/subscriptions", "createDownloadSubscription", "downloads", "Create a monitor or return the device's existing monitor for the series."), Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable}
 	create.Description = "An existing monitor keeps its options and forgets the episodes deleted under it, so the next sync can register them again. Sync explicitly after receipt; do not automatically resend an uncertain create."
 	create.MaxBodyBytes = 128 << 10
-	Register(reg, withOrigins(create, grantedNotDecided), reg.createDownloadSubscription)
+	Register(reg, withOrigins(create, grantedRefusedOwnDevice), reg.createDownloadSubscription)
 	update := Operation{Operation: humaOp(http.MethodPatch, Prefix+"/downloads/subscriptions/{id}", "updateDownloadSubscription", "downloads", "Edit monitor options under the current validator. Sync explicitly after changing scope; null fields are rejected."), Class: ClassProfileScoped, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	update.MaxBodyBytes = 128 << 10
-	Register(reg, withOrigins(update, grantedNotDecided), reg.updateDownloadSubscription)
+	Register(reg, withOrigins(update, grantedRefusedOwnDevice), reg.updateDownloadSubscription)
 	remove := Operation{Operation: humaOp(http.MethodDelete, Prefix+"/downloads/subscriptions/{id}", "deleteDownloadSubscription", "downloads", "Stop monitoring under the current validator, retaining already-registered downloads."), Class: ClassProfileScoped, ServiceBacked: true, Guarded: true, DemoRestricted: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	remove.DefaultStatus = http.StatusNoContent
-	Register(reg, withOrigins(remove, grantedNotDecided), reg.deleteDownloadSubscription)
+	Register(reg, withOrigins(remove, grantedRefusedOwnDevice), reg.deleteDownloadSubscription)
 }
 func subscriptionMutationProblem(err error) *Problem {
 	if p, ok := errors.AsType[*Problem](err); ok {

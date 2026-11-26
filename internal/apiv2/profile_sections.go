@@ -218,7 +218,7 @@ func registerProfileSections(reg *Registry) {
 		DemoRestricted: isMutatingMethod(replace.Method),
 		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
-		Origins:        grantedNotDecided,
+		Origins:        grantedRefusedOtherDevicesShow,
 	}, reg.replaceProfileSectionOverrides)
 
 	Register(reg, Operation{
@@ -228,7 +228,7 @@ func registerProfileSections(reg *Registry) {
 		DemoRestricted: true,
 		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
-		Origins:        grantedNotDecided,
+		Origins:        grantedRefusedOtherDevicesShow,
 	}, reg.resetProfileSectionOverrides)
 
 	Register(reg, Operation{

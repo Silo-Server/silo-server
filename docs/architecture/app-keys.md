@@ -430,6 +430,10 @@ still read the row.
 - the profile's own state: progress, watched, favorites, watchlist (library
   items), not interested, ratings, history, reading progress and notes, home
   dismissals, inbox reads and read marks;
+- a player's own state for the profile it acts as: playback, audio and
+  subtitle preferences (per series and per library) and ebook reader
+  settings. Each is stored per account and profile, keyed by no device the
+  caller names;
 - the events socket; Watch Together as a member of a room the person put it
   in: joining, reading the room, suggesting and voting, reporting member state;
 - its own session and its own key: signing out, the provider sign-out URL,
@@ -487,16 +491,24 @@ stream its ticket names, which is its own.
   and every host operation, and the source fallback;
 - refused for now, by decision: making media requests (including watchlist
   entries for titles the library doesn't have, which may request them),
-  editing subtitles every account sees, importing collections, refreshing or
-  translating the shared catalog, changing notification preferences, and
-  catalog edits under a delegated permission;
-- not decided: every other operation, until someone reads it. That includes
-  personal collection writes, playback and audio/subtitle preference writes,
-  home row overrides, onboarding, writing a setting by key, per-user plugin
-  settings, reading jobs, download subscriptions, direct downloads, request
-  discovery, watch-provider and history-import reads, the profile export and
-  allowance reads, the linked sign-in list, muting notification series, the
-  plugin launch cookie, and the compatibility connection information.
+  editing subtitles every account sees, importing collections, refreshing the
+  shared catalog, changing notification preferences, and catalog edits under
+  a delegated permission;
+- refused by decision, each with its own reason: personal collection writes
+  and home row overrides (the profile's own, but they change what the
+  person's other devices show); onboarding reads and writes; muting a
+  notification series; request discovery reads and cancelling, removing,
+  following or unfollowing a request; reads of watch-provider and
+  history-import connections and runs; the profile export; the library and
+  administration job reads; the account's sign-in identity list, denying a
+  device sign-in, the personal API key scopes, the plugin launch cookie, the
+  Jellyfin connection information and the plugin notification channel list;
+  and translating a catalog description, which writes shared data. Direct
+  downloads and download subscriptions are refused until the server knows the
+  session's own device;
+- not decided: every other operation, until someone reads it. Today that is
+  writing a setting by key, per-user plugin settings, the taste seed, the
+  title and collection allowance reads, and ending a View as user session.
 
 **Revoking the key takes with it everything the app was allowed to leave.**
 `RevokeDeviceKey` marks the key revoked and ends every login session it
@@ -506,6 +518,7 @@ what happens to it then:
 | Write | What it leaves | After the key is revoked |
 | --- | --- | --- |
 | progress, watched, favorites, watchlist, not interested, ratings, history removal, reading progress, notes, home dismissals, read marks | the profile's own state | stays: it is the person's data and the point of the grant |
+| playback, audio and subtitle preferences, ebook reader settings | the profile's own state, per series, library or title | stays, as the profile's |
 | shuffles | a shuffle of the profile | stays as the profile's; an abandoned one is deleted with other abandoned shuffles |
 | progress snapshot | an immutable copy of the profile's progress | stays until its `expires_at` |
 | starting playback, theme songs, bandwidth probe | a playback attempt bound to its login session | its media, stream reference and control socket are refused once the session ends; the stream ends at its idle expiry |

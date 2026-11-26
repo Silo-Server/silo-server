@@ -111,7 +111,7 @@ func registerProfileTransfer(reg *Registry) {
 	export := humaOp(http.MethodGet, Prefix+"/profile/export", "exportProfile", "profiles",
 		"Download the acting profile's own data as a silo-profile-export document: watch history and progress, ratings, favorites and watchlist, personal collections, dismissals, preferences, and notification preferences, leaving out titles the profile may not see now. It carries no account fields, password or PIN hashes, or access fields.")
 	export.Errors = []int{http.StatusForbidden, http.StatusConflict, http.StatusRequestEntityTooLarge}
-	Register(reg, withOrigins(viewerOperation(export), grantedNotDecided), func(ctx context.Context, _ *struct{}) (*ProfileExportOutput, error) {
+	Register(reg, withOrigins(viewerOperation(export), grantedRefusedProfileExport), func(ctx context.Context, _ *struct{}) (*ProfileExportOutput, error) {
 		svc := reg.deps.ProfileTransfer
 		if svc == nil {
 			return nil, unavailable("profile export")

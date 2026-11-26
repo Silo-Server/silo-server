@@ -214,7 +214,7 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		}
 		return o
 	}
-	Register(reg, withOrigins(op(http.MethodGet, "/requests/status", "getRequestStatus", "Get request capabilities for the current viewer."), grantedNotDecided), func(ctx context.Context, _ *CapabilityInput) (*RequestFeatureStatusOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "/requests/status", "getRequestStatus", "Get request capabilities for the current viewer."), grantedRefusedRequestFlow), func(ctx context.Context, _ *CapabilityInput) (*RequestFeatureStatusOutput, error) {
 		if requests == nil {
 			return &RequestFeatureStatusOutput{Body: FeatureStatus{Capability: Capability{State: StateNotConfigured}}}, nil
 		}
@@ -236,7 +236,7 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		return &RequestFeatureStatusOutput{Body: FeatureStatus{Capability: Capability{State: enabledCapabilityState(status.RequestsEnabled), Allowed: &allowed}, RequestsEnabled: status.RequestsEnabled, RatingRestrictionsEnforced: status.RatingRestrictionsEnforced, FollowSupported: true, SeasonRequestsSupported: true, MissingSeasonsRequestable: status.MissingSeasonsRequestable, DownloadProgressSupported: true, DiscoverRowsSupported: true, RemoveFailedSupported: true,
 			WatchlistTitlesSupported: status.RequestsEnabled && !status.ProfileRequestsBlocked && reg.deps.WatchlistTitles != nil && reg.deps.WatchlistRequests != nil, WatchlistRequests: status.WatchlistRequests && allowed}}, nil
 	})
-	Register(reg, withOrigins(op(http.MethodPost, "/requests/{id}/cancel", "cancelRequest", "Cancel an accessible request."), grantedNotDecided), func(ctx context.Context, in *RequestCancelInput) (*MediaRequestOutput, error) {
+	Register(reg, withOrigins(op(http.MethodPost, "/requests/{id}/cancel", "cancelRequest", "Cancel an accessible request."), grantedRefusedRequestFlow), func(ctx context.Context, in *RequestCancelInput) (*MediaRequestOutput, error) {
 		if requests == nil {
 			return nil, unavailable("requests")
 		}
@@ -252,7 +252,7 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 	})
 	remove := op(http.MethodDelete, "/requests/{id}", "removeFailedRequest", "Delete an accessible failed request that delivered nothing. Answers 409 when the request is no longer failed (an admin retried it, or the library completed it) or delivered a copy before failing.")
 	remove.DefaultStatus = http.StatusNoContent
-	Register(reg, withOrigins(remove, grantedNotDecided), func(ctx context.Context, in *RequestRemoveInput) (*struct{}, error) {
+	Register(reg, withOrigins(remove, grantedRefusedRequestFlow), func(ctx context.Context, in *RequestRemoveInput) (*struct{}, error) {
 		if requests == nil {
 			return nil, unavailable("requests")
 		}
@@ -271,7 +271,7 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		}
 		return claimsFrom(ctx).UserID, profileFrom(ctx), nil
 	}
-	Register(reg, withOrigins(op(http.MethodGet, "/watch-providers", "listWatchProviders", "List watch providers and their capabilities."), grantedNotDecided), func(ctx context.Context, _ *struct{}) (*WatchProviderCollectionOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "/watch-providers", "listWatchProviders", "List watch providers and their capabilities."), grantedRefusedExternalReads), func(ctx context.Context, _ *struct{}) (*WatchProviderCollectionOutput, error) {
 		if _, _, err := scope(ctx); err != nil {
 			return nil, err
 		}
@@ -297,14 +297,14 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		}
 		return &WatchProviderConnectionOutput{Body: body}, nil
 	}
-	Register(reg, withOrigins(op(http.MethodGet, "/watch-providers/{provider}/connection", opGetWatchProviderConnection, "Get the active profile's connection."), grantedNotDecided), func(ctx context.Context, in *WatchProviderInput) (*WatchProviderConnectionOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "/watch-providers/{provider}/connection", opGetWatchProviderConnection, "Get the active profile's connection."), grantedRefusedExternalReads), func(ctx context.Context, in *WatchProviderInput) (*WatchProviderConnectionOutput, error) {
 		u, p, err := scope(ctx)
 		if err != nil {
 			return nil, err
 		}
 		return connection(ctx, u, p, in.Provider)
 	})
-	Register(reg, withOrigins(op(http.MethodGet, "/watch-providers/{provider}/connection/settings", opGetWatchProviderSettings, "Read persisted watch-provider preferences and their update validator."), grantedNotDecided), func(ctx context.Context, in *WatchProviderInput) (*WatchProviderSettingsOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "/watch-providers/{provider}/connection/settings", opGetWatchProviderSettings, "Read persisted watch-provider preferences and their update validator."), grantedRefusedExternalReads), func(ctx context.Context, in *WatchProviderInput) (*WatchProviderSettingsOutput, error) {
 		u, p, err := scope(ctx)
 		if err != nil {
 			return nil, err
@@ -429,7 +429,7 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		out.Body.RetryAfterSeconds = result.RetryAfterSeconds
 		return out, nil
 	})
-	Register(reg, withOrigins(op(http.MethodGet, "/watch-providers/{provider}/sync-runs", "listWatchProviderSyncRuns", "List a bounded window of the profile's recent sync runs."), grantedNotDecided), func(ctx context.Context, in *WatchProviderRunsInput) (*WatchProviderRunsOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "/watch-providers/{provider}/sync-runs", "listWatchProviderSyncRuns", "List a bounded window of the profile's recent sync runs."), grantedRefusedExternalReads), func(ctx context.Context, in *WatchProviderRunsInput) (*WatchProviderRunsOutput, error) {
 		u, p, err := scope(ctx)
 		if err != nil {
 			return nil, err

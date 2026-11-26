@@ -410,7 +410,7 @@ func registerPersonalCollections(reg *Registry) {
 	createOp := write(create)
 	// A description or poster the acting account's store cannot keep.
 	createOp.Errors = append(createOp.Errors, http.StatusNotImplemented)
-	Register(reg, withOrigins(createOp, grantedNotDecided), reg.createCollection)
+	Register(reg, withOrigins(createOp, grantedRefusedOtherDevicesShow), reg.createCollection)
 
 	Register(reg, withOrigins(read(humaOp(http.MethodGet, Prefix+"/collections/capabilities", "getCollectionCapabilities", "collections",
 		"The collection features this server supports.")), grantedCapability), reg.getCollectionCapabilities)
@@ -418,7 +418,7 @@ func registerPersonalCollections(reg *Registry) {
 	order := humaOp(http.MethodPut, Prefix+"/collections/order", opReorderCollections, "collections",
 		"Replace the order of the acting profile's own collections. Retries are not safe after an intervening mutation.")
 	order.DefaultStatus = http.StatusOK
-	Register(reg, withOrigins(write(order), grantedNotDecided), reg.reorderCollections)
+	Register(reg, withOrigins(write(order), grantedRefusedOtherDevicesShow), reg.reorderCollections)
 
 	groupOp := func(op huma.Operation) Operation {
 		o := write(op)
@@ -428,20 +428,20 @@ func registerPersonalCollections(reg *Registry) {
 	createGroup := humaOp(http.MethodPost, Prefix+"/collections/groups", "createCollectionGroup", "collections",
 		groupsRemovedSummary)
 	createGroup.DefaultStatus = http.StatusCreated
-	Register(reg, withOrigins(groupOp(createGroup), grantedNotDecided), reg.createCollectionGroup)
+	Register(reg, withOrigins(groupOp(createGroup), grantedRefusedOtherDevicesShow), reg.createCollectionGroup)
 
 	groupOrder := humaOp(http.MethodPut, Prefix+"/collections/groups/order", opReorderCollectionGroups, "collections",
 		groupsRemovedSummary)
 	groupOrder.DefaultStatus = http.StatusOK
-	Register(reg, withOrigins(groupOp(groupOrder), grantedNotDecided), reg.reorderCollectionGroups)
+	Register(reg, withOrigins(groupOp(groupOrder), grantedRefusedOtherDevicesShow), reg.reorderCollectionGroups)
 
 	Register(reg, withOrigins(groupOp(humaOp(http.MethodPatch, Prefix+"/collections/groups/{id}", opUpdateCollectionGroup, "collections",
-		groupsRemovedSummary)), grantedNotDecided), reg.updateCollectionGroup)
+		groupsRemovedSummary)), grantedRefusedOtherDevicesShow), reg.updateCollectionGroup)
 
 	deleteGroup := humaOp(http.MethodDelete, Prefix+"/collections/groups/{id}", opDeleteCollectionGroup, "collections",
 		groupsRemovedSummary)
 	deleteGroup.DefaultStatus = http.StatusNoContent
-	Register(reg, withOrigins(groupOp(deleteGroup), grantedNotDecided), reg.deleteCollectionGroup)
+	Register(reg, withOrigins(groupOp(deleteGroup), grantedRefusedOtherDevicesShow), reg.deleteCollectionGroup)
 
 	importOp := func(path, id, summary string) huma.Operation {
 		op := humaOp(http.MethodPost, Prefix+path, id, "collections",

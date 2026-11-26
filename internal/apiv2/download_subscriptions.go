@@ -59,10 +59,10 @@ func downloadSubscriptionOf(row *downloads.Subscription) DownloadSubscription {
 
 func registerDownloadSubscriptions(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/downloads/subscriptions", "listDownloadSubscriptions", "downloads", "Page the calling device's series monitors, including paused monitors."), Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedNotDecided}, func(ctx context.Context, in *DownloadSubscriptionsInput) (*DownloadSubscriptionsOutput, error) {
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/downloads/subscriptions", "listDownloadSubscriptions", "downloads", "Page the calling device's series monitors, including paused monitors."), Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedOwnDevice}, func(ctx context.Context, in *DownloadSubscriptionsInput) (*DownloadSubscriptionsOutput, error) {
 		return reg.listDownloadSubscriptions(ctx, cursors, in)
 	})
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/downloads/subscriptions/{id}", "getDownloadSubscription", "downloads", "Read a series monitor and its current validator for this device."), Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedNotDecided}, reg.getDownloadSubscription)
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/downloads/subscriptions/{id}", "getDownloadSubscription", "downloads", "Read a series monitor and its current validator for this device."), Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedOwnDevice}, reg.getDownloadSubscription)
 }
 func (reg *Registry) listDownloadSubscriptions(ctx context.Context, cursors *Cursors, in *DownloadSubscriptionsInput) (*DownloadSubscriptionsOutput, error) {
 	if reg.deps.DownloadSubscriptions == nil {

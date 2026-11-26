@@ -167,7 +167,7 @@ func registerPersonalAPIKeys(reg *Registry) {
 		}
 		return o
 	}
-	Register(reg, withOrigins(op(http.MethodGet, "/api-keys/scopes", "getPersonalAPIKeyScopes"), grantedNotDecided), func(ctx context.Context, _ *struct{}) (*PersonalAPIKeyScopesOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "/api-keys/scopes", "getPersonalAPIKeyScopes"), grantedRefusedAccountSetup), func(ctx context.Context, _ *struct{}) (*PersonalAPIKeyScopesOutput, error) {
 		out := new(PersonalAPIKeyScopesOutput)
 		out.Body.Available = reg.deps.PersonalAPIKeys != nil
 		out.Body.Scopes = auth.APIKeyScopeCatalog()

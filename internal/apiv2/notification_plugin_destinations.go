@@ -316,7 +316,7 @@ func registerNotificationPluginDestinations(reg *Registry) {
 func registerNotificationPluginDestinationReads(reg *Registry) {
 	channels := notificationOperation(http.MethodGet, "/plugin-channels", "listNotificationPluginChannels")
 	channels.Summary = "List the notification channels the enabled plugins provide, with each channel's destination settings form."
-	Register(reg, withOrigins(channels, grantedNotDecided), func(ctx context.Context, _ *struct{}) (*NotificationPluginChannelListOutput, error) {
+	Register(reg, withOrigins(channels, grantedRefusedAccountSetup), func(ctx context.Context, _ *struct{}) (*NotificationPluginChannelListOutput, error) {
 		svc, p := reg.pluginDestinations()
 		if p != nil {
 			return nil, p

@@ -75,7 +75,7 @@ const metaDirectDownloadLink = "silo.direct_download_link"
 func registerDirectDownloadLinks(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodPost, Prefix+directDownloadPath+"/links", "createDirectDownloadLink", directDownloadsTag, "Authorize one original file for the selected profile and return a short-lived direct-download URL that a browser navigation can open without headers."), Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	op.MaxBodyBytes = 1024
-	Register(reg, withOrigins(op, grantedNotDecided), func(ctx context.Context, in *DirectDownloadLinkInput) (*DirectDownloadLinkOutput, error) {
+	Register(reg, withOrigins(op, grantedRefusedOwnDevice), func(ctx context.Context, in *DirectDownloadLinkInput) (*DirectDownloadLinkOutput, error) {
 		svc := reg.deps.DirectDownloadLinks
 		if svc == nil {
 			return nil, unavailable("direct download links")
@@ -163,7 +163,7 @@ func registerDirectDownloads(reg *Registry) {
 		}
 		responses["416"].Headers = map[string]*huma.Param{directContentRange: {Schema: &huma.Schema{Type: huma.TypeString}}}
 		raw := RawOperation{Operation: Operation{Operation: huma.Operation{Method: route.method, Path: Prefix + route.path, OperationID: route.id, Tags: []string{directDownloadsTag}, Parameters: params, Responses: responses, Metadata: map[string]any{metaDirectDownloadLink: true}}, Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, DemoRestricted: isMutatingMethod(route.method), ServiceBacked: true}, Protocol: "download-bytes", Reason: "Original downloads retain streaming, HEAD, range and optional proxy redirect semantics without JSON buffering or a persistent download record."}
-		RegisterRaw(reg, withRawOrigins(raw, grantedNotDecided), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		RegisterRaw(reg, withRawOrigins(raw, grantedRefusedOwnDevice), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			query, err := parseDirectDownloadQuery(r)
 			if err != nil {
 				writeProblem(w, r, err)

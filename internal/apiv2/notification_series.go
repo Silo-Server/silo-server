@@ -174,25 +174,25 @@ func registerNotificationSeries(reg *Registry) {
 	mute.DefaultStatus = http.StatusNoContent
 	mute.Summary = "Mute new-episode notifications for one series."
 	mute.Description = "The acting profile gets no new-episode notification for the series on any channel, whatever its reasons, until it unmutes. Favorites, the watchlist, Home, and watch history are unchanged, and other profiles are unaffected. Muting a series already muted succeeds and changes nothing. A series the viewer may not see, or an item that is not a series, is 404."
-	Register(reg, withOrigins(mute, grantedNotDecided), reg.muteNotificationSeries)
+	Register(reg, withOrigins(mute, grantedRefusedSeriesMute), reg.muteNotificationSeries)
 
 	unmute := notificationOperation(http.MethodDelete, "/series/{series_id}/mute", opUnmuteNotificationSeries)
 	unmute.DefaultStatus = http.StatusNoContent
 	unmute.Summary = "Unmute new-episode notifications for one series."
 	unmute.Description = "The series notifies the acting profile again for its active reasons. The mute applies when notification delivery evaluates a new episode, normally within a minute of it arriving: an episode evaluated while the series was muted is not announced later, and one still waiting to be evaluated when the profile unmutes is announced. Unmuting a series that is not muted succeeds and changes nothing. No access check runs, so a profile can lift a mute on a series it can no longer see."
-	Register(reg, withOrigins(unmute, grantedNotDecided), reg.unmuteNotificationSeries)
+	Register(reg, withOrigins(unmute, grantedRefusedSeriesMute), reg.unmuteNotificationSeries)
 
 	muteMany := notificationOperation(http.MethodPost, "/series/mute", opMuteManyNotificationSeries)
 	muteMany.Summary = "Mute new-episode notifications for many series."
 	muteMany.Description = "Mutes each named series for the acting profile as PUT /series/{series_id}/mute mutes one, in one request, and answers an outcome per distinct series in request order: applied when this call muted it, unchanged when it was already muted, not_found for an ID that names no series or a series the viewer may not see."
-	Register(reg, withOrigins(muteMany, grantedNotDecided), func(ctx context.Context, in *NotificationSeriesManyMuteInput) (*NotificationSeriesManyMuteOutput, error) {
+	Register(reg, withOrigins(muteMany, grantedRefusedSeriesMute), func(ctx context.Context, in *NotificationSeriesManyMuteInput) (*NotificationSeriesManyMuteOutput, error) {
 		return reg.setManyNotificationSeriesMuted(ctx, in, true)
 	})
 
 	unmuteMany := notificationOperation(http.MethodPost, "/series/unmute", opUnmuteManyNotificationSeries)
 	unmuteMany.Summary = "Unmute new-episode notifications for many series."
 	unmuteMany.Description = "Unmutes each named series for the acting profile as DELETE /series/{series_id}/mute unmutes one, in one request, and answers an outcome per distinct series in request order: applied when this call unmuted it, unchanged when it was not muted. No access check runs, so a profile can lift a mute on a series it can no longer see."
-	Register(reg, withOrigins(unmuteMany, grantedNotDecided), func(ctx context.Context, in *NotificationSeriesManyMuteInput) (*NotificationSeriesManyMuteOutput, error) {
+	Register(reg, withOrigins(unmuteMany, grantedRefusedSeriesMute), func(ctx context.Context, in *NotificationSeriesManyMuteInput) (*NotificationSeriesManyMuteOutput, error) {
 		return reg.setManyNotificationSeriesMuted(ctx, in, false)
 	})
 }

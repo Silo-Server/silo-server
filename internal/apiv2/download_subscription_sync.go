@@ -36,7 +36,7 @@ func registerDownloadSubscriptionSync(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/downloads/subscriptions/sync", "syncDownloadSubscription", "downloads", "Register one bounded episode page for a current device monitor. Continue every page, even if no episodes were registered."), Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	op.MaxBodyBytes = 4096
 	op.Errors = []int{409}
-	Register(reg, withOrigins(op, grantedNotDecided), func(ctx context.Context, in *DownloadSubscriptionSyncInput) (*DownloadSubscriptionSyncOutput, error) {
+	Register(reg, withOrigins(op, grantedRefusedOwnDevice), func(ctx context.Context, in *DownloadSubscriptionSyncInput) (*DownloadSubscriptionSyncOutput, error) {
 		return reg.syncDownloadSubscription(ctx, cursors, in)
 	})
 }
