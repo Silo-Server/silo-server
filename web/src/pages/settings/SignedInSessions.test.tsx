@@ -17,10 +17,13 @@ vi.mock("@/components/sessions/LoginSessionsPanel", () => ({
     <p>manage others: {String(manageOthers)}</p>
   ),
 }));
-// The page also shows Open in Silo, which has its own tests and needs a
-// signed-in account around it.
+// The page also shows Open in Silo and the Silo app devices, which have
+// their own tests and need a signed-in account around them.
 vi.mock("@/components/appKeys/OpenInSiloSection", () => ({
   OpenInSiloSection: () => null,
+}));
+vi.mock("@/components/appKeys/OwnAppKeysPanel", () => ({
+  OwnAppKeysPanel: () => null,
 }));
 afterEach(cleanup);
 

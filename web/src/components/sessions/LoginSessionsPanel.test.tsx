@@ -25,8 +25,25 @@ const mocks = vi.hoisted(() => ({
   all: vi.fn(),
   clear: vi.fn(),
   sessions: [] as unknown[],
+  impersonating: false,
+  pending: false,
+  capability: "available" as string | undefined,
 }));
-vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ clearLoginSession: mocks.clear }) }));
+vi.mock("@/hooks/useAuth", () => ({
+  useAuth: () => ({ clearLoginSession: mocks.clear, isImpersonating: mocks.impersonating }),
+}));
+vi.mock("@/hooks/queries/appKeySession", () => ({
+  useAppKeyCapability: () => ({
+    data: mocks.capability ? { state: mocks.capability } : undefined,
+  }),
+}));
+// The Silo app sentence asks the server whether app keys are on; a marker
+// stands in for it, so a test sees only whether the panel shows it.
+vi.mock("@/components/appKeys/SignsBackInNote", () => ({
+  SignsBackInNote: ({ to }: { to?: unknown }) => (
+    <span>{to === undefined ? "Silo app sentence without link" : "Silo app sentence"}</span>
+  ),
+}));
 vi.mock("@/hooks/queries/loginSessions", () => ({
   useLoginSessions: () => ({
     query: {
@@ -38,7 +55,7 @@ vi.mock("@/hooks/queries/loginSessions", () => ({
     },
     sessions: mocks.sessions,
     currentSession: null,
-    revoke: { isPending: false, mutateAsync: mocks.revoke },
+    revoke: { isPending: mocks.pending, mutateAsync: mocks.revoke },
     revokeAll: { isPending: false, mutateAsync: mocks.all },
   }),
 }));
@@ -47,6 +64,9 @@ beforeEach(() => {
   mocks.all.mockReset();
   mocks.clear.mockReset();
   mocks.sessions = [listedSession];
+  mocks.impersonating = false;
+  mocks.pending = false;
+  mocks.capability = "available";
   sessionStorage.clear();
 });
 afterEach(cleanup);
@@ -135,4 +155,104 @@ it("offers only this session's sign out when others may not be revoked", () => {
   expect(screen.getAllByText("Chrome on Windows")).toHaveLength(2);
   expect(screen.getByRole("button", { name: "Sign out this browser" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Sign out Chrome on Windows" })).toBeNull();
+});
+
+// A disabled account's keys are refused at sign-in, so its devices don't
+// sign back in: the administrator's view must not say they do.
+it.each([
+  [true, true],
+  [false, false],
+])("says devices sign back in only for an enabled account (enabled: %s)", (enabled, shown) => {
+  render(
+    <MemoryRouter>
+      <LoginSessionsPanel adminUser={{ id: 2, username: "sam", enabled }} />
+    </MemoryRouter>,
+  );
+  expect(Boolean(screen.queryByText("Silo app sentence"))).toBe(shown);
+});
+
+const keySession = { ...listedSession, id: "key", device_name: "Pixel 9", device_key_id: "k1" };
+const MARK = "This device signs back in by itself";
+
+// The row's mark says the same as the sentence: true only while app key
+// sign-in is available, and in an administrator's view only for an enabled
+// account. Unknown while the capability read loads or failed: hidden.
+it.each([
+  { name: "own, app keys on", capability: "available", adminUser: undefined, shown: true },
+  { name: "own, app keys off", capability: "disabled", adminUser: undefined, shown: false },
+  { name: "own, capability unknown", capability: undefined, adminUser: undefined, shown: false },
+  {
+    name: "admin, disabled account",
+    capability: "available",
+    adminUser: { id: 2, username: "sam", enabled: false },
+    shown: false,
+  },
+])("marks a session a key opened only where it signs back in ($name)", (row) => {
+  mocks.capability = row.capability;
+  mocks.sessions = [keySession];
+  render(
+    <MemoryRouter>
+      <LoginSessionsPanel adminUser={row.adminUser} />
+    </MemoryRouter>,
+  );
+  expect(Boolean(screen.queryByText(MARK))).toBe(row.shown);
+});
+
+// A disabled account's sign-out dialogs (one session a key opened, and every
+// session) must not say its devices sign back in.
+it.each([
+  ["Sign out Pixel 9", true],
+  ["Sign out Pixel 9", false],
+  ["Sign out everywhere", true],
+  ["Sign out everywhere", false],
+])(
+  "%s says devices sign back in only for an enabled account (enabled: %s)",
+  async (button, enabled) => {
+    mocks.sessions = [keySession];
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <LoginSessionsPanel adminUser={{ id: 2, username: "sam", enabled }} />
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByRole("button", { name: button }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(Boolean(within(dialog).queryByText("Silo app sentence"))).toBe(enabled);
+  },
+);
+
+// An administrator acting as the account has no devices list to go to: the
+// words stay, the links go.
+it("keeps the words but drops the links while an administrator acts as the account", () => {
+  mocks.impersonating = true;
+  mocks.sessions = [keySession];
+  render(
+    <MemoryRouter>
+      <LoginSessionsPanel />
+    </MemoryRouter>,
+  );
+  expect(screen.getByText("Silo app sentence without link")).toBeTruthy();
+  expect(screen.getByText(MARK).closest("a")).toBeNull();
+});
+
+// While the sign-out runs, its dialog must stay open for the result: the
+// sentence's link, which would close it, becomes words.
+it("drops the sentence's link while the sign-out runs", async () => {
+  mocks.sessions = [keySession];
+  const user = userEvent.setup();
+  const view = render(
+    <MemoryRouter>
+      <LoginSessionsPanel />
+    </MemoryRouter>,
+  );
+  await user.click(screen.getByRole("button", { name: "Sign out Pixel 9" }));
+  const dialog = () => screen.getByRole("alertdialog");
+  expect(within(dialog()).getByText("Silo app sentence")).toBeTruthy();
+  mocks.pending = true;
+  view.rerender(
+    <MemoryRouter>
+      <LoginSessionsPanel />
+    </MemoryRouter>,
+  );
+  expect(within(dialog()).getByText("Silo app sentence without link")).toBeTruthy();
 });

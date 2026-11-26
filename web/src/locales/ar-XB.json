@@ -34065,7 +34065,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E. Their other devices stay signed in. The client can sign in again with the account's password.\u202C"
+      "value": "\u202E. Their other devices stay signed in. The client can sign in again.\u202C"
     }
   ],
   "web.admin.dashboard.widgets.apiClients.confirmLabel": [
@@ -90840,18 +90840,6 @@
       "value": "count"
     }
   ],
-  "web.admin.users.detail.appKeys.actionFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECouldn’t make that change. Try again.\u202C"
-    }
-  ],
-  "web.admin.users.detail.appKeys.confirm.deny": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDeny device\u202C"
-    }
-  ],
   "web.admin.users.detail.appKeys.confirm.denyDescription": [
     {
       "type": 0,
@@ -90863,7 +90851,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E can’t sign in to \u202C"
+      "value": "\u202E won’t be able to sign in to \u202C"
     },
     {
       "type": 1,
@@ -90872,20 +90860,6 @@
     {
       "type": 0,
       "value": "\u202E’s account. If it was theirs, they add it again in the Silo app.\u202C"
-    }
-  ],
-  "web.admin.users.detail.appKeys.confirm.denyTitle": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDeny \u202C"
-    },
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": "\u202E?\u202C"
     }
   ],
   "web.admin.users.detail.appKeys.confirm.personKey": [
@@ -90922,16 +90896,10 @@
       "value": "\u202E’s account key?\u202C"
     }
   ],
-  "web.admin.users.detail.appKeys.confirm.remove": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERemove device\u202C"
-    }
-  ],
   "web.admin.users.detail.appKeys.confirm.removeDescription": [
     {
       "type": 0,
-      "value": "\u200F"
+      "value": "\u200F\u202ERemoving \u202C"
     },
     {
       "type": 1,
@@ -90939,7 +90907,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E is signed out of \u202C"
+      "value": "\u202E signs it out of \u202C"
     },
     {
       "type": 1,
@@ -90947,7 +90915,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E’s account now and can’t sign in with its key again. To use it again, \u202C"
+      "value": "\u202E’s account now and stops its key: it can’t sign in with it again. To use it again, \u202C"
     },
     {
       "type": 1,
@@ -90956,26 +90924,6 @@
     {
       "type": 0,
       "value": "\u202E adds it again in the Silo app.\u202C"
-    }
-  ],
-  "web.admin.users.detail.appKeys.confirm.removeTitle": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERemove \u202C"
-    },
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": "\u202E?\u202C"
-    }
-  ],
-  "web.admin.users.detail.appKeys.confirm.withdraw": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWithdraw approval\u202C"
     }
   ],
   "web.admin.users.detail.appKeys.confirm.withdrawDescription": [
@@ -90989,7 +90937,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E can’t use this approval to sign in to \u202C"
+      "value": "\u202E won’t be able to use this approval to sign in to \u202C"
     },
     {
       "type": 1,
@@ -90998,40 +90946,6 @@
     {
       "type": 0,
       "value": "\u202E’s account.\u202C"
-    }
-  ],
-  "web.admin.users.detail.appKeys.confirm.withdrawTitle": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWithdraw the approval for \u202C"
-    },
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": "\u202E?\u202C"
-    }
-  ],
-  "web.admin.users.detail.appKeys.confirm.working": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESaving…\u202C"
-    }
-  ],
-  "web.admin.users.detail.appKeys.denied": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": "\u202E denied\u202C"
     }
   ],
   "web.admin.users.detail.appKeys.description": [
@@ -91048,34 +90962,16 @@
       "value": "\u202E’s account with the Silo app, without a password.\u202C"
     }
   ],
-  "web.admin.users.detail.appKeys.devices.title": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDevices\u202C"
-    }
-  ],
   "web.admin.users.detail.appKeys.empty": [
     {
       "type": 0,
       "value": "\u200F\u202ENo devices use the Silo app on this account.\u202C"
     }
   ],
-  "web.admin.users.detail.appKeys.footnote": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERemoving a device signs it out and stops its key working. Signing out a session doesn’t remove the device: it signs back in with its key.\u202C"
-    }
-  ],
   "web.admin.users.detail.appKeys.loadFailed": [
     {
       "type": 0,
       "value": "\u200F\u202ECouldn’t load devices.\u202C"
-    }
-  ],
-  "web.admin.users.detail.appKeys.loading": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ELoading devices…\u202C"
     }
   ],
   "web.admin.users.detail.appKeys.off": [
@@ -91132,12 +91028,6 @@
       "value": "\u200F\u202ERemove account key\u202C"
     }
   ],
-  "web.admin.users.detail.appKeys.personKey.title": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAccount key\u202C"
-    }
-  ],
   "web.admin.users.detail.appKeys.personKeyRemoved": [
     {
       "type": 0,
@@ -91158,50 +91048,6 @@
       "value": "\u202E approved for a device that hasn’t connected yet.\u202C"
     }
   ],
-  "web.admin.users.detail.appKeys.preapprovals.loadFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECouldn’t load the sign-ins approved in advance.\u202C"
-    }
-  ],
-  "web.admin.users.detail.appKeys.preapprovals.title": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EApproved in advance\u202C"
-    }
-  ],
-  "web.admin.users.detail.appKeys.refreshLabel": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERefresh Silo app devices\u202C"
-    }
-  ],
-  "web.admin.users.detail.appKeys.removed": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": "\u202E removed\u202C"
-    }
-  ],
-  "web.admin.users.detail.appKeys.title": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESilo app devices\u202C"
-    }
-  ],
-  "web.admin.users.detail.appKeys.unavailable": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESilo app sign-in isn’t available on this server, so these devices can’t sign in. You can still remove them.\u202C"
-    }
-  ],
   "web.admin.users.detail.appKeys.waiting.description": [
     {
       "type": 0,
@@ -91220,12 +91066,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EWaiting for approval\u202C"
-    }
-  ],
-  "web.admin.users.detail.appKeys.withdrawn": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EApproval withdrawn\u202C"
     }
   ],
   "web.admin.users.detail.common.allProfiles": [
@@ -141721,7 +141561,7 @@
   "web.settings.account.password.signOutOthersDescription": [
     {
       "type": 0,
-      "value": "\u200F\u202EOther browsers and apps must sign in again with the new password. This browser stays signed in, and API keys keep working.\u202C"
+      "value": "\u200F\u202EOther browsers and apps are signed out. This browser stays signed in, and API keys keep working.\u202C"
     }
   ],
   "web.settings.account.password.title": [
@@ -142600,6 +142440,300 @@
       "value": "\u200F\u202EHow to use this key\u202C"
     }
   ],
+  "web.settings.appKeys.actionFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t make that change. Try again.\u202C"
+    }
+  ],
+  "web.settings.appKeys.approveMainOnly": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOnly the household’s main profile can approve a device. Switch to it to approve.\u202C"
+    }
+  ],
+  "web.settings.appKeys.approved": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E approved\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.approve": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApprove device\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveDescription": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E will be able to sign in to your account with the Silo app until you remove it. Approve it only if you just set it up.\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.approveTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApprove \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E?\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.deny": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDeny device\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyDescription": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E won’t be able to sign in to your account. If it was yours, add it again in the Silo app.\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.denyTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDeny \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E?\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.remove": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemove device\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemoving \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E signs it out now and stops its key: it can’t sign in with it again. To use it again, add it again in the Silo app.\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.removeTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemove \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E?\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdraw": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWithdraw approval\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawDescription": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E won’t be able to use this approval to sign in to your account.\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.withdrawTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWithdraw the approval for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E?\u202C"
+    }
+  ],
+  "web.settings.appKeys.confirm.working": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESaving…\u202C"
+    }
+  ],
+  "web.settings.appKeys.denied": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E denied\u202C"
+    }
+  ],
+  "web.settings.appKeys.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDevices and apps that sign in to your account with the Silo app, without a password.\u202C"
+    }
+  ],
+  "web.settings.appKeys.devices.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDevices\u202C"
+    }
+  ],
+  "web.settings.appKeys.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo devices use the Silo app on your account.\u202C"
+    }
+  ],
+  "web.settings.appKeys.footnote": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemoving a device signs it out and stops its key working. Signing out a session doesn’t remove the device: it signs back in with its key.\u202C"
+    }
+  ],
+  "web.settings.appKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t load your devices.\u202C"
+    }
+  ],
+  "web.settings.appKeys.loading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELoading devices…\u202C"
+    }
+  ],
+  "web.settings.appKeys.off": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo app sign-in is off on this server, so these devices can’t sign in and waiting devices can’t be approved. You can still remove them.\u202C"
+    }
+  ],
+  "web.settings.appKeys.personKey.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour Silo app uses this key to add your new devices. Set up \u202C"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.settings.appKeys.personKey.none": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo account key. Your Silo app sets one up the next time you add a device while signed in.\u202C"
+    }
+  ],
+  "web.settings.appKeys.personKey.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAccount key\u202C"
+    }
+  ],
+  "web.settings.appKeys.pinDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnter the main profile’s PIN to approve this device.\u202C"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign-ins you approved for a device that hasn’t connected yet.\u202C"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.loadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t load the sign-ins approved in advance.\u202C"
+    }
+  ],
+  "web.settings.appKeys.preapprovals.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApproved in advance\u202C"
+    }
+  ],
+  "web.settings.appKeys.refreshLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERefresh Silo app devices\u202C"
+    }
+  ],
+  "web.settings.appKeys.removed": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E removed\u202C"
+    }
+  ],
   "web.settings.appKeys.row.allowedBy": [
     {
       "type": 0,
@@ -142608,6 +142742,22 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.settings.appKeys.row.approve": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApprove\u202C"
+    }
+  ],
+  "web.settings.appKeys.row.approveLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApprove \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
     }
   ],
   "web.settings.appKeys.row.deny": [
@@ -142744,6 +142894,56 @@
     {
       "type": 1,
       "value": "device"
+    }
+  ],
+  "web.settings.appKeys.signsBackIn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDevices signed in with the Silo app sign back in by themselves. \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202ERemove a device\u202C"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E to stop it.\u202C"
+    }
+  ],
+  "web.settings.appKeys.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo app devices\u202C"
+    }
+  ],
+  "web.settings.appKeys.unavailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo app sign-in isn’t available on this server, so these devices can’t sign in. You can still remove them.\u202C"
+    }
+  ],
+  "web.settings.appKeys.waiting.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA new device asked to sign in to your account with the Silo app. Approve it only if you just set it up.\u202C"
+    }
+  ],
+  "web.settings.appKeys.waiting.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWaiting for your approval\u202C"
+    }
+  ],
+  "web.settings.appKeys.withdrawn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApproval withdrawn\u202C"
     }
   ],
   "web.settings.cardOverlay.adjust": [
@@ -151014,6 +151214,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ESigned in\u202C"
+    }
+  ],
+  "web.settings.sessions.row.signsBackIn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis device signs back in by itself\u202C"
     }
   ],
   "web.settings.sessions.row.summary": [
