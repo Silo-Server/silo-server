@@ -13,7 +13,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// redeemCode redeems code with a new device key signed by person.
+// redeemCode redeems code with a new device key signed by person. A
+// successful redeem's person_key_id is the account's person key, and it is
+// person's key exactly when the answer is enrolled: a client tells whether
+// the account holds the key it sent by the ID alone.
 func (e *keyEnv) redeemCode(t *testing.T, person testKey, code string) (*KeySignInResult, testKey, error) {
 	t.Helper()
 	device := newTestKey(t)
@@ -21,7 +24,26 @@ func (e *keyEnv) redeemCode(t *testing.T, person testKey, code string) (*KeySign
 		KeyRequest: e.request(t, message{purpose: appkeys.PurposeRedeem, signer: person, device: &device, fields: map[string]any{"code": code}}),
 		PersonKey:  person.pub,
 	})
-	return result, device, err
+	if err != nil {
+		return result, device, err
+	}
+	live, liveErr := e.signIn.keys.LivePersonKey(t.Context(), result.User.ID)
+	if liveErr != nil || result.PersonKeyID != live.KeyID {
+		t.Fatalf("person_key_id = %q, want the account's person key %+v (%v)", result.PersonKeyID, live, liveErr)
+	}
+	switch sent := result.PersonKeyID == person.pub.KeyID(); result.PersonKeyStatus {
+	case PersonKeyEnrolled:
+		if !sent {
+			t.Fatalf("enrolled, but person_key_id %q is not the sent key %q", result.PersonKeyID, person.pub.KeyID())
+		}
+	case PersonKeyKept:
+		if sent {
+			t.Fatalf("kept, but person_key_id is the sent key %q", result.PersonKeyID)
+		}
+	default:
+		t.Fatalf("person key status = %q", result.PersonKeyStatus)
+	}
+	return result, device, nil
 }
 
 // deviceKeyRow reads a device key by its public key.
@@ -88,7 +110,7 @@ func TestRedeemSessionAppCodeDB(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.PersonKeyStatus != PersonKeyEnrolled || result.PersonKeyID != person.pub.KeyID() || result.Pair == nil || result.User.ID != user.ID {
+		if result.PersonKeyStatus != PersonKeyEnrolled || result.Pair == nil || result.User.ID != user.ID {
 			t.Fatalf("result = %+v", result)
 		}
 		if key := env.deviceKeyRow(t, device); key.Status != models.DeviceKeyStatusActive || key.EnrolledVia != models.AppKeyEnrolledAppCode || key.ProviderBound {
@@ -198,7 +220,7 @@ func TestRedeemSessionAppCodeDB(t *testing.T) {
 		code := issue(t, env.loginSession(t, user, models.SessionOpenedPassword, nil))
 		person := newTestKey(t)
 		result, _, err := env.redeemCode(t, person, code)
-		if err != nil || result.PersonKeyStatus != PersonKeyEnrolled || result.PersonKeyID != person.pub.KeyID() {
+		if err != nil || result.PersonKeyStatus != PersonKeyEnrolled {
 			t.Fatalf("redeem = %+v, %v", result, err)
 		}
 		if !env.personKeyRevoked(t, dead.ID) {
