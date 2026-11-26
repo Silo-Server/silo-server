@@ -297,6 +297,53 @@ Never replay a completion, since the link is already spent.
 Links are stored only as SHA-256 digests, and the request log redacts the `{token}`
 path segment.
 
+### Sign-in links
+
+A sign-in link is for a person who lost every device. An administrator makes one
+for an account, and its page hands the Silo app an app code that enrolls new keys,
+or lets the person set a password. The link is `<server address>/sign-in-link#<token>`,
+single use for 24 hours, and the token travels in the fragment and the request body
+only, as a reset link's does. The architecture is in
+[app keys](architecture/app-keys.md#sign-in-links).
+
+- `POST /admin/users/{user_id}/sign-in-links` (`createAdminUserSignInLink`), acting
+  admin, body `{ "send_email": false }`. Answers 201
+  `{ "url", "expires_at", "delivery_status" }`; `delivery_status` is
+  `not_requested`, or with `send_email` `sent` or `failed_or_unknown` (the link is
+  live either way and is still returned). A new link replaces the account's earlier
+  links. Who may make one is who may set that account's password as an
+  administrator: any administrator for an ordinary account, only the Owner for
+  another administrator or the Owner, only the Owner for an account of their own
+  whose password sign-in is off, and never a scoped API key for an administrator
+  (403). A disabled account is 409 `conflict`. With `send_email`, an account with
+  no email address is 409 `conflict` and a server without mail 409
+  `capability_not_configured`, both before a link is made. While
+  `auth.local_password_login` is off the answer is 409 `provider_sign_in_required`.
+  Audited as `user.sign_in_link_created` with `delivery` and `expires_at`, never
+  the token. The account capability (`getAdminAccountCapabilities`) reports
+  `sign_in_links` and `sign_in_link_email`.
+- `POST /auth/sign-in-links/redeem` (`redeemSignInLink`), public, body
+  `{ "token" }`. Answers `{ "code", "expires_in", "server_address", "link_allowed",
+  "set_password_token" }`, every member optional. `code`, `expires_in`,
+  `server_address` and `link_allowed` (always `false`) come together while
+  `auth.app_key_sign_in` is on and the server is not in demo mode; otherwise the
+  answer has only `set_password_token`. `set_password_token` is present while
+  local password sign-in is on; it lives an hour, never past the link, and works
+  once. The link is spent in the transaction that makes the code. An unknown, used
+  or expired link, and one whose account is disabled, is 404 `not_found`; while
+  local password sign-in is off, 409 `provider_sign_in_required`, and the link
+  stays unspent. Audited as `user.sign_in_link_redeemed`.
+- `POST /auth/sign-in-links/set-password` (`setSignInLinkPassword`), public, body
+  `{ "token": "<set_password_token>", "new_password" }`. Answers 204. The password
+  passes the rules a reset's completion checks (422 at `body.new_password`, token
+  unspent). It sets the password, turns the account's local password sign-in on,
+  settles a temporary password and revokes every login session of the account as a
+  reset does; app keys stay. It signs nobody in. 404 `not_found` for an unknown,
+  used or expired token, 409 `provider_sign_in_required` while local password
+  sign-in is off. Audited as `user.sign_in_link_password_set`.
+
+Both public operations spend the `password_reset` rate-limit budget.
+
 ### Self-service password reset
 
 When an administrator turns on `password_reset.self_service_enabled` (off by
@@ -1252,7 +1299,7 @@ operation contract.
 | `POST /auth/grants/redeem` (`redeemAppKeyGrant`) | a `grant-redeem` envelope signed by the app's own key (the grant's `app_key`), without `device_sig` | Enrolls another app's key with a grant the account's person key signed, and opens the app's session. The key is listed with `kind` `app`, `enrolled_by` `grant` and `allowed_by`. Refused for an administrator's account. See "Grants" below. Audited as `user.app_grant_redeemed` with the app key's `device_key_id`. |
 | `POST /invitations/app-code` (`createInvitationAppCode`) | none; the invitation `token` in the body | Body `{ "token", "username", "email" }`. Starts a join through the Silo app and answers `{ "code", "expires_in", "server_address" }`; see "App codes" below. |
 | `POST /auth/app-codes` (`createAppCode`) | the account's own login session acting as the household's main profile | Body `{}`. Answers `{ "code", "expires_in", "server_address" }` for "Open in Silo"; see "App codes" below. Audited as `user.app_code_issued` with `app_code_kind` `session` and `expires_at`, never the code. |
-| `POST /auth/app-codes/redeem` (`redeemAppCode`) | `{ "person_key", "message" }` where `message` is a `redeem` envelope signed with that person key, with `device_sig`, the app code in its payload | Enrolls the device key and opens its session. The person key is enrolled when the account has none; an account that already has a different person key keeps it, the device key is enrolled under the account's key, and nothing is revoked. The sealed plaintext adds `username`, `person_key_id` (the account's person key once the redeem commits) and `person_key`: `enrolled` when `person_key` is now the account's person key, `kept` when the account kept a different one. A person who has lost every other device redeems a code, then calls `PUT /auth/keys/person` from the new session as the main profile. 404 `app_code_invalid` for an unknown, used or expired code. Audited on the account as `user.app_code_redeemed` with `app_code_kind` (`join` or `session`), the device key's `device_key_id` and the person key's `person_key_kid` when this redeem enrolled it, never the code. |
+| `POST /auth/app-codes/redeem` (`redeemAppCode`) | `{ "person_key", "message" }` where `message` is a `redeem` envelope signed with that person key, with `device_sig`, the app code in its payload | Enrolls the device key and opens its session. The person key is enrolled when the account has none; an account that already has a different person key keeps it, the device key is enrolled under the account's key, and nothing is revoked. The sealed plaintext adds `username`, `person_key_id` (the account's person key once the redeem commits) and `person_key`: `enrolled` when `person_key` is now the account's person key, `kept` when the account kept a different one, and, for a sign-in link's code only, `replaced` when `person_key` took the place of a different one. A person who has lost every other device redeems a code, then calls `PUT /auth/keys/person` from the new session as the main profile. 404 `app_code_invalid` for an unknown, used or expired code. Audited on the account as `user.app_code_redeemed` with `app_code_kind` (`join` or `session`), the device key's `device_key_id` and the person key's `person_key_kid` when this redeem enrolled it, never the code. |
 | `GET /auth/keys/session` (`getAppKeySessionAccess`) | any login session | `{ "list", "manage", "approve", "sign_in_again" }`: what this session may do with the account's keys, and whether signing in again would help. Answers while the switch is off. |
 | `GET /auth/keys` (`listAppKeys`) | the account's own login session, opened by password, provider or the person's own device key | `person_key` (`kid`, `enrolled_at`, `enrolled_ip_address`; absent when the account has none) and `devices[]` (`id`, `kid`, `kind` `device`\|`app`, `name`, `platform`, `status` `active`\|`pending`, `enrolled_by` `introduce`\|`session`\|`app-code`\|`grant`, `allowed_by`, `enrolled_at`, `enrolled_ip_address`, `last_used_at`), newest first. `enrolled_ip_address` is the client address of the request that enrolled the key, decided as a login session's `ip_address` is, except that the unspecified address (`0.0.0.0` or `::`) the resolver answers for a client it couldn't tell is stored as none; it is an empty string when unknown, which includes every key enrolled before the server recorded it, and for a caller who is not an administrator while the server runs in demo mode. A session opened by device sign-in or by another app's key is refused this list (and the pending list), so it never sees an address. Revoked and denied keys are left out, and so is a waiting key older than 24 hours, without anyone denying or revoking it. `last_used_at` is the last time the key opened a session: a key enrolled and not used since shows it equal to `enrolled_at`, and a key waiting for approval shows `null`. |
 | `DELETE /auth/keys/devices/{id}` (`revokeAppDeviceKey`) | the account's own login session | 204. Revokes the key and ends every session it opened. A device may revoke its own key, which ends the session making the request. 404 for a key that isn't the account's. |
@@ -1260,6 +1307,7 @@ operation contract.
 | `GET /auth/keys/pending` (`listPendingAppKeys`) | as `GET /auth/keys` | `{ "items": [ ... ] }`, each a device object as in `GET /auth/keys` with `status` `pending`: the account's waiting keys inside their 24 hours, oldest first. |
 | `POST /auth/keys/pending/{id}/approve` (`approvePendingAppKey`) | the account's own login session acting as the household's main profile | Body `{}`, 204. The key becomes active and the device's next `sign-in` opens a session. The account must still be an enabled administrator (403 `permission_denied`). Approving an active key changes nothing, except that the session that key itself opened is refused (403 `permission_denied`); an unknown, denied, revoked or expired key is 404 `not_found`. A session opened by one of the administrator's own device keys may approve. Audited as `user.device_key_approved`. |
 | `POST /auth/keys/pending/{id}/deny` (`denyPendingAppKey`) | as `GET /auth/keys` | Body `{}`, 204. The key's next `sign-in` answers 403 `key_denied`, and neither list shows it. Denying a denied key changes nothing; an active, revoked or unknown key is 404 `not_found`. Audited as `user.device_key_denied`. |
+| `POST /auth/sign-in-links/redeem` (`redeemSignInLink`) | none; the sign-in link's `token` in the body | Trades a sign-in link for an app code of its own kind and a set-password token; see [sign-in links](#sign-in-links). Redeeming that code at `redeemAppCode` enrolls the request's person key as the account's: `person_key` is `enrolled` when the account had none or held it already, `replaced` when it held another, which is revoked with the devices it introduced that still wait for approval. Devices already enrolled keep their keys. Neither key is bound to a provider, and both start active on an administrator's account too. |
 | `GET /admin/users/{user_id}/keys` (`listAdminUserAppKeys`) | acting admin | What `GET /auth/keys` shows for that account, each object with `provider_bound`, `identity_gone` and `identity_id` (the provider account the key is bound to, as `listAdminUserIdentities` identifies it; `null` when the key is bound to none; historical when `identity_gone` is `true`, since that provider account is no longer linked or listed) added, and `waiting_until` (when a `pending` key stops waiting; `null` otherwise) on each device. `person_key` also carries `enrolled_by` (`session`\|`app-code`). A key whose provider account is no longer linked is listed with `identity_gone` `true`: it can't sign in again, and the person's own list leaves it out. Revoked and denied keys, and waiting keys past their 24 hours, are left out. An unknown account is 404. The account's device sign-ins approved in advance are `listAdminUserDevicePreapprovals`. |
 | `DELETE /admin/users/{user_id}/keys/devices/{id}` (`revokeAdminUserDeviceKey`) | acting admin, under the Owner rules (below) | 204. Revokes the key and ends every session it opened. Revoking a revoked key changes nothing; a key of another account is 404. Audited as `user.device_key_revoked`. |
 | `DELETE /admin/users/{user_id}/keys/person` (`revokeAdminUserPersonKey`) | acting admin, under the Owner rules | 204. Revokes the person key: no device can be introduced with it, and devices it introduced that are still waiting are denied. Devices already enrolled keep their keys and sessions; the person sets up a new person key from a signed-in device. An account with no person key, as straight after a first call, answers 204 and records nothing; an unknown account is 404. The request names no key and acts on the person key the account holds when it arrives, so it is not safe to replay blindly: a repeat after the person has set up a new key revokes that one. Read the list first. Audited as `user.person_key_revoked`, with the count of waiting devices it denied. |

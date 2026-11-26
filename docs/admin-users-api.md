@@ -196,6 +196,11 @@ against the acting administrator and target account. Scoped `admin:users` keys d
 not reach this route, and the handler refuses a scoped key for an administrator
 account in any case.
 
+`POST /api/v2/admin/users/{user_id}/sign-in-links` makes a single-use sign-in link
+for a person who lost every device, with the same authority as setting the
+account's password. It works for an account with no password, and it is refused
+while local password sign-in is off. See [sign-in links](auth-api.md#sign-in-links).
+
 `POST /api/v2/admin/users/{id}/impersonate` returns the shared token-pair contract.
 It creates a login session and has no replay identity. Clients must not retry an
 uncertain response automatically. The web client checks its captured authority

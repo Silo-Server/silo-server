@@ -410,7 +410,9 @@ so the invited person notices at once and the owner removes the account. That
 risk is accepted. A session code reaches an existing account, an
 administrator's included, and an administrator's join code would hand the
 intercepting app a working administrator session (keys from a join code start
-active, and the redeem opens a session at once).
+active, and the redeem opens a session at once). The code a sign-in link hands
+out is a session code too: it reaches an existing account, so its answer says
+`link_allowed: false` and its page shows it to type.
 
 The server decides, and says so in the answer that issues the code:
 `link_allowed`. A page builds the join link only when it is true; otherwise it
@@ -466,6 +468,10 @@ There are two kinds:
   rechecked under the account lock. The code records the session and its
   provider binding. The keys it enrolls take that binding, and a code whose
   session ended before it is redeemed no longer works.
+- **Sign-in link** (`POST /auth/sign-in-links/redeem`, public): the code a
+  redeemed sign-in link hands out; see [Sign-in links](#sign-in-links). It
+  belongs to the account, bound to no session and no provider identity, and is
+  shown to type like a session code.
 
 **Redeem** (`POST /auth/app-codes/redeem`, public, `key_sign_in` budget). The
 body is `{ person_key, message }`, a `redeem` envelope signed with
@@ -494,6 +500,14 @@ its payload. The challenge is spent once the signature verifies. Then:
   person who has lost every other device redeems a code and then calls
   `PUT /auth/keys/person` from the new session as the main profile. The
   issuing session's row is read last; one that ended rolls the redeem back.
+- A sign-in link's code locks the account, spends the code, takes the settings
+  lock and checks local password sign-in as a key sign-in does, then makes the
+  request's person key the account's: enrolled when the account has none or
+  holds it already, otherwise in place of the account's key, which is revoked
+  with the devices it introduced that still wait for approval (as
+  `PUT /auth/keys/person` does). Devices already enrolled keep their keys; the
+  person may want to remove the lost devices from the key list. Both keys are
+  unbound to a provider.
 
 The hourly cleanup of expired codes never waits on any of these: it skips a
 code row a request holds (`FOR UPDATE SKIP LOCKED`) and deletes it on a later
@@ -523,7 +537,8 @@ transaction, so the code's spend rolls back and only the challenge is used up
 with `duplicate` at `body.username` or `body.email`, whichever clashed. The sealed
 plaintext is the usual `signed_in` answer plus `username`, `person_key_id`
 (the account's person key once the redeem commits) and `person_key`
-(`enrolled`, or `kept` when the account kept a different key). An unknown, spent or expired code, and one whose
+(`enrolled`, `kept` when the account kept a different key, or `replaced` for a
+sign-in link's code that put the request's key in place of another). An unknown, spent or expired code, and one whose
 invitation or session can no longer be used, is `app_code_invalid` (404). Of
 two redemptions of one code, on any API processes, exactly one succeeds.
 
@@ -553,6 +568,58 @@ lock, as accept does. On such a server a person gets the app by signing in with
 the provider on the server's site and using "Open in Silo"
 (`POST /auth/app-codes`), so the keys enroll against that identity. Creating
 and resending invitations stays refused while local passwords are off.
+
+### Sign-in links
+
+A sign-in link is how a person who lost every device gets back in. An
+administrator makes one for an account (`createAdminUserSignInLink`); its page
+(`/sign-in-link#<token>`) trades it, once, for an app code of kind
+`sign_in_link` and a set-password token (`redeemSignInLink`), and the person
+either types the code into the Silo app or sets a password
+(`setSignInLinkPassword`). The page redeems only when the person presses
+Continue, never on load: the link works once and the code lives ten minutes.
+
+**Who may make one.** Exactly who may set that account's password as an
+administrator (`auth.CheckSignInLinkIssuer`, which applies `CheckOwnerUpdate`
+to a password write and refuses a scoped API key on an administrator's
+account): a link lets its holder in as surely as a new password. The issuer and
+the account are locked in id order before the link is stored, as a reset
+link's issue does, so a promotion or ownership move that commits first is
+judged. Promoting the account deletes its links and their unredeemed codes, as
+it deletes its reset links. A disabled account gets no link, and its existing
+link answers `not_found`.
+
+**Its own table.** `auth_sign_in_links`, not `password_reset_tokens`: that
+table holds one link per account bound to a fingerprint of the current
+password, so it can't serve an account with no password, and a sign-in link
+there would cancel a pending reset link and the reverse. Only SHA-256 digests
+of the link token and the set-password token are stored. A new link deletes the
+account's earlier ones, so one link is live per account. The hourly retention
+step deletes links past their expiry; the table is left out of backups.
+
+**Redeeming.** The link is marked redeemed in the transaction that makes the
+app code; of two redemptions exactly one succeeds. Unknown, used, expired and
+disabled-account links answer the same `not_found`. While app keys are off (or
+in demo mode, where they always are) no code is made and the answer carries
+only the set-password token. The code enrolls keys as described under
+"Redeem" above: it replaces a different person key, because the person lost
+the devices that hold the old one, and leaves enrolled devices alone. Keys
+from it start active on an administrator's account too: the owner made the
+link for that person on purpose.
+
+**Setting a password.** The set-password token lives an hour, never past the
+link, and works once. The password passes the rules a reset's completion
+checks, before the token is spent. Setting it turns the account's local
+password sign-in on and revokes every login session of the account as a reset
+does (`ResetPasswordInTransaction`); app keys stay, and devices signed in with
+them sign back in.
+
+**Refused with local passwords off.** While `auth.local_password_login` is
+off, making a link, redeeming one and setting its password answer
+`provider_sign_in_required` (409), and a link stays unspent. On such a server
+the link could only create a way in that skips the sign-in provider. There the
+person signs in with the provider on the server's site and uses "Open in Silo"
+(`POST /auth/app-codes`) instead.
 
 ### Sessions that can't manage keys
 
