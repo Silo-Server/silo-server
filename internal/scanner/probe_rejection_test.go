@@ -647,30 +647,42 @@ printf '%%s\n' '{"format":{"format_name":"%s","probe_score":100,"start_time":"0.
 
 // Playing a file marked damaged probes it again (issue #5339): the repair
 // probe must check the end of the file too, or a file cut short behind an
-// intact header would lose its mark and be offered as playable.
+// intact header would lose its mark and be offered as playable. A read of the
+// end that settles nothing, such as one ffprobe fails, must not clear the
+// mark either: the repair fails and is retried.
 func TestPlaybackProbeEnsurerKeepsFileCutShortMarked(t *testing.T) {
 	media := filepath.Join(t.TempDir(), "Movie (2020).mp4")
 	if err := os.WriteFile(media, []byte("readable header bytes"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ffprobe := filepath.Join(t.TempDir(), "ffprobe")
-	writeFakeTool(t, ffprobe, `#!/bin/sh
+	for _, tc := range []struct {
+		name     string
+		tail     string
+		tailExit int
+		wantErr  bool
+	}{
+		{"cut short", `{"packets": []}`, 0, false},
+		{"tail read failed", `{}`, 1, true},
+	} {
+		ffprobe := filepath.Join(t.TempDir(), "ffprobe")
+		writeFakeTool(t, ffprobe, fmt.Sprintf(`#!/bin/sh
 if [ "$1" = "-read_intervals" ]; then
-	printf '%s\n' '{"packets": []}'
-	exit 0
+	printf '%%s\n' '%s'
+	exit %d
 fi
-printf '%s\n' '{"format":{"format_name":"mov,mp4,m4a,3gp,3g2,mj2","probe_score":100,"start_time":"0.000000","duration":"60.000000"},"streams":[{"codec_type":"audio","codec_name":"aac","duration":"60.000000"}]}'
-`)
-	markedAt := time.Now().UTC()
-	file := &models.MediaFile{ID: 10, FilePath: media, ProbeFailedAt: &markedAt}
-	repo := &probeRepairTestRepository{files: map[int]*models.MediaFile{file.ID: file}}
-	ensurer := &PlaybackProbeEnsurer{fileRepo: repo, ffprobePath: ffprobe, timeout: 5 * time.Second}
+printf '%%s\n' '{"format":{"format_name":"mov,mp4,m4a,3gp,3g2,mj2","probe_score":100,"start_time":"0.000000","duration":"60.000000"},"streams":[{"codec_type":"audio","codec_name":"aac","duration":"60.000000"}]}'
+`, tc.tail, tc.tailExit))
+		markedAt := time.Now().UTC()
+		file := &models.MediaFile{ID: 10, FilePath: media, ProbeFailedAt: &markedAt}
+		repo := &probeRepairTestRepository{files: map[int]*models.MediaFile{file.ID: file}}
+		ensurer := &PlaybackProbeEnsurer{fileRepo: repo, ffprobePath: ffprobe, timeout: 5 * time.Second}
 
-	got, err := ensurer.Ensure(t.Context(), file)
-	if err != nil {
-		t.Fatalf("Ensure error = %v, want the rejection reported on the row", err)
-	}
-	if got == nil || !got.ProbeRejected() || repo.files[file.ID].ProbeFailedAt == nil {
-		t.Fatalf("Ensure returned %+v, stored ProbeFailedAt = %v, want the file still marked damaged", got, repo.files[file.ID].ProbeFailedAt)
+		got, err := ensurer.Ensure(t.Context(), file)
+		if (err != nil) != tc.wantErr {
+			t.Fatalf("%s: Ensure error = %v, want error %v", tc.name, err, tc.wantErr)
+		}
+		if stored := repo.files[file.ID]; stored.ProbeFailedAt == nil || stored.ProbeUpdatedAt != nil || (err == nil && !got.ProbeRejected()) {
+			t.Fatalf("%s: Ensure returned %+v, stored %+v, want the file still marked damaged", tc.name, got, stored)
+		}
 	}
 }

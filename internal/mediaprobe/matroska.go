@@ -51,6 +51,7 @@ const (
 	mkvIDTrackType     = matroska.IDTrackType
 	mkvIDCodecID       = matroska.IDCodecID
 	mkvIDCluster       = matroska.IDCluster
+	mkvIDCues          = matroska.IDCues
 	ebmlUnknownSize    = matroska.UnknownSize
 	maxEBMLHeaderSize  = 4 << 10
 	maxSeekHeadSize    = 1 << 20
@@ -97,37 +98,9 @@ func (rec *readErrorRecorder) ReadAt(p []byte, off int64) (int, error) {
 }
 
 func readMatroskaTracks(r io.ReaderAt, size int64) ([]MatroskaTrack, error) {
-	id, dataSize, headerLen, err := matroska.ReadElementHeader(r, 0)
-	if err != nil || id != ebmlIDHeader {
-		return nil, ErrNotMatroska
-	}
-	header, err := matroska.ReadElementData(r, headerLen, dataSize, maxEBMLHeaderSize)
+	segStart, segEnd, err := matroskaSegment(r, size)
 	if err != nil {
-		return nil, ErrNotMatroska
-	}
-	docType := ""
-	matroska.Children(header, func(id uint64, v []byte) {
-		if id == ebmlIDDocType {
-			docType = matroska.String(v)
-		}
-	})
-	// An absent DocType takes the EBML default, "matroska".
-	if docType != "" && docType != "matroska" && docType != "webm" {
-		return nil, ErrNotMatroska
-	}
-
-	pos := headerLen + dataSize
-	id, segSize, headerLen, err := matroska.ReadElementHeader(r, pos)
-	if err != nil {
-		return nil, fmt.Errorf("mediaprobe: read Matroska segment: %w", err)
-	}
-	if id != mkvIDSegment {
-		return nil, fmt.Errorf("mediaprobe: Matroska segment missing at %d", pos)
-	}
-	segStart := pos + headerLen
-	segEnd := size
-	if segSize != ebmlUnknownSize && segStart+segSize < segEnd {
-		segEnd = segStart + segSize
+		return nil, err
 	}
 
 	tracksAt := int64(-1)
@@ -161,7 +134,7 @@ func readMatroskaTracks(r io.ReaderAt, size int64) ([]MatroskaTrack, error) {
 	if tracksAt < segStart || tracksAt >= segEnd {
 		return nil, ErrMatroskaTracksNotFound
 	}
-	id, dataSize, headerLen, err = matroska.ReadElementHeader(r, tracksAt)
+	id, dataSize, headerLen, err := matroska.ReadElementHeader(r, tracksAt)
 	if err != nil {
 		return nil, fmt.Errorf("mediaprobe: read Matroska Tracks at %d: %w", tracksAt, err)
 	}
@@ -188,4 +161,89 @@ func readMatroskaTracksElement(r io.ReaderAt, off, size int64) ([]MatroskaTrack,
 		return nil, fmt.Errorf("mediaprobe: Matroska Tracks has more than %d entries", maxTrackEntries)
 	}
 	return tracks, nil
+}
+
+// matroskaSegment checks the EBML header of a Matroska or WebM file and
+// returns where its Segment's data starts and ends: the end of the file when
+// the Segment's size is unknown or runs past it.
+func matroskaSegment(r io.ReaderAt, size int64) (segStart, segEnd int64, err error) {
+	id, dataSize, headerLen, err := matroska.ReadElementHeader(r, 0)
+	if err != nil || id != ebmlIDHeader {
+		return 0, 0, ErrNotMatroska
+	}
+	header, err := matroska.ReadElementData(r, headerLen, dataSize, maxEBMLHeaderSize)
+	if err != nil {
+		return 0, 0, ErrNotMatroska
+	}
+	docType := ""
+	matroska.Children(header, func(id uint64, v []byte) {
+		if id == ebmlIDDocType {
+			docType = matroska.String(v)
+		}
+	})
+	// An absent DocType takes the EBML default, "matroska".
+	if docType != "" && docType != "matroska" && docType != "webm" {
+		return 0, 0, ErrNotMatroska
+	}
+
+	pos := headerLen + dataSize
+	id, segSize, headerLen, err := matroska.ReadElementHeader(r, pos)
+	if err != nil {
+		return 0, 0, fmt.Errorf("mediaprobe: read Matroska segment: %w", err)
+	}
+	if id != mkvIDSegment {
+		return 0, 0, fmt.Errorf("mediaprobe: Matroska segment missing at %d", pos)
+	}
+	segStart = pos + headerLen
+	segEnd = size
+	if segSize != ebmlUnknownSize && segStart+segSize < segEnd {
+		segEnd = segStart + segSize
+	}
+	return segStart, segEnd, nil
+}
+
+// MatroskaHasCues reports whether a Matroska or WebM file names a Cues
+// element, its seek index, ahead of its first Cluster: as a top-level element
+// there or as a seek head entry. It reads only the header elements, like
+// ReadMatroskaTracks, and does not check that the Cues are still in the file.
+// A file written to a pipe or a live recording has none, and FFmpeg can only
+// seek in it by reading every cluster up to the target.
+func MatroskaHasCues(r io.ReaderAt, size int64) (bool, error) {
+	recorder := &readErrorRecorder{r: r}
+	found, err := matroskaHasCues(recorder, size)
+	if err != nil && recorder.err != nil {
+		return false, fmt.Errorf("mediaprobe: read Matroska file: %w", recorder.err)
+	}
+	return found, err
+}
+
+func matroskaHasCues(r io.ReaderAt, size int64) (bool, error) {
+	segStart, segEnd, err := matroskaSegment(r, size)
+	if err != nil {
+		return false, err
+	}
+	for at, visited := segStart, 0; at < segEnd && visited < maxTopLevelVisited; visited++ {
+		id, dataSize, headerLen, err := matroska.ReadElementHeader(r, at)
+		if err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				break
+			}
+			return false, fmt.Errorf("mediaprobe: read Matroska element at %d: %w", at, err)
+		}
+		switch id {
+		case mkvIDCues:
+			return true, nil
+		case mkvIDSeekHead:
+			if data, err := matroska.ReadElementData(r, at+headerLen, dataSize, maxSeekHeadSize); err == nil {
+				if _, ok := matroska.SeekPosition(data, mkvIDCues); ok {
+					return true, nil
+				}
+			}
+		}
+		if id == mkvIDCluster || dataSize == ebmlUnknownSize {
+			break
+		}
+		at += headerLen + dataSize
+	}
+	return false, nil
 }

@@ -81,6 +81,10 @@ type probeLimits struct {
 	// inputOptions are extra ffprobe options for the stream probe, such as a
 	// longer analysis window (see deepProbeLimits).
 	inputOptions []string
+	// unsettledTailFails fails the probe when the read of the file's end
+	// settles nothing, instead of treating the file as whole
+	// (checkMediaReachesEnd).
+	unsettledTailFails bool
 }
 
 var defaultProbeLimits = probeLimits{
@@ -125,10 +129,12 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 // probe repair runs under a short budget and does not need HDR10+ status (an
 // unchecked HDR10+ file plays as HDR10), so it leaves the track unchecked for
 // the next library scan. It still checks that the file's data reaches its
-// end: a repair probe that skipped it would clear the damaged mark of a file
-// cut short.
+// end, and fails when that check settles nothing: a repair probe that skipped
+// it would clear the damaged mark of a file cut short.
 func probeFileStreamsOnly(ctx context.Context, ffprobePath string, filePath string) (*ProbeData, error) {
-	return probeMediaFile(ctx, ffprobePath, filePath, defaultProbeLimits, false)
+	limits := defaultProbeLimits
+	limits.unsettledTailFails = true
+	return probeMediaFile(ctx, ffprobePath, filePath, limits, false)
 }
 
 func probeFileWithin(ctx context.Context, ffprobePath string, filePath string, limits probeLimits) (*ProbeData, error) {

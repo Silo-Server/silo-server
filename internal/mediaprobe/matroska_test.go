@@ -191,3 +191,33 @@ func TestReadMatroskaTracksReportsReaderErrors(t *testing.T) {
 		t.Fatalf("err = %v for a truncated header, want ErrNotMatroska", err)
 	}
 }
+
+// Cues let FFmpeg seek to the end of a file without reading every cluster
+// before it; the scanner only checks that such a file reaches its end.
+func TestMatroskaHasCues(t *testing.T) {
+	cluster := ebmlElement(mkvIDCluster, make([]byte, 64))
+	cues := ebmlElement(mkvIDCues, make([]byte, 8))
+	seekHead := ebmlElement(mkvIDSeekHead, ebmlElement(mkvIDSeek,
+		ebmlElement(mkvIDSeekID, []byte{0x1C, 0x53, 0xBB, 0x6B}),
+		// Past the end of the file, as in a copy cut before its Cues.
+		ebmlUintElement(mkvIDSeekPosition, 1<<20),
+	))
+	for _, tc := range []struct {
+		name     string
+		segment  [][]byte
+		wantCues bool
+	}{
+		{"seek head names the Cues", [][]byte{seekHead, testTracksElement(), cluster}, true},
+		{"Cues ahead of the clusters", [][]byte{testTracksElement(), cues, cluster}, true},
+		{"no Cues named ahead of the clusters", [][]byte{testTracksElement(), cluster, cues}, false},
+	} {
+		file := append(ebmlHeader("matroska"), ebmlElement(mkvIDSegment, tc.segment...)...)
+		got, err := MatroskaHasCues(bytes.NewReader(file), int64(len(file)))
+		if err != nil || got != tc.wantCues {
+			t.Fatalf("%s: MatroskaHasCues = %v, %v; want %v", tc.name, got, err, tc.wantCues)
+		}
+	}
+	if _, err := MatroskaHasCues(bytes.NewReader(ebmlHeader("notmkv")), 64); !errors.Is(err, ErrNotMatroska) {
+		t.Fatalf("other doc type: err = %v", err)
+	}
+}

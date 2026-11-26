@@ -39,6 +39,8 @@ func writeHDR10PlusFFprobe(t *testing.T, streamsJSON, frameScript string) (ffpro
 		"echo \"$*\" >> '"+argsLog+"'\n"+
 		"case \" $* \" in\n"+
 		"*\" -show_frames \"*)\n"+frameScript+"\n;;\n"+
+		// The read of the file's end that checks it is whole.
+		"*\" -read_intervals \"*) printf '%s' '{\"packets\":[{\"stream_index\":1,\"pts_time\":\"5399.9\"}]}' ;;\n"+
 		"*) printf '%s' '"+streamsJSON+"' ;;\n"+
 		"esac\n")
 	return ffprobe, argsLog

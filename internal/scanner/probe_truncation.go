@@ -79,10 +79,16 @@ const codecTypeAudio = "audio"
 // timestamps start later, its real end is later still, so the check is only
 // more lenient.
 //
-// A read that fails or times out settles nothing, and the file is then
-// treated as whole. A storage error ffprobe reports fails the probe with an
-// error IsProbeRejection does not count against the file, so the probe is
-// retried later and a repair probe cannot clear a damaged mark on it.
+// A Matroska file without Cues is not checked: FFmpeg could only reach its
+// end by reading every cluster before it, and a file written without Cues,
+// such as a live recording, is usually whole.
+//
+// A read that fails or times out settles nothing. The library scan then
+// treats the file as whole; playback's repair probe (limits.unsettledTailFails)
+// fails instead, so it cannot clear a damaged mark without checking the file.
+// A storage error ffprobe reports fails the probe either way. None of these
+// errors is one IsProbeRejection counts against the file, so the probe is
+// retried later.
 func checkMediaReachesEnd(ctx context.Context, ffprobePath, filePath string, raw *ffprobeOutput, limits probeLimits) error {
 	start := parseFloat(raw.Format.StartTime)
 	end := parseFloat(raw.Format.Duration)
@@ -104,9 +110,17 @@ func checkMediaReachesEnd(ctx context.Context, ffprobePath, filePath string, raw
 	}
 	seek := max(start, end-truncatedTailSeconds)
 	mp4 := slices.Contains(strings.Split(raw.Format.FormatName, ","), "mov")
+	if !mp4 {
+		// A header that cannot be read leaves the question open, so the
+		// file is checked.
+		if hasCues, _, err := readMatroskaHeader(ctx, filePath, mediaprobe.MatroskaHasCues); err == nil && !hasCues {
+			slog.DebugContext(ctx, "scanner: Matroska file has no Cues; not checking that it reaches its end", "component", "scanner", "path", filePath)
+			return nil
+		}
+	}
 	err := readMediaTail(ctx, ffprobePath, filePath, seek, end, media, mp4, limits)
 	if !errors.Is(err, errTruncatedMedia) {
-		return ignoreUnsettledTail(ctx, filePath, err)
+		return ignoreUnsettledTail(ctx, filePath, err, limits)
 	}
 	switch again := readMediaTail(ctx, ffprobePath, filePath, seek, end, media, mp4, limits); {
 	case again == nil:
@@ -115,14 +129,14 @@ func checkMediaReachesEnd(ctx context.Context, ffprobePath, filePath string, raw
 	case errors.Is(again, errTruncatedMedia):
 		return err
 	default:
-		return ignoreUnsettledTail(ctx, filePath, again)
+		return ignoreUnsettledTail(ctx, filePath, again, limits)
 	}
 }
 
-// ignoreUnsettledTail returns err unless it is errTailUnsettled, which it
-// logs: such a read leaves the file treated as whole.
-func ignoreUnsettledTail(ctx context.Context, filePath string, err error) error {
-	if !errors.Is(err, errTailUnsettled) {
+// ignoreUnsettledTail returns err unless it is errTailUnsettled and limits
+// let such a read leave the file treated as whole, which it logs.
+func ignoreUnsettledTail(ctx context.Context, filePath string, err error, limits probeLimits) error {
+	if !errors.Is(err, errTailUnsettled) || limits.unsettledTailFails {
 		return err
 	}
 	slog.DebugContext(ctx, "scanner: could not read the end of the file to check it is whole", "component", "scanner", "path", filePath, "error", err)
@@ -157,7 +171,9 @@ func readMediaTail(ctx context.Context, ffprobePath, filePath string, seek, end 
 		return fmt.Errorf("reading the end of %s to check it is whole failed: %w", filePath, accessErr)
 	}
 	if err != nil {
-		return fmt.Errorf("%w: %w", errTailUnsettled, err)
+		// Its text, not the error: the exit error must not make
+		// IsProbeRejection blame the file.
+		return fmt.Errorf("%w: %s: %s", errTailUnsettled, filePath, err.Error())
 	}
 	var tail struct {
 		Packets *[]struct {
@@ -168,7 +184,7 @@ func readMediaTail(ctx context.Context, ffprobePath, filePath string, seek, end 
 		} `json:"packets"`
 	}
 	if err := json.Unmarshal(output, &tail); err != nil || tail.Packets == nil {
-		return fmt.Errorf("%w: ffprobe printed no packet list", errTailUnsettled)
+		return fmt.Errorf("%w: %s: ffprobe printed no packet list", errTailUnsettled, filePath)
 	}
 
 	// A subtitle cue that outlasts the cut says nothing about the audio and
