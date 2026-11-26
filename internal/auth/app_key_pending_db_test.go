@@ -73,7 +73,7 @@ func TestPendingKeyApproveDB(t *testing.T) {
 	if err := env.signIn.ApprovePendingKey(ctx, ownDevice, id, ActingProfile{}); err != nil {
 		t.Fatalf("approving an active key again: %v", err)
 	}
-	if err := env.signIn.ApprovePendingKey(ctx, ownDevice, enrolled.DeviceID, ActingProfile{}); !errors.Is(err, ErrSessionNotAllowed) {
+	if err := env.signIn.ApprovePendingKey(ctx, ownDevice, enrolled.DeviceID, ActingProfile{}); !errors.Is(err, ErrKeyDecidesItself) {
 		t.Fatalf("a session approving its own key = %v", err)
 	}
 }

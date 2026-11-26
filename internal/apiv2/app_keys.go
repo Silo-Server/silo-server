@@ -67,8 +67,6 @@ func (reg *Registry) credentialSessionProblem(ctx context.Context, claims *auth.
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, auth.ErrActingAsAccount):
-		return NewProblem(TypePermissionDenied, handlers.ActingAsAccountDetail)
 	case errors.Is(err, auth.ErrSessionNotAllowed):
 		return NewProblem(TypePermissionDenied, handlers.SessionNotAllowedDetail)
 	}
