@@ -166,7 +166,8 @@ func ActorFor(ctx context.Context, account int) (Actor, bool) {
 }
 
 // Waker tells an account's apps that its profiles changed on this server.
-// It reports whether a wake was queued for at least one device. A nil
+// It reports whether this call queued a wake for at least one device after
+// the edit committed; a wake queued earlier answers false. A nil
 // Waker queues nothing. Called with a request's context after an edit, it
 // wakes only when the edit committed (Request.FirstRevision).
 //
