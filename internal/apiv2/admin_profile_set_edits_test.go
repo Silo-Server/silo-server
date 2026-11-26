@@ -31,7 +31,8 @@ func adminProfileSetEditFixtureCases() []fixtureCase {
 			method:   http.MethodDelete, path: base + "/profile-set/hidden/6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11", headers: actingRequestAdmin,
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminProfileSetCleared"},
 		{name: "admin_profile_settled_edit_dismiss", operationID: "dismissAdminUserSettledProfileEdit",
-			method: http.MethodDelete, path: base + "/profiles/p-kid/settled-edits/max_content_rating", headers: actingRequestAdmin,
+			scenario: "The owner dismisses the record that the person's own change replaced the owner's value.",
+			method:   http.MethodDelete, path: base + "/profiles/p-kid/settled-edits/max_content_rating", headers: actingRequestAdmin,
 			status: http.StatusNoContent},
 	}
 }

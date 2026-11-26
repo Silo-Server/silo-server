@@ -181,18 +181,12 @@ func (h *ProfileHandler) actorUsername(ctx context.Context, seen map[int]string,
 func (h *ProfileHandler) describeEditValues(ctx context.Context, store userstore.UserStore, contract *settingscontract.Manifest,
 	row *userstore.ProfileSetRow, settings map[string]json.RawMessage, view *ProfileSetEditView,
 ) error {
-	key, isSetting := strings.CutPrefix(view.Field, profileedits.FieldSettingsPrefix)
-	if isSetting {
-		own, has := settings[key]
-		view.Inherited = !has
-		view.Value = own
-		if !has {
-			resolved, err := h.resolveProfileSetting(ctx, store, contract, row.ID, key)
-			if err != nil {
-				return err
-			}
-			view.Value = resolved
+	if key, isSetting := strings.CutPrefix(view.Field, profileedits.FieldSettingsPrefix); isSetting {
+		value, inherited, err := h.settingInForce(ctx, store, contract, row.ID, settings, key)
+		if err != nil {
+			return err
 		}
+		view.Value, view.Inherited = value, inherited
 	} else {
 		item := heldItemStored(contract, row, settings)
 		view.Value = overrideValue(&item, view.Field)
@@ -206,6 +200,18 @@ func (h *ProfileHandler) describeEditValues(ctx context.Context, store userstore
 		view.ClearApplies = clearApplies(applied, &row.Profile, view.Field)
 	}
 	return nil
+}
+
+// settingInForce is the profile's value of key: its own, or (inherited)
+// the value it resolves to without one.
+func (h *ProfileHandler) settingInForce(ctx context.Context, store userstore.UserStore, contract *settingscontract.Manifest,
+	profileID string, settings map[string]json.RawMessage, key string,
+) (json.RawMessage, bool, error) {
+	if own, has := settings[key]; has {
+		return own, false, nil
+	}
+	resolved, err := h.resolveProfileSetting(ctx, store, contract, profileID, key)
+	return resolved, true, err
 }
 
 // resolveProfileSetting is the value profileID inherits for key, as the

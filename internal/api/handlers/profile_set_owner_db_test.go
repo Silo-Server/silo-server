@@ -34,6 +34,49 @@ func overriddenFields(held ProfileSetHeld, syncID string) []string {
 	return out
 }
 
+// clearFixture is an account whose set has a main profile, a kid and a
+// guest, with the owner's rating, PIN and audio language on the kid and the
+// guest removed by the owner.
+type clearFixture struct {
+	*editsFixture
+	main, kid, guest setItem
+	kidID            string
+	audio            userstore.SettingIdentity
+	version          int
+	woken            int
+}
+
+func newClearFixture(t *testing.T) *clearFixture {
+	t.Helper()
+	c := &clearFixture{editsFixture: newEditsFixture(t), version: 1}
+	f := c.editsFixture
+	f.handler.ProfileSetWaker = func(context.Context, int) bool { c.woken++; return true }
+	c.main = newSetItem("Parent")
+	c.kid = newSetItem("Kid").with("max_content_rating", "PG").with("pin", map[string]any{"set": "1111"}).
+		with("settings", map[string]any{settingskeys.PlaybackAudioLanguage: "en"})
+	c.guest = newSetItem("Guest")
+	f.mustApply(t, setDoc(t, 1, c.main, c.kid, c.guest))
+	c.kidID = f.profileBySyncID(t, c.kid.syncID()).ID
+	f.update(t, f.admin(), c.kidID, ProfileUpdateRequest{MaxContentRating: new("G"), PIN: new("2222")}, true)
+	c.audio = userstore.SettingIdentity{Key: settingskeys.PlaybackAudioLanguage, Scope: "profile", ProfileID: c.kidID}
+	f.mustPutSetting(t, f.admin(), c.audio, `"fr"`)
+	guestID := f.profileBySyncID(t, c.guest.syncID()).ID
+	if err := f.handler.DeleteProfile(f.admin(), ProfileDeleteCommand{UserID: f.userID, ProfileID: guestID, AccountAdmin: true}); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func (c *clearFixture) clearField(field string) (ProfileSetClearResult, error) {
+	return c.handler.ClearProfileSetOverride(c.admin(), ProfileSetClearCommand{UserID: c.userID, ProfileID: c.kidID, Field: field})
+}
+
+func (c *clearFixture) nextSet(t *testing.T, items ...setItem) {
+	t.Helper()
+	c.version++
+	c.mustApply(t, setDoc(t, c.version, items...))
+}
+
 // TestClearProfileSetOverrideDB: the owner's Clear puts the set's value back
 // at once and hands the field back to the set; a hidden profile comes back
 // only once cleared, and only with the next set. It catches a clear that
@@ -41,123 +84,108 @@ func overriddenFields(held ProfileSetHeld, syncID string) []string {
 // forgets to tell the person's apps; and a PIN the server can't know
 // written from nothing.
 func TestClearProfileSetOverrideDB(t *testing.T) {
-	f := newEditsFixture(t)
-	woken := 0
-	f.handler.ProfileSetWaker = func(context.Context, int) bool { woken++; return true }
-	main := newSetItem("Parent")
-	kid := newSetItem("Kid").with("max_content_rating", "PG").with("pin", map[string]any{"set": "1111"}).
-		with("settings", map[string]any{settingskeys.PlaybackAudioLanguage: "en"})
-	guest := newSetItem("Guest")
-	f.mustApply(t, setDoc(t, 1, main, kid, guest))
-	kidID := f.profileBySyncID(t, kid.syncID()).ID
-	f.update(t, f.admin(), kidID, ProfileUpdateRequest{MaxContentRating: new("G"), PIN: new("2222")}, true)
-	audio := userstore.SettingIdentity{Key: settingskeys.PlaybackAudioLanguage, Scope: "profile", ProfileID: kidID}
-	f.mustPutSetting(t, f.admin(), audio, `"fr"`)
-	guestID := f.profileBySyncID(t, guest.syncID()).ID
-	if err := f.handler.DeleteProfile(f.admin(), ProfileDeleteCommand{UserID: f.userID, ProfileID: guestID, AccountAdmin: true}); err != nil {
-		t.Fatal(err)
-	}
-	clear := func(field string) (ProfileSetClearResult, error) {
-		return f.handler.ClearProfileSetOverride(f.admin(), ProfileSetClearCommand{UserID: f.userID, ProfileID: kidID, Field: field})
-	}
-	version := 1
-	nextSet := func(items ...setItem) {
-		t.Helper()
-		version++
-		f.mustApply(t, setDoc(t, version, items...))
-	}
-
-	t.Run("clearing a field puts the set's value back now, and the next set applies to it", func(t *testing.T) {
-		res, err := clear("max_content_rating")
-		if err != nil || !res.Applied || !res.WakeQueued || woken != 1 {
-			t.Fatalf("clear = %+v, %v; woken %d", res, err, woken)
-		}
-		held := f.held(t)
-		if p := f.profileBySyncID(t, kid.syncID()); p.MaxContentRating != "PG" || slices.Contains(overriddenFields(held, kid.syncID()), "max_content_rating") ||
-			slices.Contains(changedFields(held, kid.syncID()), "owner:max_content_rating") || held.EditsToken != "" {
-			t.Fatalf("after the clear: rating %q, held %+v", p.MaxContentRating, held)
-		}
-		nextSet(main, kid.with("max_content_rating", "R"), guest)
-		if p := f.profileBySyncID(t, kid.syncID()); p.MaxContentRating != "R" {
-			t.Fatalf("the next set left the cleared field at %q", p.MaxContentRating)
-		}
-		kid = kid.with("max_content_rating", "R")
-	})
-	t.Run("clearing a setting puts the set's value back now", func(t *testing.T) {
-		if res, err := clear("settings." + settingskeys.PlaybackAudioLanguage); err != nil || !res.Applied {
-			t.Fatalf("clear = %+v, %v", res, err)
-		}
-		value, err := f.store.GetSettingValue(t.Context(), audio)
-		if err != nil || value == nil || string(value.Value) != `"en"` || len(f.held(t).Overrides) != 1 {
-			t.Fatalf("setting after the clear = %+v, %v; overrides %+v", value, err, f.held(t).Overrides)
-		}
-	})
-	t.Run("clearing a PIN keeps the owner's PIN until a newer set sends one", func(t *testing.T) {
-		res, err := clear("pin")
-		if err != nil || res.Applied {
-			t.Fatalf("clear = %+v, %v", res, err)
-		}
-		if p := f.profileBySyncID(t, kid.syncID()); !pinMatches(p.PINHash, "2222") || len(f.held(t).Overrides) != 0 {
-			t.Fatalf("after the clear: PIN kept %v, overrides %+v", pinMatches(p.PINHash, "2222"), f.held(t).Overrides)
-		}
-		nextSet(main, kid.with("pin", map[string]any{"set": "3333"}), guest)
-		if p := f.profileBySyncID(t, kid.syncID()); !pinMatches(p.PINHash, "3333") {
-			t.Fatal("the newer set's PIN was not applied")
-		}
-	})
-	t.Run("a hidden profile comes back only with a set after the owner clears it", func(t *testing.T) {
-		nextSet(main, kid, guest)
-		if f.profileBySyncID(t, guest.syncID()) != nil {
-			t.Fatal("a set brought back a profile the owner removed")
-		}
-		hidden := ProfileSetClearCommand{UserID: f.userID, SyncID: guest.syncID()}
-		if res, err := f.handler.ClearProfileSetHidden(f.admin(), hidden); err != nil || res.Applied || !res.WakeQueued {
-			t.Fatalf("clear hidden = %+v, %v", res, err)
-		}
-		if f.profileBySyncID(t, guest.syncID()) != nil {
-			t.Fatal("clearing recreated the profile")
-		}
-		nextSet(main, kid, guest)
-		if f.profileBySyncID(t, guest.syncID()) == nil {
-			t.Fatal("the next set did not bring the profile back")
-		}
-		_, err := f.handler.ClearProfileSetHidden(f.admin(), hidden)
-		requireNotFound(t, "clear hidden again", err)
-	})
+	c := newClearFixture(t)
+	t.Run("clearing a field puts the set's value back now, and the next set applies to it", c.clearsAField)
+	t.Run("clearing a setting puts the set's value back now", c.clearsASetting)
+	t.Run("clearing a PIN keeps the owner's PIN until a newer set sends one", c.clearsAPIN)
+	t.Run("a hidden profile comes back only with a set after the owner clears it", c.clearsHidden)
 	t.Run("a clear of something not there is not found", func(t *testing.T) {
-		_, err := clear("max_content_rating")
+		_, err := c.clearField("max_content_rating")
 		requireNotFound(t, "clear again", err)
-		_, err = f.handler.ClearProfileSetOverride(f.admin(), ProfileSetClearCommand{UserID: f.userID, ProfileID: f.primary + "x", Field: "name"})
+		_, err = c.handler.ClearProfileSetOverride(c.admin(), ProfileSetClearCommand{UserID: c.userID, ProfileID: c.primary + "x", Field: "name"})
 		requireNotFound(t, "clear on no profile", err)
 	})
-	t.Run("the list names who changed a field before and after the app merges it", func(t *testing.T) {
-		f.update(t, f.admin(), kidID, ProfileUpdateRequest{MaxContentRating: new("G")}, true)
-		requireEdit(t, f, ProfileSetEditOverride, f.adminID)
-		f.update(t, f.account(), kidID, ProfileUpdateRequest{MaxContentRating: new("PG-13")}, false)
-		if e := requireEdit(t, f, ProfileSetEditUnmerged, f.userID); !e.ReplacedOwner {
-			t.Fatalf("unmerged edit %+v does not say it replaced the owner's", e)
-		}
-		version++
-		if _, err := f.applySeen(t, setDoc(t, version, main, kid.with("max_content_rating", "PG-13"), guest), f.held(t).EditsToken); err != nil {
-			t.Fatal(err)
-		}
-		requireEdit(t, f, ProfileSetEditSettled, f.userID)
-		dismiss := ProfileSetClearCommand{UserID: f.userID, ProfileID: kidID, Field: "max_content_rating"}
-		if err := f.handler.DismissProfileSetEdit(f.admin(), dismiss); err != nil {
-			t.Fatal(err)
-		}
-		if views, err := f.handler.ListProfileSetEdits(t.Context(), f.userID); err != nil || len(views) != 0 {
-			t.Fatalf("after dismissing: %+v, %v", views, err)
-		}
-		requireNotFound(t, "dismiss again", f.handler.DismissProfileSetEdit(f.admin(), dismiss))
-	})
+	t.Run("the list names who changed a field before and after the app merges it", c.listsWhoChanged)
 	t.Run("no row is recorded by a clear", func(t *testing.T) {
-		for _, e := range f.edits(t) {
-			if e.SyncID == kid.syncID() {
+		for _, e := range c.edits(t) {
+			if e.SyncID == c.kid.syncID() {
 				t.Fatalf("an edit row is left: %+v", e)
 			}
 		}
 	})
+}
+
+func (c *clearFixture) clearsAField(t *testing.T) {
+	res, err := c.clearField("max_content_rating")
+	if err != nil || !res.Applied || !res.WakeQueued || c.woken != 1 {
+		t.Fatalf("clear = %+v, %v; woken %d", res, err, c.woken)
+	}
+	held := c.held(t)
+	if p := c.profileBySyncID(t, c.kid.syncID()); p.MaxContentRating != "PG" || slices.Contains(overriddenFields(held, c.kid.syncID()), "max_content_rating") ||
+		slices.Contains(changedFields(held, c.kid.syncID()), "owner:max_content_rating") || held.EditsToken != "" {
+		t.Fatalf("after the clear: rating %q, held %+v", p.MaxContentRating, held)
+	}
+	c.kid = c.kid.with("max_content_rating", "R")
+	c.nextSet(t, c.main, c.kid, c.guest)
+	if p := c.profileBySyncID(t, c.kid.syncID()); p.MaxContentRating != "R" {
+		t.Fatalf("the next set left the cleared field at %q", p.MaxContentRating)
+	}
+}
+
+func (c *clearFixture) clearsASetting(t *testing.T) {
+	if res, err := c.clearField("settings." + settingskeys.PlaybackAudioLanguage); err != nil || !res.Applied {
+		t.Fatalf("clear = %+v, %v", res, err)
+	}
+	value, err := c.store.GetSettingValue(t.Context(), c.audio)
+	if err != nil || value == nil || string(value.Value) != `"en"` || len(c.held(t).Overrides) != 1 {
+		t.Fatalf("setting after the clear = %+v, %v; overrides %+v", value, err, c.held(t).Overrides)
+	}
+}
+
+func (c *clearFixture) clearsAPIN(t *testing.T) {
+	res, err := c.clearField("pin")
+	if err != nil || res.Applied {
+		t.Fatalf("clear = %+v, %v", res, err)
+	}
+	if p := c.profileBySyncID(t, c.kid.syncID()); !pinMatches(p.PINHash, "2222") || len(c.held(t).Overrides) != 0 {
+		t.Fatalf("after the clear: PIN kept %v, overrides %+v", pinMatches(p.PINHash, "2222"), c.held(t).Overrides)
+	}
+	c.nextSet(t, c.main, c.kid.with("pin", map[string]any{"set": "3333"}), c.guest)
+	if p := c.profileBySyncID(t, c.kid.syncID()); !pinMatches(p.PINHash, "3333") {
+		t.Fatal("the newer set's PIN was not applied")
+	}
+}
+
+func (c *clearFixture) clearsHidden(t *testing.T) {
+	c.nextSet(t, c.main, c.kid, c.guest)
+	if c.profileBySyncID(t, c.guest.syncID()) != nil {
+		t.Fatal("a set brought back a profile the owner removed")
+	}
+	hidden := ProfileSetClearCommand{UserID: c.userID, SyncID: c.guest.syncID()}
+	if res, err := c.handler.ClearProfileSetHidden(c.admin(), hidden); err != nil || res.Applied || !res.WakeQueued {
+		t.Fatalf("clear hidden = %+v, %v", res, err)
+	}
+	if c.profileBySyncID(t, c.guest.syncID()) != nil {
+		t.Fatal("clearing recreated the profile")
+	}
+	c.nextSet(t, c.main, c.kid, c.guest)
+	if c.profileBySyncID(t, c.guest.syncID()) == nil {
+		t.Fatal("the next set did not bring the profile back")
+	}
+	_, err := c.handler.ClearProfileSetHidden(c.admin(), hidden)
+	requireNotFound(t, "clear hidden again", err)
+}
+
+func (c *clearFixture) listsWhoChanged(t *testing.T) {
+	c.update(t, c.admin(), c.kidID, ProfileUpdateRequest{MaxContentRating: new("G")}, true)
+	requireEdit(t, c.editsFixture, ProfileSetEditOverride, c.adminID)
+	c.update(t, c.account(), c.kidID, ProfileUpdateRequest{MaxContentRating: new("PG-13")}, false)
+	if e := requireEdit(t, c.editsFixture, ProfileSetEditUnmerged, c.userID); !e.ReplacedOwner {
+		t.Fatalf("unmerged edit %+v does not say it replaced the owner's", e)
+	}
+	c.version++
+	if _, err := c.applySeen(t, setDoc(t, c.version, c.main, c.kid.with("max_content_rating", "PG-13"), c.guest), c.held(t).EditsToken); err != nil {
+		t.Fatal(err)
+	}
+	requireEdit(t, c.editsFixture, ProfileSetEditSettled, c.userID)
+	dismiss := ProfileSetClearCommand{UserID: c.userID, ProfileID: c.kidID, Field: "max_content_rating"}
+	if err := c.handler.DismissProfileSetEdit(c.admin(), dismiss); err != nil {
+		t.Fatal(err)
+	}
+	if views, err := c.handler.ListProfileSetEdits(t.Context(), c.userID); err != nil || len(views) != 0 {
+		t.Fatalf("after dismissing: %+v, %v", views, err)
+	}
+	requireNotFound(t, "dismiss again", c.handler.DismissProfileSetEdit(c.admin(), dismiss))
 }
 
 // requireEdit lists the account's edit records and requires exactly one, of

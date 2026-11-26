@@ -346,6 +346,7 @@
 ./internal/auth TestKeyOperationsRecheckActingProfileDB
 ./internal/auth TestExpiredPendingKeySweepDB
 ./internal/apiv2 TestKeyListRefusesDeviceSignInSessionDB
+./internal/apiv2 TestProfileSetNameConflictOnTheWireDB
 ./internal/auth TestRevokeOwnDeviceKeyRulesDB
 ./internal/auth TestKeySignInLocalPasswordsOffDB
 ./internal/auth TestKeySessionContinuesProviderChainDB

@@ -237,10 +237,10 @@ func TestAccountAdminProfileWritesFollowOwnerRules(t *testing.T) {
 			}
 			// The clears of a profile set's edits: this store keeps no sets, so
 			// an allowed clear gets past the rule and fails later.
-			clear := ProfileSetClearCommand{UserID: tc.target, ProfileID: "profile-1", Field: "name", SyncID: "6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11"}
-			_, overrideErr := h.ClearProfileSetOverride(ctx, clear)
-			_, hiddenErr := h.ClearProfileSetHidden(ctx, clear)
-			dismissErr := h.DismissProfileSetEdit(ctx, clear)
+			target := ProfileSetClearCommand{UserID: tc.target, ProfileID: "profile-1", Field: "name", SyncID: "6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11"}
+			_, overrideErr := h.ClearProfileSetOverride(ctx, target)
+			_, hiddenErr := h.ClearProfileSetHidden(ctx, target)
+			dismissErr := h.DismissProfileSetEdit(ctx, target)
 			for op, err := range map[string]error{"clear override": overrideErr, "clear hidden": hiddenErr, "dismiss": dismissErr} {
 				var apiErr *APIError
 				if forbidden := errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden; forbidden != (tc.want == http.StatusForbidden) {
