@@ -2404,6 +2404,9 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 	if !requireOwningProfile(w, r, session) {
 		return
 	}
+	if !requireGrantedAppOwnStream(w, r, h.PlanStoreV3, session.ID) {
+		return
+	}
 	if !requireNativeSessionAPIEgressV3(w, session) {
 		return
 	}
@@ -2545,6 +2548,9 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 		return
 	}
 	if !requireOwningProfile(w, r, session) {
+		return
+	}
+	if !requireGrantedAppOwnStream(w, r, h.PlanStoreV3, session.ID) {
 		return
 	}
 	if !requireNativeSessionAPIEgressV3(w, session) {

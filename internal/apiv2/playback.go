@@ -456,7 +456,7 @@ func (in PlaybackReplanBody) domain() playback.ReplanRequestV3 {
 	return playback.ReplanRequestV3{ProtocolVersion: in.ProtocolVersion, ClientFeatures: in.ClientFeatures, Operation: in.Operation, PlaybackAttemptID: in.PlaybackAttemptID, ReplanRequestID: in.ReplanRequestID, FailedPlanID: in.FailedPlanID, PlanAttemptID: in.PlanAttemptID, PlanAttemptKey: in.PlanAttemptKey, AttemptedPlanKeys: in.AttemptedPlanKeys, LocalMutations: in.LocalMutations, AttemptCount: in.AttemptCount, QualityPreference: in.QualityPreference, PositionSeconds: in.PositionSeconds, Metered: in.Metered, BandwidthEstimateKbps: in.BandwidthEstimateKbps, BandwidthEstimateSource: in.BandwidthEstimateSource, ObservedThroughputKbps: in.ObservedThroughputKbps, LearnedLimit: in.LearnedLimit, BandwidthCapKbps: in.BandwidthCapKbps, SelectedTracks: in.SelectedTracks, Failure: in.Failure, Capabilities: in.Capabilities, ClientPlaybackContext: in.ClientPlaybackContext}
 }
 func registerPlaybackRouteEvents(reg *Registry, op func(method, path, id string) Operation) {
-	Register(reg, withOrigins(op(http.MethodPost, "/route-events", opReportPlaybackRouteEvent), grantedPlayback), func(ctx context.Context, in *PlaybackRouteEventInput) (*PlaybackRouteEventOutput, error) {
+	Register(reg, withOrigins(op(http.MethodPost, "/route-events", opReportPlaybackRouteEvent), grantedOwnRouteEvent), func(ctx context.Context, in *PlaybackRouteEventInput) (*PlaybackRouteEventOutput, error) {
 		caller, p := reg.playbackCaller(ctx, in.PlaybackRequestHeaders, in.Body.InstallationID)
 		if p != nil {
 			return nil, p

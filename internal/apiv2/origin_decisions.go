@@ -184,6 +184,10 @@ var (
 		"sessionReachesOtherDevices in listHouseholdSessions: only the streams its own login session started", reasonPlayback))
 	grantedOwnStream = grantedApp(decideOwnOnly(
 		"mayActOnAttempt / refuseOtherStream: only a stream its own login session started", reasonPlayback))
+	grantedOwnStreamMedia = grantedApp(decideOwnOnly(
+		"grantedAppStreamError on the media routes: only the media of a stream its own login session started", reasonPlayback))
+	grantedOwnRouteEvent = grantedApp(decideOwnOnly(
+		"mayActOnAttempt in ReportRouteEventV2: only an attempt its own login session started", reasonPlayback))
 	grantedOwnStreamTicket = grantedApp(decideOwnOnly(
 		"refuseOtherStream on the control ticket: only a stream its own login session started", reasonPlayback))
 	grantedOwnSuggestion = grantedApp(decideOwnOnly(

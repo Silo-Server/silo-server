@@ -218224,8 +218224,9 @@
         "x-silo-class": "profile_scoped",
         "x-silo-origin-decisions": {
           "granted_app": {
-            "verdict": "allowed",
-            "reason": "starting playback and playing its own streams"
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "mayActOnAttempt in ReportRouteEventV2: only an attempt its own login session started"
           }
         },
         "x-silo-retry-safety": "non_retryable",
@@ -219367,8 +219368,9 @@
         "x-silo-class": "profile_scoped",
         "x-silo-origin-decisions": {
           "granted_app": {
-            "verdict": "allowed",
-            "reason": "starting playback and playing its own streams"
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "grantedAppStreamError on the media routes: only the media of a stream its own login session started"
           }
         },
         "x-silo-raw-protocol": "hls",
@@ -219584,8 +219586,9 @@
         "x-silo-class": "profile_scoped",
         "x-silo-origin-decisions": {
           "granted_app": {
-            "verdict": "allowed",
-            "reason": "starting playback and playing its own streams"
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "grantedAppStreamError on the media routes: only the media of a stream its own login session started"
           }
         },
         "x-silo-raw-protocol": "hls",
@@ -219963,8 +219966,9 @@
         "x-silo-class": "profile_scoped",
         "x-silo-origin-decisions": {
           "granted_app": {
-            "verdict": "allowed",
-            "reason": "starting playback and playing its own streams"
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "grantedAppStreamError on the media routes: only the media of a stream its own login session started"
           }
         },
         "x-silo-raw-protocol": "hls",
@@ -241335,8 +241339,9 @@
         "x-silo-class": "profile_scoped",
         "x-silo-origin-decisions": {
           "granted_app": {
-            "verdict": "allowed",
-            "reason": "starting playback and playing its own streams"
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "grantedAppStreamError on the media routes: only the media of a stream its own login session started"
           }
         },
         "x-silo-raw-protocol": "media-bytes",
@@ -241631,8 +241636,9 @@
         "x-silo-class": "profile_scoped",
         "x-silo-origin-decisions": {
           "granted_app": {
-            "verdict": "allowed",
-            "reason": "starting playback and playing its own streams"
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "grantedAppStreamError on the media routes: only the media of a stream its own login session started"
           }
         },
         "x-silo-raw-protocol": "media-bytes",
@@ -241919,8 +241925,9 @@
         "x-silo-class": "profile_scoped",
         "x-silo-origin-decisions": {
           "granted_app": {
-            "verdict": "allowed",
-            "reason": "starting playback and playing its own streams"
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "grantedAppStreamError on the media routes: only the media of a stream its own login session started"
           }
         },
         "x-silo-raw-protocol": "subtitle-sidecar",
@@ -242175,8 +242182,9 @@
         "x-silo-class": "profile_scoped",
         "x-silo-origin-decisions": {
           "granted_app": {
-            "verdict": "allowed",
-            "reason": "starting playback and playing its own streams"
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "grantedAppStreamError on the media routes: only the media of a stream its own login session started"
           }
         },
         "x-silo-raw-protocol": "subtitle-sidecar",
@@ -242407,8 +242415,9 @@
         "x-silo-class": "profile_scoped",
         "x-silo-origin-decisions": {
           "granted_app": {
-            "verdict": "allowed",
-            "reason": "starting playback and playing its own streams"
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "grantedAppStreamError on the media routes: only the media of a stream its own login session started"
           }
         },
         "x-silo-service-backed": true

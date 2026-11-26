@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -64,4 +65,46 @@ func refuseOtherStream(ctx context.Context, caller PlaybackCaller, record *playb
 		return mayActOnAttempt(ctx, record.LoginSessionID, caller)
 	}
 	return nil
+}
+
+// grantedAppStreamError refuses a session another app's key opened the media
+// of a playback session its own login session did not start: the media
+// routes otherwise check only the account and profile, so such a session that
+// learned another device's playback session id could fetch its stream,
+// manifest, segments and subtitles. The attempt row records the login session
+// that started it; a missing row (a stream with no recorded login session)
+// refuses such a session too, and a failed read is unavailable. Every other
+// caller, a stream reference included, passes without a read.
+func grantedAppStreamError(ctx context.Context, store playback.PlanStoreV3, sessionID string) error {
+	claims := apimw.GetClaims(ctx)
+	if !claims.IsGrantedApp() {
+		return nil
+	}
+	if store == nil {
+		return apiError(http.StatusForbidden, "forbidden", SessionNotAllowedDetail)
+	}
+	record, err := store.GetAttempt(ctx, sessionID)
+	switch {
+	case errors.Is(err, playback.ErrSessionNotFound):
+		return apiError(http.StatusForbidden, "forbidden", SessionNotAllowedDetail)
+	case err != nil:
+		return apiError(http.StatusServiceUnavailable, "service_unavailable", "Failed to load playback session")
+	case record.LoginSessionID != claims.SessionID:
+		return apiError(http.StatusForbidden, "forbidden", SessionNotAllowedDetail)
+	}
+	return nil
+}
+
+// requireGrantedAppOwnStream writes grantedAppStreamError's refusal and
+// reports whether the request may go on.
+func requireGrantedAppOwnStream(w http.ResponseWriter, r *http.Request, store playback.PlanStoreV3, sessionID string) bool {
+	err := grantedAppStreamError(r.Context(), store, sessionID)
+	if err == nil {
+		return true
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
+	}
+	return false
 }

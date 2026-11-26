@@ -818,6 +818,11 @@ func (h *PlaybackHandler) ReportRouteEventV2(ctx context.Context, caller Playbac
 		(identity.SessionID == "" && !terminalStartRouteEventV3(event)) {
 		return playbackOperationError(http.StatusForbidden, "forbidden", "Route event does not belong to this profile")
 	}
+	// A session another app opened reports only on attempts its own login
+	// session started, as it acts only on those.
+	if err := mayActOnAttempt(ctx, identity.LoginSessionID, caller); err != nil {
+		return err
+	}
 	event.Diagnostics = sanitizeDiagnosticsV3(event.Diagnostics)
 	record := playback.RouteEventRecordV3{RouteEventV3: event, EventID: command.EventID, UserID: caller.UserID, ProfileID: caller.ProfileID, ClientName: caller.ClientName, ClientVersion: caller.ClientVersion, ClientBuild: caller.ClientBuild, ClientChannel: caller.ClientChannel, ClientModel: event.Diagnostics["device_model"]}
 	if event.Event == playback.RouteEventPlanSummaryV3 {

@@ -193,6 +193,9 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	if !requireOwningProfile(w, r, session) {
 		return
 	}
+	if !requireGrantedAppOwnStream(w, r, h.PlanStoreV3, session.ID) {
+		return
+	}
 
 	file, err := h.fileResolver.GetByID(r.Context(), session.MediaFileID)
 	if err != nil {
@@ -324,6 +327,9 @@ func (h *StreamHandler) loadSidecarSession(ctx context.Context, reference, sessi
 	}
 	if profileID := apimw.GetProfileID(ctx); profileID != "" && session.ProfileID != "" && profileID != session.ProfileID {
 		return nil, nil, apiError(http.StatusForbidden, "forbidden", "Session belongs to another profile")
+	}
+	if err := grantedAppStreamError(ctx, h.PlanStoreV3, session.ID); err != nil {
+		return nil, nil, err
 	}
 	return session, claims, nil
 }

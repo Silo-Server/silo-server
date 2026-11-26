@@ -1557,8 +1557,8 @@ func (s *claimRacePlanStoreV3) ClaimStopFinalization(ctx context.Context, sessio
 	return s.MemoryPlanStoreV3.ClaimStopFinalization(ctx, sessionID, lease)
 }
 
-// TestPlaybackMutationsV2KeepAnotherAppToItsStreams: progress, stop and
-// replan check the account and profile, so a session another app opened,
+// TestPlaybackMutationsV2KeepAnotherAppToItsStreams: progress, stop, replan
+// and route events check the account and profile, so a session another app opened,
 // acting as the same profile, could move or end a stream the person's other
 // device started once it knew the id. Such a caller is refused another login
 // session's stream and one with no recorded login session, and acts on the
@@ -1596,12 +1596,24 @@ func TestPlaybackMutationsV2KeepAnotherAppToItsStreams(t *testing.T) {
 	replan := PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: attemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto", Failure: playback.FailureV3{Classification: "network_error"}, Capabilities: start.Capabilities, ClientPlaybackContext: start.ClientPlaybackContext}, Digest: "d"}
 	_, err = f.handler.ReplanPlaybackV2(f.ctx, app, phone.ID, replan)
 	assertPlaybackOperationError(t, err, http.StatusForbidden, "forbidden")
+	// A route event names the stream it reports on, so it is held to the
+	// same rule.
+	routeEvent := func() PlaybackRouteEventCommand {
+		return PlaybackRouteEventCommand{EventID: uuid.NewString(), Event: playback.RouteEventV3{
+			ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: attemptID, SessionID: phone.ID, Event: "first_frame",
+			Diagnostics: map[string]string{"decoder_name": "synthetic"},
+		}}
+	}
+	assertPlaybackOperationError(t, f.handler.ReportRouteEventV2(f.ctx, app, routeEvent()), http.StatusForbidden, "forbidden")
 
 	own := app
 	own.LoginSessionID = "login-phone"
 	asked = 0
 	if _, err := f.handler.ApplyProgressV2(f.ctx, own, phone.ID, PlaybackProgressCommand{Sequence: 1, Position: 10}); err != nil {
 		t.Fatalf("progress on the caller's own stream = %v", err)
+	}
+	if err := f.handler.ReportRouteEventV2(f.ctx, own, routeEvent()); err != nil {
+		t.Fatalf("route event on the caller's own stream = %v", err)
 	}
 	if asked != 0 {
 		t.Fatalf("the rule was asked %d times for the caller's own stream", asked)
@@ -1631,4 +1643,87 @@ func TestReplanV2FailsClosedForAnotherApp(t *testing.T) {
 	command := PlaybackReplanCommand{Request: playback.ReplanRequestV3{PlaybackAttemptID: uuid.NewString(), ReplanRequestID: uuid.NewString()}}
 	_, err := f.handler.ReplanPlaybackV2(f.ctx, app, f.session.ID, command)
 	assertPlaybackOperationError(t, err, http.StatusServiceUnavailable, "unavailable")
+}
+
+// TestMediaRoutesKeepAnotherAppToItsStreams: the media routes check the
+// account and profile only, so a session another app's key opened that held
+// another device's playback session id could fetch that stream's bytes,
+// manifest, segments, subtitles and fonts. Such a session is refused another
+// login session's stream and one with no recorded login session, and reaches
+// its own; the person's own session is not asked. Catches the tie to the
+// stream's login session going missing on any one of the media routes.
+func TestMediaRoutesKeepAnotherAppToItsStreams(t *testing.T) {
+	manager := playback.NewSessionManager(0, 0)
+	session, err := manager.StartSession(1, "profile-1", 100, playback.PlayTranscode, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := playback.NewMemoryPlanStoreV3()
+	handler := newKeyedPlaybackHandler(manager)
+	handler.PlanStoreV3 = store
+	stream := NewStreamHandler(manager, testPlaybackFileResolver{})
+	stream.TM = handler.TranscodeManager()
+	stream.PlanStoreV3 = store
+	params := map[string]string{"session_id": session.ID, "track": "0", "name": "segment0.m4s"}
+	caller := func(loginSession string, kind auth.SessionKind) context.Context {
+		ctx := apimw.SetClaims(context.Background(), &auth.Claims{UserID: 1, Role: "user", TokenType: auth.TokenTypeAccess, SessionID: loginSession, SessionKind: kind})
+		return apimw.SetProfileID(ctx, "profile-1")
+	}
+	// answer is the route's outcome: refused as another app's, and whether
+	// the media was served at all.
+	answer := func(name string, ctx context.Context) (refused, served bool) {
+		t.Helper()
+		if name == "fonts" {
+			_, err := stream.SubtitleFonts(ctx, SubtitleFontRequest{SessionID: session.ID, Track: "0", Query: url.Values{}})
+			var apiErr *APIError
+			return errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden && apiErr.Message == SessionNotAllowedDetail, err == nil
+		}
+		serve := map[string]http.HandlerFunc{
+			"manifest": handler.HandleGetTranscodeManifest,
+			"segment":  handler.HandleGetTranscodeSegment,
+			"stream":   stream.HandleStream,
+			"subtitle": stream.HandleSubtitle,
+		}[name]
+		req := playbackTestRequest(http.MethodGet, "/", nil, params)
+		claims := apimw.GetClaims(ctx)
+		reqCtx := apimw.SetProfileID(apimw.SetClaims(req.Context(), claims), "profile-1")
+		rr := httptest.NewRecorder()
+		serve(rr, req.WithContext(reqCtx))
+		return rr.Code == http.StatusForbidden && strings.Contains(rr.Body.String(), SessionNotAllowedDetail), rr.Code < 400
+	}
+	refused := func(name string, ctx context.Context) bool {
+		t.Helper()
+		r, _ := answer(name, ctx)
+		return r
+	}
+	routes := []string{"manifest", "segment", "stream", "subtitle", "fonts"}
+	// No attempt row yet: a stream with no recorded login session is never
+	// served to such a session (the HLS routes answer 404 for it before
+	// the tie; the others refuse it).
+	for _, name := range routes {
+		if r, served := answer(name, caller("login-app", auth.SessionKindGrantedApp)); served || (!r && name != "manifest" && name != "segment") {
+			t.Fatalf("%s: another app reached a stream with no recorded login session", name)
+		}
+	}
+	if err := store.SaveAttempt(context.Background(), playback.AttemptRecordV3{
+		PlaybackAttemptID: uuid.NewString(), SessionID: session.ID, UserID: 1, ProfileID: "profile-1",
+		RequestedMediaFileID: 100, EffectiveMediaFileID: 100, ExpiresAt: time.Now().Add(time.Hour), LoginSessionID: "login-phone",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range routes {
+		// This fixture's sidecar routes (subtitle, fonts) load no session
+		// once the attempt row exists (404 for every caller); they refused
+		// such a session above, before the row, at the same check.
+		sidecar := name == "subtitle" || name == "fonts"
+		if r, served := answer(name, caller("login-app", auth.SessionKindGrantedApp)); served || (!r && !sidecar) {
+			t.Fatalf("%s: another app reached another device's stream", name)
+		}
+		if refused(name, caller("login-phone", auth.SessionKindGrantedApp)) {
+			t.Fatalf("%s: another app was refused its own stream", name)
+		}
+		if refused(name, caller("login-tv", "")) {
+			t.Fatalf("%s: the person's own session was refused", name)
+		}
+	}
 }
