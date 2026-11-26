@@ -108,9 +108,11 @@ it, and the account then chooses a new one under the policy. A backup
 restore never weakens the live policy.
 
 A refused password returns `422 validation_failed` with one field error at the password member
-(`body.password`, or `body.new_password` for a password change). Its `code` names the first rule
-the password breaks, in the order below, and its `detail` is the English sentence for it, such as
-"Use at least 12 characters." A translated client shows `error.field.<code>` instead.
+(`body.password`, or `body.new_password` for a password change). Its `code` names a rule the
+password breaks, and its `detail` is the English sentence for it, such as "Use at least 12
+characters." When a password breaks several rules, the code names one of them, so a client should
+not rely on which. A translated client shows `error.field.<code>` instead. A password outside the
+schema's 8 to 72 characters is refused before the policy runs, with code `out_of_range`.
 
 | Code | Rule broken |
 | --- | --- |
