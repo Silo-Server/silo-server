@@ -641,6 +641,12 @@
       "value": "Срок действия сеанса истёк. Войдите снова."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Пока вход по паролю выключен, должен оставаться включённым хотя бы один провайдер входа, доступный пользователям. Для OpenID Connect также нужен публичный URL сервера."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -94926,6 +94932,20 @@
       "value": "Сначала включите провайдер входа. Если вход по паролю выключен и ни один провайдер не включён, войти смогут только аварийные администраторы."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Сначала задайте публичный URL сервера. Без него провайдер "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " не сможет выполнять вход пользователей, и при выключенном входе по паролю войти смогут только администраторы с аварийным доступом."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -95016,6 +95036,304 @@
       "value": "Разрешить пользователям создавать API-ключи"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Выключить вход по паролю"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Входить с паролем смогут только администраторы с аварийным доступом. Все остальные будут входить через провайдер "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Провайдер "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " создаёт аккаунты при первом входе, поэтому если кто-то из этих пользователей войдёт через этого провайдера до того, как вы привяжете аккаунт, будет создан новый, отдельный аккаунт."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Привяжите каждый из них к аккаунту "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " на его странице в разделе «Пользователи»."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " аккаунт не может войти, пока администратор его не привяжет"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " аккаунта не могут войти, пока администратор их не привяжет"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " аккаунтов не могут войти, пока администратор их не привяжет"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " аккаунта не могут войти, пока администратор их не привяжет"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Не удалось проверить, каких аккаунтов это касается. Выключить вход по паролю всё равно можно."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Проверка, кто входит по паролю"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Когда провайдер "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " подтверждает при входе один из этих адресов электронной почты, Silo подключает этого пользователя к его аккаунту."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " аккаунт подключится по адресу электронной почты"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " аккаунта подключатся по адресу электронной почты"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " аккаунтов подключатся по адресу электронной почты"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " аккаунта подключатся по адресу электронной почты"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показать ещё "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показать ещё "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показать ещё "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показать ещё "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Не удалось загрузить другие аккаунты. Повторите попытку."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "После этого все аккаунты по-прежнему смогут входить."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Администратор"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Сопоставление по почте выключено"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Нет адреса почты"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Это действие никого не выводит из системы. Пользователи, которые уже вошли, останутся в системе, их API-ключи продолжат работать, и они по-прежнему смогут подтверждать вход на новых устройствах. Чтобы завершить сеансы пользователя, откройте его страницу в разделе «"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Пользователи"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "»."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Выключить вход по паролю?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Посмотреть все аккаунты в разделе «Пользователи»"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -95058,6 +95376,28 @@
     {
       "type": 0,
       "value": "»."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Вход по паролю выключен, поэтому все, кроме администраторов с аварийным доступом, входят через провайдер "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Сначала снова включите вход по паролю, затем выключите провайдер "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -161535,6 +161875,12 @@
       "value": "Эл. почта или имя пользователя"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Введите базовый URL сервера Emby, из которого нужно импортировать данные."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -161545,6 +161891,12 @@
     {
       "type": 0,
       "value": "Оставьте пустым, если у аккаунта нет пароля"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL сервера Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -161695,6 +162047,12 @@
     {
       "type": 0,
       "value": "Аккаунт Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL сервера"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -161992,7 +162350,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect или сохранённый сервер"
+      "value": "Emby Connect, URL сервера или сохранённый сервер"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

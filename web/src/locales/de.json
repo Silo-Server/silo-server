@@ -641,6 +641,12 @@
       "value": "Deine Sitzung ist abgelaufen. Melde dich erneut an."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Solange die Anmeldung mit Passwort deaktiviert ist, muss ein Anmeldeanbieter aktiviert bleiben, den Personen nutzen können. OpenID Connect benötigt außerdem die öffentliche URL des Servers."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -78943,6 +78949,20 @@
       "value": "Aktiviere zuerst einen Anmeldeanbieter. Wäre die Anmeldung mit Passwort aus und kein Anbieter aktiv, könnten sich nur Notfall-Admins anmelden."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Lege zuerst die öffentliche URL des Servers fest. Ohne sie kann "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " niemanden anmelden, sodass sich bei deaktivierter Anmeldung mit Passwort nur Notfall-Admins anmelden könnten."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -79033,6 +79053,234 @@
       "value": "Benutzern das Erstellen von API-Schlüsseln erlauben"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Anmeldung mit Passwort deaktivieren"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Nur Notfall-Admins melden sich dann mit einem Passwort an. Alle anderen melden sich mit "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " an."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " erstellt Konten bei der ersten Anmeldung. Meldet sich eine dieser Personen damit an, bevor du sie verknüpfst, erhält sie ein neues, separates Konto."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Verknüpfe jedes davon auf seiner Seite unter „Benutzer“ mit einem "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "-Konto."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " Konto kann sich erst anmelden, wenn ein Admin es verknüpft"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " Konten können sich erst anmelden, wenn ein Admin sie verknüpft"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Es konnte nicht geprüft werden, welche Konten betroffen sind. Du kannst die Anmeldung mit Passwort trotzdem deaktivieren."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Es wird geprüft, wer sich mit einem Passwort anmeldet"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Wenn "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " bei der Anmeldung eine dieser E-Mail-Adressen bestätigt, verbindet Silo die Person mit ihrem Konto."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " Konto wird per E-Mail verbunden"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " Konten werden per E-Mail verbunden"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " weiteres anzeigen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " weitere anzeigen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Weitere Konten konnten nicht geladen werden. Versuche es erneut."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Alle Konten können sich danach weiterhin anmelden."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Admin"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "E-Mail-Abgleich ist deaktiviert"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Keine E-Mail"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Dadurch wird niemand abgemeldet. Wer bereits angemeldet ist, bleibt angemeldet, API-Schlüssel funktionieren weiter, und neue Geräte können weiterhin freigegeben werden. Um jemanden abzumelden, beende die Sitzungen der Person auf ihrer Seite unter "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Benutzer"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Anmeldung mit Passwort deaktivieren?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Alle Konten unter „Benutzer“ ansehen"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -79071,6 +79319,28 @@
     {
       "type": 0,
       "value": " konnte nicht geändert werden."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Die Anmeldung mit Passwort ist deaktiviert, daher melden sich alle außer Notfall-Admins mit "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " an. Aktiviere zuerst die Anmeldung mit Passwort wieder und deaktiviere dann "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -135606,6 +135876,12 @@
       "value": "E-Mail oder Benutzername"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Gib die Basis-URL des Emby-Servers ein, aus dem du importieren möchtest."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -135616,6 +135892,12 @@
     {
       "type": 0,
       "value": "Leer lassen, wenn das Konto keines hat"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby-Server-URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -135766,6 +136048,12 @@
     {
       "type": 0,
       "value": "Plex-Konto"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Server-URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -136063,7 +136351,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect oder gespeicherter Server"
+      "value": "Emby Connect, Server-URL oder gespeicherter Server"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

@@ -641,6 +641,12 @@
       "value": "Teie seanss on aegunud. Logige uuesti sisse."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Kui parooliga sisselogimine on välja lülitatud, peab sisse jääma sisselogimise teenusepakkuja, mida kasutajad saavad kasutada. OpenID Connect vajab lisaks serveri avalikku URL-i."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -79747,6 +79753,20 @@
       "value": "Lülitage kõigepealt sisse sisselogimise teenusepakkuja. Kui parooliga sisselogimine on väljas ja ükski teenusepakkuja pole sees, saaksid sisse logida ainult hädaolukorra administraatorid."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Määrake esmalt serveri avalik URL. Teenusepakkuja "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ei saa ilma selleta kedagi sisse logida, nii et kui parooliga sisselogimine on väljas, saaksid sisse logida ainult hädajuurdepääsuga administraatorid."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -79837,6 +79857,238 @@
       "value": "Luba kasutajatel API-võtmeid luua"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Lülita parooliga sisselogimine välja"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Parooliga saavad sisse logida ainult hädajuurdepääsuga administraatorid. Kõik teised logivad sisse teenusepakkuja "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " kaudu."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Teenusepakkuja "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " loob kontod esmakordsel sisselogimisel, nii et kui mõni neist kasutajatest logib selle kaudu sisse enne, kui olete tema konto sidunud, saab ta uue, eraldi konto."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Siduge igaüks neist teenusepakkuja "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " kontoga selle lehel jaotises „Kasutajad“."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konto ei saa sisse logida, kuni administraator selle seob"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " kontot ei saa sisse logida, kuni administraator need seob"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Ei õnnestunud kontrollida, milliseid kontosid see mõjutab. Saate selle siiski välja lülitada."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Parooliga sisselogivate kontode kontrollimine"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Kui teenusepakkuja "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " kinnitab sisselogimisel mõne neist e-posti aadressidest, ühendab Silo selle kasutaja tema kontoga."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konto ühendatakse e-posti kaudu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " kontot ühendatakse e-posti kaudu"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita veel "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita veel "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Rohkemate kontode laadimine ebaõnnestus. Proovige uuesti."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Pärast seda saavad kõik kontod endiselt sisse logida."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administraator"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "E-posti sobitamine on väljas"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "E-post puudub"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "See ei logi kedagi välja. Juba sisse logitud kasutajad jäävad sisselogituks, nende API-võtmed töötavad edasi ja nad saavad endiselt uusi seadmeid kinnitada. Kellegi väljalogimiseks lõpetage tema seansid tema lehel jaotises "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Kasutajad"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Kas lülitada parooliga sisselogimine välja?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Vaata kõiki kontosid jaotises „Kasutajad“"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -79879,6 +80131,28 @@
     {
       "type": 0,
       "value": " muutmine ebaõnnestus."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Parooliga sisselogimine on väljas, seega logivad kõik peale hädajuurdepääsuga administraatorite sisse teenusepakkuja "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " kaudu. Lülitage esmalt parooliga sisselogimine uuesti sisse ja seejärel lülitage teenusepakkuja "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " välja."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -137043,6 +137317,12 @@
       "value": "E-post või kasutajanimi"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Sisestage selle Emby serveri baas-URL, kust soovite importida."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -137053,6 +137333,12 @@
     {
       "type": 0,
       "value": "Jätke tühjaks, kui kontol parooli pole"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby serveri URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -137203,6 +137489,12 @@
     {
       "type": 0,
       "value": "Plexi konto"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Serveri URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -137500,7 +137792,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect või salvestatud server"
+      "value": "Emby Connect, serveri URL või salvestatud server"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

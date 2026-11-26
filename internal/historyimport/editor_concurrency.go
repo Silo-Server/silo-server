@@ -34,13 +34,20 @@ func checkEditorRevision(actual, expected int64) error {
 	}
 	return nil
 }
+func validateServerURL(field, rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Hostname() == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || strings.Contains(rawURL, "#") {
+		return fmt.Errorf("%w: %s must be an HTTP or HTTPS URL without credentials, a query, or a fragment", ErrInvalidInput, field)
+	}
+	return nil
+}
+
 func validateSource(source Source) error {
 	if strings.TrimSpace(source.Name) == "" {
 		return fmt.Errorf("%w: name is required", ErrInvalidInput)
 	}
-	parsed, err := url.Parse(source.BaseURL)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
-		return fmt.Errorf("%w: base_url must be an HTTP or HTTPS URL without credentials, a query, or a fragment", ErrInvalidInput)
+	if err := validateServerURL("base_url", source.BaseURL); err != nil {
+		return err
 	}
 	switch source.SourceType {
 	case SourceTypeEmby, SourceTypeJellyfin, SourceTypePlex:

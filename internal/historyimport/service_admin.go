@@ -12,7 +12,7 @@ import (
 // AuthenticatePlex exchanges Plex username/password for an auth token via plex.tv.
 func (s *Service) AuthenticatePlex(ctx context.Context, username, password string) (string, error) {
 	if username == "" || password == "" {
-		return "", fmt.Errorf("username and password are required")
+		return "", fmt.Errorf("%w: username and password are required", ErrInvalidInput)
 	}
 	return s.plex.Authenticate(ctx, username, password)
 }

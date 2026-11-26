@@ -493,6 +493,7 @@ export interface CreateHistoryImportRunRequest {
   connect_session_id?: string;
   server_id?: string;
   source_id?: number;
+  emby_base_url?: string;
   username?: string;
   password?: string;
   jellyfin_base_url?: string;

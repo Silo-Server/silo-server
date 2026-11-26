@@ -9124,7 +9124,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Describe what an import run may rely on, including Plex connection fallback. */
+    /** Describe what an import run may rely on, including Plex connection fallback and direct Emby server URLs. */
     get: operations["getHistoryImportCapability"];
     put?: never;
     post?: never;
@@ -29650,6 +29650,11 @@ export interface components {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       /**
+       * @description Whether emby_base_url is honored for direct Emby server sign-in
+       * @example true
+       */
+      emby_custom_server: boolean;
+      /**
        * Format: int64
        * @description How many Plex addresses one run races, counting plex_base_url
        * @example 8
@@ -29785,6 +29790,12 @@ export interface components {
       connect_session_id?: string;
       /**
        * Format: uri-reference
+       * @description Emby: the server address for a direct sign-in
+       * @example https://emby.example.test
+       */
+      emby_base_url?: string;
+      /**
+       * Format: uri-reference
        * @description Jellyfin: the server address
        * @example https://jellyfin.example.test
        */
@@ -29793,7 +29804,7 @@ export interface components {
       jellyfin_password?: string;
       /** @description Jellyfin: the user name */
       jellyfin_username?: string;
-      /** @description Emby: the source server password when importing from a configured source; empty for an account without one */
+      /** @description Emby: the source server password when importing from a configured source or emby_base_url; empty for an account without one */
       password?: string;
       /** @description Plex: the plex.tv account token, for watchlist import alongside a server token */
       plex_account_token?: string;
@@ -29833,7 +29844,7 @@ export interface components {
        * @example 1
        */
       source_id?: string;
-      /** @description Emby: the source server user name when importing from a configured source */
+      /** @description Emby: the source server user name when importing from a configured source or emby_base_url */
       username?: string;
     };
     HistoryImportSource: {

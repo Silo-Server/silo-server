@@ -641,6 +641,12 @@
       "value": "⟦Ýöûŕ šéššîöñ éẋþîŕéđ. Šîĝñ îñ åĝåîñ.~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "⟦Ŵĥîļé þåššŵöŕđ šîĝñ-îñ îš öƒƒ, å šîĝñ-îñ þŕöṽîđéŕ þéöþļé çåñ ûšé ĥåš ţö šţåý öñ. ÖþéñÎĐ Çöññéçţ åļšö ñééđš ţĥé šéŕṽéŕ'š þûƀļîç ÛŔĻ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -86139,6 +86145,20 @@
       "value": "⟦Ţûŕñ öñ å šîĝñ-îñ þŕöṽîđéŕ ƒîŕšţ. Ŵîţĥ þåššŵöŕđ šîĝñ-îñ öƒƒ åñđ ñö þŕöṽîđéŕ öñ, öñļý ƀŕéåķ-ĝļåšš åđɱîñš çöûļđ šîĝñ îñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "⟦Šéţ ţĥé šéŕṽéŕ'š þûƀļîç ÛŔĻ ƒîŕšţ. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " çåñ'ţ šîĝñ åñýöñé îñ ŵîţĥöûţ îţ, šö ŵîţĥ þåššŵöŕđ šîĝñ-îñ öƒƒ öñļý ƀŕéåķ-ĝļåšš åđɱîñš çöûļđ šîĝñ îñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -86229,6 +86249,262 @@
       "value": "⟦Ļéţ ûšéŕš çŕéåţé ÅÞÎ ķéýš~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "⟦Ţûŕñ öƒƒ þåššŵöŕđ šîĝñ-îñ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "⟦Öñļý ƀŕéåķ-ĝļåšš åđɱîñš ŵîļļ šîĝñ îñ ŵîţĥ å þåššŵöŕđ. Éṽéŕýöñé éļšé šîĝñš îñ ŵîţĥ "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " çŕéåţéš åççöûñţš åţ ƒîŕšţ šîĝñ-îñ, šö îƒ öñé öƒ ţĥéšé þéöþļé šîĝñš îñ ŵîţĥ îţ ƀéƒöŕé ýöû ļîñķ ţĥéɱ, ţĥéý ĝéţ å ñéŵ, šéþåŕåţé åççöûñţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "⟦Ļîñķ éåçĥ öñé ţö å "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " åççöûñţ ƒŕöɱ îţš þåĝé îñ Ûšéŕš.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " åççöûñţ çåñ'ţ šîĝñ îñ ûñţîļ åñ åđɱîñ ļîñķš îţ~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " åççöûñţš çåñ'ţ šîĝñ îñ ûñţîļ åñ åđɱîñ ļîñķš ţĥéɱ~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ'ţ çĥéçķ ŵĥîçĥ åççöûñţš ţĥîš åƒƒéçţš. Ýöû çåñ šţîļļ ţûŕñ îţ öƒƒ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "⟦Çĥéçķîñĝ ŵĥö šîĝñš îñ ŵîţĥ å þåššŵöŕđ~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "⟦Ŵĥéñ "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " çöñƒîŕɱš öñé öƒ ţĥéšé éɱåîļš åţ šîĝñ-îñ, Šîļö çöññéçţš ţĥåţ þéŕšöñ ţö ţĥéîŕ åççöûñţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " åççöûñţ çöññéçţš ƀý éɱåîļ~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " åççöûñţš çöññéçţ ƀý éɱåîļ~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šĥöŵ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ɱöŕé~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šĥöŵ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ɱöŕé~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ'ţ ļöåđ ɱöŕé åççöûñţš. Ţŕý åĝåîñ.~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "⟦Éṽéŕý åççöûñţ çåñ šţîļļ šîĝñ îñ åƒţéŕ ţĥîš.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "⟦Éɱåîļ ɱåţçĥîñĝ îš öƒƒ~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "⟦Ñö éɱåîļ~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš đöéšñ'ţ šîĝñ åñýöñé öûţ. Þéöþļé ŵĥö åŕé åļŕéåđý šîĝñéđ îñ šţåý šîĝñéđ îñ, ţĥéîŕ ÅÞÎ ķéýš ķééþ ŵöŕķîñĝ, åñđ ţĥéý çåñ šţîļļ åþþŕöṽé ñéŵ đéṽîçéš. Ţö šîĝñ šöɱéöñé öûţ, éñđ ţĥéîŕ šéššîöñš ƒŕöɱ ţĥéîŕ þåĝé îñ "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Ûšéŕš"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "⟦Ţûŕñ öƒƒ þåššŵöŕđ šîĝñ-îñ?~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "⟦Šéé éṽéŕý åççöûñţ îñ Ûšéŕš~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -86271,6 +86547,28 @@
     {
       "type": 0,
       "value": ".~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "⟦Þåššŵöŕđ šîĝñ-îñ îš öƒƒ, šö "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " îš ĥöŵ éṽéŕýöñé éẋçéþţ ƀŕéåķ-ĝļåšš åđɱîñš šîĝñš îñ. Ţûŕñ þåššŵöŕđ šîĝñ-îñ ƀåçķ öñ ƒîŕšţ, ţĥéñ ţûŕñ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " öƒƒ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -148043,6 +148341,12 @@
       "value": "⟦Éɱåîļ öŕ Ûšéŕñåɱé~~~~~~~⟧"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "⟦Éñţéŕ ţĥé ƀåšé ÛŔĻ ƒöŕ ţĥé Éɱƀý šéŕṽéŕ ýöû ŵåñţ ţö îɱþöŕţ ƒŕöɱ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -148053,6 +148357,12 @@
     {
       "type": 0,
       "value": "⟦Ļéåṽé ƀļåñķ îƒ ţĥé åççöûñţ ĥåš ñöñé~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "⟦Éɱƀý Šéŕṽéŕ ÛŔĻ~~~~~~⟧"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -148203,6 +148513,12 @@
     {
       "type": 0,
       "value": "⟦Þļéẋ Åççöûñţ~~~~~⟧"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "⟦Šéŕṽéŕ ÛŔĻ~~~~⟧"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -148536,7 +148852,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "⟦Éɱƀý Çöññéçţ öŕ šåṽéđ šéŕṽéŕ~~~~~~~~~~~~⟧"
+      "value": "⟦Éɱƀý Çöññéçţ, šéŕṽéŕ ÛŔĻ, öŕ šåṽéđ šéŕṽéŕ~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

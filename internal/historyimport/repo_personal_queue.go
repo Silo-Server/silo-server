@@ -47,6 +47,39 @@ func validatePersonalCredentials(sourceType string, credential personalRunCreden
 	return nil
 }
 
+func validatePersonalRunAdmission(in personalRunAdmission) error {
+	if err := validatePersonalCredentials(in.SourceType, in.Credentials); err != nil {
+		return err
+	}
+	if in.SourceID < 0 || (in.SourceID == 0) != (in.SourceRevision == 0) || (in.SourceID > 0 && in.SourceRevision < 1) {
+		return ErrInvalidInput
+	}
+	if in.ConnectSession != nil && in.PlexSession != nil {
+		return ErrInvalidInput
+	}
+	switch in.ConnectionMode {
+	case ConnectionModePredefined:
+		if in.SourceID == 0 || in.ConnectSession != nil || in.PlexSession != nil {
+			return ErrInvalidInput
+		}
+	case ConnectionModeConnect:
+		if in.SourceType != SourceTypeEmby || in.ConnectSession == nil || in.SourceID != 0 {
+			return ErrInvalidInput
+		}
+	case ConnectionModePlexOAuth:
+		if in.SourceType != SourceTypePlex || in.ConnectSession != nil || in.SourceID != 0 {
+			return ErrInvalidInput
+		}
+	case ConnectionModeCustom:
+		if (in.SourceType != SourceTypeJellyfin && in.SourceType != SourceTypeEmby) || in.ConnectSession != nil || in.PlexSession != nil || in.SourceID != 0 {
+			return ErrInvalidInput
+		}
+	default:
+		return ErrInvalidInput
+	}
+	return nil
+}
+
 // enqueuePersonalRun accepts already-authenticated credentials. Network effects
 // must finish before this call: the transaction only revalidates immutable
 // snapshots, consumes authorization, and persists reconstructible work.
@@ -54,34 +87,8 @@ func (r *Repository) enqueuePersonalRun(ctx context.Context, in personalRunAdmis
 	if r.cipher == nil {
 		return nil, ErrPersonalCredentialsUnavailable
 	}
-	if err := validatePersonalCredentials(in.SourceType, in.Credentials); err != nil {
+	if err := validatePersonalRunAdmission(in); err != nil {
 		return nil, err
-	}
-	if in.SourceID < 0 || (in.SourceID == 0) != (in.SourceRevision == 0) || (in.SourceID > 0 && in.SourceRevision < 1) {
-		return nil, ErrInvalidInput
-	}
-	if in.ConnectSession != nil && in.PlexSession != nil {
-		return nil, ErrInvalidInput
-	}
-	switch in.ConnectionMode {
-	case ConnectionModePredefined:
-		if in.SourceID == 0 || in.ConnectSession != nil || in.PlexSession != nil {
-			return nil, ErrInvalidInput
-		}
-	case ConnectionModeConnect:
-		if in.SourceType != SourceTypeEmby || in.ConnectSession == nil || in.SourceID != 0 {
-			return nil, ErrInvalidInput
-		}
-	case ConnectionModePlexOAuth:
-		if in.SourceType != SourceTypePlex || in.ConnectSession != nil || in.SourceID != 0 {
-			return nil, ErrInvalidInput
-		}
-	case ConnectionModeCustom:
-		if in.SourceType != SourceTypeJellyfin || in.ConnectSession != nil || in.PlexSession != nil || in.SourceID != 0 {
-			return nil, ErrInvalidInput
-		}
-	default:
-		return nil, ErrInvalidInput
 	}
 	id := uuid.NewString()
 	payload, err := json.Marshal(in.Credentials)

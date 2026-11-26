@@ -641,6 +641,12 @@
       "value": "Vaša je sesija istekla. Prijavite se ponovno."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Dok je prijava lozinkom isključena, mora ostati uključen pružatelj prijave kojim se korisnici mogu služiti. OpenID Connect također treba javni URL poslužitelja."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -86522,6 +86528,20 @@
       "value": "Najprije uključite pružatelja prijave. Ako je prijava lozinkom isključena i nijedan pružatelj nije uključen, mogli bi se prijaviti samo administratori za hitni pristup."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Najprije postavite javni URL poslužitelja. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " bez njega ne može nikoga prijaviti, pa bi se uz isključenu prijavu lozinkom mogli prijaviti samo administratori za hitni pristup."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -86612,6 +86632,271 @@
       "value": "Dopusti korisnicima izradu API ključeva"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Isključi prijavu lozinkom"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Lozinkom će se prijavljivati samo administratori za hitni pristup. Svi ostali prijavljuju se putem pružatelja "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Pružatelj "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " izrađuje račune pri prvoj prijavi, pa ako se neka od ovih osoba prijavi putem njega prije nego što je povežete, dobit će novi, zasebni račun."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Svaki od njih povežite s računom pružatelja "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " na njegovoj stranici u odjeljku Korisnici."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " račun se ne može prijaviti dok ga administrator ne poveže"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " računa se ne mogu prijaviti dok ih administrator ne poveže"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " računa se ne može prijaviti dok ih administrator ne poveže"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nije moguće provjeriti na koje račune ovo utječe. Prijavu lozinkom i dalje možete isključiti."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Provjerava se tko se prijavljuje lozinkom"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Kada pružatelj "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " pri prijavi potvrdi jednu od ovih adresa e-pošte, Silo tu osobu povezuje s njezinim računom."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " račun se povezuje putem e-pošte"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " računa se povezuju putem e-pošte"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " računa se povezuje putem e-pošte"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži još "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži još "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži još "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Nije moguće učitati više računa. Pokušajte ponovno."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Nakon ovoga svaki se račun i dalje može prijaviti."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administrator"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Podudaranje po e-pošti je isključeno"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Nema e-pošte"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Ovo nikoga ne odjavljuje. Osobe koje su već prijavljene ostaju prijavljene, njihovi API ključevi i dalje rade, a i dalje mogu odobravati nove uređaje. Da biste nekoga odjavili, završite sesije te osobe na njezinoj stranici u odjeljku "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Korisnici"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Isključiti prijavu lozinkom?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Pogledajte sve račune u odjeljku Korisnici"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -86646,6 +86931,28 @@
     {
       "type": 0,
       "value": "Nije moguće promijeniti "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Prijava lozinkom je isključena, pa se svi osim administratora za hitni pristup prijavljuju putem pružatelja "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Najprije ponovno uključite prijavu lozinkom, a zatim isključite pružatelja "
     },
     {
       "type": 1,
@@ -148265,6 +148572,12 @@
       "value": "E-pošta ili korisničko ime"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Unesite osnovni URL Emby poslužitelja s kojeg želite uvesti podatke."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -148275,6 +148588,12 @@
     {
       "type": 0,
       "value": "Ostavite prazno ako račun nema lozinku"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL Emby poslužitelja"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -148425,6 +148744,12 @@
     {
       "type": 0,
       "value": "Plex račun"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL poslužitelja"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -148718,7 +149043,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect ili spremljeni poslužitelj"
+      "value": "Emby Connect, URL poslužitelja ili spremljeni poslužitelj"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

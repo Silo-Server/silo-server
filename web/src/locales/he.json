@@ -641,6 +641,12 @@
       "value": "פג תוקף ההתחברות. יש להתחבר שוב."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "כשההתחברות עם סיסמה כבויה, ספק התחברות שאנשים יכולים להשתמש בו חייב להישאר מופעל. ל-OpenID Connect נדרשת גם כתובת ה-URL הציבורית של השרת."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -85809,6 +85815,20 @@
       "value": "יש להפעיל קודם ספק התחברות. כשההתחברות עם סיסמה כבויה ואין ספק מופעל, רק מנהלי חירום יוכלו להתחבר."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "יש להגדיר קודם את כתובת ה-URL הציבורית של השרת. בלעדיה הספק "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " לא יכול לחבר אף אחד, ולכן כשההתחברות עם סיסמה כבויה, רק מנהלי חירום יוכלו להתחבר."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -85899,6 +85919,262 @@
       "value": "מתן אפשרות למשתמשים ליצור מפתחות API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "כיבוי ההתחברות עם סיסמה"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "רק מנהלי חירום יתחברו עם סיסמה. כל השאר מתחברים עם הספק "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "הספק "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " יוצר חשבונות בהתחברות הראשונה, ולכן אם מישהו מהאנשים האלה יתחבר דרכו לפני הקישור, ייווצר עבורו חשבון חדש ונפרד."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "יש לקשר כל אחד מהם לחשבון בספק "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " דרך הדף שלו בקטע ”משתמשים”."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "חשבון אחד לא יכול להתחבר עד שמנהל יקשר אותו"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " חשבונות לא יכולים להתחבר עד שמנהל יקשר אותם"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " חשבונות לא יכולים להתחבר עד שמנהל יקשר אותם"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לבדוק על אילו חשבונות זה משפיע. עדיין אפשר לכבות את האפשרות."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "מתבצעת בדיקה של מי שמתחבר עם סיסמה"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "כשהספק "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " מאשר אחת מכתובות האימייל האלה בהתחברות, Silo מחבר את האדם לחשבון שלו."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "חשבון אחד יחובר לפי אימייל"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " חשבונות יחוברו לפי אימייל"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " חשבונות יחוברו לפי אימייל"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הצגת עוד אחד"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הצגת עוד "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "הצגת עוד "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "לא ניתן היה לטעון חשבונות נוספים. אפשר לנסות שוב."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "כל החשבונות עדיין יוכלו להתחבר אחרי השינוי."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "מנהל"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "התאמת האימייל כבויה"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "אין אימייל"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "הפעולה הזו לא מנתקת אף אחד. אנשים שכבר מחוברים נשארים מחוברים, מפתחות ה-API שלהם ממשיכים לעבוד, והם עדיין יכולים לאשר מכשירים חדשים. כדי לנתק מישהו, יש לסיים את הסשנים שלו דרך הדף שלו בקטע "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "משתמשים"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "לכבות את ההתחברות עם סיסמה?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "הצגת כל החשבונות בקטע ”משתמשים”"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -85933,6 +86209,28 @@
     {
       "type": 0,
       "value": "לא ניתן היה לשנות את "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "ההתחברות עם סיסמה כבויה, ולכן כולם מלבד מנהלי חירום מתחברים דרך הספק "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". יש להפעיל קודם מחדש את ההתחברות עם סיסמה, ורק אז לכבות את הספק "
     },
     {
       "type": 1,
@@ -146614,6 +146912,12 @@
       "value": "אימייל או שם משתמש"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "יש להזין את כתובת ה-URL הבסיסית של שרת ה-Emby שממנו רוצים לייבא."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -146624,6 +146928,12 @@
     {
       "type": 0,
       "value": "יש להשאיר ריק אם אין לחשבון סיסמה"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "כתובת URL של שרת Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -146774,6 +147084,12 @@
     {
       "type": 0,
       "value": "חשבון Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "כתובת URL של השרת"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -147067,7 +147383,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect או שרת שמור"
+      "value": "Emby Connect, כתובת URL של שרת או שרת שמור"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

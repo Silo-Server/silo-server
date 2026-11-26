@@ -641,6 +641,12 @@
       "value": "Sesiunea a expirat. Conectați-vă din nou."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Cât timp conectarea cu parolă este dezactivată, trebuie să rămână activat un furnizor de conectare pe care îl pot folosi utilizatorii. OpenID Connect necesită și adresa URL publică a serverului."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -86526,6 +86532,20 @@
       "value": "Activați mai întâi un furnizor de conectare. Cu conectarea cu parolă dezactivată și fără niciun furnizor activat, s-ar putea conecta doar administratorii de urgență."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Setați mai întâi adresa URL publică a serverului. Furnizorul "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " nu poate conecta pe nimeni fără ea, așa că, având conectarea cu parolă dezactivată, doar administratorii cu acces de urgență s-ar putea conecta."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -86616,6 +86636,283 @@
       "value": "Permiteți utilizatorilor să creeze chei API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Dezactivați conectarea cu parolă"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Doar administratorii cu acces de urgență se vor conecta cu o parolă. Toți ceilalți se conectează cu furnizorul "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Furnizorul "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " creează conturi la prima conectare, așa că, dacă una dintre aceste persoane se conectează prin el înainte să o asociați, va primi un cont nou, separat."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Asociați fiecare cont cu un cont "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " din pagina acestuia din Utilizatori."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " cont nu se poate conecta până când un administrator nu îl asociază"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " conturi nu se pot conecta până când un administrator nu le asociază"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de conturi nu se pot conecta până când un administrator nu le asociază"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-a putut verifica ce conturi sunt afectate. Puteți totuși dezactiva conectarea cu parolă."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Se verifică cine se conectează cu o parolă…"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Când furnizorul "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " confirmă una dintre aceste adrese de e-mail la conectare, Silo asociază persoana respectivă cu contul său."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " cont se asociază prin e-mail"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " conturi se asociază prin e-mail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de conturi se asociază prin e-mail"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați încă "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " cont"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați încă "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " conturi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați încă "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de conturi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-au putut încărca mai multe conturi. Încercați din nou."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Toate conturile se vor putea conecta în continuare după această modificare."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administrator"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Asocierea prin e-mail este dezactivată"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Fără e-mail"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Această acțiune nu deconectează pe nimeni. Persoanele deja conectate rămân conectate, cheile lor API funcționează în continuare și pot aproba în continuare dispozitive noi. Pentru a deconecta pe cineva, încheiați-i sesiunile din pagina sa din "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Utilizatori"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Dezactivați conectarea cu parolă?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Vedeți toate conturile în Utilizatori"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -86650,6 +86947,28 @@
     {
       "type": 0,
       "value": "Nu s-a putut modifica furnizorul "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Conectarea cu parolă este dezactivată, deci toți utilizatorii, cu excepția administratorilor cu acces de urgență, se conectează prin furnizorul "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Mai întâi reactivați conectarea cu parolă, apoi dezactivați furnizorul "
     },
     {
       "type": 1,
@@ -148402,6 +148721,12 @@
       "value": "E-mail sau nume de utilizator"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Introduceți adresa URL de bază a serverului Emby din care doriți să importați."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -148412,6 +148737,12 @@
     {
       "type": 0,
       "value": "Lăsați gol dacă contul nu are parolă"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Adresa URL a serverului Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -148562,6 +148893,12 @@
     {
       "type": 0,
       "value": "Cont Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Adresa URL a serverului"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -148855,7 +149192,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect sau server salvat"
+      "value": "Emby Connect, adresa URL a serverului sau server salvat"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

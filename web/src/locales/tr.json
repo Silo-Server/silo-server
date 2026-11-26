@@ -641,6 +641,12 @@
       "value": "Oturumunuzun süresi doldu. Tekrar oturum açın."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Parolayla oturum açma kapalıyken kullanıcıların kullanabileceği bir oturum açma sağlayıcısı açık kalmalıdır. OpenID Connect için ayrıca sunucunun genel URL’si gerekir."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -78495,6 +78501,20 @@
       "value": "Önce bir oturum açma sağlayıcısını açın. Parolayla oturum açma kapalıyken ve hiçbir sağlayıcı açık değilken yalnızca acil durum yöneticileri oturum açabilir."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Önce sunucunun genel URL’sini ayarlayın. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " sağlayıcısı bu URL olmadan kimsenin oturum açmasını sağlayamaz; bu nedenle parolayla oturum açma kapalıyken yalnızca acil durum yöneticileri oturum açabilir."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -78585,6 +78605,230 @@
       "value": "Kullanıcıların API anahtarı oluşturmasına izin ver"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Parolayla oturum açmayı kapat"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Yalnızca acil durum yöneticileri parolayla oturum açacak. Diğer herkes "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " ile oturum açar."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " sağlayıcısı ilk oturum açmada hesap oluşturur; bu nedenle bu kişilerden biri siz bağlamadan önce bu sağlayıcıyla oturum açarsa yeni ve ayrı bir hesap alır."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Her birini, Kullanıcılar sayfasındaki kendi sayfasından bir "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " hesabına bağlayın."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hesap, bir yönetici bağlayana kadar oturum açamaz"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hesap, bir yönetici bağlayana kadar oturum açamaz"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Bunun hangi hesapları etkilediği kontrol edilemedi. Yine de kapatabilirsiniz."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Parolayla kimlerin oturum açtığı kontrol ediliyor"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " sağlayıcısı oturum açma sırasında bu e-posta adreslerinden birini doğruladığında Silo o kişiyi kendi hesabına bağlar."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hesap e-postayla bağlanır"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hesap e-postayla bağlanır"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tane daha göster"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tane daha göster"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Daha fazla hesap yüklenemedi. Tekrar deneyin."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Bundan sonra da tüm hesaplar oturum açabilir."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Yönetici"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "E-posta eşleştirme kapalı"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "E-posta yok"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Bu işlem kimsenin oturumunu kapatmaz. Zaten oturum açmış kişilerin oturumu açık kalır, API anahtarları çalışmaya devam eder ve yeni cihazları onaylamaya devam edebilirler. Birinin oturumunu kapatmak için "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Kullanıcılar"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " sayfasındaki kendi sayfasından oturumlarını sonlandırın."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Parolayla oturum açma kapatılsın mı?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Tüm hesapları Kullanıcılar sayfasında gör"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -78623,6 +78867,28 @@
     {
       "type": 0,
       "value": " değiştirilemedi."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Parolayla oturum açma kapalı olduğundan acil durum yöneticileri dışında herkes "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ile oturum açıyor. Önce parolayla oturum açmayı yeniden açın, ardından "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " sağlayıcısını kapatın."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -134693,6 +134959,12 @@
       "value": "E-posta veya kullanıcı adı"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "İçe aktarmak istediğiniz Emby sunucusunun temel URL’sini girin."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -134703,6 +134975,12 @@
     {
       "type": 0,
       "value": "Hesabın parolası yoksa boş bırakın"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby sunucu URL’si"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -134853,6 +135131,12 @@
     {
       "type": 0,
       "value": "Plex hesabı"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Sunucu URL’si"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -135146,7 +135430,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect veya kayıtlı sunucu"
+      "value": "Emby Connect, sunucu URL’si veya kayıtlı sunucu"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

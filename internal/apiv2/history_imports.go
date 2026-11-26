@@ -174,8 +174,9 @@ type HistoryImportRunCreate struct {
 	ConnectSessionID string   `json:"connect_session_id,omitempty" doc:"Emby: the session from loginEmbyConnect" example:"9c3e1f0a-1b2c-4d5e-8f6a-7b8c9d0e1f2a"`
 	ServerID         string   `json:"server_id,omitempty" doc:"Emby: the server chosen from the connect session"`
 	SourceID         *ID      `json:"source_id,omitempty" nullable:"false" doc:"Emby or Plex: a configured source from listHistoryImportSources" example:"1"`
-	Username         string   `json:"username,omitempty" doc:"Emby: the source server user name when importing from a configured source"`
-	Password         string   `json:"password,omitempty" doc:"Emby: the source server password when importing from a configured source; empty for an account without one"`
+	EmbyBaseURL      string   `json:"emby_base_url,omitempty" format:"uri-reference" doc:"Emby: the server address for a direct sign-in" example:"https://emby.example.test"`
+	Username         string   `json:"username,omitempty" doc:"Emby: the source server user name when importing from a configured source or emby_base_url"`
+	Password         string   `json:"password,omitempty" doc:"Emby: the source server password when importing from a configured source or emby_base_url; empty for an account without one"`
 	JellyfinBaseURL  string   `json:"jellyfin_base_url,omitempty" format:"uri-reference" doc:"Jellyfin: the server address" example:"https://jellyfin.example.test"`
 	JellyfinUsername string   `json:"jellyfin_username,omitempty" doc:"Jellyfin: the user name"`
 	JellyfinPassword string   `json:"jellyfin_password,omitempty" doc:"Jellyfin: the password"`
@@ -188,13 +189,14 @@ type HistoryImportRunCreate struct {
 }
 
 // HistoryImportCapability describes what a client may rely on when it submits
-// an import run. A server without Plex connection fallback rejects
-// plex_base_urls as an unknown member, so a client checks this before sending
-// it and falls back to plex_base_url alone.
+// an import run. A server without Plex connection fallback or direct Emby URL
+// support rejects plex_base_urls or emby_base_url as unknown members, so a
+// client checks this before sending them.
 type HistoryImportCapability struct {
 	Capability
 	PlexConnectionFallback bool `json:"plex_connection_fallback" doc:"Whether plex_base_urls is honored and the advertised connections are raced" example:"true"`
 	MaxPlexConnections     int  `json:"max_plex_connections" doc:"How many Plex addresses one run races, counting plex_base_url" example:"8"`
+	EmbyCustomServer       bool `json:"emby_custom_server" doc:"Whether emby_base_url is honored for direct Emby server sign-in" example:"true"`
 }
 
 // HistoryImportCapabilityOutput is the getHistoryImportCapability response.
@@ -336,7 +338,7 @@ func registerHistoryImports(reg *Registry) {
 
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/history-imports/capability", "getHistoryImportCapability", "history-imports",
-			"Describe what an import run may rely on, including Plex connection fallback."),
+			"Describe what an import run may rely on, including Plex connection fallback and direct Emby server URLs."),
 		Class: ClassAuthenticated,
 	}, reg.getHistoryImportCapability)
 }
@@ -350,6 +352,7 @@ func (reg *Registry) getHistoryImportCapability(_ context.Context, _ *Capability
 			Capability:             Capability{State: configuredCapabilityState(reg.deps.HistoryImports != nil)},
 			PlexConnectionFallback: true,
 			MaxPlexConnections:     historyimport.MaxPlexConnectionCandidates,
+			EmbyCustomServer:       true,
 		},
 	}, nil
 }
@@ -560,6 +563,7 @@ func (b HistoryImportRunCreate) toInput() (historyimport.CreateRunInput, *Proble
 		Source:           b.Source,
 		ConnectSessionID: b.ConnectSessionID,
 		ServerID:         b.ServerID,
+		ServerURL:        b.EmbyBaseURL,
 		Username:         b.Username,
 		Password:         b.Password,
 		JellyfinBaseURL:  b.JellyfinBaseURL,
@@ -605,6 +609,8 @@ func historyImportProblem(err error) *Problem {
 	// cause the seam's *handlers.APIError still wraps.
 	case errors.Is(err, historyimport.ErrSourceUnreachable):
 		return NewProblem(TypeDependencyUnavailable, historyImportUnreachableMessage).WithRetryAfter(30)
+	case errors.Is(err, historyimport.ErrUnexpectedSourceResponse):
+		return NewProblem(TypeDependencyUnavailable, historyimport.UnexpectedSourceResponseMessage).WithRetryAfter(30)
 	case errors.Is(err, historyimport.ErrInvalidInput):
 		message := historyImportInputMessage(err)
 		return NewProblem(TypeValidationFailed, message).

@@ -641,6 +641,12 @@
       "value": "セッションの有効期限が切れました。もう一度サインインしてください。"
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "パスワードによるサインインがオフの間は、利用できるサインインプロバイダーを少なくとも1つオンにしておく必要があります。OpenID ConnectにはサーバーのパブリックURLも必要です。"
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -72039,6 +72045,20 @@
       "value": "先にサインインプロバイダーをオンにしてください。パスワードでのサインインがオフでプロバイダーもオフの場合、緊急用管理者しかサインインできません。"
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "先にサーバーのパブリックURLを設定してください。URLがないと"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "ではサインインできないため、パスワードによるサインインがオフの場合、サインインできるのは緊急用の管理者だけになります。"
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -72129,6 +72149,213 @@
       "value": "ユーザーにAPIキーの作成を許可"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "パスワードによるサインインをオフにする"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "パスワードでサインインできるのは緊急用の管理者だけになります。それ以外のユーザーは"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "でサインインします。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "は初回サインイン時にアカウントを作成します。リンクする前にこれらのユーザーが"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "でサインインすると、別の新しいアカウントが作成されます。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "ユーザーで各アカウントのページを開き、それぞれを"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "アカウントにリンクしてください。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "件のアカウントは、管理者がリンクするまでサインインできません"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "影響を受けるアカウントを確認できませんでした。このままオフにすることもできます。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "パスワードでサインインしているユーザーを確認中"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "サインイン時に"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "がこれらのメールアドレスのいずれかを確認すると、Siloはそのユーザーを本人のアカウントに接続します。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "件のアカウントはメールアドレスで接続されます"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "さらに"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "件を表示"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "アカウントをさらに読み込めませんでした。もう一度お試しください。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "この変更後も、すべてのアカウントがサインインできます。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "管理者"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "メールアドレスの照合がオフ"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "メールアドレスなし"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "この操作では誰もサインアウトされません。すでにサインインしているユーザーはサインインしたままで、APIキーも引き続き使用でき、新しいデバイスの承認もできます。ユーザーをサインアウトさせるには、"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "ユーザー"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "でそのユーザーのページを開き、セッションを終了してください。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "パスワードによるサインインをオフにしますか？"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "ユーザーですべてのアカウントを表示"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -72167,6 +72394,28 @@
     {
       "type": 0,
       "value": "を変更できませんでした。"
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "パスワードによるサインインがオフのため、緊急用の管理者以外は全員"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "でサインインします。先にパスワードによるサインインをオンに戻してから、"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "をオフにしてください。"
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -123916,6 +124165,12 @@
       "value": "メールアドレスまたはユーザー名"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "インポート元のEmbyサーバーのベースURLを入力してください。"
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -123926,6 +124181,12 @@
     {
       "type": 0,
       "value": "アカウントにパスワードがない場合は空欄のまま"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "EmbyサーバーのURL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -124076,6 +124337,12 @@
     {
       "type": 0,
       "value": "Plexアカウント"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "サーバーURL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -124377,7 +124644,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connectまたは保存済みのサーバー"
+      "value": "Emby Connect、サーバーURL、または保存済みのサーバー"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

@@ -641,6 +641,12 @@
       "value": "Сесията ви изтече. Влезте отново."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Докато входът с парола е изключен, трябва да остане включен доставчик за вход, който хората могат да използват. OpenID Connect също изисква публичния URL адрес на сървъра."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -79343,6 +79349,20 @@
       "value": "Първо включете доставчик за вход. Ако входът с парола е изключен и няма включен доставчик, само администраторите за спешен достъп биха могли да влизат."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Първо задайте публичния URL адрес на сървъра. Без него доставчикът "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " не може да осигури вход на никого, така че при изключен вход с парола само администраторите за аварийен достъп биха могли да влизат."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -79433,6 +79453,238 @@
       "value": "Разрешаване на потребителите да създават API ключове"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Изключване на входа с парола"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Само администраторите за аварийен достъп ще влизат с парола. Всички останали влизат чрез доставчика "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Доставчикът "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " създава акаунти при първия вход, така че ако някой от тези хора влезе чрез него, преди акаунтът да бъде свързан, ще получи нов, отделен акаунт."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Свържете всеки от тях с акаунт в "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " от страницата му в „Потребители“."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " акаунт не може да влиза, докато администратор не го свърже"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " акаунта не могат да влизат, докато администратор не ги свърже"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Не можа да се провери кои акаунти са засегнати. Пак можете да изключите входа с парола."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Проверява се кой влиза с парола…"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Когато доставчикът "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " потвърди някой от тези имейли при вход, Silo свързва този човек със съответния акаунт."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " акаунт се свързва по имейл"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " акаунта се свързват по имейл"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване на още "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване на още "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Не можаха да се заредят още акаунти. Опитайте отново."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Всеки акаунт ще може да влиза и след това."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Администратор"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Съпоставянето по имейл е изключено"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Няма имейл"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Това не прекратява ничия сесия. Хората, които вече са влезли, остават влезли, API ключовете им продължават да работят и те пак могат да одобряват нови устройства. За да изведете някого от акаунта, прекратете сесиите му от страницата му в "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Потребители"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Да се изключи ли входът с парола?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Вижте всички акаунти в „Потребители“"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -79467,6 +79719,28 @@
     {
       "type": 0,
       "value": "Не можа да се промени доставчикът "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Входът с парола е изключен, така че всички освен администраторите за аварийен достъп влизат чрез доставчика "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Първо включете отново входа с парола, след което изключете доставчика "
     },
     {
       "type": 1,
@@ -136625,6 +136899,12 @@
       "value": "Имейл или потребителско име"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Въведете основния URL адрес на сървъра Emby, от който искате да импортирате."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -136635,6 +136915,12 @@
     {
       "type": 0,
       "value": "Оставете празно, ако акаунтът няма парола"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL адрес на сървъра Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -136785,6 +137071,12 @@
     {
       "type": 0,
       "value": "Акаунт в Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL адрес на сървъра"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -137078,7 +137370,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect или запазен сървър"
+      "value": "Emby Connect, URL адрес на сървъра или запазен сървър"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

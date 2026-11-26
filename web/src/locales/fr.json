@@ -641,6 +641,12 @@
       "value": "Votre session a expiré. Reconnectez-vous."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Tant que la connexion par mot de passe est désactivée, un fournisseur de connexion utilisable doit rester activé. OpenID Connect nécessite aussi l’URL publique du serveur."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -86126,6 +86132,20 @@
       "value": "Activez d’abord un fournisseur de connexion. Avec la connexion par mot de passe désactivée et aucun fournisseur activé, seuls les administrateurs de secours pourraient se connecter."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Définissez d’abord l’URL publique du serveur. Sans elle, "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ne peut connecter personne, et sans connexion par mot de passe, seuls les administrateurs de secours pourraient se connecter."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -86216,6 +86236,279 @@
       "value": "Autoriser les utilisateurs à créer des clés API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Désactiver la connexion par mot de passe"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Seuls les administrateurs de secours se connecteront avec un mot de passe. Toutes les autres personnes se connecteront avec "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " crée les comptes à la première connexion : si l’une de ces personnes se connecte avec ce fournisseur avant que vous ne liiez son compte, elle obtient un nouveau compte distinct."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Liez chacun d’eux à un compte "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " depuis sa page dans Utilisateurs."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " compte ne peut pas se connecter tant qu’un administrateur ne l’a pas lié"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de comptes ne peuvent pas se connecter tant qu’un administrateur ne les a pas liés"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " comptes ne peuvent pas se connecter tant qu’un administrateur ne les a pas liés"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Impossible de vérifier les comptes concernés. Vous pouvez quand même la désactiver."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Vérification des personnes qui se connectent avec un mot de passe"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Lorsque "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " confirme l’une de ces adresses e-mail à la connexion, Silo relie cette personne à son compte."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " compte est relié par e-mail"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de comptes sont reliés par e-mail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " comptes sont reliés par e-mail"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afficher "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de plus"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afficher "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de plus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afficher "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de plus"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Impossible de charger plus de comptes. Réessayez."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Tous les comptes pourront toujours se connecter après cette modification."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administrateur"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Correspondance par e-mail désactivée"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Aucune adresse e-mail"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Cette action ne déconnecte personne. Les personnes déjà connectées le restent, leurs clés d’API continuent de fonctionner et elles peuvent toujours approuver de nouveaux appareils. Pour déconnecter quelqu’un, mettez fin à ses sessions depuis sa page dans "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Utilisateurs"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Désactiver la connexion par mot de passe ?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Voir tous les comptes dans Utilisateurs"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -86250,6 +86543,28 @@
     {
       "type": 0,
       "value": "Impossible de modifier "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "La connexion par mot de passe est désactivée : "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " est donc le moyen de connexion de tout le monde, sauf des administrateurs de secours. Réactivez d’abord la connexion par mot de passe, puis désactivez "
     },
     {
       "type": 1,
@@ -147590,6 +147905,12 @@
       "value": "E-mail ou nom d’utilisateur"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Saisissez l’URL de base du serveur Emby à partir duquel importer."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -147600,6 +147921,12 @@
     {
       "type": 0,
       "value": "Laissez vide si le compte n’en a pas"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL du serveur Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -147750,6 +148077,12 @@
     {
       "type": 0,
       "value": "Compte Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL du serveur"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -148043,7 +148376,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect ou serveur enregistré"
+      "value": "Emby Connect, URL du serveur ou serveur enregistré"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

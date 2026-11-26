@@ -40007,6 +40007,13 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "emby_custom_server": {
+            "description": "Whether emby_base_url is honored for direct Emby server sign-in",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "max_plex_connections": {
             "description": "How many Plex addresses one run races, counting plex_base_url",
             "examples": [
@@ -40040,6 +40047,7 @@
         "required": [
           "plex_connection_fallback",
           "max_plex_connections",
+          "emby_custom_server",
           "revision",
           "state",
           "allowed"
@@ -40261,6 +40269,14 @@
             ],
             "type": "string"
           },
+          "emby_base_url": {
+            "description": "Emby: the server address for a direct sign-in",
+            "examples": [
+              "https://emby.example.test"
+            ],
+            "format": "uri-reference",
+            "type": "string"
+          },
           "jellyfin_base_url": {
             "description": "Jellyfin: the server address",
             "examples": [
@@ -40278,7 +40294,7 @@
             "type": "string"
           },
           "password": {
-            "description": "Emby: the source server password when importing from a configured source; empty for an account without one",
+            "description": "Emby: the source server password when importing from a configured source or emby_base_url; empty for an account without one",
             "type": "string"
           },
           "plex_account_token": {
@@ -40349,7 +40365,7 @@
             "type": "string"
           },
           "username": {
-            "description": "Emby: the source server user name when importing from a configured source",
+            "description": "Emby: the source server user name when importing from a configured source or emby_base_url",
             "type": "string"
           }
         },
@@ -186567,7 +186583,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Describe what an import run may rely on, including Plex connection fallback.",
+        "summary": "Describe what an import run may rely on, including Plex connection fallback and direct Emby server URLs.",
         "tags": [
           "history-imports"
         ],

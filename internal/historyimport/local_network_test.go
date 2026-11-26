@@ -120,10 +120,35 @@ func TestPersonalPlexImportChecksAddressAtAdmission(t *testing.T) {
 	}
 }
 
+func TestPersonalEmbyDirectImportRefusesLocalAddressWithoutTrust(t *testing.T) {
+	var hits atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
+	defer upstream.Close()
+	svc := &Service{emby: NewEmbyClient(), localNetwork: NewLocalNetworkAccess(staticSettings{}, nil)}
+
+	_, err := svc.preparePersonalRun(t.Context(), 7, CreateRunInput{
+		Source: SourceTypeEmby, ProfileID: "target",
+		ServerURL: upstream.URL, Username: "alice",
+	})
+	if !errors.Is(err, netguard.ErrPrivateDestination) {
+		t.Fatalf("error = %v, want ErrPrivateDestination", err)
+	}
+	if hits.Load() != 0 {
+		t.Fatal("the refused server received a request")
+	}
+	if message, ok := ServerAddressMessage(err); !ok || message != PrivateAddressMessage {
+		t.Fatalf("ServerAddressMessage = %q, %v", message, ok)
+	}
+	if errors.Is(tagUnreachable(err), ErrSourceUnreachable) {
+		t.Fatal("a refused address was reported as unreachable")
+	}
+}
+
 // Metadata and other blocked addresses stay refused with the setting on.
 func TestPersonalImportRefusesMetadataAddressEvenWhenTrusted(t *testing.T) {
-	svc := &Service{jellyfin: NewJellyfinClient(), localNetwork: allowLocalNetworkForEveryone()}
+	svc := &Service{emby: NewEmbyClient(), jellyfin: NewJellyfinClient(), localNetwork: allowLocalNetworkForEveryone()}
 	inputs := []CreateRunInput{
+		{Source: SourceTypeEmby, ProfileID: "target", ServerURL: "http://169.254.169.254", Username: "x"},
 		{Source: SourceTypeJellyfin, ProfileID: "target", JellyfinBaseURL: "http://169.254.169.254", JellyfinUsername: "x", JellyfinPassword: "x"},
 		{Source: SourceTypePlex, ProfileID: "target", PlexBaseURL: "http://169.254.169.254", PlexToken: "token"},
 		{Source: SourceTypePlex, ProfileID: "target", PlexBaseURL: "http://[fd00:ec2::254]", PlexToken: "token"},
@@ -131,7 +156,7 @@ func TestPersonalImportRefusesMetadataAddressEvenWhenTrusted(t *testing.T) {
 	for _, input := range inputs {
 		_, err := svc.preparePersonalRun(t.Context(), 7, input)
 		if !errors.Is(err, netguard.ErrBlockedDestination) {
-			t.Fatalf("%s %s: error = %v, want ErrBlockedDestination", input.Source, input.JellyfinBaseURL+input.PlexBaseURL, err)
+			t.Fatalf("%s %s: error = %v, want ErrBlockedDestination", input.Source, input.ServerURL+input.JellyfinBaseURL+input.PlexBaseURL, err)
 		}
 		if message, _ := ServerAddressMessage(err); message != BlockedAddressMessage {
 			t.Fatalf("message = %q", message)

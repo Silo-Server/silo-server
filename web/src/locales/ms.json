@@ -641,6 +641,12 @@
       "value": "Sesi anda telah tamat tempoh. Log masuk semula."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Semasa log masuk dengan kata laluan dimatikan, pembekal log masuk yang boleh digunakan oleh pengguna mesti kekal dihidupkan. OpenID Connect juga memerlukan URL awam pelayan."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -71859,6 +71865,20 @@
       "value": "Hidupkan pembekal log masuk dahulu. Dengan log masuk kata laluan dimatikan dan tiada pembekal dihidupkan, hanya pentadbir kecemasan boleh log masuk."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Tetapkan URL awam pelayan dahulu. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " tidak dapat membenarkan sesiapa log masuk tanpa URL itu, jadi apabila log masuk dengan kata laluan dimatikan, hanya pentadbir kecemasan yang boleh log masuk."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -71949,6 +71969,213 @@
       "value": "Benarkan pengguna mencipta kunci API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Matikan log masuk dengan kata laluan"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Hanya pentadbir kecemasan akan log masuk dengan kata laluan. Semua orang lain log masuk dengan "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " mencipta akaun semasa log masuk pertama, jadi jika salah seorang daripada mereka log masuk dengan "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " sebelum anda memautkannya, dia akan mendapat akaun baharu yang berasingan."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Pautkan setiap akaun ke akaun "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " dari halamannya dalam Pengguna."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " akaun tidak dapat log masuk sehingga pentadbir memautkannya"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menyemak akaun yang terjejas. Anda masih boleh mematikannya."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Menyemak pengguna yang log masuk dengan kata laluan…"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Apabila "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " mengesahkan salah satu e-mel ini semasa log masuk, Silo menyambungkan orang itu ke akaunnya."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " akaun disambungkan melalui e-mel"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tunjukkan "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " lagi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuatkan lebih banyak akaun. Cuba lagi."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Setiap akaun masih boleh log masuk selepas ini."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Pentadbir"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Padanan e-mel dimatikan"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Tiada e-mel"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Tindakan ini tidak melog keluar sesiapa. Pengguna yang sudah log masuk kekal log masuk, kunci API mereka terus berfungsi dan mereka masih boleh meluluskan peranti baharu. Untuk melog keluar seseorang, tamatkan sesinya dari halamannya dalam "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Pengguna"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Matikan log masuk dengan kata laluan?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Lihat semua akaun dalam Pengguna"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -71983,6 +72210,28 @@
     {
       "type": 0,
       "value": "Tidak dapat mengubah "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Log masuk dengan kata laluan dimatikan, jadi "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ialah cara semua orang kecuali pentadbir kecemasan log masuk. Hidupkan semula log masuk dengan kata laluan dahulu, kemudian matikan "
     },
     {
       "type": 1,
@@ -124230,6 +124479,12 @@
       "value": "E-mel atau nama pengguna"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Masukkan URL asas pelayan Emby yang ingin anda import."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -124240,6 +124495,12 @@
     {
       "type": 0,
       "value": "Biarkan kosong jika akaun tiada kata laluan"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL pelayan Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -124390,6 +124651,12 @@
     {
       "type": 0,
       "value": "Akaun Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL pelayan"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -124683,7 +124950,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect atau pelayan disimpan"
+      "value": "Emby Connect, URL pelayan atau pelayan disimpan"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

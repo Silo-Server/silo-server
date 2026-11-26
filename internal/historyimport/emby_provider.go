@@ -2,7 +2,6 @@ package historyimport
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -102,9 +101,9 @@ func (p *EmbyProvider) Stream(ctx context.Context, from *StreamPosition, sink Re
 	// episodes has no resumable episode, and the row is the only place Emby
 	// shows whether it was hidden.
 	listed, err := p.client.fetchAllItems(ctx, p.auth, embyEndpointResume, "", embyPlayableTypes)
-	// A source over the size limits fails the run here and below, rather
-	// than importing without the list it sent.
-	if errors.Is(err, ErrUpstreamResponseTooLarge) {
+	// Cancellation and size-limit failures end the run here and below, rather
+	// than importing without the list the source sent.
+	if err != nil && isFatalListingError(ctx, err) {
 		return err
 	}
 	rowRead := err == nil

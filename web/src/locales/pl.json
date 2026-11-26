@@ -641,6 +641,12 @@
       "value": "Twoja sesja wygasła. Zaloguj się ponownie."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Gdy logowanie hasłem jest wyłączone, musi pozostać włączony dostawca logowania, z którego mogą korzystać użytkownicy. OpenID Connect wymaga też publicznego adresu URL serwera."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -94663,6 +94669,20 @@
       "value": "Najpierw włącz dostawcę logowania. Przy wyłączonym logowaniu hasłem i bez włączonego dostawcy zalogować się mogliby tylko administratorzy awaryjni."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Najpierw ustaw publiczny adres URL serwera. Bez niego dostawca "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " nie może nikogo zalogować, więc przy wyłączonym logowaniu hasłem zalogować mogliby się tylko administratorzy z dostępem awaryjnym."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -94753,6 +94773,304 @@
       "value": "Zezwalaj użytkownikom na tworzenie kluczy API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Wyłącz logowanie hasłem"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Hasłem będą logować się tylko administratorzy z dostępem awaryjnym. Pozostałe osoby logują się przez dostawcę "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Dostawca "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " tworzy konta przy pierwszym logowaniu, więc jeśli któraś z tych osób zaloguje się przez niego, zanim ją połączysz, otrzyma nowe, osobne konto."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Połącz każde z nich z kontem dostawcy "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " na stronie tego konta w sekcji Użytkownicy."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konto nie może się zalogować, dopóki administrator go nie połączy"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konta nie mogą się zalogować, dopóki administrator ich nie połączy"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " kont nie może się zalogować, dopóki administrator ich nie połączy"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konta nie może się zalogować, dopóki administrator ich nie połączy"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się sprawdzić, których kont to dotyczy. Nadal możesz wyłączyć tę opcję."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Sprawdzanie, kto loguje się hasłem"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Gdy dostawca "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " potwierdzi jeden z tych adresów e-mail podczas logowania, Silo połączy tę osobę z jej kontem."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konto łączy się przez adres e-mail"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konta łączą się przez adres e-mail"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " kont łączy się przez adres e-mail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konta łączy się przez adres e-mail"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pokaż jeszcze "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pokaż jeszcze "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pokaż jeszcze "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Pokaż jeszcze "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się wczytać kolejnych kont. Spróbuj ponownie."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Po tej zmianie każde konto nadal będzie mogło się zalogować."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administrator"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Dopasowywanie adresów e-mail wyłączone"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Brak adresu e-mail"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "To nikogo nie wylogowuje. Zalogowane osoby pozostają zalogowane, ich klucze API nadal działają i wciąż mogą zatwierdzać nowe urządzenia. Aby wylogować daną osobę, zakończ jej sesje na jej stronie w sekcji "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Użytkownicy"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Wyłączyć logowanie hasłem?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Zobacz wszystkie konta w sekcji Użytkownicy"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -94787,6 +95105,28 @@
     {
       "type": 0,
       "value": "Nie udało się zmienić dostawcy "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Logowanie hasłem jest wyłączone, więc przez dostawcę "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " logują się wszyscy oprócz administratorów z dostępem awaryjnym. Najpierw włącz ponownie logowanie hasłem, a potem wyłącz dostawcę "
     },
     {
       "type": 1,
@@ -160945,6 +161285,12 @@
       "value": "E-mail lub nazwa użytkownika"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Wpisz bazowy URL serwera Emby, z którego chcesz zaimportować dane."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -160955,6 +161301,12 @@
     {
       "type": 0,
       "value": "Pozostaw puste, jeśli konto nie ma hasła"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL serwera Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -161105,6 +161457,12 @@
     {
       "type": 0,
       "value": "Konto Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL serwera"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -161398,7 +161756,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect lub zapisany serwer"
+      "value": "Emby Connect, URL serwera lub zapisany serwer"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

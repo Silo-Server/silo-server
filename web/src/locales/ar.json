@@ -641,6 +641,12 @@
       "value": "انتهت صلاحية الجلسة. سجّل الدخول مرة أخرى."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "عندما يكون تسجيل الدخول بكلمة المرور معطّلًا، يجب أن يبقى مفعّلًا مزود تسجيل دخول يمكن للمستخدمين استخدامه. ويحتاج OpenID Connect أيضًا إلى عنوان URL العام للخادم."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -106586,6 +106592,20 @@
       "value": "فعّل مزود تسجيل دخول أولًا. مع تعطيل تسجيل الدخول بكلمة المرور وعدم تفعيل أي مزود، لن يتمكن من تسجيل الدخول إلا مسؤولو الطوارئ."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "عيّن عنوان URL العام للخادم أولًا. لا يستطيع "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " تسجيل دخول أي شخص بدونه، لذا عند تعطيل تسجيل الدخول بكلمة المرور لن يتمكن من تسجيل الدخول إلا مسؤولو الطوارئ."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -106676,6 +106696,355 @@
       "value": "السماح للمستخدمين بإنشاء مفاتيح API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "تعطيل تسجيل الدخول بكلمة المرور"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "سيسجّل مسؤولو الطوارئ فقط الدخول بكلمة المرور. ويسجّل الجميع غيرهم الدخول باستخدام "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "ينشئ "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " الحسابات عند أول تسجيل دخول، لذا إذا سجّل أحد هؤلاء الأشخاص الدخول به قبل أن تربطه، فسيحصل على حساب جديد منفصل."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "اربط كل حساب منها بحساب "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " من صفحته في «المستخدمون»."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا حسابات يتعذّر عليها تسجيل الدخول حتى يربطها مسؤول"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "حساب واحد لا يمكنه تسجيل الدخول حتى يربطه مسؤول"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "حسابان لا يمكنهما تسجيل الدخول حتى يربطهما مسؤول"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " حسابات لا يمكنها تسجيل الدخول حتى يربطها مسؤول"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " حسابًا لا يمكنها تسجيل الدخول حتى يربطها مسؤول"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " حساب لا يمكنها تسجيل الدخول حتى يربطها مسؤول"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر التحقق من الحسابات التي يؤثر فيها هذا. لا يزال بإمكانك تعطيله."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "جارٍ التحقق ممن يسجّلون الدخول بكلمة المرور"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "عندما يؤكد "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " أحد عناوين البريد الإلكتروني هذه عند تسجيل الدخول، يربط Silo ذلك الشخص بحسابه."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا حسابات تتصل عبر البريد الإلكتروني"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "حساب واحد يتصل عبر البريد الإلكتروني"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "حسابان يتصلان عبر البريد الإلكتروني"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " حسابات تتصل عبر البريد الإلكتروني"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " حسابًا تتصل عبر البريد الإلكتروني"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " حساب تتصل عبر البريد الإلكتروني"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرض المزيد"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرض حساب واحد آخر"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرض حسابين آخرين"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرض "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " حسابات أخرى"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرض "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " حسابًا آخر"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرض "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " حساب آخر"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر تحميل المزيد من الحسابات. حاول مرة أخرى."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "سيظل بإمكان كل حساب تسجيل الدخول بعد ذلك."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "مسؤول"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "مطابقة البريد الإلكتروني معطّلة"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "لا يوجد بريد إلكتروني"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "لا يؤدي هذا إلى تسجيل خروج أي شخص. يبقى من سجّلوا الدخول بالفعل مسجّلين، وتظل مفاتيح API الخاصة بهم تعمل، ويظل بإمكانهم الموافقة على أجهزة جديدة. لتسجيل خروج شخص ما، أنهِ جلساته من صفحته في "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "المستخدمون"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "هل تريد تعطيل تسجيل الدخول بكلمة المرور؟"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "عرض كل الحسابات في «المستخدمون»"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -106710,6 +107079,28 @@
     {
       "type": 0,
       "value": "تعذّر تغيير "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "تسجيل الدخول بكلمة المرور معطّل، لذا فإن "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " هو طريقة تسجيل دخول الجميع باستثناء مسؤولي الطوارئ. أعد تفعيل تسجيل الدخول بكلمة المرور أولًا، ثم عطّل "
     },
     {
       "type": 1,
@@ -180674,6 +181065,12 @@
       "value": "البريد الإلكتروني أو اسم المستخدم"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "أدخل عنوان URL الأساسي لخادم Emby الذي تريد الاستيراد منه."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -180684,6 +181081,12 @@
     {
       "type": 0,
       "value": "اتركها فارغة إن لم يكن للحساب كلمة مرور"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "عنوان URL لخادم Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -180834,6 +181237,12 @@
     {
       "type": 0,
       "value": "حساب Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "عنوان URL للخادم"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -181135,7 +181544,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect أو خادم محفوظ"
+      "value": "Emby Connect، أو عنوان URL للخادم، أو خادم محفوظ"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

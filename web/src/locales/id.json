@@ -641,6 +641,12 @@
       "value": "Sesi Anda sudah kedaluwarsa. Masuk lagi."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Selama masuk dengan kata sandi nonaktif, penyedia masuk yang dapat digunakan orang harus tetap aktif. OpenID Connect juga memerlukan URL publik server."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -71883,6 +71889,20 @@
       "value": "Aktifkan penyedia masuk terlebih dahulu. Jika masuk dengan kata sandi nonaktif dan tidak ada penyedia yang aktif, hanya admin darurat yang dapat masuk."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Tetapkan URL publik server terlebih dahulu. Tanpa URL itu, "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " tidak dapat memproses masuk siapa pun, sehingga saat masuk dengan kata sandi nonaktif, hanya admin break-glass yang dapat masuk."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -71973,6 +71993,205 @@
       "value": "Izinkan pengguna membuat kunci API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Nonaktifkan masuk dengan kata sandi"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Hanya admin break-glass yang akan masuk dengan kata sandi. Semua orang lainnya masuk dengan "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " membuat akun saat pertama kali masuk, jadi jika salah satu orang ini masuk dengan penyedia itu sebelum Anda menautkannya, mereka akan mendapatkan akun baru yang terpisah."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Tautkan setiap akun ke akun "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " dari halamannya di Pengguna."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " akun tidak dapat masuk sampai admin menautkannya"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memeriksa akun mana yang terdampak. Anda tetap dapat menonaktifkannya."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Memeriksa siapa yang masuk dengan kata sandi"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Saat "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " mengonfirmasi salah satu email ini ketika masuk, Silo menghubungkan orang tersebut ke akunnya."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " akun terhubung melalui email"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tampilkan "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " lainnya"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuat akun lainnya. Coba lagi."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Setiap akun tetap dapat masuk setelah ini."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Admin"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Pencocokan email nonaktif"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Tidak ada email"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Ini tidak mengeluarkan siapa pun. Orang yang sudah masuk tetap masuk, kunci API mereka tetap berfungsi, dan mereka tetap dapat menyetujui perangkat baru. Untuk mengeluarkan seseorang, akhiri sesinya dari halamannya di "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Pengguna"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Nonaktifkan masuk dengan kata sandi?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Lihat semua akun di Pengguna"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -72007,6 +72226,28 @@
     {
       "type": 0,
       "value": "Tidak dapat mengubah "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Masuk dengan kata sandi nonaktif, jadi "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " adalah cara semua orang kecuali admin break-glass untuk masuk. Aktifkan kembali masuk dengan kata sandi terlebih dahulu, lalu nonaktifkan "
     },
     {
       "type": 1,
@@ -124344,6 +124585,12 @@
       "value": "Email atau nama pengguna"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Masukkan URL dasar server Emby yang ingin Anda impor."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -124354,6 +124601,12 @@
     {
       "type": 0,
       "value": "Kosongkan jika akun tidak memiliki kata sandi"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL server Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -124504,6 +124757,12 @@
     {
       "type": 0,
       "value": "Akun Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL server"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -124797,7 +125056,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect atau server tersimpan"
+      "value": "Emby Connect, URL server, atau server tersimpan"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [
