@@ -16,6 +16,7 @@ import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 import type { ScrollPreservingState } from "@/hooks/useScrollRestoration";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import { useT } from "@/i18n";
+import { episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import EpisodeCardCaption from "./EpisodeCardCaption";
 import WatchProgressBar from "@/components/WatchProgressBar";
 
@@ -25,6 +26,8 @@ interface EpisodeCarouselProps {
   episodeLinkState?: EpisodeNavigationState;
   /** The page's library scope, kept on each episode link. */
   libraryId?: number;
+  /** The series' episode labels; "air_date" leads each caption with its title, not its code. */
+  episodeLabels?: string;
 }
 
 export default function EpisodeCarousel({
@@ -32,6 +35,7 @@ export default function EpisodeCarousel({
   currentEpisodeNumber,
   episodeLinkState,
   libraryId,
+  episodeLabels,
 }: EpisodeCarouselProps) {
   const t = useT();
   const currentEpisodeIndex = episodes.findIndex(
@@ -81,6 +85,7 @@ export default function EpisodeCarousel({
                 isCurrent={ep.episode_number === currentEpisodeNumber}
                 episodeLinkState={linkState}
                 libraryId={libraryId}
+                episodeLabels={episodeLabels}
                 quickActionMode={quickActionMode}
                 hideImageIfUnwatched={hideImages}
                 hideOverviewIfUnwatched={hideOverviews}
@@ -109,6 +114,7 @@ function EpisodeCarouselCard({
   isCurrent,
   episodeLinkState,
   libraryId,
+  episodeLabels,
   quickActionMode,
   hideImageIfUnwatched,
   hideOverviewIfUnwatched,
@@ -117,6 +123,7 @@ function EpisodeCarouselCard({
   isCurrent: boolean;
   episodeLinkState?: EpisodeNavigationState;
   libraryId?: number;
+  episodeLabels?: string;
   quickActionMode: CardQuickActionMode;
   hideImageIfUnwatched: boolean;
   hideOverviewIfUnwatched: boolean;
@@ -125,7 +132,9 @@ function EpisodeCarouselCard({
   const cardRef = useRef<HTMLDivElement>(null);
   const thumbhashUrl = ep.still_thumbhash ? decodeThumbhash(ep.still_thumbhash) : "";
   const episodeTitle =
-    ep.title || t("web.detail.episodes.numbered", { episode: ep.episode_number });
+    ep.title ||
+    episodeAirDateLabel(episodeLabels, ep.air_date) ||
+    t("web.detail.episodes.numbered", { episode: ep.episode_number });
   const episodeHref = buildItemHref({
     contentId: ep.content_id,
     libraryId: episodeLinkLibraryId(ep, libraryId),
@@ -218,6 +227,7 @@ function EpisodeCarouselCard({
         >
           <EpisodeCardCaption
             episode={ep}
+            episodeLabels={episodeLabels}
             hideOverview={hideOverviewIfUnwatched && isEpisodeUnwatched(ep.user_data)}
             isCurrent={isCurrent}
             badges={ep.user_data?.played && <WatchedCheckIndicator />}

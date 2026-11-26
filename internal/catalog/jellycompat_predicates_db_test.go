@@ -337,6 +337,22 @@ func TestJellycompatPredicatesPostgres(t *testing.T) {
 			t.Fatalf("favorite count total=%d items=%d, want 5 and no page", total, len(items))
 		}
 
+		// A Jellyfin Ids list keeps only the named episodes; a series ID names
+		// none of them.
+		named := all
+		named.ContentIDs = []string{episodeIDs[4], otherSeries, episodeIDs[1]}
+		items, total, err = episodes.BrowseEpisodes(ctx, "", "", nil, "", named, access, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = got[:0]
+		for _, item := range items {
+			got = append(got, item.ContentID)
+		}
+		if want := []string{episodeIDs[1], episodeIDs[4]}; total != len(want) || !slices.Equal(got, want) {
+			t.Fatalf("Ids page total=%d items=%v, want %v", total, got, want)
+		}
+
 		// The highest-rated episode leads a descending rating sort, and unrated
 		// episodes stay last.
 		exec(`UPDATE episodes SET rating_imdb=CASE content_id WHEN $1 THEN 8.0 WHEN $2 THEN 9.0 END WHERE content_id=ANY($3)`, episodeIDs[1], episodeIDs[3], episodeIDs)

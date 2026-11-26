@@ -121961,6 +121961,20 @@
       "value": "Ημερομηνία τελευταίας προβολής"
     }
   ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Κλείδωμα του πεδίου «"
+    },
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": "»"
+    }
+  ],
   "web.item.editMetadata.locked": [
     {
       "type": 0,

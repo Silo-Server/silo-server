@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 
@@ -176,12 +177,24 @@ func (b outboundBundle) clear(ctx context.Context, tx pgx.Tx, cipher *secret.Cip
 }
 
 // carryOutboundSettings takes the outbound settings from the live server
-// (liveURL, or none for "") and says what it cleared.
-func carryOutboundSettings(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, cipher *secret.Cipher, out io.Writer) error {
+// (liveURL, or none for "") and says what it cleared. A cleared bundle
+// with a credential among liveOwn, the server-specific settings the live
+// server supplies afterwards, is the live server's, so it is reported as
+// kept; its other settings alone, such as a push relay's address while it
+// waits to be registered again, connect nowhere.
+func carryOutboundSettings(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, cipher *secret.Cipher, liveOwn []string, out io.Writer) error {
 	carried, cleared, err := loader.CarryOutboundSettings(ctx, dbURL, liveURL, cipher)
 	if err != nil {
 		return fmt.Errorf("keeping the live server's connections to outside services: %w", err)
 	}
+	cleared = slices.DeleteFunc(cleared, func(name string) bool {
+		i := slices.IndexFunc(outboundBundles, func(b outboundBundle) bool { return b.name == name })
+		if i < 0 || !slices.ContainsFunc(outboundBundles[i].secrets, func(k string) bool { return slices.Contains(liveOwn, k) }) {
+			return false
+		}
+		carried = append(carried, name)
+		return true
+	})
 	if len(carried) > 0 {
 		_, _ = fmt.Fprintf(out, "Kept this server's connections to outside services in place of the backup's: %s.\n", strings.Join(carried, ", "))
 	}
@@ -200,12 +213,7 @@ func carryOutboundSettings(ctx context.Context, loader DatabaseLoader, dbURL, li
 // keys a restore rotates (rotatedSettings) and the plugin provisioning hold
 // keep their new values. It returns how many settings it changed.
 func (l PGLoader) CarryServerSpecificSettings(ctx context.Context, dbURL, liveURL string) (int, error) {
-	serverSpecific := func(key string) bool {
-		kind, ok := SettingKindOf(key)
-		_, rotated := rotatedSettings[key]
-		return ok && kind == SettingKindServerSpecific && !rotated && key != plugins.ProvisionRestoreHoldKey
-	}
-	live, err := allSettingsAt(ctx, liveURL, serverSpecific)
+	live, err := allSettingsAt(ctx, liveURL, carriedServerSpecific)
 	if err != nil {
 		return 0, fmt.Errorf("reading the live server's settings: %w", err)
 	}
@@ -216,7 +224,7 @@ func (l PGLoader) CarryServerSpecificSettings(ctx context.Context, dbURL, liveUR
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 	changed := 0
 	err = pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
-		restored, err := allSettings(ctx, tx, serverSpecific)
+		restored, err := allSettings(ctx, tx, carriedServerSpecific)
 		if err != nil {
 			return err
 		}
@@ -242,6 +250,57 @@ func (l PGLoader) CarryServerSpecificSettings(ctx context.Context, dbURL, liveUR
 		return nil
 	})
 	return changed, err
+}
+
+// carriedServerSpecific reports whether CarryServerSpecificSettings gives
+// a restored database the live value of key.
+func carriedServerSpecific(key string) bool {
+	kind, ok := SettingKindOf(key)
+	_, rotated := rotatedSettings[key]
+	return ok && kind == SettingKindServerSpecific && !rotated && key != plugins.ProvisionRestoreHoldKey
+}
+
+// ServerSpecificSettingKeys lists, sorted, the server-specific settings
+// liveURL holds that CarryServerSpecificSettings gives a restored database
+// and that supply a connection there (suppliesConnection). cipher (nil for
+// none) opens the encrypted ones.
+func (l PGLoader) ServerSpecificSettingKeys(ctx context.Context, liveURL string, cipher *secret.Cipher) ([]string, error) {
+	live, err := allSettingsAt(ctx, liveURL, carriedServerSpecific)
+	if err != nil {
+		return nil, fmt.Errorf("reading the live server's settings: %w", err)
+	}
+	maps.DeleteFunc(live, func(key, value string) bool { return !suppliesConnection(key, value, cipher) })
+	return slices.Sorted(maps.Keys(live)), nil
+}
+
+// suppliesConnection reports whether the live server's value of a
+// server-specific setting key supplies what a restore would otherwise
+// report as lost. Nothing is supplied by an empty value, an encrypted one
+// cipher (nil for none) cannot open, an AI provider registry that does not
+// parse or has no providers (which a server's first start writes), ChatGPT
+// credentials with no connected account, or a job binding, which only names
+// a provider of the registry.
+func suppliesConnection(key, value string, cipher *secret.Cipher) bool {
+	if secret.IsEncrypted(value) {
+		if cipher == nil {
+			return false
+		}
+		plain, err := cipher.Decrypt(value, secret.SettingsAAD(key))
+		if err != nil {
+			return false
+		}
+		value = plain
+	}
+	switch {
+	case key == config.AIProvidersSettingKey:
+		registry, err := config.ParseAIProviderRegistry(value)
+		return err == nil && len(registry.Providers) > 0
+	case key == chatgpt.CredentialsKey:
+		return chatgpt.Connected(value)
+	case slices.Contains(config.AIProviderBindingKeys(), key):
+		return false
+	}
+	return strings.TrimSpace(value) != ""
 }
 
 // allSettingsAt reads the settings of the database at url that keep says to.

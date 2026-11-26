@@ -23,6 +23,8 @@ import { Smartphone } from "lucide-react";
 import { toast } from "sonner";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import { useLinkToken } from "@/hooks/useLinkToken";
+import { usePasswordPolicy } from "@/hooks/queries/account";
+import { newPasswordPolicyProblem, newPasswordHint, passwordErrorMessage } from "@/lib/newPassword";
 import { useT } from "@/i18n";
 
 export default function InviteClaim() {
@@ -43,6 +45,8 @@ function ClaimForm({ token }: { token: string }) {
   const { user, loading, completeLogin } = useAuth();
   const navigate = useNavigate();
   const t = useT();
+  // Nothing is asked of the server for a link that lost its token.
+  const passwordPolicy = usePasswordPolicy(token !== "");
 
   const [lookup, setLookup] = useState<{
     data?: InvitationLookup;
@@ -174,7 +178,8 @@ function ClaimForm({ token }: { token: string }) {
       case "conflict":
         return t("web.auth.invite.emailTaken");
       case "validation_failed":
-        return error.message;
+        // The rule the server refused, which a stale policy can miss.
+        return passwordErrorMessage(error, error.message);
       default:
         return null;
     }
@@ -201,8 +206,9 @@ function ClaimForm({ token }: { token: string }) {
       toast.error(t("web.auth.passwordRules.mismatch"));
       return;
     }
-    if ([...password].length < 8 || new TextEncoder().encode(password).length > 72) {
-      toast.error(t("web.auth.invite.passwordLength"));
+    const passwordProblem = newPasswordPolicyProblem(password, passwordPolicy);
+    if (passwordProblem) {
+      toast.error(passwordProblem);
       return;
     }
     const controller = lifetime.current;
@@ -381,9 +387,7 @@ function ClaimForm({ token }: { token: string }) {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="invite-password">{t("web.auth.password")}</Label>
-                  <p className="text-muted-foreground text-xs">
-                    {t("web.auth.passwordRules.minLength")}
-                  </p>
+                  <p className="text-muted-foreground text-xs">{newPasswordHint(passwordPolicy)}</p>
                   <PasswordInput
                     id="invite-password"
                     value={password}

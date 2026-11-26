@@ -23,9 +23,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/backup/backuptest"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/s3client/s3test"
@@ -1689,8 +1691,44 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 			}
 		}
 	}
+	// The report leaves out what the carry takes from the live server, except
+	// the job bindings, and a provider list and a ChatGPT record ("live")
+	// that hold no connection.
+	liveOwn, err := (PGLoader{}).ServerSpecificSettingKeys(ctx, liveURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := (PGLoader{}).CarryServerSpecificSettings(ctx, restoredURL, liveURL); err != nil {
 		t.Fatal(err)
+	}
+	var fromLive []string
+	for i, key := range keys {
+		if _, rotated := rotatedSettings[key]; i%2 == 0 && !rotated && key != plugins.ProvisionRestoreHoldKey && key != chatgpt.CredentialsKey && key != config.AIProvidersSettingKey && !slices.Contains(config.AIProviderBindingKeys(), key) {
+			fromLive = append(fromLive, key)
+		}
+	}
+	slices.Sort(fromLive)
+	if !slices.Equal(liveOwn, fromLive) {
+		t.Errorf("ServerSpecificSettingKeys = %v, want the settings the carry takes from the live server %v", liveOwn, fromLive)
+	}
+	// The read applies suppliesConnection to the live rows, opening the
+	// encrypted ones with the key it is given.
+	cipher, err := secret.New([]byte("server-specific-test-key-0123456789"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	noProviders, _, _ := config.PlanAIProviderConversion(nil)
+	empty, emptyURL := open()
+	for key, value := range map[string]string{config.AIProvidersSettingKey: noProviders[config.AIProvidersSettingKey],
+		"notifications.web_push.vapid_keypair": "pair", catalog.SearchSettingMeilisearchURL: "", config.AITextProviderSettingKey: "custom-gone"} {
+		if sealed, err := cipher.Encrypt(value, secret.SettingsAAD(key)); err != nil {
+			t.Fatal(err)
+		} else if _, err := empty.Exec(ctx, `INSERT INTO server_settings VALUES ($1, $2)`, key, sealed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := (PGLoader{}).ServerSpecificSettingKeys(ctx, emptyURL, cipher); err != nil || !slices.Equal(got, []string{"notifications.web_push.vapid_keypair"}) {
+		t.Errorf("ServerSpecificSettingKeys = %v (%v), want only the web push key pair", got, err)
 	}
 	for i, key := range keys {
 		var got *string

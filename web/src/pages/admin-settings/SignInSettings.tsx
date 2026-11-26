@@ -37,6 +37,11 @@ export const USER_API_KEYS_KEY = "auth.user_api_keys";
 // Both only work for Silo-password accounts: the server refuses a signup while
 // password sign-in is off, and a reset needs a local password to replace.
 const PASSWORD_ACCOUNT_KEYS = ["signup.enabled", "password_reset.self_service_enabled"];
+// What a new Silo password must contain (auth.PasswordPolicy on the server).
+const PASSWORD_MIN_LENGTH_KEY = "auth.password_min_length";
+const PASSWORD_UPPERCASE_KEY = "auth.password_require_uppercase";
+const PASSWORD_SPECIAL_KEY = "auth.password_require_special";
+const PASSWORD_RULE_KEYS = [PASSWORD_MIN_LENGTH_KEY, PASSWORD_UPPERCASE_KEY, PASSWORD_SPECIAL_KEY];
 // Hidden tier: still saved and readable through the settings API, deliberately
 // without a control here because the defaults suit every deployment we
 // support — auth.access_token_expiry, auth.refresh_token_expiry,
@@ -45,6 +50,7 @@ const PASSWORD_ACCOUNT_KEYS = ["signup.enabled", "password_reset.self_service_en
 const KEYS = [
   LOCAL_LOGIN_KEY,
   ...PASSWORD_ACCOUNT_KEYS,
+  ...PASSWORD_RULE_KEYS,
   EMAIL_MATCH_KEY,
   USER_API_KEYS_KEY,
   "server.public_url",
@@ -176,7 +182,9 @@ export default function SignInSettings() {
 
         <FieldGroup
           label={t("web.admin.settings.signIn.page.passwordsGroup")}
-          dirty={[LOCAL_LOGIN_KEY, ...PASSWORD_ACCOUNT_KEYS].some((key) => form.isDirty(key))}
+          dirty={[LOCAL_LOGIN_KEY, ...PASSWORD_ACCOUNT_KEYS, ...PASSWORD_RULE_KEYS].some((key) =>
+            form.isDirty(key),
+          )}
           actions={
             <Link
               to="/admin/users?tab=invite-codes"
@@ -245,6 +253,29 @@ export default function SignInSettings() {
             value={form.getValue("password_reset.self_service_enabled")}
             onChange={(v) => form.setValue("password_reset.self_service_enabled", v)}
             restartRequired={restartKeys.has("password_reset.self_service_enabled")}
+          />
+          <SettingField
+            label={t("web.admin.settings.signIn.page.passwordMinLengthLabel")}
+            dirty={form.isDirty(PASSWORD_MIN_LENGTH_KEY)}
+            type="number"
+            description={t("web.admin.settings.signIn.page.passwordMinLengthDescription")}
+            value={form.getValue(PASSWORD_MIN_LENGTH_KEY)}
+            onChange={(v) => form.setValue(PASSWORD_MIN_LENGTH_KEY, v)}
+          />
+          <SettingField
+            label={t("web.admin.settings.signIn.page.passwordRequireUppercaseLabel")}
+            dirty={form.isDirty(PASSWORD_UPPERCASE_KEY)}
+            type="toggle"
+            value={form.getValue(PASSWORD_UPPERCASE_KEY) === "true" ? "true" : "false"}
+            onChange={(v) => form.setValue(PASSWORD_UPPERCASE_KEY, v)}
+          />
+          <SettingField
+            label={t("web.admin.settings.signIn.page.passwordRequireSpecialLabel")}
+            dirty={form.isDirty(PASSWORD_SPECIAL_KEY)}
+            type="toggle"
+            description={t("web.admin.settings.signIn.page.passwordRequireSpecialDescription")}
+            value={form.getValue(PASSWORD_SPECIAL_KEY) === "true" ? "true" : "false"}
+            onChange={(v) => form.setValue(PASSWORD_SPECIAL_KEY, v)}
           />
           <AdvancedSection
             id="sign-in.locked-out"

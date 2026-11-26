@@ -156,6 +156,75 @@ func TestTranscodeServeStaleCopyRelaysToTheTokensNode(t *testing.T) {
 	}
 }
 
+// A stale copy still records the transport generation of the plan this
+// replica made. The client's current player names the node transport another
+// replica's replan started, which is not superseded while the shared store
+// still holds its recipe: it is relayed as an unmarked request is. Once a
+// replan or stop deleted that recipe, the marker names a replaced transport
+// and the copy refuses it without reaching the node.
+func TestTranscodeServeStaleCopyRelaysTheCurrentMarkedPlayer(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stored bool
+		want   int
+	}{
+		{name: "node transport still runs", stored: true, want: http.StatusOK},
+		{name: "node transport replaced", want: http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sessionMgr := playback.NewSessionManager(0, 0)
+			handler := newKeyedPlaybackHandler(sessionMgr)
+			handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpegSleep(t, "30"), t.TempDir())
+			handler.JWTSecret = "test-secret"
+			handler.NodeKeys = nodeauthtest.SameKey("test-secret")
+			node, hits := countingNode(t, http.StatusOK)
+
+			started, err := sessionMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, true)
+			if err != nil {
+				t.Fatalf("start live session: %v", err)
+			}
+			if err := sessionMgr.StopSession(started.ID); err != nil {
+				t.Fatalf("stop session: %v", err)
+			}
+			stale := *started
+			stale.TransportGeneration = stale.ID + "-thisreplica"
+			sessionMgr.RegisterReconstructed(&stale)
+
+			transport := stale.ID + "-otherreplica"
+			card := playback.NewRecipeCard(1, "profile-1", 42, node.URL, playback.TranscodeOpts{
+				SessionID: stale.ID, TranscodeTransportID: transport, InputPath: "/media/movie.mkv",
+				TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+				AudioTrackIndex: -1, SubtitleTrackIndex: -1,
+			})
+			store := &sharedRecipeStore{cards: map[string]playback.RecipeCard{}}
+			if tc.stored {
+				store.cards[transport] = card
+			}
+			handler.NodeRecipeStore = store
+			token := handler.signSessionToken(card, false)
+
+			rec := httptest.NewRecorder()
+			handler.HandleGetTranscodeManifest(rec, playbackTestRequest(http.MethodGet,
+				"/api/v2/playback/transcode/"+stale.ID+"/master.m3u8?st="+token+"&"+
+					playback.TransportQueryParam+"="+playback.TransportMarker(stale.ID, transport),
+				nil, map[string]string{"session_id": stale.ID}))
+
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, body = %s, want %d", rec.Code, rec.Body.String(), tc.want)
+			}
+			wantHits := int32(0)
+			if tc.want == http.StatusOK {
+				wantHits = 1
+			} else if got := rec.Header().Get(playback.ErrorHeader); got != playback.TransportSupersededCode {
+				t.Fatalf("%s = %q, want %s", playback.ErrorHeader, got, playback.TransportSupersededCode)
+			}
+			if got := hits.Load(); got != wantHits {
+				t.Fatalf("node hits = %d, want %d", got, wantHits)
+			}
+		})
+	}
+}
+
 // A transcode this replica moved off a dead node keeps its transport id, and
 // the client keeps presenting the token minted for that node. When the local
 // runtime the move started is lost while the session stays live, the copy is

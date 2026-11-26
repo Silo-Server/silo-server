@@ -179,6 +179,49 @@ function invalidateAdminDeviceCaches(
   queryClient.invalidateQueries({ queryKey: adminKeys.devices() });
 }
 
+/**
+ * Keys the server stores as one mirrored pair. A delete of either half clears
+ * both (settingscontract.MirrorKey), so the cache has to drop both too.
+ */
+const MIRRORED_SETTING_KEYS: Partial<Record<string, string>> = {
+  [SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO]: SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE,
+  [SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE]: SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
+};
+
+/**
+ * Takes reset device overrides out of the cached settings list before the
+ * reset settles. A reopened subtitle appearance editor reads its row and
+ * override flag from that list, so it can't wait on a refetch that may be
+ * slow, skipped or fail: it would offer the deleted values back.
+ */
+async function dropAdminDeviceOverrideRows(
+  queryClient: ReturnType<typeof useQueryClient>,
+  authority: ReturnType<typeof captureAdminSettingAuthority>,
+  target: { userId: number; profileId: string; deviceId: string; keys: readonly string[] },
+) {
+  if (target.keys.length === 0) return;
+  const keys = new Set(
+    target.keys.flatMap((key) => {
+      const mirror = MIRRORED_SETTING_KEYS[key];
+      return mirror ? [key, mirror] : [key];
+    }),
+  );
+  const settingsKey = adminUserSettingValuesKey(authority, target.userId);
+  await queryClient.cancelQueries({ queryKey: settingsKey });
+  queryClient.setQueryData<AdminSettingValueRow[]>(settingsKey, (rows) =>
+    rows?.filter(
+      (row) =>
+        !(
+          row.scope === "profile_device" &&
+          // useAdminUserDeviceSettings reports a missing id as "".
+          (row.profile_id ?? "") === target.profileId &&
+          (row.device_id ?? "") === target.deviceId &&
+          keys.has(row.key)
+        ),
+    ),
+  );
+}
+
 export const adminUsersKey = (scope = adminUserScope()) => [...adminKeys.users(), scope];
 export async function fetchAllAdminUsers(signal?: AbortSignal): Promise<AdminUser[]> {
   return listAdminUsers(captureAdminUserAuthority(), signal);
@@ -527,8 +570,12 @@ export function useDeleteAdminUserDeviceSetting() {
         { scope: "profile_device", profileId, deviceId },
         authority,
       ),
-    onSuccess: (_data, variables) => {
+    onSuccess: async (_data, variables) => {
       toast.success(t("web.admin.common.users.deviceOverrideReset"));
+      await dropAdminDeviceOverrideRows(queryClient, authority, {
+        ...variables,
+        keys: [variables.key],
+      });
       invalidateAdminDeviceCaches(queryClient, variables.userId, authority);
       queryClient.invalidateQueries({
         queryKey: adminKeys.deviceDetail(variables.userId, variables.deviceId),
@@ -572,23 +619,30 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
             { scope: "profile_device", profileId, deviceId },
             authority,
           );
-          completed++;
         } catch (err) {
-          if (err instanceof V2ProblemError && err.status === 404) {
-            completed++;
-            continue;
+          if (!(err instanceof V2ProblemError && err.status === 404)) {
+            // A failure without a readable reason (no connection) gets none: the
+            // count already says how far the reset got.
+            throw new Error(
+              t("web.admin.common.users.resetAllStopped", {
+                count: keys.length,
+                count_text: keys.length,
+                completed: completed,
+                reason: readableErrorText(err, ""),
+              }).trimEnd(),
+            );
           }
-          // A failure without a readable reason (no connection) gets none: the
-          // count already says how far the reset got.
-          throw new Error(
-            t("web.admin.common.users.resetAllStopped", {
-              count: keys.length,
-              count_text: keys.length,
-              completed: completed,
-              reason: readableErrorText(err, ""),
-            }).trimEnd(),
-          );
         }
+        completed++;
+        // Drop each row as its delete lands, not when the loop ends: a key
+        // reset before a later failure is gone too, and a save made while the
+        // rest of the loop runs must not be dropped with it.
+        await dropAdminDeviceOverrideRows(queryClient, authority, {
+          userId,
+          profileId,
+          deviceId,
+          keys: [key],
+        });
       }
       return { completed };
     },

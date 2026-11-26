@@ -100,3 +100,13 @@ describe("DashboardGrid pointer resize", () => {
     expect(release).toHaveBeenCalledWith(1);
   });
 });
+
+describe("DashboardGrid add sheet", () => {
+  it("keeps wheel input over the sheet from scrolling the dashboard", () => {
+    const layout = layoutWith(resized, vi.fn());
+    render(<DashboardGrid layout={layout} isAddPanelOpen onAddPanelOpenChange={() => {}} />);
+    const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 40 });
+    screen.getByRole("heading", { name: "Add widget" }).dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+  });
+});

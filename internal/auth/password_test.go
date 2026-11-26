@@ -71,7 +71,7 @@ func TestValidatePasswordChange(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			err := validatePasswordChange(t.Context(), tt.user, tt.currentPassword, tt.newPassword)
+			err := validatePasswordChange(t.Context(), tt.user, DefaultPasswordPolicy(), tt.currentPassword, tt.newPassword)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("validatePasswordChange() error = %v, want %v", err, tt.wantErr)
 			}
@@ -79,7 +79,7 @@ func TestValidatePasswordChange(t *testing.T) {
 	}
 }
 
-func TestValidateNewPasswordBoundaries(t *testing.T) {
+func TestDefaultPasswordPolicyBoundaries(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
 		name     string
@@ -94,7 +94,7 @@ func TestValidateNewPasswordBoundaries(t *testing.T) {
 		{"73 bytes", strings.Repeat("界", 24) + "a", ErrPasswordTooLong},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := ValidateNewPassword(tt.password); !errors.Is(err, tt.want) {
+			if err := DefaultPasswordPolicy().Check(tt.password); !errors.Is(err, tt.want) {
 				t.Fatalf("error = %v, want %v", err, tt.want)
 			}
 		})
@@ -106,8 +106,7 @@ func TestRegistrationRejectsPasswordBeforeDependencies(t *testing.T) {
 	// No stores are wired: rejection must precede setup checks, invite redemption,
 	// account creation, or any other storage access.
 	s := &Service{}
-	for _, password := range []string{"short", strings.Repeat("界", 25)} {
-		want := ValidateNewPassword(password)
+	for password, want := range map[string]error{"short": ErrPasswordTooShort, strings.Repeat("界", 25): ErrPasswordTooLong} {
 		if _, _, err := s.SetupInitialUser(t.Context(), "user", "user@example.test", password, true, "Home", "", ""); !errors.Is(err, want) {
 			t.Fatalf("setup error = %v, want %v", err, want)
 		}

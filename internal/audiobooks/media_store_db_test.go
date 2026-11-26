@@ -48,6 +48,18 @@ func TestABSListsLeaveOutBooksInNoLibraryDB(t *testing.T) {
 	if len(progress) != 1 || progress[0].ContentID != listed {
 		t.Errorf("newest progress with limit 1 = %+v, want the book in a library", progress)
 	}
+	// Both progress reads carry the stored hide flag, which ABS clients
+	// receive as hideFromContinueListening.
+	progressStore := &ABSProgressStore{Pool: pool}
+	if err := progressStore.SetHideFromContinue(ctx, strconv.Itoa(userID), "", listed, true); err != nil {
+		t.Fatalf("SetHideFromContinue: %v", err)
+	}
+	if rows, err := progressStore.ListProgressForAudiobooks(ctx, strconv.Itoa(userID), "", 1); err != nil || len(rows) != 1 || !rows[0].HideFromContinue {
+		t.Errorf("listed progress after hide = %+v, %v; want HideFromContinue", rows, err)
+	}
+	if row, err := progressStore.GetProgress(ctx, strconv.Itoa(userID), "", listed); err != nil || row == nil || !row.HideFromContinue {
+		t.Errorf("progress after hide = %+v, %v; want HideFromContinue", row, err)
+	}
 	searched := found[:0]
 	for _, item := range found {
 		if item.ContentID == listed || item.ContentID == held {

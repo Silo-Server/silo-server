@@ -1209,7 +1209,7 @@ func (s *Server) handleSubtitleFonts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fonts, err := playback.ExtractAttachedSubtitleFonts(r.Context(), claims.MediaPath, cfg.Playback.FFmpegPath)
+	fonts, err := playback.ExtractAttachedSubtitleFonts(r.Context(), claims.MediaPath, cfg.Playback.FFmpegPath, trackIndex, s.subCache)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "extract subtitle fonts", "component", "proxy", "error", err, "track", trackIndex, "path", claims.MediaPath, "playback_session_id", claims.SessionID)
 		http.Error(w, "subtitle font extraction failed", http.StatusInternalServerError)

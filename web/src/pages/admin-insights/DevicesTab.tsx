@@ -29,6 +29,7 @@ import {
   formatRatePercentNumber,
   formatShortCalendarDate,
   type InsightsFilterState,
+  insightRefreshProps,
 } from "./insightsHelpers";
 import { DevicesUsageSections } from "./DevicesUsageSections";
 import { InsightKpiCard, InsightNoticeBanner, InsightSectionError } from "./insightsShared";
@@ -57,7 +58,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
     }),
     [filters, minSessions],
   );
-  const query = useAdminInsightsDevices(queryParams);
+  const query = useAdminInsightsDevices(queryParams, { keepPrevious: true });
   const data = query.data;
 
   const formatSessionCount = useCallback(
@@ -222,7 +223,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
   });
 
   return (
-    <div className="space-y-5">
+    <div {...insightRefreshProps(query.isPlaceholderData, "space-y-5")}>
       {coverage.total_sessions > 0 && coverage.route_facts_sessions === 0 ? (
         <InsightNoticeBanner message={t("web.admin.insights.coverage.routeFactsNone")} />
       ) : coverage.total_sessions > 0 && coverage.route_facts_sessions < coverage.total_sessions ? (

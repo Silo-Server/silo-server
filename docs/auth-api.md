@@ -28,7 +28,7 @@ devices and playback sessions. All paths below use `/api/v2`.
 | --- | --- |
 | `GET /auth/sessions/capabilities` (`getLoginSessionCapabilities`) | Authenticated account. Reports `available`, `last_seen`, `admin_management` and `revoke_other_sessions`, with the standard capability state, permission answer and revision. `revoke_other_sessions` is false in [demo mode](#demo-mode) for a caller that is not an administrator. |
 | `GET /auth/sessions` (`listSessions`) | Lists the caller's live, unrevoked login sessions, newest first, with cursor pagination. Account-level access does not require profile selection. |
-| `DELETE /auth/sessions/{id}` (`deleteSession`) | Revokes a session owned by the caller. Unknown or another account's session returns 404. In [demo mode](#demo-mode) a caller that is not an administrator ending another session of the same account gets 403 `permission_denied`. |
+| `DELETE /auth/sessions/{id}` (`deleteSession`) | Revokes a session owned by the caller. Unknown or another account's session returns 404. Ending another session of the same account is 403 `permission_denied` for a session opened by device sign-in, which may end only itself, and in [demo mode](#demo-mode) for a caller that is not an administrator. |
 | `GET /admin/users/{user_id}/login-sessions` (`listAdminUserLoginSessions`) | Acting admin. Lists a selected account's live login sessions. The cursor is bound to the operation, administrator and target account. |
 | `DELETE /admin/users/{user_id}/login-sessions/{session_id}` (`deleteAdminUserLoginSession`) | Acting admin. Revokes one session of the selected account; 204 on success, 404 for an unknown or mismatched session. |
 | `DELETE /admin/users/{user_id}/login-sessions` (`deleteAdminUserLoginSessions`) | Acting admin. Revokes all live sessions of the selected account and returns `{ "revoked": N }`. Repeating an account-wide request returns zero when no live sessions remain. |
@@ -90,9 +90,24 @@ active primary profile. An admin account may also change its password before sel
 but selecting a secondary profile removes that authority. API keys and impersonation sessions can
 never change an account password.
 
-Local passwords are bcrypt hashes. Setup, invited signup, and password changes share the same
-password policy. New passwords must contain at least 8 Unicode characters and be
-no more than 72 UTF-8 bytes, the bcrypt input limit. The caller must prove knowledge of the current
+Local passwords are bcrypt hashes. Setup, invited signup, password changes, password resets and
+passwords an administrator sets share one password policy, which an administrator sets under
+Settings → Sign-in:
+
+| Setting | Default | Rule |
+| --- | --- | --- |
+| `auth.password_min_length` | `8` | Fewest Unicode characters, from 8 to 72. |
+| `auth.password_require_uppercase` | `false` | At least one capital letter (Unicode category `Lu`). |
+| `auth.password_require_special` | `false` | At least one punctuation mark or symbol (Unicode categories `P` and `S`); letters, digits and spaces do not count. |
+
+Every new password is also at most 72 UTF-8 bytes, the bcrypt input limit. The policy is read on
+every check, so a change applies at once on every node. It applies only when a password is chosen;
+passwords already stored keep working. The recovery command
+`silo auth local-login enable -user <name> -temporary-password` sets a temporary password without
+it, and the account then chooses a new one under the policy. A backup
+restore never weakens the live policy.
+
+To change a password, the caller must prove knowledge of the current
 password. By default, changing the password does not revoke existing login sessions; users can
 review and revoke those separately through the account sessions API. The change can also
 sign the account out everywhere else in the same step; see
@@ -101,6 +116,20 @@ sign the account out everywhere else in the same step; see
 Accounts whose local password login is disabled keep their credential at the external provider and
 cannot use this flow. An administrator can also make a password temporary or issue a reset link;
 see [temporary passwords](#temporary-passwords) and [password reset links](#password-reset-links).
+
+### `GET /auth/password-policy` (`getPasswordPolicy`)
+
+Public, so the setup, signup and password-reset forms can check a password before sending it. The
+server checks it again on every write.
+
+```json
+{
+  "minimum_length": 8,
+  "maximum_bytes": 72,
+  "require_uppercase": false,
+  "require_special": false
+}
+```
 
 ### `GET /account/password/capability` (`getAccountPasswordCapability`)
 
@@ -167,7 +196,7 @@ holding a session but not the password cannot brute-force it.
 | `401` | `authentication_required` | No valid login session. |
 | `403` | `permission_denied` | The active profile is not the primary profile, an administrator selected a secondary profile, or the caller is an API key or "View as user" session. |
 | `409` | `conflict` | The account does not use local password login. |
-| `422` | `validation_failed` | A member is missing, empty, `null` or unknown; the current password did not match (`body.current_password`); or the new password is shorter than 8 characters, longer than 72 UTF-8 bytes, or the same as a temporary password (`body.new_password`). |
+| `422` | `validation_failed` | A member is missing, empty, `null` or unknown; the current password did not match (`body.current_password`); or the new password breaks the [password policy](#account-passwords) or is the same as a temporary password (`body.new_password`). |
 | `429` | `rate_limited` | The `password_change` budget is spent; `Retry-After` says when to try again. |
 | `503` | `dependency_unavailable` | The server has no password service, or password hashing is saturated; `Retry-After` says when to try again. |
 
@@ -321,6 +350,49 @@ The login-session step of the `database_maintenance` scheduled task deletes expi
 login-session rows daily at 05:00 by default. Revoked sessions remain stored until their
 expiry passes. Jellyfin-compatible clients check their login session on
 every request too; cleanup removes only sessions that have already expired.
+
+### Sessions opened by device sign-in
+
+A session opened by device sign-in may sit on a device the account holder doesn't control,
+such as a shared TV, so it sees and ends only itself. `auth_sessions.via_device_sign_in`
+records how each session was opened: `true` when a device sign-in request (a code a
+signed-in person approved, Jellyfin Quick Connect, or a remote-playback handoff) opened it,
+`false` for any other sign-in, and no value for a session that existed before the column.
+`auth.LimitedToItself` decides; the two routes below read it, no other request does.
+
+A session is limited to itself when its flag is `true`, whatever its platform, or when it
+has no value and its recorded `device_platform` is a TV's: `tvOS`, `android-tv` or `roku`,
+in any case. That covers TVs signed in by code before the column; an older TV session opened
+with a password is limited too, which costs nothing because no TV app reads more of the list
+than `id` and `current` or ends another session. A session with `false`, a TV that signed in
+with a password after the upgrade included, or with no value and any other platform, is
+ordinary, as are a session an administrator opened to act as the account and an API-key
+caller. During a rolling deploy a server of the previous release inserts sessions with no
+value, so they are judged as sessions from before the column. The limit covers only the
+account's own session list: a device signed in by code on an administrator's account still
+holds that account's administrator powers, including ending any account's sessions, so a code
+on a shared device should not be approved from an administrator's account.
+
+For a limited caller, `listSessions` still answers `200` with every live session of the
+account, because released Apple apps read the session ids to recognize one server saved under
+two addresses. Its own item and `current_session` are complete. Every other item carries only
+`id` and `current`: `device_name` and `ip_address` are empty strings, `device_id` and
+`device_platform` are absent, `last_seen_at` is null, and `created_at` and `expires_at` repeat
+the caller's own values, since they have no null form. The page is ordered by `id` and the
+cursor holds only the last id, so neither tells which sessions are newer. A cursor minted for
+one kind of caller is `400 invalid_cursor` for the other. `limit` and `page.has_more` behave as
+for any caller.
+
+`deleteSession` from a limited caller ends its own session as for any caller. Another session
+of the account is `403 permission_denied`, with a detail saying a device signed in with a code
+can end only its own session. A session of another account, or an unknown id, is `404
+not_found` exactly as for an ordinary caller: the account check comes first, so the 403 says
+nothing about other accounts' sessions. `POST /auth/logout` is unchanged.
+
+What such a session still learns is how many live sessions the account has and their opaque
+ids. A device sign-in session opened before the column from a device that isn't a TV has no
+recorded mark and stays ordinary until it ends; an account holder ends shared devices'
+sessions from their session list, or an administrator ends all of the account's sessions.
 
 ### Access tokens after a role change
 

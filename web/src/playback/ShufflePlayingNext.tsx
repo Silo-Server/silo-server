@@ -127,6 +127,7 @@ export default function ShufflePlayingNext({
     <PlayingNextScreen
       seriesId={seriesId}
       seriesTitle={shuffle ? shuffleNextHeading(shuffle) : undefined}
+      episodeLabels={shuffle?.next.episode_labels}
       nextEpisode={nextEpisode}
       continueWatchingItems={continueWatchingItems}
       videoEnded={videoEnded}

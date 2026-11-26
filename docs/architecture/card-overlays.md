@@ -39,6 +39,10 @@ renderer follows, and the uploaded images badges can use.
   behind the text: without a `textColor` the text is black or white, whichever reads better on
   it, and the preset's text shadow is dropped. An accent the preset writes as text keeps that role
   only at a contrast ratio of at least 3 against the fill; below that it tints the fill instead.
+  Below 50% opacity the text sits on the artwork: without a `textColor`, presets that fill with
+  the accent (`classic`, `vibrant`, `pill`) draw it white, and a preset without its own text
+  shadow gains `minimal`'s (0, 1, blur 2, 85% black) unless `shadow` is `false`. A source chip
+  keeps no text shadow, since it is its own solid fill.
 - `items` holds one entry per badge: `enabled`, `position`, optional `accentColor` and `showIcon`,
   and optional uploaded-image references (see below). `order` ranks badges that share a position;
   an empty list means registry order.

@@ -326,13 +326,19 @@ type itemListResponse struct {
 	// item's advisory, identity, and logo to the v2 card renderer. json:"-"
 	// because /api/v1 is frozen: the fields exist on the Go struct only, and
 	// apiv2 emits them under its own names.
-	AdvisoryAge            *int     `json:"-"`
-	AdvisorySource         string   `json:"-"`
-	ImdbID                 string   `json:"-"`
-	TmdbID                 string   `json:"-"`
-	TvdbID                 string   `json:"-"`
-	Status                 string   `json:"status"`
-	ShowStatus             string   `json:"show_status,omitempty"`
+	AdvisoryAge    *int   `json:"-"`
+	AdvisorySource string `json:"-"`
+	ImdbID         string `json:"-"`
+	TmdbID         string `json:"-"`
+	TvdbID         string `json:"-"`
+	Status         string `json:"status"`
+	ShowStatus     string `json:"show_status,omitempty"`
+	// EpisodeLabels is a date-labeled series' choice (see
+	// models.EpisodeLabelsAirDate), on the series card and its episode cards;
+	// AirDate is an episode card's air date. json:"-" because /api/v1 is
+	// frozen; apiv2 emits both.
+	EpisodeLabels          string   `json:"-"`
+	AirDate                string   `json:"-"`
 	RatingIMDB             *float64 `json:"rating_imdb,omitempty"`
 	RatingTMDB             *float64 `json:"rating_tmdb,omitempty"`
 	RatingRTCritic         *int     `json:"rating_rt_critic,omitempty"`
@@ -699,6 +705,7 @@ func itemListResponseShell(item *models.MediaItem, overlaySummary *models.Overla
 	resp.MangaVolumeCount = item.MangaVolumeCount
 	resp.ReleaseDate = item.ReleaseDate
 	resp.LastAirDate = item.LastAirDate
+	resp.EpisodeLabels = item.EpisodeLabels
 	if resp.Genres == nil {
 		resp.Genres = []string{}
 	}
@@ -840,6 +847,8 @@ type episodeBrowseMetadata struct {
 	SeasonNumber  *int
 	EpisodeNumber *int
 	ParentArtwork *models.EpisodeParentArtwork
+	EpisodeLabels string
+	AirDate       string
 }
 
 func (h *ItemsHandler) listEpisodeBrowseMetadata(
@@ -876,6 +885,8 @@ func (h *ItemsHandler) listEpisodeBrowseMetadata(
 			SeasonNumber:  &c.SeasonNumber,
 			EpisodeNumber: &c.EpisodeNumber,
 			ParentArtwork: &parent,
+			EpisodeLabels: c.EpisodeLabels,
+			AirDate:       c.AirDate,
 		}
 	}
 	return result

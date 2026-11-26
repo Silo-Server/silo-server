@@ -99,6 +99,11 @@ type playbackLifecycleStore interface {
 	// a client sequence to paused or playing. ok is false when nothing
 	// changed.
 	SetLifecyclePaused(ctx context.Context, sessionID string, paused bool) (LifecycleTransition, bool, error)
+	// ConfirmLifecyclePause moves a native session to the pause state its
+	// player confirmed over the control socket, unless the attempt accepted
+	// progress after the confirmation was received at receivedSequence. ok
+	// is false when nothing changed.
+	ConfirmLifecyclePause(ctx context.Context, sessionID string, paused bool, receivedSequence int64) (LifecycleTransition, bool, error)
 	// RecordEnd ends the session's lifecycle and records its admin history
 	// row in one transaction. The row takes the reason of the end that
 	// stopped the lifecycle first, which may be an earlier one than entry's.
@@ -157,6 +162,35 @@ func (s *PGPlaybackAdminStore) SetLifecyclePaused(ctx context.Context, sessionID
 	}
 	if err != nil {
 		return LifecycleTransition{}, false, fmt.Errorf("recording playback lifecycle pause: %w", err)
+	}
+	return t, true, nil
+}
+
+func (s *PGPlaybackAdminStore) ConfirmLifecyclePause(ctx context.Context, sessionID string, paused bool, receivedSequence int64) (LifecycleTransition, bool, error) {
+	if s == nil || s.pool == nil {
+		return LifecycleTransition{}, false, nil
+	}
+	t := LifecycleTransition{SessionID: sessionID, State: lifecycleState(paused)}
+	// The share lock on the attempt row orders the confirmation against
+	// ApplyProgress, which holds that row's lock while it writes the
+	// lifecycle: progress committed first and newer than the receipt fails
+	// the sequence check, and progress committed later sets its own state.
+	err := s.pool.QueryRow(ctx, `
+		WITH attempt AS (
+			SELECT 1 FROM playback_v3_attempts
+			WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL AND last_sequence <= $3
+			FOR SHARE
+		)
+		UPDATE playback_session_lifecycle
+		SET state = $2, seq = nextval('playback_session_lifecycle_seq'), updated_at = NOW()
+		WHERE session_id = $1 AND frontend = 'native' AND state NOT IN ('stopped', $2)
+		  AND EXISTS (SELECT 1 FROM attempt)
+		RETURNING seq, updated_at`, sessionID, t.State, receivedSequence).Scan(&t.Seq, &t.At)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LifecycleTransition{}, false, nil
+	}
+	if err != nil {
+		return LifecycleTransition{}, false, fmt.Errorf("recording confirmed playback pause: %w", err)
 	}
 	return t, true, nil
 }
@@ -306,6 +340,30 @@ func (h *PlaybackHandler) SessionPauseReported(ctx context.Context, sessionID st
 	if changed {
 		h.publishLifecycle(ctx, t, PlaybackSessionsQuery{SessionID: sessionID})
 	}
+}
+
+// sessionPauseConfirmed records a pause or resume a native player confirmed
+// over its control socket, received when the attempt's last accepted
+// progress sequence was receivedSequence, and announces it when it changed
+// the session's state. The admin list reads the pause state from this row,
+// so it must commit before the sync that cues monitors to re-read the list.
+// It reports whether the row changed.
+func (h *PlaybackHandler) sessionPauseConfirmed(ctx context.Context, sessionID string, paused bool, receivedSequence int64) bool {
+	store, ok := h.AdminStore.(playbackLifecycleStore)
+	if !ok || lifecycleIDParam(sessionID) == nil {
+		return false
+	}
+	ctx, cancel := lifecycleContext(ctx)
+	defer cancel()
+	t, changed, err := store.ConfirmLifecyclePause(ctx, sessionID, paused, receivedSequence)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to record a confirmed session pause", "component", "api", "session", sessionID, "error", err)
+		return false
+	}
+	if _, ready := h.lifecycleEventsReady(); changed && ready {
+		h.publishLifecycle(ctx, t, PlaybackSessionsQuery{SessionID: sessionID})
+	}
+	return changed
 }
 
 // publishSequencedPause announces a pause or resume a native client's

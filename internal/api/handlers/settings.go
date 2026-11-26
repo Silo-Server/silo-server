@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -78,20 +79,6 @@ func (h *SettingsHandler) SetServerSettings(reader ServerSettingReader) {
 }
 
 // --- Request/Response types ---
-
-type effectiveSettingResponse struct {
-	Key               string `json:"key"`
-	ProfileID         string `json:"profile_id,omitempty"`
-	UserValue         string `json:"user_value,omitempty"`
-	DeviceValue       string `json:"device_value,omitempty"`
-	EffectiveValue    string `json:"effective_value"`
-	Source            string `json:"source"`
-	HasDeviceOverride bool   `json:"has_device_override"`
-	DeviceID          string `json:"device_id,omitempty"`
-	DeviceName        string `json:"device_name,omitempty"`
-	DevicePlatform    string `json:"device_platform,omitempty"`
-	UpdatedAt         string `json:"updated_at,omitempty"`
-}
 
 type EffectiveSubtitleAppearanceView struct {
 	Key               string `json:"key"`
@@ -309,14 +296,20 @@ func headerText(value string) string {
 }
 
 // SetDeviceSetting validates and stores a device-scoped setting for the
-// acting profile, keeping the canonical runtime settings in sync. v1 PUT
-// /settings/device/{key} and v2 updateSubtitleAppearanceDeviceOverride both
-// go through it; a *APIError is a decision the caller renders.
+// acting profile, keeping the canonical runtime settings in sync. v2
+// updateSubtitleAppearanceDeviceOverride goes through it; a *APIError is a
+// decision the caller renders. A value the canonical schema cannot hold is
+// refused: readers resolve the canonical rows, so storing it in the legacy row
+// alone would accept a write no reader ever serves.
 func (h *SettingsHandler) SetDeviceSetting(ctx context.Context, cmd DeviceSettingCommand, value string) error {
 	if err := validateDeviceSettingTarget(&cmd); err != nil {
 		return err
 	}
 	if err := validateRegisteredSetting(cmd.Key, value, scopeDevice); err != nil {
+		return fieldError("value", err.Error())
+	}
+	writes, err := planLegacyRuntimeSettings(cmd.Key, &value)
+	if err != nil {
 		return fieldError("value", err.Error())
 	}
 	store, err := h.storeProvider.ForUser(ctx, cmd.UserID)
@@ -331,16 +324,15 @@ func (h *SettingsHandler) SetDeviceSetting(ctx context.Context, cmd DeviceSettin
 		Key:            cmd.Key,
 		Value:          value,
 	}
-	if err := h.syncLegacyDeviceSetting(ctx, store, cmd.UserID, entry, &value); err != nil {
+	if err := h.syncLegacyDeviceSetting(ctx, store, cmd.UserID, entry, &value, writes); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to set device setting")
 	}
 	return nil
 }
 
 // DeleteDeviceSetting removes a device-scoped setting for the acting profile
-// (and its legacy alias row), refreshing the device registry as the v1 route
-// does. v1 DELETE /settings/device/{key} and v2
-// deleteSubtitleAppearanceDeviceOverride both go through it.
+// (and its legacy alias row), refreshing the device registry. v2
+// deleteSubtitleAppearanceDeviceOverride goes through it.
 func (h *SettingsHandler) DeleteDeviceSetting(ctx context.Context, cmd DeviceSettingCommand) error {
 	if err := validateDeviceSettingTarget(&cmd); err != nil {
 		return err
@@ -352,7 +344,14 @@ func (h *SettingsHandler) DeleteDeviceSetting(ctx context.Context, cmd DeviceSet
 	h.registerRequestDevice(ctx, store, cmd.ProfileID, cmd.Device)
 
 	entry := userstore.DeviceSettingEntry{ProfileID: cmd.ProfileID, DeviceID: cmd.Device.DeviceID, Key: cmd.Key}
-	if err := h.syncLegacyDeviceSetting(ctx, store, cmd.UserID, entry, nil); err != nil {
+	writes, err := planLegacyRuntimeSettings(cmd.Key, nil)
+	if err != nil {
+		// A key with no canonical target still clears its legacy row.
+		slog.WarnContext(ctx, "legacy device setting has no canonical representation; clearing legacy row only",
+			"component", "api", "key", cmd.Key, "error", err)
+		writes = nil
+	}
+	if err := h.syncLegacyDeviceSetting(ctx, store, cmd.UserID, entry, nil, writes); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete device setting")
 	}
 	return nil
@@ -386,24 +385,17 @@ func planLegacyRuntimeSettings(key string, value *string) ([]profileSettingSync,
 	return out, nil
 }
 
-// syncLegacyDeviceSetting mirrors a shipped device-setting mutation to its
-// profile_device canonical rows. Alias cleanup participates in the same
-// transaction, so a failure cannot leave the two spellings disagreeing.
+// syncLegacyDeviceSetting applies a shipped device-setting mutation and its
+// planned profile_device canonical writes. Alias cleanup participates in the
+// same transaction, so a failure cannot leave the two spellings disagreeing.
 func (h *SettingsHandler) syncLegacyDeviceSetting(
 	ctx context.Context,
 	store userstore.UserStore,
 	userID int,
 	entry userstore.DeviceSettingEntry,
 	value *string,
+	writes []profileSettingSync,
 ) error {
-	writes, err := planLegacyRuntimeSettings(entry.Key, value)
-	if err != nil {
-		// Keep the established loose JSON endpoint compatible when a syntactically
-		// valid legacy document cannot satisfy the stricter canonical schema.
-		slog.WarnContext(ctx, "legacy device setting has no canonical representation; preserving legacy write",
-			"component", "api", "key", entry.Key, "error", err)
-		writes = nil
-	}
 	base := userstore.SettingIdentity{
 		Scope:     settingscontract.ScopeProfileDevice,
 		ProfileID: entry.ProfileID, DeviceID: entry.DeviceID,
@@ -461,11 +453,12 @@ func planInheritedLegacyUserSettings(
 	return out, nil
 }
 
-// EffectiveSubtitleAppearance resolves the subtitle_appearance setting for
-// the acting profile on the declared device (device override over the
-// profile-wide value), refreshing the device registry as a side effect. v1
-// GET /settings/subtitle_appearance/effective and v2
-// getEffectiveSubtitleAppearance both answer from it.
+// EffectiveSubtitleAppearance resolves the subtitle appearance for the acting
+// profile on the declared device from the canonical
+// playback.subtitle_appearance rows the clients and the companion device
+// mutations write: the profile_device override over the profile-wide value,
+// the contract's resolution order. It refreshes the device registry as a side
+// effect. v2 getEffectiveSubtitleAppearance answers from it.
 func (h *SettingsHandler) EffectiveSubtitleAppearance(ctx context.Context, userID int, profileID string, device DeviceMetadata) (EffectiveSubtitleAppearanceView, error) {
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
@@ -473,23 +466,62 @@ func (h *SettingsHandler) EffectiveSubtitleAppearance(ctx context.Context, userI
 	}
 	h.registerRequestDevice(ctx, store, profileID, device)
 
-	resolved, err := h.resolveEffectiveSetting(ctx, store, profileID, device, SubtitleAppearanceSettingKey)
+	view := EffectiveSubtitleAppearanceView{
+		Key:            SubtitleAppearanceSettingKey,
+		ProfileID:      profileID,
+		DeviceID:       device.DeviceID,
+		DeviceName:     device.DeviceName,
+		DevicePlatform: device.DevicePlatform,
+	}
+	profileRow, err := store.GetSettingValue(ctx, userstore.SettingIdentity{
+		Key: settingskeys.PlaybackSubtitleAppearance, Scope: settingscontract.ScopeProfile, ProfileID: profileID,
+	})
 	if err != nil {
 		return EffectiveSubtitleAppearanceView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to get setting")
 	}
+	if profileRow != nil {
+		view.GlobalValue = compactSettingJSON(profileRow.Value)
+		view.EffectiveValue = view.GlobalValue
+	}
+	if device.DeviceID == "" {
+		return view, nil
+	}
+	deviceRow, err := store.GetSettingValue(ctx, userstore.SettingIdentity{
+		Key: settingskeys.PlaybackSubtitleAppearance, Scope: settingscontract.ScopeProfileDevice,
+		ProfileID: profileID, DeviceID: device.DeviceID,
+	})
+	if err != nil {
+		return EffectiveSubtitleAppearanceView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to get setting")
+	}
+	if deviceRow != nil {
+		view.DeviceValue = compactSettingJSON(deviceRow.Value)
+		view.EffectiveValue = view.DeviceValue
+		view.HasDeviceOverride = true
+		view.UpdatedAt = deviceRow.UpdatedAt
+		// The device name and platform live on the row the companion PUT
+		// wrote, so a GET that declares only the device id still reports them.
+		registered, err := store.GetDeviceSetting(ctx, profileID, device.DeviceID, SubtitleAppearanceSettingKey)
+		if err != nil {
+			return EffectiveSubtitleAppearanceView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to get setting")
+		}
+		if registered != nil {
+			view.DeviceName = registered.DeviceName
+			view.DevicePlatform = registered.DevicePlatform
+		}
+	}
+	return view, nil
+}
 
-	return EffectiveSubtitleAppearanceView{
-		Key:               SubtitleAppearanceSettingKey,
-		ProfileID:         resolved.ProfileID,
-		GlobalValue:       resolved.UserValue,
-		DeviceValue:       resolved.DeviceValue,
-		EffectiveValue:    resolved.EffectiveValue,
-		HasDeviceOverride: resolved.HasDeviceOverride,
-		DeviceID:          resolved.DeviceID,
-		DeviceName:        resolved.DeviceName,
-		DevicePlatform:    resolved.DevicePlatform,
-		UpdatedAt:         resolved.UpdatedAt,
-	}, nil
+// compactSettingJSON renders a stored setting value as compact JSON, dropping
+// the spaces Postgres jsonb adds. jsonb also reorders object keys while SQLite
+// keeps them as sent, so the two backends can still return different strings
+// for the same document; compare the values as JSON, not as strings.
+func compactSettingJSON(value json.RawMessage) string {
+	var out bytes.Buffer
+	if err := json.Compact(&out, value); err != nil {
+		return string(value)
+	}
+	return out.String()
 }
 
 type DeviceMetadata struct {
@@ -562,21 +594,6 @@ func keyUsesDeviceScope(key string) bool {
 	return ok && spec.Scope == scopeDevice
 }
 
-func isMigratedPlaybackSetting(key string) bool {
-	key = canonicalDeviceSettingKey(key)
-	switch key {
-	case "playback.preferred_quality",
-		"playback.audio_language",
-		"playback.auto_skip_intro",
-		"playback.auto_skip_credits",
-		"playback.auto_play_next",
-		canonicalNextUpPromptSettingKey:
-		return true
-	default:
-		return false
-	}
-}
-
 // canonicalDeviceSettingKey keeps the Android key shipped before the server's
 // canonical playback namespace was finalized working without storing two
 // independent values. New clients should use playback.next_up_prompt_seconds.
@@ -592,30 +609,6 @@ func legacyDeviceSettingKey(key string) (string, bool) {
 		return legacyAndroidNextUpPromptSettingKey, true
 	}
 	return "", false
-}
-
-// getDeviceSettingWithLegacyFallback is a read-only canonical-first lookup for
-// the Android key used before the playback namespace was finalized. Canonical
-// PUT and DELETE requests own migration and cleanup.
-func getDeviceSettingWithLegacyFallback(
-	ctx context.Context,
-	store userstore.UserStore,
-	profileID, deviceID, key string,
-) (*userstore.DeviceSettingEntry, error) {
-	override, err := store.GetDeviceSetting(ctx, profileID, deviceID, key)
-	if err != nil || override != nil {
-		return override, err
-	}
-
-	legacyKey, ok := legacyDeviceSettingKey(key)
-	if !ok {
-		return nil, nil
-	}
-	return store.GetDeviceSetting(ctx, profileID, deviceID, legacyKey)
-}
-
-func usesLegacyUserFallback(key string) bool {
-	return key == SubtitleAppearanceSettingKey
 }
 
 func validateEnumSetting(key string, allowed ...string) func(string) error {
@@ -713,109 +706,6 @@ func validateJSONSetting(key string) func(string) error {
 		}
 		return nil
 	}
-}
-
-func (h *SettingsHandler) resolveEffectiveSetting(
-	ctx context.Context,
-	store userstore.UserStore,
-	profileID string,
-	device DeviceMetadata,
-	key string,
-) (effectiveSettingResponse, error) {
-	requestedKey := key
-	key = canonicalDeviceSettingKey(key)
-	spec, hasSpec := settingsRegistry[key]
-	resolved := effectiveSettingResponse{
-		Key:            requestedKey,
-		ProfileID:      profileID,
-		DeviceID:       device.DeviceID,
-		DeviceName:     device.DeviceName,
-		DevicePlatform: device.DevicePlatform,
-	}
-
-	if hasSpec && spec.Scope == scopeDevice {
-		resolved.EffectiveValue = ""
-		resolved.Source = "default"
-		if spec.DefaultValue != "" {
-			resolved.EffectiveValue = spec.DefaultValue
-		} else {
-			resolved.Source = "unset"
-		}
-		if device.DeviceID != "" {
-			override, err := getDeviceSettingWithLegacyFallback(ctx, store, profileID, device.DeviceID, key)
-			if err != nil {
-				return effectiveSettingResponse{}, err
-			}
-			if override != nil {
-				resolved.DeviceValue = override.Value
-				resolved.EffectiveValue = override.Value
-				resolved.Source = "device"
-				resolved.HasDeviceOverride = true
-				resolved.DeviceName = override.DeviceName
-				resolved.DevicePlatform = override.DevicePlatform
-				resolved.UpdatedAt = override.UpdatedAt
-				return resolved, nil
-			}
-			if isMigratedPlaybackSetting(key) {
-				legacyValue, err := store.GetSetting(ctx, key)
-				if err != nil {
-					return effectiveSettingResponse{}, err
-				}
-				if legacyValue != "" {
-					entry := userstore.DeviceSettingEntry{
-						ProfileID:      profileID,
-						DeviceID:       device.DeviceID,
-						DeviceName:     device.DeviceName,
-						DevicePlatform: device.DevicePlatform,
-						Key:            key,
-						Value:          legacyValue,
-					}
-					if err := store.SetDeviceSetting(ctx, entry); err != nil {
-						return effectiveSettingResponse{}, err
-					}
-					resolved.DeviceValue = legacyValue
-					resolved.EffectiveValue = legacyValue
-					resolved.Source = "device"
-					resolved.HasDeviceOverride = true
-					return resolved, nil
-				}
-			}
-		}
-		if usesLegacyUserFallback(key) {
-			legacyValue, err := store.GetSetting(ctx, key)
-			if err != nil {
-				return effectiveSettingResponse{}, err
-			}
-			if legacyValue != "" {
-				resolved.UserValue = legacyValue
-				resolved.EffectiveValue = legacyValue
-				resolved.Source = "user"
-				return resolved, nil
-			}
-		}
-		return resolved, nil
-	}
-
-	userValue, err := store.GetSetting(ctx, key)
-	if err != nil {
-		return effectiveSettingResponse{}, err
-	}
-	resolved.UserValue = userValue
-	resolved.EffectiveValue = userValue
-	resolved.Source = "user"
-
-	if resolved.EffectiveValue != "" {
-		return resolved, nil
-	}
-
-	if hasSpec && spec.DefaultValue != "" {
-		resolved.EffectiveValue = spec.DefaultValue
-		resolved.Source = "default"
-		return resolved, nil
-	}
-
-	resolved.Source = "unset"
-	return resolved, nil
 }
 
 const defaultCardQuickActionMode = "both"

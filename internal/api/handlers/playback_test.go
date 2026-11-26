@@ -1389,3 +1389,64 @@ func TestPersistStopAndHistory_MarksSpannedEpisodesWatched(t *testing.T) {
 		}
 	}
 }
+
+// A replan can start a new transport under the same playback session id. The
+// superseded player keeps fetching from its own playlist, whose URLs carry the
+// old transport's marker; such a request must never wait out, restart or
+// reconstruct the current transport, live or not.
+func TestTranscodeServeRefusesSupersededTransport(t *testing.T) {
+	const sessionID = "6f8a2c1e-0b3d-4e5f-9a7b-1c2d3e4f5a6b"
+	const current = sessionID + "-planbbbbbbbb-cccc2222"
+	const stale = "planaaaaaaaa-cccc1111"
+	for _, test := range []struct {
+		name        string
+		liveRuntime bool
+		marker      string
+		wantCode    string
+	}{
+		{name: "segment for a superseded transport, runtime live", liveRuntime: true, marker: stale, wantCode: "playback_transport_superseded"},
+		{name: "segment for a superseded transport, runtime gone", marker: stale, wantCode: "playback_transport_superseded"},
+		{name: "segment for the current transport, runtime gone", marker: "planbbbbbbbb-cccc2222", wantCode: "not_found"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sessions := playback.NewSessionManager(0, 0)
+			sessions.RegisterReconstructed(&playback.Session{ID: sessionID, UserID: 1, PlayMethod: playback.PlayTranscode, TransportGeneration: current})
+			handler := newKeyedPlaybackHandler(sessions)
+			var live *playback.TranscodeSession
+			if test.liveRuntime {
+				var err error
+				live, err = playback.StartTranscode(context.Background(), playback.TranscodeOpts{
+					SessionID: sessionID, InputPath: "/media/slow.mkv", OutputDir: t.TempDir(), OutputSubdir: current,
+					TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, StartSegmentNumber: 8,
+					FFmpegPath: writePlaybackTestFFmpegNeverReady(t), HWAccel: "none", AudioTrackIndex: -1, SubtitleTrackIndex: -1,
+				})
+				if err != nil {
+					t.Fatalf("StartTranscode: %v", err)
+				}
+				t.Cleanup(func() { _ = live.Close() })
+				handler.TranscodeManager().RegisterTranscodeSession(sessionID, live)
+			}
+
+			rr := httptest.NewRecorder()
+			req := playbackTestRequest(http.MethodGet, "/api/v2/playback/transcode/"+sessionID+"/segment/seg_00072.ts?"+playback.TransportQueryParam+"="+test.marker, nil, map[string]string{"session_id": sessionID, "name": "seg_00072.ts"})
+			started := time.Now()
+			handler.HandleGetTranscodeSegment(rr, req)
+			if elapsed := time.Since(started); elapsed > 2*time.Second {
+				t.Fatalf("request took %v; a superseded transport must be refused without waiting", elapsed)
+			}
+			if rr.Code != http.StatusNotFound || !strings.Contains(rr.Body.String(), `"`+test.wantCode+`"`) {
+				t.Fatalf("status = %d body = %s, want 404 %s", rr.Code, rr.Body.String(), test.wantCode)
+			}
+			if test.liveRuntime {
+				if got := handler.TranscodeManager().GetTranscodeSession(sessionID); got != live {
+					t.Fatal("the stale request replaced the current transport")
+				}
+				if got := live.SegmentProgress(time.Now()).StartSegmentNumber; got != 8 {
+					t.Fatalf("current transport start segment = %d, want 8 (no seek restart)", got)
+				}
+			} else if handler.TranscodeManager().GetTranscodeSession(sessionID) != nil {
+				t.Fatal("the request reconstructed a transport")
+			}
+		})
+	}
+}

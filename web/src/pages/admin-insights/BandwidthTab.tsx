@@ -40,6 +40,7 @@ import {
   formatShortCalendarDate,
   formatShortTimestamp,
   type InsightsFilterState,
+  insightRefreshProps,
 } from "./insightsHelpers";
 import { InsightKpiCard, InsightNoticeBanner, InsightSectionError } from "./insightsShared";
 
@@ -56,7 +57,7 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
     () => buildInsightsWindowQueryParams(filters, { omitLibrary: true, omitUser: true }),
     [filters],
   );
-  const query = useAdminInsightsBandwidth(queryParams);
+  const query = useAdminInsightsBandwidth(queryParams, { keepPrevious: true });
   const data = query.data;
 
   const canSplitNodes = Boolean(data?.has_remote_nodes && (data?.sources.length ?? 0) > 1);
@@ -196,7 +197,7 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
   const knownLocationSessions = summary.remote_sessions + summary.local_sessions;
 
   return (
-    <div className="space-y-5">
+    <div {...insightRefreshProps(query.isPlaceholderData, "space-y-5")}>
       {showMetricsStartBanner ? (
         <InsightNoticeBanner
           message={t("web.admin.insights.coverage.metricsStart", {

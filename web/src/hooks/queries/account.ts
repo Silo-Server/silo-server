@@ -9,6 +9,8 @@ import {
 } from "@/api/client";
 import { v2, type V2Body, type V2Result } from "@/api/v2/request";
 
+import { DEFAULT_PASSWORD_POLICY, type PasswordPolicy } from "@/lib/newPassword";
+
 import { compatKeys } from "./keys";
 
 /** Whether and within which limits the caller may replace the account password. */
@@ -16,7 +18,21 @@ export type AccountPasswordCapability = V2Result<"GET /api/v2/account/password/c
 
 export const accountKeys = {
   passwordCapability: () => ["account", "password-capability"] as const,
+  passwordPolicy: () => ["auth", "password-policy"] as const,
 };
+
+/** The server's rules for a new password; the default policy until it loads.
+ * Public, so the signup, setup and reset pages read it before sign-in. */
+export function usePasswordPolicy(enabled = true): PasswordPolicy {
+  const query = useQuery({
+    queryKey: accountKeys.passwordPolicy(),
+    enabled,
+    queryFn: () => v2("GET /api/v2/auth/password-policy"),
+    // An admin may have just tightened it.
+    refetchOnMount: "always",
+  });
+  return query.data ?? DEFAULT_PASSWORD_POLICY;
+}
 
 export function useAccountPasswordCapability() {
   return useQuery({

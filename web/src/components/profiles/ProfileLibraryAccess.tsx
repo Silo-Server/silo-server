@@ -75,7 +75,11 @@ export function ProfileLibraryAccess({
                   {/* wrap-anywhere breaks a long one-word name or type instead of
                       widening the row past the list. */}
                   <div className="min-w-0 flex-1 space-y-0.5 wrap-anywhere">
-                    <div className="text-sm font-medium">{library.name}</div>
+                    {/* dir="auto" keeps the name's own reading order; align-with-page
+                        keeps its wrapped lines on the page's start side. */}
+                    <div dir="auto" className="align-with-page text-sm font-medium">
+                      {library.name}
+                    </div>
                     <div className="text-muted-foreground text-xs">
                       {libraryTypeLabel(library.type)}
                     </div>
