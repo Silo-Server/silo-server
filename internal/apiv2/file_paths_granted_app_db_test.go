@@ -32,6 +32,16 @@ func (oneFileFetcher) GetByEpisodeID(context.Context, string) ([]*models.MediaFi
 	return nil, nil
 }
 
+// watchWithAccess is the real watch reads with the test's catalog access.
+type watchWithAccess struct {
+	*handlers.ItemsHandler
+	access *allowlistCatalogAccess
+}
+
+func (w watchWithAccess) ContextAccessFilter(ctx context.Context, opts handlers.AccessFilterOptions) (catalogpkg.AccessFilter, error) {
+	return w.access.ContextAccessFilter(ctx, opts)
+}
+
 // TestFilePathsHiddenFromAnotherAppDB: on an account that holds
 // metadata_curation, the person's own sessions read the on-disk path and file
 // name of an item's files, and a session another app's key opened reads
@@ -53,8 +63,10 @@ func TestFilePathsHiddenFromAnotherAppDB(t *testing.T) {
 		detail := catalogpkg.NewDetailService(itemRepo, catalogpkg.NewEpisodeRepository(pool), catalogpkg.NewSeasonRepository(pool), catalogpkg.NewPersonRepository(pool), files)
 		itemsH = handlers.NewItemsHandler(browseRepo, itemRepo, nil, nil, nil, nil, nil, detail, nil)
 		itemsH.UserRepo = auth.NewUserRepository(pool)
-		deps.CatalogAccess = &allowlistCatalogAccess{}
+		access := &allowlistCatalogAccess{}
+		deps.CatalogAccess = access
 		deps.CatalogItems = handlers.NewCatalogResourceHandler(itemsH)
+		deps.Watch = watchWithAccess{ItemsHandler: itemsH, access: access}
 	})
 	pool := d.pool
 	library := seedLibrary(t, pool, "paths-"+sfx)
@@ -77,7 +89,7 @@ func TestFilePathsHiddenFromAnotherAppDB(t *testing.T) {
 		VALUES ($1, $2, 'test', $3, $4, $5::uuid)`, ownSession, d.userID, time.Now().Add(time.Hour), models.SessionOpenedAppKey, ownKey)
 	d.claims["tok-own-key"] = &auth.Claims{UserID: d.userID, Role: "user", SessionID: ownSession, TokenType: auth.TokenTypeAccess}
 
-	for _, path := range []string{"/catalog/items/" + movie, "/catalog/items/" + movie + "/versions"} {
+	for _, path := range []string{"/catalog/items/" + movie, "/catalog/items/" + movie + "/versions", "/watch/" + movie} {
 		for token, visible := range map[string]bool{"tok-phone": true, "tok-own-key": true, "tok-app": false} {
 			rec := do(t, d.handler, http.MethodGet, Prefix+path, "", with(bearer(token), "X-Profile-Id", "p-owner"))
 			if rec.Code != http.StatusOK {
