@@ -64,36 +64,50 @@ export function OwnAppKeysPanel() {
   useScrollToDevice(shown && !access.isPending);
   if (!shown) return null;
 
+  const header = (
+    <div className="min-w-0 space-y-2">
+      <h2
+        id="own-devices-title"
+        ref={heading}
+        tabIndex={-1}
+        className="text-lg font-semibold tracking-tight focus:outline-none"
+      >
+        {t(`${P}.title`)}
+      </h2>
+      <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
+        {t(`${P}.description`)}
+      </p>
+    </div>
+  );
   let body: ReactNode;
   if (access.isPending) body = <Loading />;
   else if (access.isError)
     body = <LoadFailed onRetry={() => void access.refetch()} busy={access.isFetching} />;
   else if (!access.data.list) body = <SignInAgainNotice signInAgain={access.data.sign_in_again} />;
   else
-    body = (
-      <DeviceLists
-        access={access.data}
-        state={state}
-        heading={heading}
-        onRefused={() => void access.refetch()}
-      />
+    return (
+      <Section>
+        <DeviceLists
+          header={header}
+          access={access.data}
+          state={state}
+          heading={heading}
+          onRefused={access.refetch}
+        />
+      </Section>
     );
   return (
-    <section id="devices" aria-labelledby="own-devices-title" className="scroll-mt-24 space-y-6">
-      <div className="min-w-0 space-y-2">
-        <h2
-          id="own-devices-title"
-          ref={heading}
-          tabIndex={-1}
-          className="text-lg font-semibold tracking-tight focus:outline-none"
-        >
-          {t(`${P}.title`)}
-        </h2>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          {t(`${P}.description`)}
-        </p>
-      </div>
+    <Section>
+      {header}
       {body}
+    </Section>
+  );
+}
+
+function Section({ children }: { children: ReactNode }) {
+  return (
+    <section id="devices" aria-labelledby="own-devices-title" className="scroll-mt-24 space-y-6">
+      {children}
     </section>
   );
 }
@@ -125,15 +139,18 @@ function isRefusal(error: unknown) {
 }
 
 function DeviceLists({
+  header,
   access,
   state,
   heading,
   onRefused,
 }: {
+  header: ReactNode;
   access: AppKeySessionAccess;
   state: CapabilityState | undefined;
   heading: React.RefObject<HTMLHeadingElement | null>;
-  onRefused: () => void;
+  /** Stable across renders (the access query's refetch). */
+  onRefused: () => unknown;
 }) {
   const t = useT();
   const { profile, selectProfile, verifyProfilePin } = useAuth();
@@ -199,12 +216,19 @@ function DeviceLists({
     }
   }
 
-  if (keys.isPending) return <Loading />;
+  if (keys.isPending || (keys.isError && refused))
+    return (
+      <>
+        {header}
+        <Loading />
+      </>
+    );
   if (keys.isError)
-    return refused ? (
-      <Loading />
-    ) : (
-      <LoadFailed onRetry={() => void keys.refetch()} busy={keys.isFetching} />
+    return (
+      <>
+        {header}
+        <LoadFailed onRetry={() => void keys.refetch()} busy={keys.isFetching} />
+      </>
     );
 
   const data = keys.data;
@@ -217,13 +241,7 @@ function DeviceLists({
   return (
     <>
       <div className="flex flex-wrap items-start justify-between gap-3">
-        {state && !on ? (
-          <p className="surface-panel-subtle text-muted-foreground min-w-0 flex-1 basis-60 p-3 text-sm">
-            {state === "disabled" ? t(`${P}.off`) : t(`${P}.unavailable`)}
-          </p>
-        ) : (
-          <span />
-        )}
+        {header}
         <Button
           size="sm"
           variant="outline"
@@ -238,6 +256,11 @@ function DeviceLists({
           {t("web.settings.sessions.refresh")}
         </Button>
       </div>
+      {state && !on && (
+        <p className="surface-panel-subtle text-muted-foreground p-3 text-sm">
+          {state === "disabled" ? t(`${P}.off`) : t(`${P}.unavailable`)}
+        </p>
+      )}
       {empty ? (
         <p className="text-muted-foreground py-2 text-sm">{t(`${P}.empty`)}</p>
       ) : (
