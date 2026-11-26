@@ -4,9 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -51,7 +51,7 @@ func (w watchWithAccess) ContextAccessFilter(ctx context.Context, opts handlers.
 // read the account's permissions and ignored how the session was opened, so
 // an app the person allowed read where their files are on disk.
 func TestFilePathsHiddenFromAnotherAppDB(t *testing.T) {
-	sfx := fmt.Sprint(time.Now().UnixNano())
+	sfx := strconv.FormatInt(time.Now().UnixNano(), 10)
 	movie := "paths-movie-" + sfx
 	fileName := "Secret Cut " + sfx + ".mkv"
 	folderPath := "/srv/media/private-" + sfx

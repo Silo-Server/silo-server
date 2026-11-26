@@ -387,7 +387,12 @@ func (reg *Registry) sealAppKeyAnswer(answer *handlers.AppKeyAnswer) (*SealedRep
 		tokens.User = reg.accountForSession(answer.Tokens.User, kind)
 		reply.Tokens = &tokens
 	}
-	plaintext, _ := json.Marshal(reply)
+	plaintext, err := json.Marshal(reply)
+	if err != nil {
+		// account_created_at is a time, which can fail to encode (a year
+		// outside 0-9999); a reply that can't be built is not sealed half-made.
+		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
+	}
 	sealed, err := appkeys.Seal(result.ReplyKey, result.Challenge, plaintext)
 	if err != nil {
 		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
