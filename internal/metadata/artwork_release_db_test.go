@@ -14,6 +14,10 @@ import (
 // with the tables and columns it reads, so it neither sees nor writes the
 // shared test database's catalog and setting.
 func storedArtworkReleaseTestPool(t *testing.T) *pgxpool.Pool {
+	return storedArtworkReleaseTestPoolWithMaxConns(t, 4)
+}
+
+func storedArtworkReleaseTestPoolWithMaxConns(t *testing.T, maxConns int32) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -34,7 +38,7 @@ func storedArtworkReleaseTestPool(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	config.ConnConfig.RuntimeParams["search_path"] = schema
-	config.MaxConns = 4
+	config.MaxConns = maxConns
 	pool, err := pgxpool.NewWithConfig(t.Context(), config)
 	if err != nil {
 		t.Fatal(err)
@@ -99,6 +103,25 @@ func newTestStoredArtworkReleaser(pool *pgxpool.Pool) *StoredArtworkReleaser {
 	r.pageSize = 2
 	r.lock = func(context.Context) (func(), bool, error) { return func() {}, true, nil }
 	return r
+}
+
+func TestStoredArtworkReleaseLockLeavesOneConnectionPoolAvailableDB(t *testing.T) {
+	pool := storedArtworkReleaseTestPoolWithMaxConns(t, 1)
+	r := NewStoredArtworkReleaser(pool)
+
+	// Before the fix, the release lock holds the pool's only connection and
+	// the release pass's first query waits on that same connection until this deadline.
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	release, acquired, err := r.lock(ctx)
+	if err != nil || !acquired {
+		t.Fatalf("lock() = %v, %v; want acquired without error", acquired, err)
+	}
+	defer release()
+	var one int
+	if err := pool.QueryRow(ctx, "SELECT 1").Scan(&one); err != nil {
+		t.Fatalf("query through one-connection pool while release lock is held: %v", err)
+	}
 }
 
 // With caching off, a pass points every stored copy of provider artwork on an
