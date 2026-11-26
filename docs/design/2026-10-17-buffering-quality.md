@@ -4,8 +4,8 @@ Status: The server and web parts of phases 1 and 2 shipped in #2699. The server
 contract is now in [playback protocol v3](../architecture/playback-protocol-v3.md#buffering-quality-native-v2)
 and the [Playback API](../playback-api.md#buffering-quality); this
 document remains the client controller spec.
-Date: 2026-10-17, revised 2026-10-22 after device testing (see *Decisions*)
-Repos affected: `silo-server` (contract, planner, store, web), `silo-android`, `silo-apple`
+Date: 2026-10-17, revised 2026-10-22 after device testing and 2026-11-23 for the pill timer (see *Decisions*)
+Repos affected: `silo-server` (contract, planner, store, web), `silo-android`, `silo-apple`, `silo-roku`
 
 ## Summary
 
@@ -75,6 +75,14 @@ answers where they differ:
 | Can a start that has not played lower on stalls? | Only with the same evidence. Before any plan of the attempt has played, a long stall, two stalls or a missed start deadline lowers only when the plan's media measurably arrived more slowly than its delivered bitrate. Without it, the start runs on to its deadline and the failure path, so a version that cannot start for another reason does not drive Auto and the learned limit down. |
 | When is a replacement a source reload? | Only when it replaces a source that has played. A replacement adopted before any plan of the attempt has played continues the attempt's start wait, under the attempt's original grace. |
 | Can an outage end playback? | No. The client waits for media data or the network, sends no failure recovery during it, and resends a replan that got no response. After it reopens the source, it sends failure recovery only while the network is connected and the server answers. |
+
+Settled on 2026-11-23, after a review of the Apple TV player:
+
+| Question | Decision |
+| --- | --- |
+| How long do the prompt and the undo pill stay up? | 10 seconds, not 15. `PROMPT_SECONDS = 10` times both. |
+| Does the untimed skip offer that returns with the controls hold a buffering pill back? | Yes. A skip pill counts while it is on screen, with or without its timer (see *Presentation rules*). |
+| Do stalls under the undo pill still count once it hides? | Yes, unchanged. An undo pill shown at adoption now ends no later than the new plan's own startup grace, which starts with that plan's first frame or wait and lasts the same 10 seconds, so under such a plan a stall can count while the pill is up only after its timer was frozen by a pause, a higher-priority pill, or a player that could not show it. A replacement adopted before any plan of the attempt has played has no grace of its own and keeps the attempt's original one, which may already be over; a stall under its pill counts as before. `visible_undo_retains_stall_history` uses a pause, which keeps the pill on screen. |
 
 ## Motivation
 
@@ -340,7 +348,7 @@ The controller acts only when the trigger fires and the title is not answered
 at this quality. If there is no lower rung, the client instead shows the
 display-only notice **"Can't lower quality for this video"**, once per title.
 
-Both pills use `PROMPT_SECONDS = 15`, measured in wall-clock time.
+Both pills use `PROMPT_SECONDS = 10`, measured in wall-clock time.
 
 Display-only notices ("Quality lowered to stop buffering", "Can't lower
 quality for this video") use the platform's notice style with an information
@@ -420,6 +428,10 @@ Presentation rules:
 
 - At most one actionable pill shows at a time. Intro skip, other segment skip
   (including recap and credits), and Next Up take priority over buffering pills.
+  A skip pill counts while it is on screen, with or without its timer: the
+  untimed offer that returns while the controls show
+  ([intro skip](2026-08-16-intro-skip-mode.md#ask)) holds a buffering pill back
+  until it hides with the controls.
   If one is showing, a new buffering pill waits with its full timer. If one
   arrives while a buffering pill is visible, hide the buffering pill and freeze
   its remaining timer. When the other pill hides, show the buffering pill and
@@ -1200,7 +1212,7 @@ The remaining cases pin the rules added since:
 | `auto_estimate_below_floor`, `ask_auto_estimate_below_floor` | A step-down estimate under 100 kbps has no lower rung, in `always` and in `ask`. |
 | `obscured_prompt_preserves_remaining_timer`, `obscured_undo_preserves_remaining_timer` | A pill hidden behind a higher-priority pill comes back with the rest of its timer. |
 | `obscured_prompt_discarded_on_plan_change` | A plan change discards a hidden prompt. |
-| `visible_undo_retains_stall_history` | Stalls while the undo pill shows still count once it hides. |
+| `visible_undo_retains_stall_history` | Stalls while the undo pill shows still count once it hides. A pause holds the pill past `p2`'s startup grace, which would otherwise end with it. |
 | `step_down_uses_exact_integer_floor` | 22120 steps down to 15484. |
 | `kept_estimate_on_later_replans` | After a lowering, a track change, seek reanchor and failure recovery carry 44100 without a source, including after an adoption the controller did not request. |
 | `kept_estimate_replaced_by_next_lowering` | A second lowering replaces the kept estimate: an output change then carries 22120. |

@@ -65,7 +65,7 @@ const STALL_WINDOW_MS = 120_000;
 /** One stall this long is enough on its own. */
 const LONG_STALL_MS = 6_000;
 /** How long the prompt and the undo pill stay up, in wall-clock time. */
-export const BUFFERING_PILL_MS = 15_000;
+export const BUFFERING_PILL_MS = 10_000;
 /** A prompt that timed out is offered again no sooner than this after it first showed. */
 const REOFFER_MIN_MS = 120_000;
 /** How long a plan that could not go lower is left alone. */

@@ -9,7 +9,7 @@
     "STALLS_BEFORE_TRIGGER": 2,
     "STALL_WINDOW_MS": 120000,
     "LONG_STALL_MS": 6000,
-    "PROMPT_SECONDS": 15,
+    "PROMPT_SECONDS": 10,
     "REOFFER_MIN_MS": 120000,
     "NO_LOWER_COOLDOWN_MS": 300000,
     "REARM_AFTER_UNADOPTED_MS": 60000,
@@ -968,7 +968,7 @@
     },
     {
       "name": "lower_again",
-      "note": "The undo pill times out at 149000; the lower plan keeps playing.",
+      "note": "The undo pill times out at 144000; the lower plan keeps playing.",
       "events": [
         {
           "t": 0,
@@ -1964,7 +1964,7 @@
     },
     {
       "name": "back_hides_undo_without_answering",
-      "note": "The undo pill times out at 149000; the lower plan keeps playing.",
+      "note": "Back at 140000 hides the undo pill; the lower plan keeps playing.",
       "events": [
         {
           "t": 0,
@@ -2485,7 +2485,7 @@
           "type": "pill_unobscured"
         },
         {
-          "t": 172000,
+          "t": 167000,
           "type": "select_lower"
         }
       ],
@@ -2705,7 +2705,7 @@
           "type": "pill_unobscured"
         },
         {
-          "t": 172000,
+          "t": 167000,
           "type": "select_restore"
         }
       ],
@@ -2736,6 +2736,7 @@
     },
     {
       "name": "visible_undo_retains_stall_history",
+      "note": "The undo pill and p2's startup grace both start at 134000 and last 10 seconds, so stalls under a running pill fall in the grace and never count. The pause from 135000 to 140000 freezes the pill's timer, so it runs until 149000; the stalls at 144000 and 146000 count under it and trigger at the next playing after it hides.",
       "events": [
         {
           "t": 0,
@@ -2815,6 +2816,14 @@
         },
         {
           "t": 134000,
+          "type": "playing"
+        },
+        {
+          "t": 135000,
+          "type": "pause"
+        },
+        {
+          "t": 140000,
           "type": "playing"
         },
         {
@@ -3120,7 +3129,7 @@
     },
     {
       "name": "kept_estimate_replaced_by_next_lowering",
-      "note": "The undo pills time out at 149000 and 224000.",
+      "note": "The undo pills time out at 144000 and 219000.",
       "events": [
         {
           "t": 0,
@@ -3459,7 +3468,7 @@
     },
     {
       "name": "quality_change_discards_kept_estimate",
-      "note": "The undo pill times out at 149000. The viewer picks 1080p-high, then Auto again.",
+      "note": "The undo pill times out at 144000. The viewer picks 1080p-high, then Auto again.",
       "events": [
         {
           "t": 0,
@@ -4245,7 +4254,7 @@
           "type": "undo_shown"
         },
         {
-          "t": 174000,
+          "t": 169000,
           "type": "replan",
           "body": {
             "operation": "quality_change",
@@ -4490,7 +4499,7 @@
           "type": "playing"
         },
         {
-          "t": 150000,
+          "t": 147000,
           "type": "waiting"
         }
       ],
@@ -4511,7 +4520,7 @@
           "type": "undo_shown"
         },
         {
-          "t": 159000,
+          "t": 154000,
           "type": "replan",
           "body": {
             "operation": "quality_change",

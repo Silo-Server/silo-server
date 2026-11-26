@@ -63,7 +63,7 @@ it("does not request a new plan while stopping at the stall deadline", () => {
   expect(outputs).toEqual([]);
 });
 
-it("reports one stall that outlasts a prompt's timeout as one stall", () => {
+it("hides the prompt after 10 seconds and counts a stall that outlasts it once", () => {
   const summaries: BufferingSummary[] = [];
   const c = new BufferingQualityController(
     "ask",
@@ -74,8 +74,14 @@ it("reports one stall that outlasts a prompt's timeout as one stall", () => {
   c.event({ type: "plan_adopted", plan }, 0);
   c.event({ type: "playing" }, 0);
   c.event({ type: "waiting" }, 20000);
-  // The prompt shows at 26000 and times out at 41000, mid-stall.
-  for (let t = 20100; t <= 50000; t += 100) c.tick(t);
+  // The prompt shows at 26000 and times out at 36000, mid-stall. The vectors
+  // pin the undo pill's duration but not the prompt's.
+  for (let t = 20100; t < 36000; t += 100) c.tick(t);
+  c.tick(35999);
+  expect(c.pill).toBe("prompt");
+  c.tick(36000);
+  expect(c.pill).toBeNull();
+  for (let t = 36100; t <= 50000; t += 100) c.tick(t);
   c.event({ type: "playing" }, 50000);
   c.stop(60000);
   expect(summaries).toEqual([
