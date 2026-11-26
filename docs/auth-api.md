@@ -1055,7 +1055,8 @@ working, and a demo server keeps its demo refusal. Each API replica remembers it
 Only a process that has never read the setting can't tell whether it is a demo, and then it
 fails closed without claiming to be one: a non-administrator's demo-restricted change is
 `500 internal_error`, `deleteSession` on another session is `500 internal_error` (the caller's
-own session still ends), and the capability answers below say no. An administrator's request
+own session still ends, and a session opened by device sign-in gets its usual `403`, because
+that rule is judged first), and the capability answers below say no. An administrator's request
 does not read the setting.
 
 A visitor can:
