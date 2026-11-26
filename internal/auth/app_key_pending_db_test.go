@@ -150,6 +150,7 @@ func TestPendingKeyRefusalsDB(t *testing.T) {
 	ctx := t.Context()
 	admin := env.localAccount(t, "keypendno-admin", models.RoleAdmin)
 	other := env.localAccount(t, "keypendno-other", models.RoleAdmin)
+	member := env.localAccount(t, "keypendno-member", models.RoleUser)
 	person, _, _ := env.enroll(t, admin)
 	claims := env.loginSession(t, admin, models.SessionOpenedPassword, nil)
 
@@ -167,19 +168,32 @@ func TestPendingKeyRefusalsDB(t *testing.T) {
 			}
 		}
 	})
-	t.Run("another account", func(t *testing.T) {
-		id, _ := env.introduceWaiting(t, person)
-		stranger := env.loginSession(t, other, models.SessionOpenedPassword, nil)
-		if got := env.pendingIDs(t, stranger); len(got) != 0 {
-			t.Fatalf("another account sees %v", got)
-		}
-		if err := env.signIn.ApprovePendingKey(ctx, stranger, id, ActingProfile{}); !errors.Is(err, ErrAppKeyNotFound) {
-			t.Fatalf("approve = %v", err)
-		}
-		if err := env.signIn.DenyPendingKey(ctx, stranger, id); !errors.Is(err, ErrAppKeyNotFound) {
-			t.Fatalf("deny = %v", err)
-		}
-	})
+	// Listing and denying need no administrator account: another account,
+	// an administrator or not, lists nothing and is told a key it does not
+	// own is not found, never refused for its role. Approving is for an
+	// administrator, which a non-administrator is told first.
+	for _, tc := range []struct {
+		name     string
+		stranger *models.User
+		approve  error
+	}{
+		{"another administrator", other, ErrAppKeyNotFound},
+		{"another account, not an administrator", member, ErrApproverNotAdmin},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id, _ := env.introduceWaiting(t, person)
+			session := env.loginSession(t, tc.stranger, models.SessionOpenedPassword, nil)
+			if got := env.pendingIDs(t, session); len(got) != 0 {
+				t.Fatalf("another account sees %v", got)
+			}
+			if err := env.signIn.ApprovePendingKey(ctx, session, id, ActingProfile{}); !errors.Is(err, tc.approve) {
+				t.Fatalf("approve = %v, want %v", err, tc.approve)
+			}
+			if err := env.signIn.DenyPendingKey(ctx, session, id); !errors.Is(err, ErrAppKeyNotFound) {
+				t.Fatalf("deny = %v", err)
+			}
+		})
+	}
 	t.Run("session kinds", func(t *testing.T) {
 		id, _ := env.introduceWaiting(t, person)
 		for name, via := range map[string]string{"device sign-in": models.SessionOpenedDeviceLogin, "older than the record": ""} {

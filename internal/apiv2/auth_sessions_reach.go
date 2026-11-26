@@ -10,12 +10,14 @@ import (
 // sessionReachListDescription and sessionReachDeleteDescription describe
 // listSessions and deleteSession for a session limited to itself.
 const (
-	sessionReachListDescription = "A session opened by device sign-in (a code a signed-in person approved, Jellyfin Quick Connect, or a remote-playback handoff), " +
-		"and a session from before this rule was recorded whose X-Silo-Device-Platform was tvOS, android-tv or roku, sees only itself in full. " +
+	sessionReachListDescription = "A session limited to itself sees only itself in full: a session opened by device sign-in " +
+		"(a code a signed-in person approved, Jellyfin Quick Connect, or a remote-playback handoff), a session opened by another app the person allowed " +
+		"(its app key was enrolled through a grant; a session the person's own app key opened is not limited), " +
+		"and a session from before this rule was recorded whose X-Silo-Device-Platform was tvOS, android-tv or roku. " +
 		"It still gets every live session of the account, but another session's item carries only its id and current: device_name and ip_address are empty, " +
 		"device_id and device_platform are absent, last_seen_at is null, and created_at and expires_at repeat the caller's own. " +
 		"For such a caller the page is ordered by id, not newest first, and a cursor from the other kind of caller is invalid_cursor."
-	sessionReachDeleteDescription = "A session opened by device sign-in (see listSessions) may revoke only itself: " +
+	sessionReachDeleteDescription = "A session limited to itself (opened by device sign-in or by another app the person allowed; see listSessions) may revoke only itself: " +
 		"another session of the account is 403 permission_denied, and a session of another account or an unknown id is 404 as for every caller."
 )
 

@@ -72,10 +72,12 @@ func registerAppKeyManagement(reg *Registry) {
 
 	revoke := humaOp(http.MethodDelete, Prefix+"/auth/keys/devices/{id}", "revokeAppDeviceKey", "app-keys",
 		"Revoke one of the signed-in account's device keys and end the sessions it opened.")
-	revoke.Description = ownKeySessionRule + " A device may revoke its own key, which ends the session making the request. A session opened by another app's key may revoke only that key, and one opened by device sign-in none (403 permission_denied). Revoking a revoked key changes nothing. Answers while auth.app_key_sign_in is off."
+	revoke.Description = ownKeySessionRule + " A device may revoke its own key, which ends the session making the request. A session opened by another app's key may revoke only that key, and one opened by device sign-in none (403 permission_denied). Revoking a revoked key changes nothing. Answers while auth.app_key_sign_in is off. Refused in demo mode for a caller who is not an administrator."
 	revoke.DefaultStatus = http.StatusNoContent
 	revoke.Errors = []int{http.StatusForbidden, http.StatusNotFound}
-	Register(reg, Operation{Operation: revoke, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true}, reg.revokeAppDeviceKey)
+	// A demo's visitors share one account: revoking a key ends every session
+	// it opened, as ending another visitor's session does.
+	Register(reg, Operation{Operation: revoke, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, DemoRestricted: true}, reg.revokeAppDeviceKey)
 
 	replace := humaOp(http.MethodPut, Prefix+"/auth/keys/person", "replacePersonKey", "app-keys",
 		"Replace the signed-in account's person key.")

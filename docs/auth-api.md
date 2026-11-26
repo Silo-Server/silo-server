@@ -29,9 +29,9 @@ devices and playback sessions. All paths below use `/api/v2`.
 
 | Operation | Authorization and behavior |
 | --- | --- |
-| `GET /auth/sessions/capabilities` (`getLoginSessionCapabilities`) | Authenticated account. Reports `available`, `last_seen`, `admin_management` and `revoke_other_sessions`, with the standard capability state, permission answer and revision. `revoke_other_sessions` is false in [demo mode](#demo-mode) for a caller that is not an administrator, and for a session opened by device sign-in, which may end only itself. |
+| `GET /auth/sessions/capabilities` (`getLoginSessionCapabilities`) | Authenticated account. Reports `available`, `last_seen`, `admin_management` and `revoke_other_sessions`, with the standard capability state, permission answer and revision. `revoke_other_sessions` is false in [demo mode](#demo-mode) for a caller that is not an administrator, and for a [session limited to itself](#sessions-limited-to-themselves) (opened by device sign-in, or by another app the person allowed), which may end only itself. |
 | `GET /auth/sessions` (`listSessions`) | Lists the caller's live, unrevoked login sessions, newest first, with cursor pagination. Account-level access does not require profile selection. |
-| `DELETE /auth/sessions/{id}` (`deleteSession`) | Revokes a session owned by the caller. Unknown or another account's session returns 404. Ending another session of the same account is 403 `permission_denied` for a session opened by device sign-in, which may end only itself, and in [demo mode](#demo-mode) for a caller that is not an administrator. |
+| `DELETE /auth/sessions/{id}` (`deleteSession`) | Revokes a session owned by the caller. Unknown or another account's session returns 404. Ending another session of the same account is 403 `permission_denied` for a [session limited to itself](#sessions-limited-to-themselves) (opened by device sign-in, or by another app the person allowed), which may end only itself, and in [demo mode](#demo-mode) for a caller that is not an administrator. |
 | `GET /admin/users/{user_id}/login-sessions` (`listAdminUserLoginSessions`) | Acting admin. Lists a selected account's live login sessions. The cursor is bound to the operation, administrator and target account. |
 | `DELETE /admin/users/{user_id}/login-sessions/{session_id}` (`deleteAdminUserLoginSession`) | Acting admin. Revokes one session of the selected account; 204 on success, 404 for an unknown or mismatched session. |
 | `DELETE /admin/users/{user_id}/login-sessions` (`deleteAdminUserLoginSessions`) | Acting admin. Revokes all live sessions of the selected account and returns `{ "revoked": N }`. Repeating an account-wide request returns zero when no live sessions remain. |
@@ -380,17 +380,30 @@ login-session rows daily at 05:00 by default. Revoked sessions remain stored unt
 expiry passes. Jellyfin-compatible clients check their login session on
 every request too; cleanup removes only sessions that have already expired.
 
-### Sessions opened by device sign-in
+### Sessions limited to themselves
 
-A session opened by device sign-in may sit on a device the account holder doesn't control,
-such as a shared TV, so it sees and ends only itself. `auth_sessions.opened_via` records how
+Two kinds of login session see and end only themselves among the account's sessions:
+
+- A session opened by device sign-in. It may sit on a device the account holder doesn't
+  control, such as a shared TV.
+- A session opened by another app the person allowed: its device key was enrolled through a
+  grant (`auth_device_keys.enrolled_via` is `grant`). That app is not one of the person's own,
+  and its access ends when its key is revoked. A session one of the person's own device keys
+  opened (`opened_via` `app_key`, key not enrolled through a grant) is ordinary.
+
+The device key decides first: a session whose `device_key_id` names a grant-enrolled key is
+limited, whatever else it records. Revoking such a key ends its sessions, and deleting a key
+row deletes the sessions that name it, so a session naming a key that is not stored should not
+exist; one that did would be limited.
+
+For a session no grant-enrolled key opened, `auth_sessions.opened_via` records how
 each session was opened and is the one record the server reads: `device_login` when a device
 sign-in request (a code a signed-in person approved, Jellyfin Quick Connect, or a
 remote-playback handoff) opened it, otherwise `password`, `provider`, `app_key` or
 `impersonation`. `auth.LimitedToItself` decides; the two routes below read it, no other
 request does.
 
-A session is limited to itself when its `opened_via` is `device_login`, whatever its
+Such a session is limited to itself when its `opened_via` is `device_login`, whatever its
 platform. Two kinds of session have no `opened_via`:
 
 - One a server of the previous release wrote. That release recorded only
@@ -406,7 +419,8 @@ platform. Two kinds of session have no `opened_via`:
   nothing because no TV app reads more of the list than `id` and `current` or ends another
   session.
 
-Every other session is ordinary, a TV that signs in with a password included, as are a
+Every other session is ordinary, a TV that signs in with a password and an app that signs in
+with the person's own key included, as are a
 session an administrator opened to act as the account and an API-key caller.
 
 `via_device_sign_in` is still stored, because a server of the previous release names it in
@@ -430,8 +444,8 @@ one kind of caller is `400 invalid_cursor` for the other. `limit` and `page.has_
 for any caller.
 
 `deleteSession` from a limited caller ends its own session as for any caller. Another session
-of the account is `403 permission_denied`, with a detail saying a device signed in with a code
-can end only its own session. A session of another account, or an unknown id, is `404
+of the account is `403 permission_denied`, with a detail saying a sign-in made with a device
+code or by another app can end only its own session. A session of another account, or an unknown id, is `404
 not_found` exactly as for an ordinary caller: the account check comes first, so the 403 says
 nothing about other accounts' sessions. `POST /auth/logout` is unchanged.
 
@@ -1099,8 +1113,8 @@ it where they are signed in. Rules for codes, links and lifetimes are in
 | `GET /auth/device?code=` or `?token=` (`getDeviceLogin`) | none; a login session's bearer token when sent | Adds `requested_at`, `server_name`, `binding` for a bound request and, when known, `server_id`. A lookup of a pending request marks it opened and holds its code for at least five more minutes, never past 30 minutes after start. A six-digit Jellyfin Quick Connect code is looked up only with the account's own login session: without a valid token it answers 401 and from an impersonation session 403, for every six-digit code. |
 | `POST /auth/device/approve`, `/approve-handoff`, `/deny` | the account's own login session | A canceled request is refused with 409, and so is approving a request another account (for `approve-handoff`, another profile) already approved, or denying one another account approved (`conflict`). An API key, an impersonation session or a remote-playback handoff session is refused with 403 `permission_denied`, because an approval gives the device a login session. `approve-handoff` approves a remote-playback or Jellyfin Quick Connect request for the verified profile in `X-Profile-Id` (with `X-Profile-Token` for a PIN profile); `approve` refuses both with 409. |
 | `POST /auth/device/preapprove` (`preapproveDeviceLogin`) | the account's own login session acting as the household's main profile (see "The household's main profile" under app keys) | Body `device_name` (1 to 128 characters), optional `device_platform` (at most 64), required `binding` (43 characters of unpadded base64url). Answers 201 with `id`, `device_code` and `expires_at`, 30 days on: an approved, single-use sign-in that only a poll with that `device_code` and the secret behind `binding` redeems. An API key, an impersonation session or a remote-playback handoff session is 403 `permission_denied`; a session whose provider identity is gone is 403 `not_permitted`; an account already holding 20 waiting is 409 `conflict`. Spends the `device_start` bucket. |
-| `GET /auth/device/preapprovals` (`listDevicePreapprovals`) | the account's own login session | The account's waiting sign-ins approved in advance, newest first: `items` of `id`, `device_name`, `device_platform`, `created_at`, `expires_at`. Never the device code or the binding. Not paged; the cap bounds it. |
-| `DELETE /auth/device/preapprovals/{id}` (`revokeDevicePreapproval`) | the account's own login session | 204; the request moves to `denied` and the device's next poll answers `denied`. Revoking one already withdrawn is 204; a redeemed, expired, unknown or other account's id is 404. |
+| `GET /auth/device/preapprovals` (`listDevicePreapprovals`) | the account's own login session, opened by a password, a provider or the person's own device key | 403 `permission_denied` for a session opened by device sign-in or by another app's key, one older than the record of how sessions open, an API key, an administrator acting as the account and a remote-playback session. The account's waiting sign-ins approved in advance, newest first: `items` of `id`, `device_name`, `device_platform`, `created_at`, `expires_at`. Never the device code or the binding. Not paged; the cap bounds it. |
+| `DELETE /auth/device/preapprovals/{id}` (`revokeDevicePreapproval`) | the account's own login session, opened by a password, a provider or the person's own device key | Refused like the list. 204; the request moves to `denied` and the device's next poll answers `denied`. Revoking one already withdrawn is 204; a redeemed, expired, unknown or other account's id is 404. |
 | `GET /admin/users/{user_id}/device-preapprovals`, `DELETE .../{id}` (`listAdminUserDevicePreapprovals`, `revokeAdminUserDevicePreapproval`) | administrator | The same list and revoke for any account; revoking follows the owner protection of revoking login sessions (403 `permission_denied`). |
 | `GET /auth/device/capability` | none | `cancel` and `opened_signal` report the two additions; `jellyfin_quick_connect` reports Quick Connect approval; `session_binding` reports session binding; `preapprove` reports approval in advance ([device-login.md](architecture/device-login.md#approval-in-advance)). |
 
@@ -1153,7 +1167,7 @@ operation contract.
 | `POST /auth/grants/redeem` (`redeemAppKeyGrant`) | a `grant-redeem` envelope signed by the app's own key (the grant's `app_key`), without `device_sig` | Enrolls another app's key with a grant the account's person key signed, and opens the app's session. The key is listed with `kind` `app`, `enrolled_by` `grant` and `allowed_by`. Refused for an administrator's account. See "Grants" below. |
 | `POST /invitations/app-code` (`createInvitationAppCode`) | none; the invitation `token` in the body | Body `{ "token", "username", "email" }`. Starts a join through the Silo app and answers `{ "code", "expires_in", "server_address" }`; see "App codes" below. |
 | `POST /auth/app-codes` (`createAppCode`) | the account's own login session acting as the household's main profile | Body `{}`. Answers `{ "code", "expires_in", "server_address" }` for "Open in Silo"; see "App codes" below. |
-| `POST /auth/app-codes/redeem` (`redeemAppCode`) | `{ "person_key", "message" }` where `message` is a `redeem` envelope signed with that person key, with `device_sig`, the app code in its payload | Enrolls both keys and opens the device key's session. The sealed plaintext adds `username` and `person_key` (`enrolled` or `replaced`). 404 `app_code_invalid` for an unknown, used or expired code. |
+| `POST /auth/app-codes/redeem` (`redeemAppCode`) | `{ "person_key", "message" }` where `message` is a `redeem` envelope signed with that person key, with `device_sig`, the app code in its payload | Enrolls the device key and opens its session. The person key is enrolled when the account has none; an account that already has a different person key keeps it, the device key is enrolled under the account's key, and nothing is revoked. The sealed plaintext adds `username`, `person_key_id` (the account's person key once the redeem commits) and `person_key`: `enrolled` when `person_key` is now the account's person key, `kept` when the account kept a different one. A person who has lost every other device redeems a code, then calls `PUT /auth/keys/person` from the new session as the main profile. 404 `app_code_invalid` for an unknown, used or expired code. |
 | `GET /auth/keys/session` (`getAppKeySessionAccess`) | any login session | `{ "list", "manage", "approve", "sign_in_again" }`: what this session may do with the account's keys, and whether signing in again would help. Answers while the switch is off. |
 | `GET /auth/keys` (`listAppKeys`) | the account's own login session, opened by password, provider or the person's own device key | `person_key` (`kid`, `enrolled_at`; absent when the account has none) and `devices[]` (`id`, `kid`, `kind` `device`\|`app`, `name`, `platform`, `status` `active`\|`pending`, `enrolled_by` `introduce`\|`session`\|`app-code`\|`grant`, `allowed_by`, `enrolled_at`, `last_used_at`), newest first. Revoked and denied keys are left out, and so is a waiting key older than 24 hours, without anyone denying or revoking it. `last_used_at` is the last time the key opened a session: a key enrolled and not used since shows it equal to `enrolled_at`, and a key waiting for approval shows `null`. |
 | `DELETE /auth/keys/devices/{id}` (`revokeAppDeviceKey`) | the account's own login session | 204. Revokes the key and ends every session it opened. A device may revoke its own key, which ends the session making the request. 404 for a key that isn't the account's. |
@@ -1395,8 +1409,11 @@ request arrived on.
   if local password sign-in was turned off since, 404 `app_code_invalid` if the
   invitation was revoked, replaced or accepted since. For a session code it
   enrolls the device key on that account, enrolling `person_key` when the
-  account has none and replacing a different one (the old one is revoked,
-  devices already enrolled keep their keys). Keys from a code start active,
+  account has none. An account with a different person key keeps it: the
+  device key is enrolled under the account's key and nothing is revoked
+  (`person_key: kept`). To start fresh after losing every other device, the
+  person redeems a code and then calls `PUT /auth/keys/person` from the new
+  session as the main profile. Keys from a code start active,
   also on an administrator's account. Of two redemptions of one code exactly
   one succeeds.
 
@@ -1442,7 +1459,9 @@ invitation lookup reports `app_join: false`. The capability,
 `pending/{id}/deny` stay open. A server in demo
 mode (`demo.enabled`) behaves as if the switch were off, for administrators
 too, and its capability reports `disabled`: every visitor shares one account
-there, so no key is enrolled on it and none signs in. For the same reason
+there, so no key is enrolled on it and none signs in. There
+`DELETE /auth/keys/devices/{id}` and `pending/{id}/deny` are open to administrators only: a caller who is not one gets
+the [demo refusal](#demo-mode). For the same reason
 `POST /auth/device/preapprove` is refused in demo mode for a caller who is not
 an administrator, and the device login capability reports `preapprove: false`.
 
@@ -1769,7 +1788,12 @@ A visitor cannot:
   `linkAccountIdentityWithCredentials`, `linkAccountIdentityWithNetwork`,
   `deleteAccountIdentity`);
 - end another session of the account (`deleteSession` on any other session);
-- create or revoke personal API keys, or create, change or delete profiles.
+- create or revoke personal API keys, or create, change or delete profiles;
+- revoke an app device key or deny a device waiting for approval (`revokeAppDeviceKey`,
+  `denyPendingAppKey`), since a key enrolled before demo mode was turned on still opens
+  sessions on the account and revoking it ends them;
+- approve a device sign-in in advance or withdraw one (`preapproveDeviceLogin`,
+  `revokeDevicePreapproval`).
 
 External sign-in enforces the same rule where every linking flow attaches its identity, in
 account resolution: a linking flow that ends on an account that is not an administrator while
@@ -1798,7 +1822,7 @@ until it expires. When the account's role can't be read, or the process has neve
 setting, sign-out takes the demo path. An expired access token revokes nothing.
 
 `TestDemoModeCoversAccountOperations` in `internal/apiv2` fails when an operation tagged
-`account`, `api-keys`, `auth`, `device-login`, `notifications` or `profiles` that a
+`account`, `api-keys`, `app-keys`, `auth`, `device-login`, `notifications` or `profiles` that a
 non-administrator can call is neither demo-restricted nor listed, with its reason, as allowed.
 
 ## Policy discovery

@@ -474,11 +474,15 @@ func revokeAccountKeysTx(ctx context.Context, tx sessionExecQuerier, userID int)
 }
 
 // endDeviceKeySessions ends the live login sessions userID's device keys
-// opened, in tx, which holds the account row lock, after the keys' rows are
-// locked. A key can have opened
-// several, each carrying the identity the key was bound to, so the account's
-// identities are taken first, the order a plugin uninstall takes them
-// (lockIdentitiesBeforeSessions).
+// opened, in tx, which holds the account row lock and has already locked the
+// keys' rows. A key can have opened several sessions, each carrying the
+// identity the key was bound to, so the account's identities are locked
+// before those sessions, the order a plugin uninstall takes them
+// (lockIdentitiesBeforeSessions). The order is account, key rows,
+// identities, sessions; revoking every key of the account takes the
+// identities before the key rows instead. Both are safe: every writer of
+// key rows holds the account row lock, and an uninstall never writes key
+// rows (a key's identity_id has no foreign key to the identity).
 func endDeviceKeySessions(ctx context.Context, tx pgx.Tx, userID int, ids []string) error {
 	if err := lockIdentitiesBeforeSessions(ctx, tx, userID, false); err != nil {
 		return err

@@ -10,10 +10,27 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// ErrSessionNotAllowed refuses an account change from a login session that
-// may not make it: one a device sign-in or another app opened, or one older
-// than the record of how sessions are opened (SessionAllows).
+// ErrSessionNotAllowed refuses an account change from a caller that may not
+// make it: a login session a device sign-in or another app opened, one older
+// than the record of how sessions are opened, an API key, a remote-playback
+// session, or an administrator acting as the account (SessionAllows).
 var ErrSessionNotAllowed = errors.New("this sign-in cannot make that change")
+
+// ErrActingAsAccount is ErrSessionNotAllowed for an administrator acting as
+// the account. errors.Is matches both; a caller that tells the person what
+// to do next checks this one first, since signing in again as the account
+// is not open to the administrator.
+var ErrActingAsAccount = fmt.Errorf("%w: an administrator acting as the account", ErrSessionNotAllowed)
+
+// NotOwnSessionError is the refusal for claims that are not the account's
+// own login session (Claims.IsOwnLoginSession): ErrActingAsAccount for an
+// administrator acting as the account, ErrSessionNotAllowed otherwise.
+func NotOwnSessionError(claims *Claims) error {
+	if claims != nil && claims.ImpersonatorUserID != nil {
+		return ErrActingAsAccount
+	}
+	return ErrSessionNotAllowed
+}
 
 // SessionAction is an account change that only some login sessions may make.
 type SessionAction int
@@ -135,7 +152,7 @@ func SessionAllows(ctx context.Context, db rowQuerier, claims *Claims, action Se
 // was opened, for a caller with one more thing to check about it.
 func allowedSessionOrigin(ctx context.Context, db rowQuerier, claims *Claims, action SessionAction) (SessionOrigin, error) {
 	if !claims.IsOwnLoginSession() {
-		return SessionOrigin{}, ErrSessionNotAllowed
+		return SessionOrigin{}, NotOwnSessionError(claims)
 	}
 	origin, err := ReadSessionOrigin(ctx, db, claims)
 	if err != nil {
