@@ -31,8 +31,16 @@ SDK's `docs/auth-provider.md`.
   works on one identity), and only then those rows: the uninstall waits at the
   identities, or the transaction waits for it. Revocation also withdraws device
   sign-in approvals before it revokes sessions. Revoking app keys follows the
-  same rule, since a session a key opened carries the identity the key was
-  bound to: the account's identities, then the key rows, then those sessions. Today the uninstall's cascade
+  same rule for the sessions, since a session a key opened carries the identity
+  the key was bound to: the identities are locked before those sessions. Where
+  the key rows fall varies. Revoking every key of the account
+  (`revokeAccountKeysTx`) and unlinking an identity (`deleteIdentity`) take the
+  identities, then the key rows, then the sessions; revoking one key takes its
+  key row first (`lockDeviceKey`), then the identities, then the sessions
+  (`endDeviceKeySessions`). Both orders are safe: every writer of key rows
+  holds the account row lock, so two of them never interleave, and an
+  uninstall never touches key rows, since a key's `identity_id` has no
+  foreign key to the identity. Today the uninstall's cascade
   clears requests before sessions; that follows from the names Postgres gave
   the two foreign keys' triggers, and nothing relies on it. These paths take
   one account at a time: an uninstall deletes an installation's identities in
