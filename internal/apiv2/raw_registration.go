@@ -170,9 +170,11 @@ func RegisterRaw(reg *Registry, raw RawOperation, handler http.Handler) {
 	if op.Metadata == nil {
 		op.Metadata = map[string]any{}
 	}
+	reg.recordOrigins(op.OperationID, op.Origins)
 	op.Metadata[metaClass] = op.Class
 	op.Metadata[metaPermission] = op.Permission
 	op.Metadata[metaDemoRestricted] = op.DemoRestricted
+	recordOriginDecisions(&op)
 	op.Metadata[metaProfileOptional] = op.ProfileOptional
 	op.Metadata[metaHouseholdGate] = op.HouseholdProfileGate
 	op.Metadata[metaRateLimitBucket] = op.RateLimitBucket

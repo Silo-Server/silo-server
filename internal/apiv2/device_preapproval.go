@@ -72,15 +72,15 @@ func registerDevicePreapprovals(reg *Registry) {
 	create.Description = preapprovalSessionRule + " The sign-in is single use and lasts 30 days. An account has at most 20 waiting; another is 409 conflict. Refused in demo mode for a caller who is not an administrator, and the capability then reports preapprove false." + mainProfileRule
 	create.DefaultStatus = http.StatusCreated
 	create.Errors = []int{http.StatusForbidden, http.StatusConflict}
-	Register(reg, mainProfileOnly(Operation{
+	Register(reg, withOrigins(mainProfileOnly(Operation{
 		Operation: create, RetrySafety: RetrySafetyNonRetryable,
 		ServiceBacked: true, Audited: true, RateLimitBucket: bucketDeviceStart, DemoRestricted: true,
-	}), reg.preapproveDeviceLogin)
+	}), grantedRefusedSignIn), reg.preapproveDeviceLogin)
 	list := humaOp(http.MethodGet, Prefix+"/auth/device/preapprovals", "listDevicePreapprovals", "device-login",
 		"List the account's device sign-ins approved in advance and not yet redeemed.")
 	list.Description = preapprovalSessionRule
 	list.Errors = []int{http.StatusForbidden}
-	Register(reg, Operation{Operation: list, Class: ClassAuthenticated, ServiceBacked: true}, reg.listDevicePreapprovals)
+	Register(reg, Operation{Operation: list, Class: ClassAuthenticated, ServiceBacked: true, Origins: grantedRefusedSignIn}, reg.listDevicePreapprovals)
 	revoke := humaOp(http.MethodDelete, Prefix+"/auth/device/preapprovals/{id}", "revokeDevicePreapproval", "device-login",
 		"Revoke a device sign-in approved in advance; the device's next poll answers denied.")
 	// A demo's visitors share one account: withdrawing a sign-in someone
@@ -88,7 +88,7 @@ func registerDevicePreapprovals(reg *Registry) {
 	revoke.Description = preapprovalSessionRule + " Refused in demo mode for a caller who is not an administrator."
 	revoke.DefaultStatus = http.StatusNoContent
 	revoke.Errors = []int{http.StatusForbidden, http.StatusNotFound}
-	Register(reg, Operation{Operation: revoke, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, DemoRestricted: true}, reg.revokeDevicePreapproval)
+	Register(reg, Operation{Operation: revoke, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, DemoRestricted: true, Origins: grantedRefusedSignIn}, reg.revokeDevicePreapproval)
 
 	root := "/{user_id}/device-preapprovals"
 	adminList := adminAccountOperation(http.MethodGet, root, "listAdminUserDevicePreapprovals", false)

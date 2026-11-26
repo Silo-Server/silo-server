@@ -74,7 +74,7 @@ func registerWatchTogetherSuggestions(reg *Registry) {
 	const creationOrder = "created_at,id"
 	cursors := NewCursors(reg.deps.CursorSecret)
 	list := Operation{Operation: humaOp(http.MethodGet, root, listID, "realtime", "List room suggestions in bounded creation order. Vote changes do not reorder the live traversal; this is not a snapshot."), Class: ClassProfileScoped, ServiceBacked: true}
-	Register(reg, list, func(ctx context.Context, in *WatchTogetherSuggestionListInput) (*WatchTogetherSuggestionListOutput, error) {
+	Register(reg, withOrigins(list, grantedRoomMember), func(ctx context.Context, in *WatchTogetherSuggestionListInput) (*WatchTogetherSuggestionListOutput, error) {
 		user, profile, err := reg.suggestionProof(ctx, in.RoomID, in.RoomToken)
 		if err != nil {
 			return nil, err
@@ -118,7 +118,7 @@ func registerWatchTogetherSuggestions(reg *Registry) {
 		}
 		op.DefaultStatus = http.StatusNoContent
 		op.Errors = []int{409}
-		Register(reg, op, func(ctx context.Context, in *WatchTogetherSuggestionVoteInput) (*struct{}, error) {
+		Register(reg, withOrigins(op, grantedRoomMember), func(ctx context.Context, in *WatchTogetherSuggestionVoteInput) (*struct{}, error) {
 			user, profile, err := reg.suggestionProof(ctx, in.RoomID, in.RoomToken)
 			if err != nil {
 				return nil, err

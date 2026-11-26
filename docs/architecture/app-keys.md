@@ -372,7 +372,285 @@ its own. It also can't create a personal API key or link a sign-in provider
 account, the two older routes that hand an account a lasting credential
 (`SessionMayIssueCredential`); other sessions keep what those routes' own
 rules give them. The person, or the server's owner, revokes the app from the key list
-like any device.
+like any device. Every other operation states what such a session may do with
+it, below.
+
+### What a granted app can do
+
+A granted app is a player the person let in. It may read the catalog, play,
+and keep the state a player keeps for the profile it acts as. It may not
+spend something of the person's, host a Watch Together room or change what
+its other members play, edit what other profiles or accounts see (shared
+subtitles, the shared catalog, collections and home rows the person's other
+devices show), reach the person's other devices or change the account.
+
+The grant names no profile: the app acts as whichever profile of the account
+it names in `X-Profile-Id`. A profile with a PIN needs its PIN, as from any
+device; a profile without one needs nothing. "The acting profile's own
+state" means the profile it acts as, and the PIN is the household's boundary
+between profiles for this session as for any other. Revoking its key ends the sessions it
+opened and their access, and nothing the app could create still acts for it
+afterwards: no credential, delivery channel, registration, device row,
+external link, secret URL or media request. What stays is the acting
+profile's own state and records of the app's activity, listed below.
+
+Every v2 operation of class `authenticated`, `profile_scoped` or
+`permission_gated`, reads as well as writes, carries a decision for such a
+session (`Operation.Origins`, `internal/apiv2/origin_decisions.go`):
+
+- **allowed**, with a reason;
+- **its own things only**, naming the handler check that enforces "own" and
+  what "own" means there. A gate cannot tell what is the session's own, so the
+  check stays in the handler;
+- **refused**, with a reason.
+
+The generated document publishes each decision as `x-silo-origin-decisions`
+(`{"granted_app": {"verdict", "reason", "check"?}}`), so a table can be
+checked against the server. `Register` refuses a decision without its reason,
+an own-only decision without its check, and a decision on a public or
+acting-admin operation, where no gate reads it (a grant is never redeemed on an
+administrator's account, and a promotion revokes the account's keys).
+`TestEveryOperationDecidesForGrantedApps` fails by name on an operation with no
+decision. Today 202 operations are allowed, 19 own-only and 228 refused,
+and none is left undecided. An
+operation refused or own-only for any judged kind declares 403 in the
+document. A capability read never reports as allowed an action whose
+operations are all refused to the session asking; see
+[the capability rule](api-contract.md#discovery-and-capability-detection).
+
+A refusal is enforced in the gate chain right after authentication, before
+the demo gate, the rate limiter, viewer access and the handler: 403
+`permission_denied` with the detail every key route gives a session that may
+not make a change. The gate is the only thing that refuses those operations:
+no handler repeats the check, and with the gate removed every refused
+operation fails `TestRefusedOperationsAnswerGrantedAppsFirst`. The gate reads
+the session kind the authentication lookup already returned: `ActiveSession`
+joins the session's device key by its id and reports
+`auth.SessionKindGrantedApp` when the key was enrolled through a grant, or
+when the session names a key whose row is missing (failing closed, as
+`SessionOrigin.GrantKey` does). The middleware copies it onto the claims
+(`Claims.SessionKind`, never serialized). The gate costs no query of its own.
+Every other caller passes it untouched: a password or provider session, the
+person's own device key, a device signed in by code, an API key, an
+administrator acting as the account, and a remote-playback session.
+
+**No declared device.** The server cannot tell such an app's device from
+another of the person's, so for such a session the gate removes the device it
+declares (`X-Silo-Device-Id`, `X-Silo-Device-Name`, `X-Silo-Device-Platform`
+and the playback `X-Device-ID`) before any later gate, input binding or
+handler reads it. Every device-keyed read and write then takes the "no
+declared device" path: a playback start records nothing in the profile's
+device registry, start, replan and route events key no connection record,
+and the settings reads resolve without device-scoped values. Naming another
+device (`device_id`) or profile (`profile_id`) on a settings read is refused,
+with the same answer whether the id exists. Stream telemetry, which records
+the requests of each stream for administrators and runs before
+authentication, still sees what was sent: it records the device id on each
+stream's own media requests, in memory, for administrators, and writes
+nothing that lasts.
+
+The handler checks that need only this fact read the claim
+(`sessionReachesOtherDevices`, `otherDevicesRule`, `grantedAppStreamError`).
+`grantedAppStreamError` runs on the media routes before the playback session
+is looked up, so a refused request loads, rebuilds and encodes nothing.
+Checks that re-read the session under a lock inside a transaction
+(`SessionAllows` and its callers) still read the row.
+
+**Outside the gate.** Two public operations attach a session when one is
+sent, and the gate does not run on them. `putProfileSet` refuses such a
+session itself (`ActionManageKeys`). `getDeviceLogin` refuses it in the
+handler: with its session attached it would look up the account's Quick
+Connect codes and mark requests opened. The Apple push display-token path
+(`RequireApplePushDisplayAuth`) builds claims with no session kind and serves
+one operation, which `TestDisplayTokenOperationsStayAllowed` keeps allowed.
+The plugin-content proxy (`/api/v2/plugin-content/...`) is outside the
+registry: its access resolver answers such a session as a caller with no
+session, whether its token comes as the bearer header, the token query or a
+launch cookie, so the plugin is never told the account, role or profile and
+the session reaches only routes a plugin serves publicly
+(`TestPluginAccessTreatsAnotherAppAsNoSessionDB`). Every mount reaches that
+resolver (`TestPluginContentMountsAllReachTheContentHandler`,
+`TestContentHandlerResolvesEveryRequest`).
+
+**Allowed.** This list is the contract for what a granted app can do:
+
+- who it is and which profile it acts as: the current user (without the
+  account's email, which is the empty string for such a session), the profile
+  list, verifying a profile's PIN, and capability reads. A
+  wrong PIN spends that profile's attempt budget as from any device (five
+  attempts in five minutes), so the app's wrong guesses can lock the profile
+  for the person's own devices for up to five minutes, until a following
+  change counts such a session's attempts separately. The profile list carries every profile's limits, as for
+  any session;
+- reading the catalog, home, libraries, collections, recommendations,
+  subtitles, settings and preferences. Reading a person can queue that
+  person's metadata refresh when one is due;
+- starting playback and playing its own streams, including theme songs and
+  shuffles (a shuffle is the profile's; its id is random and not listed);
+- the profile's own state: progress, watched, favorites, watchlist (a title
+  the library doesn't have is kept, and for such a session no media request is
+  made, followed or withdrawn), not interested, ratings, history, reading
+  progress and notes, home dismissals, inbox reads and read marks;
+- a player's own state for the profile it acts as: playback, audio and
+  subtitle preferences (per series and per library) and ebook reader
+  settings. Each is stored per account and profile, keyed by no device;
+- the events socket; Watch Together as a member of a room the person put it
+  in: joining by the room's code, reading the room, suggesting and voting,
+  reporting member state. As any member, it may suggest and vote, and a
+  buffering report from it can pause the room for everyone (at most once a
+  minute per room, with a cooldown per member). The room read, join and the
+  socket's snapshots name no power it is refused: `self_can_manage_room`,
+  `self_can_control_transport` and the host's `invite_path` are false or
+  absent for it. `self_role` stays: it names the profile's seat, not what
+  this session may do. The strip follows who is asking: it marks the app's
+  connection, never the seat, so the person's own device in the same profile
+  is told its powers while the app holds the seat and after it leaves. The
+  room read leaves out the playback session id
+  attached to the member (a member is the account and profile, so it may be
+  the person's own device's), and a connection of such a session starts with
+  no attached stream and attaches only one its own login session started;
+- its own session and its own key: signing out, the provider sign-out URL,
+  and the read of what its session may do.
+
+**Its own things only.**
+
+| Operation | Check | "Own" means |
+| --- | --- | --- |
+| `listSessions` | `SessionLimitedToItself` | its own session in full; every other item is its `id` |
+| `deleteSession` | `SessionLimitedToItself` | only the login session making the request |
+| `revokeAppDeviceKey` | `RevokeOwnDeviceKey` | only the key that opened the session |
+| `listHouseholdSessions` | `sessionReachesOtherDevices` | only streams its own login session started |
+| `updatePlaybackProgress`, `replanPlayback`, `stopPlayback` | `mayActOnAttempt`, `refuseOtherStream` | only a stream its own login session started |
+| `reportPlaybackRouteEvent` | `mayActOnAttempt` | only an attempt its own login session started |
+| `createPlaybackControlSocketTicket` | `refuseOtherStream` | only a stream its own login session started |
+| `getPlaybackMedia`, `headPlaybackMedia`, `getPlaybackManifest`, `headPlaybackManifest`, `getPlaybackSegment`, `getPlaybackSubtitle`, `headPlaybackSubtitle`, `getPlaybackSubtitleFonts` | `grantedAppStreamError` | only the media of a stream its own login session started, by the attempt row; a stream with no recorded login session is refused |
+| `createWatchTogetherSocketTicket` | `ConnectOtherApp`, `ownStream` | a member's seat no other connection holds, never a room its account and profile host; `attach_session` only for a stream its own login session started |
+| `deleteWatchTogetherSuggestion` | `DeleteOwnSuggestion` | suggestions of the account and profile it acts as. A suggester is stored as account and profile, not as the session, so this includes suggestions the person's own devices made as that profile |
+
+The media routes are registry operations whose handlers are the stream and
+transcode handlers; a playback session id of another device can reach such a
+session through a room's `attached_session_id` (a member is the account and
+profile), so the tie to the login session is what keeps its media away.
+
+**Socket frames** are not operations. On the Watch Together socket such a
+session may send `attach_session`, `state_report`, `ready`, `buffering`,
+`lobby_ready` and `ping`; `transport_request` is refused with an error frame
+(`ConnectOtherApp`'s connection carries the mark). A `buffering` report can
+pause the room, as from any member. Connecting while the member's seat is
+held is refused with an error frame of code `forbidden` and a message that
+the seat is still held, inviting a retry: a seat stays held for up to 30
+seconds after a socket that dropped without closing and up to 45 seconds after
+its API server died, so the holder may be the app's own earlier connection. On
+the events socket it subscribes to the non-administrator channels, which carry
+the profile's own changes. On the playback control socket it reaches only the
+stream its ticket names, which is its own.
+
+**Refused.** By family, with the reason each operation publishes:
+
+- changes the account: changing the password. With the current password and
+  `sign_out_other_sessions` it would keep the app's session and end the
+  person's others;
+- changes how the account signs in, or reads or hands out its other
+  credentials: linking or unlinking a sign-in provider, listing, creating or
+  revoking personal API keys, every key-management route but revoking its own
+  key, approving a device sign-in now or in advance, and reading the profile
+  set (`getProfileSet`), which only a session that may manage keys reads;
+- leaves something behind that outlives the key: webhook sync connections
+  (their list returned each receiver URL with its secret), notification
+  webhooks, plugin notification destinations, the notification email address
+  and Discord link, watch-provider links, history-import links and runs;
+- reaches the person's other devices: web push, and native push registration
+  (a request can name another device's id);
+- until the server knows the session's own device: the device registry
+  (`listDevices`, `updateDevice`, `forgetDevice`, `clearDeviceSettings`),
+  managed downloads, download subscriptions, direct downloads, the device
+  subtitle-appearance override, and the device-keyed playback connection
+  reads and writes (`getPlaybackConnection`, `resetPlaybackLearnedLimit`,
+  `reportPlaybackBandwidthProbe`; playback works without them);
+- changes the household's profiles, PINs or limits: creating, changing and
+  deleting profiles, avatars, title and collection allowances, profile import;
+- acts as a room's host or changes what other members play: creating a room
+  and every host operation, and the source fallback;
+- refused for now, by decision: making media requests, editing subtitles every
+  account sees, importing collections, refreshing the shared catalog,
+  changing notification preferences, and catalog edits under a delegated
+  permission;
+- refused by decision, each with its own reason: personal collection writes
+  and home row overrides (the profile's own, but they change what the
+  person's other devices show); onboarding reads and writes; muting a
+  notification series; request discovery reads and cancelling, removing,
+  following or unfollowing a request; reads of watch-provider and
+  history-import connections and runs; the profile export; the library and
+  administration job reads; the account's sign-in identity list, denying a
+  device sign-in, the personal API key scopes, the plugin launch cookie, the
+  Jellyfin connection information and the plugin notification channel list;
+  translating a catalog description, which writes shared data; progress
+  snapshots (the account has two slots, which the app could hold);
+  diagnostics uploads (a per-account quota); subtitle searches against the
+  providers (the server's allowance with them); and the notification email
+  and Discord preference reads;
+- refused by decision, the rows once marked not decided: writing a setting
+  by key (some keys and scopes reach beyond the profile, and none has been
+  read for that), per-user plugin settings (a plugin's values may hold tokens
+  for other services), the title and collection allowance reads (they are
+  about other profiles), the taste seed (not yet read for whether it touches
+  only the profile's own state), and ending a View as user session (such a
+  session never is one). No operation is left undecided.
+
+**Revoking the key takes with it everything the app was allowed to leave.**
+`RevokeDeviceKey` marks the key revoked and ends every login session it
+opened, in one transaction. What an allowed or own-only operation can leave
+on the account for such a session, and what happens to it then:
+
+| Left by | What it leaves | After the key is revoked |
+| --- | --- | --- |
+| progress, watched, favorites, watchlist, not interested, ratings, history removal, reading progress, notes, home dismissals, read marks | the profile's own state | stays: it is the person's data and the point of the grant |
+| playback, audio and subtitle preferences, ebook reader settings | the profile's own state, per series, library or title | stays, as the profile's |
+| starting playback | which version and quality the profile last played for that title (`user_series_playback_preferences`) | stays, as the profile's state; it is written as a side effect of starting playback, not by a request to change a preference, and the person's other devices start that title from it |
+| shuffles | a shuffle of the profile | stays as the profile's; an abandoned one is deleted with other abandoned shuffles |
+| starting playback, theme songs, the bandwidth probe download | a playback attempt bound to its login session, and the play's history row, which carries the client name the app sent | the attempt's media, stream reference and control socket are refused once the session ends, and the stream ends at its idle expiry; the history row stays as the profile's |
+| route events | diagnostics about its own streams, carrying its client name | stay; they grant nothing |
+| verifying a PIN with a wrong guess | spent attempts on the profile's PIN budget | expire within five minutes |
+| reading a person | a metadata refresh queued when one is due | runs as any refresh; grants nothing |
+| Watch Together membership, suggestions, votes, member state | the profile's place and choices in a room the person put it in | stay as the profile's; the room socket closes on the session's next authority check |
+| events socket ticket | a short-lived ticket | the socket closes on its next authority check (at most 15 seconds) |
+| suggestions in a room | suggestions up to the room's cap, as the profile's | stay until the host deletes them or the room closes |
+| any request with client name headers | the client name the app sends, which is not stripped. A person sees it today in the web app's household streams panel, beside their own devices' plays; administrators see it in playback history, insights and session views | stays in playback history after the key is revoked; whether to strip it is a later decision |
+| its own media requests | the declared device label, in stream telemetry (in memory, administrators only) | gone with the process; nothing lasts |
+| sign out, ending its own session, revoking its own key | nothing | nothing to take |
+
+Capability reads that still tell such a session it may do what the gate
+refuses, to be closed by the next change:
+
+- `getCollectionCapabilities` answers `allowed: true` (it governs a mix:
+  listing and reading collections are allowed) with `imports`,
+  `import_sources`, `item_reorder`, `create_description` and
+  `sync_schedule_editable`. The app is told it may import, reorder, describe
+  and schedule collections; the gate refuses every collection write.
+- `getWatchTogetherCapabilities` answers `allowed: true` (joining is allowed)
+  with host flags that say what the host may do; the gate refuses such a
+  session every host operation.
+
+No device registry row and no connection record is left: the declared device
+is removed before anything reads it. Nothing on the list acts for the app
+after its key is revoked: no credential, delivery channel, registration,
+link to an external account, secret URL, media request or session on another
+surface. Every operation that would leave one is refused above.
+
+**Not covered.** The server does not yet know which device is the session's
+own, so the device-keyed operations above are refused rather than limited to
+the app's device. The plugin-content proxy is outside the registry and has no
+decisions; its resolver holds such a session to public plugin routes (above).
+The Jellyfin-compatible and Audiobookshelf-compatible listeners accept no Silo
+session. A coverage test over operations sees neither the proxy nor socket
+frames.
+
+**Another kind of session.** `OriginDecisions` has one member per kind of
+session judged apart, and `originMembers` one row per member; the gate, the
+registration check and the published extension read every kind through it
+(`TestOriginDecisionsTakeAnotherKind`). A device signed in by code would add
+its member, its row and its `auth.SessionKind`, set from `opened_via` in the
+same lookup, and a decision on every operation; the gate does not change.
 
 **Retention.** A used grant's ID is kept until an hour past the grant's `exp`
 (the margin covers a database clock ahead of an API process's), then the
@@ -689,17 +967,18 @@ action per kind of change:
   than the column, is refused the same way.
 - `ActionApproveDeviceSignIn` (approving a device sign-in that is waiting now)
   refuses only the grant-enrolled app's session.
-- `ActionReachOtherDevices` refuses only the grant-enrolled app's session too,
-  and, unlike the actions above, passes every caller that is not the
-  account's own login session, through `auth.SessionMayReachOtherDevices`.
-  It keeps the app off the person's other devices: the household playback
-  list leaves their streams out, the web push and native push writes refuse
-  it, the playback progress, stop, replan and control-ticket routes refuse a
-  stream another login session started, and Watch Together refuses it hosting
-  or driving a room
-  ([Other devices' playback and web push](../auth-api.md#other-devices-playback-and-web-push)).
-  A device sign-in keeps what it has there; only the login session list
-  limits it ([Sessions limited to
+- Keeping the app off the person's other devices is not a `SessionAction`:
+  those checks need only whether another app's key opened the session, which
+  the authentication lookup puts on the claims (`Claims.IsGrantedApp`), and
+  pass every caller that is not the account's own login session. The
+  household playback list leaves the other devices' streams out, the playback
+  progress, stop, replan and control-ticket routes refuse a stream another
+  login session started, and Watch Together refuses it hosting or driving a
+  room ([Other devices' playback and web
+  push](../auth-api.md#other-devices-playback-and-web-push)); web push and
+  native push are refused outright ([What a granted app can
+  do](#what-a-granted-app-can-do)). A device sign-in keeps what it has there;
+  only the login session list limits it ([Sessions limited to
   themselves](../auth-api.md#sessions-limited-to-themselves)).
 - `DELETE /auth/keys/devices/{id}` follows `ActionManageKeys`, except that a
   grant-enrolled app may revoke its own key. A device may revoke its own key,
@@ -1398,7 +1677,10 @@ redemption, both app code issues and app code redemption,
 form of `PUT /profiles/set` answer
 `capability_disabled`; the invitation lookup reports `app_join: false`. A person's own key list and its deletes, the pending
 list and `deny` stay open, so keys can be reviewed, revoked and refused; sessions keys
-opened before are not ended by the switch. Backups classify it as an access setting: a restore keeps the
+opened before are not ended by the switch. A session another app's key
+opened is answered 403 `permission_denied` by the origin gate on
+`createAppCode`, `enrollAppKeys`, `approvePendingAppKey` and
+`replacePersonKey` before those operations' `capability_disabled`. Backups classify it as an access setting: a restore keeps the
 stricter of the live and the backed-up value.
 
 **Demo mode.** On a demo server (`demo.enabled`) every visitor signs in to

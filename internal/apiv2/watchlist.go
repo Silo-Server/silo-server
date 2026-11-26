@@ -50,22 +50,22 @@ const opListWatchlist = "listWatchlist"
 func registerWatchlist(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/watchlist", opListWatchlist, "watchlist",
-		"List the acting profile's watchlist as catalog cards, newest entry first; fully-watched series and items the viewer may not see are omitted.")),
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/watchlist", opListWatchlist, "watchlist",
+		"List the acting profile's watchlist as catalog cards, newest entry first; fully-watched series and items the viewer may not see are omitted.")), grantedProfileState),
 		func(ctx context.Context, in *WatchlistListInput) (*WatchlistCollectionOutput, error) {
 			return reg.listWatchlist(ctx, cursors, in)
 		})
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/watchlist/{item_id}", "getWatchlistEntry", "watchlist",
-		"Answer whether the item is on the acting profile's watchlist: the entry, or 404 when it is not (or the viewer may not see it).")),
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/watchlist/{item_id}", "getWatchlistEntry", "watchlist",
+		"Answer whether the item is on the acting profile's watchlist: the entry, or 404 when it is not (or the viewer may not see it).")), grantedProfileState),
 		reg.getWatchlistEntry)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/watchlist/{item_id}/membership", "getWatchlistMembership", "watchlist",
-		"Answer whether the item is on the acting profile's watchlist as is_member, 200 either way; 404 only when the viewer may not see the item.")),
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/watchlist/{item_id}/membership", "getWatchlistMembership", "watchlist",
+		"Answer whether the item is on the acting profile's watchlist as is_member, 200 either way; 404 only when the viewer may not see the item.")), grantedProfileState),
 		reg.getWatchlistMembership)
-	Register(reg, viewerNoContentMutation(humaOp(http.MethodPut, Prefix+"/watchlist/{item_id}", "addToWatchlist", "watchlist",
-		"Add the item to the acting profile's watchlist. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")),
+	Register(reg, withOrigins(viewerNoContentMutation(humaOp(http.MethodPut, Prefix+"/watchlist/{item_id}", "addToWatchlist", "watchlist",
+		"Add the item to the acting profile's watchlist. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")), grantedProfileState),
 		reg.addToWatchlist)
-	Register(reg, viewerNoContentMutation(humaOp(http.MethodDelete, Prefix+"/watchlist/{item_id}", "deleteWatchlistEntry", "watchlist",
-		"Remove the item from the acting profile's watchlist. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")),
+	Register(reg, withOrigins(viewerNoContentMutation(humaOp(http.MethodDelete, Prefix+"/watchlist/{item_id}", "deleteWatchlistEntry", "watchlist",
+		"Remove the item from the acting profile's watchlist. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")), grantedProfileState),
 		reg.deleteWatchlistEntry)
 }
 

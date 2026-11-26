@@ -19,14 +19,15 @@ import (
 
 // Extension names the document carries; they mirror internal/apiv2.
 const (
-	extClass          = "x-silo-class"
-	extDemoRestricted = "x-silo-demo-restricted"
-	extServiceBacked  = "x-silo-service-backed"
-	extGuarded        = "x-silo-guarded"
-	extConditional    = "x-silo-conditional"
-	extCreateOnly     = "x-silo-create-only"
-	extExtensionBag   = "x-silo-extension-bag"
-	extDeprecation    = "x-silo-deprecation"
+	extClass           = "x-silo-class"
+	extDemoRestricted  = "x-silo-demo-restricted"
+	extOriginDecisions = "x-silo-origin-decisions"
+	extServiceBacked   = "x-silo-service-backed"
+	extGuarded         = "x-silo-guarded"
+	extConditional     = "x-silo-conditional"
+	extCreateOnly      = "x-silo-create-only"
+	extExtensionBag    = "x-silo-extension-bag"
+	extDeprecation     = "x-silo-deprecation"
 
 	// Members of x-silo-deprecation.
 	deprecationAt     = "at"
@@ -121,6 +122,9 @@ func lintStatuses(fail func(string, ...any), where, path, method string, op oper
 		return
 	}
 	demo, _ := op.Extensions[extDemoRestricted].(bool)
+	// An operation that refuses, or limits to its own things, some judged
+	// kind of session answers that session 403 as demo mode does.
+	demo = demo || originMayRefuse(op.Extensions[extOriginDecisions])
 	serviceBacked, _ := op.Extensions[extServiceBacked].(bool)
 	guarded, _ := op.Extensions[extGuarded].(bool)
 	conditional, _ := op.Extensions[extConditional].(bool)
@@ -674,4 +678,17 @@ func isPascal(s string) bool {
 		}
 	}
 	return true
+}
+
+// originMayRefuse reports whether an x-silo-origin-decisions value refuses,
+// or limits to its own things, any kind of session it judges.
+func originMayRefuse(v any) bool {
+	kinds, _ := v.(map[string]any)
+	for _, d := range kinds {
+		decision, _ := d.(map[string]any)
+		if verdict, _ := decision["verdict"].(string); verdict == "refused" || verdict == "own_only" {
+			return true
+		}
+	}
+	return false
 }

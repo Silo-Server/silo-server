@@ -401,8 +401,8 @@ func registerPersonalCollections(reg *Registry) {
 		return Operation{Operation: op, Class: ClassProfileScoped, DemoRestricted: isMutatingMethod(op.Method), ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, Guarded: op.OperationID == opReorderCollections || op.OperationID == opReorderCollectionGroups || op.OperationID == opUpdateCollectionGroup || op.OperationID == opDeleteCollectionGroup}
 	}
 
-	Register(reg, read(humaOp(http.MethodGet, Prefix+"/collections", "listCollections", "collections",
-		"List the acting profile's own collections in its order, then the collections other profiles on the login share, grouped by creator and each in its creator's order.")), reg.listCollections)
+	Register(reg, withOrigins(read(humaOp(http.MethodGet, Prefix+"/collections", "listCollections", "collections",
+		"List the acting profile's own collections in its order, then the collections other profiles on the login share, grouped by creator and each in its creator's order.")), grantedCollectionRead), reg.listCollections)
 
 	create := humaOp(http.MethodPost, Prefix+"/collections", "createCollection", "collections",
 		"Create a manual or smart collection for the acting profile. Not idempotent: a retry after a lost response creates a second collection.")
@@ -410,15 +410,15 @@ func registerPersonalCollections(reg *Registry) {
 	createOp := write(create)
 	// A description or poster the acting account's store cannot keep.
 	createOp.Errors = append(createOp.Errors, http.StatusNotImplemented)
-	Register(reg, createOp, reg.createCollection)
+	Register(reg, withOrigins(createOp, grantedRefusedOtherDevicesShow), reg.createCollection)
 
-	Register(reg, read(humaOp(http.MethodGet, Prefix+"/collections/capabilities", "getCollectionCapabilities", "collections",
-		"The collection features this server supports.")), reg.getCollectionCapabilities)
+	Register(reg, withOrigins(read(humaOp(http.MethodGet, Prefix+"/collections/capabilities", "getCollectionCapabilities", "collections",
+		"The collection features this server supports.")), grantedCapability), reg.getCollectionCapabilities)
 
 	order := humaOp(http.MethodPut, Prefix+"/collections/order", opReorderCollections, "collections",
 		"Replace the order of the acting profile's own collections. Retries are not safe after an intervening mutation.")
 	order.DefaultStatus = http.StatusOK
-	Register(reg, write(order), reg.reorderCollections)
+	Register(reg, withOrigins(write(order), grantedRefusedOtherDevicesShow), reg.reorderCollections)
 
 	groupOp := func(op huma.Operation) Operation {
 		o := write(op)
@@ -428,20 +428,20 @@ func registerPersonalCollections(reg *Registry) {
 	createGroup := humaOp(http.MethodPost, Prefix+"/collections/groups", "createCollectionGroup", "collections",
 		groupsRemovedSummary)
 	createGroup.DefaultStatus = http.StatusCreated
-	Register(reg, groupOp(createGroup), reg.createCollectionGroup)
+	Register(reg, withOrigins(groupOp(createGroup), grantedRefusedOtherDevicesShow), reg.createCollectionGroup)
 
 	groupOrder := humaOp(http.MethodPut, Prefix+"/collections/groups/order", opReorderCollectionGroups, "collections",
 		groupsRemovedSummary)
 	groupOrder.DefaultStatus = http.StatusOK
-	Register(reg, groupOp(groupOrder), reg.reorderCollectionGroups)
+	Register(reg, withOrigins(groupOp(groupOrder), grantedRefusedOtherDevicesShow), reg.reorderCollectionGroups)
 
-	Register(reg, groupOp(humaOp(http.MethodPatch, Prefix+"/collections/groups/{id}", opUpdateCollectionGroup, "collections",
-		groupsRemovedSummary)), reg.updateCollectionGroup)
+	Register(reg, withOrigins(groupOp(humaOp(http.MethodPatch, Prefix+"/collections/groups/{id}", opUpdateCollectionGroup, "collections",
+		groupsRemovedSummary)), grantedRefusedOtherDevicesShow), reg.updateCollectionGroup)
 
 	deleteGroup := humaOp(http.MethodDelete, Prefix+"/collections/groups/{id}", opDeleteCollectionGroup, "collections",
 		groupsRemovedSummary)
 	deleteGroup.DefaultStatus = http.StatusNoContent
-	Register(reg, groupOp(deleteGroup), reg.deleteCollectionGroup)
+	Register(reg, withOrigins(groupOp(deleteGroup), grantedRefusedOtherDevicesShow), reg.deleteCollectionGroup)
 
 	importOp := func(path, id, summary string) huma.Operation {
 		op := humaOp(http.MethodPost, Prefix+path, id, "collections",
@@ -449,17 +449,17 @@ func registerPersonalCollections(reg *Registry) {
 		op.DefaultStatus = http.StatusCreated
 		return op
 	}
-	Register(reg, write(importOp("/collections/import/mdblist", "importMDBListCollection",
-		"Import an MDBList list as a synced collection.")), reg.importMDBListCollection)
-	Register(reg, write(importOp("/collections/import/tmdb", "importTMDBCollection",
-		"Import a TMDB preset as a synced collection.")), reg.importTMDBCollection)
-	Register(reg, write(importOp("/collections/import/tmdb-list", "importTMDBListCollection",
-		"Import a public TMDB list as a synced collection.")), reg.importTMDBListCollection)
+	Register(reg, withOrigins(write(importOp("/collections/import/mdblist", "importMDBListCollection",
+		"Import an MDBList list as a synced collection.")), grantedRefusedImport), reg.importMDBListCollection)
+	Register(reg, withOrigins(write(importOp("/collections/import/tmdb", "importTMDBCollection",
+		"Import a TMDB preset as a synced collection.")), grantedRefusedImport), reg.importTMDBCollection)
+	Register(reg, withOrigins(write(importOp("/collections/import/tmdb-list", "importTMDBListCollection",
+		"Import a public TMDB list as a synced collection.")), grantedRefusedImport), reg.importTMDBListCollection)
 
-	Register(reg, read(humaOp(http.MethodGet, Prefix+"/collections/import/mdblist/search", "searchMDBListLists", "collections",
-		"Search MDBList for lists to import.")), reg.searchMDBListLists)
-	Register(reg, read(humaOp(http.MethodGet, Prefix+"/collections/import/mdblist/top", "listTopMDBListLists", "collections",
-		"MDBList's most-liked lists.")), reg.listTopMDBListLists)
+	Register(reg, withOrigins(read(humaOp(http.MethodGet, Prefix+"/collections/import/mdblist/search", "searchMDBListLists", "collections",
+		"Search MDBList for lists to import.")), grantedCollectionRead), reg.searchMDBListLists)
+	Register(reg, withOrigins(read(humaOp(http.MethodGet, Prefix+"/collections/import/mdblist/top", "listTopMDBListLists", "collections",
+		"MDBList's most-liked lists.")), grantedCollectionRead), reg.listTopMDBListLists)
 }
 
 func (reg *Registry) personalCollections() (PersonalCollectionService, *Problem) {

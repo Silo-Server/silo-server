@@ -74,7 +74,7 @@ func (reg *Registry) viewerSubtitleDeletionRow(ctx context.Context, raw ID) (*su
 
 func registerViewerSubtitleDeletion(reg *Registry) {
 	read := Operation{Operation: humaOp(http.MethodGet, Prefix+"/subtitles/stored/{id}/metadata", "getViewerSubtitleMetadata", "subtitles", "Read a deletable stored subtitle and its viewer-bound validator. Requires file access and downloading-account or effective administrator authority."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, ServiceBacked: true, Conditional: true}
-	Register(reg, read, func(ctx context.Context, in *ViewerSubtitleMetadataInput) (*ViewerSubtitleMetadataOutput, error) {
+	Register(reg, withOrigins(read, grantedSubtitleRead), func(ctx context.Context, in *ViewerSubtitleMetadataInput) (*ViewerSubtitleMetadataOutput, error) {
 		row, _, err := reg.viewerSubtitleDeletionRow(ctx, in.ID)
 		if err != nil {
 			return nil, err
@@ -90,7 +90,7 @@ func registerViewerSubtitleDeletion(reg *Registry) {
 	})
 	del := Operation{Operation: humaOp(http.MethodDelete, Prefix+"/subtitles/stored/{id}", "deleteStoredSubtitle", "subtitles", "Delete the authorized stored subtitle using If-Match. Success confirms metadata deletion only; object cleanup is best effort. Never automatically retry an uncertain response."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, DemoRestricted: true, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyNonRetryable}
 	del.DefaultStatus = http.StatusNoContent
-	Register(reg, del, func(ctx context.Context, in *ViewerSubtitleMetadataInput) (*struct{}, error) {
+	Register(reg, withOrigins(del, grantedRefusedSubtitleEdit), func(ctx context.Context, in *ViewerSubtitleMetadataInput) (*struct{}, error) {
 		row, access, err := reg.viewerSubtitleDeletionRow(ctx, in.ID)
 		if err != nil {
 			return nil, err

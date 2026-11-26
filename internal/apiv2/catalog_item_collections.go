@@ -38,8 +38,8 @@ type CatalogItemCollectionsOutput struct {
 }
 
 func registerCatalogItemCollections(reg *Registry) {
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}/collections", opListItemCollections, "catalog",
-		"The collections a title's page lists under \"Also in\": visible manual and synced collections, server and personal, that store the title. Smart collections are not listed, nor the synced copy of the box set the page shows. When only one collection holds the title, preview_items carries up to 6 of its other titles. 404 when the ID is missing, hidden, or not a catalog title.")), reg.listCatalogItemCollections)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}/collections", opListItemCollections, "catalog",
+		"The collections a title's page lists under \"Also in\": visible manual and synced collections, server and personal, that store the title. Smart collections are not listed, nor the synced copy of the box set the page shows. When only one collection holds the title, preview_items carries up to 6 of its other titles. 404 when the ID is missing, hidden, or not a catalog title.")), grantedCatalogRead), reg.listCatalogItemCollections)
 }
 
 func (reg *Registry) listCatalogItemCollections(ctx context.Context, in *CatalogItemCollectionsInput) (*CatalogItemCollectionsOutput, error) {

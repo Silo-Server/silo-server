@@ -342,7 +342,7 @@ func registerPlayback(reg *Registry) {
 		}
 		return operation
 	}
-	Register(reg, op(http.MethodGet, "/capabilities", opGetPlaybackCapabilities), func(ctx context.Context, _ *CapabilityInput) (*PlaybackCapabilitiesOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "/capabilities", opGetPlaybackCapabilities), grantedCapability), func(ctx context.Context, _ *CapabilityInput) (*PlaybackCapabilitiesOutput, error) {
 		userID, profileID, p := viewerIdentity(ctx)
 		if p != nil {
 			return nil, p
@@ -367,7 +367,7 @@ func registerPlayback(reg *Registry) {
 		}
 		return &PlaybackCapabilitiesOutput{CacheControl: playbackCacheControl, Body: body}, nil
 	})
-	Register(reg, op(http.MethodPost, "/start", opStartPlayback), func(ctx context.Context, in *PlaybackStartInput) (*PlaybackStartOutput, error) {
+	Register(reg, withOrigins(op(http.MethodPost, "/start", opStartPlayback), grantedPlayback), func(ctx context.Context, in *PlaybackStartInput) (*PlaybackStartOutput, error) {
 		if in.Body.BandwidthEstimateSource != "" && in.Body.BandwidthEstimateKbps == nil {
 			return nil, NewProblem(TypeMalformedRequest, "bandwidth_estimate_source requires bandwidth_estimate_kbps")
 		}
@@ -401,7 +401,7 @@ func registerPlayback(reg *Registry) {
 		}
 		return &PlaybackStartOutput{Body: playbackDecision(response)}, nil
 	})
-	Register(reg, op(http.MethodPost, "/{session_id}/progress", opUpdatePlaybackProgress), func(ctx context.Context, in *PlaybackProgressInput) (*PlaybackMutationOutput, error) {
+	Register(reg, withOrigins(op(http.MethodPost, "/{session_id}/progress", opUpdatePlaybackProgress), grantedOwnStream), func(ctx context.Context, in *PlaybackProgressInput) (*PlaybackMutationOutput, error) {
 		caller, p := reg.playbackCaller(ctx, in.PlaybackRequestHeaders, in.Body.InstallationID)
 		if p != nil {
 			return nil, p
@@ -411,7 +411,7 @@ func registerPlayback(reg *Registry) {
 	})
 	registerPlaybackReplan(reg, op)
 	registerPlaybackRouteEvents(reg, op)
-	Register(reg, op(http.MethodDelete, "/{session_id}", opStopPlayback), func(ctx context.Context, in *PlaybackStopInput) (*PlaybackMutationOutput, error) {
+	Register(reg, withOrigins(op(http.MethodDelete, "/{session_id}", opStopPlayback), grantedOwnStream), func(ctx context.Context, in *PlaybackStopInput) (*PlaybackMutationOutput, error) {
 		caller, p := reg.playbackCaller(ctx, in.PlaybackRequestHeaders, in.Body.InstallationID)
 		if p != nil {
 			return nil, p
@@ -427,7 +427,7 @@ func registerPlayback(reg *Registry) {
 	})
 }
 func registerPlaybackReplan(reg *Registry, op func(method, path, id string) Operation) {
-	Register(reg, op(http.MethodPost, "/{session_id}/replan", opReplanPlayback), func(ctx context.Context, in *PlaybackReplanInput) (*PlaybackReplanOutput, error) {
+	Register(reg, withOrigins(op(http.MethodPost, "/{session_id}/replan", opReplanPlayback), grantedOwnStream), func(ctx context.Context, in *PlaybackReplanInput) (*PlaybackReplanOutput, error) {
 		if in.Body.BandwidthEstimateSource != "" && in.Body.BandwidthEstimateKbps == nil {
 			return nil, NewProblem(TypeMalformedRequest, "bandwidth_estimate_source requires bandwidth_estimate_kbps")
 		}
@@ -456,7 +456,7 @@ func (in PlaybackReplanBody) domain() playback.ReplanRequestV3 {
 	return playback.ReplanRequestV3{ProtocolVersion: in.ProtocolVersion, ClientFeatures: in.ClientFeatures, Operation: in.Operation, PlaybackAttemptID: in.PlaybackAttemptID, ReplanRequestID: in.ReplanRequestID, FailedPlanID: in.FailedPlanID, PlanAttemptID: in.PlanAttemptID, PlanAttemptKey: in.PlanAttemptKey, AttemptedPlanKeys: in.AttemptedPlanKeys, LocalMutations: in.LocalMutations, AttemptCount: in.AttemptCount, QualityPreference: in.QualityPreference, PositionSeconds: in.PositionSeconds, Metered: in.Metered, BandwidthEstimateKbps: in.BandwidthEstimateKbps, BandwidthEstimateSource: in.BandwidthEstimateSource, ObservedThroughputKbps: in.ObservedThroughputKbps, LearnedLimit: in.LearnedLimit, BandwidthCapKbps: in.BandwidthCapKbps, SelectedTracks: in.SelectedTracks, Failure: in.Failure, Capabilities: in.Capabilities, ClientPlaybackContext: in.ClientPlaybackContext}
 }
 func registerPlaybackRouteEvents(reg *Registry, op func(method, path, id string) Operation) {
-	Register(reg, op(http.MethodPost, "/route-events", opReportPlaybackRouteEvent), func(ctx context.Context, in *PlaybackRouteEventInput) (*PlaybackRouteEventOutput, error) {
+	Register(reg, withOrigins(op(http.MethodPost, "/route-events", opReportPlaybackRouteEvent), grantedOwnRouteEvent), func(ctx context.Context, in *PlaybackRouteEventInput) (*PlaybackRouteEventOutput, error) {
 		caller, p := reg.playbackCaller(ctx, in.PlaybackRequestHeaders, in.Body.InstallationID)
 		if p != nil {
 			return nil, p

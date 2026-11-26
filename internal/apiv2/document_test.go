@@ -76,7 +76,7 @@ func TestBucketLimitedPublicOperationsDocument429(t *testing.T) {
 				continue
 			}
 			bucket, _ := op.Metadata[metaRateLimitBucket].(string)
-			if chain, _ := gateChain(deps, ClassPublic, "", false, false, false, bucket); len(chain) == 0 {
+			if chain, _ := gateChain(deps, ClassPublic, "", OriginDecisions{}, false, false, false, bucket); len(chain) == 0 {
 				continue
 			}
 			limited++

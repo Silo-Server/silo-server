@@ -97,8 +97,8 @@ type ProfileImportResult struct {
 type ProfileImportOutput struct{ Body ProfileImportResult }
 
 func registerProfileTransfer(reg *Registry) {
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/profile-export", "getProfileExportCapability", "profiles",
-		"Discover profile export and import: the document format and version, the import size limit, and the data types carried.")),
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/profile-export", "getProfileExportCapability", "profiles",
+		"Discover profile export and import: the document format and version, the import size limit, and the data types carried.")), grantedCapability),
 		func(context.Context, *CapabilityInput) (*ProfileExportCapabilityOutput, error) {
 			doc := ProfileExportCapability{Capability: Capability{State: configuredCapabilityState(reg.deps.ProfileTransfer != nil)}, DataTypes: []string{}}
 			if svc := reg.deps.ProfileTransfer; svc != nil {
@@ -111,7 +111,7 @@ func registerProfileTransfer(reg *Registry) {
 	export := humaOp(http.MethodGet, Prefix+"/profile/export", "exportProfile", "profiles",
 		"Download the acting profile's own data as a silo-profile-export document: watch history and progress, ratings, favorites and watchlist, personal collections, dismissals, preferences, and notification preferences, leaving out titles the profile may not see now. It carries no account fields, password or PIN hashes, or access fields.")
 	export.Errors = []int{http.StatusForbidden, http.StatusConflict, http.StatusRequestEntityTooLarge}
-	Register(reg, viewerOperation(export), func(ctx context.Context, _ *struct{}) (*ProfileExportOutput, error) {
+	Register(reg, withOrigins(viewerOperation(export), grantedRefusedProfileExport), func(ctx context.Context, _ *struct{}) (*ProfileExportOutput, error) {
 		svc := reg.deps.ProfileTransfer
 		if svc == nil {
 			return nil, unavailable("profile export")
@@ -156,7 +156,7 @@ func registerProfileTransfer(reg *Registry) {
 		next(huma.WithContext(ctx, admitted))
 	}}
 	Register(reg, Operation{Operation: imp, Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true,
-		RetrySafety: RetrySafetyNaturalIdempotent, MaxBodyBytes: backup.MaxProfileImportBytes},
+		RetrySafety: RetrySafetyNaturalIdempotent, MaxBodyBytes: backup.MaxProfileImportBytes, Origins: grantedRefusedHousehold},
 		func(ctx context.Context, in *ProfileImportInput) (*ProfileImportOutput, error) {
 			svc := reg.deps.ProfileTransfer
 			if svc == nil {

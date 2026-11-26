@@ -30,7 +30,7 @@ type PolicyCapabilityOutput struct {
 }
 
 func registerPolicyCapability(reg *Registry) {
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/policy/capability", "getPolicyCapability", "policy", "Discover policy availability and runtime health."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, func(ctx context.Context, _ *CapabilityInput) (*PolicyCapabilityOutput, error) {
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/policy/capability", "getPolicyCapability", "policy", "Discover policy availability and runtime health."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, Origins: grantedCapability}, func(ctx context.Context, _ *CapabilityInput) (*PolicyCapabilityOutput, error) {
 		view := handlers.PolicyCapabilityView{DecisionTypes: policy.DecisionTypes()}
 		if reg.deps.PolicyCapability != nil {
 			view = reg.deps.PolicyCapability.PolicyCapability(ctx)

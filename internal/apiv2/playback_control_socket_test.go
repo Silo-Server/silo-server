@@ -48,14 +48,14 @@ func controlSocketDeps(f *fakeControlSocket) Dependencies {
 	deps := pilotDeps(nil, nil)
 	deps.PlaybackControlSocket = f
 	claims := &auth.Claims{UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute))}}
-	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{map[string]*auth.Claims{memberToken: claims, "tok-unbounded": {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess}}}, fakeSessions{map[string]string{"s1": "user"}}, nil, nil)
+	granted := &auth.Claims{UserID: 1, Role: "user", SessionID: grantedAppSessionID, TokenType: auth.TokenTypeAccess, RegisteredClaims: claims.RegisteredClaims}
+	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{map[string]*auth.Claims{memberToken: claims, grantedAppToken: granted, "tok-unbounded": {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess}}}, fakeSessions{map[string]string{"s1": "user"}}, nil, nil)
 	return deps
 }
 
 func TestPlaybackControlSocketTicketDelegatesOwnerAuthority(t *testing.T) {
 	f := &fakeControlSocket{available: true}
 	deps := controlSocketDeps(f)
-	deps.AppKeys = &fakeAppKeys{reachErr: auth.ErrSessionNotAllowed}
 	h := NewHandler(deps)
 	path := Prefix + "/playback/sessions/" + controlSocketSession + "/control/ws-ticket"
 	body := `{"installation_id":"` + playbackTestInstallation + `"}`
@@ -64,10 +64,14 @@ func TestPlaybackControlSocketTicketDelegatesOwnerAuthority(t *testing.T) {
 	if rec.Code != 200 || f.calls != 1 || f.identity.UserID != 1 || f.identity.SessionID != "s1" || f.identity.ProfileID != "p-owner" || f.session != controlSocketSession || f.installation != playbackTestInstallation {
 		t.Fatalf("delegation: %d %s %+v", rec.Code, rec.Body.String(), f)
 	}
-	// The mint carries the rule it asks for a stream another login session
-	// started.
-	if f.reach == nil || !errors.Is(f.reach(t.Context()), auth.ErrSessionNotAllowed) {
-		t.Fatal("the mint did not carry the caller's other-device rule")
+	// The person's own session mints with no other-device rule; a session
+	// another app's key opened carries the rule, which refuses a stream
+	// another login session started.
+	if f.reach != nil {
+		t.Fatal("the person's own session carried an other-device rule")
+	}
+	if rec := do(t, h, http.MethodPost, path, body, with(bearer(grantedAppToken), "X-Profile-Id", "p-owner")); rec.Code != 200 || f.reach == nil || !errors.Is(f.reach(t.Context()), auth.ErrSessionNotAllowed) {
+		t.Fatalf("the mint did not carry another app's other-device rule: %d %s", rec.Code, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), `"protocol":"silo.playback-control.v2"`) || !strings.Contains(rec.Body.String(), `"max_connection_seconds":14400`) || rec.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("ticket body/headers: %s %v", rec.Body.String(), rec.Header())

@@ -218,28 +218,28 @@ const (
 
 func registerRecommendations(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/because-watched/{item_id}", "listBecauseWatched", "recommendations",
-		"Cards recommended because the acting profile watched the item, minus what it has watched or rated.")), reg.listBecauseWatched)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/discover", "getDiscover", "recommendations",
-		"The Discover page: the acting profile's recommendation rows with their cards, blended with upcoming airings.")), reg.getDiscover)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/for-you/main", "getForYouMain", "recommendations",
-		"The acting profile's main For You row; empty until the engine has a profile for it.")), reg.getForYouMain)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/for-you/rows", "listForYouRows", "recommendations",
-		"The acting profile's For You rows, one per taste cluster.")), reg.listForYouRows)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/popular", "listPopular", "recommendations",
-		"The server's most played items over the window, minus what the acting profile has watched or marked Not interested.")), reg.listPopular)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/recently-added", "listRecentlyAdded", "recommendations",
-		"Items added over the window, minus what the acting profile has watched or marked Not interested.")), reg.listRecentlyAdded)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/section/{kind}", "getRecommendationSection", "recommendations",
-		"One recommendation row in full, for a dedicated see-all page; empty when the profile has no such row.")), reg.getRecommendationSection)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/similar/{item_id}", "listSimilar", "recommendations",
-		"Cards similar to the item by content; personalised only by the acting profile's access and by leaving out the titles it marked Not interested.")), reg.listSimilar)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/similar-users", "listSimilarUsersLiked", "recommendations",
-		"Cards profiles with similar taste liked.")), reg.listSimilarUsersLiked)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/taste-profile", "getTasteProfile", "recommendations",
-		"The acting profile's taste summary; empty members until the engine has computed one.")), reg.getTasteProfile)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/taste-seed/items", opListTasteSeedItems, "recommendations",
-		"A page of cards for the taste-seeding picker, most recognizable first.")), func(ctx context.Context, in *TasteSeedItemsInput) (*CatalogItemCollectionOutput, error) {
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/because-watched/{item_id}", "listBecauseWatched", "recommendations",
+		"Cards recommended because the acting profile watched the item, minus what it has watched or rated.")), grantedRecommendRead), reg.listBecauseWatched)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/discover", "getDiscover", "recommendations",
+		"The Discover page: the acting profile's recommendation rows with their cards, blended with upcoming airings.")), grantedRecommendRead), reg.getDiscover)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/for-you/main", "getForYouMain", "recommendations",
+		"The acting profile's main For You row; empty until the engine has a profile for it.")), grantedRecommendRead), reg.getForYouMain)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/for-you/rows", "listForYouRows", "recommendations",
+		"The acting profile's For You rows, one per taste cluster.")), grantedRecommendRead), reg.listForYouRows)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/popular", "listPopular", "recommendations",
+		"The server's most played items over the window, minus what the acting profile has watched or marked Not interested.")), grantedRecommendRead), reg.listPopular)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/recently-added", "listRecentlyAdded", "recommendations",
+		"Items added over the window, minus what the acting profile has watched or marked Not interested.")), grantedRecommendRead), reg.listRecentlyAdded)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/section/{kind}", "getRecommendationSection", "recommendations",
+		"One recommendation row in full, for a dedicated see-all page; empty when the profile has no such row.")), grantedRecommendRead), reg.getRecommendationSection)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/similar/{item_id}", "listSimilar", "recommendations",
+		"Cards similar to the item by content; personalised only by the acting profile's access and by leaving out the titles it marked Not interested.")), grantedRecommendRead), reg.listSimilar)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/similar-users", "listSimilarUsersLiked", "recommendations",
+		"Cards profiles with similar taste liked.")), grantedRecommendRead), reg.listSimilarUsersLiked)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/taste-profile", "getTasteProfile", "recommendations",
+		"The acting profile's taste summary; empty members until the engine has computed one.")), grantedRecommendRead), reg.getTasteProfile)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/taste-seed/items", opListTasteSeedItems, "recommendations",
+		"A page of cards for the taste-seeding picker, most recognizable first.")), grantedRecommendRead), func(ctx context.Context, in *TasteSeedItemsInput) (*CatalogItemCollectionOutput, error) {
 		return reg.listTasteSeedItems(ctx, cursors, in)
 	})
 	Register(reg, Operation{
@@ -251,11 +251,12 @@ func registerRecommendations(reg *Registry) {
 		RetrySafety:    RetrySafetyNonRetryable,
 		DemoRestricted: true,
 		ServiceBacked:  true,
+		Origins:        grantedRefusedTasteSeed,
 	}, reg.createTasteSeed)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/watch-tonight", "getWatchTonight", "recommendations",
-		"The acting profile's Watch Tonight list: in-progress and next-up items merged with taste candidates, best first.")), reg.getWatchTonight)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/watch-tonight/cards", "listWatchTonightCards", "recommendations",
-		"A page of Watch Tonight swipe cards with cast, in continue or discover mode, minus the identifiers already swiped.")), reg.listWatchTonightCards)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/watch-tonight", "getWatchTonight", "recommendations",
+		"The acting profile's Watch Tonight list: in-progress and next-up items merged with taste candidates, best first.")), grantedRecommendRead), reg.getWatchTonight)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/watch-tonight/cards", "listWatchTonightCards", "recommendations",
+		"A page of Watch Tonight swipe cards with cast, in continue or discover mode, minus the identifiers already swiped.")), grantedRecommendRead), reg.listWatchTonightCards)
 }
 
 func (reg *Registry) recommendationsService() (RecommendationService, *Problem) {

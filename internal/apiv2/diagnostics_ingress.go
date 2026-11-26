@@ -82,7 +82,7 @@ func diagnosticsIngressProblem(err error) error {
 func registerDiagnosticsIngress(reg *Registry) {
 	read := Operation{Operation: humaOp(http.MethodGet, Prefix+"/diagnostics/capabilities", "getDiagnosticsCapabilities", "diagnostics", "Read diagnostics upload availability and limits for this account."), Class: ClassAuthenticated, ServiceBacked: true}
 	read.Errors = []int{http.StatusForbidden}
-	Register(reg, read, func(ctx context.Context, _ *CapabilityInput) (*DiagnosticsCapabilitiesOutput, error) {
+	Register(reg, withOrigins(read, grantedCapability), func(ctx context.Context, _ *CapabilityInput) (*DiagnosticsCapabilitiesOutput, error) {
 		userID, err := diagnosticsAccount(ctx)
 		if err != nil {
 			return nil, err
@@ -125,7 +125,7 @@ func registerDiagnosticsIngress(reg *Registry) {
 			"Retry-After": {Schema: &huma.Schema{Type: "string"}, Description: "Minimum delay in seconds after an explicit quota or busy rejection; not permission to replay an uncertain upload."},
 		}
 	}
-	Register(reg, upload, func(ctx context.Context, in *DiagnosticsUploadInput) (*DiagnosticsUploadOutput, error) {
+	Register(reg, withOrigins(upload, grantedRefusedDiagnosticsQuota), func(ctx context.Context, in *DiagnosticsUploadInput) (*DiagnosticsUploadOutput, error) {
 		userID, err := diagnosticsAccount(ctx)
 		if err != nil {
 			return nil, err

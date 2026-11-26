@@ -98,11 +98,11 @@ func bootstrapScope(operation string, userID int, profileID, snapshotID string) 
 }
 func registerProgressBootstrap(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/sync/progress/capabilities", opProgressBootstrapCapabilities, "progress", "Discover full-replacement progress bootstrap support for this profile."), Class: ClassProfileScoped, ServiceBacked: true}, reg.progressBootstrapCapabilities)
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/sync/progress/capabilities", opProgressBootstrapCapabilities, "progress", "Discover full-replacement progress bootstrap support for this profile."), Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedCapability}, reg.progressBootstrapCapabilities)
 	create := humaOp(http.MethodPost, progressSnapshotPath, opCreateProgressSnapshot, "progress", "Capture an immutable full-replacement snapshot. Reuse request_id only for the same admission intent within the 24-hour metadata retention horizon.")
 	create.DefaultStatus = http.StatusCreated
 	create.Errors = []int{http.StatusConflict, http.StatusRequestEntityTooLarge, http.StatusTooManyRequests, http.StatusServiceUnavailable}
-	Register(reg, Operation{Operation: create, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyDomainIdentity}, func(ctx context.Context, in *ProgressSnapshotCreateInput) (*ProgressSnapshotOutput, error) {
+	Register(reg, Operation{Operation: create, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyDomainIdentity, Origins: grantedRefusedSnapshotSlots}, func(ctx context.Context, in *ProgressSnapshotCreateInput) (*ProgressSnapshotOutput, error) {
 		if reg.deps.ProgressBootstrap == nil {
 			return nil, unavailable("progress bootstrap")
 		}
@@ -118,7 +118,7 @@ func registerProgressBootstrap(reg *Registry) {
 	})
 	read := humaOp(http.MethodGet, progressSnapshotPath+"/{snapshot_id}", opGetProgressSnapshot, "progress", "Read the next immutable snapshot page using its signed continuation.")
 	read.Errors = []int{http.StatusBadRequest, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable}
-	Register(reg, Operation{Operation: read, Class: ClassProfileScoped, ServiceBacked: true}, func(ctx context.Context, in *ProgressSnapshotReadInput) (*ProgressSnapshotOutput, error) {
+	Register(reg, Operation{Operation: read, Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedSnapshotSlots}, func(ctx context.Context, in *ProgressSnapshotReadInput) (*ProgressSnapshotOutput, error) {
 		if reg.deps.ProgressBootstrap == nil {
 			return nil, unavailable("progress bootstrap")
 		}

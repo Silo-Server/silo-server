@@ -115,7 +115,7 @@ func registerSubtitleSyncTargets(reg *Registry) {
 
 	list := Operation{Operation: humaOp(http.MethodGet, Prefix+"/subtitles/{media_file_id}/sync", "listSubtitleSync", "subtitles", "List the timing and latest sync job of every subtitle of a media file that can be synced: stored subtitles, then subtitle files next to the media."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, ServiceBacked: true}
 	list.Description = "Each entry's key is the subtitle's sync key, which the playback inventory publishes as sync_key on the matching track. Only SRT, WebVTT, ASS, and SSA subtitles are listed. A subtitle file next to the media that cannot be read is left out." + access
-	Register(reg, list, func(ctx context.Context, in *SubtitleSyncFileInput) (*SubtitleSyncListOutput, error) {
+	Register(reg, withOrigins(list, grantedSubtitleRead), func(ctx context.Context, in *SubtitleSyncFileInput) (*SubtitleSyncListOutput, error) {
 		fileID, access, p := reg.subtitleSyncFileAccess(ctx, in.MediaFileID)
 		if p != nil {
 			return nil, p
@@ -134,7 +134,7 @@ func registerSubtitleSyncTargets(reg *Registry) {
 
 	read := Operation{Operation: humaOp(http.MethodGet, Prefix+"/subtitles/{media_file_id}/sync/{key}", "getSubtitleSync", "subtitles", "Read one subtitle's timing and latest sync job, and the validator for setSubtitleTiming."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, ServiceBacked: true}
 	read.Description = "Poll it while the job is pending or running, or follow the subtitle_sync_updated realtime event of a playback session." + access
-	Register(reg, read, func(ctx context.Context, in *SubtitleSyncKeyInput) (*SubtitleSyncStateOutput, error) {
+	Register(reg, withOrigins(read, grantedSubtitleRead), func(ctx context.Context, in *SubtitleSyncKeyInput) (*SubtitleSyncStateOutput, error) {
 		fileID, access, p := reg.subtitleSyncFileAccess(ctx, in.MediaFileID)
 		if p != nil {
 			return nil, p
@@ -151,7 +151,7 @@ func registerSubtitleSyncTargets(reg *Registry) {
 	start := Operation{Operation: humaOp(http.MethodPost, Prefix+"/subtitles/{media_file_id}/sync/{key}", "startSubtitleSync", "subtitles", "Align one subtitle to its file's audio."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyCoalescing}
 	start.DefaultStatus = http.StatusAccepted
 	start.Description = "Starts a sync job, or returns the subtitle's active one, and returns the subtitle with that job. A request repeated after the job finished starts another job, which reaches the same timing. A synced job stores a correction that every delivery path applies; no_match leaves the timing unchanged and means the subtitle most likely belongs to another release. A subtitle file next to the media is never modified: its correction belongs to its current bytes." + access
-	Register(reg, start, func(ctx context.Context, in *SubtitleSyncKeyInput) (*SubtitleSyncStartOutput, error) {
+	Register(reg, withOrigins(start, grantedRefusedSubtitleEdit), func(ctx context.Context, in *SubtitleSyncKeyInput) (*SubtitleSyncStartOutput, error) {
 		fileID, access, p := reg.subtitleSyncFileAccess(ctx, in.MediaFileID)
 		if p != nil {
 			return nil, p
@@ -167,7 +167,7 @@ func registerSubtitleSyncTargets(reg *Registry) {
 
 	timing := Operation{Operation: humaOp(http.MethodPut, Prefix+"/subtitles/{media_file_id}/sync/{key}/timing", "setSubtitleTiming", "subtitles", "Replace one subtitle's timing correction."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, DemoRestricted: true, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	timing.Description = "Sets the correction every delivery path applies: original time t plays at t * scale + offset_ms. Send {offset_ms: 0, scale: 1} to restore the original timing. Requires If-Match with the validator from getSubtitleSync." + access
-	Register(reg, timing, func(ctx context.Context, in *SubtitleSyncTimingInput) (*SubtitleSyncStateOutput, error) {
+	Register(reg, withOrigins(timing, grantedRefusedSubtitleEdit), func(ctx context.Context, in *SubtitleSyncTimingInput) (*SubtitleSyncStateOutput, error) {
 		fileID, access, p := reg.subtitleSyncFileAccess(ctx, in.MediaFileID)
 		if p != nil {
 			return nil, p

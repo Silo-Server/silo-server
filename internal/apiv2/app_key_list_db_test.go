@@ -75,7 +75,7 @@ func newKeyRoutesDB(t *testing.T, with ...func(*Dependencies)) *keyRoutesDB {
 		t.Fatal(err)
 	}
 
-	claims, roles := map[string]*auth.Claims{}, map[string]string{}
+	claims := map[string]*auth.Claims{}
 	session := func(token, openedVia string, deviceKey *string, impersonator *int) {
 		id := uuid.NewString()
 		if _, err := pool.Exec(ctx, `INSERT INTO auth_sessions (id, user_id, device_name, expires_at, opened_via, device_key_id)
@@ -83,7 +83,6 @@ func newKeyRoutesDB(t *testing.T, with ...func(*Dependencies)) *keyRoutesDB {
 			t.Fatal(err)
 		}
 		claims[token] = &auth.Claims{UserID: userID, Role: "user", SessionID: id, TokenType: auth.TokenTypeAccess, ImpersonatorUserID: impersonator}
-		roles[id] = "user"
 	}
 	session("tok-phone", models.SessionOpenedPassword, nil, nil)
 	session("tok-tv", models.SessionOpenedDeviceLogin, nil, nil)
@@ -99,7 +98,9 @@ func newKeyRoutesDB(t *testing.T, with ...func(*Dependencies)) *keyRoutesDB {
 	deps := appKeyDeps(&fakeAppKeys{})
 	deps.AppKeys = handler
 	deps.Devices = handler
-	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{roles}, fakeAPIKeys{},
+	// The real session lookup, so the claim saying another app's key opened
+	// the session comes from the rows, as in production.
+	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{claims}, sessions, fakeAPIKeys{},
 		fakeUsers{map[int]*models.User{userID: {ID: userID, Role: "user", Enabled: true}}})
 	for _, change := range with {
 		change(&deps)

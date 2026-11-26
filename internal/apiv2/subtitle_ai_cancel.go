@@ -16,7 +16,7 @@ func registerSubtitleAICancel(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/subtitles/ai/jobs/{job_id}/cancel", "cancelSubtitleAIJob", "subtitles", "Request cancellation of an authorized subtitle AI job."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	op.DefaultStatus = http.StatusNoContent
 	op.Description = "A terminal job remains unchanged. Completion can win a concurrent cancellation; read the job to determine the outcome. Cancellation does not erase earlier output or confirm that provider compute and live cues stopped immediately."
-	Register(reg, op, func(ctx context.Context, in *SubtitleAIJobInput) (*struct{}, error) {
+	Register(reg, withOrigins(op, grantedRefusedSubtitleEdit), func(ctx context.Context, in *SubtitleAIJobInput) (*struct{}, error) {
 		id, idProblem := in.JobID.positive64("path.job_id")
 		if idProblem != nil {
 			return nil, validationProblem("path.job_id", "invalid", "Expected a positive job identifier.")

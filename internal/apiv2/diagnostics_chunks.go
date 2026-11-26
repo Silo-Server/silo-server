@@ -80,7 +80,7 @@ func registerDiagnosticsChunks(reg *Registry) {
 	init.DefaultStatus = http.StatusCreated
 	init.MaxBodyBytes = diagnostics.MaxManifestBytes + (128 << 10)
 	init.Errors = []int{400, 403, 409, 413, 500, 503}
-	Register(reg, init, func(ctx context.Context, in *DiagnosticsChunkInitInput) (*DiagnosticsChunkInitOutput, error) {
+	Register(reg, withOrigins(init, grantedRefusedDiagnosticsQuota), func(ctx context.Context, in *DiagnosticsChunkInitInput) (*DiagnosticsChunkInitOutput, error) {
 		user, err := diagnosticsChunkAccount(reg, ctx)
 		if err != nil {
 			return nil, err
@@ -99,7 +99,7 @@ func registerDiagnosticsChunks(reg *Registry) {
 	put := Operation{Operation: humaOp(http.MethodPut, Prefix+"/diagnostics/reports/uploads/{upload_id}/chunks/{chunk_index}", "putDiagnosticsUploadChunk", "diagnostics", "Store one immutable chunk in a process-local upload session."), Class: ClassAuthenticated, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	put.MaxBodyBytes = diagnostics.UploadChunkBytes
 	put.Errors = []int{400, 403, 404, 408, 409, 413, 415, 500}
-	Register(reg, put, func(ctx context.Context, in *DiagnosticsChunkPutInput) (*DiagnosticsChunkPutOutput, error) {
+	Register(reg, withOrigins(put, grantedRefusedDiagnosticsQuota), func(ctx context.Context, in *DiagnosticsChunkPutInput) (*DiagnosticsChunkPutOutput, error) {
 		user, err := diagnosticsChunkAccount(reg, ctx)
 		if err != nil {
 			return nil, err
@@ -121,7 +121,7 @@ func registerDiagnosticsChunks(reg *Registry) {
 	complete := Operation{Operation: humaOp(http.MethodPost, Prefix+"/diagnostics/reports/uploads/{upload_id}/complete", "completeDiagnosticsUpload", "diagnostics", "Consume a local upload session and ingest its diagnostics report without durable receipt replay."), Class: ClassAuthenticated, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
 	complete.DefaultStatus = http.StatusCreated
 	complete.Errors = []int{400, 403, 404, 409, 413, 429, 500, 503}
-	Register(reg, complete, func(ctx context.Context, in *DiagnosticsChunkCompleteInput) (*DiagnosticsUploadOutput, error) {
+	Register(reg, withOrigins(complete, grantedRefusedDiagnosticsQuota), func(ctx context.Context, in *DiagnosticsChunkCompleteInput) (*DiagnosticsUploadOutput, error) {
 		user, err := diagnosticsChunkAccount(reg, ctx)
 		if err != nil {
 			return nil, err
@@ -140,7 +140,7 @@ func registerDiagnosticsChunks(reg *Registry) {
 	abort := Operation{Operation: humaOp(http.MethodDelete, Prefix+"/diagnostics/reports/uploads/{upload_id}", "abortDiagnosticsUpload", "diagnostics", "Best-effort abort of this account's local diagnostics upload."), Class: ClassAuthenticated, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	abort.DefaultStatus = http.StatusNoContent
 	abort.Errors = []int{403}
-	Register(reg, abort, func(ctx context.Context, in *DiagnosticsChunkPath) (*struct{}, error) {
+	Register(reg, withOrigins(abort, grantedRefusedDiagnosticsQuota), func(ctx context.Context, in *DiagnosticsChunkPath) (*struct{}, error) {
 		user, err := diagnosticsChunkAccount(reg, ctx)
 		if err != nil {
 			return nil, err

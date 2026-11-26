@@ -47,6 +47,12 @@ type Claims struct {
 	// authority: RequireAuth sets both from it, so a token issued before the
 	// session was bound (by an older release) is restricted the same way.
 	SessionPurpose string `json:"session_purpose,omitempty"`
+	// SessionKind is the kind of login session the request comes from, by
+	// how it was opened (SessionKindGrantedApp), read from the session row by
+	// the same lookup that checks the session is active; empty for every
+	// other session and for API keys. Never serialized: the row is the
+	// authority, not the token.
+	SessionKind SessionKind `json:"-"`
 	// SessionEndsAt, when set, caps the expiry of tokens generated from
 	// these claims at the session's absolute end. Never serialized.
 	SessionEndsAt time.Time `json:"-"`
@@ -97,6 +103,13 @@ const DirectDownloadLinkTTL = 5 * time.Minute
 func (c *Claims) IsOwnLoginSession() bool {
 	return c != nil && c.TokenType != TokenTypeAPIKey && c.SessionID != "" && c.ImpersonatorUserID == nil &&
 		!c.IsRemotePlayback()
+}
+
+// IsGrantedApp reports whether the claims are a login session another app's
+// key opened (SessionKindGrantedApp). Only the account's own login sessions
+// carry a kind; claims standing for one playback stream's media carry none.
+func (c *Claims) IsGrantedApp() bool {
+	return c != nil && c.SessionKind == SessionKindGrantedApp && c.IsOwnLoginSession()
 }
 
 // SkipsProfilePIN reports whether the credential may act as a PIN-locked

@@ -248,7 +248,7 @@ func TestCapabilityMissingCacheHeaderRejectedAtRegistration(t *testing.T) {
 	prepareCapabilityOperation(&operation, func(context.Context, *CapabilityInput) (*malformedCapabilityOutput, error) {
 		t.Fatal("handler must not run")
 		return nil, nil
-	})
+	}, nil)
 }
 
 type capabilityScopeProbe struct{ Capability }

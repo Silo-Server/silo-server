@@ -306,11 +306,11 @@ func registerHistoryImports(reg *Registry) {
 		return registered
 	}
 
-	Register(reg, accountOp(humaOp(http.MethodGet, Prefix+"/history-imports/sources", "listHistoryImportSources", "history-imports",
-		"List the configured servers a user may import watch history from.")), reg.listHistoryImportSources)
+	Register(reg, withOrigins(accountOp(humaOp(http.MethodGet, Prefix+"/history-imports/sources", "listHistoryImportSources", "history-imports",
+		"List the configured servers a user may import watch history from.")), grantedRefusedExternalReads), reg.listHistoryImportSources)
 
-	Register(reg, accountOp(humaOp(http.MethodGet, Prefix+"/history-imports/runs", opListHistoryImportRuns, "history-imports",
-		"List the account's import runs, newest first.")), func(ctx context.Context, in *HistoryImportRunListInput) (*HistoryImportRunCollectionOutput, error) {
+	Register(reg, withOrigins(accountOp(humaOp(http.MethodGet, Prefix+"/history-imports/runs", opListHistoryImportRuns, "history-imports",
+		"List the account's import runs, newest first.")), grantedRefusedExternalReads), func(ctx context.Context, in *HistoryImportRunListInput) (*HistoryImportRunCollectionOutput, error) {
 		return reg.listHistoryImportRuns(ctx, cursors, in)
 	})
 
@@ -318,26 +318,27 @@ func registerHistoryImports(reg *Registry) {
 		"Start an import run for a profile; answers 202 with the queued run and its Location.")
 	create.DefaultStatus = http.StatusAccepted
 	create.Errors = []int{http.StatusConflict}
-	Register(reg, accountOp(create), reg.createHistoryImportRun)
+	Register(reg, withOrigins(accountOp(create), grantedRefusedLeaves), reg.createHistoryImportRun)
 
 	get := accountOp(humaOp(http.MethodGet, Prefix+"/history-imports/runs/{id}", "getHistoryImportRun", "history-imports",
 		"Read one of the account's import runs."))
 	get.Conditional = true
-	Register(reg, get, reg.getHistoryImportRun)
+	Register(reg, withOrigins(get, grantedRefusedExternalReads), reg.getHistoryImportRun)
 
-	Register(reg, accountOp(humaOp(http.MethodPost, Prefix+"/history-imports/plex/auth/pin", "createPlexPin", "history-imports",
-		"Start a plex.tv sign-in: a PIN the user completes in a browser and a session to poll.")), reg.createPlexPin)
+	Register(reg, withOrigins(accountOp(humaOp(http.MethodPost, Prefix+"/history-imports/plex/auth/pin", "createPlexPin", "history-imports",
+		"Start a plex.tv sign-in: a PIN the user completes in a browser and a session to poll.")), grantedRefusedLeaves), reg.createPlexPin)
 
-	Register(reg, accountOp(humaOp(http.MethodPost, Prefix+"/history-imports/plex/auth/check", "checkPlexPin", "history-imports",
-		"Poll a plex.tv sign-in; once authenticated, lists the servers to import from.")), reg.checkPlexPin)
+	Register(reg, withOrigins(accountOp(humaOp(http.MethodPost, Prefix+"/history-imports/plex/auth/check", "checkPlexPin", "history-imports",
+		"Poll a plex.tv sign-in; once authenticated, lists the servers to import from.")), grantedRefusedLeaves), reg.checkPlexPin)
 
-	Register(reg, accountOp(humaOp(http.MethodPost, Prefix+"/history-imports/emby-connect/login", "loginEmbyConnect", "history-imports",
-		"Sign in to Emby Connect and list the account's servers in a short-lived session.")), reg.loginEmbyConnect)
+	Register(reg, withOrigins(accountOp(humaOp(http.MethodPost, Prefix+"/history-imports/emby-connect/login", "loginEmbyConnect", "history-imports",
+		"Sign in to Emby Connect and list the account's servers in a short-lived session.")), grantedRefusedLeaves), reg.loginEmbyConnect)
 
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/history-imports/capability", "getHistoryImportCapability", "history-imports",
 			"Describe what an import run may rely on, including Plex connection fallback."),
-		Class: ClassAuthenticated,
+		Class:   ClassAuthenticated,
+		Origins: grantedCapability,
 	}, reg.getHistoryImportCapability)
 }
 

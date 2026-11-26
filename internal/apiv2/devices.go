@@ -62,7 +62,7 @@ type DeviceUpdate struct {
 
 func registerDeviceSettings(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/devices", opListDevices, "devices", "List settings devices for the acting profile, or explicitly authorized household."), Class: ClassProfileScoped, ServiceBacked: true}, func(ctx context.Context, in *DeviceSettingsListInput) (*DeviceSettingsListOutput, error) {
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/devices", opListDevices, "devices", "List settings devices for the acting profile, or explicitly authorized household."), Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedOwnDevice}, func(ctx context.Context, in *DeviceSettingsListInput) (*DeviceSettingsListOutput, error) {
 		return reg.listDevices(ctx, cursors, in)
 	})
 	for _, command := range []struct {
@@ -71,7 +71,7 @@ func registerDeviceSettings(reg *Registry) {
 	}{{"/devices/{device_id}", opForgetDevice, true}, {"/devices/{device_id}/settings", opClearDeviceSettings, false}} {
 		op := humaOp(http.MethodDelete, Prefix+command.path, command.id, "devices", "Clear device settings; forgetting additionally removes its registry entry. Login sessions remain active.")
 		op.DefaultStatus = http.StatusNoContent
-		Register(reg, Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, func(ctx context.Context, in *DeviceSettingsRemoveInput) (*struct{}, error) {
+		Register(reg, Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, Origins: grantedRefusedOwnDevice}, func(ctx context.Context, in *DeviceSettingsRemoveInput) (*struct{}, error) {
 			if reg.deps.DeviceSettings == nil {
 				return nil, unavailable("device settings")
 			}
@@ -88,7 +88,7 @@ func registerDeviceSettings(reg *Registry) {
 	update := humaOp(http.MethodPatch, Prefix+"/devices/{device_id}", opUpdateDevice, "devices", "Update a device's entry for the acting profile, or another household profile, and return it; omitted members are unchanged. Settings and login sessions are untouched.")
 	// The name converges: repeating the request leaves the same row and
 	// returns the same representation.
-	Register(reg, Operation{Operation: update, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}, reg.updateDevice)
+	Register(reg, Operation{Operation: update, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent, Origins: grantedRefusedOwnDevice}, reg.updateDevice)
 }
 
 func (reg *Registry) updateDevice(ctx context.Context, in *DeviceUpdateInput) (*DeviceUpdateOutput, error) {

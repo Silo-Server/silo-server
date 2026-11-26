@@ -284,16 +284,16 @@ type CatalogItemCollectionOutput struct {
 }
 
 func registerLibraryViews(reg *Registry) {
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/layout", "getLibraryLayout", "libraries",
-		"The library's section layout for the acting profile, without items.")), reg.getLibraryLayout)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/sections", "listLibrarySections", "libraries",
-		"The library's sections that have cards for the acting profile, with those cards.")), reg.listLibrarySections)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/sections/{section_id}/items", "getLibrarySectionItems", "libraries",
-		"One section of the library with its cards.")), reg.getLibrarySectionItems)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/collections", "getLibraryCollections", "libraries",
-		"The library's Collections tab: curated collections, their groups, and opted-in personal collections (the viewer's own, plus shared ones from other profiles on the same login).")), reg.getLibraryCollections)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/user-collections", "listLibraryUserCollections", "libraries",
-		"Personal collections opted into this library's tab: the viewer's own, plus shared ones from other profiles on the same login.")), reg.listLibraryUserCollections)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/layout", "getLibraryLayout", "libraries",
+		"The library's section layout for the acting profile, without items.")), grantedLibraryRead), reg.getLibraryLayout)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/sections", "listLibrarySections", "libraries",
+		"The library's sections that have cards for the acting profile, with those cards.")), grantedLibraryRead), reg.listLibrarySections)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/sections/{section_id}/items", "getLibrarySectionItems", "libraries",
+		"One section of the library with its cards.")), grantedLibraryRead), reg.getLibrarySectionItems)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/collections", "getLibraryCollections", "libraries",
+		"The library's Collections tab: curated collections, their groups, and opted-in personal collections (the viewer's own, plus shared ones from other profiles on the same login).")), grantedLibraryRead), reg.getLibraryCollections)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/user-collections", "listLibraryUserCollections", "libraries",
+		"Personal collections opted into this library's tab: the viewer's own, plus shared ones from other profiles on the same login.")), grantedLibraryRead), reg.listLibraryUserCollections)
 }
 
 // viewerIdentity is the profile-scoped caller; the gate guarantees both.

@@ -280,6 +280,13 @@ type memberState struct {
 	connection      RoomConnection
 	isReady         bool
 	isBuffering     bool
+	// otherApp marks the member's current connection as one a session
+	// another app's key opened (ConnectOtherApp). It belongs to that
+	// connection, not to the seat: it is set and cleared with connection, and
+	// only frames sent on that connection leave out the powers such a session
+	// is refused. A member holds one connection at a time, and the person's own
+	// device asking over REST is never stripped by it.
+	otherApp bool
 	// correctionCommand is the most recent normal-playing correction sent to
 	// this member. It is persisted with the room runtime so another API server
 	// does not immediately resend the same correction.
@@ -573,6 +580,13 @@ func (s *Service) connect(
 	} else if current.connection != nil && current.connection != conn {
 		previousConn = current.connection
 	}
+	if otherApp {
+		// The seat is free (checked above), so whatever stream a previous
+		// connection attached is another device's: such a connection starts
+		// with none and sees only one it attaches itself.
+		current.sessionID = ""
+	}
+	current.otherApp = otherApp
 	current.connection = conn
 	current.connectionID = uuid.NewString()
 	current.remoteConnected = false
@@ -592,6 +606,9 @@ func (s *Service) connect(
 
 	connectionID := current.connectionID
 	snapshot := s.buildSnapshotLocked(live, userID, profileID)
+	if otherApp {
+		snapshot = snapshot.WithoutSessionPowers()
+	}
 	dispatches := s.prepareSnapshotDispatchesLocked(live)
 	s.mu.Unlock()
 
@@ -623,6 +640,7 @@ func (s *Service) disconnect(ctx context.Context, reg *Registration, explicitLea
 
 	isHost := member.userID == live.room.HostUserID && member.profileID == live.room.HostProfileID
 	member.connection = nil
+	member.otherApp = false
 	member.remoteConnected = false
 	member.disconnectedAt = s.now()
 	if explicitLeave {
@@ -3137,6 +3155,9 @@ func personalizeSnapshot(base Snapshot, room Room, member *memberState) Snapshot
 	base.SelfIgnoreWait, base.AttachedSessionID = member.ignoreWait, member.sessionID
 	if base.SelfCanManageRoom {
 		base.InvitePath = fmt.Sprintf("/rooms/join?token=%s", room.JoinToken)
+	}
+	if member.otherApp {
+		base = base.WithoutSessionPowers()
 	}
 	base.Members = slices.Clone(base.Members)
 	for i := range base.Members {

@@ -72,8 +72,8 @@ func registerAdminCatalogItemMetadata(reg *Registry) {
 	}
 	refresh := op(http.MethodPost, "/refresh-metadata", "refreshAdminItemMetadata", "Persist an item metadata refresh job for an authorized item.")
 	refresh.DefaultStatus = http.StatusAccepted
-	Register(reg, refresh, reg.refreshAdminItemMetadata)
-	Register(reg, op(http.MethodPatch, "/metadata", "updateAdminItemMetadata", "Apply partial metadata edits and return refreshed catalog detail."), reg.updateAdminItemMetadata)
+	Register(reg, withOrigins(refresh, grantedRefusedCatalogEdit), reg.refreshAdminItemMetadata)
+	Register(reg, withOrigins(op(http.MethodPatch, "/metadata", "updateAdminItemMetadata", "Apply partial metadata edits and return refreshed catalog detail."), grantedRefusedCatalogEdit), reg.updateAdminItemMetadata)
 }
 func (reg *Registry) refreshAdminItemMetadata(ctx context.Context, in *AdminItemMetadataRefreshInput) (*AdminCatalogJobAcceptedOutput, error) {
 	if reg.deps.AdminItemMetadata == nil {
