@@ -135,17 +135,21 @@ func readProfileScopeSettings(ctx context.Context, tx pgx.Tx, userID int) (map[s
 }
 
 // WithProfileSetTransaction runs fn in one transaction that holds, in order:
-// the account's preference-settings and section-override locks (every
-// profile writer takes the first before any row), the audit actors, the
-// account row, the collections of the profiles the set removes in ID order,
-// and every profile row of the account in ID order; fn locks the account's
-// edit rows only at its end (SettleEdits). A profile save locks its profile
-// row before the account row, but it takes the preference-settings lock
-// first, so it runs wholly before or after the set. The account row comes
-// before the profile rows because writers without that lock take them in
-// that order: approving a device sign-in for a profile locks the account row
-// and then, through the request's foreign key, the profile row, and an
-// allowance change locks the account row and then the acting profile.
+// the account's preference-settings and section-override locks, the audit
+// actors, the account row, the collections of the profiles the set removes
+// in ID order, and every profile row of the account in ID order; fn locks the
+// account's edit rows only at its end (SettleEdits). The order rests on two
+// rules the other writers keep. Every writer that takes a profile row and
+// then the account row takes the preference-settings lock first, so it runs
+// wholly before or after the set: a profile save that bumps the access
+// revision is one. Every writer that does not take that lock takes the
+// account row before any profile row, the set's order: approving a device
+// sign-in for a profile locks the account row and then, through the
+// request's foreign key, the profile row; an allowance change locks the
+// account row and then the acting profile; creating an API key share-locks
+// the account row and then the profile; renaming the main profile with the
+// username locks the account row and then writes the profile. Recording an
+// avatar hash writes one profile row and no account row.
 func (s *PostgresUserStore) WithProfileSetTransaction(ctx context.Context, inSet []string, fn func(userstore.ProfileSetWriter) error) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

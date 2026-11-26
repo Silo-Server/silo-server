@@ -1046,7 +1046,7 @@ configuration writer skips a value equal to the stored one. The SQLite user
 store records nothing; it does not take sets either.
 
 The edit rows are the last rows any transaction locks: after the account
-locks, profile rows and the account row in the set, and after the profile row
+locks, the account row and the profile rows in the set, and after the profile row
 in a profile save, avatar write or delete. The account's preference-settings
 lock comes first: the profile, settings and Jellyfin-compatible configuration
 transactions, a profile delete and the set take it always; the pool-level
@@ -1232,17 +1232,23 @@ artwork, devices, notification state, and the purges other services run).
 Only profiles with a `sync_id` are ever removed, never the main profile. The
 app confirms deletions with the person before it sends such a set.
 
-**Locks.** The set's transaction takes the account's preference-settings and
-section-override locks, the audit actors, the collections of the profiles it
-removes in ID order, every profile row of the account in ID order, and the
-account row last. That is a profile delete's order extended, and a profile
-save locks its profile row before the account row, so neither deadlocks with
-a set. Deleting the account locks the account row before its profiles, the
-opposite order: a set and an account deletion running together can deadlock,
-and PostgreSQL aborts one of them. An aborted set starts over; a set whose
-account is gone answers as any request for a deleted account
-(`session_expired`). The lock order stays, because it is the one profile
-saves need.
+**Locks.** The set's transaction takes, in order: the account's
+preference-settings and section-override locks, the audit actors, the account
+row, the collections of the profiles it removes in ID order, and every profile
+row of the account in ID order; the edit rows come last. A writer that locks a
+profile row and then the account row takes the preference-settings lock first,
+so it runs wholly before or after a set: a profile save that bumps the access
+revision, and the pool-level profile update the avatar routes use, both take
+it before the profile row. A profile delete takes it too, and then locks the
+account row before the profile row. A writer that does not take that lock
+locks the account row before any profile row, the set's own order: approving a
+device sign-in, an allowance change, creating an API key for a profile, and
+renaming the main profile with the username. Deleting an account takes the
+preference-settings lock before the account row at both deletion sites, so a
+set and an account deletion run one after the other rather than deadlocking.
+The set still starts over when PostgreSQL aborts it as a deadlock victim, as a
+guard for a writer that breaks these rules; a set whose account is gone
+answers as any request for a deleted account (`session_expired`).
 
 **SQLite.** The SQLite user store keeps profiles in a per-account file while
 other profile data lives in PostgreSQL, so a set can't be one transaction
