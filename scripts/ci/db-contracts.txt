@@ -329,6 +329,7 @@
 ./internal/auth TestLocalPasswordOffKeepsOpenSessionsDB
 ./internal/auth TestSignInProviderGuardDB
 ./internal/auth TestSignInProviderGuardSerializesWithSettingsSaveDB
+./internal/plugins TestProvisionAppliesDeclarationThatLeavesNoSignInProviderDB
 ./internal/api/handlers TestLocalLoginSettingRequiresBreakGlassDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB

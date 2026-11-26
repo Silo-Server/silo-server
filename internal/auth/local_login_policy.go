@@ -28,7 +28,8 @@ var (
 	// password sign-in off with no OIDC or LDAP provider people can use:
 	// turning the switch off without one, or taking the last one away while
 	// it is off. Nobody but the break-glass admins could sign in.
-	ErrSignInProviderRequired = errors.New("a sign-in provider people can use is required while local password sign-in is off")
+	// The plugins package owns the value so its writes can recognize it.
+	ErrSignInProviderRequired = plugins.ErrSignInProviderRequired
 )
 
 // rowQuerier is what the policy reads need: a pool or a transaction.

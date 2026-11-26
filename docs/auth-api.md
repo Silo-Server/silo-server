@@ -926,7 +926,13 @@ binding (`updateAdminPluginAuthBinding`), disabling its installation
 (`deleteAdminPluginInstallation`), or clearing `server.public_url` when it is
 the only provider and uses OpenID Connect. Disable and uninstall are refused
 before the plugin stops. Turn password sign-in back on first; break-glass
-admins can sign in with a password either way.
+admins can sign in with a password either way. Deployment provisioning
+(`SILO_CONFIG`, `SILO_PLUGINS`) is the exception: it applies the operator's
+declared configuration at startup and is never refused for this, so a
+declaration that leaves no such provider is applied, logged as a warning, and
+reported in the provisioning status of its sign-in plugins
+(`listAdminPluginProvisioningStatus`). A full restore likewise applies the
+backup's state without the check.
 
 Provider re-check: a login session opened through the provider (an OAuth or
 LDAP sign-in, a device sign-in approved from such a session, or a session of
