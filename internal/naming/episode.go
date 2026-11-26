@@ -32,6 +32,11 @@ var (
 	unhandledEpisodePrefixRe = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}])(?:s?\d+x\d+|s(?:eason)?[ ._-]*\d+)[ ._-]*$`)
 	episodeTechnicalRe       = regexp.MustCompile(`(?i)(?:^|[ ._[(\-])(?:\d{3,4}[pi]|web[ ._-]?dl|webrip|bluray|blu[ ._-]?ray|bdrip|dvdrip|hdtv|pdtv|x26[45]|h[ .]?26[45]|hevc|av1|aac|eac3|ac3|ddp|dts|truehd|flac|opus|nvenc)(?:$|[ ._\])\-]|[0-9])`)
 	leadingGroupRe           = regexp.MustCompile(`^\[[^\]]+\]\s*`)
+	// titleSeasonLabelRe finds a season label ending the show title before an
+	// unlabeled episode number: Show S2 - 05, Show Season 2 - 05, Show 2nd
+	// Season - 05. The one-letter S takes its number directly, so U.S. 2 stays
+	// a title.
+	titleSeasonLabelRe = regexp.MustCompile(`(?i)(?:^|[ ._\-\[(])(?:s(\d{1,2})|(?:` + bareSeasonDirectoryLabels + `)[ ._-]*(\d{1,2})|(\d{1,2})(?:st|nd|rd|th)[ ._-]*(?:` + bareSeasonDirectoryLabels + `))[ ._\-\])]*$`)
 )
 
 type episodeToken struct {
@@ -118,7 +123,12 @@ func parseEpisodeToken(name string, directories []string, rootRelative, allowNum
 		return episodeToken{}, false
 	}
 	makeToken := func(start, end int, episode int) episodeToken {
-		return finishEpisodeToken(name, episodeToken{season: season, seasonKnown: hasSeason, episode: episode, start: start, end: end})
+		token := episodeToken{season: season, seasonKnown: hasSeason, episode: episode, start: start, end: end}
+		// A season in the file name beats the folder, as with S01E05.
+		if labelStart, labelSeason, ok := titleSeasonLabel(name[:start], showDirectory); ok {
+			token.season, token.seasonKnown, token.start = labelSeason, true, labelStart
+		}
+		return finishEpisodeToken(name, token)
 	}
 	for _, match := range episodeOnlyRe.FindAllStringSubmatchIndex(name, -1) {
 		if compact := compactEpisodeMatch(name); compact != nil && compact[3] <= match[0] {
@@ -290,6 +300,24 @@ func yieldsToLaterEpisode(name string, candidate, later [2]int, showDirectory st
 	return (candidate[0] == 0 && showDirectory == "") ||
 		completesShowTitle(name[:candidate[1]], showDirectory) ||
 		(candidate[1]-candidate[0] == 1 && name[later[0]] == '0')
+}
+
+// titleSeasonLabel reads a season label that ends prefix, the text before an
+// unlabeled episode number, and returns where the label starts. A label that
+// completes the show folder's title (Open Season 2/Open Season 2 - 05) names
+// the show instead.
+func titleSeasonLabel(prefix, showDirectory string) (start, season int, ok bool) {
+	match := titleSeasonLabelRe.FindStringSubmatchIndex(prefix)
+	if match == nil || completesShowTitle(cleanEpisodeSeriesTitle(prefix), showDirectory) {
+		return 0, 0, false
+	}
+	for group := 2; group+1 < len(match); group += 2 {
+		if match[group] >= 0 {
+			season, _ = strconv.Atoi(prefix[match[group]:match[group+1]])
+			break
+		}
+	}
+	return match[0], season, true
 }
 
 func showFolderTitle(showDirectory string) string {

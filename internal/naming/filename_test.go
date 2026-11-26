@@ -234,6 +234,47 @@ func TestParseFilename(t *testing.T) {
 	}
 }
 
+// TestFansubEpisodeNames covers fansub releases in a series library: an
+// absolute number after a spaced dash and no SxxEyy. A season label before the
+// number sets the season, and EpisodeShowTitle keeps a show title the show
+// folder doesn't give, so a sequel title never reads as season 1.
+func TestFansubEpisodeNames(t *testing.T) {
+	for _, tt := range []struct {
+		path        string
+		wantSeason  int // -1: unknown
+		wantEpisode int
+		wantShow    string
+	}{
+		{path: "/tv/Solo Leveling/[SubsPlease] Solo Leveling - 05 (1080p) [A1B2C3D4].mkv", wantSeason: -1, wantEpisode: 5},
+		{path: "/tv/Show/[Group] Show - 05 [1080p].mkv", wantSeason: -1, wantEpisode: 5},
+		{path: "/tv/Show/Show - 05v2.mkv", wantSeason: -1, wantEpisode: 5},
+		{path: "/tv/Show/Show - 105.mkv", wantSeason: -1, wantEpisode: 105},
+		{path: "/tv/Show/[Group] Show - 05 [1920x1080 x264 AAC][ABCD1234].mkv", wantSeason: -1, wantEpisode: 5},
+		{path: "/tv/Show (2019)/[Group] Show (2019) - 05 [1080p].mkv", wantSeason: -1, wantEpisode: 5},
+		{path: "/tv/86/[SubsPlease] 86 - 05 (1080p) [A1B2C3D4].mkv", wantSeason: -1, wantEpisode: 5},
+		{path: "/tv/Mob Psycho 100/[SubsPlease] Mob Psycho 100 - 05 (1080p).mkv", wantSeason: -1, wantEpisode: 5},
+		{path: "/tv/Mob Psycho 100/[SubsPlease] Mob Psycho 100 III - 05 (1080p).mkv", wantSeason: -1, wantEpisode: 5, wantShow: "Mob Psycho 100 III"},
+		{path: "/tv/[SubsPlease] Mob Psycho 100 - 05 (1080p).mkv", wantSeason: -1, wantEpisode: 5, wantShow: "Mob Psycho 100"},
+		{path: "/tv/Show/[SubsPlease] Show S2 - 05 (1080p) [A1B2C3D4].mkv", wantSeason: 2, wantEpisode: 5},
+		{path: "/tv/Show/[Erai-raws] Show Season 2 - 05 [1080p].mkv", wantSeason: 2, wantEpisode: 5},
+		{path: "/tv/Show/[Erai-raws] Show 2nd Season - 05 [1080p].mkv", wantSeason: 2, wantEpisode: 5},
+		{path: "/tv/Show/Season 1/[Group] Show S2 - 05 [1080p].mkv", wantSeason: 2, wantEpisode: 5},
+		{path: "/tv/Open Season 2/Open Season 2 - 05.mkv", wantSeason: -1, wantEpisode: 5},
+		{path: "/tv/Show/Show U.S. 2 - 05.mkv", wantSeason: -1, wantEpisode: 5, wantShow: "Show U.S. 2"},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			h := ParseFilename(tt.path, "series", "/tv")
+			season := h.SeasonNum
+			if !h.SeasonKnown {
+				season = -1
+			}
+			if season != tt.wantSeason || h.EpisodeNum != tt.wantEpisode || h.EpisodeShowTitle != tt.wantShow {
+				t.Fatalf("season %d, episode %d, show title %q; want %d, %d, %q", season, h.EpisodeNum, h.EpisodeShowTitle, tt.wantSeason, tt.wantEpisode, tt.wantShow)
+			}
+		})
+	}
+}
+
 func TestParseFilename_StripsStructuredProviderIDsFromTitles(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {

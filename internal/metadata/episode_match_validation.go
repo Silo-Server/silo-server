@@ -27,7 +27,7 @@ const (
 
 var (
 	episodeReleaseSuffixPattern = regexp.MustCompile(
-		`(?i)(?:^|[ ._-])(?:2160p|1080p|720p|576p|480p|webrip|web[ ._-]?dl|bluray|blu[ ._-]?ray|bdrip|hdtv|dvdrip|remux|x26[45]|h26[45]|hevc|av1|aac|ac3|eac3|dts(?:[ ._-]?hd)?|flac|hdr10?|dolby[ ._-]?vision)(?:$|[ ._-])`,
+		`(?i)(?:^|[ ._(-])(?:2160p|1080p|720p|576p|480p|webrip|web[ ._-]?dl|bluray|blu[ ._-]?ray|bdrip|hdtv|dvdrip|remux|x26[45]|h26[45]|hevc|av1|aac|ac3|eac3|dts(?:[ ._-]?hd)?|flac|hdr10?|dolby[ ._-]?vision)(?:$|[ ._)-])`,
 	)
 	episodeGenericTitlePattern   = regexp.MustCompile(`(?i)^(?:tba|tbd|pilot|episode|episode\s+\d+|ep\.?\s*\d+|part\s+\d+|chapter\s+\d+|\d+)$`)
 	episodeTechnicalTitlePattern = regexp.MustCompile(`(?i)^(?:\d{3,4}p|web(?:rip|dl)?|bluray|hdtv|remux|x26[45]|h26[45]|hevc)(?:\b|[ ._-])`)
@@ -534,7 +534,13 @@ func cleanEpisodeMatchTitle(title string) string {
 		title = title[:cut]
 	}
 	if location := episodeReleaseSuffixPattern.FindStringIndex(title); location != nil {
-		title = title[:location[0]]
+		cut := location[0]
+		// A release token inside parentheses starts a release tag: (1080p),
+		// (BD 1080p HEVC). The match may begin at the parenthesis itself.
+		if open := strings.LastIndexByte(title[:cut+1], '('); open >= 0 && !strings.Contains(title[open:cut], ")") {
+			cut = open
+		}
+		title = title[:cut]
 	}
 	title = strings.NewReplacer(".", " ", "_", " ").Replace(title)
 	return strings.Join(strings.Fields(strings.Trim(title, " -")), " ")

@@ -9,6 +9,8 @@ type FilenameHints struct {
 	SeasonKnown bool // Distinguishes explicit specials (season 0) from an unspecified season.
 	EpisodeNum  int
 	AirDate     string // ISO date for daily/by-date episodes, e.g. 2026-04-24
+	// EpisodeShowTitle is the PathContext field of the same name.
+	EpisodeShowTitle string
 }
 
 // PathContext captures the classification and parsed hints for a media path
@@ -27,6 +29,13 @@ type PathContext struct {
 	HasAirDatePattern      bool
 	HasSeasonStructure     bool
 	HasMovieFolderEvidence bool
+	// EpisodeShowTitle is the show title an episode's file name gives before
+	// its episode number, without release group, year, or season label, when
+	// no show folder already gives that title. It is empty when the name gives
+	// none or repeats its show folder's title: "Mob Psycho 100 III" for
+	// Mob Psycho 100/Mob Psycho 100 III - 05.mkv, empty for
+	// Mob Psycho 100/Mob Psycho 100 - 05.mkv.
+	EpisodeShowTitle string
 }
 
 // FolderIDHints contains external IDs parsed from folder names.

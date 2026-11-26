@@ -103,6 +103,10 @@ func (r *fakeEpisodeRepo) ListBySeries(_ context.Context, seriesID string) ([]*m
 	return r.listBySeries(seriesID), nil
 }
 
+func (r *fakeEpisodeRepo) ListAllBySeries(_ context.Context, seriesID string) ([]*models.Episode, error) {
+	return r.listBySeries(seriesID), nil
+}
+
 func (r *fakeEpisodeRepo) ListBySeriesAndNumbers(
 	_ context.Context,
 	seriesID string,
@@ -842,6 +846,53 @@ var ensureSeriesEpisodeLinksAirDateCandidatesCases = func() []ensureSeriesEpisod
 		},
 	}
 }()
+
+// TestEnsureSeriesEpisodeLinks_UnseasonedNumbers links files that carry an
+// episode number but no season, as fansub releases name them, through
+// provider episodes only.
+func TestEnsureSeriesEpisodeLinks_UnseasonedNumbers(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		path    string
+		seasons []int // seasons with a provider episode 2
+		wantID  string
+	}{
+		{name: "absolute number names season 1", path: "/tv/Example Show/[Group] Example Show - 02 (1080p) [ABCD1234].mkv", seasons: []int{1, 2}, wantID: "s1"},
+		{name: "season label", path: "/tv/Example Show/[Group] Example Show S2 - 02 (1080p).mkv", seasons: []int{1, 2}, wantID: "s2"},
+		{name: "sequel title stays unlinked", path: "/tv/Example Show/[Group] Example Show II - 02 (1080p).mkv", seasons: []int{1, 2}},
+		{name: "sequel title with a unique number", path: "/tv/Example Show/[Group] Example Show II - 02 (1080p).mkv", seasons: []int{1}, wantID: "s1"},
+		{name: "file title the series carries", path: "/tv/Example/[Group] Example Show - 02 (1080p).mkv", seasons: []int{1, 2}, wantID: "s1"},
+		{name: "number only a later season has", path: "/tv/Example Show/[Group] Example Show - 02 (1080p).mkv", seasons: []int{2}},
+		{name: "episode title must agree", path: "/tv/Example Show/Example Show - 02 - Reborn.mkv", seasons: []int{1, 2}},
+		{name: "scanner fallback is not evidence", path: "/tv/Example Show/Example Show - 02.mkv", seasons: []int{0}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newFallbackTestHarness()
+			const seriesID = "unseasoned-series"
+			if err := h.itemRepo.Upsert(t.Context(), &models.MediaItem{ContentID: seriesID, Title: "Example Show", Type: "series", Status: "matched"}); err != nil {
+				t.Fatal(err)
+			}
+			for _, season := range tt.seasons {
+				episode := &models.Episode{ContentID: fmt.Sprintf("s%d", season), SeriesID: seriesID, SeasonNumber: season, EpisodeNumber: 2, Title: "The Arrival", MetadataSource: "provider"}
+				if season == 0 {
+					episode.SeasonNumber, episode.MetadataSource = 1, "scanner_fallback"
+				}
+				if err := h.episodeRepo.Upsert(t.Context(), episode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			file := &models.MediaFile{ID: 1, MediaFolderID: 1, FilePath: tt.path}
+			h.fileRepo.addFile(file)
+			h.fileRepo.contentIDs[file.ID] = seriesID
+			if err := h.service.ensureSeriesEpisodeLinks(t.Context(), seriesID); err != nil {
+				t.Fatal(err)
+			}
+			if got := h.fileRepo.episodeLinks[file.ID]; got != tt.wantID {
+				t.Fatalf("episode link = %q, want %q", got, tt.wantID)
+			}
+		})
+	}
+}
 
 // TestFallbackEpisode_PartialProviderCoverageKeepsScannerEpisodes verifies that
 // when a provider supplies metadata for some episodes but not all, the

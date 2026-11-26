@@ -36,7 +36,10 @@ func newUnseasonedEpisodeIndex(episodes []*models.Episode) unseasonedEpisodeInde
 	return index
 }
 
-func (index unseasonedEpisodeIndex) resolve(number int, title string) (*models.Episode, bool) {
+// resolve finds the episode an unseasoned file names by its number and the
+// episode title after it. showOnly reports that the file names no show title
+// beyond its series' own (see namesOnlySeries).
+func (index unseasonedEpisodeIndex) resolve(number int, title string, showOnly bool) (*models.Episode, bool) {
 	if number <= 0 {
 		return nil, false
 	}
@@ -53,15 +56,46 @@ func (index unseasonedEpisodeIndex) resolve(number int, title string) (*models.E
 		return matches[0], true
 	}
 	matches := index.byNumber[number]
-	// A number found only in a later season exceeds every earlier season's
-	// length, so an absolute reading would place it elsewhere. Only season 1
-	// reads the same under absolute and per-season numbering. Requiring it
-	// also defers links while season 1 metadata has not been stored yet.
-	if len(matches) != 1 || matches[0].SeasonNumber != 1 {
+	// Only season 1 reads the same under absolute and per-season numbering,
+	// so an absolute number (Show - 05) names its episode there. A number
+	// found only in a later season exceeds every earlier season's length, so
+	// an absolute reading would place it elsewhere. Requiring season 1 also
+	// defers links while season 1 metadata has not been stored yet.
+	var selected *models.Episode
+	for _, match := range matches {
+		if match.SeasonNumber == 1 {
+			selected = match
+			break
+		}
+	}
+	// When later seasons share the number, the file may be one of theirs
+	// numbered per season. Such a file names its season beyond the show's
+	// title (Show II - 05, Show Final Season - 05), so a file that names only
+	// its show stays in season 1.
+	if selected == nil || (len(matches) > 1 && !showOnly) {
 		return nil, false
 	}
-	if !isGenericEpisodeMatchTitle(title) && normalizeTitleForScoring(title) != normalizeTitleForScoring(matches[0].Title) {
+	if !isGenericEpisodeMatchTitle(title) && normalizeTitleForScoring(title) != normalizeTitleForScoring(selected.Title) {
 		return nil, false
 	}
-	return matches[0], true
+	return selected, true
+}
+
+// namesOnlySeries reports whether showTitle, the show title an unseasoned
+// file gives that its show folder doesn't (naming's EpisodeShowTitle), names
+// nothing beyond series. An empty showTitle names nothing more.
+func namesOnlySeries(showTitle string, series *models.MediaItem) bool {
+	if showTitle == "" {
+		return true
+	}
+	if series == nil {
+		return false
+	}
+	want := normalizeTitleForScoring(showTitle)
+	for _, title := range []string{series.Title, series.OriginalTitle} {
+		if title != "" && normalizeTitleForScoring(title) == want {
+			return true
+		}
+	}
+	return false
 }
