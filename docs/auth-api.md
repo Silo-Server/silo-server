@@ -1071,8 +1071,8 @@ is not an administrator. Demo mode refuses that account any change one visitor c
 lock out, sign out or take over the others. An operation marked demo-restricted
 (`DemoRestricted` in `internal/apiv2`, `x-silo-demo-restricted` in the OpenAPI document)
 answers a caller that is not an administrator `403 permission_denied` with the detail "This
-action is not available in demo mode." Reads are never restricted, and administrators are
-never restricted.
+action is not available in demo mode." Reads are not restricted, except that `listSessions`
+shows a visitor less (see below), and administrators are never restricted.
 
 Every request reads `demo.enabled` (one setting read, no time-based cache), through one
 `demomode.Setting` per process shared by every surface that enforces demo mode. Only the
