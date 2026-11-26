@@ -116,7 +116,7 @@ not rely on which. A translated client shows `error.field.<code>` instead. That 
 [`getPasswordPolicy`](#get-authpassword-policy-getpasswordpolicy) again. Every operation that sets a password
 except `changePassword` limits it to 8 to 72 characters in its schema, so a password outside that
 range gets `out_of_range` there before the policy runs. `changePassword` accepts 1 to 1024
-characters, so the policy answers it at any length.
+characters, so the policy codes cover every length in that range.
 
 | Code | Rule broken |
 | --- | --- |
