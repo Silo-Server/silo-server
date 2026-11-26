@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/appkeys"
@@ -113,6 +114,22 @@ func keyAddingCases(env *keyEnv, devices *DeviceLoginService) []keyAddingCase {
 			}
 			return added{userID: user.ID, before: map[string]string{auditFieldPersonKey: quoted(old.pub.KeyID())},
 				after:     map[string]string{auditFieldPersonKey: quoted(replacement.pub.KeyID()), auditFieldSessionOpenedVia: quoted(models.SessionOpenedPassword)},
+				personKid: replacement.pub.KeyID()}
+		}},
+		// An administrator's device the old key introduced is still waiting:
+		// the replacement denies it, and the row counts it.
+		{"replace a person key whose device waits", auditmutation.ActionPersonKeyReplaced, "/api/v2/auth/keys/person", func(t *testing.T, label string) added {
+			admin := env.localAccount(t, label, models.RoleAdmin)
+			old, _, _ := env.enroll(t, admin)
+			env.introduceWaiting(t, old)
+			replacement := newTestKey(t)
+			reqCtx := env.addedCtx(t, "/api/v2/auth/keys/person", &admin.ID)
+			if err := env.signIn.ReplacePersonKey(reqCtx, env.loginSession(t, admin, models.SessionOpenedPassword, nil), replacement.pub, ActingProfile{}); err != nil {
+				t.Fatal(err)
+			}
+			return added{userID: admin.ID, before: map[string]string{auditFieldPersonKey: quoted(old.pub.KeyID())},
+				after: map[string]string{auditFieldPersonKey: quoted(replacement.pub.KeyID()), auditFieldSessionOpenedVia: quoted(models.SessionOpenedPassword),
+					auditFieldDeniedDeviceKeys: "1"},
 				personKid: replacement.pub.KeyID()}
 		}},
 		{"issue an app code", auditmutation.ActionAppCodeIssued, "/api/v2/auth/app-codes", func(t *testing.T, label string) added {
@@ -362,5 +379,41 @@ func TestKeyStoresNoUnspecifiedAddressDB(t *testing.T) {
 		if got := env.keyIP(t, "auth_device_keys", "key_id", device.pub.KeyID()); got != tc.want {
 			t.Fatalf("enrolled from %q: stored %q, want %q", tc.ip, got, tc.want)
 		}
+	}
+}
+
+// An introduce records its row and then opens the device's session in the
+// same transaction. When that session can't be written, the transaction
+// rolls back and takes the row and the key with it: the row is never written
+// outside the change. A trigger on the test database refuses the session row
+// for this one device name; production code has no seam for it.
+func TestIntroduceFailingAfterItsAuditRowLeavesNoneDB(t *testing.T) {
+	env := newKeyEnv(t, "keyaddedlate")
+	ctx := t.Context()
+	user := env.localAccount(t, "keyaddedlate-user", models.RoleUser)
+	person, _, _ := env.enroll(t, user)
+	name := "refused-" + strconv.FormatInt(env.now.UnixNano(), 36)
+	fn := "test_refuse_session_" + strconv.FormatInt(env.now.UnixNano(), 36)
+	if _, err := env.pool.Exec(ctx, `CREATE FUNCTION `+fn+`() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN RAISE EXCEPTION 'session refused by test'; END $$;
+		CREATE TRIGGER `+fn+` BEFORE INSERT ON auth_sessions FOR EACH ROW
+		WHEN (NEW.device_name = '`+name+`') EXECUTE FUNCTION `+fn+`()`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = env.pool.Exec(context.WithoutCancel(ctx), `DROP TRIGGER IF EXISTS `+fn+` ON auth_sessions; DROP FUNCTION IF EXISTS `+fn+`()`)
+	})
+	device := newTestKey(t)
+	reqCtx := env.addedCtx(t, "/api/v2/auth/keys/introduce", nil)
+	req := from(reqCtx, env.request(t, message{purpose: appkeys.PurposeIntroduce, signer: person, device: &device,
+		fields: map[string]any{"device_name": name}}))
+	if _, err := env.signIn.Introduce(reqCtx, req); err == nil || !strings.Contains(err.Error(), "session refused by test") {
+		t.Fatalf("introduce whose session is refused = %v", err)
+	}
+	if rows := audittest.Rows(t, env.pool, auditmutation.ActionDeviceKeyIntroduced, auditmutation.TargetUser, strconv.Itoa(user.ID)); len(rows) != 0 {
+		t.Fatalf("%d audit rows survived the rollback: %+v", len(rows), rows)
+	}
+	if _, err := env.signIn.keys.DeviceKeyByKeyID(ctx, device.pub.KeyID()); !errors.Is(err, ErrAppKeyNotFound) {
+		t.Fatalf("the rolled-back introduce left its device key: %v", err)
 	}
 }

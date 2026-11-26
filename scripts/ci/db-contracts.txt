@@ -355,6 +355,8 @@
 ./internal/auth TestKeyAddingRefusalsLeaveNoAuditDB
 ./internal/auth TestKeyWithoutAddressListsEmptyDB
 ./internal/auth TestKeyChangesRecordSessionOpenedViaDB
+./internal/auth TestKeyStoresNoUnspecifiedAddressDB
+./internal/auth TestIntroduceFailingAfterItsAuditRowLeavesNoneDB
 ./internal/apiv2 TestKeyListCarriesEnrolledAddressDB
 ./migrations TestAppKeyEnrolledIPMigrationUpAndDownPostgres
 ./internal/auth TestRevokeOwnDeviceKeyRulesDB
