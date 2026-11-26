@@ -96,12 +96,16 @@ the same for each of its device keys.
 always in one order: the account row (`lockUser`), the settings lock (shared;
 `lockChain`, see [The switch](#the-switch)), the plugin installation (share)
 and the provider identity a key is bound to (`keySignInPolicy`), the person
-key, the device keys, then the login sessions those keys opened. No database
-trigger or cascade writes to a key row. Turning the switch off takes the
-settings lock (exclusive), every plugin installation row (share, in id order)
-and then the key sessions (in id order), and no account, identity or key
-row, so it never waits on anything a key path holds while holding something
-that path needs. A sign-in reads the key's
+key, the device keys, the device sign-ins those sessions approved in advance
+(in id order), then the login sessions those keys opened. No database
+trigger or cascade writes to a key row. Ending a session fires a trigger that
+withdraws the device sign-ins it approved in advance, so every path that ends
+sessions locks those request rows first, then the session rows
+(`lockSessionPreapprovals`). Turning the switch off takes the settings lock
+(exclusive), every plugin installation row (share, in id order), the
+request rows, then the key sessions (in id order), and no account, identity
+or key row, so it never waits on anything a key path holds while holding
+something that path needs. A sign-in reads the key's
 binding without a lock, locks the installation and identity, then locks the
 key row and, when its binding changed meanwhile (a link committed in between),
 answers 429 with a one-second `Retry-After`: the key is still good, and the
@@ -902,14 +906,22 @@ to the Go check it mirrors: a usable password is `HasLocalPassword`; a usable
 provider identity is an identity at an installation whose provider can sign
 people in from an ordinary device (`signInProviders`: an enabled
 installation with an enabled sign-in binding that is not a network identity
-binding, and for an OAuth provider a public URL, without which its browser
-and native starts refuse); a working key follows
+binding and whose capability row exists, and for an OAuth provider a public
+URL, without which its browser and native starts refuse); a working key follows
 `keySignInPolicy` (a local key under the local password rule, a person key
 only on an account that isn't an administrator's, a provider-bound key while
-its identity's installation is enabled; a waiting key is no way in). A full
+its identity's installation is enabled; a waiting key is no way in). A
+settings write that changes `server.public_url` is refused, with the same
+problem and remedy, while an account would lose the only provider it can
+sign in with and has no password that signs in (`auth.CheckPublicURLChange`),
+and the switch checks judge the address the same write leaves. An address
+the environment supplies refuses admin writes, and a change to that value at
+a restart is not checked. A full
 restore lists the accounts it brings back with no way in with the same SQL
 (`auth.AccountHasNoWayInSQL`), over every enabled account. Each refusal, and
-the restore, names a remedy true for the switches (`auth.WayInRemedy`):
+the restore, names a remedy true for the settings (`auth.WayInRemedy`), and
+offers linking a provider account only while some provider can sign people
+in, otherwise setting one up:
 while local passwords are on, a password or a provider account; while they
 are off, a provider account, or a password for a break-glass administrator
 it names.
@@ -1863,21 +1875,45 @@ exclusive, the pattern that would deadlock two of them.
 The sweep ends key sessions in one order (`endKeySessionsTx`): every plugin
 installation row (share), then the device sign-ins those sessions approved in
 advance (the rows the `auth_sessions_withdraw_preapprovals` trigger writes as
-a session ends), then the sessions, each in id order. Ending all of an
-account's sessions (`revokeSignInsInTransaction`) also takes the requests
-before the sessions, so the two can't deadlock.
+a session ends), then the sessions, each in id order. Every other path that
+ends sessions takes the request rows before the session rows too: logout,
+ending one session from the session list, the administrator's revoke of one
+session or all of an account's, ending all of an account's sessions on a
+password reset or account deletion, replacing a temporary password, a
+provider's refusal, and revoking keys (`lockSessionPreapprovals`, or
+withdrawing the account's approvals in id order). A source check
+(`TestSessionEndersLockRequestsFirst`) holds every statement that ends
+sessions to taking them first. Staged tests run the sweep against logout,
+ending one session from the list and the administrator's single revoke in
+both orders, a renewal against its own session's logout, and a logout against
+ending all of an account's sessions, each without a deadlock. Ending a
+session viewing as another account touches no request row, as such a session
+can't approve a device sign-in in advance.
 
 A key session can survive the sweep only in a database written or put back
 by hand (`auth.app_key_sign_in` or `demo.enabled` stored without the
 settings write). Such a session is ended at its next renewal
 (`checkSessionStanding`, which `Service.Refresh` and plugin access renewal
-share): the renewal reads the switch under the settings lock and, finding it
-off, ends the session in the sweep's order and answers as for a revoked
-session. Its access token is refused from then on, and the session does not
+share): the renewal reads the switch without a lock and, only when that
+says off, takes the settings lock (shared), reads it again, ends the session
+in the sweep's order and answers as for a revoked session. While the switch
+is on a key session's renewal costs one extra read and takes no lock: a
+switch-off that commits just after that read ends the session in its own
+sweep, so the tokens that renewal mints name a revoked session and fail on
+first use. Its access token is refused from then on, and the session does not
 come back when the switch does. Only a session with a `device_key_id` reads
 the switch there; requests with an access token don't. So a key session the
 sweep missed that never refreshes keeps its access token until it expires
-(8 hours by default).
+(8 hours by default). During a rolling deploy, an API server still on the
+previous build opens key sessions without reading the switch inside its
+transaction, and its refresh does not end them; those end at the next refresh
+an updated server handles.
+
+**The Owner.** While the Owner holds a live key session, only the Owner may
+turn app keys off or demo mode on through the settings write; anyone else is
+refused `owner_protected`, as for any other change to the Owner's account
+(`auth.CheckSwitchOffActor`, decided in the write's transaction before the
+sweep, where every key path waits on the settings lock).
 
 A session another app's key opened, if one still existed, would be answered
 403 `permission_denied` by the origin gate on `createAppCode`,

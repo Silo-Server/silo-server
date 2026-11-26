@@ -114,6 +114,16 @@ with a detail that names the accounts (the first ten, then how many more):
 - Turning app keys off (`auth.app_key_sign_in` off, or `demo.enabled` on) while
   any enabled account signs in only with its keys. Otherwise the write ends
   every login session a key opened, in the same transaction.
+- Changing `server.public_url` while an account would lose the only sign-in
+  provider it can use (an OAuth provider needs the address) and has no
+  password that signs in. Both switch checks judge the address the same write
+  leaves. An address the environment supplies refuses admin writes, and a
+  change to that value at a restart is not checked.
+
+While the Owner holds a live session a key opened, turning app keys off or
+demo mode on by anyone but the Owner is `403 owner_protected` (on v2,
+`permission_denied` with the same detail as other Owner refusals), and
+nothing is written.
 
 Turning app keys off ends every session a key opened. A device such a session
 approved has a session of its own and stays signed in: a TV signed in by
