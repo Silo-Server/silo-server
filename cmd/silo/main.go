@@ -1593,7 +1593,8 @@ func main() {
 	// Every password sign-in surface shares one demo account exemption,
 	// refreshed off the sign-in path.
 	demoSignIn := auth.NewDemoSignIn(auth.NewUserRepository(pool), demoMode)
-	if mode == "" || mode == "integrated" || mode == "api" {
+	// Every mode that serves the native sign-in refreshes it (frontend too).
+	if mode == "" || mode == "integrated" || mode == "api" || mode == "frontend" {
 		go demoSignIn.Run(appCtx)
 	}
 	deps := api.Dependencies{
