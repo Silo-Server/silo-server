@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { OwnAppKeysPanel } from "./OwnAppKeysPanel";
@@ -8,7 +8,11 @@ const state = vi.hoisted(() => ({
   impersonating: false,
   primary: true,
   capability: "available",
+  capabilityFailed: false,
+  refetchCapability: vi.fn(),
   access: { list: true, manage: true, approve: true, sign_in_again: false },
+  // Each `enabled` the session-access read was asked with.
+  accessEnabled: [] as boolean[],
   useOwnAppKeys: vi.fn(),
 }));
 vi.mock("@/hooks/useAuth", () => ({
@@ -21,8 +25,14 @@ vi.mock("@/hooks/useAuth", () => ({
   }),
 }));
 vi.mock("@/hooks/queries/appKeySession", () => ({
-  useAppKeyCapability: () => ({ isSuccess: true, data: { state: state.capability } }),
-  useAppKeySessionAccess: () => ({ isPending: false, isError: false, data: state.access }),
+  useAppKeyCapability: () =>
+    state.capabilityFailed
+      ? { isSuccess: false, isError: true, isFetching: false, refetch: state.refetchCapability }
+      : { isSuccess: true, isError: false, data: { state: state.capability } },
+  useAppKeySessionAccess: (enabled: boolean) => {
+    state.accessEnabled.push(enabled);
+    return { isPending: false, isError: false, isSuccess: true, data: state.access };
+  },
 }));
 vi.mock("@/hooks/queries/ownAppKeys", () => ({ useOwnAppKeys: state.useOwnAppKeys }));
 
@@ -41,32 +51,45 @@ const waitingPhone = {
 };
 const mutation = { isPending: false, mutateAsync: vi.fn() };
 
-function mount() {
-  render(
-    <MemoryRouter>
+function mount(entry = "/settings/sessions") {
+  return render(
+    <MemoryRouter initialEntries={[entry]}>
       <OwnAppKeysPanel />
     </MemoryRouter>,
   );
 }
 
-beforeEach(() => {
-  state.impersonating = false;
-  state.primary = true;
-  state.capability = "available";
-  state.access = { list: true, manage: true, approve: true, sign_in_again: false };
-  state.useOwnAppKeys.mockReturnValue({
+function keysResult(isPending: boolean) {
+  return {
     keys: {
-      isPending: false,
+      isPending,
       isError: false,
-      data: { person_key: null, devices: [waitingPhone] },
+      data: isPending ? undefined : { person_key: null, devices: [waitingPhone] },
       refetch: vi.fn(),
     },
-    preapprovals: { isSuccess: true, data: [], refetch: vi.fn() },
+    preapprovals: { isSuccess: !isPending, data: [], refetch: vi.fn() },
     revokeDevice: mutation,
     deny: mutation,
     approve: mutation,
     withdraw: mutation,
-  });
+  };
+}
+
+// The element each scrollIntoView call was made on (jsdom has none).
+const scrolledTo: string[] = [];
+Element.prototype.scrollIntoView = function (this: Element) {
+  scrolledTo.push(this.id);
+};
+
+beforeEach(() => {
+  state.impersonating = false;
+  state.primary = true;
+  state.capability = "available";
+  state.capabilityFailed = false;
+  state.access = { list: true, manage: true, approve: true, sign_in_again: false };
+  state.accessEnabled = [];
+  scrolledTo.length = 0;
+  state.useOwnAppKeys.mockReturnValue(keysResult(false));
 });
 afterEach(() => {
   cleanup();
@@ -86,11 +109,47 @@ it.each([
   expect(state.useOwnAppKeys).not.toHaveBeenCalled();
 });
 
-// An administrator acting as the account sees no panel at all.
-it("renders nothing for an administrator acting as the account", () => {
+// An administrator acting as the account sees no panel at all, and the page
+// asks the server for neither the session's access nor the list.
+it("renders and asks nothing for an administrator acting as the account", () => {
   state.impersonating = true;
   mount();
   expect(screen.queryByRole("heading")).toBeNull();
+  expect(state.accessEnabled.every((enabled) => !enabled)).toBe(true);
+  expect(state.useOwnAppKeys).not.toHaveBeenCalled();
+});
+
+// A failed capability read must not make the panel vanish: it says so and
+// offers to ask again.
+it("offers a retry when the capability read fails", () => {
+  state.capabilityFailed = true;
+  mount();
+  expect(screen.getByRole("heading", { name: "Silo app devices" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(state.refetchCapability).toHaveBeenCalledTimes(1);
+  expect(state.accessEnabled.every((enabled) => !enabled)).toBe(true);
+});
+
+// A link to one device (from a session row or a dialog) must land on its
+// row, which exists only once the list has loaded.
+it("scrolls to a linked device once its row is on the page", () => {
+  state.useOwnAppKeys.mockReturnValue(keysResult(true));
+  const view = mount(`/settings/sessions#device-${waitingPhone.id}`);
+  expect(scrolledTo).toEqual([]);
+  state.useOwnAppKeys.mockReturnValue(keysResult(false));
+  view.rerender(
+    <MemoryRouter initialEntries={[`/settings/sessions#device-${waitingPhone.id}`]}>
+      <OwnAppKeysPanel />
+    </MemoryRouter>,
+  );
+  expect(scrolledTo).toEqual([`device-${waitingPhone.id}`]);
+});
+
+// A malformed hash must not take the page down to its error boundary.
+it("ignores a hash that doesn't decode", () => {
+  mount("/settings/sessions#device-%zz");
+  expect(screen.getByRole("heading", { name: "Silo app devices" })).toBeTruthy();
+  expect(scrolledTo).toEqual([]);
 });
 
 // Approve is offered only where it can work: the main profile, with app keys

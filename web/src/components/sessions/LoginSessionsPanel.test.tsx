@@ -27,8 +27,11 @@ const mocks = vi.hoisted(() => ({
   sessions: [] as unknown[],
 }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ clearLoginSession: mocks.clear }) }));
-// The Silo app sentence asks the server whether app keys are on; it has no say here.
-vi.mock("@/components/appKeys/SignsBackInNote", () => ({ SignsBackInNote: () => null }));
+// The Silo app sentence asks the server whether app keys are on; a marker
+// stands in for it, so a test sees only whether the panel shows it.
+vi.mock("@/components/appKeys/SignsBackInNote", () => ({
+  SignsBackInNote: () => <span>Silo app sentence</span>,
+}));
 vi.mock("@/hooks/queries/loginSessions", () => ({
   useLoginSessions: () => ({
     query: {
@@ -137,4 +140,18 @@ it("offers only this session's sign out when others may not be revoked", () => {
   expect(screen.getAllByText("Chrome on Windows")).toHaveLength(2);
   expect(screen.getByRole("button", { name: "Sign out this browser" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Sign out Chrome on Windows" })).toBeNull();
+});
+
+// A disabled account's keys are refused at sign-in, so its devices don't
+// sign back in: the administrator's view must not say they do.
+it.each([
+  [true, true],
+  [false, false],
+])("says devices sign back in only for an enabled account (enabled: %s)", (enabled, shown) => {
+  render(
+    <MemoryRouter>
+      <LoginSessionsPanel adminUser={{ id: 2, username: "sam", enabled }} />
+    </MemoryRouter>,
+  );
+  expect(Boolean(screen.queryByText("Silo app sentence"))).toBe(shown);
 });
