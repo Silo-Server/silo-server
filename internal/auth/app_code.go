@@ -24,16 +24,19 @@ const AppCodeLifetime = 10 * time.Minute
 
 // App code kinds (auth_app_codes.kind).
 const (
-	appCodeKindJoin    = "join"
-	appCodeKindSession = "session"
+	appCodeKindJoin       = "join"
+	appCodeKindSession    = "session"
+	appCodeKindSignInLink = "sign_in_link"
 )
 
 // What redeeming an app code did with the request's person key: enrolled
-// as the account's person key (or already it), or kept out because the
-// account holds a different one.
+// as the account's person key (or already it), kept out because the
+// account holds a different one (a session code), or put in place of a
+// different one, which is revoked (a sign-in link's code).
 const (
 	PersonKeyEnrolled = "enrolled"
 	PersonKeyKept     = "kept"
+	PersonKeyReplaced = "replaced"
 )
 
 var (
@@ -331,14 +334,20 @@ type appCodeRow struct {
 	sessionID     string
 	identityID    *int64
 	providerBound bool
+	// signInLinkID and signInLinkCreatedBy: a sign-in link's code's link and
+	// the account that made it.
+	signInLinkID        *int64
+	signInLinkCreatedBy *int
 }
 
 func readAppCode(ctx context.Context, db rowQuerier, hash []byte) (appCodeRow, error) {
 	var row appCodeRow
 	var username, email, sessionID *string
-	err := db.QueryRow(ctx, `SELECT kind, user_id, invitation_id, reserved_username, reserved_email, session_id, identity_id, provider_bound
+	err := db.QueryRow(ctx, `SELECT kind, user_id, invitation_id, reserved_username, reserved_email, session_id, identity_id, provider_bound,
+			sign_in_link_id, sign_in_link_created_by
 		FROM auth_app_codes WHERE code_hash = $1 AND redeemed_at IS NULL AND expires_at > clock_timestamp()`, hash).Scan(
-		&row.kind, &row.userID, &row.invitationID, &username, &email, &sessionID, &row.identityID, &row.providerBound)
+		&row.kind, &row.userID, &row.invitationID, &username, &email, &sessionID, &row.identityID, &row.providerBound,
+		&row.signInLinkID, &row.signInLinkCreatedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return appCodeRow{}, ErrAppCodeInvalid
 	}
@@ -371,8 +380,14 @@ func spendAppCode(ctx context.Context, tx pgx.Tx, hash []byte) error {
 // when the account has none, and an account holding a different one keeps
 // it, with the device key enrolled under the account's key (a person who
 // lost every other device replaces it afterwards with ReplacePersonKey).
-// Keys from a code start active, also on an administrator's account: the
-// code came from the account's own session or its invitation.
+// A sign-in link's code enrolls both keys on its account: a new or replacing
+// person key and its device start unbound to any provider, while the
+// account's own provider-bound person key sent again keeps its binding and
+// the new device takes it. Its person key replaces a different one the
+// account holds (redeemSignInLinkCode); it is refused for an administrator's
+// account. Keys
+// from a code start active, also on an administrator's account: the code
+// came from the account's own session or its invitation.
 func (a *AppKeySignIn) RedeemAppCode(ctx context.Context, req KeyRedeemRequest) (*KeySignInResult, error) {
 	if err := req.Envelope.CheckShape(appkeys.PurposeRedeem); err != nil {
 		return nil, err
@@ -396,6 +411,8 @@ func (a *AppKeySignIn) RedeemAppCode(ctx context.Context, req KeyRedeemRequest) 
 		audit, err = a.redeemJoin(ctx, req, payload, hash, code, out)
 	case code.kind == appCodeKindSession && code.userID != nil:
 		audit, err = a.redeemSession(ctx, req, payload, hash, code, out)
+	case code.kind == appCodeKindSignInLink && code.userID != nil:
+		audit, err = a.redeemSignInLinkCode(ctx, req, payload, hash, code, out)
 	default:
 		err = ErrAppCodeInvalid
 	}

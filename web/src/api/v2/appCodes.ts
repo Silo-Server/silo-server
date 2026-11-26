@@ -31,7 +31,20 @@ export function linkableJoinCode(code: JoinAppCode): LinkableJoinAppCode | null 
  */
 export type SessionAppCode = AppCode & { readonly [codeKind]: "session" };
 
-function checked(operation: string, result: AppCode | undefined): AppCode {
+/** An app code answer as it may arrive: an older server leaves out link_allowed. */
+interface AppCodeAnswer {
+  code: string;
+  expires_in: number;
+  server_address: string;
+  link_allowed?: unknown;
+}
+
+/**
+ * The answer, checked. An answer without link_allowed (a server from before
+ * the member, as during a deploy that runs two versions) means no link: the
+ * code is shown to type. A member of any other type is refused.
+ */
+function checked(operation: string, result: AppCodeAnswer | undefined): AppCode {
   if (
     !result ||
     typeof result.code !== "string" ||
@@ -39,12 +52,14 @@ function checked(operation: string, result: AppCode | undefined): AppCode {
     !Number.isSafeInteger(result.expires_in) ||
     result.expires_in <= 0 ||
     typeof result.server_address !== "string" ||
-    typeof result.link_allowed !== "boolean" ||
+    (result.link_allowed !== undefined && typeof result.link_allowed !== "boolean") ||
     !/^https?:\/\//.test(result.server_address)
   ) {
     throw new V2TransportError(operation, 200, "Invalid app code response");
   }
-  return result;
+  // Checked above; the contract mark is the generated type's, which this
+  // module adds to what it validated.
+  return { ...result, link_allowed: result.link_allowed === true } as AppCode;
 }
 
 /**
@@ -78,4 +93,61 @@ export async function createSessionAppCode(): Promise<SessionAppCode> {
     ? await v2("POST /api/v2/auth/app-codes", { body: {}, profileContext })
     : await v2("POST /api/v2/auth/app-codes", { body: {} });
   return checked("createAppCode", result) as SessionAppCode;
+}
+
+/** What a redeemed sign-in link hands its holder. */
+export interface SignInLinkRedeemed {
+  /** The app code, absent while the server has app key sign-in off. */
+  appCode: SessionAppCode | null;
+  /** The token that sets a password once, absent when the account may not set one. */
+  setPasswordToken: string | null;
+  /**
+   * Why there is no app code: an administrator's account gets the password
+   * route only, and app key sign-in may be off. Null with a code, or for a
+   * reason this page doesn't know.
+   */
+  noCodeReason: "administrator" | "app_keys_off" | null;
+}
+
+/**
+ * Trades a sign-in link's token, once. Its app code signs the Silo app in to
+ * an existing account, so it is a session code: shown to type, never put in a
+ * link, whatever link_allowed says.
+ */
+export async function redeemSignInLink(token: string): Promise<SignInLinkRedeemed> {
+  const result = await v2("POST /api/v2/auth/sign-in-links/redeem", {
+    body: { token },
+    retryAuthentication: false,
+  });
+  const setPasswordToken =
+    typeof result?.set_password_token === "string" && result.set_password_token !== ""
+      ? result.set_password_token
+      : null;
+  if (result?.code === undefined) {
+    if (!setPasswordToken) {
+      throw new V2TransportError("redeemSignInLink", 200, "Invalid sign-in link response");
+    }
+    const reason = result?.no_code_reason;
+    const noCodeReason = reason === "administrator" || reason === "app_keys_off" ? reason : null;
+    return { appCode: null, setPasswordToken, noCodeReason };
+  }
+  const code = checked("redeemSignInLink", {
+    code: result.code,
+    expires_in: result.expires_in ?? 0,
+    server_address: result.server_address ?? "",
+    link_allowed: result.link_allowed,
+  });
+  return {
+    appCode: { ...code, link_allowed: false } as SessionAppCode,
+    setPasswordToken,
+    noCodeReason: null,
+  };
+}
+
+/** Sets the account's password with a redeemed sign-in link's token. */
+export async function setSignInLinkPassword(token: string, newPassword: string): Promise<void> {
+  await v2("POST /api/v2/auth/sign-in-links/set-password", {
+    body: { token, new_password: newPassword },
+    retryAuthentication: false,
+  });
 }

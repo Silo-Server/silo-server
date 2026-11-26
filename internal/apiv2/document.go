@@ -786,6 +786,7 @@ func registerAll(reg *Registry) {
 	registerAdminInviteCodes(reg)
 	registerInvitations(reg)
 	registerPasswordResets(reg)
+	registerSignInLinks(reg)
 	registerWebhookSync(reg)
 	registerWebhookReceiver(reg)
 	registerOnboarding(reg)

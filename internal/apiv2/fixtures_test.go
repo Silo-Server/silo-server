@@ -1805,6 +1805,7 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, adminAppKeyFixtureCases()...)
 	cases = append(cases, appCodeFixtureCases()...)
 	cases = append(cases, adminProfileSetEditFixtureCases()...)
+	cases = append(cases, signInLinkFixtureCases()...)
 	return cases
 }
 
@@ -2226,6 +2227,7 @@ func fixtureDeps() Dependencies {
 	deps.ProfileSet = fixtureProfileSets{}
 	deps.ProfileSetEdits = fixtureProfileSets{}
 	deps.AdminAppKeys = fixtureAdminAppKeys()
+	deps.SignInLinks = fixtureSignInLinks{}
 	deps.AdminPluginProvisionStatus = func(context.Context) ([]plugins.ProvisionStatus, error) {
 		return []plugins.ProvisionStatus{{PluginID: "silo.auth.oidc", Version: "0.1.2", State: "pending"}}, nil
 	}
@@ -2451,7 +2453,8 @@ func generateFixtures(t *testing.T) map[string][]byte {
 		// Absolute discovery URLs and origins in published fixtures use a
 		// reserved test host.
 		if p := r.URL.Path; p == Prefix+"/playback/capabilities" || p == Prefix+"/system/info" ||
-			p == Prefix+"/invitations/app-code" || p == Prefix+"/auth/app-codes" {
+			p == Prefix+"/invitations/app-code" || p == Prefix+"/auth/app-codes" ||
+			p == Prefix+"/auth/sign-in-links/redeem" || p == Prefix+"/admin/users/2/sign-in-links" {
 			r.Host = "api.example.test"
 		}
 		for k, v := range c.headers {

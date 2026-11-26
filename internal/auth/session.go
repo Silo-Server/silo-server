@@ -473,12 +473,9 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 	if err := lockAdminActorAndTarget(ctx, tx, actorID, userID); err != nil {
 		return 0, err
 	}
-	// Sign out everywhere takes the account's identities, then its device
-	// sign-in approvals, then its sessions, as revokeSignInsInTransaction
-	// does (see lockIdentitiesBeforeSessions).
 	// Sign out everywhere takes the account's identities, then its sessions
 	// in id order (lockSessionsInOrder), then withdraws its device sign-in
-	// approvals, as revokeSignInsInTransaction does.
+	// approvals and ends its sign-in links, as revokeSignInsInTransaction does.
 	var (
 		withdrawn int64
 		query     string
@@ -519,6 +516,9 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 	}
 	if sessionID == nil {
 		if withdrawn, err = withdrawDeviceSignInApprovalsInTransaction(ctx, tx, []int{userID}); err != nil {
+			return 0, err
+		}
+		if err := EndSignInLinksTx(ctx, tx, userID); err != nil {
 			return 0, err
 		}
 	}

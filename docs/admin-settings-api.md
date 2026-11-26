@@ -141,7 +141,7 @@ sign-in approved in advance is refused once the approving session has ended.
 `GET /admin/sign-in/accounts-at-risk?change=app_keys_off|local_passwords_off`
 (`listSignInAccountsAtRisk`, acting admin) lists those accounts with their id,
 username, role, `is_owner`, `break_glass`, `has_password` and
-`sign_in_link_expires_at` (always null: this server makes no sign-in links). The app keys
+`sign_in_link_expires_at` (always null: the list does not fill it). The app keys
 list is the same while app keys are already off, where it names the accounts
 that still have no way in. It is not paged.
 

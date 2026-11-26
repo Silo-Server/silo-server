@@ -289,6 +289,9 @@ const (
 	ActionDeviceKeyIntroduced     = "user.device_key_introduced"
 	ActionAppCodeRedeemed         = "user.app_code_redeemed"
 	ActionAppGrantRedeemed        = "user.app_grant_redeemed"
+	ActionSignInLinkCreated       = "user.sign_in_link_created"
+	ActionSignInLinkRedeemed      = "user.sign_in_link_redeemed"
+	ActionSignInLinkPasswordSet   = "user.sign_in_link_password_set" //nolint:gosec // an audit action name, not a credential
 	ActionAPIKeyCreated           = "api_key.created"
 	ActionAPIKeyUpdated           = "api_key.updated"
 	ActionAPIKeyDeleted           = "api_key.deleted"
@@ -335,6 +338,7 @@ func Actions() []string {
 		ActionDeviceKeyRevoked, ActionPersonKeyRevoked,
 		ActionAppKeysEnrolled, ActionPersonKeyReplaced, ActionAppCodeIssued, ActionDeviceSignInPreapproved,
 		ActionDeviceKeyIntroduced, ActionAppCodeRedeemed, ActionAppGrantRedeemed,
+		ActionSignInLinkCreated, ActionSignInLinkRedeemed, ActionSignInLinkPasswordSet,
 		ActionAPIKeyCreated, ActionAPIKeyUpdated, ActionAPIKeyDeleted,
 		ActionProfileCreated, ActionProfileUpdated, ActionProfileDeleted,
 		ActionProfileOverrideCleared, ActionProfileHiddenCleared, ActionProfileEditDismissed}

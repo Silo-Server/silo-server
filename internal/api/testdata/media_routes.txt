@@ -556,6 +556,7 @@ DELETE /api/v2/admin/users/{user_id}/keys/person	non-media
 DELETE /api/v2/admin/users/{user_id}/login-sessions	non-media
 GET /api/v2/admin/users/{user_id}/login-sessions	non-media
 DELETE /api/v2/admin/users/{user_id}/login-sessions/{session_id}	non-media
+POST /api/v2/admin/users/{user_id}/sign-in-links	non-media
 GET /api/v2/api-keys	non-media
 POST /api/v2/api-keys	non-media
 GET /api/v2/api-keys/scopes	non-media
@@ -612,6 +613,8 @@ GET /api/v2/auth/sessions	non-media
 GET /api/v2/auth/sessions/capabilities	non-media
 DELETE /api/v2/auth/sessions/{id}	non-media
 POST /api/v2/auth/setup	non-media
+POST /api/v2/auth/sign-in-links/redeem	non-media
+POST /api/v2/auth/sign-in-links/set-password	non-media
 GET /api/v2/auth/signup	non-media
 POST /api/v2/auth/signup	non-media
 GET /api/v2/autoscan/capabilities	non-media
@@ -1675,6 +1678,7 @@ DELETE /api/v2/admin/users/{user_id}/keys/person	non-media
 DELETE /api/v2/admin/users/{user_id}/login-sessions	non-media
 GET /api/v2/admin/users/{user_id}/login-sessions	non-media
 DELETE /api/v2/admin/users/{user_id}/login-sessions/{session_id}	non-media
+POST /api/v2/admin/users/{user_id}/sign-in-links	non-media
 GET /api/v2/api-keys	non-media
 POST /api/v2/api-keys	non-media
 GET /api/v2/api-keys/scopes	non-media
@@ -1731,6 +1735,8 @@ GET /api/v2/auth/sessions	non-media
 GET /api/v2/auth/sessions/capabilities	non-media
 DELETE /api/v2/auth/sessions/{id}	non-media
 POST /api/v2/auth/setup	non-media
+POST /api/v2/auth/sign-in-links/redeem	non-media
+POST /api/v2/auth/sign-in-links/set-password	non-media
 GET /api/v2/auth/signup	non-media
 POST /api/v2/auth/signup	non-media
 GET /api/v2/autoscan/capabilities	non-media

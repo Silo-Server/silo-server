@@ -468,6 +468,9 @@ func updateUser(ctx context.Context, db interface {
 	if err != nil {
 		return err
 	}
+	if err := endSignInLinksForUpdateTx(ctx, db, id, input, email); err != nil {
+		return err
+	}
 	var permissions []string
 	if input.Permissions != nil {
 		normalized, err := NormalizePermissions(*input.Permissions)
@@ -652,9 +655,9 @@ func endImpersonationsInvolving(ctx context.Context, db interface {
 	return nil
 }
 
-// revokeCredentialsIssuedToNonAdmin deletes the API keys and reset links of
-// an account being made an admin or the Owner, revokes its app keys, and
-// withdraws the device sign-ins it approved in advance that no device has
+// revokeCredentialsIssuedToNonAdmin deletes the API keys, reset and sign-in
+// links of an account being made an admin or the Owner, revokes its app keys,
+// and withdraws the device sign-ins it approved in advance that no device has
 // collected. Other admins may have minted them and kept them; afterwards they
 // would carry authority that only the Owner grants, and a device collecting
 // such a sign-in would open an administrator's session. An admin's app keys
@@ -662,7 +665,8 @@ func endImpersonationsInvolving(ctx context.Context, db interface {
 // given. The withdrawal marks those requests denied, as the person's own
 // withdrawal does, after the sessions (session rows before request rows),
 // with the request rows locked in id order. It is a direct write, not a
-// side write of ending a session.
+// side write of ending a session. The sign-in links and their codes go last;
+// their rows reference no session or request.
 func revokeCredentialsIssuedToNonAdmin(ctx context.Context, db interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }, id int) error {
@@ -685,7 +689,7 @@ func revokeCredentialsIssuedToNonAdmin(ctx context.Context, db interface {
 		id, DeviceLoginStatusDenied, DeviceLoginStatusApproved); err != nil {
 		return fmt.Errorf("withdrawing the promoted account's device sign-ins approved in advance: %w", err)
 	}
-	return nil
+	return EndSignInLinksTx(ctx, db, id)
 }
 
 // CompareAndSwapPassword replaces the bcrypt hash only if it is still the one
@@ -754,6 +758,9 @@ func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, exp
 		return fmt.Errorf("updating password: %w", err)
 	}
 	if tag.RowsAffected() == 1 {
+		if err := EndSignInLinksTx(ctx, tx, id); err != nil {
+			return err
+		}
 		if alsoInTx != nil {
 			if err := alsoInTx(tx); err != nil {
 				return err

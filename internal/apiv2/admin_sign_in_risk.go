@@ -27,7 +27,7 @@ type AccountAtRisk struct {
 	IsOwner             bool     `json:"is_owner"`
 	BreakGlass          bool     `json:"break_glass"`
 	HasPassword         bool     `json:"has_password" doc:"Whether the account has a usable local password, whatever the server's local password setting"`
-	SignInLinkExpiresAt *Instant `json:"sign_in_link_expires_at" nullable:"true" doc:"When the account's live, unused sign-in link expires; null for none. This server makes no sign-in links yet, so it is always null"`
+	SignInLinkExpiresAt *Instant `json:"sign_in_link_expires_at" nullable:"true" doc:"When the account's live, unused sign-in link expires; null for none. The list does not fill it, so it is always null"`
 }
 
 // SignInRiskOutput is the listSignInAccountsAtRisk response.

@@ -161,8 +161,8 @@ type AccountAtRisk struct {
 	// whatever the server's local password setting.
 	HasPassword bool
 	// SignInLinkExpiresAt is when the account's live, unused sign-in link
-	// expires, or nil for none. This server makes no sign-in links yet, so
-	// it is always nil and every listed account blocks the change.
+	// expires, or nil for none. The list does not fill it, so it is always
+	// nil and every listed account blocks the change.
 	SignInLinkExpiresAt *time.Time
 }
 
@@ -347,7 +347,7 @@ func WayInRemedy(localOn, breakGlass, providerAvailable bool) string {
 // refuseAccountsAtRisk lists the accounts change leaves at risk and refuses
 // with *AccountsAtRiskError while any of them blocks it. For app keys off an
 // account with a live sign-in link does not block (SignInLinkExpiresAt);
-// this server makes none yet, so every listed account does.
+// the list does not fill it, so every listed account does.
 func refuseAccountsAtRisk(ctx context.Context, db dbQuerier, change SignInChange, settings SignInSettings) error {
 	accounts, providers, err := accountsAtRisk(ctx, db, change, settings)
 	if err != nil {

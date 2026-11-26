@@ -6739,6 +6739,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/users/{user_id}/sign-in-links": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Make a single-use sign-in link for an account, for a person who lost every device.
+     * @description Answers the link to give the person, and emails it to the account's address with send_email. The link is built on the server's public URL (server.public_url), as a password reset link is; a server without one answers 409 capability_not_configured and makes no link. An email goes only to the address the account has when the link is stored: one changed since is 409 conflict. A new link, a password set by any route, a change of the account's email address, signing the account out everywhere or out of every other session, disabling the account and promoting it each end the link, the code its redeem left and its set-password token. The link's page trades it once (redeemSignInLink) for a token that sets a password and, unless the account is an administrator's or app keys are off (or the server is in demo mode), an app code the Silo app redeems. A new link replaces the account's earlier links. A scoped API key can never make one (403 permission_denied from the scope check: no scope names this operation, and a link is at least as strong as setting a password). Otherwise who may make one follows the rule for setting that account's password as an administrator (updateAdminUser with password): any administrator for an ordinary account, only the server Owner for another administrator or the Owner, and only the Owner for an account of their own whose password sign-in is off (403 permission_denied). An account a sign-in provider manages, with its own password sign-in off, can have a link as it can have its password set: setting a password with the link turns its local sign-in on. A disabled account is 409 conflict. With send_email, an account with no email address is 409 conflict and a server without mail 409 capability_not_configured, before any link is made. A link is made only for an account allowed to sign in with a local password on this server, by password sign-in's server-and-account-state rule (the admin account view's local_password_allowed): a break-glass account always; any other while the server-wide auth.local_password_login switch is on and no network identity provider refuses the account. The rule leaves out the account's own password sign-in flag, since setting a password with the link turns it on. An account that fails that rule is refused in one of two ways: 409 provider_sign_in_required while the switch is off (the person signs in with the provider on the server's site and uses createAppCode instead), and 403 not_permitted while a network sign-in provider refuses the account. For an administrator's account the link gives the password route only: its redeem hands out no app code. Audited as user.sign_in_link_created with the link's sign_in_link_id, the delivery and the expiry, never the token. The response is no-store.
+     */
+    post: operations["createAdminUserSignInLink"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/users/capabilities": {
     parameters: {
       query?: never;
@@ -6902,7 +6922,7 @@ export interface paths {
     put?: never;
     /**
      * Enroll a person key and a device key with an app code and open the device's login session.
-     * @description message is a redeem envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig; the app code is in its payload. A join code creates the invited account, with no password and the invitation's access, enrolls both keys and marks the invitation accepted, in one transaction. A session code enrolls the device key on the account that issued it, with that session's provider identity: person_key is enrolled when the account has none. When the account already has a different person key, the redeem keeps it: the device key is enrolled under the account's person key, nothing is revoked, devices waiting for approval stay waiting, and person_key is not stored (it only proves the device signed the envelope). A person who has lost every other device then replaces the account's person key from the new session with replacePersonKey as the main profile. Keys from a code start active, also on an administrator's account. 404 app_code_invalid: the code is unknown, used or expired, its invitation was revoked, replaced or accepted since, or the session that issued it ended. 409 conflict has two causes, told apart by errors[0].code: duplicate (at body.message.payload) means the reserved name or email was taken since, and the person gets a new code from the page with another name; key_enrolled means a public key is already enrolled on this server, at body.person_key for the person key or body.message.payload for the device key, and the app makes that key again and redeems the same code on a new challenge. Every refusal after the code is looked up rolls the code back, so it stays good for its ten minutes; the challenge is spent once the signature verifies. 409 provider_sign_in_required: a join code while local password sign-in is off. A malformed payload field is 422 at body.message.payload. Spends the per-address key_sign_in rate-limit budget. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status: signed_in, device_id, account_id, tokens, person_key_id, username, person_key, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); person_key_id is the key ID (kid) of the account's live person key as the session opens, or null when the account has none: none was enrolled, it was revoked, or it is bound to a sign-in provider identity that is gone from the account (the key list leaves such a key out too). A device that knows a newer person key than the one named, or gets null, learns that this server holds an older person key or none. The member is absent only from a server that does not report it, and from the answers that never carry it: approval_required, and every answer to another app's key enrolled through a grant; username is the account's name, and person_key enrolled (person_key is now the account's person key, or already was) or kept (the account keeps a different one, named by person_key_id). A client tells whether the account holds the key it sent by comparing person_key_id with the ID of that key, not by person_key. person_key says how the account came to hold its key (enrolled, kept); a client that does not know a value still has its answer from the ID. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
+     * @description message is a redeem envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig; the app code is in its payload. A join code creates the invited account, with no password and the invitation's access, enrolls both keys and marks the invitation accepted, in one transaction. A session code enrolls the device key on the account that issued it, with that session's provider identity: person_key is enrolled when the account has none. When the account already has a different person key, the redeem keeps it: the device key is enrolled under the account's person key, nothing is revoked, devices waiting for approval stay waiting, and person_key is not stored (it only proves the device signed the envelope). A person who has lost every other device then replaces the account's person key from the new session with replacePersonKey as the main profile. A sign-in link's code (redeemSignInLink) enrolls a new or replacing person key and its device unbound to any provider (the account's own person key sent again keeps its provider binding, and its device takes it), and its person_key replaces a different one the account holds (person_key replaced), which is revoked with the devices it introduced that wait for approval; devices already enrolled keep their keys. Keys from a code start active, also on an administrator's account from a session or join code; a sign-in link's code is refused for an administrator's account. 404 app_code_invalid: the code is unknown, used or expired, its invitation was revoked, replaced or accepted since, the session that issued it ended, or it is a sign-in link's code and the account is an administrator's. 409 conflict has two causes, told apart by errors[0].code: duplicate (at body.message.payload) means the reserved name or email was taken since, and the person gets a new code from the page with another name; key_enrolled means a public key is already enrolled on this server, at body.person_key for the person key or body.message.payload for the device key, and the app makes that key again and redeems the same code on a new challenge. Every refusal after the code is looked up rolls the code back, so it stays good for its ten minutes; the challenge is spent once the signature verifies. 409 provider_sign_in_required: a join code while local password sign-in is off. A malformed payload field is 422 at body.message.payload. Spends the per-address key_sign_in rate-limit budget. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status: signed_in, device_id, account_id, tokens, person_key_id, username, person_key, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); person_key_id is the key ID (kid) of the account's live person key as the session opens, or null when the account has none: none was enrolled, it was revoked, or it is bound to a sign-in provider identity that is gone from the account (the key list leaves such a key out too). A device that knows a newer person key than the one named, or gets null, learns that this server holds an older person key or none. The member is absent only from a server that does not report it, and from the answers that never carry it: approval_required, and every answer to another app's key enrolled through a grant; username is the account's name, and person_key one of: enrolled (the request's person key is the account's person key, now or already), kept (the account kept a different person key, named by person_key_id; the request's key is not stored) or replaced (a sign-in link's code brought a different key, and the account's old person key was revoked). A client tells whether the account holds the key it sent by comparing person_key_id with the ID of that key, not by person_key. person_key says how the account came to hold its key (enrolled, kept, replaced); a client that does not know a value still has its answer from the ID. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
      */
     post: operations["redeemAppCode"];
     delete?: never;
@@ -7763,6 +7783,46 @@ export interface paths {
     put?: never;
     /** Create the first administrator account and open its session. */
     post: operations["setupServer"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/sign-in-links/redeem": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Trade a sign-in link for a set-password token and, on the app-code path, an app code.
+     * @description The sign-in link page calls this when the person presses Continue, never on load: the link works once. The answer has one of two shapes: code, expires_in, server_address and link_allowed (false) together, with set_password_token when the account may set a password; or set_password_token and no_code_reason alone. The server sends no other shape. In one transaction the link is spent and, on the app-code path (not for an administrator's account, not while app keys are off or the server is in demo mode, read inside that transaction), an app code of its own kind is made for the account; of two redemptions exactly one succeeds. The code enrolls a person key and a device key at redeemAppCode: a new or replacing person key and its device start unbound to any sign-in provider, while the account's own person key sent again keeps its provider binding and its device takes it; the person key replaces a different one the account holds (person_key replaced in the sealed answer), which is revoked with the devices it introduced that wait for approval, while devices already enrolled keep their keys. For an account that is an administrator's at the moment of redeeming (judged under the account lock in the transaction that spends the link, so an account demoted since the link was made gets a code when the app-code path is available: app keys on and the server not in demo mode) the answer has only set_password_token and no_code_reason administrator, and no key is enrolled: the person sets a password, signs in on this server's site, and opens the app from there with createAppCode. While auth.app_key_sign_in is off, or the server is in demo mode, the answer for an account that is not an administrator's has only set_password_token and no_code_reason app_keys_off; when both apply, no_code_reason is administrator. An unknown, used or expired link, and one whose account is disabled, is 404 not_found. For an account that may not sign in with a local password on this server (it is not break-glass, and local password sign-in is off or a network sign-in provider refuses it) it is 409 provider_sign_in_required (the switch off) or 403 not_permitted (a network identity provider refuses it), and the link stays unspent. Spends the per-address password_reset rate-limit budget. Audited as user.sign_in_link_redeemed. The response is no-store.
+     */
+    post: operations["redeemSignInLink"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/sign-in-links/set-password": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Set the account's password with a redeemed sign-in link's token.
+     * @description The password passes the rules a password reset's completion checks (422 at body.new_password, and the token is not spent). It sets the password, turns the account's local password sign-in on, and signs the account out everywhere as a password reset does; its app keys stay, and devices signed in with them sign back in. It signs nobody in: sign in with the new password next. An unknown, used or expired token is 404 not_found; for an account that may not sign in with a local password on this server (it is not break-glass, and local password sign-in is off or a network sign-in provider refuses it), 409 provider_sign_in_required or 403 not_permitted respectively, and the token stays unspent. Spends the per-address password_reset rate-limit budget. Audited as user.sign_in_link_password_set. Answers 204.
+     */
+    post: operations["setSignInLinkPassword"];
     delete?: never;
     options?: never;
     head?: never;
@@ -14699,7 +14759,7 @@ export interface components {
       role: "admin" | "user";
       /**
        * Format: date-time
-       * @description When the account's live, unused sign-in link expires; null for none. This server makes no sign-in links yet, so it is always null
+       * @description When the account's live, unused sign-in link expires; null for none. The list does not fill it, so it is always null
        */
       sign_in_link_expires_at: string | null;
       /** @description The account's username, or its email when it has none */
@@ -15059,6 +15119,10 @@ export interface components {
       request_usage: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      /** @description Whether createAdminUserSignInLink can also email the link: sign_in_links, and a mail server is configured */
+      sign_in_link_email: boolean;
+      /** @description Whether createAdminUserSignInLink can make sign-in links: the server's public URL is set. For one account, read its local_password_allowed, which says whether the account passes the local-password rule a link needs; this member says whether the server has what every link needs besides */
+      sign_in_links: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -24348,6 +24412,32 @@ export interface components {
       restart_required?: boolean;
       value: string;
     };
+    AdminSignInLink: {
+      /**
+       * @description With send_email: sent, or failed_or_unknown when the mail server did not confirm delivery (the link is live; send it another way). Without: not_requested
+       * @example not_requested
+       * @enum {string}
+       */
+      delivery_status: "sent" | "failed_or_unknown" | "not_requested";
+      /**
+       * Format: date-time
+       * @description When the link stops working, 24 hours after it was made
+       */
+      expires_at: string;
+      /**
+       * Format: uri
+       * @description The link: the server address, /sign-in-link, and the token in the fragment, which browsers never send to the server. A bearer credential for the account until it is redeemed or expires; give it only to the person
+       * @example https://media.example.com/sign-in-link#8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA
+       */
+      url: string;
+    };
+    AdminSignInLinkInputBody: {
+      /**
+       * @description Also email the link to the account's address. The link is returned either way
+       * @example false
+       */
+      send_email?: boolean;
+    };
     AdminSplitAmbiguousHistory: {
       profile_id: string;
       /**
@@ -25361,6 +25451,11 @@ export interface components {
        */
       library_ids: string[] | null;
       /**
+       * @description Whether this server lets the account sign in with a local password now, by password sign-in's server-and-account-state rule: a break-glass account always; any other while the server-wide auth.local_password_login switch is on and no network identity provider refuses the account. It leaves out the account's own password_login, which a sign-in link's set-password turns on. It answers only whether the account passes that rule: making a sign-in link (createAdminUserSignInLink) needs it to be true and has prerequisites of its own, such as the server's public URL (without one the answer is 409 capability_not_configured)
+       * @example true
+       */
+      local_password_allowed: boolean;
+      /**
        * Format: int64
        * @description Local per-stream bitrate override in kbps; null inherits, 0 means unlimited
        * @example 0
@@ -26083,8 +26178,8 @@ export interface components {
        */
       sign_in: boolean;
       /**
-       * @description Whether an administrator can send a single-use sign-in link
-       * @example false
+       * @description Whether an administrator can make single-use sign-in links on this server (createAdminUserSignInLink, redeemSignInLink): the server has a public URL to build them on. Whether one can be made for a given account is that account's too: it must pass password sign-in's server-and-account-state rule (a break-glass account always; any other while the server-wide switch is on and no network sign-in provider refuses it), the admin account view's local_password_allowed; otherwise the refusal is 409 provider_sign_in_required (the switch off) or 403 not_permitted (a network provider's refusal)
+       * @example true
        */
       sign_in_links: boolean;
       /**
@@ -38522,6 +38617,53 @@ export interface components {
       id: string;
       /** @enum {string} */
       kind: "library" | "series" | "season" | "library_collection" | "user_collection";
+    };
+    SignInLinkRedeemed: {
+      /**
+       * @description An app code for the account, for the Silo app to redeem (redeemAppCode). A session code: it signs the Silo app in to an existing account, so it is never put in a link. Absent while auth.app_key_sign_in is off and for an administrator's account (no_code_reason says which)
+       * @example 8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA
+       */
+      code?: string;
+      /**
+       * Format: int64
+       * @description Seconds the code stays good. Present with code
+       * @example 600
+       */
+      expires_in?: number;
+      /**
+       * @description Present with code, and always false: show the server address and the code as text to type in the app, and never build a link or anything a device could open from them
+       * @example false
+       */
+      link_allowed?: boolean;
+      /**
+       * @description Present when code is absent, saying why: administrator when the account is an administrator's at the moment of redeeming, where a link gives the password route only (set a password, sign in on the server's site, then use createAppCode from that session); app_keys_off, for an account that is not an administrator's, while auth.app_key_sign_in is off or the server is in demo mode. When both apply, administrator is sent. A client that does not know a value treats it as no code
+       * @example administrator
+       * @enum {string}
+       */
+      no_code_reason?: "app_keys_off" | "administrator";
+      /**
+       * @description The server address the app connects to, as createAppCode answers it. Present with code
+       * @example https://media.example.com
+       */
+      server_address?: string;
+      /**
+       * @description For setSignInLinkPassword. Present on every successful redeem, which happens only for an account that may sign in with a local password on this server: a break-glass account always (so also while local password sign-in is off for the server), any other while the switch is on and no network sign-in provider refuses it. Lives an hour, never past the link's own expiry, and works once
+       * @example Zt1Wq3m0sP2Kc8vY5dQhX7nB4rJ6eL9aF0uG2iT1oMw
+       */
+      set_password_token?: string;
+    };
+    SignInLinkRedeemInputBody: {
+      /** @description The token from the sign-in link's fragment */
+      token: string;
+    };
+    SignInLinkSetPasswordInputBody: {
+      /**
+       * @description The new password
+       * @example margin fossil quench hollow
+       */
+      new_password: string;
+      /** @description set_password_token from redeemSignInLink */
+      token: string;
     };
     SignInRiskOutputBody: {
       /** @description Every account the change leaves at risk, in username order. Not paged: it holds only accounts that sign in with keys and have no password or provider identity that works */
@@ -101473,6 +101615,155 @@ export interface operations {
       };
     };
   };
+  createAdminUserSignInLink: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminSignInLinkInputBody"];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminSignInLink"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getAdminAccountCapabilities: {
     parameters: {
       query?: never;
@@ -107827,6 +108118,276 @@ export interface operations {
       /** @description Service Unavailable */
       503: {
         headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  redeemSignInLink: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SignInLinkRedeemInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SignInLinkRedeemed"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          /** @description Seconds to wait before trying again. */
+          "Retry-After"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          /** @description Seconds to wait before trying again. */
+          "Retry-After"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  setSignInLinkPassword: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SignInLinkSetPasswordInputBody"];
+      };
+    };
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          /** @description Seconds to wait before trying again. */
+          "Retry-After"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          /** @description Seconds to wait before trying again. */
+          "Retry-After"?: string;
           [name: string]: unknown;
         };
         content: {

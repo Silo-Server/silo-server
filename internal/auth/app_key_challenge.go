@@ -78,12 +78,14 @@ func (c *KeyChallenges) Spend(ctx context.Context, raw []byte) error {
 const grantUseRetention = time.Hour
 
 // DeleteExpiredChallenges removes challenges that expired unspent, the IDs
-// of used grants past their exp and grantUseRetention, and app codes past
-// their expiry, spent or not, for the retention step. A spent challenge has
+// of used grants past their exp and grantUseRetention, and app codes and
+// sign-in links past their expiry, spent or not, for the retention step. A spent challenge has
 // no row left. The challenge and grant deletes may wait, but no request holds
 // one of their rows while it waits on anything: a challenge is spent by one
 // statement, and a grant redemption holds only the fresh row it inserted.
-// The app code delete skips rows a request holds.
+// The app code delete skips rows a request holds. A sign-in link's row is
+// held by a request that already holds its account and waits on nothing
+// the delete holds.
 func (c *KeyChallenges) DeleteExpiredChallenges(ctx context.Context) (int, error) {
 	tag, err := c.pool.Exec(ctx, `DELETE FROM auth_key_challenges WHERE expires_at < NOW()`)
 	if err != nil {
@@ -103,5 +105,11 @@ func (c *KeyChallenges) DeleteExpiredChallenges(ctx context.Context) (int, error
 	if err != nil {
 		return int(tag.RowsAffected() + grants.RowsAffected()), fmt.Errorf("deleting expired app codes: %w", err)
 	}
-	return int(tag.RowsAffected() + grants.RowsAffected() + codes.RowsAffected()), nil
+	// A link past its expiry is dead, redeemed or not: its set-password
+	// token never outlives it.
+	links, err := c.pool.Exec(ctx, `DELETE FROM auth_sign_in_links WHERE expires_at < NOW()`)
+	if err != nil {
+		return int(tag.RowsAffected() + grants.RowsAffected() + codes.RowsAffected()), fmt.Errorf("deleting expired sign-in links: %w", err)
+	}
+	return int(tag.RowsAffected() + grants.RowsAffected() + codes.RowsAffected() + links.RowsAffected()), nil
 }

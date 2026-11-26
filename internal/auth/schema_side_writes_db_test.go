@@ -52,6 +52,12 @@ var allowedSideWrites = map[string]string{
 		"the account row",
 	"auth_device_keys_user_id_fkey": "deleting an account deletes its keys itself, under the account lock, before " +
 		"the account row",
+	"auth_sign_in_links_user_id_fkey": "deleting an account ends its links itself (EndSignInLinksTx, after its sessions " +
+		"and requests) before the account row; link rows reference no session or request, and every path takes them " +
+		"after the account's row",
+	"auth_sign_in_links_created_by_fkey": "deleting an account that made links for other accounts nulls only their " +
+		"maker column, holding the deleted account's row; no path takes an account row after a link row, so nothing " +
+		"holding a link row waits on it",
 	// Actions when a provider identity is deleted.
 	"auth_sessions_identity_id_fkey": "an identity is deleted under its own lock (unlink) or its installation's " +
 		"(uninstall), and every path that writes several of an account's sessions takes the account's identities " +
