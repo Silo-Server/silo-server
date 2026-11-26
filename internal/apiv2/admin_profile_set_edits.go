@@ -64,7 +64,7 @@ type AdminProfileSetEditsOutput struct {
 // AdminProfileSetCleared is what clearing an owner's record did.
 type AdminProfileSetCleared struct {
 	Applied    bool `json:"applied" doc:"Whether the set's value was written now. Always false for a hidden profile, which comes back with the next newer set" example:"true"`
-	WakeQueued bool `json:"wake_queued" doc:"Whether this call queued a push telling the person's apps, after the clear committed. False with push off, with no phone registered, within a minute after an earlier wake of the account, and while a wake for the account is in flight on this server; the change then reaches the app the next time it syncs" example:"false"`
+	WakeQueued bool `json:"wake_queued" doc:"Whether this call queued a push telling the person's apps, after the clear committed. False with push off, with no phone registered, within a minute after an earlier wake of the account, while a wake for the account is in flight on this server, and when queueing the wake failed or timed out; the change then reaches the app the next time it syncs" example:"false"`
 }
 
 // AdminProfileSetClearedOutput is the response of the two clears.
@@ -103,7 +103,11 @@ type AdminProfileOverrideClearInput struct {
 	Body        AdminProfileOverrideState
 }
 
-// overrideETag is the validator of an override: its token, opaque.
+// overrideETag is the validator of an override: its token, opaque, as a
+// strong EntityTag, so quoting and comparison are the shared type's.
+// RenderETag does not fit: it takes a monotonic row version, and an override
+// has none; its token is a digest of what the clear would do and of the
+// edit row's revision, already bound to the account, profile and field.
 func overrideETag(token string) EntityTag {
 	return EntityTag{Opaque: "pso1-" + token}
 }
@@ -140,7 +144,7 @@ func registerAdminProfileSetEdits(reg *Registry) {
 	override.GuardedReceipt = true
 	override.Summary = "Clear the owner's override of one field of a profile from the account's app."
 	override.Description = "Takes {\"state\": \"cleared\"}, the only state an override can be put in: this operation ends an override and does nothing else, and a different change to the override would be a new state added on purpose. " +
-		"Requires If-Match with the override's etag from listAdminUserProfileSetEdits, so the clear does what the owner was shown: a missing If-Match is 428 precondition_required, and an etag that no longer matches (the person's app sent a newer set, the value in force changed, or the override was edited since) is 412 precondition_failed with the current ETag. Either way nothing is written and the override stays. " +
+		"Requires If-Match with the override's etag from listAdminUserProfileSetEdits, so the clear does what the owner was shown: a missing If-Match is 428 precondition_required, and an etag that no longer matches (the person's app sent a newer set that changes what the clear would write or whether it can, or the override was edited since) is 412 precondition_failed with the current ETag. Either way nothing is written and the override stays. The precondition exists so that a clear does what the confirmation the owner read said it would. If-Match: * is the convention's deliberate overwrite: a caller that sends it has been shown no confirmation and says outright that it takes whatever the person's set holds at that moment. First-party clients never send it; the web card always sends the etag of the record it showed. " +
 		"The etag is compared inside the clear's transaction, on the profile rows it has locked, so a set can't land between the check and the write. Refusals come in this order: 404 not_found when the profile has no override of the field (including one the person has since replaced), then 428 and 412, then 409 for a name. " +
 		"Puts the value of the person's last accepted set back at once, in one transaction, and the set applies to the field again from then on; nothing it writes counts as an edit here. A PIN the set sent as digits, or kept, can't be put back (this server never stores digits): the PIN stays as the owner set it until the person's app sends a newer set. When the set has no PIN for the profile, clearing removes the owner's PIN at once. A picture this server doesn't hold waits for its upload. For a setting the settings contract mirrors in another key, both keys' overrides are cleared. Putting back a name another profile on the account now has (compared trimmed and without case) is refused with 409 conflict, as the owner's own rename to it is, and nothing is written; the override stays. " +
 		"Answers a receipt: applied, whether the set's value was written now, and wake_queued, whether this call queued a push telling the person's apps after the clear committed. The clears of a hidden profile and of a settled record restore no value, so they stay unguarded DELETEs." + adminProfileSetEditsRule

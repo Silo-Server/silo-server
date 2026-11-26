@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/profileedits"
@@ -415,24 +416,33 @@ type mutableAdminDefaults map[string]string
 
 func (d mutableAdminDefaults) Get(_ context.Context, key string) (string, error) { return d[key], nil }
 
-// TestOverrideTokenDB: an override's token changes when anything a clear of
-// it depends on changes, and only then. It catches a clear confirmed on one
-// state applying another: a token that misses a change lets a stale
-// confirmation through, and one that moves on its own refuses every clear.
+// TestOverrideTokenDB: an override's token moves when what a clear of it
+// would do moves, or when the override is edited again, and on nothing
+// else. Each step moves one of its ingredients alone. It catches a clear
+// confirmed on one state applying another (an ingredient missing from the
+// token), and a pending clear refused for a change the confirmation never
+// showed (a value read outside the clear's locks in the token).
 func TestOverrideTokenDB(t *testing.T) {
 	f := newEditsFixture(t)
 	defaults := mutableAdminDefaults{}
 	f.handler.AdminDefaults = defaults
-	key := settingskeys.UiNextUpMode
+	mode, audio := settingskeys.UiNextUpMode, settingskeys.PlaybackAudioLanguage
+	missing := "sha256:" + strings.Repeat("ab", 32)
 	main := newSetItem("Parent")
-	kid := newSetItem("Kid").with("max_content_rating", "PG").with("settings", map[string]any{key: "separate"})
+	kid := newSetItem("Kid").with("max_content_rating", "PG").with("picture", missing).
+		with("settings", map[string]any{mode: "separate", audio: nil})
 	f.mustApply(t, setDoc(t, 1, main, kid))
 	kidID := f.profileBySyncID(t, kid.syncID()).ID
-	f.update(t, f.admin(), kidID, ProfileUpdateRequest{MaxContentRating: new("G")}, true)
+	preset := "avatar-2"
+	f.update(t, f.admin(), kidID, ProfileUpdateRequest{MaxContentRating: new("G"), Avatar: &preset}, true)
+	f.mustPutSetting(t, f.admin(), userstore.SettingIdentity{Key: audio, Scope: "profile", ProfileID: kidID}, `"fr"`)
 	// The owner resets the kid's mode, so the kid inherits it.
-	if _, err := f.store.DeleteSettingValue(f.admin(), userstore.SettingIdentity{Key: key, Scope: "profile", ProfileID: kidID}); err != nil {
+	if _, err := f.store.DeleteSettingValue(f.admin(), userstore.SettingIdentity{Key: mode, Scope: "profile", ProfileID: kidID}); err != nil {
 		t.Fatal(err)
 	}
+	rating, modeField, audioField, picture := "max_content_rating", profileedits.FieldSettingsPrefix+mode,
+		profileedits.FieldSettingsPrefix+audio, profileedits.FieldPicture
+	all := []string{rating, modeField, audioField, picture}
 	tokens := func() map[string]string {
 		t.Helper()
 		views, err := f.handler.ListProfileSetEdits(t.Context(), f.userID)
@@ -450,10 +460,14 @@ func TestOverrideTokenDB(t *testing.T) {
 		}
 		return out
 	}
-	rating, mode := "max_content_rating", profileedits.FieldSettingsPrefix+key
 	before := tokens()
-	if len(before) != 2 || before[rating] == before[mode] {
-		t.Fatalf("tokens = %v; want one per override, each its own", before)
+	if len(before) != len(all) {
+		t.Fatalf("tokens = %v; want one per override", before)
+	}
+	version := 1
+	nextSet := func(item setItem) {
+		version++
+		f.mustApply(t, setDoc(t, version, main, item))
 	}
 	steps := []struct {
 		name    string
@@ -461,24 +475,32 @@ func TestOverrideTokenDB(t *testing.T) {
 		changed []string
 	}{
 		{"nothing changes", func() {}, nil},
-		{"the set's value of the field changes", func() {
-			f.mustApply(t, setDoc(t, 2, main, kid.with("max_content_rating", "R")))
+		{"the set's value of the field changes (SetValue)", func() {
+			kid = kid.with("max_content_rating", "R")
+			nextSet(kid)
 		}, []string{rating}},
-		{"the set resets the setting", func() {
-			f.mustApply(t, setDoc(t, 3, main, kid.with("max_content_rating", "R").with("settings", map[string]any{}).
-				with("settings_reset", []string{key})))
-		}, []string{mode}},
-		{"the inherited value in force changes", func() {
-			defaults[settingscontract.AdminDefaultSettingKey(key)] = `"separate"`
-		}, []string{mode}},
-		{"the owner edits the field again", func() {
+		{"the set resets a key it sent as null, so a clear resets it instead (SetResets)", func() {
+			kid = kid.with("settings", map[string]any{mode: "separate"}).with("settings_reset", []string{audio})
+			nextSet(kid)
+		}, []string{audioField}},
+		{"the profile comes to hold the set's picture outside any edit, so a clear can apply it (Applies)", func() {
+			if _, err := f.pool.Exec(t.Context(), `UPDATE user_profiles SET avatar = $3, avatar_source_sha256 = $4 WHERE user_id = $1 AND id = $2`,
+				f.userID, kidID, testAvatarRef(f.userID, kidID), strings.TrimPrefix(missing, "sha256:")); err != nil {
+				t.Fatal(err)
+			}
+		}, []string{picture}},
+		{"the owner changes the field and back, so the override is another edit (Revision)", func() {
 			f.update(t, f.admin(), kidID, ProfileUpdateRequest{MaxContentRating: new("PG-13")}, true)
+			f.update(t, f.admin(), kidID, ProfileUpdateRequest{MaxContentRating: new("G")}, true)
 		}, []string{rating}},
+		{"an inherited value changes through an administrator default, outside the clear's locks", func() {
+			defaults[settingscontract.AdminDefaultSettingKey(mode)] = `"separate"`
+		}, nil},
 	}
 	for _, step := range steps {
 		step.change()
 		after := tokens()
-		for _, field := range []string{rating, mode} {
+		for _, field := range all {
 			if moved := after[field] != before[field]; moved != slices.Contains(step.changed, field) {
 				t.Fatalf("%s: token of %s moved %v", step.name, field, moved)
 			}

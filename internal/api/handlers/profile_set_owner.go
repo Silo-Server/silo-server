@@ -196,7 +196,7 @@ func (h *ProfileHandler) describeEditValues(ctx context.Context, store userstore
 ) error {
 	settings := snap.Settings[row.ID]
 	if view.Kind == ProfileSetEditOverride {
-		token, err := h.overrideToken(ctx, store, contract, userID, row, settings, snap.Edits, view.Field)
+		token, err := overrideToken(contract, userID, row, snap.Edits, view.Field)
 		if err != nil {
 			return err
 		}
@@ -346,31 +346,30 @@ func (r restoredRecord) applies(row *userstore.Profile, field string) bool {
 	return true
 }
 
-// overrideTokenPart is what the owner is shown of one field, and what
-// clearing it would do.
+// overrideTokenPart is, for one field, what clearing the override would do
+// and which edit of the field the override is.
 type overrideTokenPart struct {
 	Field     string          `json:"f"`
-	Value     json.RawMessage `json:"v"`
-	Inherited bool            `json:"i"`
 	SetValue  json.RawMessage `json:"s"`
 	SetResets bool            `json:"r"`
 	Applies   bool            `json:"a"`
-	By        string          `json:"b"`
-	Actor     int             `json:"u"`
-	Revision  int64           `json:"n"`
-	Settled   bool            `json:"d"`
+	// Revision moves on every recorded edit of the field, whoever makes it,
+	// so it stands for the override record: who set it and when.
+	Revision int64 `json:"n"`
 }
 
-// overrideToken names everything a clear of field on row depends on: for the
-// field, and for a setting the contract mirrors in another key that key too,
-// the value in force, the set's value and whether the set resets it, whether
-// clearing applies it, and the edit record itself. Any change to one of them
-// gives another token; nothing else does. It is a SHA-256 over the account,
-// the profile and the field as well, so a token never matches another
-// override, and it shows nothing the list does not.
-func (h *ProfileHandler) overrideToken(ctx context.Context, store userstore.UserStore, contract *settingscontract.Manifest,
-	userID int, row *userstore.ProfileSetRow, settings map[string]json.RawMessage, rows []profileedits.Edit, field string,
-) (string, error) {
+// overrideToken names what a clear of field on row would do and which
+// override it would end: for the field, and for a setting the contract
+// mirrors in another key that key too, the set's value, whether the set
+// resets it, whether the clear applies it (all from the same rebuilt record
+// the clear writes) and the edit row's revision. It reads only the profile
+// row and the edit rows, which the clear's transaction has locked, so the
+// clear compares it on exactly what it will write. The value in force is
+// left out: no confirmation shows it, and an inherited value moves with
+// writes outside those locks. A SHA-256 over the account, the profile and
+// the field as well, so a token never matches another override; it shows
+// nothing the list does not.
+func overrideToken(contract *settingscontract.Manifest, userID int, row *userstore.ProfileSetRow, rows []profileedits.Edit, field string) (string, error) {
 	fields := []string{field}
 	if key, isSetting := strings.CutPrefix(field, profileedits.FieldSettingsPrefix); isSetting {
 		if mirror, ok := settingscontract.MirrorKey(key); ok {
@@ -384,21 +383,13 @@ func (h *ProfileHandler) overrideToken(ctx context.Context, store userstore.User
 	parts := make([]overrideTokenPart, 0, len(fields))
 	for _, f := range fields {
 		part := overrideTokenPart{Field: f}
-		if key, isSetting := strings.CutPrefix(f, profileedits.FieldSettingsPrefix); isSetting {
-			if part.Value, part.Inherited, err = h.settingInForce(ctx, store, contract, row.ID, settings, key); err != nil {
-				return "", err
-			}
-		} else {
-			item := heldItemStored(contract, row, settings)
-			part.Value = overrideValue(&item, f)
-		}
 		if restored {
 			part.SetValue, part.SetResets = record.value(f)
 			part.Applies = record.applies(&row.Profile, f)
 		}
 		for _, e := range rows {
 			if e.SyncID == row.SyncID && e.Field == f {
-				part.By, part.Actor, part.Revision, part.Settled = e.By, e.ActorUserID, e.Revision, !e.Open()
+				part.Revision = e.Revision
 			}
 		}
 		parts = append(parts, part)
@@ -409,7 +400,7 @@ func (h *ProfileHandler) overrideToken(ctx context.Context, store userstore.User
 		Profile string              `json:"p"`
 		Field   string              `json:"f"`
 		Parts   []overrideTokenPart `json:"parts"`
-	}{1, userID, row.ID, field, parts})
+	}{2, userID, row.ID, field, parts})
 	if err != nil {
 		return "", err
 	}
@@ -595,7 +586,7 @@ func (r *profileSetRun) clearOverride(ctx context.Context, w userstore.ProfileSe
 	// rows this transaction has locked, so no set lands between the check
 	// and the write.
 	if cmd.Precondition != nil {
-		token, err := r.h.overrideToken(ctx, r.store, r.contract, cmd.UserID, row, snap.Settings[row.ID], snap.Edits, cmd.Field)
+		token, err := overrideToken(r.contract, cmd.UserID, row, snap.Edits, cmd.Field)
 		if err != nil {
 			return false, err
 		}

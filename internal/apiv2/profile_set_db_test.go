@@ -364,6 +364,7 @@ func TestClearOverridePreconditionDB(t *testing.T) {
 	t.Run("a mirrored setting whose other half changed is not restored by a stale clear", clearStaleMirror)
 	t.Run("no If-Match, or a body that is not the cleared state, is refused and writes nothing", clearRefusesBadRequests)
 	t.Run("refusals come in order: not found, then the precondition, then a name", clearRefusalOrder)
+	t.Run("If-Match: * clears to whatever the set holds now, by decision", clearWildcard)
 	for _, woke := range []bool{true, false} {
 		t.Run(fmt.Sprintf("a current clear applies and answers wake_queued %v as the waker did", woke), func(t *testing.T) { clearReceipt(t, woke) })
 	}
@@ -517,5 +518,29 @@ func clearReceipt(t *testing.T, woke bool) {
 	}
 	if rec.Header().Get("ETag") != "" {
 		t.Fatal("a receipt carries no ETag")
+	}
+}
+
+// clearWildcard: If-Match: * is the convention's deliberate overwrite. A
+// caller sending it was shown no confirmation, and the clear takes whatever
+// the person's set holds at that moment: the owner listed G when the set
+// said PG, the app then sent R, and the clear writes R.
+func clearWildcard(t *testing.T) {
+	r := newOverrideClearRig(t)
+	kid := setDBItem(uuid.NewString(), "Kid")
+	kid["max_content_rating"] = "PG"
+	r.apply(kid)
+	p := r.kid(kid["sync_id"].(string))
+	r.ownerEdit(p.ID, handlers.ProfileUpdateRequest{MaxContentRating: new("G")})
+	if r.listed("max_content_rating") == nil {
+		t.Fatal("no override to clear")
+	}
+	kid["max_content_rating"] = "R"
+	r.apply(kid)
+	if got := r.clear(p.ID, "max_content_rating", clearedBody, "*"); got.status != http.StatusOK {
+		t.Fatalf("If-Match: * answered %d %+v", got.status, got.problem)
+	}
+	if got := r.kid(kid["sync_id"].(string)).MaxContentRating; got != "R" {
+		t.Fatalf("rating after If-Match: * = %q; want the set's value now", got)
 	}
 }

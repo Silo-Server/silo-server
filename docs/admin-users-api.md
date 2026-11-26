@@ -412,10 +412,18 @@ Clearing an override is a guarded `PATCH` whose body is the state the
 override is put in, `{ "state": "cleared" }`; that is the only state, so the
 operation ends an override and does nothing else, and any other value, an extra
 member or `null` is 422. It requires `If-Match` with the record's `etag`, so the
-clear does what the owner was shown. The `etag` changes whenever anything the
-clear depends on changes: the set's value of the field and whether the set
-resets it (for a mirrored setting, either key), `clear_applies`, the value in
-force, and the override itself. A missing `If-Match` is 428
+clear does what the owner was shown. The `etag` changes whenever what the
+clear would do changes: the set's value of the field and whether the set
+resets it (for a mirrored setting, either key), and `clear_applies`; and
+whenever the override itself is edited again. It is built only from the
+profile row and the edit rows, so it never moves because an inherited value
+changed through the account or an administrator default. The precondition
+exists so that a clear does what the confirmation the owner read said it
+would. `If-Match: *` is the convention's deliberate overwrite: a caller that
+sends it has been shown no confirmation and says outright that it takes
+whatever the person's set holds at that moment. First-party clients never send
+it; the web card always sends the `etag` of the record it showed. A
+missing `If-Match` is 428
 `precondition_required`; one that no longer matches is 412
 `precondition_failed` with the current `ETag`, for example when the person's app
 sent a newer set after the list was read. Nothing is written in either case.
@@ -440,7 +448,8 @@ newer set does, as a new profile. After a clear of an override or a hidden
 profile commits, the server tries to wake the person's apps with a push, and
 `wake_queued` is true only when this call queued one. It is false with push
 off, with no phone registered, within a minute after an earlier wake of the
-account, and while a wake for the account is in flight on this server; the
+account, while a wake for the account is in flight on this server, and when
+queueing the wake failed or timed out; the
 change then reaches the app the next time it syncs. The hidden-profile clear and the dismissal restore no value,
 so they stay unguarded `DELETE`s. Dismissing a
 settled record changes nothing else and tells no app.

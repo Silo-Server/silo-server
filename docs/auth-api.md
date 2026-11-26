@@ -1109,7 +1109,8 @@ The field leaves `overrides` and the next newer set applies to it. Clearing a
 hidden profile takes it out of `hidden_by_owner` without recreating it; the
 next newer set creates it. After either commits, the server wakes the
 person's apps with a push where it can (at most one a minute per account, and
-only with push on and a phone registered); otherwise the app sees the change
+only with push on, a phone registered and the wake queued in time); otherwise
+the app sees the change
 the next time it syncs. A field that leaves `overrides` without the person's
 own edit was cleared: send a newer set so the server holds the app's value.
 

@@ -990,9 +990,13 @@ by a set built elsewhere.
   after its own transaction has.
 - *What an override clear must match.* The list gives each override a token:
   a SHA-256 over the account, the profile and the field and, for the field
-  and a mirrored setting's other key, the value in force, the set's value and
-  whether it resets it, whether a clear applies it (all from the same rebuilt
-  record the clear writes), and the edit row (who, revision). The clear is a
+  and a mirrored setting's other key, the set's value and whether it resets
+  it, whether a clear applies it (all from the same rebuilt record the clear
+  writes), and the edit row's revision, which moves on every recorded edit of
+  the field. It reads only the profile row and the edit rows, which the
+  clear's transaction has locked; the value in force is left out, since no
+  confirmation shows it and an inherited value moves with writes outside
+  those locks. The clear is a
   guarded `PATCH` whose `If-Match` must match the token recomputed in its
   transaction, after the profile rows are locked and before the name check,
   so a set accepted after the owner read the list refuses the clear (412)
