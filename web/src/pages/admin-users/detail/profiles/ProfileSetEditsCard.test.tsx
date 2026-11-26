@@ -156,6 +156,21 @@ it("names the value that comes back for a field the server can restore", async (
   ).toBeInTheDocument();
 });
 
+// A nullable setting's null is a value ("No preference"), not the text
+// "null", in the list and in the confirmation.
+it("shows a null setting as the setting's unset label", async () => {
+  mocks.edits = [
+    edit({ field: "settings.playback.audio_language", value: null, set_value: null } as never),
+  ];
+  render(<ProfileSetEditsCard user={user} manage />);
+  expect(screen.getByText("Preferred audio language: No preference")).toBeInTheDocument();
+  const dialog = await openClear(/Clear the change to Preferred audio language on Kiddo/);
+  expect(
+    within(dialog).getByText(/goes back to No preference, the value from their app/),
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/null/)).toBeNull();
+});
+
 // A refused clear is explained, not reported as a failure.
 it("explains a name the server refused to put back", async () => {
   mocks.edits = [edit({ field: "name", value: "Kiddo", set_value: "Kid" })];

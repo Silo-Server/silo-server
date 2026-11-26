@@ -48,6 +48,16 @@ function fieldLabel(t: Translate, field: string): string {
   return label ? t(label) : field;
 }
 
+/**
+ * A setting's value as formatSettingValue reads it: a string as it is, null
+ * (a nullable setting's "no value", such as "No preference") as null, and
+ * anything else as its JSON.
+ */
+function settingText(value: unknown): string | null {
+  if (value === null) return null;
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
 /** A record's value in force as the screen shows it. */
 function valueText(t: Translate, edit: AdminProfileSetEdit): string {
   const value: unknown = edit.value;
@@ -55,9 +65,7 @@ function valueText(t: Translate, edit: AdminProfileSetEdit): string {
   if (field.startsWith(SETTING_PREFIX)) {
     const key = field.slice(SETTING_PREFIX.length);
     const text =
-      value === undefined
-        ? t(`${P}.value.none`)
-        : formatSettingValue(key, typeof value === "string" ? value : JSON.stringify(value));
+      value === undefined ? t(`${P}.value.none`) : formatSettingValue(key, settingText(value));
     return edit.inherited ? t(`${P}.value.inherited`, { value: text }) : text;
   }
   switch (field) {
