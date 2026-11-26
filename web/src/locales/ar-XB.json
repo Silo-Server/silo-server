@@ -99128,6 +99128,12 @@
       "value": "\u200F\u202EScan code for the Silo app\u202C"
     }
   ],
+  "web.auth.appCode.scanCodeUnavailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA scan code can’t be shown for this server. Type the server address and code in the Silo app, or copy the code and paste it there.\u202C"
+    }
+  ],
   "web.auth.appCode.scanHint": [
     {
       "type": 0,

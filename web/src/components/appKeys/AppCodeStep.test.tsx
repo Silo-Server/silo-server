@@ -44,8 +44,19 @@ it("draws no scan code for an address over 128 bytes", () => {
   expect(container.querySelector("svg[data-qr-value]")).toBeNull();
   expect(screen.getByText(long)).toBeTruthy();
   expect(screen.getByText(known.app_code!)).toBeTruthy();
+  expect(screen.getByText(/too long for a scan code/)).toBeTruthy();
   expect(screen.getByRole("button", { name: "Copy code" })).toBeTruthy();
   expectNoLinkCarrying(container, known.app_code!);
+});
+
+// An address the app's scanner can't read (here, a host with a "*") gets no
+// scan code, and the page doesn't claim the address is too long.
+it("says a scan code can't be shown for an address in the wrong form", () => {
+  const { container } = step("https://a*b.example.com");
+  expect(container.querySelector("svg[data-qr-value]")).toBeNull();
+  expect(screen.getByText(/A scan code can’t be shown for this server/)).toBeTruthy();
+  expect(screen.queryByText(/too long/)).toBeNull();
+  expect(screen.getByRole("button", { name: "Copy code" })).toBeTruthy();
 });
 
 // Copy code puts the code alone on the clipboard (the app's paste field takes

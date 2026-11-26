@@ -19,12 +19,13 @@ export function qrCodeMock() {
 
 /**
  * Fails if anything in container could hand `code` to a device: an attribute
- * holding it (href, src, data), a link, image or canvas, a QR code of
- * anything but a scan code, or text with a URL that carries it. A code whose
- * answer said link_allowed: false is shown as text to type or copy and as a
- * scan code: a link can be received by an app other than Silo, which would
- * redeem the code first. A QR code's content is only readable where the test
- * mocks react-qr-code with qrCodeMock.
+ * holding it (href, src, data), a link, image or canvas, an svg that is
+ * neither an icon (aria-hidden) nor a QR code of a scan code, or text with a
+ * URL that carries it. A code whose answer said link_allowed: false is shown
+ * as text to type or copy and as a scan code: a link can be received by an
+ * app other than Silo, which would redeem the code first. A QR code's content
+ * is only readable where the test mocks react-qr-code with qrCodeMock, so an
+ * unmocked QR code, of a scan code or of anything else, fails.
  */
 export function expectNoLinkCarrying(container: HTMLElement, code: string) {
   for (const element of container.querySelectorAll("*")) {
@@ -40,6 +41,15 @@ export function expectNoLinkCarrying(container: HTMLElement, code: string) {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     expect(node.textContent ?? "").not.toMatch(urlWithCode);
+  }
+  for (const svg of container.querySelectorAll("svg")) {
+    // An svg inside another (a nested group) is judged with its outer svg.
+    if (svg.parentElement?.closest("svg")) continue;
+    if (svg.getAttribute("aria-hidden") === "true") continue;
+    expect(
+      svg.getAttribute("data-qr-value") ?? "",
+      "svg that is neither an icon nor a scan code",
+    ).toMatch(scanCode);
   }
   expect(container.querySelector("a[href*='join'], img, canvas")).toBeNull();
 }

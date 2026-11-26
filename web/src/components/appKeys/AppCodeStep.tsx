@@ -6,7 +6,7 @@ import type { AppCode, JoinAppCode, LinkableJoinAppCode, SessionAppCode } from "
 import { Button } from "@/components/ui/button";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { buildJoinLink } from "@/lib/joinLink";
-import { scanCodeText } from "@/lib/scanCode";
+import { scanCode as scanCodeFor, scanCodePixels } from "@/lib/scanCode";
 import { useT } from "@/i18n";
 
 type StepProps<Code extends AppCode> = {
@@ -124,11 +124,14 @@ export function SessionCodeStep({
  * hand: the scan code (a QR code of text only the Silo app's scanner reads,
  * never a link), the server address and the code as text to type, and Copy
  * code for a device that can't scan. A server address over 128 bytes has no
- * scan code, so the address and the code are all there is.
+ * scan code, so the address and the code are all there is. The QR code grows
+ * with the text so a module stays at least 3.5 px; where the column is
+ * narrower (the longest code on a phone) it stays centered and reaches into
+ * the card's padding rather than shrinking.
  */
 function CodeToType({ appCode }: { appCode: AppCode }) {
   const t = useT();
-  const scanCode = scanCodeText(appCode.code, appCode.server_address);
+  const scanCode = scanCodeFor(appCode.code, appCode.server_address);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
   async function copyCode() {
@@ -142,22 +145,28 @@ function CodeToType({ appCode }: { appCode: AppCode }) {
 
   return (
     <div className="space-y-3">
-      {scanCode ? (
+      {scanCode.text !== null ? (
         <div className="space-y-2">
-          <div className="mx-auto w-fit rounded-md bg-white p-3">
-            <QRCode
-              value={scanCode}
-              size={176}
-              role="img"
-              aria-label={t("web.auth.appCode.scanCodeLabel")}
-            />
+          <div className="flex justify-center">
+            <div className="shrink-0 rounded-md bg-white p-3">
+              <QRCode
+                value={scanCode.text}
+                size={scanCodePixels(scanCode.text)}
+                role="img"
+                aria-label={t("web.auth.appCode.scanCodeLabel")}
+              />
+            </div>
           </div>
           <p className="text-muted-foreground text-center text-xs">
             {t("web.auth.appCode.scanHint")}
           </p>
         </div>
       ) : (
-        <p className="text-muted-foreground text-sm">{t("web.auth.appCode.noScanCode")}</p>
+        <p className="text-muted-foreground text-sm">
+          {scanCode.reason === "too_long"
+            ? t("web.auth.appCode.noScanCode")
+            : t("web.auth.appCode.scanCodeUnavailable")}
+        </p>
       )}
       <dl className="space-y-2">
         <div>
