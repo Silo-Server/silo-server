@@ -899,3 +899,33 @@ func TestProfileSetWakeGivesUpWaitingForTheCredentialLockDB(t *testing.T) {
 		t.Fatalf("the wake took %v waiting for the credential lock, want at most %v", elapsed, bound)
 	}
 }
+
+// A wake whose queueing fails answers false and leaves nothing behind: no
+// attempt, no recorded wake time, and no in-flight mark. Regression: an
+// error answering true, telling the caller a phone was told that was not.
+func TestProfileSetWakeFailingToQueueAnswersFalseDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	registerForSession(t, repo, "live")
+	// The attempts insert fails, after the wake's time is recorded in the
+	// same transaction.
+	if _, err := pool.Exec(t.Context(), `
+		CREATE FUNCTION refuse_wake_attempts() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN RAISE EXCEPTION 'refused by the test'; END $$;
+		CREATE TRIGGER refuse_wake_attempts BEFORE INSERT ON push_delivery_attempts
+		FOR EACH ROW EXECUTE FUNCTION refuse_wake_attempts()`); err != nil {
+		t.Fatal(err)
+	}
+	h := wakeHarness{t: t, pool: pool}
+	node := profileSetWakeSystem(t, pool, repo, nil, nil)
+	if node.WakeProfileSetDevices(t.Context(), 7) {
+		t.Fatal("a wake that failed to queue answered true")
+	}
+	var recorded int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM push_profile_set_wakes`).Scan(&recorded); err != nil {
+		t.Fatal(err)
+	}
+	if h.attempts() != 0 || recorded != 0 || node.profileSetWakeInFlight(7) {
+		t.Fatalf("after a failed queue: %d attempts, %d wake times, in flight %v; want none",
+			h.attempts(), recorded, node.profileSetWakeInFlight(7))
+	}
+}

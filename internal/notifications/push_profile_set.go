@@ -65,9 +65,11 @@ var profileSetWakeBudget = profileSetWakeInterval / 2
 // request only two phones would be reached. Four lets a slow phone hold one
 // slot while the person's other phones go on, and keeps one wake to a
 // quarter of the 16 workers the push dispatcher already sends through the
-// same relay with. One wake makes at most about 83 relay requests (20 phones,
-// up to four posts each, and up to three credential requests), never more
-// than four at once, once a minute per account.
+// same relay with. One wake makes at most about 100 relay requests, never
+// more than four at once, once a minute per account: each of its 20 phones
+// can post twice, renew the credential after a token_expired answer, and
+// post twice again, and preparing the credential can add one renewal and one
+// replacement.
 const profileSetWakeConcurrency = 4
 
 // A wake is sent once and never retried: the next edit or the app opening
