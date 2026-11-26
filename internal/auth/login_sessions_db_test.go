@@ -270,7 +270,7 @@ func TestLoginSessionActivityAndAdminRevocationDB(t *testing.T) {
 		for revokerPID == 0 {
 			if err := pool.QueryRow(waitCtx, `SELECT COALESCE((SELECT pid FROM pg_stat_activity
 				WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid))
-				AND query LIKE 'UPDATE auth_sessions%' LIMIT 1), 0)`, holderPID).Scan(&revokerPID); err != nil {
+				AND (query LIKE 'UPDATE auth_sessions%' OR query LIKE 'SELECT s.id FROM auth_sessions%') LIMIT 1), 0)`, holderPID).Scan(&revokerPID); err != nil {
 				t.Fatalf("waiting for revocation to hold the account: %v", err)
 			}
 		}

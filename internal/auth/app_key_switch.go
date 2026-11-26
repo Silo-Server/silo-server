@@ -98,26 +98,20 @@ func EndAppKeySessionsTx(ctx context.Context, tx pgx.Tx) (int64, error) {
 //   - every plugin installation row (share, in id order). A plugin uninstall
 //     locks its installation row before it deletes the identities whose
 //     sessions it clears, so either the uninstall waits there for this to
-//     commit, or this waits there, holding no request or session row.
-//   - the device sign-in requests those sessions pre-approved (in id order),
-//     the rows the auth_sessions_withdraw_preapprovals trigger writes when a
-//     session ends. Ending all of an account's sessions
-//     (revokeSignInsInTransaction) withdraws its approvals before it ends its
-//     sessions, so both take requests before sessions.
-//   - the sessions (in id order), whose revocation fires that trigger.
+//     commit, or this waits there, holding no session row.
+//   - the sessions, in id order (lockSessionsInOrder), as every path that
+//     ends several sessions takes them. Ending a session writes only its
+//     row: a device sign-in it approved in advance stops being honoured
+//     because collection reads the session's state (approverLive).
 func endKeySessionsTx(ctx context.Context, tx pgx.Tx, only []string) (int64, error) {
 	if _, err := tx.Exec(ctx, `SELECT id FROM plugin_installations ORDER BY id FOR SHARE`); err != nil {
 		return 0, fmt.Errorf("locking plugin installations: %w", err)
 	}
-	if err := lockSessionPreapprovals(ctx, tx, `s.device_key_id IS NOT NULL AND ($1::text[] IS NULL OR s.id = ANY($1))`, only); err != nil {
+	const ending = `device_key_id IS NOT NULL AND revoked_at IS NULL AND ($1::text[] IS NULL OR id = ANY($1))`
+	if err := lockSessionsInOrder(ctx, tx, ending, only); err != nil {
 		return 0, err
 	}
-	tag, err := tx.Exec(ctx, `WITH ending AS (
-			SELECT id FROM auth_sessions
-			WHERE device_key_id IS NOT NULL AND revoked_at IS NULL AND ($1::text[] IS NULL OR id = ANY($1))
-			ORDER BY id FOR UPDATE
-		)
-		UPDATE auth_sessions s SET revoked_at = NOW() FROM ending WHERE s.id = ending.id`, only)
+	tag, err := tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at = NOW() WHERE `+ending, only)
 	if err != nil {
 		return 0, fmt.Errorf("ending app key sessions: %w", err)
 	}

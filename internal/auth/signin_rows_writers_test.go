@@ -36,13 +36,9 @@ const (
 	// No caller.
 	unused = "no caller"
 	// Works across accounts: the settings lock, every installation row
-	// (share, in id order), then the device sign-in requests the ended
-	// sessions pre-approved (the rows the auth_sessions_withdraw_preapprovals
-	// trigger writes), then the sessions. An uninstall waits at its
-	// installation or the writer waits there holding no request or session
-	// row; ending all of an account's sessions also takes requests before
-	// sessions.
-	installationsFirst = "settings lock, every installation (share), pre-approved requests, then sessions"
+	// (share, in id order), then the sessions in id order. An uninstall waits
+	// at its installation or the writer waits there holding no session row.
+	installationsFirst = "settings lock, every installation (share), then sessions in id order"
 )
 
 // signInRowWriters is every statement outside tests that writes

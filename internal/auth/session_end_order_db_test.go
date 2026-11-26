@@ -2,8 +2,8 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -14,36 +14,44 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// preapprovedKeySession is a key session that approved a TV's sign-in in
-// advance: ending it writes that request through the
-// auth_sessions_withdraw_preapprovals trigger.
-type preapprovedKeySession struct {
-	user    *models.User
-	admin   *models.User
-	session string
-	refresh string
+// keySessions stores n live sessions opened by deviceKeyID for userID, in the
+// reverse of their id order, so a statement that updates them in the order
+// it scans them takes the higher id first. It answers the ids in id order.
+func (e *keyEnv) keySessions(t *testing.T, userID int, deviceKeyID string, n int) []string {
+	t.Helper()
+	ids := make([]string, n)
+	for i := range ids {
+		ids[i] = uuid.NewString()
+	}
+	slices.Sort(ids)
+	for i := n - 1; i >= 0; i-- {
+		if err := e.svc.sessions.Create(t.Context(), models.AuthSession{ID: ids[i], UserID: userID, DeviceName: "phone",
+			ExpiresAt: time.Now().Add(time.Hour), DeviceKeyID: &deviceKeyID, OpenedVia: models.SessionOpenedAppKey}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return ids
 }
 
-func (e *keyEnv) preapprovedKeySession(t *testing.T, label string) preapprovedKeySession {
+// preapprove stores a device sign-in session approved in advance.
+func (e *keyEnv) preapprove(t *testing.T, userID int, session string) string {
 	t.Helper()
-	user := e.localAccount(t, label, models.RoleUser)
-	_, _, enrolled := e.enroll(t, user)
+	id := uuid.NewString()
 	if _, err := e.pool.Exec(t.Context(), `INSERT INTO device_login_requests (id, device_code_hash, browser_code_hash, user_code_hash,
 			match_code, device_name, status, approved_by_user_id, expires_at, preapproved_at, preapproved_session_id, binding_hash)
 		VALUES ($1, $4, $4, $4, '000000', 'TV', 'approved', $2, NOW() + interval '10 minutes', NOW(), $3, 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')`,
-		uuid.NewString(), user.ID, enrolled.Pair.SessionID, uuid.NewString()); err != nil {
+		id, userID, session, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
-	return preapprovedKeySession{user: user, admin: e.localAccount(t, label+"-admin", models.RoleAdmin),
-		session: enrolled.Pair.SessionID, refresh: enrolled.Pair.RefreshToken}
+	return id
 }
 
-// runStaged holds the session row, starts first and lets it take what it
+// runStaged holds row (a session row), starts first and lets it take what it
 // takes before that row and wait, then starts second. When contend, second
 // waits too, and the row is released; otherwise (the two share no row)
 // second must finish while first still waits. Both must finish within the
 // deadline, so neither order deadlocks.
-func (e *keyEnv) runStaged(t *testing.T, session string, first, second func(context.Context) error, contend bool) {
+func (e *keyEnv) runStaged(t *testing.T, row string, first, second func(context.Context) error, contend bool) {
 	t.Helper()
 	ctx := t.Context()
 	hold, err := e.pool.Begin(ctx)
@@ -51,7 +59,7 @@ func (e *keyEnv) runStaged(t *testing.T, session string, first, second func(cont
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = hold.Rollback(context.Background()) })
-	if _, err := hold.Exec(ctx, `SELECT 1 FROM auth_sessions WHERE id = $1 FOR UPDATE`, session); err != nil {
+	if _, err := hold.Exec(ctx, `SELECT 1 FROM auth_sessions WHERE id = $1 FOR UPDATE`, row); err != nil {
 		t.Fatal(err)
 	}
 	deadline, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -79,118 +87,227 @@ func (e *keyEnv) runStaged(t *testing.T, session string, first, second func(cont
 	}
 }
 
-// Every path that ends a single session takes the device sign-ins it approved
-// in advance before the session row, as the switch-off sweep and ending all
-// of an account's sessions do, so none of them deadlocks with the other over
-// a key session holding a pre-approval, in either order.
-func TestSessionEndersShareOneOrderDB(t *testing.T) {
-	env := newKeyEnv(t, "endorder")
-	t.Cleanup(saveSettings(t, env.pool, config.AuthAppKeySignInSettingKey))
-	sweep := func(_ preapprovedKeySession) func(context.Context) error {
-		return func(ctx context.Context) error { return switchOff(ctx, env.pool) }
-	}
-	revokers := []struct {
-		name string
-		end  func(s preapprovedKeySession) func(context.Context) error
-	}{
-		{"logout", func(s preapprovedKeySession) func(context.Context) error {
-			return func(ctx context.Context) error { return env.svc.Logout(ctx, s.session) }
-		}},
-		{"ending one session from the list", func(s preapprovedKeySession) func(context.Context) error {
-			return func(ctx context.Context) error { return env.svc.RevokeSession(ctx, s.session, s.user.ID) }
-		}},
-		{"the administrator's single revoke", func(s preapprovedKeySession) func(context.Context) error {
-			return func(ctx context.Context) error {
-				_, err := env.svc.sessions.RevokeAsAdmin(ctx, s.admin.ID, s.user.ID, &s.session)
+// inAccountTx runs end in a transaction holding userID's account row, as
+// the account's own paths that end sessions do.
+func (e *keyEnv) inAccountTx(userID int, end func(context.Context, pgx.Tx) error) func(context.Context) error {
+	return func(ctx context.Context) error {
+		return pgx.BeginFunc(ctx, e.pool, func(tx pgx.Tx) error {
+			if _, err := lockUser(ctx, tx, userID); err != nil {
 				return err
 			}
-		}},
-	}
-	revokeAll := func(s preapprovedKeySession) func(context.Context) error {
-		return func(ctx context.Context) error {
-			return pgx.BeginFunc(ctx, env.pool, func(tx pgx.Tx) error {
-				if _, err := lockUser(ctx, tx, s.user.ID); err != nil {
-					return err
-				}
-				return revokeSignInsInTransaction(ctx, tx, s.user.ID, nil)
-			})
-		}
-	}
-	type pair struct {
-		name          string
-		first, second func(preapprovedKeySession) func(context.Context) error
-		switchOff     bool
-	}
-	var pairs []pair
-	for _, r := range revokers {
-		pairs = append(pairs,
-			pair{name: r.name + ", then the sweep", first: r.end, second: sweep},
-			pair{name: "the sweep, then " + r.name, first: sweep, second: r.end})
-	}
-	logout := revokers[0].end
-	// A renewal with the switch off ends its own session (stored off by
-	// hand, so no sweep ran).
-	renew := func(s preapprovedKeySession) func(context.Context) error {
-		return func(ctx context.Context) error {
-			if _, err := env.svc.Refresh(ctx, s.refresh); err != nil && !errors.Is(err, ErrSessionRevoked) {
-				return err
-			}
-			return nil
-		}
-	}
-	pairs = append(pairs,
-		pair{name: "a renewal, then its own session's logout", first: renew, second: logout, switchOff: true},
-		pair{name: "a logout, then its own session's renewal", first: logout, second: renew, switchOff: true},
-		pair{name: "a logout, then ending all of the account's sessions", first: logout, second: revokeAll},
-		pair{name: "ending all of the account's sessions, then a logout", first: revokeAll, second: logout})
-	for i, p := range pairs {
-		t.Run(p.name, func(t *testing.T) {
-			env.setSetting(t, config.AuthAppKeySignInSettingKey, "true")
-			s := env.preapprovedKeySession(t, fmt.Sprintf("endorder-%d", i))
-			if p.switchOff {
-				env.setSetting(t, config.AuthAppKeySignInSettingKey, "false")
-			}
-			env.runStaged(t, s.session, p.first(s), p.second(s), true)
-			var live, approved int
-			if err := env.pool.QueryRow(t.Context(), `SELECT
-					(SELECT COUNT(*) FROM auth_sessions WHERE id = $1 AND revoked_at IS NULL),
-					(SELECT COUNT(*) FROM device_login_requests WHERE preapproved_session_id = $1 AND status = 'approved')`,
-				s.session).Scan(&live, &approved); err != nil {
-				t.Fatal(err)
-			}
-			if live != 0 || approved != 0 {
-				t.Fatalf("after both: %d live sessions, %d approvals still standing", live, approved)
-			}
+			return end(ctx, tx)
 		})
 	}
 }
 
-// Ending a session viewing as another account shares no row with the sweep:
-// such a session cannot approve a device sign-in in advance and no key opened
-// it. While the sweep holds a key session's pre-approval and waits on that
-// session's row, ending an impersonation finishes, in either order.
-func TestEndImpersonationBesideTheSweepDB(t *testing.T) {
-	env := newKeyEnv(t, "endimpersonation")
+// staged is one pair of paths that end sessions, run in both orders.
+type staged struct {
+	name string
+	// set up returns the row to hold and the two sides.
+	setup func(t *testing.T, label string) (row string, a, b func(context.Context) error)
+}
+
+// The paths that end sessions, staged against each other in both orders on
+// the rows they share: none deadlocks. Every path that ends several sessions
+// locks them in id order first, and ending a session writes only its row.
+func TestSessionEndersStagedDB(t *testing.T) {
+	env := newKeyEnv(t, "endstaged")
 	t.Cleanup(saveSettings(t, env.pool, config.AuthAppKeySignInSettingKey))
-	for i, sweepFirst := range []bool{true, false} {
-		t.Run(fmt.Sprintf("sweep first %v", sweepFirst), func(t *testing.T) {
-			env.setSetting(t, config.AuthAppKeySignInSettingKey, "true")
-			s := env.preapprovedKeySession(t, fmt.Sprintf("endimp-%d", i))
-			viewing := uuid.NewString()
-			if _, err := env.pool.Exec(t.Context(), `INSERT INTO auth_sessions (id, user_id, device_name, expires_at, impersonator_user_id, impersonation_started_at, opened_via)
-				VALUES ($1, $2, 'view', NOW() + interval '1 hour', $3, NOW(), 'impersonation')`, viewing, s.user.ID, s.admin.ID); err != nil {
-				t.Fatal(err)
+	sweep := func(ctx context.Context) error { return switchOff(ctx, env.pool) }
+	keyed := func(t *testing.T, label string) (*models.User, string, []string) {
+		user := env.localAccount(t, label, models.RoleUser)
+		_, _, enrolled := env.enroll(t, user)
+		return user, enrolled.DeviceID, env.keySessions(t, user.ID, enrolled.DeviceID, 2)
+	}
+	deleteAccount := func(userID int) func(context.Context) error {
+		return func(ctx context.Context) error {
+			_, err := NewUserRepository(env.pool).MutateAdminAccount(ctx, userID, -1, nil,
+				func(*models.User, pgx.Tx) (bool, error) { return true, nil })
+			return err
+		}
+	}
+	pairs := []staged{
+		{"logout and the sweep", func(t *testing.T, label string) (string, func(context.Context) error, func(context.Context) error) {
+			user, _, sessions := keyed(t, label)
+			env.preapprove(t, user.ID, sessions[0])
+			return sessions[0], func(ctx context.Context) error { return env.svc.Logout(ctx, sessions[0]) }, sweep
+		}},
+		{"deleting the account and a logout", func(t *testing.T, label string) (string, func(context.Context) error, func(context.Context) error) {
+			user, _, sessions := keyed(t, label)
+			env.preapprove(t, user.ID, sessions[0])
+			return sessions[0], deleteAccount(user.ID), func(ctx context.Context) error {
+				// The account may be gone by then, its session with it.
+				if err := env.svc.Logout(ctx, sessions[0]); err != nil && !IsSessionNotFound(err) {
+					return err
+				}
+				return nil
 			}
-			end := func(ctx context.Context) error { return env.svc.EndImpersonation(ctx, viewing, s.admin.ID) }
-			sweep := func(ctx context.Context) error { return switchOff(ctx, env.pool) }
-			if sweepFirst {
-				// The sweep holds the pre-approval and waits on the key
-				// session's row.
-				env.runStaged(t, s.session, sweep, end, false)
-			} else {
-				// Ending the impersonation waits on its own session's row.
-				env.runStaged(t, viewing, end, sweep, false)
-			}
-		})
+		}},
+		{"deleting the account and the sweep", func(t *testing.T, label string) (string, func(context.Context) error, func(context.Context) error) {
+			user, _, sessions := keyed(t, label)
+			env.preapprove(t, user.ID, sessions[0])
+			return sessions[0], deleteAccount(user.ID), sweep
+		}},
+		{"ending all of an account's sessions and the sweep", func(t *testing.T, label string) (string, func(context.Context) error, func(context.Context) error) {
+			user, _, sessions := keyed(t, label)
+			return sessions[0], env.inAccountTx(user.ID, func(ctx context.Context, tx pgx.Tx) error {
+				return revokeSignInsInTransaction(ctx, tx, user.ID, nil)
+			}), sweep
+		}},
+		{"the administrator ending all of an account's sessions and the sweep", func(t *testing.T, label string) (string, func(context.Context) error, func(context.Context) error) {
+			user, _, sessions := keyed(t, label)
+			admin := env.localAccount(t, label+"-admin", models.RoleAdmin)
+			return sessions[0], func(ctx context.Context) error {
+				_, err := env.svc.sessions.RevokeAsAdmin(ctx, admin.ID, user.ID, nil)
+				return err
+			}, sweep
+		}},
+		{"revoking one device key and the sweep", func(t *testing.T, label string) (string, func(context.Context) error, func(context.Context) error) {
+			user, key, sessions := keyed(t, label)
+			return sessions[0], func(ctx context.Context) error {
+				return NewAppKeyRepository(env.pool).RevokeDeviceKey(ctx, user.ID, key)
+			}, sweep
+		}},
+		{"revoking an account's keys and the sweep", func(t *testing.T, label string) (string, func(context.Context) error, func(context.Context) error) {
+			user, _, sessions := keyed(t, label)
+			return sessions[0], env.inAccountTx(user.ID, func(ctx context.Context, tx pgx.Tx) error {
+				return revokeAccountKeysTx(ctx, tx, user.ID)
+			}), sweep
+		}},
+		{"unlinking an identity and the sweep", func(t *testing.T, _ string) (string, func(context.Context) error, func(context.Context) error) {
+			// The provider account's keys are bound to its identity.
+			_, enrolled := env.enrollFromProvider(t)
+			sessions := env.keySessions(t, env.user.ID, enrolled.DeviceID, 2)
+			return sessions[0], env.inAccountTx(env.user.ID, func(ctx context.Context, tx pgx.Tx) error {
+				return revokeIdentityKeysTx(ctx, tx, env.user.ID, env.identityID)
+			}), sweep
+		}},
+	}
+	for i, p := range pairs {
+		for _, aFirst := range []bool{true, false} {
+			order := map[bool]string{true: "first", false: "second"}[aFirst]
+			t.Run(fmt.Sprintf("%s, the former %s", p.name, order), func(t *testing.T) {
+				env.setSetting(t, config.AuthAppKeySignInSettingKey, "true")
+				row, a, b := p.setup(t, fmt.Sprintf("endstaged-%d-%s", i, order))
+				if aFirst {
+					env.runStaged(t, row, a, b, true)
+				} else {
+					env.runStaged(t, row, b, a, true)
+				}
+			})
+		}
+	}
+}
+
+// Two revokes of one session, with a sign-in approved in advance from it
+// committing between them: neither waits on the request, and the request is
+// no longer honoured once the session has ended.
+func TestTwoRevokesAroundAPreapprovalDB(t *testing.T) {
+	env := newKeyEnv(t, "tworevokes")
+	ctx := t.Context()
+	user := env.localAccount(t, "tworevokes-user", models.RoleUser)
+	_, _, enrolled := env.enroll(t, user)
+	session := enrolled.Pair.SessionID
+	hold, err := env.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = hold.Rollback(context.Background()) })
+	// No-key-update: the revokes wait on it, while the pre-approval's
+	// foreign key check (a key-share lock) does not.
+	if _, err := hold.Exec(ctx, `SELECT 1 FROM auth_sessions WHERE id = $1 FOR NO KEY UPDATE`, session); err != nil {
+		t.Fatal(err)
+	}
+	deadline, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	done := make(chan error, 2)
+	revoke := func() {
+		if err := env.svc.Logout(deadline, session); err != nil && !IsSessionNotFound(err) {
+			done <- err
+			return
+		}
+		done <- nil
+	}
+	go revoke()
+	waitForLockWaiters(t, env.pool, 1)
+	request := env.preapprove(t, user.ID, session)
+	go revoke()
+	waitForLockWaiters(t, env.pool, 2)
+	if err := hold.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatalf("a revoke failed: %v", err)
+		}
+	}
+	var live bool
+	if err := env.pool.QueryRow(ctx, `SELECT `+preapprovalLiveSQL+` FROM device_login_requests r WHERE r.id = $1`, request).Scan(&live); err != nil || live {
+		t.Fatalf("the request's approver live = %v (%v), want ended", live, err)
+	}
+}
+
+// A collect racing the revoke of the session that approved it in advance:
+// a revoke committed before the collect reads the approver leaves the
+// device no session; run together, either outcome is allowed and neither
+// deadlocks.
+func TestCollectRacingTheApproversRevokeDB(t *testing.T) {
+	svc, pool, userID, name := deviceLoginTestService(t)
+	ctx := t.Context()
+	approve := func(label string) (session, code, secret string) {
+		t.Helper()
+		approver := preapprovalApprover(t, svc, userID, nil, nil)
+		secret, binding := preapprovalSecret(t)
+		created, err := svc.Preapprove(approver, DevicePreapprovalInput{DeviceName: name(label), Binding: binding}, userID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ClaimsFromContext(approver).SessionID, created.DeviceCode, secret
+	}
+
+	// The collect waits on the account row while the revoke commits.
+	session, code, secret := approve("revoked first")
+	hold, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = hold.Rollback(context.Background()) })
+	if _, err := hold.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
+		t.Fatal(err)
+	}
+	deadline, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	type polled struct {
+		poll *DeviceLoginPollResult
+		err  error
+	}
+	collected := make(chan polled, 1)
+	go func() {
+		poll, err := svc.Poll(deadline, code, secret)
+		collected <- polled{poll, err}
+	}()
+	waitForLockWaiters(t, pool, 1)
+	if err := svc.sessions.Revoke(deadline, session); err != nil {
+		t.Fatal(err)
+	}
+	if err := hold.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-collected; got.err != nil || got.poll.TokenPair != nil || got.poll.Status != DeviceLoginStatusDenied {
+		t.Fatalf("collect after the revoke committed = %+v, %v; want denied with no session", got.poll, got.err)
+	}
+
+	// Together: either outcome, no deadlock.
+	session, code, secret = approve("together")
+	results := make(chan error, 2)
+	go func() {
+		_, err := svc.Poll(deadline, code, secret)
+		results <- err
+	}()
+	go func() { results <- svc.sessions.Revoke(deadline, session) }()
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Fatalf("collect or revoke failed: %v", err)
+		}
 	}
 }

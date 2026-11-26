@@ -61,22 +61,29 @@ func RevokeOtherSignInsInTransaction(ctx context.Context, tx pgx.Tx, userID int,
 // locked several accounts' identities at once could meet it halfway.
 func revokeSignInsInTransaction(ctx context.Context, tx pgx.Tx, userID int, keepSessionID *string) error {
 	userIDs := []int{userID}
-	// Identities, device sign-in requests, then sessions: the order a plugin
-	// uninstall takes them (see lockIdentitiesBeforeSessions). Every caller
-	// holds the account row, which approving and collecting a device sign-in
-	// also lock first, so withdrawing the approvals before the sessions end
-	// leaves no window for a session to approve or a device to collect.
+	// Identities, sessions in id order, then device sign-in requests: the
+	// order a plugin uninstall takes identities and sessions in (see
+	// lockIdentitiesBeforeSessions), and session rows before request rows,
+	// the order a session's deletion writes them in (its foreign key nulls
+	// the requests it approved in advance). Every caller holds the account
+	// row, which approving and collecting a device sign-in also lock first,
+	// so no session approves or device collects between the two writes.
 	if err := lockIdentitiesBeforeSessions(ctx, tx, userID, false); err != nil {
 		return err
 	}
-	if _, err := withdrawDeviceSignInApprovalsInTransaction(ctx, tx, userIDs); err != nil {
+	const ending = `(user_id = ANY($1::int[]) OR impersonator_user_id = ANY($1::int[])) AND revoked_at IS NULL
+		  AND id IS DISTINCT FROM $2::text`
+	if err := lockSessionsInOrder(ctx, tx, `(s.user_id = ANY($1::int[]) OR s.impersonator_user_id = ANY($1::int[]))
+		AND s.revoked_at IS NULL AND s.id IS DISTINCT FROM $2::text`, userIDs, keepSessionID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE auth_sessions SET revoked_at = NOW()
-		WHERE (user_id = ANY($1::int[]) OR impersonator_user_id = ANY($1::int[])) AND revoked_at IS NULL
-		  AND id IS DISTINCT FROM $2::text`, userIDs, keepSessionID); err != nil {
+		WHERE `+ending, userIDs, keepSessionID); err != nil {
 		return fmt.Errorf("revoking login sessions: %w", err)
+	}
+	if _, err := withdrawDeviceSignInApprovalsInTransaction(ctx, tx, userIDs); err != nil {
+		return err
 	}
 	if _, err := revokeAudiobookshelfSessionsInTransaction(ctx, tx, userIDs); err != nil {
 		return err

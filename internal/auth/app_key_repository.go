@@ -433,7 +433,7 @@ func revokeIdentityKeysTx(ctx context.Context, tx sessionExecQuerier, userID int
 		WHERE user_id = $1 AND identity_id = $2 AND revoked_at IS NULL`, userID, identityID); err != nil {
 		return fmt.Errorf("revoking the identity's person key: %w", err)
 	}
-	if err := lockSessionPreapprovals(ctx, tx, `s.user_id = $1 AND s.device_key_id IN (SELECT id FROM auth_device_keys
+	if err := lockSessionsInOrder(ctx, tx, `s.user_id = $1 AND s.revoked_at IS NULL AND s.device_key_id IN (SELECT id FROM auth_device_keys
 		WHERE user_id = $1 AND identity_id = $2 AND revoked_at IS NULL)`, userID, identityID); err != nil {
 		return err
 	}
@@ -486,7 +486,7 @@ func revokeAccountKeysTx(ctx context.Context, tx sessionExecQuerier, userID int)
 	if _, err := tx.Exec(ctx, `UPDATE auth_person_keys SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, userID); err != nil {
 		return fmt.Errorf("revoking person keys: %w", err)
 	}
-	if err := lockSessionPreapprovals(ctx, tx, `s.user_id = $1 AND s.device_key_id IS NOT NULL`, userID); err != nil {
+	if err := lockSessionsInOrder(ctx, tx, `s.user_id = $1 AND s.device_key_id IS NOT NULL AND s.revoked_at IS NULL`, userID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `WITH revoked AS (
@@ -513,7 +513,7 @@ func endDeviceKeySessions(ctx context.Context, tx pgx.Tx, userID int, ids []stri
 	if err := lockIdentitiesBeforeSessions(ctx, tx, userID, false); err != nil {
 		return err
 	}
-	if err := lockSessionPreapprovals(ctx, tx, `s.device_key_id = ANY($1::uuid[])`, ids); err != nil {
+	if err := lockSessionsInOrder(ctx, tx, `s.device_key_id = ANY($1::uuid[]) AND s.revoked_at IS NULL`, ids); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, NOW())
@@ -545,6 +545,11 @@ func bindAccountKeysToIdentity(ctx context.Context, tx sessionExecQuerier, userI
 // sessions they opened by cascade (key rows before sessions, as everywhere),
 // then the person keys, before the account's other sessions are revoked.
 func deleteAccountKeysTx(ctx context.Context, tx sessionExecQuerier, userID int) error {
+	// The cascade deletes every session the keys opened, live or not; they
+	// are locked in id order first (lockSessionsInOrder).
+	if err := lockSessionsInOrder(ctx, tx, `s.user_id = $1 AND s.device_key_id IS NOT NULL`, userID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM auth_device_keys WHERE user_id = $1`, userID); err != nil {
 		return fmt.Errorf("deleting device keys: %w", err)
 	}

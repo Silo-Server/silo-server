@@ -87,6 +87,11 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 	// cascade; a promotion revokes them (revokeCredentialsIssuedToNonAdmin).
 	switch {
 	case input == nil:
+		// Every session of the account, in id order, before the deletes
+		// whose cascades end them.
+		if err = lockSessionsInOrder(ctx, tx, `s.user_id = $1 OR s.impersonator_user_id = $1`, id); err != nil {
+			return current, err
+		}
 		if err = deleteAccountKeysTx(ctx, tx, id); err != nil {
 			return current, err
 		}

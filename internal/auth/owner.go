@@ -366,6 +366,11 @@ func moveOwnership(ctx context.Context, tx pgx.Tx, fromID, toID int) error {
 	if err := revokeCredentialsIssuedToNonAdmin(ctx, tx, toID); err != nil {
 		return err
 	}
+	// Both sets of sessions below, locked in id order first.
+	if err := lockSessionsInOrder(ctx, tx, `s.revoked_at IS NULL AND ((s.user_id = $1 AND s.impersonator_user_id IS NOT NULL)
+		OR (s.impersonator_user_id = $2 AND EXISTS (SELECT 1 FROM users t WHERE t.id = s.user_id AND t.role = 'admin')))`, toID, fromID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE auth_sessions SET revoked_at = NOW()
 		WHERE user_id = $1 AND impersonator_user_id IS NOT NULL AND revoked_at IS NULL`, toID); err != nil {

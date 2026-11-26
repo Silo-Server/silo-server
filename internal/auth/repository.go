@@ -639,6 +639,10 @@ func updateCurrentRole(ctx context.Context, db interface {
 func endImpersonationsInvolving(ctx context.Context, db interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }, id int) error {
+	if err := lockSessionsInOrder(ctx, db, `(s.impersonator_user_id = $1 OR (s.user_id = $1 AND s.impersonator_user_id IS NOT NULL))
+		AND s.revoked_at IS NULL`, id); err != nil {
+		return err
+	}
 	if _, err := db.Exec(ctx, `
 		UPDATE auth_sessions SET revoked_at = NOW()
 		WHERE (impersonator_user_id = $1 OR (user_id = $1 AND impersonator_user_id IS NOT NULL))
@@ -683,7 +687,7 @@ func (r *UserRepository) ReplaceTemporaryPassword(ctx context.Context, id int, e
 		if err := lockIdentitiesBeforeSessions(ctx, tx, id, false); err != nil {
 			return err
 		}
-		if err := lockSessionPreapprovals(ctx, tx, `s.user_id = $1 AND s.id <> $2`, id, keepSessionID); err != nil {
+		if err := lockSessionsInOrder(ctx, tx, `s.user_id = $1 AND s.id <> $2 AND s.revoked_at IS NULL`, id, keepSessionID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `

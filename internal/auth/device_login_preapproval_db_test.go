@@ -213,11 +213,12 @@ func TestDevicePreapprovalRefusedDB(t *testing.T) {
 	}
 }
 
-// TestDevicePreapprovalWithdrawnWithSessionDB: revoking the one login session
-// that approved a sign-in in advance withdraws it, whichever way the session
-// is revoked, and leaves what the account approved from another session. Without
-// this a caller holding someone else's session could leave a sign-in behind
-// after the session was ended, or hide it by logging the session out.
+// TestDevicePreapprovalWithdrawnWithSessionDB: once the one login session
+// that approved a sign-in in advance has ended, whichever way it ended
+// (expiring included), the sign-in is left out of the list and refused when
+// collected, and what the account approved from another session stands.
+// Without this a caller holding someone else's session could leave a sign-in
+// behind after the session was ended, or hide it by logging the session out.
 func TestDevicePreapprovalWithdrawnWithSessionDB(t *testing.T) {
 	svc, pool, userID, name := deviceLoginTestService(t)
 	keys := NewAppKeyRepository(pool)
@@ -277,10 +278,25 @@ func TestDevicePreapprovalWithdrawnWithSessionDB(t *testing.T) {
 			_, err := pool.Exec(t.Context(), `UPDATE auth_sessions SET revoked_at = NOW() WHERE id = $1`, session)
 			return err
 		}},
+		// An approving session that simply expires stops its pre-approvals
+		// at once.
+		"expired": {end: func(session string) error {
+			_, err := pool.Exec(t.Context(), `UPDATE auth_sessions SET expires_at = NOW() - interval '1 second' WHERE id = $1`, session)
+			return err
+		}},
 	} {
-		session, _, code, secret := approve(label, end.deviceKeyID)
+		session, id, code, secret := approve(label, end.deviceKeyID)
 		if err := end.end(session); err != nil {
 			t.Fatalf("%s: %v", label, err)
+		}
+		listed, err := svc.listPreapprovals(t.Context(), userID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range listed {
+			if p.ID == id {
+				t.Fatalf("%s: the pre-approval of an ended session is still listed", label)
+			}
 		}
 		poll, err := svc.Poll(t.Context(), code, secret)
 		if err != nil || poll.TokenPair != nil || poll.Status != DeviceLoginStatusDenied {
