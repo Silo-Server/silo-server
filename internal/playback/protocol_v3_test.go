@@ -461,6 +461,50 @@ func TestPlanPlaybackV3EvidenceTiersReachTierAppropriateRoutes(t *testing.T) {
 	}
 }
 
+// On Roku a bare declared "h264" claim means 8-bit: a High 10 source is
+// encoded unless a decode entry names 10 bits. A Roku client that sent the
+// bare claim played these files as a black screen. Elsewhere the bare claim
+// still covers High 10, which Apple and Android players decode in software.
+func TestPlanPlaybackV3DeclaredH264ClaimOnRokuCoversOnlyEightBit(t *testing.T) {
+	tenBit := models.VideoTrack{Codec: "h264", Profile: "High 10", Level: 50, Width: 1280, Height: 720, FrameRate: "24000/1001", Bitrate: 3_000, BitDepth: 10, PixelFormat: "yuv420p10le", VideoRange: "SDR", VideoRangeType: "SDR"}
+	eightBit := tenBit
+	eightBit.Profile, eightBit.BitDepth, eightBit.PixelFormat = "High", 8, "yuv420p"
+	for _, tc := range []struct {
+		name     string
+		platform string
+		track    models.VideoTrack
+		decode   []VideoDecodeCapabilityV3
+		direct   bool
+	}{
+		{name: "roku, 8-bit, bare claim", platform: "roku", track: eightBit, direct: true},
+		{name: "roku, 10-bit, bare claim", platform: "roku", track: tenBit, direct: false},
+		{name: "roku, 10-bit, entry names 10 bits", platform: "roku", track: tenBit, decode: []VideoDecodeCapabilityV3{{Codec: "h264", BitDepths: []int{8, 10}}}, direct: true},
+		{name: "tvos, 10-bit, bare claim", platform: "tvos", track: tenBit, direct: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := &models.MediaFile{
+				ID: 42, FilePath: "/media/episode.mkv", Container: "mkv", CodecVideo: "h264", CodecAudio: "aac",
+				Resolution: "720p", Bitrate: 3_100, AudioChannels: 2,
+				VideoTracks: []models.VideoTrack{tc.track},
+				AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}},
+			}
+			req := validStartRequestV3()
+			req.Capabilities.VideoEvidence = EvidenceDeclaredV3
+			req.Capabilities.CodecsVideo = []string{"h264"}
+			req.Capabilities.Containers = []string{"mkv"}
+			req.Capabilities.VideoDecode = tc.decode
+			req.ClientPlaybackContext.Device.Platform = tc.platform
+			result := planFileV3(req, file)
+			if result.Plan == nil {
+				t.Fatalf("no plan: %s", ExplainPlannerResultV3(result))
+			}
+			if direct := result.Plan.Delivery == DeliveryOriginalHTTPV3; direct != tc.direct {
+				t.Fatalf("direct = %v, want %v: %s", direct, tc.direct, ExplainPlannerResultV3(result))
+			}
+		})
+	}
+}
+
 // A tier that cannot validate a stream the flat lists claim must say so:
 // the adapted plan carries evidence_insufficient_for_direct rather than
 // looking like a device refusal.
