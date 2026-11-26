@@ -680,7 +680,11 @@ envelope itself (its signature, challenge, `account_id` or times, or a payload
 with no set at all) is reported as the other signed routes report it. A signed
 set is validated after its signature verifies, so a 422 for it has already
 spent the challenge: correct the set, get a new challenge, and sign again. A new item named like a profile outside
-the set is 422 at its name with code `name_conflict`.
+the set is 422 at its name with code `name_conflict`, and so is an item whose
+name the owner already gave another of the set's profiles on this server (a
+profile keeps a name the owner set, whatever its item says); the item named is
+the one whose name comes from the set, the later one when both do. An item 0 whose `sync_id` the owner removed on this server
+(see `hidden_by_owner`) is 422 at `body.set.items[0].sync_id`.
 
 **Answer.**
 
@@ -692,8 +696,8 @@ the set is 422 at its name with code `name_conflict`.
   "awaiting_libraries": [],
   "awaiting_pictures": [],
   "awaiting_pins": [],
-  "hidden_by_owner": [],
-  "overrides": [],
+  "hidden_by_owner": ["6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11"],
+  "overrides": [{ "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e", "field": "max_content_rating", "value": "PG" }],
   "skipped_settings": [{ "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e", "key": "playback.subtitle_mode" }]
 }
 ```
@@ -711,7 +715,10 @@ the set is 422 at its name with code `name_conflict`.
 - `awaiting_pins`: profiles created from `keep` that still have no PIN.
 - `skipped_settings`: known settings whose value this server refused; it kept
   its own. Unknown keys and `server_local` keys are not listed.
-- `hidden_by_owner` and `overrides` are always empty today.
+- `hidden_by_owner`: items the owner removed on this server. The set did not
+  create or pair them.
+- `overrides`: values the owner set on this server for the set's profiles,
+  which the set left as they are (see [Edits made on this server](#edits-made-on-this-server)).
 - `jellyfin_bare_name_sign_in`: whether a Jellyfin-compatible app that signs
   in with the bare account name (no `#profile`) gets a profile, as the
   account's profiles stand after the set. It is `true` when exactly one
@@ -726,11 +733,18 @@ the set is 422 at its name with code `name_conflict`.
 The answer describes the account as it stands after the call, so a repeat of
 the same set answers the same lists.
 
-**Refusals.**
+**Refusals.** They come in one order. A malformed set is 422 first: its
+shape needs nothing from the server. Then a set that is older, other content
+at the held version, or newer without the person's latest edits (`edits_seen`)
+is `profile_set_stale`. Then the household must map the set (`pairs`, the
+main profile). The held version again is then compared and answered as a
+no-op; it is never refused for something only a write would do. Last, a set
+that will write is refused for what it would do: `name_conflict`, or item 0
+taking a `sync_id` the owner removed.
 
 | Problem | When |
 | --- | --- |
-| 409 `profile_set_stale` | The version is older than the one the server holds; the same version with other content; the same version whose `set` PIN differs from the stored PIN, or whose `clear` finds a PIN; or the server holds the person's own edits and `edits_seen` is not its current `edits_token`. Nothing is written. |
+| 409 `profile_set_stale` | The version is older than the one the server holds; the same version with other content; the same version whose `set` PIN differs from the stored PIN, or whose `clear` finds a PIN (a PIN the owner set on this server is not compared); or a newer version while the server holds the person's own edits and `edits_seen` is not its current `edits_token`. Nothing is written. |
 | 409 `capability_disabled` | The signed form while `auth.app_key_sign_in` is off. The session form works with app keys off. |
 | 409 `conflict` | The household kept changing while the set was applied; or the account has profiles but no main profile, which a set can't apply to. Send the set again a few times, waiting longer each time, then stop and report it: the second case doesn't clear by itself. |
 | 401 `signature_invalid`, `challenge_invalid` | The signed form, as on the other signed routes. A payload naming another account is `signature_invalid`. A replayed envelope is `challenge_invalid`. |
@@ -767,13 +781,17 @@ it, with or without a profile header; it needs no PIN.
     "name": "Sam", "picture": "preset:avatar-3", "has_pin": true, "is_child": false,
     "max_content_rating": "", "max_advisory_age": null, "require_advisory_age": false,
     "requests_blocked": false, "settings": { "playback.audio_language": "en" },
-    "changed_here": []
+    "changed_here": [
+      { "field": "name", "at": "2026-11-25T03:50:00.000Z", "by": "account" },
+      { "field": "settings.playback.subtitle_language", "at": "2026-11-25T03:52:00.000Z", "by": "owner" }
+    ]
   }],
-  "deleted_here": [],
-  "overrides": [],
+  "deleted_here": [{ "sync_id": "6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11", "at": "2026-11-25T03:51:00.000Z", "by": "owner" }],
+  "overrides": [{ "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e", "field": "settings.playback.subtitle_language" }],
+  "hidden_by_owner": ["6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11"],
   "local_only": [{ "id": "15", "name": "Guest", "has_pin": false }],
   "jellyfin_bare_name_sign_in": true,
-  "edits_token": ""
+  "edits_token": "e1.mFzDq0dX7eTsc3m6SfN0Lw1o2s0kHqgV"
 }
 ```
 
@@ -783,11 +801,103 @@ profile is absent. `local_only` lists the profiles outside the set, in
 creation order, with `has_pin`, so an app can work out
 `jellyfin_bare_name_sign_in` for a set before it sends it.
 `jellyfin_bare_name_sign_in` is as in the `PUT` answer, for the profiles as
-they stand now. `edits_token` names the person's own edits on this server that
-no set has settled yet; it is `""` when there are none, which is always today.
-`changed_here`, `deleted_here` and `overrides` are always empty today. An
-account that never took a set answers `version` 0, no items, and every profile
-in `local_only`.
+they stand now. `changed_here`, `deleted_here`, `overrides`,
+`hidden_by_owner` and `edits_token` are described below. An account that never
+took a set answers `version` 0, no items, and every profile in `local_only`.
+
+### Edits made on this server
+
+A profile from the set can still be changed on each server through the
+ordinary routes: the profile editor, settings, the avatar routes, the admin
+Users page, a Jellyfin-compatible app's user configuration. The server records
+each such change to a profile that has a `sync_id`, per field, with who made it
+and when:
+
+- `by: "account"` (a mark): the account's own sessions, its API keys and its
+  Jellyfin-compatible sessions. The app reads these and decides whether to
+  spread them to the person's other servers, asking first for a PIN, a limit
+  or a deletion.
+- `by: "owner"` (an override): an administrator on an admin route, or an
+  administrator signed in as the account. A set leaves the field as it is and
+  reports it in `overrides`. An override belongs to the profile, not to its
+  `sync_id`: when a set gives the main profile a new `sync_id`, its overrides
+  and marks move with it.
+
+The later edit of a field wins, whoever makes it: an administrator's edit of a
+field the person changed makes it an override, and the person's edit of an
+overridden field on this server ends the override and makes it a mark again.
+An override is not a lock.
+
+What counts as an edit:
+
+- A profile field (`name`, `picture`, `pin`, `is_child`, `max_content_rating`,
+  `max_advisory_age`, `require_advisory_age`, `requests_blocked`) when the
+  save changes its value. A save that sends every field marks only the fields
+  that changed. `picture` changes with a new upload even when the avatar
+  reference stays the same; `pin` changes whenever a PIN is set, the same
+  digits included.
+- A setting, `settings.<key>`, when a write or reset changes the profile's
+  effective value: the value the settings routes answer for that profile
+  (its own value, else what it inherits, an administrator's default
+  included). Writing the value the profile already has, inherited or stored,
+  and resetting a value equal to the one it would inherit, are not edits;
+  choosing the contract default over a different administrator default is. Two keys
+  the settings contract keeps as spellings of one preference
+  (`playback.intro_skip_mode` and `playback.auto_skip_intro`) are recorded
+  together: a change of either moves both to whoever made it.
+  `server_local` keys and settings stored per device, library or series are
+  not in the set and are never recorded. A Jellyfin-compatible app's
+  configuration save writes only the values that differ from the effective
+  ones it shows the app, resolved the same way, so echoing a page back
+  records nothing.
+- A profile's deletion, in `deleted_here`. An owner's deletion also hides the
+  profile: a set does not create or pair it again on this server, and reports
+  it in `hidden_by_owner`.
+
+Nothing is recorded for the set's own writes, a backup restore, a profile
+import, or a change to the main profile's name when the account's username
+changes: a main profile from a set keeps its name then.
+
+In `GET /profiles/set`:
+
+- `items[].changed_here`: the profile's recorded fields, `{ field, at, by }`,
+  by field. Marks are listed until a set settles them, overrides until the
+  person edits the field here.
+- `field`, here and in `overrides`, is an open string: an item field name or
+  `settings.<key>`. New item fields and new settings keys will appear; an app
+  ignores, or carries through unchanged, a `field` it doesn't know.
+- `deleted_here`: profiles of the set deleted here, `{ sync_id, at, by }`.
+- `overrides`: `{ sync_id, field, value }` for each owner's field. `value` is
+  what the profile holds now, encoded as a set item encodes it: `pin` is
+  `"set"` or `"clear"`, never a PIN; `max_advisory_age` is a number or
+  `null`; a setting the owner reset has no `value` member, because the
+  profile has no value of its own (`null` is a value). A `picture` naming an
+  upload this server kept no hash for has no `value` member in the `PUT`
+  answer, which never reads an upload.
+- `hidden_by_owner`: the `sync_id`s the owner deleted here.
+- `deleted_here` and `hidden_by_owner` list every removal on record, including
+  `sync_id`s the set has since dropped. The `PUT` answer's `hidden_by_owner`
+  lists only that set's items. An app that doesn't find one of these
+  `sync_id`s in its own set ignores it; the server is not out of step.
+- `edits_token`: names the marks (`by: "account"` entries of `changed_here`
+  and `deleted_here`); `""` when there are none. It changes when a mark is
+  added (an edit that puts a field back as it was included), settled, or
+  replaced by an owner's edit of the same field. Any other owner's edit is
+  not a mark and leaves it as it is.
+
+While `edits_token` is not empty, a newer set must carry it as `edits_seen`,
+or it is `profile_set_stale` with nothing written: read the set, merge the
+marks, and send again. An accepted newer set settles exactly the marks its
+`edits_seen` named and they leave `changed_here` and `deleted_here`; a mark
+recorded after the read stays. A repeat of the held version settles nothing.
+An override stays until the person edits that field on this server, or the
+profile is deleted here. Two settings the settings contract keeps as one
+preference under two keys are recorded together, so the person's edit of
+either ends the override on both. An override belongs to its profile: a set that drops
+the profile removes what the owner recorded for it, and an item under a new
+`sync_id` is a new profile with none of the old one's overrides. A profile an
+administrator deleted stays hidden on this server: no operation clears that
+yet.
 
 ## Profile PINs
 

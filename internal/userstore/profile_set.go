@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/profileedits"
 )
 
 // ErrProfileSetUnsupported is returned by a store that cannot apply a
@@ -48,6 +50,9 @@ type ProfileSetSnapshot struct {
 	State    ProfileSetState
 	Rows     []ProfileSetRow
 	Settings map[string]map[string]json.RawMessage
+	// Edits is every row of the account's edits made on this server
+	// outside a set, ordered by sync ID and field.
+	Edits []profileedits.Edit
 }
 
 // ProfileSetStore applies a profile set. The PostgreSQL store implements it.
@@ -88,4 +93,12 @@ type ProfileSetWriter interface {
 	// Accept stores the set's version and content hash as the account's,
 	// stamped now.
 	Accept(ctx context.Context, version int64, sha256 []byte) error
+	// SettleEdits settles the marks an accepted set saw (exactly those rows,
+	// by revision) and drops the field rows of the profiles it removed,
+	// by sync ID (profileedits.Settle). It locks edit rows, so it runs last.
+	SettleEdits(ctx context.Context, seen []profileedits.Edit, removed []string) error
+	// MoveEdits moves the edit rows of the profile with sync ID from to the
+	// ID to the set gave it (profileedits.Move). It locks edit rows, so it
+	// runs last.
+	MoveEdits(ctx context.Context, from, to string) error
 }

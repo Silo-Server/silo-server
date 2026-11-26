@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -15,6 +16,10 @@ import (
 type PostgresUserStore struct {
 	pool   *pgxpool.Pool
 	userID int
+	// adminDefaults is the administrator's defaults reader the settings read
+	// routes resolve with, so an edit is judged on the same effective value
+	// (nil resolves every default from the contract).
+	adminDefaults settingsresolve.ServerSettings
 }
 
 // Compile-time interface check.

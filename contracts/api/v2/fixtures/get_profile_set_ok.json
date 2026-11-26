@@ -9,18 +9,53 @@
       "picture": "preset:avatar-3",
       "has_pin": true,
       "is_child": false,
-      "max_content_rating": "",
+      "max_content_rating": "PG",
       "max_advisory_age": 12,
       "require_advisory_age": false,
       "requests_blocked": false,
       "settings": {
         "playback.audio_language": "en"
       },
-      "changed_here": []
+      "changed_here": [
+        {
+          "field": "max_content_rating",
+          "at": "2026-11-25T03:50:00.000Z",
+          "by": "owner"
+        },
+        {
+          "field": "name",
+          "at": "2026-11-25T03:50:00.000Z",
+          "by": "account"
+        },
+        {
+          "field": "settings.playback.subtitle_language",
+          "at": "2026-11-25T03:50:00.000Z",
+          "by": "owner"
+        }
+      ]
     }
   ],
-  "deleted_here": [],
-  "overrides": [],
+  "deleted_here": [
+    {
+      "sync_id": "6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11",
+      "at": "2026-11-25T03:50:00.000Z",
+      "by": "owner"
+    }
+  ],
+  "overrides": [
+    {
+      "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "field": "max_content_rating",
+      "value": "PG"
+    },
+    {
+      "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "field": "settings.playback.subtitle_language"
+    }
+  ],
+  "hidden_by_owner": [
+    "6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11"
+  ],
   "local_only": [
     {
       "id": "p-guest",
@@ -29,5 +64,5 @@
     }
   ],
   "jellyfin_bare_name_sign_in": false,
-  "edits_token": ""
+  "edits_token": "e1.mFzDq0dX7eTsc3m6SfN0Lw1o2s0kHqgV"
 }

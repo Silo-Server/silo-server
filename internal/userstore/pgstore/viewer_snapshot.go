@@ -3,8 +3,9 @@ package pgstore
 import (
 	"context"
 
-	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // ViewerSnapshotReader exposes only the owning preference reads on an existing

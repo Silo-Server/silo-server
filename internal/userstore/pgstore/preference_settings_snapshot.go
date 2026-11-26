@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func (s *PostgresUserStore) WithPreferenceSettingsSnapshot(ctx context.Context, fn func(userstore.PreferenceSettingsReader) error) error {
@@ -14,7 +15,7 @@ func (s *PostgresUserStore) WithPreferenceSettingsSnapshot(ctx context.Context, 
 		return fmt.Errorf("beginning preference snapshot: %w", err)
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
-	if err := fn(&preferenceSettingsTx{exec: tx, userID: s.userID}); err != nil {
+	if err := fn(&preferenceSettingsTx{exec: tx, userID: s.userID, defaults: s.adminDefaults}); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

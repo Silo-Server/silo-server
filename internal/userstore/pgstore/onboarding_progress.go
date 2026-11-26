@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func scanOnboardingProgress(row pgx.Row, profileID, tourID string) (*userstore.OnboardingProgress, error) {

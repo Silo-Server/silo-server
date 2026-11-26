@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
+	"github.com/Silo-Server/silo-server/internal/profileedits"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -79,7 +80,12 @@ func readProfileSetSnapshot(ctx context.Context, tx pgx.Tx, userID int, lock str
 	if err != nil {
 		return out, fmt.Errorf("reading the household: %w", err)
 	}
-	out.Settings, err = readProfileScopeSettings(ctx, tx, userID)
+	if out.Settings, err = readProfileScopeSettings(ctx, tx, userID); err != nil {
+		return out, err
+	}
+	// A plain read: an edit row is locked only last, by the writer that
+	// settles or records it.
+	out.Edits, err = profileedits.List(ctx, tx, userID)
 	return out, err
 }
 
@@ -132,7 +138,8 @@ func readProfileScopeSettings(ctx context.Context, tx pgx.Tx, userID int) (map[s
 // the account's preference-settings and section-override locks (every
 // profile writer takes the first before any row), the audit actors, the
 // collections of the profiles the set removes in ID order, every profile
-// row of the account in ID order, and the account row last. A profile save
+// row of the account in ID order, and the account row last; fn locks the
+// account's edit rows only at its end (SettleEdits). A profile save
 // locks its profile row before the account row, and a profile delete takes
 // the same prefix of locks, so neither can wait on this transaction while
 // holding something it needs.
@@ -186,7 +193,7 @@ func (s *PostgresUserStore) WithProfileSetTransaction(ctx context.Context, inSet
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR NO KEY UPDATE`, s.userID); err != nil {
 		return fmt.Errorf("locking the account: %w", err)
 	}
-	writer := &profileSetTx{preferenceSettingsTx: preferenceSettingsTx{exec: tx, userID: s.userID}, tx: tx, removable: removable}
+	writer := &profileSetTx{preferenceSettingsTx: preferenceSettingsTx{exec: tx, userID: s.userID, defaults: s.adminDefaults}, tx: tx, removable: removable}
 	if err := fn(writer); err != nil {
 		return err
 	}
@@ -240,7 +247,16 @@ func (w *profileSetTx) DeleteProfile(ctx context.Context, profileID string) ([]s
 	if !slices.Contains(w.removable, profileID) {
 		return nil, fmt.Errorf("profile %s was not locked for removal", profileID)
 	}
-	return deleteProfileRowsTx(ctx, w.tx, w.userID, profileID)
+	collections, _, err := deleteProfileRowsTx(ctx, w.tx, w.userID, profileID)
+	return collections, err
+}
+
+func (w *profileSetTx) SettleEdits(ctx context.Context, seen []profileedits.Edit, removed []string) error {
+	return profileedits.Settle(ctx, w.tx, w.userID, seen, removed)
+}
+
+func (w *profileSetTx) MoveEdits(ctx context.Context, from, to string) error {
+	return profileedits.Move(ctx, w.tx, w.userID, from, to)
 }
 
 func (w *profileSetTx) Accept(ctx context.Context, version int64, sha256 []byte) error {

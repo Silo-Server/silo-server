@@ -241,6 +241,7 @@ var restoredFlagColumns = map[string]string{
 	"page_sections.featured":                                  whyShown,
 	"page_sections.web_only":                                  whyShown,
 	"profile_series_interest.next_up_candidate":               whyDerived,
+	"profile_set_edits.replaced_owner":                        "a record that the person ended an owner's override; it grants nothing",
 	"request_routes.is_fallback":                              whyRouting,
 	"request_routes.skip_uhd":                                 whyRouting,
 	"request_routing.id":                                      whyKey,

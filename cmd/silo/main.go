@@ -2758,7 +2758,9 @@ func main() {
 			userStoreProvider = userdb.NewSQLiteProvider(pool)
 			slog.Info("user store initialized", "backend", "sqlite", "max_open", poolConfig.MaxOpen)
 		default: // "postgres"
-			userStoreProvider = pgstore.NewPostgresProvider(deps.DB)
+			// The stores judge a setting edit on the effective value the
+			// settings routes answer, administrator defaults included.
+			userStoreProvider = pgstore.NewPostgresProvider(deps.DB).WithAdminDefaults(adminDefaults)
 			slog.Info("user store initialized", "backend", "postgres")
 		}
 		defer userStoreProvider.Close()
@@ -4282,6 +4284,7 @@ func main() {
 			ClientIPResolver:     ipResolver,
 			IngressTokens:        networkAccess.Registry,
 			ActivityLogWriter:    deps.ActivityLogWriter,
+			ProfileEditsWaker:    deps.ProfileEditsWaker,
 			NodeID:               deps.NodeID,
 			StreamTelemetry:      streamTelemetryRegistry,
 			NodePlanner:          deps.NodePlanner,

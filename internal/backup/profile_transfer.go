@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/backup/userdata"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/profileedits"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
@@ -431,6 +432,8 @@ func refusePreferenceAccessFields(raw json.RawMessage) error {
 // Import merges a profile export into the signed-in profile, in one
 // transaction, with the restore's merge rules.
 func (t *ProfileTransfer) Import(ctx context.Context, scope ProfileImportScope, data []byte) (*ProfileImportResult, error) {
+	// An import is not an edit made on this server.
+	ctx = profileedits.WithoutRecording(ctx)
 	release, err := t.slotFor(ctx, scope.UserID)
 	if err != nil {
 		return nil, err

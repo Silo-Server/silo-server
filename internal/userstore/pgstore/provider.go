@@ -6,12 +6,22 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // PostgresProvider implements userstore.UserStoreProvider using shared Postgres tables.
 type PostgresProvider struct {
-	pool *pgxpool.Pool
+	pool          *pgxpool.Pool
+	adminDefaults settingsresolve.ServerSettings
+}
+
+// WithAdminDefaults gives every store the administrator's defaults reader
+// the settings read routes resolve with, so the stores judge a setting edit
+// on the same effective value those routes answer.
+func (p *PostgresProvider) WithAdminDefaults(defaults settingsresolve.ServerSettings) *PostgresProvider {
+	p.adminDefaults = defaults
+	return p
 }
 
 // NewPostgresProvider creates a provider backed by a pgx pool.
@@ -25,7 +35,9 @@ var _ userstore.UserStoreProvider = (*PostgresProvider)(nil)
 // ForUser returns a PostgresUserStore scoped to the given user.
 // This is lightweight — no per-user connection, just a struct with the pool + userID.
 func (p *PostgresProvider) ForUser(_ context.Context, userID int) (userstore.UserStore, error) {
-	return newStore(p.pool, userID), nil
+	store := newStore(p.pool, userID)
+	store.adminDefaults = p.adminDefaults
+	return store, nil
 }
 
 // Close is a no-op for Postgres — the pool is managed externally.

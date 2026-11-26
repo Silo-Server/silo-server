@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
+	"github.com/Silo-Server/silo-server/internal/profileedits"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -243,8 +244,23 @@ func (s *PostgresUserStore) ListProfiles(ctx context.Context) ([]userstore.Profi
 	return profiles, nil
 }
 
+// UpdateProfile writes one profile in a transaction of its own, so its
+// UPDATE, its library rows, the account's access revision and the edit it
+// records commit together. It locks the profile row, then the account row
+// (for an access field), then edit rows.
+//
+// It first takes the account's preference-settings lock, as every other
+// profile writer and an account deletion do. The deletion then runs wholly
+// before or after it: never between a write and the edit it records, and
+// never holding the account row while this transaction holds the profile
+// row and waits for the account row (an access field's revision bump).
 func (s *PostgresUserStore) UpdateProfile(ctx context.Context, id string, u userstore.UpdateProfileInput) error {
-	return updateProfile(ctx, s.pool, s.userID, id, u)
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := lockPreferenceSettings(ctx, tx, s.userID); err != nil {
+			return err
+		}
+		return updateProfile(ctx, tx, s.userID, id, u)
+	})
 }
 
 func updateProfile(
@@ -355,12 +371,20 @@ func updateProfile(
 		return nil
 	}
 
-	var exists bool
-	if err := exec.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM user_profiles WHERE user_id = $1 AND id = $2)", userID, id).Scan(&exists); err != nil {
-		return fmt.Errorf("checking profile %s existence: %w", id, err)
+	// An edit to a profile from a set is recorded by comparing the fields
+	// a set carries before and after, under the row lock the UPDATE takes.
+	before, err := readRecordedFields(ctx, exec, userID, id, u)
+	if err != nil {
+		return err
 	}
-	if !exists {
-		return fmt.Errorf("profile %s not found", id)
+	if before == nil {
+		var exists bool
+		if err := exec.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM user_profiles WHERE user_id = $1 AND id = $2)", userID, id).Scan(&exists); err != nil {
+			return fmt.Errorf("checking profile %s existence: %w", id, err)
+		}
+		if !exists {
+			return fmt.Errorf("profile %s not found", id)
+		}
 	}
 
 	if len(setClauses) > 0 {
@@ -388,6 +412,9 @@ func updateProfile(
 		if _, err := exec.Exec(ctx, "UPDATE users SET access_policy_revision = access_policy_revision + 1 WHERE id = $1", userID); err != nil {
 			return fmt.Errorf("bumping access policy revision for user %d: %w", userID, err)
 		}
+	}
+	if before != nil {
+		return profileedits.RecordFields(ctx, exec, userID, id, before.changedFields(u))
 	}
 	return nil
 }
@@ -528,8 +555,13 @@ func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string,
 		}
 	}
 
-	collectionIDs, err := deleteProfileRowsTx(ctx, tx, s.userID, id)
+	collectionIDs, gone, err := deleteProfileRowsTx(ctx, tx, s.userID, id)
 	if err != nil {
+		return nil, err
+	}
+	// A profile from a set deleted outside one is recorded, last: an
+	// owner's removal keeps the set from bringing it back here.
+	if err := profileedits.RecordRemoval(ctx, tx, s.userID, gone.syncID, gone.name); err != nil {
 		return nil, err
 	}
 	if audit != nil {
@@ -548,8 +580,31 @@ func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string,
 // and returns the IDs of the personal collections it deleted. It takes no
 // locks: the caller already holds what DeleteProfileAudited takes, in its
 // order (the account locks, the actors, the collections, the profile row).
-// A profile that does not exist is an error.
-func deleteProfileRowsTx(ctx context.Context, tx pgx.Tx, userID int, id string) ([]string, error) {
+// A profile that does not exist is an error. It also returns the deleted
+// profile's sync ID ("" for none) and name.
+func deleteProfileRowsTx(ctx context.Context, tx pgx.Tx, userID int, id string) ([]string, deletedProfile, error) {
+	collectionIDs, err := deleteProfileDataTx(ctx, tx, userID, id)
+	if err != nil {
+		return nil, deletedProfile{}, err
+	}
+	var gone deletedProfile
+	err = tx.QueryRow(ctx, "DELETE FROM user_profiles WHERE user_id = $1 AND id = $2 RETURNING COALESCE(sync_id::text, ''), name",
+		userID, id).Scan(&gone.syncID, &gone.name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, deletedProfile{}, fmt.Errorf("profile %s not found", id)
+	}
+	if err != nil {
+		return nil, deletedProfile{}, fmt.Errorf("deleting profile %s: %w", id, err)
+	}
+	return collectionIDs, gone, nil
+}
+
+// deletedProfile is what a profile delete reports of the profile row.
+type deletedProfile struct{ syncID, name string }
+
+// deleteProfileDataTx deletes every row keyed by a profile, but not the
+// profile row, and returns the IDs of the personal collections it deleted.
+func deleteProfileDataTx(ctx context.Context, tx pgx.Tx, userID int, id string) ([]string, error) {
 	// Preferences belong to viewers, not creators, so remove every override
 	// for collections owned by the profile before those collections disappear.
 	if _, err := tx.Exec(ctx, `
@@ -611,14 +666,6 @@ func deleteProfileRowsTx(ctx context.Context, tx pgx.Tx, userID int, id string) 
 		if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE user_id = $1 AND profile_id = $2", table), userID, id); err != nil {
 			return nil, fmt.Errorf("deleting from %s for profile %s: %w", table, id, err)
 		}
-	}
-
-	result, err := tx.Exec(ctx, "DELETE FROM user_profiles WHERE user_id = $1 AND id = $2", userID, id)
-	if err != nil {
-		return nil, fmt.Errorf("deleting profile %s: %w", id, err)
-	}
-	if result.RowsAffected() == 0 {
-		return nil, fmt.Errorf("profile %s not found", id)
 	}
 	return collectionIDs, nil
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -89,7 +90,13 @@ func (h *AuthHandler) resolvedUserDTO(ctx context.Context, session *Session) (us
 	if err != nil {
 		return dto, err
 	}
-	values, err := settingsresolve.New(contract).Resolve(ctx, store, settingsresolve.Context{ProfileID: session.ProfileID}, []string{settingskeys.PlaybackAudioLanguage, settingskeys.PlaybackSubtitleLanguage, settingskeys.PlaybackSubtitleMode, settingskeys.PlaybackShowForcedSubtitles, settingskeys.PlaybackAutoPlayNext, settingskeys.HomeHideWatchedItems}, nil)
+	// The resolution the native settings routes answer with, administrator
+	// defaults included, so a value echoed back reads as the one shown.
+	resolver := settingsresolve.New(contract)
+	if h.adminDefaults != nil {
+		resolver = resolver.WithAdminDefaults(h.adminDefaults)
+	}
+	values, err := resolver.Resolve(ctx, store, settingsresolve.Context{ProfileID: session.ProfileID}, []string{settingskeys.PlaybackAudioLanguage, settingskeys.PlaybackSubtitleLanguage, settingskeys.PlaybackSubtitleMode, settingskeys.PlaybackShowForcedSubtitles, settingskeys.PlaybackAutoPlayNext, settingskeys.HomeHideWatchedItems}, nil)
 	if err != nil {
 		return dto, err
 	}
@@ -196,6 +203,7 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 	// auto with forced subtitles shown.
 	currentSubtitleMode := dto.Configuration.SubtitleMode
 	currentHidePlayed := dto.Configuration.HidePlayedInLatest
+	currentAutoPlay := dto.Configuration.EnableNextEpisodeAutoPlay
 	currentLanguages := map[string]string{
 		"audiolanguagepreference":    dto.Configuration.AudioLanguagePreference,
 		"subtitlelanguagepreference": dto.Configuration.SubtitleLanguagePreference,
@@ -231,15 +239,21 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 				continue
 			}
 			value, _ = json.Marshal(dto.Configuration.HidePlayedInLatest)
-		} else if field != "enablenextepisodeautoplay" {
+		} else if field == "enablenextepisodeautoplay" {
+			// The effective value, stored or default, echoed back is no change.
+			if dto.Configuration.EnableNextEpisodeAutoPlay == currentAutoPlay {
+				continue
+			}
+		} else {
 			var tag string
 			if err := json.Unmarshal(value, &tag); err != nil {
 				writeError(w, 400, "BadRequest", "Invalid language")
 				return
 			}
 			// Echoing a base-language choice must not flatten a native region or
-			// script preference when Jellyfin Web saves an unrelated setting.
-			if tag != "" && tag == currentLanguages[field] {
+			// script preference when Jellyfin Web saves an unrelated setting,
+			// and an unset language echoed as empty is not a choice either.
+			if tag == currentLanguages[field] {
 				continue
 			}
 			if tag == "" {
@@ -270,7 +284,18 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 	encoded, _ := json.Marshal(dto.Configuration)
 	err = tx.WithPreferenceSettingsTransaction(r.Context(), func(writer userstore.PreferenceSettingsWriter) error {
 		for key, value := range values {
-			if _, err := writer.UpsertSettingValue(r.Context(), userstore.SettingIdentity{Key: key, Scope: settingscontract.ScopeProfile, ProfileID: session.ProfileID}, value); err != nil {
+			id := userstore.SettingIdentity{Key: key, Scope: settingscontract.ScopeProfile, ProfileID: session.ProfileID}
+			// Jellyfin Web saves the whole configuration from every page; a
+			// value equal to the stored one is not written, so it is not an
+			// edit of that setting.
+			stored, err := writer.GetSettingValue(r.Context(), id)
+			if err != nil {
+				return err
+			}
+			if stored != nil && sameJSON(stored.Value, value) {
+				continue
+			}
+			if _, err := writer.UpsertSettingValue(r.Context(), id, value); err != nil {
 				return err
 			}
 		}
@@ -302,4 +327,13 @@ func (h *AuthHandler) HandleCultures(w http.ResponseWriter, r *http.Request) {
 		cultures = append(cultures, culture{Name: code, DisplayName: display.English.Languages().Name(base), TwoLetterISOLanguageName: code, ThreeLetterISOLanguageName: iso3, ThreeLetterISOLanguageNames: []string{iso3}})
 	}
 	writeJSON(w, http.StatusOK, cultures)
+}
+
+// sameJSON reports whether a and b are the same JSON value.
+func sameJSON(a, b json.RawMessage) bool {
+	var x, y any
+	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
+		return false
+	}
+	return reflect.DeepEqual(x, y)
 }

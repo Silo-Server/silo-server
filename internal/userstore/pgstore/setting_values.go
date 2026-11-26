@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -240,13 +241,16 @@ func (s *PostgresUserStore) UpsertSettingValue(
 	id userstore.SettingIdentity,
 	value json.RawMessage,
 ) (*userstore.SettingValue, error) {
-	return upsertSettingValue(ctx, s.pool, s.userID, id, value)
+	return inRecordingTx(ctx, s, id, func(exec preferenceSettingsExecutor) (*userstore.SettingValue, error) {
+		return upsertSettingValue(ctx, exec, s.userID, s.adminDefaults, id, value)
+	})
 }
 
 func upsertSettingValue(
 	ctx context.Context,
 	exec preferenceSettingsExecutor,
 	userID int,
+	defaults settingsresolve.ServerSettings,
 	id userstore.SettingIdentity,
 	value json.RawMessage,
 ) (*userstore.SettingValue, error) {
@@ -259,6 +263,10 @@ func upsertSettingValue(
 	target, ok := settingConflictTargets[id.Scope]
 	if !ok {
 		return nil, fmt.Errorf("%w: %q has no storage identity", userstore.ErrInvalidSettingIdentity, id.Scope)
+	}
+	effect, err := beginSettingEffect(ctx, exec, userID, defaults, id)
+	if err != nil {
+		return nil, err
 	}
 
 	row := exec.QueryRow(ctx, fmt.Sprintf(`
@@ -278,6 +286,9 @@ func upsertSettingValue(
 	stored, err := scanSettingValue(row)
 	if err != nil {
 		return nil, fmt.Errorf("upserting setting value %q at %s: %w", id.Key, id.Scope, err)
+	}
+	if err := effect.finish(ctx, exec, userID, defaults, id); err != nil {
+		return nil, err
 	}
 	return &stored, nil
 }
@@ -338,13 +349,16 @@ func (s *PostgresUserStore) CompareAndSetSettingValue(
 	value json.RawMessage,
 	expectedRevision int64,
 ) (*userstore.SettingValue, error) {
-	return compareAndSetSettingValue(ctx, s.pool, s.userID, id, value, expectedRevision)
+	return inRecordingTx(ctx, s, id, func(exec preferenceSettingsExecutor) (*userstore.SettingValue, error) {
+		return compareAndSetSettingValue(ctx, exec, s.userID, s.adminDefaults, id, value, expectedRevision)
+	})
 }
 
 func compareAndSetSettingValue(
 	ctx context.Context,
 	exec preferenceSettingsExecutor,
 	userID int,
+	defaults settingsresolve.ServerSettings,
 	id userstore.SettingIdentity,
 	value json.RawMessage,
 	expectedRevision int64,
@@ -357,6 +371,10 @@ func compareAndSetSettingValue(
 	}
 	if expectedRevision < 0 {
 		return nil, fmt.Errorf("%w: expected revision must be non-negative", userstore.ErrInvalidSettingIdentity)
+	}
+	effect, err := beginSettingEffect(ctx, exec, userID, defaults, id)
+	if err != nil {
+		return nil, err
 	}
 
 	var row pgx.Row
@@ -394,26 +412,40 @@ func compareAndSetSettingValue(
 	if err != nil {
 		return nil, fmt.Errorf("compare-and-setting value %q at %s: %w", id.Key, id.Scope, err)
 	}
+	if err := effect.finish(ctx, exec, userID, defaults, id); err != nil {
+		return nil, err
+	}
 	return &stored, nil
 }
 
 func (s *PostgresUserStore) DeleteSettingValue(ctx context.Context, id userstore.SettingIdentity) (bool, error) {
-	return deleteSettingValue(ctx, s.pool, s.userID, id)
+	return inRecordingTx(ctx, s, id, func(exec preferenceSettingsExecutor) (bool, error) {
+		return deleteSettingValue(ctx, exec, s.userID, s.adminDefaults, id)
+	})
 }
 
 func deleteSettingValue(
 	ctx context.Context,
 	exec preferenceSettingsExecutor,
 	userID int,
+	defaults settingsresolve.ServerSettings,
 	id userstore.SettingIdentity,
 ) (bool, error) {
 	if err := id.Validate(); err != nil {
+		return false, err
+	}
+	effect, err := beginSettingEffect(ctx, exec, userID, defaults, id)
+	if err != nil {
 		return false, err
 	}
 	clause, args := settingIdentityPredicate(userID, id)
 	tag, err := exec.Exec(ctx, "DELETE FROM user_setting_values WHERE "+clause, args...)
 	if err != nil {
 		return false, fmt.Errorf("deleting setting value %q at %s: %w", id.Key, id.Scope, err)
+	}
+	// A reset that leaves the effective value as it was is not an edit.
+	if err := effect.finish(ctx, exec, userID, defaults, id); err != nil {
+		return false, err
 	}
 	return tag.RowsAffected() > 0, nil
 }
