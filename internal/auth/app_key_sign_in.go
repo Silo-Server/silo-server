@@ -516,7 +516,7 @@ func (a *AppKeySignIn) Enroll(ctx context.Context, req KeyEnrollRequest) (*KeySi
 			return err
 		}
 		audit, err = recordKeyAdded(ctx, tx, auditmutation.ActionAppKeysEnrolled, user.ID, http.StatusOK,
-			keyAdded{}.withDevice(key).withPerson(person, personCreated))
+			keyAdded{auditFieldSessionOpenedVia: chain.openedVia}.withDevice(key).withPerson(person, personCreated))
 		return err
 	})
 	if err != nil {

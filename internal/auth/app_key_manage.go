@@ -147,7 +147,7 @@ func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key
 		if !chain.binding().same(binding) {
 			return ErrSessionRevoked
 		}
-		changes := auditmutation.Changes(before, map[string]any{auditFieldPersonKey: key.KeyID()})
+		changes := auditmutation.Changes(before, map[string]any{auditFieldPersonKey: key.KeyID(), auditFieldSessionOpenedVia: chain.openedVia})
 		if denied > 0 {
 			changes = append(changes, auditmutation.Created(auditFieldDeniedDeviceKeys, denied)...)
 		}

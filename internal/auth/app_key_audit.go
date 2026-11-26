@@ -23,6 +23,10 @@ const (
 	auditFieldExpiresAt          = "expires_at"
 	auditFieldDeviceName         = "device_name"
 	auditFieldDeviceLoginRequest = "device_login_request_id"
+	// auditFieldSessionOpenedVia is how the session that made the change
+	// was opened (auth_sessions.opened_via): whether a device key stands
+	// behind it (app_key) or a password or provider sign-in.
+	auditFieldSessionOpenedVia = "session_opened_via"
 )
 
 // keyAdded are the values a key-adding audit row records, all on the after

@@ -93,7 +93,8 @@ func TestKeyAddingOperationsAuditedDB(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			return added{userID: user.ID, after: map[string]string{auditFieldDeviceKey: quoted(result.DeviceID), auditFieldPersonKey: quoted(person.pub.KeyID())},
+			return added{userID: user.ID, after: map[string]string{auditFieldDeviceKey: quoted(result.DeviceID), auditFieldPersonKey: quoted(person.pub.KeyID()),
+				auditFieldSessionOpenedVia: quoted(models.SessionOpenedPassword)},
 				personKid: person.pub.KeyID(), deviceKid: device.pub.KeyID(), session: result.Pair.SessionID}
 		}},
 		{"introduce", auditmutation.ActionDeviceKeyIntroduced, "/api/v2/auth/keys/introduce", func(t *testing.T, label string) added {
@@ -117,7 +118,7 @@ func TestKeyAddingOperationsAuditedDB(t *testing.T) {
 				t.Fatal(err)
 			}
 			return added{userID: user.ID, before: map[string]string{auditFieldPersonKey: quoted(old.pub.KeyID())},
-				after:     map[string]string{auditFieldPersonKey: quoted(replacement.pub.KeyID())},
+				after:     map[string]string{auditFieldPersonKey: quoted(replacement.pub.KeyID()), auditFieldSessionOpenedVia: quoted(models.SessionOpenedPassword)},
 				personKid: replacement.pub.KeyID()}
 		}},
 		{"issue an app code", auditmutation.ActionAppCodeIssued, "/api/v2/auth/app-codes", func(t *testing.T, label string) added {
@@ -277,5 +278,57 @@ func TestKeyWithoutAddressListsEmptyDB(t *testing.T) {
 	keys, err := env.signIn.ListOwnKeys(t.Context(), env.loginSession(t, user, models.SessionOpenedPassword, nil))
 	if err != nil || len(keys.Devices) != 1 || keys.Devices[0].ID != enrolled.DeviceID || keys.Devices[0].EnrolledIP != "" {
 		t.Fatalf("keys = %+v, %v", keys, err)
+	}
+}
+
+// Enrolling and replacing the person key record how the session that did it
+// was opened, read from that session's row in the change's transaction: a
+// later notice tells a change with a device key behind it (app_key) from one
+// made after a password or provider sign-in. One row per value either
+// operation can see; a device sign-in's session is refused both.
+func TestKeyChangesRecordSessionOpenedViaDB(t *testing.T) {
+	env := newKeyEnv(t, "keyopenedvia")
+	sessions := []struct {
+		via     string
+		session func(t *testing.T, label string) (*models.User, *Claims, testKey)
+	}{
+		{models.SessionOpenedPassword, func(t *testing.T, label string) (*models.User, *Claims, testKey) {
+			user := env.localAccount(t, label, models.RoleUser)
+			return user, env.loginSession(t, user, models.SessionOpenedPassword, nil), newTestKey(t)
+		}},
+		{models.SessionOpenedProvider, func(t *testing.T, _ string) (*models.User, *Claims, testKey) {
+			return env.user, env.loginSession(t, env.user, models.SessionOpenedProvider, &env.identityID), newTestKey(t)
+		}},
+		// The session a device's own key opened, enrolling a second device
+		// under the same person key.
+		{models.SessionOpenedAppKey, func(t *testing.T, label string) (*models.User, *Claims, testKey) {
+			user := env.localAccount(t, label, models.RoleUser)
+			person, _, result := env.enroll(t, user)
+			return user, claimsOf(result), person
+		}},
+	}
+	for i, tc := range sessions {
+		t.Run(tc.via, func(t *testing.T) {
+			user, claims, person := tc.session(t, "keyopenedvia-"+strconv.Itoa(i))
+			device := newTestKey(t)
+			enrollCtx := env.addedCtx(t, "/api/v2/auth/keys/enroll", &user.ID)
+			if _, err := env.signIn.Enroll(enrollCtx, KeyEnrollRequest{
+				KeyRequest: from(enrollCtx, env.request(t, message{purpose: appkeys.PurposeEnroll, signer: person, device: &device})),
+				PersonKey:  person.pub, Claims: claims,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			replaceCtx := env.addedCtx(t, "/api/v2/auth/keys/person", &user.ID)
+			if err := env.signIn.ReplacePersonKey(replaceCtx, claims, newTestKey(t).pub, ActingProfile{}); err != nil {
+				t.Fatal(err)
+			}
+			want := `"` + tc.via + `"`
+			for _, action := range []string{auditmutation.ActionAppKeysEnrolled, auditmutation.ActionPersonKeyReplaced} {
+				row := audittest.One(t, env.pool, action, auditmutation.TargetUser, strconv.Itoa(user.ID))
+				if got := audittest.Value(row.Change(t, auditFieldSessionOpenedVia).After); got != want {
+					t.Fatalf("%s: session_opened_via = %s, want %s", action, got, want)
+				}
+			}
+		})
 	}
 }

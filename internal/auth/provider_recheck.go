@@ -1140,6 +1140,10 @@ func (r *PluginProviderRegistry) AccountChecker(ctx context.Context, installatio
 type sessionProviderChain struct {
 	identityID    *int64
 	providerSince *time.Time
+	// openedVia is how the session was opened (auth_sessions.opened_via),
+	// set by sessionProviderChainOf; empty for a session from before it was
+	// recorded.
+	openedVia string
 }
 
 // sessionProviderChainOf returns the provider chain of the session
@@ -1154,9 +1158,9 @@ func sessionProviderChainOf(ctx context.Context, db dbQuerier, sessionID string,
 	// Only an ordinary sign-in approves: a remote-playback handoff session is
 	// refused here whatever its token says, including one issued by an older
 	// release before the session was bound.
-	err := db.QueryRow(ctx, `SELECT identity_id, provider_since FROM auth_sessions
+	err := db.QueryRow(ctx, `SELECT identity_id, provider_since, COALESCE(opened_via, '') FROM auth_sessions
 		WHERE id = $1 AND user_id = $2 AND impersonator_user_id IS NULL AND purpose = $3
-			AND revoked_at IS NULL AND expires_at > clock_timestamp() FOR UPDATE`, sessionID, userID, models.SessionPurposeAccount).Scan(&chain.identityID, &chain.providerSince)
+			AND revoked_at IS NULL AND expires_at > clock_timestamp() FOR UPDATE`, sessionID, userID, models.SessionPurposeAccount).Scan(&chain.identityID, &chain.providerSince, &chain.openedVia)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sessionProviderChain{}, ErrSessionRevoked
 	}
