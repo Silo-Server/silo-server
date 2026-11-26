@@ -142,13 +142,13 @@ func registerWatchlistTitles(reg *Registry) {
 	add := humaOp(http.MethodPut, Prefix+"/watchlist/titles/{media_type}/{tmdb_id}", opAddWatchlistTitle, "watchlist",
 		"Add a title to the acting profile's watchlist. A title the library has goes onto the library watchlist; otherwise it is kept by TMDB ID and, when watchlist requests apply, requested or followed. Automatic retries are unsafe because provider, refresh and request effects are not change-gated.")
 	add.Errors = []int{http.StatusNotFound, http.StatusConflict}
-	Register(reg, Operation{Operation: add, Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable, Origins: grantedRefusedRequests}, reg.addWatchlistTitle)
+	Register(reg, Operation{Operation: add, Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable, Origins: grantedWatchlistTitle}, reg.addWatchlistTitle)
 
 	remove := humaOp(http.MethodDelete, Prefix+"/watchlist/titles/{media_type}/{tmdb_id}", opDeleteWatchlistTitle, "watchlist",
 		"Remove a title from the acting profile's watchlist by its current or a former TMDB ID, from the library watchlist too, and withdraw the request the watchlist made for it while nothing has been sent. An absent entry succeeds, but automatic retries can repeat provider and refresh effects.")
 	remove.DefaultStatus = http.StatusNoContent
 	remove.Errors = []int{http.StatusConflict}
-	Register(reg, Operation{Operation: remove, Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable, Origins: grantedRefusedRequests}, reg.deleteWatchlistTitle)
+	Register(reg, Operation{Operation: remove, Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable, Origins: grantedWatchlistTitle}, reg.deleteWatchlistTitle)
 }
 
 // watchlistTitleViewer resolves the viewer for both services and the rating
@@ -264,7 +264,10 @@ func (reg *Registry) addWatchlistTitle(ctx context.Context, in *WatchlistTitleIn
 	}
 	title := requestTitleOf(snap)
 	var state mediarequests.RequestState
-	if added.ItemID != "" {
+	// A session another app's key opened keeps the entry but makes and
+	// follows no media request: that spends the person's request allowance
+	// in their name. It reports the state as it stands.
+	if added.ItemID != "" || grantedAppSession(claimsFrom(ctx)) {
 		// The library has it: nothing to request, only the state to report.
 		states, err := reg.deps.WatchlistRequests.WatchlistRequestStates(ctx, rv, []mediarequests.WatchlistTitle{title})
 		if err != nil {
@@ -357,6 +360,14 @@ func (reg *Registry) deleteWatchlistTitle(ctx context.Context, in *WatchlistTitl
 		snap = known.Snapshot()
 		ids = append(ids, known.TMDBID)
 		ids = append(ids, known.FormerTMDBIDs...)
+	}
+	// A session another app's key opened removes the entry and withdraws no
+	// request: a request is the person's, whoever's watchlist made it.
+	if grantedAppSession(claimsFrom(ctx)) {
+		if _, err := reg.deps.WatchlistTitles.RemoveWatchlistTitle(ctx, viewer, in.MediaType, in.TMDBID); err != nil {
+			return nil, serviceProblem(err)
+		}
+		return nil, nil
 	}
 	if err := reg.withdrawWatchlistRequests(ctx, rv, in.MediaType, ids); err != nil {
 		return nil, requestProblem(err)

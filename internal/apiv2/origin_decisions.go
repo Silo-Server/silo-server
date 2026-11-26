@@ -90,6 +90,11 @@ func grantedApp(d *SessionDecision) OriginDecisions { return OriginDecisions{Gra
 // app can do).
 const (
 	reasonWhoItIs        = "who it is and which profile it acts as"
+	reasonCurrentUser    = "who it is; the account's email is left out for such a session"
+	reasonVerifyPIN      = "acting as a PIN-protected profile; a following change counts such a session's attempts separately"
+	reasonShuffle        = "playing a shuffle of the profile's; a shuffle's id is random and not listed"
+	reasonPersonRead     = "reading the catalog; reading a person can queue that person's metadata refresh when one is due"
+	reasonRoomJoin       = "joining a room by its code, as a member"
 	reasonCapabilityRead = "a capability read: what the server offers this caller"
 	reasonCatalogRead    = "reading the catalog"
 	reasonHomeRead       = "reading home"
@@ -106,6 +111,7 @@ const (
 	reasonOwnSession     = "its own session and its own key"
 	reasonDiagnostics    = "a diagnostics upload, for the administrator to read"
 	reasonPlayerState    = "a player's own state for the profile it acts as"
+	reasonWatchlistTitle = "the profile's own watchlist; for such a session no media request is made, followed or withdrawn"
 )
 
 // Reasons for the operations such a session is refused.
@@ -134,6 +140,10 @@ const (
 	reasonRefusedJobReads         = "refused by decision: library and administration jobs are not a player's"
 	reasonRefusedAccountSetup     = "refused by decision: the account's sign-in, credential and plugin setup is not a player's"
 	reasonRefusedSharedWrite      = "refused by decision: writes shared catalog data"
+	reasonRefusedSnapshotSlots    = "refused by decision: the account has two progress snapshot slots, which the app could hold"
+	reasonRefusedDiagnosticsQuota = "refused by decision: a diagnostics upload spends a per-account quota"
+	reasonRefusedProviderSearch   = "refused by decision: a provider search spends the server's allowance with its subtitle providers"
+	reasonRefusedChannelReads     = "refused by decision: reads the person's email address or Discord link"
 )
 
 // Decisions shared by whole families: what a session another app's key
@@ -157,6 +167,12 @@ var (
 	grantedOwnSession     = grantedApp(decideAllowed(reasonOwnSession))
 	grantedDiagnostics    = grantedApp(decideAllowed(reasonDiagnostics))
 	grantedPlayerState    = grantedApp(decideAllowed(reasonPlayerState))
+	grantedWatchlistTitle = grantedApp(decideAllowed(reasonWatchlistTitle))
+	grantedCurrentUser    = grantedApp(decideAllowed(reasonCurrentUser))
+	grantedVerifyPIN      = grantedApp(decideAllowed(reasonVerifyPIN))
+	grantedShuffle        = grantedApp(decideAllowed(reasonShuffle))
+	grantedPersonRead     = grantedApp(decideAllowed(reasonPersonRead))
+	grantedRoomJoin       = grantedApp(decideAllowed(reasonRoomJoin))
 
 	grantedOwnSessionList = grantedApp(decideOwnOnly(
 		"SessionLimitedToItself: every other session's item is redacted to its id", reasonOwnSession))
@@ -199,6 +215,10 @@ var (
 	grantedRefusedJobReads         = grantedApp(decideRefused(reasonRefusedJobReads))
 	grantedRefusedAccountSetup     = grantedApp(decideRefused(reasonRefusedAccountSetup))
 	grantedRefusedSharedWrite      = grantedApp(decideRefused(reasonRefusedSharedWrite))
+	grantedRefusedSnapshotSlots    = grantedApp(decideRefused(reasonRefusedSnapshotSlots))
+	grantedRefusedDiagnosticsQuota = grantedApp(decideRefused(reasonRefusedDiagnosticsQuota))
+	grantedRefusedProviderSearch   = grantedApp(decideRefused(reasonRefusedProviderSearch))
+	grantedRefusedChannelReads     = grantedApp(decideRefused(reasonRefusedChannelReads))
 )
 
 // extOriginDecisions documents OriginDecisions as {kind: {verdict, reason,

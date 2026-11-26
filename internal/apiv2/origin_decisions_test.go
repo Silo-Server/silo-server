@@ -283,3 +283,22 @@ func TestGrantedAppPlayerStateWritesStayOnTheActingProfile(t *testing.T) {
 		})
 	}
 }
+
+// TestCurrentUserLeavesTheEmailOutForAnotherApp: who the account is stays an
+// app's to read, its email does not, so a session another app's key opened
+// gets the email member as the shape's "none" (the empty string), and the
+// person's own session gets it as before. Catches the email reaching such a
+// session again, or leaving the person's own answer.
+func TestCurrentUserLeavesTheEmailOutForAnotherApp(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	for token, want := range map[string]string{grantedAppToken: "", memberToken: "laura@example.test"} {
+		rec := do(t, h, http.MethodGet, Prefix+"/account/me", "", bearer(token))
+		var body Account
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &body) != nil {
+			t.Fatalf("%s: %d %s", token, rec.Code, rec.Body.String())
+		}
+		if body.Email != want || body.Username != "laura" {
+			t.Fatalf("%s: email %q, username %q", token, body.Email, body.Username)
+		}
+	}
+}

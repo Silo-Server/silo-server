@@ -130,7 +130,7 @@ func registerNotificationChannels(reg *Registry) {
 
 	emailRead := notificationOperation(http.MethodGet, "/email-preferences", "getNotificationEmailPreferences")
 	emailRead.Summary = "Read the acting profile's email notification preferences."
-	Register(reg, withOrigins(emailRead, grantedSettingsRead), func(ctx context.Context, _ *struct{}) (*NotificationEmailPreferencesOutput, error) {
+	Register(reg, withOrigins(emailRead, grantedRefusedChannelReads), func(ctx context.Context, _ *struct{}) (*NotificationEmailPreferencesOutput, error) {
 		return reg.notificationEmailState(ctx)
 	})
 	emailWrite := notificationOperation(http.MethodPut, "/email-preferences", "updateNotificationEmailPreferences")
@@ -149,7 +149,7 @@ func registerNotificationChannels(reg *Registry) {
 	discordRead := notificationOperation(http.MethodGet, "/discord-preferences", "getNotificationDiscordPreferences")
 	discordRead.ProfileOptional = true
 	discordRead.Summary = "Read the login account's Discord notification preferences."
-	Register(reg, withOrigins(discordRead, grantedSettingsRead), func(ctx context.Context, _ *struct{}) (*NotificationDiscordPreferencesOutput, error) {
+	Register(reg, withOrigins(discordRead, grantedRefusedChannelReads), func(ctx context.Context, _ *struct{}) (*NotificationDiscordPreferencesOutput, error) {
 		return reg.notificationDiscordState(ctx)
 	})
 	discordWrite := notificationOperation(http.MethodPut, "/discord-preferences", "updateNotificationDiscordPreferences")

@@ -280,7 +280,7 @@ func registerCatalogActions(reg *Registry) {
 	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/people", "listPeople", "catalog",
 		"Search people by name, with exact matches first, then the most credited for a specific query, and optional media scope.")), grantedCatalogRead), reg.listPeople)
 	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/people/{id}", "getPerson", "catalog",
-		"One person; viewing queues a provider refresh when one is due, unless the read is a prefetch.")), grantedCatalogRead), reg.getPerson)
+		"One person; viewing queues a provider refresh when one is due, unless the read is a prefetch.")), grantedPersonRead), reg.getPerson)
 	refreshPerson := humaOp(http.MethodPost, Prefix+"/catalog/people/{id}/refresh", "refreshPerson", "catalog",
 		"Queue a provider refresh of the person; answers 202 once queued.")
 	refreshPerson.DefaultStatus = http.StatusAccepted

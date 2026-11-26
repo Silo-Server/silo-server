@@ -131,30 +131,30 @@ func registerShuffles(reg *Registry) {
 	// never read again and is deleted with other abandoned shuffles.
 	create.RetrySafety = RetrySafetyNonRetryable
 	create.Errors = []int{http.StatusNotFound, http.StatusConflict}
-	Register(reg, withOrigins(create, grantedPlayback), reg.createShuffle)
+	Register(reg, withOrigins(create, grantedShuffle), reg.createShuffle)
 
 	get := viewerOperation(humaOp(http.MethodGet, Prefix+"/shuffles/{shuffle_id}", "getShuffle", "playback",
 		"Read a shuffle: what plays now and what plays next."))
 	get.Errors = []int{http.StatusNotFound, http.StatusConflict}
-	Register(reg, withOrigins(get, grantedPlayback), reg.getShuffle)
+	Register(reg, withOrigins(get, grantedShuffle), reg.getShuffle)
 
 	advance := viewerOperation(humaOp(http.MethodPost, Prefix+"/shuffles/{shuffle_id}/advance", "advanceShuffle", "playback",
 		"Move a shuffle on after its current item: the next item becomes current and another is picked to follow it."))
 	advance.RetrySafety = RetrySafetyNaturalIdempotent
 	advance.Errors = []int{http.StatusNotFound, http.StatusConflict}
-	Register(reg, withOrigins(advance, grantedPlayback), reg.advanceShuffle)
+	Register(reg, withOrigins(advance, grantedShuffle), reg.advanceShuffle)
 
 	skip := viewerOperation(humaOp(http.MethodPost, Prefix+"/shuffles/{shuffle_id}/skip", "skipShuffleItem", "playback",
 		"Replace a shuffle's next item with another pick. The skipped item never played, so it can still come up later in the cycle."))
 	skip.RetrySafety = RetrySafetyNaturalIdempotent
 	skip.Errors = []int{http.StatusNotFound, http.StatusConflict}
-	Register(reg, withOrigins(skip, grantedPlayback), reg.skipShuffleItem)
+	Register(reg, withOrigins(skip, grantedShuffle), reg.skipShuffleItem)
 
 	remove := viewerOperation(humaOp(http.MethodDelete, Prefix+"/shuffles/{shuffle_id}", "deleteShuffle", "playback",
 		"Stop a shuffle. Stopping one that is already gone succeeds."))
 	remove.DefaultStatus = http.StatusNoContent
 	remove.RetrySafety = RetrySafetyNaturalIdempotent
-	Register(reg, withOrigins(remove, grantedPlayback), reg.deleteShuffle)
+	Register(reg, withOrigins(remove, grantedShuffle), reg.deleteShuffle)
 }
 
 func (reg *Registry) getShuffleCapability(ctx context.Context, _ *CapabilityInput) (*ShuffleCapabilityOutput, error) {

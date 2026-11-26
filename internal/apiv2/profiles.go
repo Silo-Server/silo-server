@@ -307,7 +307,7 @@ func registerProfiles(reg *Registry) {
 		ProfileOptional: true,
 		RetrySafety:     RetrySafetyNonRetryable,
 		ServiceBacked:   true,
-		Origins:         grantedWhoItIs,
+		Origins:         grantedVerifyPIN,
 	}, reg.verifyProfilePIN)
 
 	upload := humaOp(http.MethodPut, Prefix+"/profiles/{id}/avatar", "uploadProfileAvatar", "profiles",

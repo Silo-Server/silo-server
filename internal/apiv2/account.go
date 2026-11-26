@@ -77,7 +77,7 @@ func registerAccount(reg *Registry) {
 			"Get the authenticated caller's login account."),
 		Class:         ClassAuthenticated,
 		ServiceBacked: true,
-		Origins:       grantedWhoItIs,
+		Origins:       grantedCurrentUser,
 	}, reg.getCurrentUser)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/account/password/capability", "getAccountPasswordCapability", "account",
@@ -200,7 +200,12 @@ func (reg *Registry) getCurrentUser(ctx context.Context, _ *struct{}) (*AccountO
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &AccountOutput{Body: accountFromView(view)}, nil
+	out := accountFromView(view)
+	if grantedAppSession(claims) {
+		// The person's email is not an app's to read; the shape's "none".
+		out.Email = ""
+	}
+	return &AccountOutput{Body: out}, nil
 }
 
 func accountFromView(v handlers.UserView) Account {

@@ -125,7 +125,7 @@ func registerDiagnosticsIngress(reg *Registry) {
 			"Retry-After": {Schema: &huma.Schema{Type: "string"}, Description: "Minimum delay in seconds after an explicit quota or busy rejection; not permission to replay an uncertain upload."},
 		}
 	}
-	Register(reg, withOrigins(upload, grantedDiagnostics), func(ctx context.Context, in *DiagnosticsUploadInput) (*DiagnosticsUploadOutput, error) {
+	Register(reg, withOrigins(upload, grantedRefusedDiagnosticsQuota), func(ctx context.Context, in *DiagnosticsUploadInput) (*DiagnosticsUploadOutput, error) {
 		userID, err := diagnosticsAccount(ctx)
 		if err != nil {
 			return nil, err

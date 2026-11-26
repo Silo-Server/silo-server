@@ -221,3 +221,35 @@ func TestDeleteWatchlistTitleKeepsRequestOfConcurrentReadd(t *testing.T) {
 		t.Fatalf("withdrawn = %v, want only the withdrawal before the removal", reqs.withdrawn)
 	}
 }
+
+// TestWatchlistTitleForAnotherAppMakesNoRequest: a session another app's key
+// opened may keep the profile's watchlist, but a request made in the
+// person's name spends their allowance, so its add writes the entry and
+// makes or follows no request, and its delete removes the entry and
+// withdraws none. The person's own session still requests and withdraws.
+// Catches the request step running again for such a session.
+func TestWatchlistTitleForAnotherAppMakesNoRequest(t *testing.T) {
+	for _, tc := range []struct {
+		token                  string
+		wantRequest, wantPulls bool
+	}{{grantedAppToken, false, false}, {memberToken, true, true}} {
+		t.Run(tc.token, func(t *testing.T) {
+			titles := &fakeWatchlistTitles{}
+			reqs := &fakeWatchlistRequests{details: map[int]*tmdb.MediaDetail{949: {MediaType: "movie", ID: 949, Title: "Heat", Year: 1995}}}
+			h := newTestHandler(t, watchlistTitlesDeps(titles, reqs))
+			headers := with(bearer(tc.token), "X-Profile-Id", "p-owner")
+			if rec := do(t, h, http.MethodPut, "/api/v2/watchlist/titles/movie/949", "", headers); rec.Code != http.StatusOK {
+				t.Fatalf("add: %d %s", rec.Code, rec.Body.String())
+			}
+			if len(titles.added) != 1 || (len(reqs.requested) == 1) != tc.wantRequest {
+				t.Fatalf("added %d entries, requested %v", len(titles.added), reqs.requested)
+			}
+			if rec := do(t, h, http.MethodDelete, "/api/v2/watchlist/titles/movie/949", "", headers); rec.Code != http.StatusNoContent {
+				t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
+			}
+			if len(titles.removed) != 1 || (len(reqs.withdrawn) > 0) != tc.wantPulls {
+				t.Fatalf("removed %d entries, withdrew %v", len(titles.removed), reqs.withdrawn)
+			}
+		})
+	}
+}

@@ -91,7 +91,7 @@ func registerSubtitleReads(reg *Registry) {
 	})
 	search := op(http.MethodPost, "/subtitles/search", "searchSubtitles")
 	search.RetrySafety = RetrySafetyNaturalIdempotent
-	Register(reg, withOrigins(search, grantedSubtitleRead), func(ctx context.Context, in *SubtitleSearchInput) (*SubtitleSearchOutput, error) {
+	Register(reg, withOrigins(search, grantedRefusedProviderSearch), func(ctx context.Context, in *SubtitleSearchInput) (*SubtitleSearchOutput, error) {
 		id, p := in.Body.MediaFileID.positive("body.media_file_id")
 		if p != nil {
 			return nil, p
