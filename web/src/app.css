@@ -833,7 +833,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   /* Bolder moves every weight up a step. Tailwind's weight utilities read its
      --font-weight-* theme variables, so redefining them here reaches every
      form of the class: `font-medium`, `focus:font-medium`, `md:font-semibold`,
-     `file:font-medium`. */
+     `file:font-medium`. Component CSS (here, player-hud.css,
+     setup-wizard.css) sets weights through the same variables rather than
+     fixed numbers. 800 is the UI font's heaviest weight and stays put. */
   html[data-text-weight="strong"] {
     --font-weight-ui: 520;
     --font-weight-normal: 520;
@@ -1797,7 +1799,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     padding: 0.25rem 0.6rem;
     border-radius: 9999px;
     font-size: 0.7rem;
-    font-weight: 600;
+    font-weight: var(--font-weight-semibold, 600);
     line-height: 1rem;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -1819,7 +1821,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     padding: 0.78rem 1.4rem;
     border-radius: 9999px;
     font-size: 0.84rem;
-    font-weight: 700;
+    font-weight: var(--font-weight-bold, 700);
     letter-spacing: 0.01em;
     transition: all var(--duration-fast) var(--ease-default);
   }
@@ -1890,7 +1892,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     padding: 0.375rem 1rem;
     border-radius: var(--radius-md);
     font-size: 0.875rem;
-    font-weight: 500;
+    font-weight: var(--font-weight-medium, 500);
     color: var(--muted-foreground);
     transition: all var(--duration-fast) var(--ease-default);
     cursor: pointer;
@@ -2004,7 +2006,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .hero-eyebrow {
     font-family: var(--font-body);
     font-size: 0.72rem;
-    font-weight: 600;
+    font-weight: var(--font-weight-semibold, 600);
     line-height: 1;
     letter-spacing: 0.22em;
     text-transform: uppercase;
@@ -2036,7 +2038,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     gap: 0 0.1rem;
     font-family: var(--font-body);
     font-size: 0.82rem;
-    font-weight: 500;
+    font-weight: var(--font-weight-medium, 500);
     letter-spacing: 0.02em;
     color: color-mix(in srgb, var(--foreground) 78%, transparent);
   }
@@ -2058,7 +2060,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     gap: 0.75rem;
     font-family: var(--font-mono);
     font-size: 0.7rem;
-    font-weight: 500;
+    font-weight: var(--font-weight-medium, 500);
     letter-spacing: 0.12em;
     color: color-mix(in srgb, #fff 68%, transparent);
     text-shadow: 0 2px 10px rgb(0 0 0 / 0.45);
@@ -2134,7 +2136,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     padding: 0.5rem 1rem;
     border-radius: 9999px;
     font-size: 0.78rem;
-    font-weight: 600;
+    font-weight: var(--font-weight-semibold, 600);
     letter-spacing: 0.01em;
     color: color-mix(in srgb, var(--foreground) 62%, transparent);
     background: transparent;
@@ -2570,7 +2572,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     align-items: center;
     gap: 0.5rem;
     font-size: 1.25rem;
-    font-weight: 600;
+    font-weight: var(--font-weight-semibold, 600);
     color: var(--foreground);
     padding-bottom: 0.75rem;
   }
@@ -2585,7 +2587,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     padding: 2px 8px;
     border-radius: 6px;
     font-size: 0.625rem;
-    font-weight: 700;
+    font-weight: var(--font-weight-bold, 700);
     background: rgba(255, 60, 60, 0.12);
     color: #fca5a5;
     border: 1px solid rgba(255, 60, 60, 0.2);
