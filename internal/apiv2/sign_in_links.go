@@ -77,6 +77,14 @@ type SignInLinkSetPasswordInput struct {
 	}
 }
 
+// The delivery_status values of an emailed link, shared with
+// createAdminUserPasswordReset.
+const (
+	deliveryNotRequested    = "not_requested"
+	deliverySent            = "sent"
+	deliveryFailedOrUnknown = "failed_or_unknown"
+)
+
 // signInLinkUnknownDetail is the one answer for a link or token that is
 // unknown, used or expired, or whose account is disabled.
 const signInLinkUnknownDetail = "This sign-in link is unknown, used or expired. Ask the server's owner for a new one."
@@ -139,11 +147,11 @@ func (reg *Registry) createAdminUserSignInLink(ctx context.Context, in *AdminSig
 	if result == nil {
 		return nil, signInLinkProblem(err)
 	}
-	out := AdminSignInLink{URL: result.URL, ExpiresAt: NewInstant(result.ExpiresAt), DeliveryStatus: "not_requested"}
+	out := AdminSignInLink{URL: result.URL, ExpiresAt: NewInstant(result.ExpiresAt), DeliveryStatus: deliveryNotRequested}
 	if in.Body.SendEmail {
-		out.DeliveryStatus = "sent"
+		out.DeliveryStatus = deliverySent
 		if err != nil || !result.EmailSent {
-			out.DeliveryStatus = "failed_or_unknown"
+			out.DeliveryStatus = deliveryFailedOrUnknown
 		}
 	}
 	return &AdminSignInLinkOutput{Body: out}, nil

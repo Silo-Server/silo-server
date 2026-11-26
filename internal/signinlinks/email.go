@@ -48,7 +48,7 @@ func composeEmail(brand mail.Brand, username, serverName, linkURL string, expire
 	body.WriteString(mail.EmailLinkFallback(linkURL))
 
 	return emailContent{
-		Subject: fmt.Sprintf("Your sign-in link for %s", product),
+		Subject: "Your sign-in link for " + product,
 		Text:    text.String(),
 		HTML: mail.RenderLayout(mail.LayoutOptions{
 			Brand:      brand,

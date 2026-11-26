@@ -126,7 +126,7 @@ func TestRedeemSignInLinkConcurrentDB(t *testing.T) {
 		wg.Go(func() { _, errs[i] = env.signIn.RedeemSignInLink(t.Context(), issued.Token, true) })
 	}
 	wg.Wait()
-	if (errs[0] == nil) == (errs[1] == nil) || !(errors.Is(errs[0], ErrSignInLinkInvalid) || errors.Is(errs[1], ErrSignInLinkInvalid)) {
+	if (errs[0] == nil) == (errs[1] == nil) || (!errors.Is(errs[0], ErrSignInLinkInvalid) && !errors.Is(errs[1], ErrSignInLinkInvalid)) {
 		t.Fatalf("redeems = %v, %v; want exactly one success", errs[0], errs[1])
 	}
 }
