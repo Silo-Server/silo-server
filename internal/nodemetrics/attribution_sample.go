@@ -58,16 +58,20 @@ func (s *Sampler) sampleAttribution() *ResourceAttribution {
 		CgroupCPU: s.cgroupCPUDetails, CgroupMemory: s.cgroupMemoryDetails,
 		DroppedDiskRoots: s.droppedRoots,
 	}
-	// The window end is taken right before the reads it closes, on both clocks:
-	// the boot clock reading is the line a later child's start time must cross
-	// to count as born inside the next window.
+	// Children are listed first, because walking the kernel's children lists
+	// takes a varying time. The window end is then taken on both clocks right
+	// before the counter reads it closes, so every window spans the same
+	// reads. The boot clock reading is the line a later child's start time
+	// must cross to count as born inside the next window; a child born while
+	// discovery ran, and missed by it, is counted from its first reading on.
+	pids := s.childPIDs()
 	at := s.now()
 	boot, bootOK := s.bootTicks()
 	var procTicks uint64
 	var childTicks map[childKey]uint64
 	out.Process, procTicks = sampleProcess(s.procDir, os.Getpid())
 	if out.Process.CPUSeconds != nil {
-		out.Children, childTicks = sampleChildren(s.procDir, os.Getpid(), s.childPIDs())
+		out.Children, childTicks = sampleChildren(s.procDir, os.Getpid(), pids)
 	}
 	s.attributeCPU(out, at, boot, bootOK, procTicks, childTicks)
 	out.Disks = s.diskDetails
@@ -153,9 +157,9 @@ func (s *Sampler) publishCPUShares(out *ResourceAttribution, basis cpuShareBasis
 // seen contributes its whole lifetime only when it was born inside the window:
 // its start time is on or after the boot clock reading taken when the window
 // opened and before the one taken when it closed. A child born after the
-// close, while discovery ran, only becomes a baseline. An older one (a child that was unreadable for a pass, say) only
-// becomes a baseline, because its lifetime is mostly earlier windows' work. A
-// child that exited contributes nothing, so this is a lower bound.
+// close only becomes a baseline, and so does an older one (a child that was
+// unreadable for a pass, say), because its lifetime is mostly earlier windows'
+// work. A child that exited contributes nothing, so this is a lower bound.
 //
 // Start times count on the kernel's boot clock, which is read directly because
 // lxcfs replaces /proc/uptime with a container's own. A lifetime larger than

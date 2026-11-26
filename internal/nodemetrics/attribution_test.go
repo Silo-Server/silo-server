@@ -375,15 +375,42 @@ func TestChildCPUShareSurvivesDiscoveryGaps(t *testing.T) {
 	listed = true
 	wantPct(t, "listed again", pass().Attribution.Children.CPUPct, 10)
 
-	// A child born half a second after the window opened is credited its
-	// lifetime although discovery ends a second after the window does.
+	// A child born half a second after the window opened (which, with a
+	// one-second discovery before each boundary, was a second past the
+	// previous pass's start) is credited its lifetime.
 	h.children = []int{200, 201}
-	h.setChild(201, h.uptimeTicks()+testUserHZ/2, 100)
+	h.setChild(201, h.uptimeTicks()+testUserHZ+testUserHZ/2, 100)
 	wantPct(t, "born inside the window", pass().Attribution.Children.CPUPct, 15)
 
-	// A child born after the window closed, while discovery ran, is not
-	// charged to that window; it becomes a baseline.
+	// A child born after the window closed is not charged to that window; it
+	// becomes a baseline.
 	h.children = []int{200, 201, 202}
-	h.setChild(202, h.uptimeTicks()+5*testUserHZ+testUserHZ/2, 50)
+	h.setChild(202, h.uptimeTicks()+6*testUserHZ+testUserHZ/2, 50)
 	wantPct(t, "born after the window closed", pass().Attribution.Children.CPUPct, 10)
+}
+
+// Listing children takes a varying time. The window spans the counter reads,
+// not the listing, so a child using a steady 50 ticks a second on 4 cores
+// reads 12.5% whatever the delay.
+func TestChildCPUShareWindowIgnoresDiscoveryDelay(t *testing.T) {
+	h := newCPUPctHarness(t, 4)
+	start := h.clock.now()
+	delays := []time.Duration{0, 0, 0, time.Second, 0, 0}
+	var pending time.Duration // the listing's delay, once per pass (GPU sampling lists children too)
+	h.children = []int{200}
+	h.s.ffmpegPIDs = func() []int {
+		h.clock.advance(pending)
+		pending = 0
+		h.setChild(200, 1, uint64(h.clock.now().Sub(start).Seconds()*50))
+		return h.children
+	}
+	h.setProcess(1000)
+	for i := range delays {
+		pending = delays[i]
+		a := h.pass()
+		h.clock.advance(-delays[i]) // keep passes five seconds apart
+		if i >= 2 {
+			wantPct(t, fmt.Sprintf("pass %d children", i+1), a.Attribution.Children.CPUPct, 12.5)
+		}
+	}
 }
