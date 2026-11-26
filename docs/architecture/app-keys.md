@@ -498,18 +498,48 @@ apps. The same gate sets both client name headers (`X-Client-Name` when the
 app sent it, and `X-Silo-Client` always) to `Granted App`
 (`playback.GrantedAppClientName`), so every reader, whichever header family
 the app used, records that name, and an app that sends none is recorded
-under it too. The version, build, channel, model and platform stay as
-declared: playback diagnosis reads them. Every other caller that declares
-that name, or one that differs only in case, spacing or punctuation, has it
-dropped (the request proceeds as if it named no client in that header), and
-the Jellyfin-compatible and Audiobookshelf-compatible listeners drop it the
-same way, so no other session is recorded under it. Nothing in the server
-decides anything by the client name: it is shown, filtered and grouped on in
-admin lists, used as a metrics label and logged. Stream telemetry, which runs
-before authentication, still sees the name the app sent on each stream's
-media requests, in memory, for administrators, as it sees the declared
-device. The limit that remains: the lists show that another app made a play,
-not which app.
+under it too. The label beside the name is built from the version, and the
+full label adds the build and channel, so for such a session each of those,
+in the headers or in the start body's `client_playback_context`, is kept
+only when it looks like a version (a letter or digit, then letters, digits,
+`.`, `+`, `_` or `-`, at most 32 characters) and dropped otherwise
+(`playback.LooksLikeClientVersion`).
+
+Every other caller that declares a name that would be stored as one reading
+as `Granted App` has it dropped: the request proceeds as if it named no
+client in that header. The Jellyfin-compatible and Audiobookshelf-compatible
+listeners drop it the same way, so no other session is recorded under it.
+One function decides (`playback.IsGrantedAppClientName`). It judges the name
+as it would be stored (trimmed, controls removed, cut to 128 characters),
+folds it with NFKC and lower case, and drops everything but letters and
+digits; the name is reserved when what is left has as many characters as
+`grantedapp`, each one either equal to the character at its position or
+outside ASCII, and at least half of them equal. So it catches case, spacing,
+punctuation, invisible characters, padding past the cut, fullwidth forms,
+and a letter swapped for one from another script in a name of the same
+length. It does not catch a name of a different length made to look
+similar, and it says nothing about what is shown beside the name.
+
+Nothing in the server decides anything by the client name: it is shown,
+filtered and grouped on in admin lists, used as a metrics label and logged.
+The limit that remains: the lists show that another app made a play, not
+which app. What the app still chooses is shown beside the name, never in
+it: the `User-Agent`, which the household streams and session views show as
+sent and from which the Jellyfin badge is decided; a version, build or
+channel that is version-shaped but can still be a word; and the model and
+platform it declares (`X-Client-Model`, `X-Client-Platform` and the start
+body's device description), which playback diagnosis reads. The history and
+live rows take their device platform from the declared device, which the
+gate removes, so it is empty there for such a session.
+
+Stream telemetry runs before authentication and sees the name the app sent
+on each stream's media requests. It keeps that in memory on each API
+process and in short-lived Redis snapshots that expire after the
+membership interval (a minute by default); no read shows the client name
+from it. A media request authorized by a stream reference is judged without
+the session's kind, so its request-log line and stream telemetry carry the
+name the app sent; nothing stored or shown takes the client name from that
+request.
 
 The handler checks that need only this fact read the claim
 (`sessionReachesOtherDevices`, `otherDevicesRule`, `grantedAppStreamError`).
@@ -672,9 +702,10 @@ stream its ticket names, which is its own.
   read for that), per-user plugin settings (a plugin's values may hold tokens
   for other services), the title and collection allowance reads (they are
   about other profiles), the taste seed (it records up to 200 picks as the
-  profile's favorites at once and runs the profile's taste refresh
-  immediately, in one of the few immediate refreshes the whole server runs at
-  a time; such a session adds favorites one at a time instead), and ending a
+  profile's favorites at once and, when any is new, refreshes the profile's
+  taste in one of the few immediate refreshes each API process runs at a
+  time, or queues the refresh when none is free; such a session adds
+  favorites one at a time instead), and ending a
   View as user session (such a session never is one). No operation is left
   undecided.
 

@@ -187,7 +187,7 @@ const (
 	reasonRefusedSettingByKey     = "refused by decision: some setting keys and scopes reach beyond the profile, and none has been read for that yet"
 	reasonRefusedPluginSettings   = "refused by decision: a plugin's per-user values may hold tokens for other services, and a plugin acting on what an app wrote is the plugin proxy's problem again"
 	reasonRefusedOtherProfiles    = "refused by decision: it is about the account's other profiles"
-	reasonRefusedTasteSeed        = "refused by decision: it records up to 200 picks as the profile's favorites at once and runs the profile's taste refresh immediately, in one of the few immediate refreshes the whole server runs at a time; such a session adds favorites one at a time instead"
+	reasonRefusedTasteSeed        = "refused by decision: it records up to 200 picks as the profile's favorites at once and, when any is new, refreshes the profile's taste in one of the few immediate refreshes each API process runs at a time, or queues the refresh when none is free; such a session adds favorites one at a time instead"
 	reasonRefusedImpersonationEnd = "refused by decision: such a session is never a View as user session"
 )
 
@@ -402,15 +402,23 @@ func stripDeclaredDevice(h http.Header) {
 // the request log read.
 var clientNameHeaders = []string{"X-Client-Name", "X-Silo-Client"}
 
+// clientVersionHeaders are the version, build and channel paired with either
+// name header. The label beside a client name shows the version, so for a
+// session another app's key opened one that does not look like a version
+// (playback.LooksLikeClientVersion) is dropped.
+var clientVersionHeaders = []string{"X-Client-Version", "X-Client-Build", "X-Client-Channel", "X-Silo-Client-Version", "X-Silo-Client-Build", "X-Silo-Client-Channel"}
+
 // nameDeclaredClient sets the client name a session another app's key opened
 // is recorded under: the app could otherwise name its plays after the
 // person's own apps in the household streams, playback history and insights.
 // Both headers carry playback.GrantedAppClientName, the declared one only when
 // the app sent it, so the same header family supplies the rest of the client
-// identity (version, build, channel), which stays as declared. Every other
-// caller has the reserved name dropped from either header, so the request
-// proceeds as if it named no client there and nothing else is recorded under
-// it. Like the device strip, this edits the request's shared header map
+// identity (version, build, channel). Each of those stays as declared when it
+// looks like a version and is dropped otherwise, so it cannot carry a client
+// name into the label. Every other caller has a name dropped from either
+// header when it would be stored as one reading as the reserved name
+// (playback.IsGrantedAppClientName), so the request proceeds as if it named
+// no client there and nothing else is recorded under it. Like the device strip, this edits the request's shared header map
 // before anything after the gate reads it.
 func nameDeclaredClient(h http.Header, grantedApp bool) {
 	if grantedApp {
@@ -420,6 +428,14 @@ func nameDeclaredClient(h http.Header, grantedApp bool) {
 			h.Del(clientNameHeaders[0])
 		}
 		h.Set(clientNameHeaders[1], playback.GrantedAppClientName)
+		for _, name := range clientVersionHeaders {
+			for _, v := range h.Values(name) {
+				if !playback.LooksLikeClientVersion(strings.TrimSpace(v)) {
+					h.Del(name)
+					break
+				}
+			}
+		}
 		return
 	}
 	for _, name := range clientNameHeaders {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -186,7 +187,7 @@ func (f *fakeAPIKeyUserLoader) GetByID(_ context.Context, id int) (*models.User,
 // any other name is kept. Catches a compat play reading as another app's in
 // the lists that show who played what.
 func TestCompatClientIsNeverNamedAsAnotherApp(t *testing.T) {
-	for client, want := range map[string]string{"Granted App": "", "granted-app": "", "Infuse": "Infuse"} {
+	for client, want := range map[string]string{"Granted App": "", "granted-app": "", "Granted App" + strings.Repeat(" ", 200) + "x": "", "Granted App" + strings.Repeat("\u200b", 200) + "x": "", "Infuse": "Infuse"} {
 		r := httptest.NewRequest(http.MethodGet, "/Sessions", nil)
 		r.Header.Set("X-Emby-Authorization", `MediaBrowser Client="`+client+`", Device="TV", DeviceId="tv-1", Version="8.1"`)
 		if got := compatPlaybackClientInfo(r).Name; got != want {

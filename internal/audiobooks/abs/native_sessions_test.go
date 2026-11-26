@@ -3,6 +3,7 @@ package abs
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -20,6 +21,8 @@ func TestABSClientIsNeverNamedAsAnotherApp(t *testing.T) {
 	}{
 		{"reserved header", "Granted App", absDeviceInfo{}, "Audiobookshelf"},
 		{"reserved device name", "Plappa", absDeviceInfo{ClientName: "granted app", ClientVersion: "1"}, "Plappa"},
+		{"reserved header padded past the stored length", "Granted App" + strings.Repeat(" ", 200) + "x", absDeviceInfo{}, "Audiobookshelf"},
+		{"reserved device name padded with zero-width spaces", "Plappa", absDeviceInfo{ClientName: "Granted App" + strings.Repeat("\u200b", 200) + "x"}, "Plappa"},
 		{"other name", "Plappa", absDeviceInfo{}, "Plappa"},
 	} {
 		r := httptest.NewRequest(http.MethodPost, "/api/session/local", nil)

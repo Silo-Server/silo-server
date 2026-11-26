@@ -73,7 +73,9 @@ func TestEveryOperationDecidesForGrantedApps(t *testing.T) {
 
 // pendingWording matches a published reason or check that reads as work
 // still to do rather than a decision.
-var pendingWording = regexp.MustCompile(`(?i)\b(until|not yet|to do|to-do|todo|later|pending|not decided|undecided|tbd|next change)\b`)
+// "once" and "when" alone describe behavior ("at once", "when one is due"),
+// so only "once the server" and "when the server" count.
+var pendingWording = regexp.MustCompile(`(?i)\b(until|not yet|to do|to-do|todo|later|pending|not decided|undecided|tbd|next change|awaiting|temporarily|for the moment|deferred|in a future release|yet to be|unresolved|open question|once the server|when the server)\b`)
 
 // forNowReasons is the closed list of refusals that wait on a policy question
 // for the project owner, each beside the question. A reason that says "for
@@ -89,7 +91,8 @@ var forNowReasons = map[string]string{
 
 // TestPublishedReasonsReadAsDecisions: every reason and own-only check the
 // document publishes, for every kind of session judged, states a decision:
-// none reads as pending ("until", "not yet", "later", "TBD" and the like),
+// none reads as pending (pendingWording: "until", "not yet", "later",
+// "awaiting", "deferred", "once the server" and the like),
 // and a reason that says "for now" is one of the closed list forNowReasons
 // names, each waiting on its stated question. Catches a refusal published as
 // a to-do, and a new "for now" refusal added without naming its question.

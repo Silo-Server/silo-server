@@ -399,6 +399,20 @@ func TestCapabilityReadsAnswerForTheSession(t *testing.T) {
 			return body
 		}
 		own, app := read(liveMemberToken), read(liveGrantedAppToken)
+		// A member with a row must be in both answers, as the same kind of
+		// JSON value, before its value means anything: a renamed or dropped
+		// member fails here.
+		for key := range capabilityMembers {
+			member, ok := strings.CutPrefix(key, op+" ")
+			if !ok {
+				continue
+			}
+			o, inOwn := own[member]
+			a, inApp := app[member]
+			if !inOwn || !inApp || reflect.TypeOf(o) != reflect.TypeOf(a) {
+				t.Errorf("%s %s: in the person's own answer %v (%T), in another app's %v (%T)", op, member, inOwn, o, inApp, a)
+			}
+		}
 		for member := range own {
 			if member == "revision" || member == "state" {
 				continue

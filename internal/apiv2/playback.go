@@ -383,6 +383,9 @@ func registerPlayback(reg *Registry) {
 			return nil, validationProblem("body.profile_id", "invalid", "Profile must match the authenticated viewer.")
 		}
 		request := in.Body.domain(fileID)
+		if grantedAppSession(claimsFrom(ctx)) {
+			request.ClientPlaybackContext = withDeclaredVersionsOnly(request.ClientPlaybackContext)
+		}
 		validationData, err := json.Marshal(request)
 		if err != nil {
 			return nil, validationProblem("body", "invalid", "Invalid playback request.")
@@ -611,4 +614,19 @@ func (reg *Registry) bandwidthProbeBaseURL(r *http.Request) string {
 		return base
 	}
 	return handlers.RequestBaseURL(r)
+}
+
+// withDeclaredVersionsOnly drops the body's app version, build and channel
+// when one does not look like a version (playback.LooksLikeClientVersion).
+// The start falls back to them when the headers carry none, and the label
+// beside a client name shows the version, so for a session another app's key
+// opened (recorded as playback.GrantedAppClientName) they could otherwise
+// carry a client name into it. The origin gate does the same to the headers.
+func withDeclaredVersionsOnly(c playback.ClientPlaybackContextV3) playback.ClientPlaybackContextV3 {
+	for _, v := range []*string{&c.AppVersion, &c.AppBuild, &c.AppChannel} {
+		if !playback.LooksLikeClientVersion(strings.TrimSpace(*v)) {
+			*v = ""
+		}
+	}
+	return c
 }

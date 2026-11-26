@@ -130,20 +130,20 @@ type CollectionCapabilities struct {
 	Capability
 	Groups                    bool                           `json:"groups" doc:"Always false: personal collection groups are no longer supported"`
 	LoginSharing              bool                           `json:"login_sharing" doc:"is_shared shows a collection to every profile on the login, listCollections includes other profiles' shared collections, and only a collection's creator changes or orders it"`
-	Imports                   bool                           `json:"imports" doc:"The acting account supports imported collections"`
-	ImportSources             []string                       `json:"import_sources" enum:"mdblist,tmdb,tmdb_list" doc:"Import sources the acting account can create a collection from; empty when imports is false" example:"[\"mdblist\",\"tmdb\",\"tmdb_list\"]"`
-	Artwork                   bool                           `json:"artwork" doc:"The acting account supports collection artwork"`
-	ItemReorder               bool                           `json:"item_reorder" doc:"The acting account supports reordering collection items"`
+	Imports                   bool                           `json:"imports" doc:"The caller may import collections: the acting account supports them and the session may make the import operations (false for a session another app's key opened)"`
+	ImportSources             []string                       `json:"import_sources" enum:"mdblist,tmdb,tmdb_list" doc:"Import sources the caller may create a collection from; empty when imports is false" example:"[\"mdblist\",\"tmdb\",\"tmdb_list\"]"`
+	Artwork                   bool                           `json:"artwork" doc:"The caller may upload and remove collection artwork: the acting account supports it and the session may make those operations (false for a session another app's key opened)"`
+	ItemReorder               bool                           `json:"item_reorder" doc:"The caller may reorder collection items: the acting account supports it and the session may make that operation (false for a session another app's key opened)"`
 	DisplayFilterFields       []string                       `json:"display_filter_fields" doc:"Catalog query fields a display filter may use" example:"[\"type\",\"watched\"]"`
 	DisplayFilterPresets      CollectionDisplayFilterPresets `json:"display_filter_presets"`
 	CollectionDefaultSort     bool                           `json:"collection_default_sort" example:"true"`
-	CollectionSortPreferences bool                           `json:"collection_sort_preferences" example:"true"`
+	CollectionSortPreferences bool                           `json:"collection_sort_preferences" doc:"The caller may set and clear collection sort preferences; false for a session another app's key opened" example:"true"`
 	EffectiveCollectionSort   bool                           `json:"effective_collection_sort" example:"true"`
-	SortPreferenceKinds       []string                       `json:"sort_preference_kinds" doc:"collection_kind values the sort-preference operations accept" example:"[\"library\",\"user\",\"watchlist\",\"favorites\"]"`
-	CreateDescription         bool                           `json:"create_description" doc:"createCollection stores a description for the acting account" example:"true"`
+	SortPreferenceKinds       []string                       `json:"sort_preference_kinds" doc:"collection_kind values the sort-preference operations accept; empty when the caller may not use them" example:"[\"library\",\"user\",\"watchlist\",\"favorites\"]"`
+	CreateDescription         bool                           `json:"create_description" doc:"The caller may create a collection, and createCollection stores its description; false for a session another app's key opened, which may not create one" example:"true"`
 	MDBListSearch             bool                           `json:"mdblist_search" doc:"searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key" example:"true"`
 	ScheduleTimeZone          CollectionScheduleTimeZone     `json:"schedule_time_zone"`
-	SyncScheduleEditable      bool                           `json:"sync_schedule_editable" doc:"updateCollection accepts sync_schedule on a synced list; false when imports is false" example:"true"`
+	SyncScheduleEditable      bool                           `json:"sync_schedule_editable" doc:"The caller may set sync_schedule on a synced list with updateCollection; false when imports is false" example:"true"`
 	ContainsItem              bool                           `json:"contains_item" doc:"listCollections accepts contains_item and marks the acting profile's own manual collections with contains" example:"true"`
 	PreviewPosters            bool                           `json:"preview_posters" doc:"previewCollection items carry poster_url when the title has a poster" example:"true"`
 	PosterCollages            bool                           `json:"poster_collages" doc:"A collection with no uploaded or imported poster shows a collage of its first titles the acting profile can see in poster_url, marked by poster_is_collage, on listCollections, getLibraryCollections and listLibraryUserCollections, once the server has built it. False when the server has no artwork storage or the acting account's store keeps no artwork" example:"true"`
