@@ -96,6 +96,11 @@ type ProfileHandler struct {
 	// ratelimit.ProfilePINPolicy). The router always sets it; nil, as in
 	// tests that do not exercise the limit, allows every attempt.
 	PINAttempts *ratelimit.AttemptLimiter
+	// GrantedAppPINAttempts bounds the PIN guesses of a login session
+	// another app's key opened, per profile and app key (see
+	// ratelimit.GrantedAppPINPolicy). Such a session never spends
+	// PINAttempts. The router always sets it; nil allows every attempt.
+	GrantedAppPINAttempts *ratelimit.AttemptLimiter
 	// RecWorker is told when an update changes a profile's access scope, so
 	// its recommendations are rebuilt under the new one. Optional.
 	RecWorker SignalsChangedNotifier
@@ -239,23 +244,35 @@ type ProfileListView struct {
 // list of a single user's store, so another account's profiles can never
 // conflict.
 //
-// This is a check-then-write guard with no store-level uniqueness constraint
-// (the userstore's dual Postgres/SQLite backends carry no unique index on
-// name), so two concurrent requests can both pass and insert duplicates —
-// unlike the profile limit, which is re-counted inside the creating
-// transaction. Good enough for interactive profile management; a functional
-// unique index is the fix if that ever stops being true.
+// This early check answers the common case without opening a transaction.
+// There is no unique index on names (neither user store carries one); a
+// create and a rename check again inside their transaction, after the
+// account's preference-settings lock (profileNameTaken), as the profile set,
+// the owner's clear of a name and an administrator's change of the account's
+// username do, so two overlapping writes can't both take one name.
 func profileNameConflicts(profiles []userstore.Profile, name, excludeID string) bool {
-	trimmed := strings.TrimSpace(name)
 	for _, p := range profiles {
-		if p.ID == excludeID {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(p.Name), trimmed) {
+		if p.ID != excludeID && sameProfileName(p.Name, name) {
 			return true
 		}
 	}
 	return false
+}
+
+// profileNameTaken is profileNameConflicts over the names a transaction read.
+func profileNameTaken(names []userstore.ProfileName, name, excludeID string) bool {
+	for _, p := range names {
+		if p.ID != excludeID && sameProfileName(p.Name, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// profileNameConflictError is the 409 for a name another profile of the
+// account has.
+func profileNameConflictError() *APIError {
+	return apiError(http.StatusConflict, "name_conflict", "A profile with this name already exists")
 }
 
 // profileLimitReached is the 409 for a household already at its limit.
@@ -532,7 +549,7 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	}
 
 	if profileNameConflicts(existingProfiles, req.Name, "") {
-		return none, apiError(http.StatusConflict, "name_conflict", "A profile with this name already exists")
+		return none, profileNameConflictError()
 	}
 
 	showForcedSubtitles := true
@@ -585,6 +602,9 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	if err := h.createProfileWithSettingsSync(ctx, store, userID, profile, profileLimit, settingsSync, acting); err != nil {
 		if errors.Is(err, errProfileLimitReached) {
 			return none, profileLimitReached(profileLimit)
+		}
+		if errors.Is(err, errProfileNameConflict) {
+			return none, profileNameConflictError()
 		}
 		if errors.Is(err, access.ErrProfileUnverified) {
 			return none, profileManagementError(err)
@@ -703,7 +723,7 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to list profiles")
 		}
 		if profileNameConflicts(existingProfiles, *req.Name, profileID) {
-			return none, apiError(http.StatusConflict, "name_conflict", "A profile with this name already exists")
+			return none, profileNameConflictError()
 		}
 	}
 
@@ -749,6 +769,9 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 	if err := h.applyProfileUpdateSettingsSync(
 		ctx, store, userID, profileID, input, settingsSync, acting,
 	); err != nil {
+		if errors.Is(err, errProfileNameConflict) {
+			return none, profileNameConflictError()
+		}
 		if errors.Is(err, access.ErrProfileUnverified) {
 			return none, profileManagementError(err)
 		}
@@ -878,6 +901,14 @@ type ProfileVerifyPINCommand struct {
 	SessionID string
 	ProfileID string
 	PIN       string
+	// GrantedApp reports that another app's key opened the login session
+	// (auth.Claims.IsGrantedApp). Such a session's attempts count under that
+	// app's own allowance, by GrantedAppKeyID, never the household's; one
+	// whose key id is missing is refused before anything is read or counted.
+	GrantedApp bool
+	// GrantedAppKeyID is the device key that opened such a session
+	// (auth.Claims.GrantedAppKeyID); ignored for every other caller.
+	GrantedAppKeyID string
 }
 
 // ProfileVerification is the outcome of a PIN check: whether the PIN
@@ -890,12 +921,46 @@ type ProfileVerification struct {
 	ExpiresAt    time.Time
 }
 
+// reservePINAttempt counts one PIN attempt and returns the key and limiter
+// it was counted under, for the Reset a correct PIN makes, or the lockout.
+//
+// The household's devices share one count per profile (PINAttempts). A
+// login session another app's key opened counts under that app's key and
+// profile instead (GrantedAppPINAttempts), so its wrong guesses lock only
+// the app, and signing in again with the same key does not reset them. Such
+// a session reads the household's count and is refused while the profile is
+// locked there, but never writes it: neither its failures nor its correct
+// PIN move the household's count.
+func (h *ProfileHandler) reservePINAttempt(ctx context.Context, cmd ProfileVerifyPINCommand) (string, *ratelimit.AttemptLimiter, error) {
+	householdKey := ratelimit.ProfilePINKey(cmd.UserID, cmd.ProfileID)
+	if !cmd.GrantedApp {
+		if retryAfter, ok := h.PINAttempts.Reserve(ctx, householdKey); !ok {
+			return "", nil, PINLockedError(retryAfter)
+		}
+		return householdKey, h.PINAttempts, nil
+	}
+	if retryAfter, locked := h.PINAttempts.Locked(ctx, householdKey); locked {
+		return "", nil, PINLockedError(retryAfter)
+	}
+	appKey := ratelimit.GrantedAppPINKey(cmd.UserID, cmd.ProfileID, cmd.GrantedAppKeyID)
+	if retryAfter, ok := h.GrantedAppPINAttempts.Reserve(ctx, appKey); !ok {
+		return "", nil, PINLockedError(retryAfter)
+	}
+	return appKey, h.GrantedAppPINAttempts, nil
+}
+
 // VerifyPIN checks a profile's PIN and, on a match, mints the X-Profile-Token
-// the profile gates accept. v1 POST /profiles/{id}/verify-pin and v2
-// verifyProfilePIN both call it; a failure is an *APIError carrying the v1
-// status, code and message.
+// the profile gates accept. Only v2 verifyProfilePIN calls it (the v1 route
+// is retired); a failure is an *APIError carrying the status, code and
+// message that operation maps to its problem.
 func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINCommand) (ProfileVerification, error) {
 	var none ProfileVerification
+	// Another app's session must be counted by its key. Without the key it
+	// cannot be, and counting it as a household device would let it lock the
+	// household out, so it is refused before any count or hash is touched.
+	if cmd.GrantedApp && cmd.GrantedAppKeyID == "" {
+		return none, apiError(http.StatusForbidden, "forbidden", SessionNotAllowedDetail)
+	}
 	store, err := h.storeProvider.ForUser(ctx, cmd.UserID)
 	if err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
@@ -928,9 +993,9 @@ func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINComm
 	// guesses cannot overrun the limit, and while the profile is locked even
 	// the right PIN is refused. The check then waits for a hashing turn ahead
 	// of sign-ins, and compares against the hash read with the revision above.
-	attemptKey := ratelimit.ProfilePINKey(cmd.UserID, cmd.ProfileID)
-	if retryAfter, ok := h.PINAttempts.Reserve(ctx, attemptKey); !ok {
-		return none, PINLockedError(retryAfter)
+	attemptKey, limiter, err := h.reservePINAttempt(ctx, cmd)
+	if err != nil {
+		return none, err
 	}
 	permit, err := passwordhash.AdmitAhead(ctx)
 	if apiErr := busyError(err); apiErr != nil {
@@ -942,7 +1007,7 @@ func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINComm
 		return none, apiError(http.StatusNotFound, "not_found", "Profile not found or has no PIN")
 	}
 	if valid {
-		h.PINAttempts.Reset(ctx, attemptKey)
+		limiter.Reset(ctx, attemptKey)
 	}
 	if !valid || user == nil {
 		return ProfileVerification{Valid: valid}, nil

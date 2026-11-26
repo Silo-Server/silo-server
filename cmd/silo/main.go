@@ -3387,6 +3387,9 @@ func main() {
 	// shares one budget per profile even with ratelimit.backend at its memory
 	// default, and is process-local only on a Redis-less deployment.
 	deps.ProfilePINAttempts = ratelimit.NewProfilePINAttemptLimiter(apiRedisClient)
+	// A session another app's key opened counts its PIN attempts apart, on
+	// the same terms.
+	deps.GrantedAppPINAttempts = ratelimit.NewGrantedAppPINAttemptLimiter(apiRedisClient)
 	// The Quick Connect code budget per account follows the same rule, and
 	// the native approval routes and Jellyfin's Authorize share it.
 	deps.QuickConnectCodeAttempts = ratelimit.NewQuickConnectCodeAttemptLimiter(apiRedisClient)

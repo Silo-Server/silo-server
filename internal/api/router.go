@@ -232,6 +232,10 @@ type Dependencies struct {
 	// shared with the Jellyfin login so both count against one budget.
 	// Nil gets a process-local limiter.
 	ProfilePINAttempts *ratelimit.AttemptLimiter
+	// GrantedAppPINAttempts bounds the PIN guesses of a login session
+	// another app's key opened, per profile and app key, apart from
+	// ProfilePINAttempts. Nil falls back to a process-local limiter.
+	GrantedAppPINAttempts *ratelimit.AttemptLimiter
 	// QuickConnectCodeAttempts bounds the six-digit Jellyfin Quick Connect
 	// codes each account tries, shared with the Jellyfin-compatible API's
 	// Authorize route. Nil gets a process-local limiter.
@@ -1315,6 +1319,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		profileHandler.PINAttempts = deps.ProfilePINAttempts
 		if profileHandler.PINAttempts == nil {
 			profileHandler.PINAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.ProfilePINPolicy)
+		}
+		profileHandler.GrantedAppPINAttempts = deps.GrantedAppPINAttempts
+		if profileHandler.GrantedAppPINAttempts == nil {
+			profileHandler.GrantedAppPINAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.GrantedAppPINPolicy)
 		}
 		// Private S3 preserves existing avatar keys and presigned delivery. Local
 		// avatars use the signed artwork endpoint. Never use public S3 here.

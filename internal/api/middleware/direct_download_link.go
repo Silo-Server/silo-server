@@ -62,6 +62,7 @@ func (am *AuthMiddleware) RequireDirectDownloadAuth(next http.Handler) http.Hand
 		// change does not refuse it; the request carries the current role.
 		claims.Role = authority.Role
 		claims.SessionKind = authority.Kind
+		claims.GrantedAppKeyID = authority.GrantedAppKeyID
 		if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 			uid := claims.UserID
 			lc.UserID = &uid

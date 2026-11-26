@@ -481,12 +481,17 @@ resolver (`TestPluginContentMountsAllReachTheContentHandler`,
 
 - who it is and which profile it acts as: the current user (without the
   account's email, which is the empty string for such a session), the profile
-  list, verifying a profile's PIN, and capability reads. A
-  wrong PIN spends that profile's attempt budget as from any device (five
-  attempts in five minutes), so the app's wrong guesses can lock the profile
-  for the person's own devices for up to five minutes, until a following
-  change counts such a session's attempts separately. The profile list carries every profile's limits, as for
-  any session;
+  list, verifying a profile's PIN, and capability reads. The app's PIN
+  attempts count under its own allowance, per profile and app device key
+  (`ratelimit.GrantedAppPINPolicy`: three attempts, then an hour locked), so
+  signing in again with the same key does not reset them. They never spend
+  the household's count: the app's wrong guesses lock only the app, never the
+  person's own devices. While the household's own devices have locked the
+  profile, the app is refused too, with the same 429 and retry time. A
+  session whose device key row is missing is still treated as another app's
+  and counted by the key id the session names; a key row is revoked, never
+  deleted, while its account exists, so this is only a guard. The
+  profile list carries every profile's limits, as for any session;
 - reading the catalog, home, libraries, collections, recommendations,
   subtitles, settings and preferences. Reading a person can queue that
   person's metadata refresh when one is due;
@@ -615,7 +620,7 @@ on the account for such a session, and what happens to it then:
 | shuffles | a shuffle of the profile | stays as the profile's; an abandoned one is deleted with other abandoned shuffles |
 | starting playback, theme songs, the bandwidth probe download | a playback attempt bound to its login session, and the play's history row, which carries the client name the app sent | the attempt's media, stream reference and control socket are refused once the session ends, and the stream ends at its idle expiry; the history row stays as the profile's |
 | route events | diagnostics about its own streams, carrying its client name | stay; they grant nothing |
-| verifying a PIN with a wrong guess | spent attempts on the profile's PIN budget | expire within five minutes |
+| verifying a PIN with a wrong guess | spent attempts on the app's own PIN allowance for that profile, which lock only the app | expire within an hour of the attempt that locked it, or of the first attempt when it never locked; a later correct PIN clears them |
 | reading a person | a metadata refresh queued when one is due | runs as any refresh; grants nothing |
 | Watch Together membership, suggestions, votes, member state | the profile's place and choices in a room the person put it in | stay as the profile's; the room socket closes on the session's next authority check |
 | events socket ticket | a short-lived ticket | the socket closes on its next authority check (at most 15 seconds) |
@@ -1301,8 +1306,9 @@ by a set built elsewhere.
   accepted newer set creates the profile only if it has an item with that
   `sync_id` and the household has room (otherwise the item is left off); a
   set refused as a whole (a name clash, say) writes nothing; a set that
-  pairs the `sync_id` with a profile outside the set gives it to that
-  profile, which keeps its history; and a repeat of the held version
+  pairs the `sync_id` with a profile on the account with no `sync_id`
+  gives it to that profile, which keeps its history and needs no room, since
+  the limit applies only to new profiles; and a repeat of the held version
   creates nothing. Each clear then calls the wake hook
   (`profileedits.Waker`) itself, since its writes record nothing for the
   request's middleware to wake on, and answers what the hook reported: true
@@ -1361,7 +1367,7 @@ configuration writer skips a value equal to the stored one. The SQLite user
 store records nothing; it does not take sets either.
 
 The edit rows are the last rows any transaction locks: after the account
-locks, profile rows and the account row in the set, and after the profile row
+locks, the account row and the profile rows in the set, and after the profile row
 in a profile save, avatar write or delete. The account's preference-settings
 lock comes first: the profile, settings and Jellyfin-compatible configuration
 transactions, a profile delete and the set take it always; the pool-level
@@ -1496,12 +1502,27 @@ household is under its profile limit; the rest are reported in `left_off`.
 Profiles outside the set count toward the limit, and nothing is deleted to make
 room.
 
-**Names.** Names are unique in the set, compared trimmed and without case as
-everywhere else. The check runs on the household as the set leaves it, so a
-rename chain applies; an item named like a profile outside the set refuses the
-whole set (`name_conflict`). There is no unique index on names: the set
-transaction holds every profile row and the account's preference lock, which
-every other profile writer takes first.
+**Names.** The server decides whether two names are the same: trimmed and
+compared without case, as everywhere else. A device's own list may compare
+names exactly, so it can hold `Sam` and `sam`; it does not reproduce the
+server's comparison, and goes by the answer. Every name clash is one answer, 422
+`name_conflict` at an item's name, judged after the version like any other
+refusal of a set that will write, so a stale set is told it is stale first. Two
+items of the set with one name come first, at the later item. That compares the
+names the set gives over every item, so an item left off for the limit or
+hidden by the owner counts, and so does one whose profile keeps a name the
+owner gave it: clearing that name would otherwise bring the clash back with
+nobody sending anything. Then the household as the set leaves it is checked,
+so a rename chain applies, and an item named like a profile outside the set
+refuses the whole set. There is no unique index on names. These five writers of
+a profile's name each check it under the account's preference-settings lock,
+taken before they read the names: a profile create and a profile rename (inside
+`WithPreferenceSettingsTransaction`), the person's set and the owner's clear
+of a name override (inside `WithProfileSetTransaction`), and an
+administrator's change of the account's username, which renames the main
+profile when it still carries the old username (`MutateAdminAccount` takes
+`LockAccountForImport` first). They run one at a time, so none can take a name
+another just took.
 
 **What a new profile starts with.** The item's fields and settings, no picture
 unless the item names a preset this server knows, and no PIN unless the item
@@ -1538,17 +1559,24 @@ artwork, devices, notification state, and the purges other services run).
 Only profiles with a `sync_id` are ever removed, never the main profile. The
 app confirms deletions with the person before it sends such a set.
 
-**Locks.** The set's transaction takes the account's preference-settings and
-section-override locks, the audit actors, the collections of the profiles it
-removes in ID order, every profile row of the account in ID order, and the
-account row last. That is a profile delete's order extended, and a profile
-save locks its profile row before the account row, so neither deadlocks with
-a set. Deleting the account locks the account row before its profiles, the
-opposite order: a set and an account deletion running together can deadlock,
-and PostgreSQL aborts one of them. An aborted set starts over; a set whose
-account is gone answers as any request for a deleted account
-(`session_expired`). The lock order stays, because it is the one profile
-saves need.
+**Locks.** The set's transaction takes, in order: the account's
+preference-settings and section-override locks, the audit actors, the account
+row, the collections of the profiles it removes in ID order, and every profile
+row of the account in ID order; the edit rows come last. A writer that locks a
+profile row and then the account row takes the preference-settings lock first,
+so it runs wholly before or after a set: a profile save that bumps the access
+revision, and the pool-level profile update the avatar routes use, both take
+it before the profile row. A profile delete takes it too, and then locks the
+account row before the profile row. An administrator's change of the account's
+username takes it before the account row, since it may rename the main
+profile. A writer that does not take that lock locks the account row before
+any profile row, the set's own order: approving a device sign-in, an allowance
+change, and creating an API key for a profile. Deleting an account takes the
+preference-settings lock before the account row at both deletion sites, so a
+set and an account deletion run one after the other rather than deadlocking.
+The set still starts over when PostgreSQL aborts it as a deadlock victim, as a
+guard for a writer that breaks these rules; a set whose account is gone
+answers as any request for a deleted account (`session_expired`).
 
 **SQLite.** The SQLite user store keeps profiles in a per-account file while
 other profile data lives in PostgreSQL, so a set can't be one transaction
