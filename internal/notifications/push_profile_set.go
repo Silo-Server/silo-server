@@ -216,13 +216,14 @@ func listProfileSetWakeDevices(ctx context.Context, tx pgx.Tx, userID int, platf
 // recordProfileSetWake records a wake of userID now, unless one was
 // recorded within profileSetWakeInterval, and reports whether it recorded
 // one. It is one statement: a second server recording at the same moment
-// waits on the account's row and then finds the new time. The time is the
-// statement's own (clock_timestamp), not its transaction's start, so the
-// interval is measured from when each wake is recorded.
+// waits on the account's row and then finds the new time. The time is read
+// from the clock (clock_timestamp) when the row is written, after any wait
+// for it, not at the transaction's or the statement's start, so the
+// interval is measured from when each wake is admitted.
 func recordProfileSetWake(ctx context.Context, tx pgx.Tx, userID int) (bool, error) {
 	rows, err := tx.Query(ctx, `INSERT INTO push_profile_set_wakes AS w (user_id, last_wake_at)
 		VALUES ($1, clock_timestamp())
-		ON CONFLICT (user_id) DO UPDATE SET last_wake_at = excluded.last_wake_at
+		ON CONFLICT (user_id) DO UPDATE SET last_wake_at = clock_timestamp()
 		WHERE w.last_wake_at <= clock_timestamp() - $2::interval
 		RETURNING w.user_id`, userID, profileSetWakeInterval)
 	if err != nil {

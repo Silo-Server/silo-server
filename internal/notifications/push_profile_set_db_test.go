@@ -122,8 +122,9 @@ func (h wakeHarness) editThenWake(node *System, commit bool) bool {
 // wakes overlap: a third connection holds the account's wake time row until
 // every node is waiting on it. A node that never waits on that row fails the
 // test, so it fails whenever the wake is not decided on the row, not only
-// when the timing happens to line up.
-func (h wakeHarness) wakeTogether(nodes ...*System) []bool {
+// when the timing happens to line up. released is the holder's clock just
+// before it let the row go.
+func (h wakeHarness) wakeTogether(nodes ...*System) (answers []bool, released time.Time) {
 	h.t.Helper()
 	ctx := h.t.Context()
 	if _, err := h.pool.Exec(ctx, `INSERT INTO push_profile_set_wakes (user_id, last_wake_at)
@@ -140,7 +141,7 @@ func (h wakeHarness) wakeTogether(nodes ...*System) []bool {
 		h.t.Fatal(err)
 	}
 
-	answers := make([]bool, len(nodes))
+	answers = make([]bool, len(nodes))
 	var wg sync.WaitGroup
 	for i, node := range nodes {
 		wg.Go(func() { answers[i] = node.WakeProfileSetDevices(context.Background(), 7) })
@@ -165,11 +166,14 @@ func (h wakeHarness) wakeTogether(nodes ...*System) []bool {
 			h.t.Fatal(err)
 		}
 	}
+	if err := holder.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&released); err != nil {
+		h.t.Fatal(err)
+	}
 	if err := holder.Commit(ctx); err != nil {
 		h.t.Fatal(err)
 	}
 	<-finished
-	return answers
+	return answers, released
 }
 
 // An edit to a profile from the account's set wakes each of the account's
@@ -192,9 +196,20 @@ func TestProfileSetWakeDebounceDB(t *testing.T) {
 	nodeB := profileSetWakeSystem(t, pool, repo, nil, h.relayed)
 
 	// Two servers recording at the same moment queue one wake per phone, and
-	// only the one that queued it answers true.
-	if answers := h.wakeTogether(nodeA, nodeB); answers[0] == answers[1] || h.attempts() != 2 {
+	// only the one that queued it answers true. The time recorded is when
+	// the wake was admitted, after its wait on the account's row, so the next
+	// wake is a full interval after this one. Regression: the upsert stored
+	// the time it proposed before the wait, earlier than its admission.
+	answers, released := h.wakeTogether(nodeA, nodeB)
+	if answers[0] == answers[1] || h.attempts() != 2 {
 		t.Fatalf("concurrent wakes answered %v with %d attempts, want one true, one false and 2", answers, h.attempts())
+	}
+	var recordedAt time.Time
+	if err := pool.QueryRow(ctx, `SELECT last_wake_at FROM push_profile_set_wakes WHERE user_id = 7`).Scan(&recordedAt); err != nil {
+		t.Fatal(err)
+	}
+	if recordedAt.Before(released) {
+		t.Fatalf("wake recorded at %v, before the account's row was released at %v", recordedAt, released)
 	}
 	paths := map[string]bool{}
 	for _, wake := range h.receive(2) {
