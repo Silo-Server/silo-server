@@ -410,7 +410,8 @@ Clearing an override puts the set's value back at once, in one transaction that
 takes the set's locks, and the set applies to the field again from then on.
 Nothing it writes counts as an edit. A PIN the set sent as digits, or kept, can't
 be put back, because the server never stores digits: the owner's PIN stays until
-the person's app sends a newer set. A picture this server doesn't hold waits for
+the person's app sends a newer set. When the set has no PIN for the profile,
+clearing removes the owner's PIN at once. A picture this server doesn't hold waits for
 its upload. `clear_applies` on the record and `applied` in the answer say which
 happened. For a setting the settings contract mirrors in another key, clearing
 either key clears both. Putting back a `name` that another profile on the account now has,
