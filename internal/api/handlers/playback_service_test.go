@@ -1589,7 +1589,10 @@ func TestPlaybackMutationsV2KeepAnotherAppToItsStreams(t *testing.T) {
 		_, err = f.handler.StopPlaybackV2(f.ctx, app, session, PlaybackStopCommand{StopID: uuid.NewString()})
 		assertPlaybackOperationError(t, err, http.StatusForbidden, "forbidden")
 	}
-	_, err = f.handler.ReplanPlaybackV2(f.ctx, app, phone.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{PlaybackAttemptID: attemptID, ReplanRequestID: uuid.NewString()}})
+	// A replan that would otherwise be accepted, so the refusal is the rule's.
+	start := v3HandlerStartRequest()
+	replan := PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: attemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto", Failure: playback.FailureV3{Classification: "network_error"}, Capabilities: start.Capabilities, ClientPlaybackContext: start.ClientPlaybackContext}, Digest: "d"}
+	_, err = f.handler.ReplanPlaybackV2(f.ctx, app, phone.ID, replan)
 	assertPlaybackOperationError(t, err, http.StatusForbidden, "forbidden")
 
 	own := app
@@ -1601,4 +1604,29 @@ func TestPlaybackMutationsV2KeepAnotherAppToItsStreams(t *testing.T) {
 	if asked != 0 {
 		t.Fatalf("the rule was asked %d times for the caller's own stream", asked)
 	}
+}
+
+// failingAttemptReadPlanStoreV3 is a plan store whose attempt read fails.
+type failingAttemptReadPlanStoreV3 struct{ *playback.MemoryPlanStoreV3 }
+
+func (failingAttemptReadPlanStoreV3) GetAttempt(context.Context, string) (*playback.AttemptRecordV3, error) {
+	return nil, errors.New("store unreachable")
+}
+
+// TestReplanV2FailsClosedForAnotherApp: the replan reads the attempt to tell
+// whose stream it is; when that read fails, a caller the rule applies to is
+// refused as unavailable instead of being let through unchecked.
+func TestReplanV2FailsClosedForAnotherApp(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	memory, ok := f.handler.PlanStoreV3.(*playback.MemoryPlanStoreV3)
+	if !ok {
+		t.Fatalf("plan store = %T", f.handler.PlanStoreV3)
+	}
+	f.handler.PlanStoreV3 = failingAttemptReadPlanStoreV3{memory}
+	app := f.caller
+	app.LoginSessionID = "login-app"
+	app.MayReachOtherDevices = func(context.Context) error { return auth.ErrSessionNotAllowed }
+	command := PlaybackReplanCommand{Request: playback.ReplanRequestV3{PlaybackAttemptID: uuid.NewString(), ReplanRequestID: uuid.NewString()}}
+	_, err := f.handler.ReplanPlaybackV2(f.ctx, app, f.session.ID, command)
+	assertPlaybackOperationError(t, err, http.StatusServiceUnavailable, "unavailable")
 }
