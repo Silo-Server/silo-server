@@ -3,7 +3,8 @@ package catalog
 import "fmt"
 
 // effectiveLastAirDateExpr returns a SQL expression yielding the most recent
-// aired-episode date for a series. For non-series rows it returns the
+// aired regular-episode date for a series (specials do not count; see
+// refreshSeriesAirDatesSQL). For non-series rows it returns the
 // stored release/first-air date trimmed.
 //
 // As of migration 103, this reads the denormalized media_items.last_air_date_at
