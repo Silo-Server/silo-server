@@ -105,7 +105,8 @@ const recordFieldsSQL = `
 		by = excluded.by, actor_user_id = excluded.actor_user_id, at = excluded.at,
 		revision = excluded.revision, profile_name = NULL, settled_at = NULL,
 		replaced_owner = excluded.by = 'account'
-			AND (e.by = 'owner' OR (e.replaced_owner AND e.settled_at IS NULL))`
+			AND (e.by = 'owner' OR (e.replaced_owner AND e.settled_at IS NULL))
+	RETURNING e.revision`
 
 // RecordFields records fields of account's profile profileID as edited by
 // ctx's actor. It runs in the caller's transaction, after the write, and
@@ -118,12 +119,16 @@ func RecordFields(ctx context.Context, db Executor, account int, profileID strin
 	sorted := slices.Clone(fields)
 	slices.Sort(sorted)
 	sorted = slices.Compact(sorted)
-	tag, err := db.Exec(ctx, recordFieldsSQL, account, profileID, sorted, actor.By, actor.UserID)
+	rows, err := db.Query(ctx, recordFieldsSQL, account, profileID, sorted, actor.By, actor.UserID)
 	if err != nil {
 		return fmt.Errorf("recording an edit of profile %s: %w", profileID, err)
 	}
-	if tag.RowsAffected() > 0 {
-		FromContext(ctx).noteAccount(account)
+	revisions, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return fmt.Errorf("recording an edit of profile %s: %w", profileID, err)
+	}
+	if len(revisions) > 0 {
+		FromContext(ctx).noteAccount(account, slices.Min(revisions))
 	}
 	return nil
 }
@@ -160,17 +165,19 @@ func RecordRemoval(ctx context.Context, db Executor, account int, syncID, name s
 		account, syncID); err != nil {
 		return fmt.Errorf("recording a profile removal: %w", err)
 	}
-	if _, err := db.Exec(ctx, `
+	var revision int64
+	if err := db.QueryRow(ctx, `
 		INSERT INTO profile_set_edits AS e (user_id, sync_id, field, by, actor_user_id, profile_name)
 		VALUES ($1, $2::uuid, '', $3, $4, $5)
 		ON CONFLICT (user_id, sync_id, field) DO UPDATE SET
 			by = excluded.by, actor_user_id = excluded.actor_user_id, at = excluded.at,
 			revision = excluded.revision, profile_name = excluded.profile_name,
-			replaced_owner = false, settled_at = NULL`,
-		account, syncID, actor.By, actor.UserID, name); err != nil {
+			replaced_owner = false, settled_at = NULL
+		RETURNING e.revision`,
+		account, syncID, actor.By, actor.UserID, name).Scan(&revision); err != nil {
 		return fmt.Errorf("recording a profile removal: %w", err)
 	}
-	FromContext(ctx).noteAccount(account)
+	FromContext(ctx).noteAccount(account, revision)
 	return nil
 }
 

@@ -2854,6 +2854,7 @@ func main() {
 		)
 		userStoreProvider = notifications.WrapUserStoreProvider(userStoreProvider, notificationSystem)
 		deps.Notifications = notificationSystem
+		deps.ProfileEditsWaker = notificationSystem.WakeProfileSetDevices
 		if pluginService != nil {
 			notificationSystem.SetPluginChannelHost(pluginChannelHost{plugins: pluginService})
 		}

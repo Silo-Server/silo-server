@@ -14,6 +14,9 @@ import (
 const (
 	PushTriggerDelivery = "delivery"
 	PushTriggerTest     = "test"
+	// PushTriggerProfileSet is a background wake after a profile from the
+	// account's profile set changed on this server (push_profile_set.go).
+	PushTriggerProfileSet = "profile_set"
 
 	PushOutcomePending   = "pending"
 	PushOutcomeDelivered = "delivered"

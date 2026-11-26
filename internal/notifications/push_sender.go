@@ -36,6 +36,9 @@ const (
 	relayAppleSendPath      = "/v1/apple/send"
 	relayFcmSendPath        = "/v1/fcm/send"
 	relayModePrivateAlert   = "private_alert"
+	// relayModeBackgroundWake shows nothing: the relay sends a background
+	// APNs push or a normal-priority FCM data message.
+	relayModeBackgroundWake = "background_wake"
 
 	// relayCodeIdempotencyKeyReuse is the relay's 422 code for a retry whose
 	// payload differs from the one recorded under its idempotency key.
@@ -590,13 +593,16 @@ func (s *pushSender) postRelay(ctx context.Context, attempt PushDeliveryAttempt,
 	if attempt.NotificationDeliveryID != nil {
 		deliveryID = *attempt.NotificationDeliveryID
 	}
-	collapseID := deliveryID
+	mode, collapseID := relayModePrivateAlert, deliveryID
+	if attempt.TriggerType == PushTriggerProfileSet {
+		mode, collapseID = relayModeBackgroundWake, profileSetCollapseID
+	}
 	sendPath := relayAppleSendPath
 	var payload any = pushRelayAppleRequest{
 		Token:           token,
 		Environment:     device.APNsEnvironment,
 		Topic:           device.APNsTopic,
-		Mode:            relayModePrivateAlert,
+		Mode:            mode,
 		ServerDeviceID:  device.ServerDeviceID,
 		DeliveryID:      deliveryID,
 		CollapseID:      &collapseID,
@@ -606,7 +612,7 @@ func (s *pushSender) postRelay(ctx context.Context, attempt PushDeliveryAttempt,
 		sendPath = relayFcmSendPath
 		payload = pushRelayFcmRequest{
 			Token:           token,
-			Mode:            relayModePrivateAlert,
+			Mode:            mode,
 			ServerDeviceID:  device.ServerDeviceID,
 			DeliveryID:      deliveryID,
 			CollapseID:      &collapseID,
