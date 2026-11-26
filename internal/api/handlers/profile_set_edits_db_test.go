@@ -596,6 +596,16 @@ func TestProfileSetEditsRaceSetDB(t *testing.T) {
 			t.Fatalf("%d edit rows outlived the deleted account", left)
 		}
 	})
+	// The set's profile limit is read before its transaction; an account
+	// already gone there was a 500 rather than the set's own answer.
+	t.Run("a set sent after the account is deleted finds it gone", func(t *testing.T) {
+		if err := auth.NewUserRepository(f.pool).Delete(t.Context(), f.userID); err != nil && !errors.Is(err, auth.ErrNotFound) {
+			t.Fatal(err)
+		}
+		if _, err := f.applySeen(t, setDoc(t, 1000, main, kid), ""); !errors.Is(err, userstore.ErrProfileSetAccountGone) {
+			t.Fatalf("err = %v, want ErrProfileSetAccountGone", err)
+		}
+	})
 }
 
 // raceRacers are TestProfileSetEditsRaceSetDB's writers, by name, each run
