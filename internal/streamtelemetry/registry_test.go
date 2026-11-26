@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -252,40 +253,44 @@ func (s *stalledStore) Publish(ctx context.Context, snapshot Snapshot) error {
 func (s *stalledStore) Load(context.Context) (Snapshot, error) { return Snapshot{}, nil }
 
 func TestStartRetriesAfterStalledPublish(t *testing.T) {
-	cfg := testConfig()
-	cfg.SweepInterval = time.Millisecond
-	cfg.Freshness = 20 * time.Millisecond
-	store := &stalledStore{secondPublish: make(chan struct{})}
-	registry := NewRegistry(cfg, store, slog.New(slog.DiscardHandler))
-	ctx, cancel := context.WithCancel(context.Background())
-	registry.Start(ctx)
-	select {
-	case <-store.secondPublish:
-	case <-time.After(time.Second):
-		t.Error("a stalled publish blocked every later publish")
-	}
-	cancel()
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
-	defer stopCancel()
-	if err := registry.Stop(stopCtx); err != nil {
-		t.Fatal(err)
-	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	if store.calls < 2 {
-		return
-	}
-	if !errors.Is(store.stallErr, context.DeadlineExceeded) {
-		t.Fatalf("stalled publish ended with %v, want its deadline", store.stallErr)
-	}
-	if store.recoveredErr != nil {
-		t.Fatalf("retry publish got a dead context: %v", store.recoveredErr)
-	}
-	// The tick that queued during the stall is stale; the retry must describe
-	// the registry as of the retry, or readers count it stale on arrival.
-	if store.recovered.CapturedAt.Before(store.stallEnded) {
-		t.Fatalf("retry captured at %v, before the stall ended at %v", store.recovered.CapturedAt, store.stallEnded)
-	}
+	// The bubble's fake clock moves only while every goroutine waits, so a
+	// slow runner cannot spend the retry's deadline before the store reads it.
+	synctest.Test(t, func(t *testing.T) {
+		cfg := testConfig()
+		cfg.SweepInterval = time.Millisecond
+		cfg.Freshness = 20 * time.Millisecond
+		store := &stalledStore{secondPublish: make(chan struct{})}
+		registry := NewRegistry(cfg, store, slog.New(slog.DiscardHandler))
+		ctx, cancel := context.WithCancel(context.Background())
+		registry.Start(ctx)
+		select {
+		case <-store.secondPublish:
+		case <-time.After(time.Second):
+			t.Error("a stalled publish blocked every later publish")
+		}
+		cancel()
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+		defer stopCancel()
+		if err := registry.Stop(stopCtx); err != nil {
+			t.Fatal(err)
+		}
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		if store.calls < 2 {
+			return
+		}
+		if !errors.Is(store.stallErr, context.DeadlineExceeded) {
+			t.Fatalf("stalled publish ended with %v, want its deadline", store.stallErr)
+		}
+		if store.recoveredErr != nil {
+			t.Fatalf("retry publish got a dead context: %v", store.recoveredErr)
+		}
+		// The tick that queued during the stall is stale; the retry must describe
+		// the registry as of the retry, or readers count it stale on arrival.
+		if store.recovered.CapturedAt.Before(store.stallEnded) {
+			t.Fatalf("retry captured at %v, before the stall ended at %v", store.recovered.CapturedAt, store.stallEnded)
+		}
+	})
 }
 
 type lifecycleStore struct {
