@@ -72,6 +72,9 @@ type RefreshedTokensView struct {
 	AccessToken  string
 	RefreshToken string
 	ExpiresIn    int
+	// AccountCreatedAt is when the account was made; zero for a session
+	// another app's key opened, whose answer leaves it out.
+	AccountCreatedAt time.Time
 }
 
 // Refresh exchanges a refresh token for a new pair. v1 POST /auth/refresh and
@@ -109,7 +112,11 @@ func (h *AuthHandler) Refresh(ctx context.Context, refreshToken string) (Refresh
 		}
 		return RefreshedTokensView{}, invalid
 	}
-	return RefreshedTokensView{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresIn: pair.ExpiresIn}, nil
+	view := RefreshedTokensView{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresIn: pair.ExpiresIn}
+	if pair.User != nil && !pair.GrantedApp {
+		view.AccountCreatedAt = pair.User.CreatedAt
+	}
+	return view, nil
 }
 
 // ListSessionsPage is the keyset listing v2 listSessions serves: up to limit

@@ -63,7 +63,7 @@ func (f *fakeInvitations) Lookup(_ context.Context, token string) (*invitations.
 func (f *fakeInvitations) AcceptInvitation(_ context.Context, token, email, _, _, _ string) (handlers.InvitationAcceptanceView, error) {
 	f.writes++
 	f.acceptEmail = email
-	v := handlers.InvitationAcceptanceView{Username: f.row.Email, Tokens: &handlers.TokenPairView{AccessToken: "fixture-access", RefreshToken: "fixture-refresh", ExpiresIn: 3600, User: handlers.UserView{ID: 3, Username: f.row.Email, Role: models.RoleUser}}}
+	v := handlers.InvitationAcceptanceView{Username: f.row.Email, Tokens: &handlers.TokenPairView{AccessToken: "fixture-access", RefreshToken: "fixture-refresh", ExpiresIn: 3600, User: handlers.UserView{ID: 3, Username: f.row.Email, Role: models.RoleUser, CreatedAt: fixtureAccountCreatedAt}}}
 	if token == "sign-in-required" {
 		return v, invitations.ErrSessionStart
 	}

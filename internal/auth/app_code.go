@@ -546,9 +546,11 @@ func (a *AppKeySignIn) enrollRedeemedDevice(ctx context.Context, tx pgx.Tx, user
 		return nil, keyEnrolledAs(KeyMemberDevice, err)
 	}
 	out.User, out.DeviceID, out.Status = user, key.ID, appkeys.ReplySignedIn
-	out.PersonKeyID, out.PersonKeyStatus = person.KeyID, personStatus
-	out.Pair, err = a.service.openKeySessionTx(ctx, tx, user, key, session)
-	return key, err
+	out.PersonKeyStatus = personStatus
+	if out.Pair, err = a.service.openKeySessionTx(ctx, tx, user, key, session); err != nil {
+		return key, err
+	}
+	return key, out.reportPersonKey(ctx, tx, user.ID)
 }
 
 // SessionKeyAccess answers what the claims' session may do with the

@@ -72,9 +72,13 @@ type TokenPair struct {
 	ExpiresIn    int // seconds until access token expires
 	// SessionID is the login session the pair authenticates.
 	SessionID string
-	// User is the account read while an OAuth completion opens its session.
-	// Other token-pair paths return their account separately.
+	// User is the account read while an OAuth completion opens its session,
+	// or while Refresh checks the session. Other token-pair paths return
+	// their account separately.
 	User *models.User
+	// GrantedApp marks a refreshed session another app's key opened (a key
+	// enrolled through a grant), set by Refresh.
+	GrantedApp bool
 }
 
 // SettingsGetter retrieves server settings by key.
@@ -1345,7 +1349,14 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	if session.IsRemotePlayback() {
 		refreshed = remotePlaybackClaims(refreshed, session)
 	}
+	grantedApp, err := s.sessions.OpenedByGrantedApp(ctx, session)
+	if err != nil {
+		return nil, sessionCheckUnavailable("reading the session's key", err)
+	}
 	pair, err := s.generateTokenPair(refreshed)
+	if err == nil {
+		pair.User, pair.GrantedApp = user, grantedApp
+	}
 	if err == nil && session.ImpersonatorUserID == nil && !session.IsRemotePlayback() {
 		// A device that keeps its session refreshed shows where the account
 		// signs in from, so a new device there is not locked out with

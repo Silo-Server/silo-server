@@ -85,9 +85,20 @@ type KeySignInResult struct {
 	User     *models.User
 	// Pair is the session's tokens; nil while approval is required.
 	Pair *TokenPair
-	// PersonKeyID is the account's person key's ID (kid), set by enroll and
-	// by an app code's redeem.
+	// PersonKeyReported marks a signed_in answer to one of the person's own
+	// device keys, which says which person key the account holds: the ID of
+	// its live person key in PersonKeyID, or none (PersonKeyID empty). It is
+	// false for approval_required and for a granted app's key, whose answers
+	// leave the person key out (reportPersonKey).
+	PersonKeyReported bool
+	// PersonKeyID is the account's live person key's ID (kid) once the
+	// session's transaction commits, when PersonKeyReported; empty when the
+	// account has none.
 	PersonKeyID string
+	// GrantedApp marks a session another app's key opened (a key enrolled
+	// through a grant): its answer carries neither the person key nor the
+	// account's email.
+	GrantedApp bool
 	// PersonKeyStatus is PersonKeyEnrolled or PersonKeyKept, set by an app
 	// code's redeem.
 	PersonKeyStatus string
@@ -305,8 +316,10 @@ func (a *AppKeySignIn) Introduce(ctx context.Context, req KeyRequest) (*KeySignI
 			return holdForApproval(ctx, tx, key, out)
 		}
 		out.Status = appkeys.ReplySignedIn
-		out.Pair, err = a.service.openKeySessionTx(ctx, tx, user, key, chain.session(req.IP, expiry))
-		return err
+		if out.Pair, err = a.service.openKeySessionTx(ctx, tx, user, key, chain.session(req.IP, expiry)); err != nil {
+			return err
+		}
+		return out.reportPersonKey(ctx, tx, user.ID)
 	})
 	if err != nil {
 		return nil, err
@@ -404,8 +417,14 @@ func (a *AppKeySignIn) SignIn(ctx context.Context, req KeyRequest) (*KeySignInRe
 			return &KeyRetryError{RetryAfter: time.Second}
 		}
 		out.Status = appkeys.ReplySignedIn
-		out.Pair, err = a.service.openKeySessionTx(ctx, tx, user, key, chain.session(req.IP, expiry))
-		return err
+		if out.Pair, err = a.service.openKeySessionTx(ctx, tx, user, key, chain.session(req.IP, expiry)); err != nil {
+			return err
+		}
+		if key.EnrolledVia == models.AppKeyEnrolledGrant {
+			out.GrantedApp = true
+			return nil
+		}
+		return out.reportPersonKey(ctx, tx, user.ID)
 	})
 	if err != nil {
 		return nil, err
@@ -478,7 +497,7 @@ func (a *AppKeySignIn) Enroll(ctx context.Context, req KeyEnrollRequest) (*KeySi
 		return nil, sessionIdentityGone(err)
 	}
 	var audit *auditmutation.Entry
-	out := &KeySignInResult{ReplyKey: *payload.ReplyKey, Challenge: payload.Challenge, PersonKeyID: req.PersonKey.KeyID()}
+	out := &KeySignInResult{ReplyKey: *payload.ReplyKey, Challenge: payload.Challenge}
 	err = a.inTx(ctx, func(tx pgx.Tx) error {
 		user, err := lockEnabledUser(ctx, tx, req.Claims.UserID)
 		if err != nil {
@@ -518,6 +537,9 @@ func (a *AppKeySignIn) Enroll(ctx context.Context, req KeyEnrollRequest) (*KeySi
 		out.User, out.DeviceID, out.Status = user, key.ID, appkeys.ReplySignedIn
 		out.Pair, err = a.service.openKeySessionTx(ctx, tx, user, key, locked.session(req.IP, expiry))
 		if err != nil {
+			return err
+		}
+		if err := out.reportPersonKey(ctx, tx, user.ID); err != nil {
 			return err
 		}
 		audit, err = recordKeyAdded(ctx, tx, auditmutation.ActionAppKeysEnrolled, user.ID, http.StatusOK,
@@ -560,6 +582,24 @@ func (b KeyBinding) same(other KeyBinding) bool {
 		return false
 	}
 	return b.IdentityID == nil || *b.IdentityID == *other.IdentityID
+}
+
+// reportPersonKey records in out which person key the account holds, for a
+// signed_in answer to one of the person's own device keys. tx holds the
+// account row lock and has opened the session, after every write of its own
+// to the account's person key. Every writer of person key rows holds that
+// lock too, so this plain read sees the rows as they stand when the session
+// commits. The rule is the key list's (identityLive): an unrevoked key whose
+// provider identity is gone from the account counts as none.
+func (out *KeySignInResult) reportPersonKey(ctx context.Context, tx pgx.Tx, userID int) error {
+	var keyID string
+	err := tx.QueryRow(ctx, `SELECT k.key_id FROM auth_person_keys k
+		WHERE k.user_id = $1 AND k.revoked_at IS NULL AND `+identityLive, userID).Scan(&keyID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("reading the account's person key: %w", err)
+	}
+	out.PersonKeyReported, out.PersonKeyID = true, keyID
+	return nil
 }
 
 // livePersonKeyTx locks the account's live person key, or answers nil. tx

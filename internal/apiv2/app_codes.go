@@ -72,8 +72,8 @@ type AppKeySessionAccessOutput struct {
 
 // redeemSealedReply is redeemAppCode's sealed answer: the signed_in
 // plaintext with the account's name and person key.
-var redeemSealedReply = sealedReplySignedIn("person_key_id, username, person_key, ",
-	"; person_key_id is the ID of the account's person key once the redeem commits, username the account's name, and person_key enrolled (person_key is now the account's person key, or already was) or kept (the account keeps a different one, named by person_key_id). A client tells whether the account holds the key it sent by comparing person_key_id with the ID of that key, not by person_key. person_key says how the account came to hold its key (enrolled, kept); a client that does not know a value still has its answer from the ID")
+var redeemSealedReply = personSealedReply("username, person_key, ",
+	"; username is the account's name, and person_key enrolled (person_key is now the account's person key, or already was) or kept (the account keeps a different one, named by person_key_id). A client tells whether the account holds the key it sent by comparing person_key_id with the ID of that key, not by person_key. person_key says how the account came to hold its key (enrolled, kept); a client that does not know a value still has its answer from the ID")
 
 // redeemPayloadLocation is where redeem's signed payload sits in its body.
 const redeemPayloadLocation = locationBody + ".message.payload"

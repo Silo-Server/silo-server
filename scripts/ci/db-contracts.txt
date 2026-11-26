@@ -355,6 +355,7 @@
 ./internal/apiv2 TestKeyRoutesRefuseSessionsDB
 ./internal/apiv2 TestAllowedOperationsAnswerGrantedAppsDB
 ./internal/apiv2 TestHouseholdSessionsForAnotherAppDB
+./internal/apiv2 TestFilePathsHiddenFromAnotherAppDB
 ./internal/apiv2 TestWebPushRefusesAnotherAppDB
 ./internal/apiv2 TestWatchTogetherRefusesAnotherAppDB
 ./internal/apiv2 TestGuestSeatAnotherAppKeepsOwnDeviceViewDB
@@ -406,6 +407,10 @@
 ./internal/auth TestUnlinkOnlyProviderWithKeysRefusedDB
 ./internal/backup TestStrandedAccountsCoverEveryAccountDB
 ./internal/auth TestGrantRedeemDB
+./internal/auth TestSignedInRepliesReportPersonKeyDB
+./internal/auth TestRepliesThatLeaveOutThePersonKeyDB
+./internal/auth TestRevokedPersonKeyIsNeverTakenAgainDB
+./internal/auth TestAccountCreatedAtSurvivesRenameDB
 ./internal/auth TestGrantRedeemRefusalsDB
 ./internal/auth TestGrantRedeemConcurrentDB
 ./internal/auth TestGrantRedeemUnderAnotherKidDB
@@ -1775,6 +1780,8 @@
 ./internal/api/handlers TestAdminInsightsPlayGroupingDB
 ./internal/api/handlers TestAdminInsightsBreakdownsDB
 ./internal/api/handlers TestPlaybackHistoryEntrySkipsTheReadGateDB
+./internal/api/handlers TestRefreshAccountCreatedAtDB
+./internal/api/handlers TestViewAsPairCarriesTheViewedAccountsCreatedAtDB
 ./internal/backup TestCarryCredentialsReconcilesRestoredStreamNodesDB
 ./internal/backup TestCarryCredentialsKeepsNodeSamplesWithoutDailyArchiveDB
 
