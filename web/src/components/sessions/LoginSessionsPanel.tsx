@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useLoginSessions, type LoginSession } from "@/hooks/queries/loginSessions";
 import { useAuth } from "@/hooks/useAuth";
-import { loginSessionDevice } from "@/lib/loginSessionDevice";
+import { isReducedLoginSession, loginSessionDevice } from "@/lib/loginSessionDevice";
 import { useT } from "@/i18n";
 import { LoginSessionRow } from "./LoginSessionRow";
 
@@ -95,6 +95,7 @@ export function LoginSessionsPanel({
           key={session.id}
           session={session}
           onSignOut={canSignOut ? signOut : undefined}
+          reduced={!adminUser && isReducedLoginSession(session, current)}
         />
       ))}
     </ul>

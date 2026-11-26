@@ -136,3 +136,45 @@ it("offers only this session's sign out when others may not be revoked", () => {
   expect(screen.getByRole("button", { name: "Sign out this browser" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Sign out Chrome on Windows" })).toBeNull();
 });
+// A demo visitor's list carries another visitor's session by id only, with the
+// caller's own times repeated; the row must not present them as that session's.
+it("shows a session the server reduced to its id without the caller's own times", async () => {
+  const own = {
+    ...listedSession,
+    id: "this",
+    device_name: "Firefox/1 Linux",
+    ip_address: "192.0.2.1",
+    created_at: "2026-10-01T00:00:00Z",
+    expires_at: "2026-10-31T00:00:00Z",
+    last_seen_at: "2026-10-02T00:00:00Z",
+    current: true,
+  };
+  const reduced = {
+    ...own,
+    id: "other",
+    device_name: "",
+    ip_address: "",
+    last_seen_at: null,
+    current: false,
+  };
+  mocks.sessions = [own, reduced, listedSession];
+  const user = userEvent.setup();
+  render(
+    <MemoryRouter>
+      <LoginSessionsPanel manageOthers={false} />
+    </MemoryRouter>,
+  );
+  const row = (name: string) => screen.getByText(name).closest("li") as HTMLElement;
+  const reducedRow = row("Unknown device");
+  expect(within(reducedRow).queryByRole("button", { name: /Details/ })).toBeNull();
+  expect(reducedRow).not.toHaveTextContent(/Signed in|Last seen|Expires|2026|Unknown$|Not sent/);
+  // The current row and a full row render as before.
+  const fullRow = row("Chrome on Windows");
+  expect(fullRow).toHaveTextContent("Last seen not recorded yet · Signed in");
+  await user.click(within(fullRow).getByRole("button", { name: /Details/ }));
+  expect(fullRow).toHaveTextContent("Expires");
+  const currentRow = row("Firefox on Linux");
+  expect(currentRow).toHaveTextContent("Signed in");
+  await user.click(within(currentRow).getByRole("button", { name: /Details/ }));
+  expect(currentRow).toHaveTextContent("192.0.2.1");
+});
