@@ -18,7 +18,8 @@ import (
 const (
 	authLocalLoginCommand = "local-login"
 	authEnableAction      = "enable"
-	authCommandUsage      = "usage: silo auth " + authLocalLoginCommand + " " + authEnableAction + " [-user <name or email> [-temporary-password]] [-env .env]"
+	authCommandUsage      = "usage: silo auth " + authLocalLoginCommand + " " + authEnableAction + " [-user <name or email> [-temporary-password]] [-env .env]\n" +
+		"-user needs -temporary-password while that account's password sign-in is off: its stored password may be one nobody knows."
 )
 
 // authCommand is one parsed `silo auth` invocation.
@@ -42,7 +43,9 @@ type authCommand struct {
 //     password sign-in back on (linking an account to a provider turns it
 //     off, the Owner's too); with -temporary-password the account also gets
 //     a random temporary password, printed once, which it must replace at
-//     its next sign-in, and its sign-ins are revoked.
+//     its next sign-in, and its sign-ins are revoked. While the account's
+//     password sign-in is off, -temporary-password is required: its stored
+//     password may be one nobody knows.
 func runAuthCommand(ctx context.Context, args []string, out io.Writer) error {
 	cmd, err := parseAuthCommand(args)
 	if err != nil {
@@ -91,6 +94,9 @@ func enableAccountLocalLogin(ctx context.Context, users *auth.UserRepository, cm
 	if auth.IsNotFound(err) {
 		return fmt.Errorf("no account named %q", cmd.user)
 	}
+	if errors.Is(err, auth.ErrTemporaryPasswordRequired) {
+		return fmt.Errorf("password sign-in is off for %s, so its stored password may be one nobody knows: run the command again with -temporary-password", cmd.user)
+	}
 	if err != nil {
 		return err
 	}
@@ -128,7 +134,7 @@ func parseAuthCommand(args []string) (authCommand, error) {
 	flags.SetOutput(io.Discard)
 	env := flags.String("env", ".env", "path to .env bootstrap file")
 	user := flags.String("user", "", "username or email of one account to recover")
-	temporary := flags.Bool("temporary-password", false, "also give the account a temporary password")
+	temporary := flags.Bool("temporary-password", false, "also give the account a temporary password; required while its password sign-in is off")
 	if err := flags.Parse(args[2:]); err != nil || flags.NArg() != 0 {
 		return authCommand{}, errors.New(authCommandUsage)
 	}

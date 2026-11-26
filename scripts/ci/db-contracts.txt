@@ -329,6 +329,7 @@
 ./internal/auth TestExternalAccountCannotPreemptInitialSetupDB
 ./internal/auth TestPluginAuthBindingCallbackModeDB
 ./internal/auth TestLocalPasswordOffAccountsDB
+./internal/auth TestEnableAccountLocalLoginDB
 ./internal/auth TestLocalPasswordOffKeepsOpenSessionsDB
 ./internal/auth TestSignInProviderGuardDB
 ./internal/auth TestSignInProviderGuardSerializesWithSettingsSaveDB

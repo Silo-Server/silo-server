@@ -768,8 +768,11 @@ func TestConcurrentFirstSignInCreatesOneAccountDB(t *testing.T) {
 
 // An account linked to a provider has no local password sign-in, so a
 // provider outage or plugin removal must not strand it: the recovery command
-// turns local sign-in back on for one account, optionally with a temporary
-// password that revokes its sign-ins.
+// turns local sign-in back on for one account. While the account's password
+// sign-in is off it requires a temporary password, since the stored one may
+// be a password nobody knows (an account a provider created holds a random
+// one); the temporary password revokes the account's sign-ins. With password
+// sign-in already on, nothing extra is required.
 func TestEnableAccountLocalLoginDB(t *testing.T) {
 	env := newExternalSignInEnv(t)
 	ctx := t.Context()
@@ -789,21 +792,30 @@ func TestEnableAccountLocalLoginDB(t *testing.T) {
 	if _, err := users.EnableAccountLocalLogin(ctx, "nobody-"+env.suffix, ""); !IsNotFound(err) {
 		t.Fatalf("unknown account: %v", err)
 	}
-	user, err := users.EnableAccountLocalLogin(ctx, owner.Username, "")
-	if err != nil || !user.LocalPasswordLoginEnabled || user.PasswordChangeRequired {
-		t.Fatalf("enable = %+v, %v", user, err)
+	// Off, without a temporary password: refused, and nothing changes.
+	if _, err := users.EnableAccountLocalLogin(ctx, owner.Username, ""); !errors.Is(err, ErrTemporaryPasswordRequired) {
+		t.Fatalf("enable without a temporary password = %v, want ErrTemporaryPasswordRequired", err)
 	}
-	if _, err := NewLocalProvider(users, sessions).Authenticate(ctx, Credentials{Username: owner.Username, Password: "correct horse battery"}); err != nil {
-		t.Fatalf("sign-in with the kept password: %v", err)
+	if still, _ := users.GetByID(ctx, owner.ID); still.LocalPasswordLoginEnabled {
+		t.Fatal("a refused enable turned local password sign-in on")
 	}
 
-	user, err = users.EnableAccountLocalLogin(ctx, owner.Email, "temporary-pass-1")
-	if err != nil || !user.PasswordChangeRequired || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte("temporary-pass-1")) != nil {
+	// Off, with one: on, the password must be changed at the next sign-in,
+	// and the account's sign-ins are revoked.
+	user, err := users.EnableAccountLocalLogin(ctx, owner.Email, "temporary-pass-1")
+	if err != nil || !user.LocalPasswordLoginEnabled || !user.PasswordChangeRequired ||
+		bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte("temporary-pass-1")) != nil {
 		t.Fatalf("temporary password = %+v, %v", user, err)
 	}
 	var live int
 	if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM auth_sessions WHERE user_id = $1 AND revoked_at IS NULL`, owner.ID).Scan(&live); err != nil || live != 0 {
 		t.Fatalf("live sessions after a temporary password = %d, %v", live, err)
+	}
+
+	// Already on: no temporary password needed, and the password is kept.
+	again, err := users.EnableAccountLocalLogin(ctx, owner.Username, "")
+	if err != nil || !again.LocalPasswordLoginEnabled || again.PasswordHash != user.PasswordHash {
+		t.Fatalf("enable while already on = %+v, %v", again, err)
 	}
 }
 

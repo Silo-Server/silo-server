@@ -229,7 +229,14 @@ ordered against each other.
   provider outage or removing its plugin would otherwise lock the account
   out), and `-temporary-password` also gives it a random temporary password,
   printed once, that must be changed at the next sign-in, revoking its
-  sign-ins.
+  sign-ins. While the account's password sign-in is off, `-user` requires
+  `-temporary-password`: its stored password may be one nobody knows (an
+  account a provider created holds a random one), and the account would
+  otherwise count as a break-glass admin nobody can use. The switch is read
+  under the account's row lock in the transaction that turns it on. An
+  account that had a real password therefore gets a temporary one when its
+  password sign-in is turned back on this way; one whose password sign-in is
+  already on needs no flag.
 - An administrator setting an account's password (admin user update) also turns its local password sign-in back on.
 - While the switch is off, invited signup and invitation acceptance, which
   create local-password accounts, are refused with `local_login_disabled`

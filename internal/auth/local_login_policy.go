@@ -24,6 +24,10 @@ var (
 	// local password sign-in off and no enabled break-glass admin that can
 	// still use its password.
 	ErrBreakGlassRequired = errors.New("at least one enabled break-glass admin with password sign-in is required while local password sign-in is off")
+	// ErrTemporaryPasswordRequired refuses turning an account's local
+	// password sign-in back on without a temporary password while it is off:
+	// the stored password may then be one nobody knows.
+	ErrTemporaryPasswordRequired = errors.New("a temporary password is required to turn this account's password sign-in on: its stored password may be one nobody knows")
 	// ErrSignInProviderRequired refuses a change that would leave local
 	// password sign-in off with no OIDC or LDAP provider people can use:
 	// turning the switch off without one, or taking the last one away while
@@ -114,6 +118,14 @@ func (r *UserRepository) EnableLocalPasswordLogin(ctx context.Context) error {
 // way in. With a non-empty temporaryPassword the account also gets that
 // password, which it must replace at its next sign-in, and every sign-in it
 // holds is revoked. login is a username or email.
+//
+// While the account's password sign-in is off, temporaryPassword is
+// required (ErrTemporaryPasswordRequired): the stored hash may be a random
+// password nobody knows, such as the one an account a provider created
+// holds, and turning sign-in on with it would count the account as a
+// break-glass admin nobody can use. The switch is read under the account's
+// row lock in the transaction that changes it. With password sign-in already
+// on, the call is unchanged.
 func (r *UserRepository) EnableAccountLocalLogin(ctx context.Context, login, temporaryPassword string) (*models.User, error) {
 	user, err := LookupLogin(ctx, r, login)
 	if err != nil {
@@ -128,6 +140,16 @@ func (r *UserRepository) EnableAccountLocalLogin(ctx context.Context, login, tem
 		hash = string(raw)
 	}
 	err = pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		var on bool
+		if err := tx.QueryRow(ctx, `SELECT local_password_login_enabled FROM users WHERE id = $1 FOR UPDATE`, user.ID).Scan(&on); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("reading local password sign-in: %w", err)
+		}
+		if !on && hash == "" {
+			return ErrTemporaryPasswordRequired
+		}
 		tag, err := tx.Exec(ctx, `UPDATE users SET local_password_login_enabled = true,
 				password_hash = CASE WHEN $2 = '' THEN password_hash ELSE $2 END,
 				password_change_required = CASE WHEN $2 = '' THEN password_change_required ELSE true END,

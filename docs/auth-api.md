@@ -104,7 +104,8 @@ Every new password is also at most 72 UTF-8 bytes, the bcrypt input limit. The p
 every check, so a change applies at once on every node. It applies only when a password is chosen;
 passwords already stored keep working. The recovery command
 `silo auth local-login enable -user <name> -temporary-password` sets a temporary password without
-it, and the account then chooses a new one under the policy. A backup
+it, and the account then chooses a new one under the policy. While that account's password
+sign-in is off, `-temporary-password` is required: its stored password may be one nobody knows. A backup
 restore never weakens the live policy.
 
 A refused password returns `422 validation_failed` with one field error at the password member
