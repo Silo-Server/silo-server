@@ -641,6 +641,12 @@
       "value": "Sua sessão expirou. Entre novamente."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Enquanto o login com senha estiver desativado, um provedor de login que as pessoas possam usar precisa continuar ativado. O OpenID Connect também precisa da URL pública do servidor."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -86454,6 +86460,20 @@
       "value": "Ative um provedor de login primeiro. Com o login com senha desativado e nenhum provedor ativado, só administradores de emergência poderiam entrar."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Defina primeiro a URL pública do servidor. Sem ela, "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " não consegue fazer o login de ninguém; assim, com o login com senha desativado, só administradores de emergência poderiam entrar."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -86544,6 +86564,267 @@
       "value": "Permitir que usuários criem chaves de API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Desativar login com senha"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Apenas administradores de emergência entrarão com senha. Todos os demais entram com "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " cria contas no primeiro login; por isso, se uma dessas pessoas entrar com ele antes que você a vincule, ela receberá uma conta nova e separada."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Vincule cada uma a uma conta de "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " pela página dela em Usuários."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " conta não pode entrar até que um administrador a vincule"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de contas não podem entrar até que um administrador as vincule"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " contas não podem entrar até que um administrador as vincule"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível verificar quais contas isso afeta. Você ainda pode desativá-lo."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Verificando quem entra com senha"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Quando "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " confirmar um desses e-mails no login, o Silo conectará essa pessoa à conta dela."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " conta se conecta por e-mail"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de contas se conectam por e-mail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " contas se conectam por e-mail"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrar mais "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrar mais "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrar mais "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível carregar mais contas. Tente novamente."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Todas as contas ainda poderão entrar depois disso."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administrador"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Correspondência por e-mail desativada"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Sem e-mail"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Isso não desconecta ninguém. Quem já entrou continua conectado, as chaves de API continuam funcionando e ainda é possível aprovar novos dispositivos. Para desconectar alguém, encerre as sessões da pessoa pela página dela em "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Usuários"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Desativar o login com senha?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Ver todas as contas em Usuários"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -86578,6 +86859,28 @@
     {
       "type": 0,
       "value": "Não foi possível alterar "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "O login com senha está desativado, então todos, exceto os administradores de emergência, entram com "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Reative o login com senha primeiro e depois desative "
     },
     {
       "type": 1,
@@ -147852,6 +148155,12 @@
       "value": "E-mail ou nome de usuário"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Digite a URL base do servidor Emby do qual você quer importar."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -147862,6 +148171,12 @@
     {
       "type": 0,
       "value": "Deixe em branco se a conta não tiver senha"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL do servidor Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -148012,6 +148327,12 @@
     {
       "type": 0,
       "value": "Conta Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL do servidor"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -148305,7 +148626,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect ou servidor salvo"
+      "value": "Emby Connect, URL do servidor ou servidor salvo"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

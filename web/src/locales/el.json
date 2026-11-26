@@ -641,6 +641,12 @@
       "value": "Η περίοδος σύνδεσής σας έληξε. Συνδεθείτε ξανά."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Όσο η σύνδεση με κωδικό πρόσβασης είναι απενεργοποιημένη, πρέπει να παραμένει ενεργός ένας πάροχος σύνδεσης που μπορούν να χρησιμοποιήσουν οι χρήστες. Το OpenID Connect χρειάζεται επίσης το δημόσιο URL του διακομιστή."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -79395,6 +79401,20 @@
       "value": "Ενεργοποιήστε πρώτα έναν πάροχο σύνδεσης. Με τη σύνδεση με κωδικό πρόσβασης ανενεργή και χωρίς ενεργό πάροχο, μόνο οι διαχειριστές έκτακτης ανάγκης θα μπορούσαν να συνδεθούν."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Ορίστε πρώτα το δημόσιο URL του διακομιστή. Χωρίς αυτό, ο πάροχος "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " δεν μπορεί να συνδέσει κανέναν, οπότε με τη σύνδεση με κωδικό πρόσβασης απενεργοποιημένη θα μπορούσαν να συνδεθούν μόνο οι διαχειριστές έκτακτης ανάγκης."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -79485,6 +79505,246 @@
       "value": "Δημιουργία κλειδιών API από χρήστες"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Απενεργοποίηση σύνδεσης με κωδικό πρόσβασης"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Μόνο οι διαχειριστές έκτακτης ανάγκης θα συνδέονται με κωδικό πρόσβασης. Όλοι οι άλλοι συνδέονται με τον πάροχο "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Ο πάροχος "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " δημιουργεί λογαριασμούς κατά την πρώτη σύνδεση, οπότε αν κάποιος από αυτούς τους χρήστες συνδεθεί μέσω αυτού πριν από τη συσχέτιση, θα αποκτήσει νέο, ξεχωριστό λογαριασμό."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Συσχετίστε κάθε λογαριασμό με έναν λογαριασμό του παρόχου "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " από τη σελίδα του στην ενότητα «Χρήστες»."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " λογαριασμός δεν μπορεί να συνδεθεί μέχρι να τον συσχετίσει ένας διαχειριστής"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " λογαριασμοί δεν μπορούν να συνδεθούν μέχρι να τους συσχετίσει ένας διαχειριστής"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατός ο έλεγχος των λογαριασμών που επηρεάζονται. Μπορείτε και πάλι να την απενεργοποιήσετε."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Έλεγχος των χρηστών που συνδέονται με κωδικό πρόσβασης"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Όταν ο πάροχος "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " επιβεβαιώνει ένα από αυτά τα email κατά τη σύνδεση, το Silo συνδέει τον χρήστη με τον λογαριασμό του."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " λογαριασμός συνδέεται μέσω email"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " λογαριασμοί συνδέονται μέσω email"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ακόμη"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ακόμη"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η φόρτωση περισσότερων λογαριασμών. Δοκιμάστε ξανά."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Όλοι οι λογαριασμοί θα μπορούν να συνδέονται και μετά από αυτό."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Διαχειριστής"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Η αντιστοίχιση email είναι απενεργοποιημένη"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Χωρίς email"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Αυτό δεν αποσυνδέει κανέναν. Όσοι έχουν ήδη συνδεθεί δεν αποσυνδέονται, τα κλειδιά API τους εξακολουθούν να λειτουργούν και μπορούν ακόμη να εγκρίνουν νέες συσκευές. Για να αποσυνδέσετε κάποιον χρήστη, τερματίστε τις περιόδους σύνδεσής του από τη σελίδα του στην ενότητα "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Χρήστες"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Απενεργοποίηση της σύνδεσης με κωδικό πρόσβασης;"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Εμφάνιση όλων των λογαριασμών στην ενότητα «Χρήστες»"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -79519,6 +79779,28 @@
     {
       "type": 0,
       "value": "Δεν ήταν δυνατή η αλλαγή του παρόχου "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Η σύνδεση με κωδικό πρόσβασης είναι απενεργοποιημένη, επομένως μέσω του παρόχου "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " συνδέονται όλοι εκτός από τους διαχειριστές έκτακτης ανάγκης. Ενεργοποιήστε πρώτα ξανά τη σύνδεση με κωδικό πρόσβασης και, στη συνέχεια, απενεργοποιήστε τον πάροχο "
     },
     {
       "type": 1,
@@ -136783,6 +137065,12 @@
       "value": "Email ή όνομα χρήστη"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Εισαγάγετε τη βασική διεύθυνση URL του διακομιστή Emby από τον οποίο θέλετε να κάνετε εισαγωγή."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -136793,6 +137081,12 @@
     {
       "type": 0,
       "value": "Αφήστε κενό αν ο λογαριασμός δεν έχει κωδικό"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL διακομιστή Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -136943,6 +137237,12 @@
     {
       "type": 0,
       "value": "Λογαριασμός Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL διακομιστή"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -137236,7 +137536,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect ή αποθηκευμένος διακομιστής"
+      "value": "Emby Connect, URL διακομιστή ή αποθηκευμένος διακομιστής"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

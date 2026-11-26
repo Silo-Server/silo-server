@@ -641,6 +641,12 @@
       "value": "Jūsu sesijas derīguma termiņš ir beidzies. Pierakstieties vēlreiz."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Kamēr pierakstīšanās ar paroli ir izslēgta, ir jāpaliek ieslēgtam pierakstīšanās nodrošinātājam, ko lietotāji var izmantot. OpenID Connect nodrošinātājam ir nepieciešams arī servera publiskais URL."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -87601,6 +87607,20 @@
       "value": "Vispirms ieslēdziet pierakstīšanās nodrošinātāju. Ja pierakstīšanās ar paroli ir izslēgta un neviens nodrošinātājs nav ieslēgts, pierakstīties varētu tikai ārkārtas piekļuves administratori."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Vispirms iestatiet servera publisko URL. Bez tā nodrošinātājs "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " nevar nevienu pierakstīt, tāpēc, ja pierakstīšanās ar paroli ir izslēgta, pierakstīties varētu tikai ārkārtas piekļuves administratori."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -87691,6 +87711,271 @@
       "value": "Atļaut lietotājiem izveidot API atslēgas"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Izslēgt pierakstīšanos ar paroli"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Ar paroli pierakstīsies tikai ārkārtas piekļuves administratori. Visi pārējie pierakstās, izmantojot "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Nodrošinātājs "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " izveido kontus pirmajā pierakstīšanās reizē, tāpēc, ja kāds no šiem lietotājiem pierakstīsies ar šo nodrošinātāju, pirms jūs viņu sasaistāt, viņam tiks izveidots jauns, atsevišķs konts."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Sasaistiet katru no tiem ar "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " kontu tā lapā sadaļā „Lietotāji”."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konti nevar pierakstīties, kamēr administrators tos nesasaista"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konts nevar pierakstīties, kamēr administrators to nesasaista"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konti nevar pierakstīties, kamēr administrators tos nesasaista"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās pārbaudīt, kurus kontus tas ietekmē. Pierakstīšanos ar paroli joprojām var izslēgt."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Notiek pārbaude, kuri lietotāji pierakstās ar paroli"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Kad nodrošinātājs "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " pierakstīšanās laikā apstiprina kādu no šīm e-pasta adresēm, Silo savieno šo lietotāju ar viņa kontu."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konti tiek savienoti pēc e-pasta adreses"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konts tiek savienots pēc e-pasta adreses"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konti tiek savienoti pēc e-pasta adreses"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt vēl "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt vēl "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rādīt vēl "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Neizdevās ielādēt citus kontus. Mēģiniet vēlreiz."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Pēc šīs izmaiņas visi konti joprojām varēs pierakstīties."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administrators"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "E-pasta saskaņošana ir izslēgta"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Nav e-pasta adreses"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Šī darbība nevienu neizraksta. Lietotāji, kuri jau ir pierakstījušies, paliek pierakstīti, viņu API atslēgas turpina darboties, un viņi joprojām var apstiprināt jaunas ierīces. Lai kādu izrakstītu, pārtrauciet šī lietotāja sesijas viņa lapā sadaļā "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Lietotāji"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Vai izslēgt pierakstīšanos ar paroli?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Skatīt visus kontus sadaļā „Lietotāji”"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -87733,6 +88018,28 @@
     {
       "type": 0,
       "value": "”."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Pierakstīšanās ar paroli ir izslēgta, tāpēc visi, izņemot ārkārtas piekļuves administratorus, pierakstās, izmantojot "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Vispirms atkal ieslēdziet pierakstīšanos ar paroli un pēc tam izslēdziet nodrošinātāju "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -150215,6 +150522,12 @@
       "value": "E-pasts vai lietotājvārds"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Ievadiet tā Emby servera bāzes URL, no kura vēlaties importēt."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -150225,6 +150538,12 @@
     {
       "type": 0,
       "value": "Atstājiet tukšu, ja kontam nav paroles"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby servera URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -150375,6 +150694,12 @@
     {
       "type": 0,
       "value": "Plex konts"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Servera URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -150676,7 +151001,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect vai saglabāts serveris"
+      "value": "Emby Connect, servera URL vai saglabāts serveris"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

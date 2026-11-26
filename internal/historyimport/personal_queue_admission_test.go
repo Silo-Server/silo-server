@@ -49,3 +49,41 @@ func TestEnqueuePersonalRunAllowsOneActiveRunPerAccount(t *testing.T) {
 		t.Fatalf("run after the first finished: %v", err)
 	}
 }
+
+func TestValidatePersonalRunAdmissionAcceptsCustomEmby(t *testing.T) {
+	t.Parallel()
+
+	valid := personalRunAdmission{
+		UserID:         1,
+		ProfileID:      "p",
+		SourceType:     SourceTypeEmby,
+		ConnectionMode: ConnectionModeCustom,
+		Credentials:    personalRunCredentials{BaseURL: "http://emby.example", ExternalUserID: "emby-user", ServerToken: "token"},
+	}
+	if err := validatePersonalRunAdmission(valid); err != nil {
+		t.Fatalf("custom Emby admission rejected: %v", err)
+	}
+	withSource := valid
+	withSource.SourceID = 1
+	withSource.SourceRevision = 1
+	if err := validatePersonalRunAdmission(withSource); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("custom Emby with source_id: err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestEnqueuePersonalRunAcceptsCustomEmby(t *testing.T) {
+	repo := personalQueueRepository(t)
+	run, err := repo.enqueuePersonalRun(t.Context(), personalRunAdmission{
+		UserID:         1,
+		ProfileID:      "p",
+		SourceType:     SourceTypeEmby,
+		ConnectionMode: ConnectionModeCustom,
+		Credentials:    personalRunCredentials{BaseURL: "http://emby.example", ExternalUserID: "emby-user", ServerToken: "token"},
+	})
+	if err != nil {
+		t.Fatalf("custom Emby enqueue: %v", err)
+	}
+	if run.SourceType != SourceTypeEmby || run.ConnectionMode != ConnectionModeCustom {
+		t.Fatalf("run = %+v, want emby/custom", run)
+	}
+}
