@@ -36,13 +36,20 @@ var ErrPluginUpdateUnavailable = errors.New("plugin has no applicable update")
 const lifecycleCommitTimeout = 30 * time.Second
 
 // stopAfterCommit stops installation id's plugin once a change that disables
-// or removes it has committed, through the service or stopForTest. A failure
-// is logged: the row already says the plugin is off, and reconciliation on
-// every node stops a process whose row no longer runs.
+// or removes it has committed, through the service or stopForTest. The
+// service stops it only if the row is still disabled or gone, so an enable
+// that committed since keeps its process (Service.StopUnlessEnabled). The
+// read is detached from the request: the change already holds. A failure is
+// logged: the row already says the plugin is off, and reconciliation on every
+// node stops a process whose row no longer runs.
 func (h *PluginHandler) stopAfterCommit(ctx context.Context, id int) {
-	stop := h.service.Stop
-	if h.stopForTest != nil {
-		stop = h.stopForTest
+	stop := h.stopForTest
+	if stop == nil {
+		stop = func(id int) error {
+			detached, cancel := context.WithTimeout(context.WithoutCancel(ctx), lifecycleCommitTimeout)
+			defer cancel()
+			return h.service.StopUnlessEnabled(detached, id)
+		}
 	}
 	if err := stop(id); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
 		slog.WarnContext(ctx, "stopping plugin after its change was saved", "component", "api", "installation_id", id, "error", err)

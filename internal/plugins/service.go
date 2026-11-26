@@ -844,6 +844,26 @@ func (s *Service) Stop(installationID int) error {
 	return s.stopRuntime(installationID)
 }
 
+// StopUnlessEnabled stops installation id's process after a change that
+// disabled or removed it committed, unless the row, read again under the
+// runtime lock, is enabled: an enable that committed and launched in between
+// is newer than the change that asked for the stop, so its process stays.
+// Every launch takes the same lock, so none can slip between the read and
+// the stop.
+func (s *Service) StopUnlessEnabled(ctx context.Context, installationID int) error {
+	lock := s.runtimeLock(installationID)
+	lock.Lock()
+	defer lock.Unlock()
+	installation, err := s.installations.GetByID(ctx, installationID)
+	if err == nil && installation.Enabled {
+		return nil
+	}
+	if err != nil && !errors.Is(err, ErrInstallationNotFound) {
+		return err
+	}
+	return s.stopRuntime(installationID)
+}
+
 // stopRuntime stops a process with its lock held.
 func (s *Service) stopRuntime(installationID int) error {
 	if s.host == nil {
