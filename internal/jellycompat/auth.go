@@ -275,7 +275,9 @@ func compatPlaybackClientInfo(r *http.Request) playback.ClientInfo {
 		return playback.ClientInfo{}
 	}
 	return playback.ClientInfo{
-		Name:      firstMediaBrowserAuthorizationValue(r, "Client"),
+		// No compat client is recorded under the name reserved for another
+		// app's session on the native API.
+		Name:      playback.WithoutGrantedAppClientName(firstMediaBrowserAuthorizationValue(r, "Client")),
 		Version:   firstMediaBrowserAuthorizationValue(r, "Version"),
 		UserAgent: r.UserAgent(),
 		IsCompat:  true,
