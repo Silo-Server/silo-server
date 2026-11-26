@@ -168,6 +168,10 @@ export default function AdminDashboard() {
             : []),
         ]);
         const nextStats = await fetchAdminStats({ refresh: true, profileContext });
+        // setQueryData doesn't stop the stats query's own read. One that
+        // started before this refresh (after a realtime event, say) and
+        // answers after it would put the server's cached, older stats back.
+        await queryClient.cancelQueries({ queryKey: adminStatsKey(profileContext), exact: true });
         if (!isCapturedProfileAuthorityActive(profileContext)) return;
         if (sequence < order.applied) return;
         order.applied = sequence;

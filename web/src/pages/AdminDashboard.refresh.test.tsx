@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useDashboardInsightsActivity } from "@/hooks/queries/admin/insights";
-import { useAdminStats } from "@/hooks/queries/admin/stats";
+import { adminStatsKey, useAdminStats } from "@/hooks/queries/admin/stats";
 import AdminDashboard from "./AdminDashboard";
 
 const mocks = vi.hoisted(() => ({ request: vi.fn(), withInsightsWidget: false }));
@@ -141,6 +141,48 @@ describe("AdminDashboard refresh ordering", () => {
       expect(tile.textContent).toBe("222");
     },
   );
+
+  // A realtime event invalidates the stats query, whose own read starts and is
+  // answered from the server's stats cache. When that read answers after a
+  // refresh, its older numbers must not replace the refreshed ones (#5246).
+  it("keeps a refresh's stats when an earlier ordinary read answers after it", async () => {
+    const ordinary: Deferred[] = [];
+    let refreshed: Deferred | undefined;
+    mocks.request.mockImplementation(
+      (operation: string, args: { query?: { refresh?: boolean } }) => {
+        if (operation !== "GET /api/v2/admin/stats") throw new Error(`unexpected ${operation}`);
+        const response = deferred<{ total_movies: number }>();
+        if (args.query?.refresh) refreshed = response;
+        else ordinary.push(response);
+        return response.promise;
+      },
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <AdminDashboard />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await vi.waitFor(() => expect(ordinary).toHaveLength(1));
+    await act(async () => ordinary[0]!.resolve({ total_movies: 1 }));
+    const tile = await screen.findByText("1");
+
+    await act(async () => {
+      void queryClient.invalidateQueries({ queryKey: adminStatsKey(profileContext), exact: true });
+    });
+    await vi.waitFor(() => expect(ordinary).toHaveLength(2));
+
+    fireEvent.click(await screen.findByRole("button", { name: /^refresh$/i }));
+    await vi.waitFor(() => expect(refreshed).toBeDefined());
+    await act(async () => refreshed!.resolve({ total_movies: 222 }));
+    await vi.waitFor(() => expect(tile.textContent).toBe("222"));
+
+    await act(async () => ordinary[1]!.resolve({ total_movies: 111 }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(tile.textContent).toBe("222");
+  });
 
   // The server serves its cached Insights while it refreshes them in the
   // background; a refresh the admin asked for must ask it for fresh data.
