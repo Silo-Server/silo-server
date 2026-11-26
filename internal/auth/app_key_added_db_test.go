@@ -76,6 +76,11 @@ type keyAddingCase struct {
 func quoted(s string) string { raw, _ := json.Marshal(s); return string(raw) }
 
 func keyAddingCases(env *keyEnv, devices *DeviceLoginService) []keyAddingCase {
+	return append(keyEnrollingCases(env), keyGrantingCases(env, devices)...)
+}
+
+// keyEnrollingCases enroll or replace keys directly.
+func keyEnrollingCases(env *keyEnv) []keyAddingCase {
 	return []keyAddingCase{
 		{"enroll from a session", auditmutation.ActionAppKeysEnrolled, "/api/v2/auth/keys/enroll", func(t *testing.T, label string) added {
 			user := env.localAccount(t, label, models.RoleUser)
@@ -132,6 +137,12 @@ func keyAddingCases(env *keyEnv, devices *DeviceLoginService) []keyAddingCase {
 					auditFieldDeniedDeviceKeys: "1"},
 				personKid: replacement.pub.KeyID()}
 		}},
+	}
+}
+
+// keyGrantingCases hand out a code, a grant or an approval, or redeem one.
+func keyGrantingCases(env *keyEnv, devices *DeviceLoginService) []keyAddingCase {
+	return []keyAddingCase{
 		{"issue an app code", auditmutation.ActionAppCodeIssued, "/api/v2/auth/app-codes", func(t *testing.T, label string) added {
 			user := env.localAccount(t, label, models.RoleUser)
 			reqCtx := env.addedCtx(t, "/api/v2/auth/app-codes", &user.ID)
