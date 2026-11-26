@@ -1448,7 +1448,9 @@ invitation lookup reports `app_join: false`. The capability,
 `pending/{id}/deny` stay open. A server in demo
 mode (`demo.enabled`) behaves as if the switch were off, for administrators
 too, and its capability reports `disabled`: every visitor shares one account
-there, so no key is enrolled on it and none signs in. For the same reason
+there, so no key is enrolled on it and none signs in. There
+`DELETE /auth/keys/devices/{id}` and `pending/{id}/deny` are open to administrators only: a caller who is not one gets
+the [demo refusal](#demo-mode). For the same reason
 `POST /auth/device/preapprove` is refused in demo mode for a caller who is not
 an administrator, and the device login capability reports `preapprove: false`.
 
@@ -1775,7 +1777,12 @@ A visitor cannot:
   `linkAccountIdentityWithCredentials`, `linkAccountIdentityWithNetwork`,
   `deleteAccountIdentity`);
 - end another session of the account (`deleteSession` on any other session);
-- create or revoke personal API keys, or create, change or delete profiles.
+- create or revoke personal API keys, or create, change or delete profiles;
+- revoke an app device key or deny a device waiting for approval (`revokeAppDeviceKey`,
+  `denyPendingAppKey`), since a key enrolled before demo mode was turned on still opens
+  sessions on the account and revoking it ends them;
+- approve a device sign-in in advance or withdraw one (`preapproveDeviceLogin`,
+  `revokeDevicePreapproval`).
 
 External sign-in enforces the same rule where every linking flow attaches its identity, in
 account resolution: a linking flow that ends on an account that is not an administrator while
@@ -1804,7 +1811,7 @@ until it expires. When the account's role can't be read, or the process has neve
 setting, sign-out takes the demo path. An expired access token revokes nothing.
 
 `TestDemoModeCoversAccountOperations` in `internal/apiv2` fails when an operation tagged
-`account`, `api-keys`, `auth`, `device-login`, `notifications` or `profiles` that a
+`account`, `api-keys`, `app-keys`, `auth`, `device-login`, `notifications` or `profiles` that a
 non-administrator can call is neither demo-restricted nor listed, with its reason, as allowed.
 
 ## Policy discovery
