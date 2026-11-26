@@ -379,8 +379,16 @@ it, below.
 
 A granted app is a player the person let in. It may read the catalog, play,
 and keep the state a player keeps for the profile it acts as. It may not
-spend something of the person's, change what others see, reach the person's
-other devices or change the account. Revoking its key ends the sessions it
+spend something of the person's, host a Watch Together room or change what
+its other members play, edit what other profiles or accounts see (shared
+subtitles, the shared catalog, collections and home rows the person's other
+devices show), reach the person's other devices or change the account.
+
+The grant names no profile: the app acts as whichever profile of the account
+it names in `X-Profile-Id`. A profile with a PIN needs its PIN, as from any
+device; a profile without one needs nothing. "The acting profile's own
+state" means the profile it acts as, and the PIN is the household's boundary
+between profiles for this session as for any other. Revoking its key ends the sessions it
 opened and their access, and nothing the app could create still acts for it
 afterwards: no credential, delivery channel, registration, device row,
 external link, secret URL or media request. What stays is the acting
@@ -403,7 +411,8 @@ an own-only decision without its check, and a decision on a public or
 acting-admin operation, where no gate reads it (a grant is never redeemed on an
 administrator's account, and a promotion revokes the account's keys).
 `TestEveryOperationDecidesForGrantedApps` fails by name on an operation with no
-decision. Today 202 operations are allowed, 19 own-only and 228 refused. An
+decision. Today 202 operations are allowed, 19 own-only and 228 refused,
+and none is left undecided. An
 operation refused or own-only for any judged kind declares 403 in the
 document. A capability read never reports as allowed an action whose
 operations are all refused to the session asking; see
@@ -469,8 +478,9 @@ resolver (`TestPluginContentMountsAllReachTheContentHandler`,
   account's email, which is the empty string for such a session), the profile
   list, verifying a profile's PIN, and capability reads. A
   wrong PIN spends that profile's attempt budget as from any device (five
-  attempts in five minutes); a following change counts such a session's
-  attempts separately. The profile list carries every profile's limits, as for
+  attempts in five minutes), so the app's wrong guesses can lock the profile
+  for the person's own devices for up to five minutes, until a following
+  change counts such a session's attempts separately. The profile list carries every profile's limits, as for
   any session;
 - reading the catalog, home, libraries, collections, recommendations,
   subtitles, settings and preferences. Reading a person can queue that
@@ -486,7 +496,9 @@ resolver (`TestPluginContentMountsAllReachTheContentHandler`,
   settings. Each is stored per account and profile, keyed by no device;
 - the events socket; Watch Together as a member of a room the person put it
   in: joining by the room's code, reading the room, suggesting and voting,
-  reporting member state. The room read leaves out the playback session id
+  reporting member state. As any member, it may suggest and vote, and a
+  buffering report from it pauses the room for everyone. The room read
+  leaves out the playback session id
   attached to the member (a member is the account and profile, so it may be
   the person's own device's), and a connection of such a session starts with
   no attached stream and attaches only one its own login session started;
@@ -570,9 +582,13 @@ stream its ticket names, which is its own.
   diagnostics uploads (a per-account quota); subtitle searches against the
   providers (the server's allowance with them); and the notification email
   and Discord preference reads;
-- not decided: every other operation, until someone reads it. Today that is
-  writing a setting by key, per-user plugin settings, the taste seed, the
-  title and collection allowance reads, and ending a View as user session.
+- refused by decision, the rows once marked not decided: writing a setting
+  by key (some keys and scopes reach beyond the profile, and none has been
+  read for that), per-user plugin settings (a plugin's values may hold tokens
+  for other services), the title and collection allowance reads (they are
+  about other profiles), the taste seed (not yet read for whether it touches
+  only the profile's own state), and ending a View as user session (such a
+  session never is one). No operation is left undecided.
 
 **Revoking the key takes with it everything the app was allowed to leave.**
 `RevokeDeviceKey` marks the key revoked and ends every login session it
@@ -583,6 +599,7 @@ on the account for such a session, and what happens to it then:
 | --- | --- | --- |
 | progress, watched, favorites, watchlist, not interested, ratings, history removal, reading progress, notes, home dismissals, read marks | the profile's own state | stays: it is the person's data and the point of the grant |
 | playback, audio and subtitle preferences, ebook reader settings | the profile's own state, per series, library or title | stays, as the profile's |
+| starting playback | which version and quality the profile last played for that title (`user_series_playback_preferences`) | stays, as the profile's state; the one allowed write whose effect shows up on the person's other devices, which start that title from it |
 | shuffles | a shuffle of the profile | stays as the profile's; an abandoned one is deleted with other abandoned shuffles |
 | starting playback, theme songs, the bandwidth probe download | a playback attempt bound to its login session, and the play's history row, which carries the client name the app sent | the attempt's media, stream reference and control socket are refused once the session ends, and the stream ends at its idle expiry; the history row stays as the profile's |
 | route events | diagnostics about its own streams, carrying its client name | stay; they grant nothing |
@@ -591,7 +608,7 @@ on the account for such a session, and what happens to it then:
 | Watch Together membership, suggestions, votes, member state | the profile's place and choices in a room the person put it in | stay as the profile's; the room socket closes on the session's next authority check |
 | events socket ticket | a short-lived ticket | the socket closes on its next authority check (at most 15 seconds) |
 | suggestions in a room | suggestions up to the room's cap, as the profile's | stay until the host deletes them or the room closes |
-| any request with client name headers | the client name the app sends, which is not stripped: in playback history, in the household streams panel the web app shows the account (beside the person's own devices' streams), and in administrators' playback history, insights and session views | stays in those records |
+| any request with client name headers | the client name the app sends, which is not stripped. A person sees it today in the web app's household streams panel, beside their own devices' plays; administrators see it in playback history, insights and session views | stays in playback history after the key is revoked; whether to strip it is a later decision |
 | its own media requests | the declared device label, in stream telemetry (in memory, administrators only) | gone with the process; nothing lasts |
 | sign out, ending its own session, revoking its own key | nothing | nothing to take |
 

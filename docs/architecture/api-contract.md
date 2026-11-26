@@ -865,14 +865,21 @@ Clients use capability documents to decide whether a feature exists. The server 
 contract digest are for diagnostics, support, cache identity, and last-resort compatibility
 messages; they are not substitutes for feature detection.
 
-A capability document's permission answer (`allowed`) never reports as allowed an action whose
-operations are all refused to the session asking. The rule is applied in one place, the shared
-capability adapter (`prepareCapabilityOperation`): a capability that describes such actions names
-their operations (`x-silo-capability-for` in the document), and for a session of a kind the
-per-operation decisions judge (`x-silo-origin-decisions`) the answer is false when every named
-operation is refused to that kind. Every other caller gets the capability's own answer. Today one
-kind is judged, a session another app's key opened; a second kind inherits the rule with no new
-code.
+A permission member of a response (a boolean named `allowed` or ending in `_allowed`, at any
+depth) never reports as allowed an action whose operations are all refused to the session asking.
+Every such member of a response a judged kind of session may read has a row in one table
+(`capabilityMembers`, `internal/apiv2/origin_decisions.go`): either it governs, naming the
+operations it answers for, or it is exempt with a reason that says what the app would do if it
+believed it. A capability read's top-level `allowed` is applied by the shared capability adapter
+(`prepareCapabilityOperation`, published as `x-silo-capability-for`); a member deeper in a response
+by its handler. For a session of a kind the per-operation decisions judge (`x-silo-origin-decisions`),
+a governed member is false when every operation it names is refused to that kind; every other
+caller gets the member's own answer. `TestPermissionMembersStateTheirCase` fails by name on a member
+with no row, and a live check, run over the fakes and against Postgres, fails on a true member with
+no row or a governed one that is true when its operations are all refused. Today the exempt members
+are four documents that describe server behavior (`getImageCapabilities`,
+`getNetworkAccessCapabilities`, `getPolicyCapability`, `getServerConnections`), whose only action is
+reading them.
 
 `links.identity` points at `GET /api/v2/system/identity`, the one public per-deployment value:
 a stable `server_id` every API process answers at every address. It is self-asserted and
