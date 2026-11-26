@@ -109,6 +109,16 @@ func newProfileDeleteFixture(t *testing.T) *profileDeleteFixture {
 		VALUES ($1, $2, $3) RETURNING id`, f.installationID, name, f.userID).Scan(&f.identityID); err != nil {
 		t.Fatal(err)
 	}
+	f.stageRequests(t, name)
+	f.holdTrigger(t, name)
+	return f
+}
+
+// stageRequests inserts the two requests so that an index scan and a
+// sequential scan reach them in opposite orders (see profileDeleteFixture).
+func (f *profileDeleteFixture) stageRequests(t *testing.T, name string) {
+	t.Helper()
+	ctx, pool := t.Context(), f.pool
 	// device_name is in no index, so updating it keeps the row on its page
 	// (HOT) when the page has room, and index entries keep the old position.
 	// The update can land in a slot freed earlier on the page, so it is
@@ -164,7 +174,12 @@ func newProfileDeleteFixture(t *testing.T) *profileDeleteFixture {
 	if !staged {
 		t.Fatal("could not stage the scan orders: no pair of requests shared a page with room for the update")
 	}
+}
 
+// holdTrigger installs the trigger that holds each side at its request.
+func (f *profileDeleteFixture) holdTrigger(t *testing.T, name string) {
+	t.Helper()
+	ctx, pool := t.Context(), f.pool
 	// The profile delete is held at the first request as it clears the
 	// profile; the uninstall at the second as it clears the identity, and a
 	// sign-out everywhere at the second as it withdraws the approval.
@@ -187,7 +202,6 @@ func newProfileDeleteFixture(t *testing.T) *profileDeleteFixture {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.WithoutCancel(ctx), `DROP TRIGGER IF EXISTS `+fn+` ON device_login_requests; DROP FUNCTION IF EXISTS `+fn+`()`)
 	})
-	return f
 }
 
 // store is the account's profile store over pool.
@@ -395,34 +409,41 @@ func TestProfileDeleteLockOrderDB(t *testing.T) {
 					if !opponentFirst && !slices.Equal(opponentWaitsOn, []int{deletePID}) {
 						t.Errorf("the %s waited on %v, want the %s (%d)", against, opponentWaitsOn, name, deletePID)
 					}
-					left := 0
-					for _, q := range []string{
-						`SELECT count(*) FROM user_profiles WHERE user_id = $1 AND id = 'p' AND $2::text[] IS NOT NULL`,
-						`SELECT count(*) FROM device_login_requests WHERE id = ANY($2) AND approved_profile_id IS NOT NULL AND $1::int > 0`,
-					} {
-						var n int
-						if err := f.pool.QueryRow(context.WithoutCancel(ctx), q, f.userID, f.requests[:]).Scan(&n); err != nil {
-							t.Fatal(err)
-						}
-						left += n
-					}
-					var opponentLeft int
-					// A request the profile delete cleared first no longer
-					// names the account, so the sign-out leaves it alone.
-					q := `SELECT count(*) FROM device_login_requests WHERE id = ANY($1) AND status = 'approved'
-						AND approved_by_user_id IS NOT NULL AND $2::bigint > 0`
-					if against == "uninstall" {
-						q = `SELECT (SELECT count(*) FROM plugin_auth_identities WHERE id = $2) +
-							(SELECT count(*) FROM device_login_requests WHERE id = ANY($1) AND approved_identity_id IS NOT NULL)`
-					}
-					if err := f.pool.QueryRow(context.WithoutCancel(ctx), q, f.requests[:], f.identityID).Scan(&opponentLeft); err != nil {
-						t.Fatal(err)
-					}
-					if left+opponentLeft != 0 {
-						t.Fatalf("%d of the profile and its approvals, and %d of what the %s removes, remain", left, opponentLeft, against)
-					}
+					f.assertCleared(t, against)
 				})
 			}
 		}
+	}
+}
+
+// assertCleared fails unless the profile and its approvals are gone, and
+// what the opponent removes is gone too.
+func (f *profileDeleteFixture) assertCleared(t *testing.T, against string) {
+	t.Helper()
+	left := 0
+	for _, q := range []string{
+		`SELECT count(*) FROM user_profiles WHERE user_id = $1 AND id = 'p' AND $2::text[] IS NOT NULL`,
+		`SELECT count(*) FROM device_login_requests WHERE id = ANY($2) AND approved_profile_id IS NOT NULL AND $1::int > 0`,
+	} {
+		var n int
+		if err := f.pool.QueryRow(context.WithoutCancel(t.Context()), q, f.userID, f.requests[:]).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		left += n
+	}
+	var opponentLeft int
+	// A request the profile delete cleared first no longer
+	// names the account, so the sign-out leaves it alone.
+	q := `SELECT count(*) FROM device_login_requests WHERE id = ANY($1) AND status = 'approved'
+		AND approved_by_user_id IS NOT NULL AND $2::bigint > 0`
+	if against == "uninstall" {
+		q = `SELECT (SELECT count(*) FROM plugin_auth_identities WHERE id = $2) +
+			(SELECT count(*) FROM device_login_requests WHERE id = ANY($1) AND approved_identity_id IS NOT NULL)`
+	}
+	if err := f.pool.QueryRow(context.WithoutCancel(t.Context()), q, f.requests[:], f.identityID).Scan(&opponentLeft); err != nil {
+		t.Fatal(err)
+	}
+	if left+opponentLeft != 0 {
+		t.Fatalf("%d of the profile and its approvals, and %d of what the %s removes, remain", left, opponentLeft, against)
 	}
 }
