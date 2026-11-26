@@ -67,7 +67,7 @@ func (reg *Registry) requireVerifiedMainProfile(ctx context.Context, svc mainPro
 	none := auth.ActingProfile{}
 	claims := claimsFrom(ctx)
 	if !claims.IsOwnLoginSession() {
-		return none, appKeyProblem(auth.ErrSessionNotAllowed)
+		return none, appKeyProblem(auth.NotOwnSessionError(claims))
 	}
 	// The session before the profile: one that may not do this is told so,
 	// not sent to switch profile and prove a PIN for nothing.
@@ -119,10 +119,10 @@ func registerAppKeyPending(reg *Registry) {
 
 	deny := humaOp(http.MethodPost, Prefix+"/auth/keys/pending/{id}/deny", "denyPendingAppKey", "app-keys",
 		"Refuse a device waiting to sign in to the signed-in account.")
-	deny.Description = pendingSessionRule + " Send an empty JSON object. The device's next signInWithAppKey that reaches the key answers 403 key_denied (409 capability_disabled comes first while auth.app_key_sign_in is off), and neither listAppKeys nor listPendingAppKeys shows the key. Denying a denied key changes nothing; an active, revoked or unknown key is 404 not_found. Answers while auth.app_key_sign_in is off."
+	deny.Description = pendingSessionRule + " Send an empty JSON object. The device's next signInWithAppKey that reaches the key answers 403 key_denied (409 capability_disabled comes first while auth.app_key_sign_in is off), and neither listAppKeys nor listPendingAppKeys shows the key. Denying a denied key changes nothing; an active, revoked or unknown key is 404 not_found. Answers while auth.app_key_sign_in is off. Refused in demo mode for a caller who is not an administrator."
 	deny.DefaultStatus = http.StatusNoContent
 	deny.Errors = []int{http.StatusForbidden, http.StatusNotFound}
-	Register(reg, Operation{Operation: deny, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true}, reg.denyPendingAppKey)
+	Register(reg, Operation{Operation: deny, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true, DemoRestricted: true}, reg.denyPendingAppKey)
 }
 
 func (reg *Registry) listPendingAppKeys(ctx context.Context, _ *struct{}) (*PendingAppKeyListOutput, error) {
@@ -131,7 +131,7 @@ func (reg *Registry) listPendingAppKeys(ctx context.Context, _ *struct{}) (*Pend
 		return nil, err
 	}
 	if !claimsFrom(ctx).IsOwnLoginSession() {
-		return nil, appKeyProblem(auth.ErrSessionNotAllowed)
+		return nil, appKeyProblem(auth.NotOwnSessionError(claimsFrom(ctx)))
 	}
 	keys, err := svc.ListPendingAppKeys(ctx, claimsFrom(ctx))
 	if err != nil {
@@ -172,7 +172,7 @@ func (reg *Registry) denyPendingAppKey(ctx context.Context, in *PendingAppKeyDec
 		return nil, err
 	}
 	if !claimsFrom(ctx).IsOwnLoginSession() {
-		return nil, appKeyProblem(auth.ErrSessionNotAllowed)
+		return nil, appKeyProblem(auth.NotOwnSessionError(claimsFrom(ctx)))
 	}
 	if err := svc.DenyPendingAppKey(ctx, claimsFrom(ctx), in.ID); err != nil {
 		return nil, appKeyProblem(err)

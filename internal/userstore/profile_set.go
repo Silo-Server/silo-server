@@ -64,7 +64,7 @@ type ProfileSetStore interface { //nolint:iface // implemented by pgstore and it
 	// needs. inSet is the set's sync IDs: the profiles that hold a sync ID
 	// outside it (other than the primary) are the ones the set removes, and
 	// their collections are locked before any profile row. The account row
-	// is locked last.
+	// is locked before both.
 	WithProfileSetTransaction(ctx context.Context, inSet []string, fn func(ProfileSetWriter) error) error
 }
 

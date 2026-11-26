@@ -6882,7 +6882,7 @@ export interface paths {
     put?: never;
     /**
      * Enroll a person key and a device key with an app code and open the device's login session.
-     * @description message is a redeem envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig; the app code is in its payload. A join code creates the invited account, with no password and the invitation's access, enrolls both keys and marks the invitation accepted, in one transaction. A session code enrolls the keys on the account that issued it, with that session's provider identity: person_key is enrolled when the account has none and replaces a different one (the old one is revoked; devices already enrolled keep their keys, devices waiting on it are refused). Keys from a code start active, also on an administrator's account. The sealed plaintext adds username (the account's name) and person_key: enrolled, or replaced. 404 app_code_invalid: the code is unknown, used or expired, its invitation was revoked, replaced or accepted since, or the session that issued it ended. 409 conflict has two causes, told apart by errors[0].code: duplicate (at body.message.payload) means the reserved name or email was taken since, and the person gets a new code from the page with another name; key_enrolled means a public key is already enrolled on this server, at body.person_key for the person key or body.message.payload for the device key, and the app makes that key again and redeems the same code on a new challenge. Every refusal after the code is looked up rolls the code back, so it stays good for its ten minutes; the challenge is spent once the signature verifies. 409 provider_sign_in_required: a join code while local password sign-in is off. A malformed payload field is 422 at body.message.payload. Spends the per-address key_sign_in rate-limit budget. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status: signed_in, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity). Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
+     * @description message is a redeem envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig; the app code is in its payload. A join code creates the invited account, with no password and the invitation's access, enrolls both keys and marks the invitation accepted, in one transaction. A session code enrolls the device key on the account that issued it, with that session's provider identity: person_key is enrolled when the account has none. When the account already has a different person key, the redeem keeps it: the device key is enrolled under the account's person key, nothing is revoked, devices waiting for approval stay waiting, and person_key is not stored (it only proves the device signed the envelope). A person who has lost every other device then replaces the account's person key from the new session with replacePersonKey as the main profile. Keys from a code start active, also on an administrator's account. 404 app_code_invalid: the code is unknown, used or expired, its invitation was revoked, replaced or accepted since, or the session that issued it ended. 409 conflict has two causes, told apart by errors[0].code: duplicate (at body.message.payload) means the reserved name or email was taken since, and the person gets a new code from the page with another name; key_enrolled means a public key is already enrolled on this server, at body.person_key for the person key or body.message.payload for the device key, and the app makes that key again and redeems the same code on a new challenge. Every refusal after the code is looked up rolls the code back, so it stays good for its ten minutes; the challenge is spent once the signature verifies. 409 provider_sign_in_required: a join code while local password sign-in is off. A malformed payload field is 422 at body.message.payload. Spends the per-address key_sign_in rate-limit budget. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status: signed_in, device_id, account_id, tokens, person_key_id, username, person_key, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); person_key_id is the ID of the account's person key once the redeem commits, username the account's name, and person_key enrolled (person_key is now the account's person key, or already was) or kept (the account keeps a different one, named by person_key_id). A client tells whether the account holds the key it sent by comparing person_key_id with the ID of that key, not by person_key. person_key says how the account came to hold its key (enrolled, kept); a client that does not know a value still has its answer from the ID. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
      */
     post: operations["redeemAppCode"];
     delete?: never;
@@ -7228,7 +7228,7 @@ export interface paths {
     post?: never;
     /**
      * Revoke one of the signed-in account's device keys and end the sessions it opened.
-     * @description Only the account's own login session: an API key and an administrator acting as the account are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. A device may revoke its own key, which ends the session making the request. A session opened by another app's key may revoke only that key, and one opened by device sign-in none (403 permission_denied). Revoking a revoked key changes nothing. Answers while auth.app_key_sign_in is off.
+     * @description Only the account's own login session: an API key and an administrator acting as the account are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. A device may revoke its own key, which ends the session making the request. A session opened by another app's key may revoke only that key, and one opened by device sign-in none (403 permission_denied). Revoking a revoked key changes nothing. Answers while auth.app_key_sign_in is off. Refused in demo mode for a caller who is not an administrator.
      */
     delete: operations["revokeAppDeviceKey"];
     options?: never;
@@ -7247,7 +7247,7 @@ export interface paths {
     put?: never;
     /**
      * Enroll a person key and a device key on the signed-in account and open a session bound to the device key.
-     * @description Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. When the account has no person key, person_key is registered and takes the provider identity of the session that enrolls it. When person_key is the account's person key already, it is reused as it is, binding unchanged. A different person key on the account is 409 conflict, and so is a device key already enrolled on this server. The new device key takes the session's provider identity. The sealed plaintext adds person_key_id; the client drops the session it called with. Keys enrolled here start active, also on an administrator's account, so enroll never answers approval_required. A malformed payload field is 422 at body.message.payload. It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile of the account is 403 main_profile_required, and an X-Profile-Id that names no profile of the account is 404 not_found. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 main_profile_required. On this operation 403 permission_denied means the session itself may not do this, whatever profile it names. The operation checks the profile again once it holds the account: if the profile's PIN changed, it stopped being the main profile, or it was being written at that moment, the answer is 403 profile_verification_required with nothing changed, and the request is made again: an operation whose body carries a signed envelope (enrollAppKeys) needs a new challenge and a newly signed envelope, since the first challenge is spent; every other operation is sent again as it was. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status: signed_in, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity). Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
+     * @description Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. When the account has no person key, person_key is registered and takes the provider identity of the session that enrolls it. When person_key is the account's person key already, it is reused as it is, binding unchanged. A different person key on the account is 409 conflict, and so is a device key already enrolled on this server. The new device key takes the session's provider identity. The client drops the session it called with. Keys enrolled here start active, also on an administrator's account, so enroll never answers approval_required. A malformed payload field is 422 at body.message.payload. It creates lasting access to the shared account, so only the household's main profile may call it: X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile of the account is 403 main_profile_required, and an X-Profile-Id that names no profile of the account is 404 not_found. A request without X-Profile-Id is accepted only from an administrator account that has at most one profile, neither PIN-protected nor access-restricted; an administrator account with several profiles, or a PIN, names its main profile like any other account. Otherwise it is 403 main_profile_required. On this operation 403 permission_denied means the session itself may not do this, whatever profile it names. The operation checks the profile again once it holds the account: if the profile's PIN changed, it stopped being the main profile, or it was being written at that moment, the answer is 403 profile_verification_required with nothing changed, and the request is made again: an operation whose body carries a signed envelope (enrollAppKeys) needs a new challenge and a newly signed envelope, since the first challenge is spent; every other operation is sent again as it was. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status: signed_in, device_id, account_id, tokens, person_key_id, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); person_key_id is the ID of the account's person key. Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
      */
     post: operations["enrollAppKeys"];
     delete?: never;
@@ -7327,7 +7327,7 @@ export interface paths {
     put?: never;
     /**
      * Refuse a device waiting to sign in to the signed-in account.
-     * @description Only the account's own login session: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. Send an empty JSON object. The device's next signInWithAppKey that reaches the key answers 403 key_denied (409 capability_disabled comes first while auth.app_key_sign_in is off), and neither listAppKeys nor listPendingAppKeys shows the key. Denying a denied key changes nothing; an active, revoked or unknown key is 404 not_found. Answers while auth.app_key_sign_in is off.
+     * @description Only the account's own login session: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. Send an empty JSON object. The device's next signInWithAppKey that reaches the key answers 403 key_denied (409 capability_disabled comes first while auth.app_key_sign_in is off), and neither listAppKeys nor listPendingAppKeys shows the key. Denying a denied key changes nothing; an active, revoked or unknown key is 404 not_found. Answers while auth.app_key_sign_in is off. Refused in demo mode for a caller who is not an administrator.
      */
     post: operations["denyPendingAppKey"];
     delete?: never;
@@ -7684,7 +7684,7 @@ export interface paths {
     };
     /**
      * List the caller's live login sessions, newest first.
-     * @description A session opened by device sign-in (a code a signed-in person approved, Jellyfin Quick Connect, or a remote-playback handoff), and a session from before this rule was recorded whose X-Silo-Device-Platform was tvOS, android-tv or roku, sees only itself in full. It still gets every live session of the account, but another session's item carries only its id and current: device_name and ip_address are empty, device_id and device_platform are absent, last_seen_at is null, and created_at and expires_at repeat the caller's own. For such a caller the page is ordered by id, not newest first, and a cursor from the other kind of caller is invalid_cursor.
+     * @description A session limited to itself sees only itself in full: a session opened by device sign-in (a code a signed-in person approved, Jellyfin Quick Connect, or a remote-playback handoff), a session opened by another app the person allowed (its app key was enrolled through a grant; a session the person's own app key opened is not limited), and a session from before this rule was recorded whose X-Silo-Device-Platform was tvOS, android-tv or roku. It still gets every live session of the account, but another session's item carries only its id and current: device_name and ip_address are empty, device_id and device_platform are absent, last_seen_at is null, and created_at and expires_at repeat the caller's own. For such a caller the page is ordered by id, not newest first, and a cursor from the other kind of caller is invalid_cursor.
      */
     get: operations["listSessions"];
     put?: never;
@@ -7707,7 +7707,7 @@ export interface paths {
     post?: never;
     /**
      * Revoke one of the caller's login sessions.
-     * @description In demo mode a caller that is not an administrator may revoke only the session making the request; any other session of the account is 403 permission_denied, while an unknown session or one of another account is 404 as for every caller. getLoginSessionCapabilities reports this as revoke_other_sessions. A session opened by device sign-in (see listSessions) may revoke only itself: another session of the account is 403 permission_denied, and a session of another account or an unknown id is 404 as for every caller.
+     * @description In demo mode a caller that is not an administrator may revoke only the session making the request; any other session of the account is 403 permission_denied, while an unknown session or one of another account is 404 as for every caller. getLoginSessionCapabilities reports this as revoke_other_sessions. A session limited to itself (opened by device sign-in or by another app the person allowed; see listSessions) may revoke only itself: another session of the account is 403 permission_denied, and a session of another account or an unknown id is 404 as for every caller.
      */
     delete: operations["deleteSession"];
     options?: never;
@@ -32104,52 +32104,52 @@ export interface components {
     LoginSession: {
       /**
        * Format: date-time
-       * @description When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at
+       * @description When the session was opened. On another session's item, a session limited to itself sees its own created_at
        * @example 2026-01-02T03:04:05.678Z
        */
       created_at: string;
       /** @description Whether this is the login session making this request */
       current: boolean;
       /**
-       * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in
+       * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session limited to itself
        * @example 8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50
        */
       device_id?: string;
       /**
        * Format: uuid
-       * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in, and on another session's item for a session opened by device sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
+       * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in, and on another session's item for a session limited to itself. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
        * @example 0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11
        */
       device_key_id: string | null;
       /**
-       * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in
+       * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session limited to itself
        * @example Living Room Apple TV
        */
       device_name: string;
       /**
-       * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in
+       * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session limited to itself
        * @example tvOS
        */
       device_platform?: string;
       /**
        * Format: date-time
-       * @description When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at
+       * @description When the session expires unless refreshed. On another session's item, a session limited to itself sees its own expires_at
        * @example 2026-02-01T03:04:05.678Z
        */
       expires_at: string;
       /**
-       * @description Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current
+       * @description Session identifier; the value deleteSession takes. A session limited to itself (see listSessions) sees every session's id, and of another session nothing else but current
        * @example 6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c
        */
       id: string;
       /**
-       * @description Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in
+       * @description Client address recorded at login; empty when unknown, and on another session's item for a session limited to itself
        * @example 203.0.113.7
        */
       ip_address: string;
       /**
        * Format: date-time
-       * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in
+       * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session limited to itself
        * @example 2026-01-02T03:04:05.678Z
        */
       last_seen_at: string | null;
@@ -32164,7 +32164,7 @@ export interface components {
       last_seen: boolean;
       /** @description Opaque revision of this document */
       revision: string;
-      /** @description Whether deleteSession may revoke the caller's sessions other than the one making the request. False in demo mode for a caller that is not an administrator, and for a session opened by device sign-in (see listSessions); either may still revoke the current session */
+      /** @description Whether deleteSession may revoke the caller's sessions other than the one making the request. False in demo mode for a caller that is not an administrator, and for a session limited to itself, one opened by device sign-in or by another app the person allowed (see listSessions); either may still revoke the current session */
       revoke_other_sessions: boolean;
       /**
        * @description Support and configuration state, not health
@@ -32177,52 +32177,52 @@ export interface components {
       current_session: {
         /**
          * Format: date-time
-         * @description When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at
+         * @description When the session was opened. On another session's item, a session limited to itself sees its own created_at
          * @example 2026-01-02T03:04:05.678Z
          */
         created_at: string;
         /** @description Whether this is the login session making this request */
         current: boolean;
         /**
-         * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in
+         * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session limited to itself
          * @example 8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50
          */
         device_id?: string;
         /**
          * Format: uuid
-         * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in, and on another session's item for a session opened by device sign-in. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
+         * @description The app device key that opened this session (its id in listAppKeys and listAdminUserAppKeys); null for any other sign-in, and on another session's item for a session limited to itself. Signing the session out leaves the key, so the device signs in again with it; revoking the key ends the session
          * @example 0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11
          */
         device_key_id: string | null;
         /**
-         * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in
+         * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session limited to itself
          * @example Living Room Apple TV
          */
         device_name: string;
         /**
-         * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in
+         * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session limited to itself
          * @example tvOS
          */
         device_platform?: string;
         /**
          * Format: date-time
-         * @description When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at
+         * @description When the session expires unless refreshed. On another session's item, a session limited to itself sees its own expires_at
          * @example 2026-02-01T03:04:05.678Z
          */
         expires_at: string;
         /**
-         * @description Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current
+         * @description Session identifier; the value deleteSession takes. A session limited to itself (see listSessions) sees every session's id, and of another session nothing else but current
          * @example 6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c
          */
         id: string;
         /**
-         * @description Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in
+         * @description Client address recorded at login; empty when unknown, and on another session's item for a session limited to itself
          * @example 203.0.113.7
          */
         ip_address: string;
         /**
          * Format: date-time
-         * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in
+         * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session limited to itself
          * @example 2026-01-02T03:04:05.678Z
          */
         last_seen_at: string | null;

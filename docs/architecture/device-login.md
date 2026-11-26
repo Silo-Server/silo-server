@@ -233,7 +233,10 @@ the fingerprint. Nothing on the poll changes for the TV.
   device, not the phone's.
 - **List and revoke.** `GET /api/v2/auth/device/preapprovals` and
   `DELETE /api/v2/auth/device/preapprovals/{id}` serve the account's own login
-  session; `GET /api/v2/admin/users/{user_id}/device-preapprovals` and
+  session, opened by a password, a provider or the person's own device key
+  (`auth.SessionAllows`, `ActionReadKeys` for the list and `ActionManageKeys`
+  to withdraw): a shared TV's session or another app's may neither read nor
+  withdraw the waiting approvals; `GET /api/v2/admin/users/{user_id}/device-preapprovals` and
   `DELETE .../{id}` serve administrators, under the owner protection that
   revoking login sessions has. Items carry `id`, `device_name`,
   `device_platform`, `created_at` and `expires_at`, never the device code or

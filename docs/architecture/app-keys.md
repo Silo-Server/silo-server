@@ -458,10 +458,15 @@ its payload. The challenge is spent once the signature verifies. Then:
   opens the device key's session. A code nobody redeems leaves the invitation
   open and no account.
 - A session code locks the account, spends the code, and enrolls the device
-  key. The account's person key is enrolled when it has none and replaced when
-  it has a different one: the old key is revoked, devices waiting on it are
-  refused, devices already enrolled keep their keys. The issuing session's row
-  is read last; one that ended rolls the redeem back.
+  key. The request's person key is enrolled when the account has none (a
+  provider-bound key whose identity is gone counts as none). An account with
+  a different person key keeps it: the device key is enrolled under the
+  account's key, nothing is revoked, devices waiting for approval stay
+  waiting, and the request's person key, which only proved the device signed
+  the envelope, is not stored. A redeem never replaces the person key; a
+  person who has lost every other device redeems a code and then calls
+  `PUT /auth/keys/person` from the new session as the main profile. The
+  issuing session's row is read last; one that ended rolls the redeem back.
 
 The hourly cleanup of expired codes never waits on any of these: it skips a
 code row a request holds (`FOR UPDATE SKIP LOCKED`) and deletes it on a later
@@ -489,8 +494,9 @@ challenge. Every refusal after the code is found returns inside the redeem's
 transaction, so the code's spend rolls back and only the challenge is used up
 (`docs/auth-api.md` has the table). Issuing a join code answers a taken name
 with `duplicate` at `body.username` or `body.email`, whichever clashed. The sealed
-plaintext is the usual `signed_in` answer plus `username` and `person_key`
-(`enrolled` or `replaced`). An unknown, spent or expired code, and one whose
+plaintext is the usual `signed_in` answer plus `username`, `person_key_id`
+(the account's person key once the redeem commits) and `person_key`
+(`enrolled`, or `kept` when the account kept a different key). An unknown, spent or expired code, and one whose
 invitation or session can no longer be used, is `app_code_invalid` (404). Of
 two redemptions of one code, on any API processes, exactly one succeeds.
 
@@ -541,8 +547,8 @@ The operations on keys check how the calling session was opened
 `provider`, `device_login`, `app_key` or `impersonation`). It is the only
 record these rules read. The older `auth_sessions.via_device_sign_in` flag,
 which a server of the previous release writes on its own, settles only
-whether a session sees and ends just itself ([Sessions opened by device
-sign-in](../auth-api.md#sessions-opened-by-device-sign-in)): a session with
+whether a session sees and ends just itself ([Sessions limited to
+themselves](../auth-api.md#sessions-limited-to-themselves)): a session with
 that flag and no `opened_via` is refused here like any session with no record
 of how it was opened. The rule is one function, `auth.SessionAllows`, with one
 action per kind of change:
@@ -554,8 +560,10 @@ action per kind of change:
   is revoked, so it must not mint access that outlives that, nor read the
   person's devices.
 - `ActionManageKeys` (`enroll`, `PUT /auth/keys/person`,
-  `pending/{id}/approve`, `POST /auth/device/preapprove`) and `ActionReadKeys`
-  (`GET /auth/keys`, `GET /auth/keys/pending`, `pending/{id}/deny`) also need a
+  `pending/{id}/approve`, `POST /auth/device/preapprove`,
+  `DELETE /auth/device/preapprovals/{id}`) and `ActionReadKeys`
+  (`GET /auth/keys`, `GET /auth/keys/pending`, `pending/{id}/deny`,
+  `GET /auth/device/preapprovals`) also need a
   session opened by a password, a provider or the person's own device key. A
   session opened by device sign-in (a TV, a shared tablet, a browser approved
   by QR code) is refused: whoever holds it isn't necessarily the person, the
@@ -575,7 +583,7 @@ The key routes against each kind of session:
 
 | Route | Password, provider, own device key | Device sign-in (a TV) | Grant-enrolled app | No `opened_via` | Admin acting as the account, API key, remote playback |
 |---|---|---|---|---|---|
-| `GET /auth/keys`, `GET /auth/keys/pending`, `pending/{id}/deny` | allowed | refused | refused | refused | refused |
+| `GET /auth/keys`, `GET /auth/keys/pending`, `pending/{id}/deny`, `GET /auth/device/preapprovals`, `DELETE /auth/device/preapprovals/{id}` | allowed | refused | refused | refused | refused |
 | `enroll`, `PUT /auth/keys/person`, `pending/{id}/approve`, `POST /auth/device/preapprove` | main profile only | refused | refused | refused | refused |
 | `DELETE /auth/keys/devices/{id}` | allowed | refused | its own key only | refused | refused |
 

@@ -322,6 +322,8 @@
 ./internal/auth TestPasswordSignInForDB
 ./internal/auth TestCreatePersonalAPIKeyDB
 ./internal/auth TestAccountSignInChangesDuringPluginUninstallDB
+./internal/auth TestProfileDeleteLockOrderDB
+./internal/auth TestProfileSetLockOrderDB
 ./internal/auth TestExpiredSessionCleanupSkipsHeldRequestDB
 ./internal/auth TestAPIKeyCreationRefusesRevokedCredentialDB
 ./internal/auth TestPasswordSignInForRoutesDB
@@ -348,7 +350,7 @@
 ./internal/auth TestPendingKeyCapDB
 ./internal/auth TestKeyOperationsRecheckActingProfileDB
 ./internal/auth TestExpiredPendingKeySweepDB
-./internal/apiv2 TestKeyListRefusesDeviceSignInSessionDB
+./internal/apiv2 TestKeyRoutesRefuseSessionsDB
 ./internal/apiv2 TestProfileSetNameConflictOnTheWireDB
 ./internal/auth TestRevokeOwnDeviceKeyRulesDB
 ./internal/auth TestKeySignInLocalPasswordsOffDB

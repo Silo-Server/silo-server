@@ -84,10 +84,12 @@ type appKeyReply struct {
 	DeviceID  string     `json:"device_id"`
 	AccountID ID         `json:"account_id"`
 	Tokens    *TokenPair `json:"tokens,omitempty"`
-	// PersonKeyID is the enrolled person key's ID, on enroll only.
+	// PersonKeyID is the account's person key's ID, on enroll and on an app
+	// code's redeem.
 	PersonKeyID string `json:"person_key_id,omitempty"`
-	// Username and PersonKey are the account's name and what happened to
-	// its person key (enrolled or replaced), on an app code's redeem only.
+	// Username and PersonKey are the account's name and what the redeem did
+	// with the request's person key (enrolled or kept), on an app code's
+	// redeem only.
 	Username  string `json:"username,omitempty"`
 	PersonKey string `json:"person_key,omitempty"`
 	// LocalRoute is the pinned local route, on signed_in only, when the
@@ -105,9 +107,28 @@ const sealedRefusals = "Refusals are not sealed: 401 signature_invalid (bad sign
 
 // sealedReplyDescriptionSignedIn is sealedReplyDescription for a route
 // whose answer is always signed_in.
-const sealedReplyDescriptionSignedIn = " The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status: signed_in, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity). " + sealedRefusals
+var sealedReplyDescriptionSignedIn = sealedReplySignedIn("", "")
+
+// sealedReplyIntro and sealedReplyRouteNote are the shared pieces of a
+// sealed reply's description.
+const (
+	sealedReplyIntro     = " The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it."
+	sealedReplyRouteNote = "where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity)"
+)
+
+// sealedReplySignedIn describes a signed_in sealed reply whose plaintext
+// carries extra members (each followed by ", ") before local_route, which
+// notes, starting with "; ", explain. It states the whole shape once.
+func sealedReplySignedIn(extra, notes string) string {
+	return sealedReplyIntro + " Its plaintext is {status: signed_in, device_id, account_id, tokens, " + extra + "local_route}, " +
+		sealedReplyRouteNote + notes + ". " + sealedRefusals
+}
 
 const sealedReplyDescription = " The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. " + sealedRefusals
+
+// enrollSealedReply is enrollAppKeys' sealed answer: the signed_in
+// plaintext with the account's person key.
+var enrollSealedReply = sealedReplySignedIn("person_key_id, ", "; person_key_id is the ID of the account's person key")
 
 // enrollPayloadLocation is where enroll's signed payload sits in its body.
 const enrollPayloadLocation = locationBody + ".message.payload"
@@ -149,7 +170,7 @@ func registerAppKeySignIn(reg *Registry) {
 
 	enroll := humaOp(http.MethodPost, Prefix+"/auth/keys/enroll", "enrollAppKeys", "app-keys",
 		"Enroll a person key and a device key on the signed-in account and open a session bound to the device key.")
-	enroll.Description = "Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. When the account has no person key, person_key is registered and takes the provider identity of the session that enrolls it. When person_key is the account's person key already, it is reused as it is, binding unchanged. A different person key on the account is 409 conflict, and so is a device key already enrolled on this server. The new device key takes the session's provider identity. The sealed plaintext adds person_key_id; the client drops the session it called with. Keys enrolled here start active, also on an administrator's account, so enroll never answers approval_required. A malformed payload field is 422 at body.message.payload." + mainProfileRule + appKeySignedBodyNote + sealedReplyDescriptionSignedIn + providerAnswersDescription
+	enroll.Description = "Only the account's own login session enrolls: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. message is an enroll envelope signed with the private half of person_key (its kid must be person_key's ID), with device_sig. When the account has no person key, person_key is registered and takes the provider identity of the session that enrolls it. When person_key is the account's person key already, it is reused as it is, binding unchanged. A different person key on the account is 409 conflict, and so is a device key already enrolled on this server. The new device key takes the session's provider identity. The client drops the session it called with. Keys enrolled here start active, also on an administrator's account, so enroll never answers approval_required. A malformed payload field is 422 at body.message.payload." + mainProfileRule + appKeySignedBodyNote + enrollSealedReply + providerAnswersDescription
 	enroll.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
 	enrollOp := mainProfileOnly(Operation{Operation: enroll, RetrySafety: RetrySafetyNonRetryable,
 		ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10})
@@ -481,7 +502,9 @@ var appKeyProblems = []struct {
 	{auth.ErrPendingKeyLimit, TypeConflict, "This account already has the most devices waiting for approval; approve or deny one first."},
 	{auth.ErrApproverNotAdmin, TypePermissionDenied, "Only an administrator account approves a waiting device."},
 	{auth.ErrAppKeyNotFound, TypeNotFound, "No such device key on this account."},
-	{auth.ErrSessionNotAllowed, TypePermissionDenied, "This sign-in cannot manage app keys."},
+	// The administrator's row comes first: errors.Is matches it to both.
+	{auth.ErrActingAsAccount, TypePermissionDenied, handlers.ActingAsAccountDetail},
+	{auth.ErrSessionNotAllowed, TypePermissionDenied, handlers.SessionNotAllowedDetail},
 	{auth.ErrSessionRevoked, TypeSessionExpired, "The login session is no longer valid."},
 	{auth.ErrUserDisabled, TypePermissionDenied, "The account is disabled."},
 	{auth.ErrLocalLoginDisabled, TypeLocalLoginDisabled, "This server signs this account in only through its sign-in provider."},

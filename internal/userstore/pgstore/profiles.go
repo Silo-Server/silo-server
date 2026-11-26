@@ -12,7 +12,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/profileedits"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -525,11 +524,11 @@ func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string,
 	}
 
 	// Deleting the account locks it before its cascade reaches the profile
-	// and its collections, so the audit row's account keys come first.
-	if audit != nil {
-		if err := auditmutation.LockActors(ctx, tx); err != nil {
-			return nil, err
-		}
+	// and its collections, so the audit row's account keys come first, with
+	// the account row that deleteProfileRowsTx's identity lock needs before
+	// it (lockAccountForProfileDelete).
+	if err := lockAccountForProfileDelete(ctx, tx, s.userID, audit != nil); err != nil {
+		return nil, err
 	}
 
 	// Lock every collection whose revision the deletes below advance, in id
@@ -577,12 +576,19 @@ func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string,
 }
 
 // deleteProfileRowsTx deletes one profile and every row keyed by it in tx,
-// and returns the IDs of the personal collections it deleted. It takes no
-// locks: the caller already holds what DeleteProfileAudited takes, in its
-// order (the account locks, the actors, the collections, the profile row).
+// and returns the IDs of the personal collections it deleted. The caller
+// already holds what DeleteProfileAudited takes, in its order (the account
+// locks, the actors and the account row, the collections, the profile row).
+// It then locks the account's identities: deleting the profile row clears,
+// through a foreign key, every device sign-in request approved for the
+// profile, and a plugin uninstall clears the same requests after deleting
+// an identity, so it waits here or this waits for it (LockSignInIdentities).
 // A profile that does not exist is an error. It also returns the deleted
 // profile's sync ID ("" for none) and name.
 func deleteProfileRowsTx(ctx context.Context, tx pgx.Tx, userID int, id string) ([]string, deletedProfile, error) {
+	if err := LockSignInIdentities(ctx, tx, userID, false); err != nil {
+		return nil, deletedProfile{}, err
+	}
 	collectionIDs, err := deleteProfileDataTx(ctx, tx, userID, id)
 	if err != nil {
 		return nil, deletedProfile{}, err

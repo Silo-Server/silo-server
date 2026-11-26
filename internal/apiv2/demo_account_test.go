@@ -46,31 +46,57 @@ func TestDemoModeAccountChanges(t *testing.T) {
 		{"link complete", http.MethodPost, "/account/identities/link-complete", `{"code":"c","code_verifier":"v"}`},
 		// s9 is another session of the member's account (memberToken is s1).
 		{"end another session", http.MethodDelete, "/auth/sessions/s9", ""},
+		// A key enrolled before demo mode was turned on: revoking it ends
+		// every session it opened.
+		{"revoke device key", http.MethodDelete, "/auth/keys/devices/0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", ""},
+		{"deny waiting device", http.MethodPost, "/auth/keys/pending/0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11/deny", "{}"},
+		{"revoke device pre-approval", http.MethodDelete, "/auth/device/preapprovals/6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c", ""},
 	}
 	headers := map[string]map[string]string{
 		"member": with(bearer(memberToken), "X-Profile-Id", "p-primary"),
 		"admin":  with(bearer(adminToken), "X-Profile-Id", "p-primary"),
 	}
+	// These rows reach a fake that succeeds, so the administrator, and the
+	// member with demo mode off, must get 204 and not merely another refusal.
+	// The two key rows also count calls on the app key fake.
+	succeeds := map[string]bool{"revoke device key": true, "deny waiting device": true, "revoke device pre-approval": true}
+	keyRow := map[string]bool{"revoke device key": true, "deny waiting device": true}
+	keys := &fakeAppKeys{}
 	handler := func(demo bool) http.Handler {
 		deps := externalSignInDeps(&fakeExternalSignIn{allowUnlink: true})
 		deps.Sessions = &fakeSessionService{}
+		deps.AppKeys = keys
 		deps.DemoSettings = fakeSettings{demo: demo}
 		return newTestHandler(t, deps)
 	}
 	on, off := handler(true), handler(false)
 	for _, tc := range restricted {
 		t.Run(tc.name, func(t *testing.T) {
+			// answered checks one non-demo answer: 204 with the key service
+			// run once for a row that succeeds, anything but the demo
+			// refusal otherwise.
+			answered := func(who string, h http.Handler, hdr map[string]string) {
+				t.Helper()
+				before := keys.calls
+				rec := do(t, h, tc.method, Prefix+tc.path, tc.body, hdr)
+				if isDemoRefusal(rec) || (succeeds[tc.name] && rec.Code != http.StatusNoContent) {
+					t.Fatalf("%s: %d %s", who, rec.Code, rec.Body.String())
+				}
+				if keyRow[tc.name] && keys.calls != before+1 {
+					t.Fatalf("%s: key service ran %d times", who, keys.calls-before)
+				}
+			}
+			before := keys.calls
 			rec := do(t, on, tc.method, Prefix+tc.path, tc.body, headers["member"])
 			if !isDemoRefusal(rec) {
 				t.Fatalf("demo visitor: %d %s", rec.Code, rec.Body.String())
 			}
 			requireProblem(t, rec, TypePermissionDenied)
-			if rec := do(t, on, tc.method, Prefix+tc.path, tc.body, headers["admin"]); isDemoRefusal(rec) {
-				t.Fatalf("administrator refused in demo mode: %s", rec.Body.String())
+			if keys.calls != before {
+				t.Fatalf("demo visitor: key service ran %d times", keys.calls-before)
 			}
-			if rec := do(t, off, tc.method, Prefix+tc.path, tc.body, headers["member"]); isDemoRefusal(rec) {
-				t.Fatalf("refused with demo mode off: %s", rec.Body.String())
-			}
+			answered("administrator in demo mode", on, headers["admin"])
+			answered("member with demo mode off", off, headers["member"])
 		})
 	}
 
@@ -273,11 +299,17 @@ var demoAllowedAccountOperations = map[string]string{
 	"deleteSession":        "the handler refuses any session but the caller's own in demo mode",
 	"createPluginLaunch":   "issues a plugin cookie for the caller's own session; changes nothing",
 	"verifyProfilePIN":     "a wrong guess spends the profile's attempt budget, but visitors can't set a PIN, so the demo has none to lock",
+	// appKeysOn answers capability_disabled in demo mode, administrators
+	// included, so these four never run on a demo server.
+	"enrollAppKeys":        "the handler refuses every caller while demo mode is on (appKeysOn)",
+	"replacePersonKey":     "the handler refuses every caller while demo mode is on (appKeysOn)",
+	"createAppCode":        "the handler refuses every caller while demo mode is on (appKeysOn)",
+	"approvePendingAppKey": "the handler refuses every caller while demo mode is on (appKeysOn)",
 }
 
 // demoAccountDomains are the tags of operations that change the account, how
 // it signs in, or who holds a session on it.
-var demoAccountDomains = map[string]bool{"account": true, "api-keys": true, "auth": true, "device-login": true, "notifications": true, "profiles": true}
+var demoAccountDomains = map[string]bool{"account": true, "api-keys": true, "app-keys": true, "auth": true, "device-login": true, "notifications": true, "profiles": true}
 
 // TestDemoModeCoversAccountOperations fails when an account-changing
 // operation a non-administrator can call is added without deciding its

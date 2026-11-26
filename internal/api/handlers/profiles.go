@@ -274,6 +274,11 @@ func (h *ProfileHandler) householdProfileLimit(ctx context.Context, userID int) 
 		return 0, nil
 	}
 	user, err := h.UserRepo.GetByID(ctx, userID)
+	if errors.Is(err, auth.ErrNotFound) {
+		// Deleted under the request: no limit, and the write that follows
+		// finds the account gone in its own transaction.
+		return 0, nil
+	}
 	if err != nil {
 		slog.WarnContext(ctx, "loading the account for its profile limit failed", "component", "api", "user_id", userID, "error", err)
 		return 0, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user")

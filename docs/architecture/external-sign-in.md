@@ -31,8 +31,16 @@ SDK's `docs/auth-provider.md`.
   works on one identity), and only then those rows: the uninstall waits at the
   identities, or the transaction waits for it. Revocation also withdraws device
   sign-in approvals before it revokes sessions. Revoking app keys follows the
-  same rule, since a session a key opened carries the identity the key was
-  bound to: the account's identities, then the key rows, then those sessions. Today the uninstall's cascade
+  same rule for the sessions, since a session a key opened carries the identity
+  the key was bound to: the identities are locked before those sessions. Where
+  the key rows fall varies. Revoking every key of the account
+  (`revokeAccountKeysTx`) and unlinking an identity (`deleteIdentity`) take the
+  identities, then the key rows, then the sessions; revoking one key takes its
+  key row first (`lockDeviceKey`), then the identities, then the sessions
+  (`endDeviceKeySessions`). Both orders are safe: every writer of key rows
+  holds the account row lock, so two of them never interleave, and an
+  uninstall never touches key rows, since a key's `identity_id` has no
+  foreign key to the identity. Today the uninstall's cascade
   clears requests before sessions; that follows from the names Postgres gave
   the two foreign keys' triggers, and nothing relies on it. These paths take
   one account at a time: an uninstall deletes an installation's identities in
@@ -41,8 +49,12 @@ SDK's `docs/auth-provider.md`.
   carry no identity (impersonation sessions), deletes an account created in
   the same request, or never waits (the expired-session and expired-request
   cleanups skip rows another transaction holds and delete them on a later
-  run). Deleting a profile is the exception: it clears several requests
-  approved for the profile without taking the identities. `signInRowWriters`
+  run). Deleting a profile clears the requests approved for the profile
+  through a foreign key, so it follows the rule too. A profile delete and a
+  profile set lock the account row before the profile's collections and
+  profile rows (approving a device sign-in for a profile locks the account
+  row and then, through the request's foreign key, the profile row), and
+  both lock the identities before the profile row goes. `signInRowWriters`
   in `internal/auth/signin_rows_writers_test.go` lists every writer with its
   rule, and the test fails on one it does not list.
 
