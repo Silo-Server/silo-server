@@ -602,8 +602,11 @@ account by its account ID (empty by default, naming none). While demo mode is on
 setting names an existing, enabled account that is not an administrator and signs in with
 its local password, password sign-ins with that account's own sign-in names (its username
 and its email address) skip the per-name budget, wherever the local provider checks the
-password. Nothing else changes: the per-address request limits, profile PIN attempts, and
-every other name's budget apply as before, and a sign-in that names another provider, or
+password. The whole per-name budget is skipped, including the budget it gives an address
+the account is known to sign in from once the name is locked, which exists only within
+it. Nothing else changes: the request rate limits by client address that a listener
+applies to its sign-in route, profile PIN attempts, and every other name's budget apply
+as before, and a sign-in that names another provider, or
 a Jellyfin name whose budget name signs in to a different account, keeps the budget.
 
 Writing the setting refuses an account that does not exist or is an administrator's, with
@@ -619,15 +622,16 @@ background), and an attempt only compares its name's budget key with them: an at
 any other name runs the same reads as without the setting. An attempt whose name matches
 re-reads the settings and the account before it skips the budget; names an earlier
 refresh found only choose which attempts re-read, and never skip the budget on their own;
-a refresh or re-read that fails holds no names until a read succeeds.
-A rename or a newly
-set email takes effect at the next refresh; until then that name keeps the ordinary
+a refresh or re-read that fails holds no names until a read succeeds. A re-read cut
+short because the attempt's own request ended denies that attempt and leaves the names
+in place for every other attempt. A rename or a newly set email takes effect at the next refresh; until then that name keeps the ordinary
 budget.
 
 What an operator gives up by naming an account:
 
 - The per-name limit no longer slows password guessing against that one account. On a
-  demo its password is public by design; the per-address limits still apply.
+  demo its password is public by design; a listener's request rate limits by client
+  address still apply.
 - The server no longer treats that one name like every other, so the promise that the
   budget reveals nothing about which names exist holds for every name but that one.
 
