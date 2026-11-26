@@ -2,6 +2,8 @@ package backup
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -308,6 +310,9 @@ type PGControl struct {
 	// Like is the database whose encoding and locale a created
 	// database copies, so the restored catalog sorts as the live one did.
 	Like string
+	// own is the application name of the restore's own connections, which
+	// OtherConnections does not count.
+	own string
 }
 
 // maintenanceDatabases are the databases the control connection may use,
@@ -345,10 +350,25 @@ func ConnectControl(ctx context.Context, databaseURL string) (*PGControl, error)
 			_ = conn.Close(context.WithoutCancel(ctx))
 			return nil, fmt.Errorf("the control connection reached %q, the live database: %w", on, err)
 		}
-		return &PGControl{Conn: conn, Like: live}, nil
+		own, err := ownApplicationName()
+		if err != nil {
+			_ = conn.Close(context.WithoutCancel(ctx))
+			return nil, err
+		}
+		return &PGControl{Conn: conn, Like: live, own: own}, nil
 	}
 	return nil, fmt.Errorf("a replace needs a maintenance database other than the live one (%s) that the role can connect to; "+
 		"grant it CONNECT on one, or use separate mode (--into): %w", strings.Join(maintenanceDatabases, " or "), errors.Join(failures...))
+}
+
+// ownApplicationName names one restore's connections. The random part keeps
+// another command's connections, a second restore's included, counted.
+func ownApplicationName() (string, error) {
+	var b [6]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("naming the restore's connections: %w", err)
+	}
+	return "silo-restore-" + hex.EncodeToString(b[:]), nil
 }
 
 func ident(name string) string { return pgx.Identifier{name}.Sanitize() }
@@ -371,11 +391,41 @@ func (c *PGControl) NameOf(ctx context.Context, oid uint32) (string, bool, error
 	return name, err == nil, err
 }
 
+// OtherConnections counts the sessions on name that are neither this
+// command's control session, nor a connection the restore opened itself, nor
+// an autovacuum worker.
+//
+// The restore reads and writes the live database over short connections of
+// its own, and the server lists a closed connection's backend in
+// pg_stat_activity until that backend has exited. Counted, one of those
+// refused a restore of a database nothing else was using. They carry the
+// restore's application name (OwnApplicationName), as do the parallel
+// workers of their queries, so they are left out by name, without waiting
+// for them to go: every other session is counted the moment it is seen.
+//
+// Every other backend on the database can write to it, or belongs to a
+// client that can: a client, a parallel worker, a logical replication
+// worker, an extension's background worker, a walsender in database mode.
+// An autovacuum worker connects on its own and writes only what vacuuming
+// and analyzing keep, which the restored database rebuilds.
+//
+// A role without pg_read_all_stats sees another role's session with its
+// backend type NULL, and a restore may run as such a role (CheckPrivileges
+// asks only for CREATEDB and ownership), so a NULL type is counted. Postgres
+// 18 shows such a role the application name; the query still treats a NULL
+// name as another client's.
 func (c *PGControl) OtherConnections(ctx context.Context, name string) (int, error) {
 	var n int
-	err := c.Conn.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`, name).Scan(&n)
+	err := c.Conn.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+		WHERE datname = $1 AND pid <> pg_backend_pid()
+			AND backend_type IS DISTINCT FROM 'autovacuum worker'
+			AND ($2 = '' OR application_name IS DISTINCT FROM $2)`, name, c.own).Scan(&n)
 	return n, err
 }
+
+// OwnApplicationName is the application name the restore gives its own
+// connections to the live database, unique to this control connection.
+func (c *PGControl) OwnApplicationName() string { return c.own }
 
 // CheckPrivileges: renaming needs CREATEDB and ownership, and ALLOW_CONNECTIONS
 // needs ownership; a superuser has both.
