@@ -1,15 +1,11 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken } from "@/api/client";
 import { expectNoLinkCarrying } from "@/components/appKeys/codeLinkGuard.test-support";
-import {
-  bodiesSentTo,
-  json,
-  openLink,
-  problemResponse,
-  renderRoutes,
-} from "./authPage.test-support";
+import { bodiesSentTo, json, openLink, problemResponse } from "./authPage.test-support";
 import SignInLink from "./SignInLink";
 import policyFixture from "../../../contracts/api/v2/fixtures/get_password_policy_ok.json";
 import redeemed from "../../../contracts/api/v2/fixtures/redeem_sign_in_link_ok.json";
@@ -24,12 +20,27 @@ let redeem: () => Promise<Response>;
 let setPassword: () => Promise<Response>;
 const redeems = () => bodiesSentTo(fetchMock, "/api/v2/auth/sign-in-links/redeem");
 
+// The page blocks router navigation, which needs a data router.
+let router: ReturnType<typeof createMemoryRouter>;
+function renderPage() {
+  router = createMemoryRouter(
+    [
+      { path: "/sign-in-link", element: <SignInLink /> },
+      { path: "/login", element: <p>Ordinary login</p> },
+    ],
+    { initialEntries: ["/sign-in-link"] },
+  );
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
+}
+
 function mount(link = "/sign-in-link#link-secret") {
   openLink(link);
-  return renderRoutes("/sign-in-link", {
-    "/sign-in-link": <SignInLink />,
-    "/login": <p>Ordinary login</p>,
-  });
+  return renderPage();
 }
 
 beforeEach(() => {
@@ -136,7 +147,7 @@ it("asks before leaving, and says the link is used after a reload", async () => 
   window.dispatchEvent(leaving);
   expect(leaving.defaultPrevented).toBe(true);
   first.unmount();
-  renderRoutes("/sign-in-link", { "/sign-in-link": <SignInLink /> });
+  renderPage();
   expect(await screen.findByText(/Ask an administrator of this server for a new one/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
   expect(redeems()).toHaveLength(1);
@@ -182,4 +193,33 @@ it("disables Back while the password is saved", async () => {
       true,
     ),
   );
+});
+
+// In-app navigation (Back, Forward, a link) doesn't unload the page, so the
+// router asks before it leaves while the page holds the code and the
+// set-password token; staying keeps them. Once the password is saved nothing
+// is held, and the page's own way out goes straight on.
+it("asks before an in-app navigation leaves a held result, and not after the password is saved", async () => {
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+  await screen.findByText(redeemed.code);
+  await act(async () => {
+    void router.navigate("/login");
+  });
+  expect(await screen.findByRole("alertdialog")).toHaveTextContent("Leave this page?");
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(screen.getByText(redeemed.code)).toBeTruthy();
+  expect(router.state.location.pathname).toBe("/sign-in-link");
+
+  fireEvent.click(screen.getByRole("button", { name: "Set a password instead" }));
+  fireEvent.change(screen.getByLabelText("New password"), { target: { value: "margin fossil" } });
+  fireEvent.change(screen.getByLabelText("Confirm new password"), {
+    target: { value: "margin fossil" },
+  });
+  fireEvent.submit(screen.getByRole("button", { name: "Save password" }).closest("form")!);
+  await screen.findByText(/Your password is saved/);
+  fireEvent.click(screen.getByRole("link", { name: "Sign in" }));
+  expect(await screen.findByText("Ordinary login")).toBeTruthy();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
 });

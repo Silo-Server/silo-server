@@ -100736,6 +100736,24 @@
       "value": "\u200F\u202EKeep this page open until you’re done. The link is used up, so reloading or leaving loses what it gave you.\u202C"
     }
   ],
+  "web.auth.signInLink.leaveAction": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELeave\u202C"
+    }
+  ],
+  "web.auth.signInLink.leaveDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe link is used up. If you leave, the code for the Silo app and the chance to set a password are gone, and you’ll need a new link.\u202C"
+    }
+  ],
+  "web.auth.signInLink.leaveTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELeave this page?\u202C"
+    }
+  ],
   "web.auth.signInLink.noCodeAdministrator": [
     {
       "type": 0,

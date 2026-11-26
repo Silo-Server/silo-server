@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Link } from "react-router";
+import { Link, useBlocker } from "react-router";
 import {
   redeemSignInLink,
   setSignInLinkPassword,
@@ -10,6 +10,16 @@ import { V2ProblemError } from "@/api/v2/request";
 import { SessionCodeStep } from "@/components/appKeys/AppCodeStep";
 import { AuthCard, SignInHint } from "@/components/auth/AuthCard";
 import { PasswordInput } from "@/components/PasswordInput";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { usePasswordPolicy } from "@/hooks/queries/account";
@@ -60,6 +70,12 @@ export default function SignInLink() {
     window.addEventListener("beforeunload", ask);
     return () => window.removeEventListener("beforeunload", ask);
   }, [holding]);
+  // Navigating inside the app (Back, Forward, a link) doesn't unload the
+  // page, so the router asks the same question while a result is held.
+  const leave = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      holding && currentLocation.pathname !== nextLocation.pathname,
+  );
 
   async function redeem() {
     if (busy.current || stage.kind !== "intro") return;
@@ -131,13 +147,16 @@ export default function SignInLink() {
     const { redeemed } = stage;
     if (stage.view === "password" && redeemed.setPasswordToken) {
       return (
-        <SetPasswordForm
-          token={redeemed.setPasswordToken}
-          noCodeReason={redeemed.noCodeReason}
-          onBack={redeemed.appCode ? () => setStage({ ...stage, view: "code" }) : undefined}
-          onDone={() => setStage({ kind: "passwordSet" })}
-          onUnavailable={() => setStage({ kind: "unavailable" })}
-        />
+        <>
+          <SetPasswordForm
+            token={redeemed.setPasswordToken}
+            noCodeReason={redeemed.noCodeReason}
+            onBack={redeemed.appCode ? () => setStage({ ...stage, view: "code" }) : undefined}
+            onDone={() => setStage({ kind: "passwordSet" })}
+            onUnavailable={() => setStage({ kind: "unavailable" })}
+          />
+          <LeaveDialog blocker={leave} />
+        </>
       );
     }
     if (redeemed.appCode) {
@@ -161,6 +180,7 @@ export default function SignInLink() {
               {t("web.auth.signInLink.setPasswordInstead")}
             </Button>
           )}
+          <LeaveDialog blocker={leave} />
         </AuthCard>
       );
     }
@@ -178,6 +198,48 @@ export default function SignInLink() {
       </Button>
       <SignInHint />
     </AuthCard>
+  );
+}
+
+/**
+ * Asks before an in-app navigation leaves the page while it holds what the
+ * spent link handed out; staying keeps it, leaving lets the navigation go.
+ */
+function LeaveDialog({ blocker }: { blocker: ReturnType<typeof useBlocker> }) {
+  const t = useT();
+  const proceeding = useRef(false);
+  useEffect(() => {
+    if (blocker.state !== "blocked") proceeding.current = false;
+  }, [blocker.state]);
+  return (
+    <AlertDialog
+      open={blocker.state === "blocked"}
+      onOpenChange={(open) => {
+        if (open || proceeding.current) return;
+        blocker.reset?.();
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("web.auth.signInLink.leaveTitle")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("web.auth.signInLink.leaveDescription")}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            onClick={() => {
+              proceeding.current = true;
+              blocker.proceed?.();
+            }}
+          >
+            {t("web.auth.signInLink.leaveAction")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
