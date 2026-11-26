@@ -762,6 +762,7 @@
 ./internal/userstore/pgstore TestPostgresConcurrentProfileAndCollectionDeletes
 ./internal/userstore/pgstore TestPostgresConcurrentProfileDeleteAndCollectionReorder
 ./internal/userstore/pgstore TestPostgresProfileSetConcurrentWithDeleteAndReorderDB
+./internal/userstore/pgstore TestProfileDeleteDuringPluginUninstallDB
 ./internal/userstore/pgstore TestUpdateProfileRequestsBlockedBumpsAccessPolicyRevision
 ./internal/api/handlers TestEbookReaderPurgeProfileDB
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
