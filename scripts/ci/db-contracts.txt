@@ -406,6 +406,7 @@
 ./internal/auth TestNoUnlistedSideWritesDB
 ./internal/auth TestOwnershipTransferSignInAndSwitchOffDB
 ./internal/auth TestPromotionWithdrawsPreapprovalsDB
+./internal/auth TestSessionEndersLockInIDOrderDB
 ./internal/auth TestSwitchOffAfterRenewalReadDB
 ./internal/api/handlers TestPublicURLWritesKeepAWayInDB
 ./internal/api/handlers TestSwitchOffKeepsOwnerProtectionDB
