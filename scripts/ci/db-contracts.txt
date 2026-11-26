@@ -400,8 +400,10 @@
 ./internal/apiv2 TestKeySessionSweepMissedEndsAtRefreshDB
 ./internal/auth TestSwitchOffSweepAndAccountRevokeDoNotDeadlockDB
 ./internal/api/handlers TestAppKeysOffJudgedOnTheBatchLocalSettingDB
-./internal/auth TestSessionEndersShareOneOrderDB
-./internal/auth TestEndImpersonationBesideTheSweepDB
+./internal/auth TestSessionEndersStagedDB
+./internal/auth TestTwoRevokesAroundAPreapprovalDB
+./internal/auth TestCollectRacingTheApproversRevokeDB
+./internal/auth TestNoUnlistedSideWritesDB
 ./internal/auth TestSwitchOffAfterRenewalReadDB
 ./internal/api/handlers TestPublicURLWritesKeepAWayInDB
 ./internal/api/handlers TestSwitchOffKeepsOwnerProtectionDB
