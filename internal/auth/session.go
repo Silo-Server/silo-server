@@ -415,6 +415,9 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 		if withdrawn, err = withdrawDeviceSignInApprovalsInTransaction(ctx, tx, []int{userID}); err != nil {
 			return 0, err
 		}
+		if err := EndSignInLinksTx(ctx, tx, userID); err != nil {
+			return 0, err
+		}
 	}
 	query := `UPDATE auth_sessions SET revoked_at = NOW()
 		WHERE (user_id = $1 OR impersonator_user_id = $1)

@@ -21,9 +21,10 @@ func NewSignInLinkHandler(service *signinlinks.Service) *SignInLinkHandler {
 	return &SignInLinkHandler{service: service}
 }
 
-// SignInLinkEmailAvailable reports whether the server can email a link.
-func (h *SignInLinkHandler) SignInLinkEmailAvailable(ctx context.Context) bool {
-	return h.service.EmailAvailable(ctx)
+// SignInLinkCapabilities reports whether the server can make a link now,
+// and email one.
+func (h *SignInLinkHandler) SignInLinkCapabilities(ctx context.Context) (signinlinks.Capabilities, error) {
+	return h.service.Capabilities(ctx)
 }
 
 // IssueSignInLink makes a sign-in link for an account. Who may make one is

@@ -16,7 +16,7 @@ import (
 // SignInLinkService makes and redeems sign-in links
 // (*handlers.SignInLinkHandler).
 type SignInLinkService interface {
-	SignInLinkEmailAvailable(context.Context) bool
+	SignInLinkCapabilities(context.Context) (signinlinks.Capabilities, error)
 	IssueSignInLink(context.Context, signinlinks.IssueInput) (*signinlinks.IssueResult, error)
 	RedeemSignInLink(ctx context.Context, token string, keysOn bool) (auth.SignInLinkRedemption, error)
 	SetPasswordWithSignInLink(ctx context.Context, token, newPassword string) error
@@ -113,7 +113,7 @@ func registerSignInLinks(reg *Registry) {
 	}
 	Register(reg, public("/auth/sign-in-links/redeem", "redeemSignInLink",
 		"Trade a sign-in link for an app code and a set-password token.",
-		"The sign-in link page calls this when the person presses Continue, never on load: the link works once. In one transaction the link is spent and an app code of its own kind is made for the account; of two redemptions exactly one succeeds. The code enrolls a person key and a device key at redeemAppCode, neither bound to a sign-in provider; the person key replaces a different one the account holds (person_key replaced in the sealed answer), which is revoked with the devices it introduced that wait for approval, while devices already enrolled keep their keys. For an account that is an administrator's at the moment of redeeming (judged under the account lock in the transaction that spends the link, so an account demoted since the link was made gets a code) the answer has only set_password_token and no_code_reason administrator, and no key is enrolled: the person sets a password, signs in on this server's site, and opens the app from there with createAppCode. While auth.app_key_sign_in is off, or the server is in demo mode, the answer has only set_password_token and no_code_reason app_keys_off. An unknown, used or expired link, and one whose account is disabled, is 404 not_found. While local password sign-in is off it is 409 provider_sign_in_required and the link stays unspent. Spends the per-address password_reset rate-limit budget. Audited as user.sign_in_link_redeemed. The response is no-store."),
+		"The sign-in link page calls this when the person presses Continue, never on load: the link works once. The answer has one of two shapes: code, expires_in, server_address and link_allowed (false) together, with set_password_token when the account may set a password; or set_password_token and no_code_reason alone. In one transaction the link is spent and an app code of its own kind is made for the account; of two redemptions exactly one succeeds. The code enrolls a person key and a device key at redeemAppCode, neither bound to a sign-in provider; the person key replaces a different one the account holds (person_key replaced in the sealed answer), which is revoked with the devices it introduced that wait for approval, while devices already enrolled keep their keys. For an account that is an administrator's at the moment of redeeming (judged under the account lock in the transaction that spends the link, so an account demoted since the link was made gets a code) the answer has only set_password_token and no_code_reason administrator, and no key is enrolled: the person sets a password, signs in on this server's site, and opens the app from there with createAppCode. While auth.app_key_sign_in is off, or the server is in demo mode, the answer has only set_password_token and no_code_reason app_keys_off. An unknown, used or expired link, and one whose account is disabled, is 404 not_found. While local password sign-in is off it is 409 provider_sign_in_required and the link stays unspent. Spends the per-address password_reset rate-limit budget. Audited as user.sign_in_link_redeemed. The response is no-store."),
 		reg.redeemSignInLink)
 	Register(reg, public("/auth/sign-in-links/set-password", "setSignInLinkPassword",
 		"Set the account's password with a redeemed sign-in link's token.",
@@ -140,12 +140,8 @@ func (reg *Registry) createAdminUserSignInLink(ctx context.Context, in *AdminSig
 	if p != nil {
 		return nil, p
 	}
-	address, ok := reg.appCodeServerAddress(ctx)
-	if !ok {
-		return nil, NewProblem(TypeInternalError, "This server could not work out the address it was reached on.")
-	}
 	result, err := svc.IssueSignInLink(ctx, signinlinks.IssueInput{
-		UserID: id, IssuedBy: claimsFrom(ctx).UserID, SendEmail: in.Body.SendEmail, ServerAddress: address,
+		UserID: id, IssuedBy: claimsFrom(ctx).UserID, SendEmail: in.Body.SendEmail,
 	})
 	if result == nil {
 		return nil, signInLinkProblem(err)
@@ -187,12 +183,30 @@ func (reg *Registry) redeemSignInLink(ctx context.Context, in *SignInLinkRedeemI
 	if err != nil {
 		return nil, signInLinkProblem(err)
 	}
-	out := SignInLinkRedeemed{SetPasswordToken: redeemed.SetPasswordToken, NoCodeReason: redeemed.NoCode}
-	if code := redeemed.AppCode; code != nil {
-		out.Code, out.ExpiresIn, out.ServerAddress = code.Code, code.ExpiresIn(time.Now()), address
-		out.LinkAllowed = new(code.LinkAllowed)
+	out, ok := signInLinkRedeemedAnswer(redeemed, address, time.Now())
+	if !ok {
+		return nil, NewProblem(TypeInternalError, "Unable to process the sign-in link.")
 	}
 	return &SignInLinkRedeemedOutput{Body: out}, nil
+}
+
+// signInLinkRedeemedAnswer is redeemSignInLink's answer, in one of its two
+// shapes: the code with expires_in, server_address and link_allowed (false),
+// with or without set_password_token; or set_password_token alone with
+// no_code_reason. ok is false for anything else, which the route answers as
+// an internal error rather than a 200 a client can't use.
+func signInLinkRedeemedAnswer(redeemed auth.SignInLinkRedemption, address string, now time.Time) (SignInLinkRedeemed, bool) {
+	if code := redeemed.AppCode; code != nil {
+		if code.Code == "" || address == "" || code.LinkAllowed || redeemed.NoCode != "" {
+			return SignInLinkRedeemed{}, false
+		}
+		return SignInLinkRedeemed{Code: code.Code, ExpiresIn: code.ExpiresIn(now), ServerAddress: address,
+			LinkAllowed: new(false), SetPasswordToken: redeemed.SetPasswordToken}, true
+	}
+	if redeemed.SetPasswordToken == "" || redeemed.NoCode == "" {
+		return SignInLinkRedeemed{}, false
+	}
+	return SignInLinkRedeemed{SetPasswordToken: redeemed.SetPasswordToken, NoCodeReason: redeemed.NoCode}, true
 }
 
 func (reg *Registry) setSignInLinkPassword(ctx context.Context, in *SignInLinkSetPasswordInput) (*struct{}, error) {
@@ -231,6 +245,10 @@ func signInLinkProblem(err error) error {
 		return NewProblem(TypeConflict, "The account has no email address; share the link instead.")
 	case errors.Is(err, mail.ErrNotConfigured):
 		return NewProblem(TypeCapabilityNotConfigured, "Email is not configured; share the link instead.")
+	case errors.Is(err, signinlinks.ErrNoLinkBase):
+		return NewProblem(TypeCapabilityNotConfigured, "Sign-in links need the server's public URL; set it in the server settings.")
+	case errors.Is(err, auth.ErrSignInLinkAccountChanged):
+		return NewProblem(TypeConflict, "The account's email address changed while making the link. Reload the account and try again.")
 	case errors.Is(err, passwordhash.ErrBusy):
 		return passwordHashBusyProblem()
 	}

@@ -38,9 +38,9 @@ func ResetPasswordInTransaction(ctx context.Context, tx pgx.Tx, userID int, newP
 
 // RevokeSignInsInTransaction signs an account out everywhere within the
 // caller's transaction: every login session it holds or impersonates from,
-// its Audiobookshelf- and Jellyfin-compatible sessions, and any device sign-in
+// its Audiobookshelf- and Jellyfin-compatible sessions, any device sign-in
 // it approved that the device has not collected yet, which would otherwise
-// mint a fresh session afterwards. Personal API keys are credentials the
+// mint a fresh session afterwards, and its sign-in links (EndSignInLinksTx). Personal API keys are credentials the
 // account created on purpose and survive; see
 // docs/architecture/password-resets.md. Callers run the OnUserSessionsRevoked
 // hook after commit so every replica drops the Jellyfin-compatible sessions it
@@ -70,6 +70,11 @@ func revokeSignInsInTransaction(ctx context.Context, tx pgx.Tx, userID int, keep
 		return err
 	}
 	if _, err := withdrawDeviceSignInApprovalsInTransaction(ctx, tx, userIDs); err != nil {
+		return err
+	}
+	// Signing the account out everywhere, or out of every other session,
+	// ends its sign-in links too.
+	if err := EndSignInLinksTx(ctx, tx, userID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `

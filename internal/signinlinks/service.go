@@ -26,14 +26,17 @@ var (
 	// ErrNoEmail refuses emailing a link to an account with no usable
 	// address.
 	ErrNoEmail = errors.New("account has no usable email address")
-	// ErrNoAddress reports a request whose server address could not be
-	// worked out, so no link could be built.
-	ErrNoAddress = errors.New("no server address for the link")
+	// ErrNoLinkBase refuses a link while the server has no public URL
+	// (server.public_url), as an administrator's password reset link is
+	// refused: a link built on the address the administrator happened to
+	// use might not open for the person.
+	ErrNoLinkBase = errors.New("no external URL is configured for sign-in links")
 )
 
 // store is the part of *auth.AppKeySignIn the service uses.
 type store interface {
 	IssueSignInLink(ctx context.Context, in auth.SignInLinkIssue) (auth.IssuedSignInLink, error)
+	LocalPasswordLoginAllowed(ctx context.Context) (bool, error)
 	RedeemSignInLink(ctx context.Context, token string, keysOn bool) (auth.SignInLinkRedemption, error)
 	SetPasswordWithSignInLink(ctx context.Context, token, newPassword string) (int, error)
 }
@@ -68,9 +71,27 @@ func (s *Service) OnSessionsRevoked(fn func(ctx context.Context, userID int)) {
 	s.sessionsRevoked = fn
 }
 
-// EmailAvailable reports whether the server can email a link now.
-func (s *Service) EmailAvailable(ctx context.Context) bool {
-	return s.mail != nil && s.mail.Enabled(ctx)
+// Capabilities is what the server can do with sign-in links now.
+type Capabilities struct {
+	// Links: a link can be made, which needs the server's public URL and
+	// local password sign-in on.
+	Links bool
+	// Email: a link can also be emailed; a mail server is configured.
+	Email bool
+}
+
+// Capabilities answers from the live settings.
+func (s *Service) Capabilities(ctx context.Context) (Capabilities, error) {
+	allowed, err := s.links.LocalPasswordLoginAllowed(ctx)
+	if err != nil {
+		return Capabilities{}, err
+	}
+	links := allowed && s.linkBase(ctx) != ""
+	return Capabilities{Links: links, Email: links && s.mail != nil && s.mail.Enabled(ctx)}, nil
+}
+
+func (s *Service) linkBase(ctx context.Context) string {
+	return mail.AccountLinkBase(ctx, s.settings, "")
 }
 
 // IssueInput is an administrator's request for a sign-in link.
@@ -79,9 +100,6 @@ type IssueInput struct {
 	IssuedBy  int
 	ScopedKey bool
 	SendEmail bool
-	// ServerAddress is the server address the link starts with, as the app
-	// code answers compute it.
-	ServerAddress string
 }
 
 // IssueResult is a stored link. With SendEmail it may come with an email
@@ -94,14 +112,15 @@ type IssueResult struct {
 }
 
 // Issue stores a new link for the account, replacing its earlier ones, and
-// emails it when asked. An email request for an account with no address,
-// or on a server without mail, is refused before a link is made, since a
-// new link would replace one the person may hold.
+// emails it when asked. The link is built on the server's public URL, as a
+// password reset link is, for the answer and the email alike. An email
+// request for an account with no address, or on a server without mail, and
+// any request on a server with no public URL, are refused before a link is
+// made, since a new link would replace one the person may hold. The address
+// an email goes to is checked again when the link is stored (it must still be
+// the account's), so a link is never sent to an address the account dropped
+// meanwhile.
 func (s *Service) Issue(ctx context.Context, in IssueInput) (*IssueResult, error) {
-	address := strings.TrimRight(strings.TrimSpace(in.ServerAddress), "/")
-	if address == "" {
-		return nil, ErrNoAddress
-	}
 	var user *models.User
 	delivery := "link"
 	if in.SendEmail {
@@ -113,17 +132,23 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (*IssueResult, error
 		if _, err := auth.ValidateEmail(user.Email); err != nil {
 			return nil, ErrNoEmail
 		}
-		if !s.EmailAvailable(ctx) {
+		if s.mail == nil || !s.mail.Enabled(ctx) {
 			return nil, mail.ErrNotConfigured
 		}
 	}
-	issued, err := s.links.IssueSignInLink(ctx, auth.SignInLinkIssue{
-		UserID: in.UserID, IssuedBy: in.IssuedBy, ScopedKey: in.ScopedKey, Delivery: delivery,
-	})
+	base := s.linkBase(ctx)
+	if base == "" {
+		return nil, ErrNoLinkBase
+	}
+	request := auth.SignInLinkIssue{UserID: in.UserID, IssuedBy: in.IssuedBy, ScopedKey: in.ScopedKey, Delivery: delivery}
+	if user != nil {
+		request.ExpectedEmail = &user.Email
+	}
+	issued, err := s.links.IssueSignInLink(ctx, request)
 	if err != nil {
 		return nil, err
 	}
-	result := &IssueResult{URL: address + PagePath + "#" + issued.Token, ExpiresAt: issued.ExpiresAt}
+	result := &IssueResult{URL: mail.AccountLink(base, PagePath, issued.Token), ExpiresAt: issued.ExpiresAt}
 	if !in.SendEmail {
 		return result, nil
 	}

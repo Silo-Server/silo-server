@@ -15,10 +15,12 @@ import (
 // set-password token, with why. "used-token" is a spent link.
 type fixtureSignInLinks struct{}
 
-func (fixtureSignInLinks) SignInLinkEmailAvailable(context.Context) bool { return true }
+func (fixtureSignInLinks) SignInLinkCapabilities(context.Context) (signinlinks.Capabilities, error) {
+	return signinlinks.Capabilities{Links: true, Email: true}, nil
+}
 
-func (fixtureSignInLinks) IssueSignInLink(_ context.Context, in signinlinks.IssueInput) (*signinlinks.IssueResult, error) {
-	return &signinlinks.IssueResult{URL: in.ServerAddress + signinlinks.PagePath + "#8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA",
+func (fixtureSignInLinks) IssueSignInLink(context.Context, signinlinks.IssueInput) (*signinlinks.IssueResult, error) {
+	return &signinlinks.IssueResult{URL: "https://media.example.test" + signinlinks.PagePath + "#8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA",
 		ExpiresAt: time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)}, nil
 }
 

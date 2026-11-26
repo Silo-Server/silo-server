@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
@@ -38,10 +41,32 @@ var (
 	// sign-in is off on the server: the link could only give the account a
 	// way in that skips the sign-in provider.
 	ErrSignInLinkNeedsProvider = errors.New("this server signs people in through its sign-in provider")
+	// ErrSignInLinkAccountChanged refuses a link to be emailed when the
+	// account's address changed since the caller read it.
+	ErrSignInLinkAccountChanged = errors.New("the account's email address changed while the link was made")
 	// ErrScopedKeyAdminCredentials refuses a scoped API key handing out a
 	// way into an administrator's account, as it may not set one's password.
 	ErrScopedKeyAdminCredentials = errors.New("a scoped API key may not change an admin account's credentials")
 )
+
+// EndSignInLinksTx ends every sign-in link of the account in db, the
+// caller's transaction, which holds the account row: the links, the app codes
+// redeemed links left, and the set-password tokens they handed out, together,
+// so a place that ends a link can't forget one of the three. Whatever ends a
+// link calls it: a new link, a password set by any route (the link's own, a
+// reset, an administrator's, the person's change), signing the account out
+// everywhere, disabling the account and promoting it.
+func EndSignInLinksTx(ctx context.Context, db interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}, userID int) error {
+	if _, err := db.Exec(ctx, `DELETE FROM auth_sign_in_links WHERE user_id = $1`, userID); err != nil {
+		return fmt.Errorf("ending sign-in links: %w", err)
+	}
+	if _, err := db.Exec(ctx, `DELETE FROM auth_app_codes WHERE user_id = $1 AND kind = $2`, userID, appCodeKindSignInLink); err != nil {
+		return fmt.Errorf("ending sign-in link codes: %w", err)
+	}
+	return nil
+}
 
 // SignInLinkIssue is an administrator's request for a sign-in link.
 type SignInLinkIssue struct {
@@ -52,6 +77,10 @@ type SignInLinkIssue struct {
 	ScopedKey bool
 	// Delivery is recorded in the audit row: "email" or "link".
 	Delivery string
+	// ExpectedEmail, when set, is the address the link is about to be
+	// emailed to: the account must still have it when the link is stored,
+	// compared as sign-in compares addresses (ErrSignInLinkAccountChanged).
+	ExpectedEmail *string
 }
 
 // IssuedSignInLink is a stored link. Token is the raw token, shown once.
@@ -130,6 +159,9 @@ func (a *AppKeySignIn) IssueSignInLink(ctx context.Context, in SignInLinkIssue) 
 		if !target.Enabled {
 			return ErrUserDisabled
 		}
+		if in.ExpectedEmail != nil && !strings.EqualFold(NormalizeEmail(target.Email), NormalizeEmail(*in.ExpectedEmail)) {
+			return ErrSignInLinkAccountChanged
+		}
 		if err := lockServerSettings(ctx, tx); err != nil {
 			return err
 		}
@@ -140,8 +172,10 @@ func (a *AppKeySignIn) IssueSignInLink(ctx context.Context, in SignInLinkIssue) 
 		if !allowed {
 			return ErrSignInLinkNeedsProvider
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM auth_sign_in_links WHERE user_id = $1`, target.ID); err != nil {
-			return fmt.Errorf("replacing sign-in links: %w", err)
+		// A new link replaces the account's earlier links, their codes and
+		// their set-password tokens.
+		if err := EndSignInLinksTx(ctx, tx, target.ID); err != nil {
+			return err
 		}
 		var createdBy *int
 		if in.IssuedBy > 0 {
@@ -399,20 +433,34 @@ func (a *AppKeySignIn) SetPasswordWithSignInLink(ctx context.Context, token, new
 	return userID, nil
 }
 
+// LocalPasswordLoginAllowed reads the server-wide local password switch,
+// which a sign-in link needs.
+func (a *AppKeySignIn) LocalPasswordLoginAllowed(ctx context.Context) (bool, error) {
+	return localPasswordLoginAllowed(ctx, a.pool)
+}
+
 // redeemSignInLinkCode enrolls the keys of a sign-in link's app code on its
 // account. The person lost every device, so the request's person key
 // becomes the account's: enrolled when the account has none or holds it
 // already, and in place of a different one otherwise, which is revoked
 // with the devices it introduced that still wait for approval, as
 // replacing the person key does. Devices already enrolled keep their keys.
-// Neither key is bound to a provider identity. Lock order: the account,
-// the code, the settings, the person key, the device keys and sessions.
+// A new or replacing person key and its device are bound to no provider;
+// the account's own person key sent again keeps its provider binding, and
+// the device enrolled under it takes that binding, as a device it introduces
+// does. An administrator's account is refused. Lock order: the account, the
+// code, the settings or the provider locks, the person key, the device keys
+// and sessions.
 func (a *AppKeySignIn) redeemSignInLinkCode(ctx context.Context, req KeyRedeemRequest, payload *appkeys.Payload, hash []byte, code appCodeRow, out *KeySignInResult) (*auditmutation.Entry, error) {
-	expiry, err := a.service.keyProviderExpiry(ctx, *code.userID, KeyBinding{})
+	binding, err := ownPersonKeyBinding(ctx, a.pool, *code.userID, req.PersonKey)
 	if err != nil {
 		return nil, err
 	}
-	var audit *auditmutation.Entry
+	expiry, err := a.service.keyProviderExpiry(ctx, *code.userID, binding)
+	if err != nil {
+		return nil, sessionIdentityGone(err)
+	}
+	var audit, replaced *auditmutation.Entry
 	err = a.inTx(ctx, func(tx pgx.Tx) error {
 		user, err := lockEnabledUser(ctx, tx, *code.userID)
 		if err != nil {
@@ -426,24 +474,33 @@ func (a *AppKeySignIn) redeemSignInLinkCode(ctx context.Context, req KeyRedeemRe
 		if err := spendAppCode(ctx, tx, hash); err != nil {
 			return err
 		}
-		chain, err := lockChain(ctx, tx, user, KeyBinding{})
+		chain, err := lockChain(ctx, tx, user, binding)
 		if err != nil {
-			return err
+			return sessionIdentityGone(err)
 		}
 		took, err := takeOverPersonKeyTx(ctx, tx, user.ID, req.PersonKey, req.IP)
 		if err != nil {
 			return keyEnrolledAs(KeyMemberPerson, err)
 		}
-		key, err := a.enrollRedeemedDevice(ctx, tx, user, took.person, KeyBinding{}, payload, chain.session(req.IP, expiry), took.status, out)
+		// The binding read before the locks must be the locked key's: a new
+		// key is unbound, the account's own key keeps its binding.
+		lockedBinding := KeyBinding{}
+		if !took.created {
+			lockedBinding = personKeyBinding(took.person)
+		}
+		if !lockedBinding.same(binding) {
+			return errKeyBindingChanged
+		}
+		key, err := a.enrollRedeemedDevice(ctx, tx, user, took.person, binding, payload, chain.session(req.IP, expiry), took.status, out)
 		if err != nil {
 			return err
 		}
-		values := keyAdded{auditFieldAppCodeKind: appCodeKindSignInLink}.withDevice(key).withPerson(took.person, took.created)
-		// The link the code came from and the account that made it.
-		values[auditFieldSignInLink] = code.signInLinkID
+		link := map[string]any{auditFieldSignInLink: code.signInLinkID}
 		if code.signInLinkCreatedBy != nil {
-			values[auditFieldSignInLinkCreatedBy] = *code.signInLinkCreatedBy
+			link[auditFieldSignInLinkCreatedBy] = *code.signInLinkCreatedBy
 		}
+		values := keyAdded{auditFieldAppCodeKind: appCodeKindSignInLink}.withDevice(key).withPerson(took.person, took.created)
+		maps.Copy(values, link)
 		before := map[string]any{}
 		if took.replaced != "" {
 			before[auditFieldPersonKey] = took.replaced
@@ -454,9 +511,53 @@ func (a *AppKeySignIn) redeemSignInLinkCode(ctx context.Context, req KeyRedeemRe
 		}
 		audit, err = auditmutation.RecordMutation(ctx, tx, auditmutation.ActionAppCodeRedeemed, auditmutation.TargetUser,
 			strconv.Itoa(user.ID), http.StatusOK, changes)
+		if err != nil || took.replaced == "" {
+			return err
+		}
+		// A replacement is also recorded as one, as replacePersonKey records
+		// it, so a watch on person key replacements sees it: the key before
+		// and after, the link and the account that made the link.
+		after := map[string]any{auditFieldPersonKey: took.person.KeyID}
+		maps.Copy(after, link)
+		changes = auditmutation.Changes(map[string]any{auditFieldPersonKey: took.replaced}, after)
+		if took.denied > 0 {
+			changes = append(changes, auditmutation.Created(auditFieldDeniedDeviceKeys, took.denied)...)
+		}
+		replaced, err = auditmutation.RecordMutation(ctx, tx, auditmutation.ActionPersonKeyReplaced, auditmutation.TargetUser,
+			strconv.Itoa(user.ID), http.StatusOK, changes)
 		return err
 	})
-	return audit, err
+	if err != nil {
+		return nil, err
+	}
+	auditmutation.CommitMutation(ctx, replaced)
+	return audit, nil
+}
+
+// ownPersonKeyBinding is the provider binding a sign-in link's redeem
+// enrolls under: the account's live person key's when the request sends that
+// key (read before any lock; the redeem checks it again under the locks),
+// none otherwise.
+func ownPersonKeyBinding(ctx context.Context, db rowQuerier, userID int, key appkeys.PublicKey) (KeyBinding, error) {
+	var identityID *int64
+	var providerBound bool
+	err := db.QueryRow(ctx, `SELECT identity_id, provider_bound FROM auth_person_keys
+		WHERE user_id = $1 AND key_id = $2 AND revoked_at IS NULL`, userID, key.KeyID()).Scan(&identityID, &providerBound)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !providerBound) {
+		return KeyBinding{}, nil
+	}
+	if err != nil {
+		return KeyBinding{}, fmt.Errorf("reading person key binding: %w", err)
+	}
+	return KeyBinding{IdentityID: identityID, ProviderBound: true}, nil
+}
+
+// personKeyBinding is a person key's provider binding.
+func personKeyBinding(key *models.AppPersonKey) KeyBinding {
+	if !key.ProviderBound {
+		return KeyBinding{}
+	}
+	return KeyBinding{IdentityID: key.IdentityID, ProviderBound: true}
 }
 
 // personKeyTakeOver is what a sign-in link's redeem did with the

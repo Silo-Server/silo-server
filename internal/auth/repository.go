@@ -575,6 +575,13 @@ func updateUser(ctx context.Context, db interface {
 			return err
 		}
 	}
+	// A password set by an administrator, or disabling the account, ends its
+	// sign-in links; re-enabling it never brings one back.
+	if input.Password != nil || (input.Enabled != nil && !*input.Enabled) {
+		if err := EndSignInLinksTx(ctx, db, id); err != nil {
+			return err
+		}
+	}
 	// The promoted account's keys go before any session is touched: key rows
 	// are locked before sessions on every path.
 	if promoting {
@@ -655,11 +662,8 @@ func revokeCredentialsIssuedToNonAdmin(ctx context.Context, db interface {
 	if _, err := db.Exec(ctx, `DELETE FROM password_reset_tokens WHERE user_id = $1`, id); err != nil {
 		return fmt.Errorf("deleting the promoted account's reset links: %w", err)
 	}
-	if _, err := db.Exec(ctx, `DELETE FROM auth_sign_in_links WHERE user_id = $1`, id); err != nil {
-		return fmt.Errorf("deleting the promoted account's sign-in links: %w", err)
-	}
-	if _, err := db.Exec(ctx, `DELETE FROM auth_app_codes WHERE user_id = $1 AND kind = $2`, id, appCodeKindSignInLink); err != nil {
-		return fmt.Errorf("deleting the promoted account's sign-in link codes: %w", err)
+	if err := EndSignInLinksTx(ctx, db, id); err != nil {
+		return err
 	}
 	return revokeAccountKeysTx(ctx, db, id)
 }
@@ -727,6 +731,10 @@ func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, exp
 		return fmt.Errorf("updating password: %w", err)
 	}
 	if tag.RowsAffected() == 1 {
+		// A password the person chose ends the account's sign-in links.
+		if err := EndSignInLinksTx(ctx, tx, id); err != nil {
+			return err
+		}
 		if alsoInTx != nil {
 			if err := alsoInTx(tx); err != nil {
 				return err
