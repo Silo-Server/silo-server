@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -383,6 +384,48 @@ var selectInitialMatchCandidateDecisionsCases = func() []selectInitialMatchCandi
 			candidates: daysWild},
 	}
 }()
+
+// TestSelectInitialMatchCandidate_LoneNoYearMovie covers a movie folder without
+// a year, such as "Big Hero 6", whose title search returns a single film. One
+// source and an exact title score 63, below the lone-candidate bar of 70.
+func TestSelectInitialMatchCandidate_LoneNoYearMovie(t *testing.T) {
+	t.Parallel()
+
+	tmdbID := map[string]string{testTMDBProvider: "177572"}
+	cases := []struct {
+		name      string
+		hintType  string
+		candidate MatchCandidate
+		wantMatch bool
+	}{
+		{name: "dated film with the exact title", hintType: anchoredItemTypeMovie, wantMatch: true,
+			candidate: matchCand("Big Hero 6", 2014, anchoredItemTypeMovie, tmdbID, testTMDBProvider)},
+		{name: "undated film", hintType: anchoredItemTypeMovie,
+			candidate: matchCand("Big Hero 6", 0, anchoredItemTypeMovie, tmdbID, testTMDBProvider)},
+		{name: "result without provider IDs", hintType: anchoredItemTypeMovie,
+			candidate: matchCand("Big Hero 6", 2014, anchoredItemTypeMovie, map[string]string{}, testTMDBProvider)},
+		{name: "series", hintType: anchoredItemTypeSeries,
+			candidate: matchCand("Big Hero 6", 2014, anchoredItemTypeSeries, tmdbID, testTMDBProvider)},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			hints := &MatchHints{Title: "Big Hero 6", Type: tt.hintType}
+			got, ok := selectInitialMatchCandidate(hints, []MatchCandidate{tt.candidate}, nil)
+			if !tt.wantMatch {
+				if ok || got != nil {
+					t.Fatalf("expected no match, got winner %+v", got)
+				}
+				return
+			}
+			if !ok || got == nil || got.ProviderIDs[testTMDBProvider] != "177572" {
+				t.Fatalf("winner = %+v (ok=%v), want tmdb 177572", got, ok)
+			}
+			if !slices.Contains(got.MatchReasons, "sole_exact_title") {
+				t.Fatalf("MatchReasons = %v, want sole_exact_title", got.MatchReasons)
+			}
+		})
+	}
+}
 
 //nolint:goconst // Keep the production-shaped provider fixtures readable in place.
 func TestSelectInitialMatchCandidate_MissingYearConsensusAllowsResolvedCanonicalIDConflict(t *testing.T) {

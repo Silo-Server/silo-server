@@ -158,7 +158,8 @@ func sanitizedMatchHintProviderIDs(hints *MatchHints) *MatchHints {
 const (
 	automaticMatchAcceptanceFloor = 55
 	// automaticMatchLoneCandidateScore is the score a single candidate needs
-	// when nothing else, such as a matching year, corroborates it.
+	// when nothing else, such as a matching year or, for a movie, an exact
+	// title (loneExactTitleMovie), corroborates it.
 	automaticMatchLoneCandidateScore = 70
 	// automaticMatchTieWindow is how close two scores must be to count as a
 	// tie; the best candidate needs this lead to win outright.
@@ -969,6 +970,11 @@ func selectInitialMatch(hints *MatchHints, candidates []MatchCandidate, provider
 		}
 	}
 	if len(scoredCandidates) == 1 {
+		if loneExactTitleMovie(hints, best.candidate) {
+			winner := best.candidate
+			winner.MatchReasons = append(slices.Clone(winner.MatchReasons), "sole_exact_title")
+			return &winner, true, candidateRejection{}
+		}
 		if best.score < automaticMatchLoneCandidateScore {
 			return nil, false, candidateRejection{rule: MatchRejectionLoneCandidate, requiredScore: automaticMatchLoneCandidateScore}
 		}
@@ -981,6 +987,24 @@ func selectInitialMatch(hints *MatchHints, candidates []MatchCandidate, provider
 		return nil, false, candidateRejection{rule: MatchRejectionAmbiguous}
 	}
 	return &best.candidate, true, candidateRejection{}
+}
+
+// loneExactTitleMovie reports whether the only candidate for a movie folder
+// without a year is a dated provider film with the folder's exact title. A
+// provider's title search is fuzzy, so a single result that carries the exact
+// title is as strong as an exact title that beats weaker results by the tie
+// window, which is already accepted at the same score. Series are left to
+// episode validation.
+func loneExactTitleMovie(hints *MatchHints, candidate MatchCandidate) bool {
+	if hints == nil || hints.Year != 0 || !isMovieTypeAlias(strings.ToLower(strings.TrimSpace(hints.Type))) {
+		return false
+	}
+	if candidate.Year == 0 || !candidateTypeMatchesHint(hints.Type, candidate.ContentType) ||
+		providerIDRichness(candidate.ProviderIDs) == 0 {
+		return false
+	}
+	similarity, _ := bestCandidateTitleSimilarity(hints.Title, candidate, 0)
+	return similarity == 1
 }
 
 // trustedIDWinner picks the highest-scored candidate that carries the trusted
