@@ -96,6 +96,23 @@ func (reg *Registry) sessionReachesOtherDevices(ctx context.Context) (bool, *Pro
 	return false, serviceProblem(err)
 }
 
+// otherDevicesRule is the caller's login session and the rule a playback
+// service asks, only for a stream another login session started, whether
+// the caller may act on it (auth.SessionMayReachOtherDevices). The rule is
+// nil when app keys are not wired, since no session another app opened
+// exists then.
+func (reg *Registry) otherDevicesRule(ctx context.Context) (string, func(context.Context) error) {
+	claims := claimsFrom(ctx)
+	if claims == nil {
+		return "", nil
+	}
+	if reg.deps.AppKeys == nil {
+		return claims.SessionID, nil
+	}
+	keys := reg.deps.AppKeys
+	return claims.SessionID, func(ctx context.Context) error { return keys.SessionMayReachOtherDevices(ctx, claims) }
+}
+
 // otherDevicesProblem refuses a session another app opened with a grant
 // (sessionReachesOtherDevices) with 403 permission_denied.
 func (reg *Registry) otherDevicesProblem(ctx context.Context) *Problem {

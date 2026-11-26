@@ -26,7 +26,7 @@ type fakeControlSocket struct {
 }
 
 func (f *fakeControlSocket) Available() bool { return f.available }
-func (f *fakeControlSocket) Mint(_ context.Context, identity evt.SocketIdentity, session, installation string) (string, time.Time, error) {
+func (f *fakeControlSocket) Mint(_ context.Context, identity evt.SocketIdentity, session, installation string, _ func(context.Context) error) (string, time.Time, error) {
 	f.calls++
 	f.identity, f.session, f.installation = identity, session, installation
 	if f.err != nil {

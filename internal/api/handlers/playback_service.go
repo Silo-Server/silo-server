@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
@@ -45,6 +46,13 @@ type PlaybackCaller struct {
 	// profile's device registry. It is separate from DeviceID, the playback
 	// device named by the v2 X-Device-ID header.
 	DeclaredDevice DeviceMetadata
+	// LoginSessionID is the caller's login session; empty for an API key.
+	LoginSessionID string
+	// MayReachOtherDevices answers auth.ErrSessionNotAllowed when the
+	// caller may act only on playback its own login session started (a
+	// session another app opened). Nil lets the caller act on any of its
+	// profile's playback. See mayActOnAttempt.
+	MayReachOtherDevices func(context.Context) error
 }
 
 // PlaybackCapabilitiesView is the v2 capabilities body. State is always
@@ -727,7 +735,32 @@ func (h *PlaybackHandler) ownedAttemptV2(ctx context.Context, caller PlaybackCal
 	if !attemptOwnedBy(record, caller) {
 		return nil, playbackOperationError(http.StatusForbidden, "forbidden", "Session belongs to another profile")
 	}
+	if err := mayActOnAttempt(ctx, record.LoginSessionID, caller); err != nil {
+		return nil, err
+	}
 	return record, nil
+}
+
+// mayActOnAttempt refuses a caller that may act only on playback its own
+// login session started when another login session (or none, a stream
+// started before the record) started the attempt: a session another app
+// opened must not stop, seek or report progress for the person's other
+// devices. It asks only for an attempt the caller's session did not start,
+// so a client acting on its own stream pays nothing for it.
+func mayActOnAttempt(ctx context.Context, attemptLoginSessionID string, caller PlaybackCaller) error {
+	if caller.MayReachOtherDevices == nil || (caller.LoginSessionID != "" && attemptLoginSessionID == caller.LoginSessionID) {
+		return nil
+	}
+	err := caller.MayReachOtherDevices(ctx)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, auth.ErrSessionNotAllowed):
+		return playbackOperationError(http.StatusForbidden, "forbidden", SessionNotAllowedDetail)
+	case errors.Is(err, auth.ErrSessionRevoked):
+		return playbackOperationError(http.StatusUnauthorized, "unauthorized", "Login session is no longer valid")
+	}
+	return playbackStoreOperationError()
 }
 
 // attemptOwnedBy reports whether the attempt belongs to the caller's profile.
@@ -763,7 +796,13 @@ func (h *PlaybackHandler) ReplanPlaybackV2(ctx context.Context, caller PlaybackC
 	// refuse to serve. The store's commit predicate refuses stopped rows too.
 	// Only the attempt's owner learns how it ended; anyone else gets the 403
 	// the replan itself answers.
-	if record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && record != nil && record.StoppedAt != nil {
+	record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID)
+	if err == nil && record != nil && attemptOwnedBy(record, caller) {
+		if err := mayActOnAttempt(ctx, record.LoginSessionID, caller); err != nil {
+			return playback.DecisionResponseV3{}, err
+		}
+	}
+	if err == nil && record != nil && record.StoppedAt != nil {
 		if !attemptOwnedBy(record, caller) {
 			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusForbidden, "forbidden", "Session belongs to another profile")
 		}

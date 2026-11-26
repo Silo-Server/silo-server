@@ -223,13 +223,23 @@ func (h *PlaybackControlSocketV2) Available() bool {
 
 // Mint validates the caller's login authority and ownership of the playback
 // session and issues one single-use credential bound to both.
-func (h *PlaybackControlSocketV2) Mint(ctx context.Context, identity evt.SocketIdentity, playbackSessionID, installationID string) (string, time.Time, error) {
+//
+// mayReachOtherDevices, when set, is asked for a playback session the
+// caller's login session did not start (PlaybackCaller.MayReachOtherDevices):
+// a session another app opened must not take over the control lane of the
+// person's other devices. Its error is returned as is.
+func (h *PlaybackControlSocketV2) Mint(ctx context.Context, identity evt.SocketIdentity, playbackSessionID, installationID string, mayReachOtherDevices func(context.Context) error) (string, time.Time, error) {
 	if !h.Available() {
 		return "", time.Time{}, ErrPlaybackControlSocketUnavailable
 	}
 	validated, claims, err := h.Validate(ctx, identity)
 	if err != nil {
 		return "", time.Time{}, err
+	}
+	if mayReachOtherDevices != nil && h.startedBy(ctx, playbackSessionID) != identity.SessionID {
+		if err := mayReachOtherDevices(ctx); err != nil {
+			return "", time.Time{}, err
+		}
 	}
 	scope, ok := access.GetScope(validated)
 	if !ok {
@@ -253,6 +263,21 @@ func (h *PlaybackControlSocketV2) Mint(ctx context.Context, identity evt.SocketI
 		expiry = identity.AccessExpiresAt
 	}
 	return ticket, expiry, nil
+}
+
+// startedBy is the login session that started the playback session's
+// durable attempt, or "" when none is recorded or it can't be read (a
+// bridge-started session, an id the store can't name, a store outage).
+func (h *PlaybackControlSocketV2) startedBy(ctx context.Context, playbackSessionID string) string {
+	store := h.Playback.PlanStoreV3
+	if id, err := uuid.Parse(playbackSessionID); store == nil || err != nil || id == uuid.Nil || id.String() != playbackSessionID {
+		return ""
+	}
+	attempt, err := store.GetAttemptIdentity(ctx, playbackSessionID)
+	if err != nil || attempt == nil {
+		return ""
+	}
+	return attempt.LoginSessionID
 }
 
 // missingSessionError tells a session that ended from one this replica has not
