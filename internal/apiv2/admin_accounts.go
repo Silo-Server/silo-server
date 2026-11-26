@@ -155,8 +155,8 @@ func adminAccountTag(ctx context.Context, id int, revision, groupRevision int64)
 func adminAccountError(err error) *Problem {
 	// A password the policy refused is a validation problem at the password
 	// member, as on every other path that sets a password.
-	if message, ok := auth.PasswordRuleMessage(err); ok {
-		return passwordMemberProblem(message)
+	if p, ok := passwordRuleProblem(err, "password"); ok {
+		return p
 	}
 	switch {
 	case errors.Is(err, auth.ErrNotFound):

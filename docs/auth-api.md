@@ -107,6 +107,24 @@ passwords already stored keep working. The recovery command
 it, and the account then chooses a new one under the policy. A backup
 restore never weakens the live policy.
 
+A refused password returns `422 validation_failed` with one field error at the password member
+(`body.password`, or `body.new_password` for a password change). Its `code` names a rule the
+password breaks, and its `detail` is the English sentence for it, such as "Use at least 12
+characters." When a password breaks several rules, the code names one of them, so a client should
+not rely on which. A translated client shows `error.field.<code>` instead. That text is generic, so
+`password_too_short` doesn't name the minimum; a client that wants to show it reads
+[`getPasswordPolicy`](#get-authpassword-policy-getpasswordpolicy) again. Every operation that sets a password
+except `changePassword` limits it to 8 to 72 characters in its schema, so a password outside that
+range gets `out_of_range` there before the policy runs. `changePassword` accepts 1 to 1024
+characters, so the policy codes cover every length in that range.
+
+| Code | Rule broken |
+| --- | --- |
+| `password_too_short` | Fewer characters than `auth.password_min_length`. |
+| `password_too_long` | More than 72 UTF-8 bytes. |
+| `password_needs_uppercase` | No capital letter while `auth.password_require_uppercase` is on. |
+| `password_needs_special` | No punctuation mark or symbol while `auth.password_require_special` is on. |
+
 To change a password, the caller must prove knowledge of the current
 password. By default, changing the password does not revoke existing login sessions; users can
 review and revoke those separately through the account sessions API. The change can also
@@ -258,7 +276,8 @@ They send the `Deprecation` and `Link` headers; no `Sunset` is declared. A link 
 Every unusable link returns the same `404 not_found`, whether it is unknown, expired,
 used, replaced, or outdated by a password or recovery email change, or its account
 is disabled. Changing only the email's letter case preserves the link.
-Invalid passwords return `422 validation_failed` at `body.password` and leave the link
+Invalid passwords return `422 validation_failed` at `body.password`, with a
+[code that names the rule](#account-passwords), and leave the link
 unspent. While password resets are not configured, every link operation returns `409`. Both operations spend the `password_reset` rate-limit budget, 20 requests per
 minute per client IP by default.
 

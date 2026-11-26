@@ -545,8 +545,8 @@ func invalidEmailProblem(email string) *Problem {
 // everything else follows the v1 status.
 func registrationProblem(err error) *Problem {
 	// A password the policy refused reads as on every other password path.
-	if message, ok := auth.PasswordRuleMessage(err); ok {
-		return passwordMemberProblem(message)
+	if p, ok := passwordRuleProblem(err, "password"); ok {
+		return p
 	}
 	var apiErr *handlers.APIError
 	if errors.As(err, &apiErr) && apiErr.Field != "" {
