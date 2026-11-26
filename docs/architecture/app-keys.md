@@ -939,6 +939,20 @@ the account
 (enabling it again never brings a link back); and promoting it to
 administrator.
 
+Ending a link is this release's code, not a database rule. During the rolling
+deploy that introduces sign-in links, an account change handled by a server
+still on the previous release does not end a link made in that window, nor the
+code or set-password token a redeemed link handed out: such a link stays
+usable until it is used or its 24 hours pass. Make links after the deploy has
+finished; a single server has no such window. Once the deploy is over, making
+a new link for the account ends such a link for certain, with its code and
+token, because a new link replaces every earlier one (`IssueSignInLink` calls
+`EndSignInLinksTx` before it stores the new link); making it is judged as the
+first was, now, so an account promoted since takes the Owner, and an account
+disabled since, or one that no longer passes the local-password rule, gets no
+new link but has its old one refused at redeem and set-password for the same
+reason.
+
 **Its own table.** `auth_sign_in_links`, not `password_reset_tokens`: that
 table holds one link per account bound to a fingerprint of the current
 password, so it can't serve an account with no password, and a sign-in link
@@ -957,7 +971,11 @@ ended unredeemed still has its entry.
 app code; of two redemptions exactly one succeeds. Unknown, used, expired and
 disabled-account links answer the same `not_found`. While app keys are off (or
 in demo mode, where they always are) no code is made and the answer carries
-only the set-password token. The code enrolls keys as described under
+only the set-password token. In demo mode a link does exactly what a password
+reset does: an administrator can make one and anyone else cannot; redeeming it
+answers the set-password token only, never an app code; and setting a password
+with it works, the shared demo account's included, exactly as completing a
+reset does. The code enrolls keys as described under
 "Redeem" above: it replaces a different person key, because the person lost
 the devices that hold the old one, and leaves enrolled devices alone. A new or
 replacing person key and its device start unbound to any provider; the

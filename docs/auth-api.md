@@ -368,6 +368,11 @@ only, as a reset link's does. The architecture is in
 
 Both public operations spend the `password_reset` rate-limit budget.
 
+In [demo mode](#demo-mode) a sign-in link does exactly what a password reset
+does: an administrator can make one and anyone else cannot; redeeming it answers
+the set-password token only, never an app code; and setting a password with it
+works, the shared demo account's included, exactly as completing a reset does.
+
 ### Self-service password reset
 
 When an administrator turns on `password_reset.self_service_enabled` (off by
