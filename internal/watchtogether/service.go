@@ -280,6 +280,9 @@ type memberState struct {
 	connection      RoomConnection
 	isReady         bool
 	isBuffering     bool
+	// otherApp marks a connection a session another app's key opened made
+	// (ConnectOtherApp): its snapshots name no power it is refused.
+	otherApp bool
 	// correctionCommand is the most recent normal-playing correction sent to
 	// this member. It is persisted with the room runtime so another API server
 	// does not immediately resend the same correction.
@@ -579,6 +582,7 @@ func (s *Service) connect(
 		// with none and sees only one it attaches itself.
 		current.sessionID = ""
 	}
+	current.otherApp = otherApp
 	current.connection = conn
 	current.connectionID = uuid.NewString()
 	current.remoteConnected = false
@@ -2286,7 +2290,7 @@ func (s *Service) buildSnapshotLocked(live *liveRoom, userID int, profileID stri
 		return cmp.Compare(a.UserID, b.UserID)
 	})
 
-	return Snapshot{
+	snapshot := Snapshot{
 		RoomID:                  live.room.ID,
 		Phase:                   live.room.Phase,
 		PlaybackState:           live.room.PlaybackState,
@@ -2321,6 +2325,10 @@ func (s *Service) buildSnapshotLocked(live *liveRoom, userID int, profileID stri
 		InvitePath: invitePath,
 		Members:    members,
 	}
+	if member != nil && member.otherApp {
+		snapshot = snapshot.WithoutSessionPowers()
+	}
+	return snapshot
 }
 
 func (s *Service) prepareSnapshotDispatchesLocked(live *liveRoom) []snapshotDispatch {
@@ -3143,6 +3151,9 @@ func personalizeSnapshot(base Snapshot, room Room, member *memberState) Snapshot
 	base.SelfIgnoreWait, base.AttachedSessionID = member.ignoreWait, member.sessionID
 	if base.SelfCanManageRoom {
 		base.InvitePath = fmt.Sprintf("/rooms/join?token=%s", room.JoinToken)
+	}
+	if member.otherApp {
+		base = base.WithoutSessionPowers()
 	}
 	base.Members = slices.Clone(base.Members)
 	for i := range base.Members {

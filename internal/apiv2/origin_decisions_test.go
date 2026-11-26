@@ -516,13 +516,17 @@ func TestPluginContentMountsAllReachTheContentHandler(t *testing.T) {
 type attachedRoomRead struct{}
 
 func (attachedRoomRead) ReadWatchTogetherRoom(context.Context, string, int, string, string) (watchtogether.Snapshot, string, error) {
-	return watchtogether.Snapshot{RoomID: "room", Code: "ABCD", AnchorUpdatedAt: "2026-01-02T03:04:05Z", AttachedSessionID: "phone-stream"}, "proof", nil
+	return watchtogether.Snapshot{RoomID: "room", Code: "ABCD", AnchorUpdatedAt: "2026-01-02T03:04:05Z", AttachedSessionID: "phone-stream",
+		SelfRole: watchtogether.MemberRoleHost, SelfCanManageRoom: true, SelfCanControlTransport: true, InvitePath: "/rooms/join?token=T"}, "proof", nil
 }
 
 // TestRoomReadLeavesOutAnotherDevicesStream: a Watch Together member is the
 // account and profile, so the room read names the stream attached to it,
-// which may be the person's own device's. A session another app's key opened
-// is not told that playback session id; the person's own session still is.
+// which may be the person's own device's, and the powers of the profile's
+// seat (the host's controls and invite link, transport control). A session
+// another app's key opened is told neither that playback session id nor
+// powers it is refused; the role still names the seat. The person's own
+// session is told all of it.
 // Catches another device's id reaching such a session through the room read.
 func TestRoomReadLeavesOutAnotherDevicesStream(t *testing.T) {
 	deps := parityDeps(false)
@@ -533,13 +537,21 @@ func TestRoomReadLeavesOutAnotherDevicesStream(t *testing.T) {
 		var body struct {
 			Room struct {
 				AttachedSessionID string `json:"attached_session_id"`
+				SelfRole          string `json:"self_role"`
+				Manage            bool   `json:"self_can_manage_room"`
+				Control           bool   `json:"self_can_control_transport"`
+				InvitePath        string `json:"invite_path"`
 			} `json:"room"`
 		}
 		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &body) != nil {
 			t.Fatalf("%s: %d %s", token, rec.Code, rec.Body.String())
 		}
-		if body.Room.AttachedSessionID != want {
-			t.Fatalf("%s: attached_session_id %q, want %q", token, body.Room.AttachedSessionID, want)
+		powers := want != ""
+		if body.Room.AttachedSessionID != want || body.Room.Manage != powers || body.Room.Control != powers || (body.Room.InvitePath != "") != powers {
+			t.Fatalf("%s: %+v", token, body.Room)
+		}
+		if body.Room.SelfRole != string(watchtogether.MemberRoleHost) {
+			t.Fatalf("%s: role %q, want the seat's host", token, body.Room.SelfRole)
 		}
 	}
 }

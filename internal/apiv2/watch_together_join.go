@@ -46,6 +46,9 @@ func registerWatchTogetherJoin(reg *Registry) {
 		// may be the person's own device's; a session another app's key
 		// opened is not told another device's playback session id.
 		if grantedAppSession(claimsFrom(ctx)) {
+			// Nor the powers of the profile's seat it is refused: the
+			// host's controls and invite link, and transport control.
+			row = row.WithoutSessionPowers()
 			row.AttachedSessionID = ""
 		}
 		return watchTogetherRoomOutput(row, token)

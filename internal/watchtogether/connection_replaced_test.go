@@ -224,3 +224,48 @@ func TestOtherAppStartsWithNoAttachedStream(t *testing.T) {
 		})
 	}
 }
+
+// TestOtherAppSnapshotsNameNoRefusedPower: a member is its account and
+// profile, so a session another app opened connected as the host's profile,
+// or as a guest while the room lets guests play and pause, would be told it
+// may manage the room (with the host's invite link) or control transport,
+// which the socket and the gate refuse it. Its snapshots, the one connect
+// returns and the ones broadcast to it, name none of those powers; the
+// role still names the profile's seat. The person's own connection keeps
+// them. Catches such a session being offered controls it cannot use.
+func TestOtherAppSnapshotsNameNoRefusedPower(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		otherApp      bool
+		manage, steer bool
+	}{{"another app", true, false, false}, {"the person's own device", false, true, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			room := baseRoom(now)
+			room.GuestControlPolicy = GuestControlPolicyGuestPlayPause
+			repo := &stubRepo{room: room}
+			s := newServiceForTest(now, repo, nil, nil, nil)
+			t.Cleanup(s.Close)
+			connect := s.Connect
+			if tc.otherApp {
+				connect = s.ConnectOtherApp
+			}
+			_, snapshot, err := connect(t.Context(), repo.room.ID, 7, "host", new(replacementConn))
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.mu.Lock()
+			live := s.rooms[repo.room.ID]
+			broadcast := personalizeSnapshot(s.buildSnapshotLocked(live, 0, ""), live.room, live.members[buildMemberKey(7, "host")])
+			s.mu.Unlock()
+			for name, got := range map[string]Snapshot{"connect": snapshot, "broadcast": broadcast} {
+				if got.SelfCanManageRoom != tc.manage || got.SelfCanControlTransport != tc.steer || (got.InvitePath != "") != tc.manage {
+					t.Fatalf("%s: manage %v, control %v, invite %q", name, got.SelfCanManageRoom, got.SelfCanControlTransport, got.InvitePath)
+				}
+				if got.SelfRole != MemberRoleHost {
+					t.Fatalf("%s: role %q, want the seat's host", name, got.SelfRole)
+				}
+			}
+		})
+	}
+}
