@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,9 +37,9 @@ var (
 	ErrAppKeyInvalid = errors.New("invalid app key")
 )
 
-const personKeyColumns = `id::text, user_id, public_key, key_id, identity_id, provider_bound, enrolled_via, created_at, revoked_at`
+const personKeyColumns = `id::text, user_id, public_key, key_id, identity_id, provider_bound, enrolled_via, COALESCE(host(enrolled_ip_address), ''), created_at, revoked_at`
 
-const deviceKeyColumns = `id::text, user_id, public_key, key_id, kind, name, platform, status, enrolled_via, person_key_id::text, identity_id, provider_bound, created_at, last_used_at, revoked_at, last_attempt_at`
+const deviceKeyColumns = `id::text, user_id, public_key, key_id, kind, name, platform, status, enrolled_via, person_key_id::text, identity_id, provider_bound, COALESCE(host(enrolled_ip_address), ''), created_at, last_used_at, revoked_at, last_attempt_at`
 
 // Unique constraints Postgres names after the columns in the migration.
 const (
@@ -88,6 +89,9 @@ type NewPersonKey struct {
 	// was deleted.
 	ProviderBound bool
 	EnrolledVia   string
+	// IP is the client address of the enrolling request, the one the login
+	// session it opens records (KeySession.IP); empty when unknown.
+	IP string
 }
 
 // NewDeviceKey is a device key to enroll.
@@ -105,11 +109,13 @@ type NewDeviceKey struct {
 	// takes its person key's.
 	IdentityID    *int64
 	ProviderBound bool
+	// IP is as on NewPersonKey.
+	IP string
 }
 
 func scanPersonKey(row pgx.Row) (*models.AppPersonKey, error) {
 	var k models.AppPersonKey
-	err := row.Scan(&k.ID, &k.UserID, &k.PublicKey, &k.KeyID, &k.IdentityID, &k.ProviderBound, &k.EnrolledVia, &k.CreatedAt, &k.RevokedAt)
+	err := row.Scan(&k.ID, &k.UserID, &k.PublicKey, &k.KeyID, &k.IdentityID, &k.ProviderBound, &k.EnrolledVia, &k.EnrolledIP, &k.CreatedAt, &k.RevokedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrAppKeyNotFound
 	}
@@ -122,7 +128,7 @@ func scanPersonKey(row pgx.Row) (*models.AppPersonKey, error) {
 func scanDeviceKey(row pgx.Row) (*models.AppDeviceKey, error) {
 	var k models.AppDeviceKey
 	err := row.Scan(&k.ID, &k.UserID, &k.PublicKey, &k.KeyID, &k.Kind, &k.Name, &k.Platform, &k.Status, &k.EnrolledVia,
-		&k.PersonKeyID, &k.IdentityID, &k.ProviderBound, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt, &k.LastAttemptAt)
+		&k.PersonKeyID, &k.IdentityID, &k.ProviderBound, &k.EnrolledIP, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt, &k.LastAttemptAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrAppKeyNotFound
 	}
@@ -204,11 +210,23 @@ func insertPersonKeyTx(ctx context.Context, tx pgx.Tx, k NewPersonKey) (*models.
 		return nil, err
 	}
 	row, err := scanPersonKey(tx.QueryRow(ctx, `INSERT INTO auth_person_keys
-		(id, user_id, public_key, key_id, identity_id, provider_bound, enrolled_via)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		(id, user_id, public_key, key_id, identity_id, provider_bound, enrolled_via, enrolled_ip_address)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::inet)
 		RETURNING `+personKeyColumns,
-		uuid.NewString(), k.UserID, k.PublicKey.Bytes(), k.PublicKey.KeyID(), k.IdentityID, k.ProviderBound || k.IdentityID != nil, k.EnrolledVia))
+		uuid.NewString(), k.UserID, k.PublicKey.Bytes(), k.PublicKey.KeyID(), k.IdentityID, k.ProviderBound || k.IdentityID != nil, k.EnrolledVia, enrolledAddress(k.IP)))
 	return row, appKeyInsertError(err)
+}
+
+// enrolledAddress is the address a key row records for the enrolling
+// request's ip: none for the unspecified address (0.0.0.0 or ::), which the
+// client-address resolver answers for a client it could not tell, so the
+// lists show none rather than a made-up address. A login session's row keeps
+// what it is given; this is the one place a key's address differs from it.
+func enrolledAddress(ip string) string {
+	if parsed := net.ParseIP(ip); parsed == nil || parsed.IsUnspecified() {
+		return ""
+	}
+	return ip
 }
 
 // validDeviceKey reports whether k's kind, status and way of enrolling are
@@ -257,11 +275,11 @@ func insertDeviceKeyTx(ctx context.Context, tx pgx.Tx, k NewDeviceKey) (*models.
 		return nil, err
 	}
 	row, err := scanDeviceKey(tx.QueryRow(ctx, `INSERT INTO auth_device_keys
-		(id, user_id, public_key, key_id, kind, name, platform, status, enrolled_via, person_key_id, identity_id, provider_bound)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11, $12)
+		(id, user_id, public_key, key_id, kind, name, platform, status, enrolled_via, person_key_id, identity_id, provider_bound, enrolled_ip_address)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11, $12, NULLIF($13, '')::inet)
 		RETURNING `+deviceKeyColumns,
 		uuid.NewString(), k.UserID, k.PublicKey.Bytes(), k.PublicKey.KeyID(), k.Kind, k.Name, k.Platform, status,
-		k.EnrolledVia, k.PersonKeyID, k.IdentityID, k.ProviderBound || k.IdentityID != nil))
+		k.EnrolledVia, k.PersonKeyID, k.IdentityID, k.ProviderBound || k.IdentityID != nil, enrolledAddress(k.IP)))
 	return row, appKeyInsertError(err)
 }
 

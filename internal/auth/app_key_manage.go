@@ -3,11 +3,15 @@ package auth
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/appkeys"
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -83,7 +87,8 @@ func (a *AppKeySignIn) RevokeOwnDeviceKey(ctx context.Context, claims *Claims, i
 // own login session, and revokes the one it replaces. Device keys already
 // enrolled keep working; new devices need the new key. Replacing the key
 // with itself changes nothing. acting is the main profile the route checked,
-// checked again under the account lock.
+// checked again under the account lock. The new key records the request's
+// client address (clientip), the one a key sign-in's session records.
 func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key appkeys.PublicKey, acting ActingProfile) error {
 	if err := SessionAllows(ctx, a.pool, claims, ActionManageKeys); err != nil {
 		return err
@@ -92,7 +97,8 @@ func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key
 	if err != nil {
 		return err
 	}
-	return a.inTx(ctx, func(tx pgx.Tx) error {
+	var audit *auditmutation.Entry
+	err = a.inTx(ctx, func(tx pgx.Tx) error {
 		user, err := lockEnabledUser(ctx, tx, claims.UserID)
 		if err != nil {
 			return err
@@ -114,18 +120,21 @@ func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key
 		if err != nil {
 			return err
 		}
+		before := map[string]any{}
+		var denied int64
 		if current != nil {
 			if current.KeyID == key.KeyID() {
 				return nil
 			}
-			if err := retirePersonKeyTx(ctx, tx, user.ID, current.ID); err != nil {
+			if denied, err = retirePersonKeyTx(ctx, tx, user.ID, current.ID); err != nil {
 				return err
 			}
+			before[auditFieldPersonKey] = current.KeyID
 		}
 		binding := unlocked.binding()
 		if _, err := insertPersonKeyTx(ctx, tx, NewPersonKey{
 			UserID: user.ID, PublicKey: key, IdentityID: binding.IdentityID,
-			ProviderBound: binding.ProviderBound, EnrolledVia: models.AppKeyEnrolledSession,
+			ProviderBound: binding.ProviderBound, EnrolledVia: models.AppKeyEnrolledSession, IP: clientip.FromContext(ctx),
 		}); err != nil {
 			return err
 		}
@@ -138,21 +147,30 @@ func (a *AppKeySignIn) ReplacePersonKey(ctx context.Context, claims *Claims, key
 		if !chain.binding().same(binding) {
 			return ErrSessionRevoked
 		}
-		return nil
+		changes := auditmutation.Changes(before, map[string]any{auditFieldPersonKey: key.KeyID(), auditFieldSessionOpenedVia: chain.openedVia})
+		if denied > 0 {
+			changes = append(changes, auditmutation.Created(auditFieldDeniedDeviceKeys, denied)...)
+		}
+		audit, err = auditmutation.RecordMutation(ctx, tx, auditmutation.ActionPersonKeyReplaced, auditmutation.TargetUser,
+			strconv.Itoa(user.ID), http.StatusOK, changes)
+		return err
 	})
+	if err != nil {
+		return err
+	}
+	auditmutation.CommitMutation(ctx, audit)
+	return nil
 }
 
 // retirePersonKeyTx revokes a person key that is being replaced. Replacing
 // the key is how the person cuts off a copy of it, and a device still
 // waiting for approval may be the copy's work: it is refused with the key
 // that vouched for it. Devices already approved keep their keys. tx holds
-// the account row lock and the key's row lock.
-func retirePersonKeyTx(ctx context.Context, tx pgx.Tx, userID int, id string) error {
+// the account row lock and the key's row lock. It returns how many waiting
+// devices it denied.
+func retirePersonKeyTx(ctx context.Context, tx pgx.Tx, userID int, id string) (int64, error) {
 	if _, err := tx.Exec(ctx, `UPDATE auth_person_keys SET revoked_at = NOW() WHERE id = $1`, id); err != nil {
-		return fmt.Errorf("revoking person key: %w", err)
+		return 0, fmt.Errorf("revoking person key: %w", err)
 	}
-	if _, err := denyIntroducedWaitingKeysTx(ctx, tx, userID, id); err != nil {
-		return err
-	}
-	return nil
+	return denyIntroducedWaitingKeysTx(ctx, tx, userID, id)
 }

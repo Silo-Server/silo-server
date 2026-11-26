@@ -33,7 +33,7 @@ func fixtureAdminAppKeys() *fakeAdminAppKeys {
 	used := created.Add(time.Hour)
 	identity, gone := int64(7), int64(8)
 	return &fakeAdminAppKeys{keys: auth.AdminAccountKeys{
-		Person: &auth.AdminPersonKey{AppPersonKey: &models.AppPersonKey{KeyID: "PgujdSfBbNNyXngLWCsOgw", CreatedAt: created,
+		Person: &auth.AdminPersonKey{AppPersonKey: &models.AppPersonKey{KeyID: "PgujdSfBbNNyXngLWCsOgw", EnrolledIP: "127.0.0.2", CreatedAt: created,
 			EnrolledVia: models.AppKeyEnrolledSession, ProviderBound: true, IdentityID: &identity}},
 		Devices: []auth.AdminDeviceKey{
 			{AppDeviceKey: &models.AppDeviceKey{ID: "5b1d7f0e-6a57-4d0c-8a59-0f3f3a0f4a10", KeyID: "iX--ofJySUkUOsEpPo17PQ", Kind: models.DeviceKeyKindDevice,
@@ -41,7 +41,7 @@ func fixtureAdminAppKeys() *fakeAdminAppKeys {
 				ProviderBound: true, IdentityID: &identity, CreatedAt: created}},
 			{AppDeviceKey: &models.AppDeviceKey{ID: "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", KeyID: "zT321tSgcB7emUH9k0B0oA", Kind: models.DeviceKeyKindDevice,
 				Name: "Sam's iPhone", Platform: "ios", Status: models.DeviceKeyStatusActive, EnrolledVia: models.AppKeyEnrolledIntroduce,
-				ProviderBound: true, IdentityID: &identity, CreatedAt: created, LastUsedAt: &used}},
+				ProviderBound: true, IdentityID: &identity, EnrolledIP: "127.0.0.3", CreatedAt: created, LastUsedAt: &used}},
 			{AppDeviceKey: &models.AppDeviceKey{ID: "2d4c6e8a-1b3d-4f5a-9c7e-0a1b2c3d4e5f", KeyID: "T2xkLWxhcHRvcC1rZXktMQ", Kind: models.DeviceKeyKindDevice,
 				Name: "Old laptop", Platform: "macos", Status: models.DeviceKeyStatusActive, EnrolledVia: models.AppKeyEnrolledSession,
 				ProviderBound: true, IdentityID: &gone, CreatedAt: created, LastUsedAt: &used}, IdentityGone: true},

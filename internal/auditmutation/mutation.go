@@ -281,12 +281,20 @@ const (
 	ActionDeviceKeyDenied          = "user.device_key_denied"
 	ActionDeviceKeyRevoked         = "user.device_key_revoked"
 	ActionPersonKeyRevoked         = "user.person_key_revoked"
-	ActionAPIKeyCreated            = "api_key.created"
-	ActionAPIKeyUpdated            = "api_key.updated"
-	ActionAPIKeyDeleted            = "api_key.deleted"
-	ActionProfileCreated           = "profile.created"
-	ActionProfileUpdated           = "profile.updated"
-	ActionProfileDeleted           = "profile.deleted"
+	// The ways a key or an approval in advance comes to exist on an account.
+	ActionAppKeysEnrolled         = "user.app_keys_enrolled"
+	ActionPersonKeyReplaced       = "user.person_key_replaced"
+	ActionAppCodeIssued           = "user.app_code_issued"
+	ActionDeviceSignInPreapproved = "user.device_sign_in_preapproved"
+	ActionDeviceKeyIntroduced     = "user.device_key_introduced"
+	ActionAppCodeRedeemed         = "user.app_code_redeemed"
+	ActionAppGrantRedeemed        = "user.app_grant_redeemed"
+	ActionAPIKeyCreated           = "api_key.created"
+	ActionAPIKeyUpdated           = "api_key.updated"
+	ActionAPIKeyDeleted           = "api_key.deleted"
+	ActionProfileCreated          = "profile.created"
+	ActionProfileUpdated          = "profile.updated"
+	ActionProfileDeleted          = "profile.deleted"
 )
 
 // Target types of domain actions.
@@ -322,6 +330,8 @@ func Actions() []string {
 		ActionPasswordResetLinkCreated, ActionPasswordResetCompleted, ActionPasswordChanged,
 		ActionLoginSessionRevoked, ActionLoginSessionsRevoked, ActionDeviceKeyApproved, ActionDeviceKeyDenied,
 		ActionDeviceKeyRevoked, ActionPersonKeyRevoked,
+		ActionAppKeysEnrolled, ActionPersonKeyReplaced, ActionAppCodeIssued, ActionDeviceSignInPreapproved,
+		ActionDeviceKeyIntroduced, ActionAppCodeRedeemed, ActionAppGrantRedeemed,
 		ActionAPIKeyCreated, ActionAPIKeyUpdated, ActionAPIKeyDeleted,
 		ActionProfileCreated, ActionProfileUpdated, ActionProfileDeleted}
 }
