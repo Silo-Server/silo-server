@@ -10,8 +10,9 @@ import (
 )
 
 // fixtureSignInLinks answers the sign-in link fixtures. The token
-// "keys-off-token" answers as a server with app key sign-in off does: only
-// the set-password token. "used-token" is a spent link.
+// "keys-off-token" answers as a server with app key sign-in off does, and
+// "admin-token" as a link for an administrator's account: only the
+// set-password token, with why. "used-token" is a spent link.
 type fixtureSignInLinks struct{}
 
 func (fixtureSignInLinks) SignInLinkEmailAvailable(context.Context) bool { return true }
@@ -27,6 +28,10 @@ func (fixtureSignInLinks) RedeemSignInLink(_ context.Context, token string, _ bo
 	case "used-token":
 		return auth.SignInLinkRedemption{}, auth.ErrSignInLinkInvalid
 	case "keys-off-token":
+		out.NoCode = auth.NoCodeAppKeysOff
+		return out, nil
+	case "admin-token":
+		out.NoCode = auth.NoCodeAdministrator
 		return out, nil
 	}
 	out.AppCode = &auth.IssuedAppCode{Code: "Hc3o3zH8l1M0lYqk2k7lQZx0bq2f2tTj6a4q9d1Xb2E", ExpiresAt: time.Now().Add(auth.AppCodeLifetime + 500*time.Millisecond)}
@@ -58,5 +63,9 @@ func signInLinkFixtureCases() []fixtureCase {
 			scenario: "A link that is unknown, used or expired: the page asks the person to get a new one from the server's owner.",
 			method:   http.MethodPost, path: "/api/v2/auth/sign-in-links/redeem", body: `{"token":"used-token"}`,
 			status: http.StatusNotFound, assertHeaders: ok, schema: "#/components/schemas/Problem"},
+		{name: "redeem_sign_in_link_administrator", operationID: "redeemSignInLink",
+			scenario: "A link for an administrator's account: the password route only, no app code; the page says to set a password, sign in on the site and open the app from there.",
+			method:   http.MethodPost, path: "/api/v2/auth/sign-in-links/redeem", body: `{"token":"admin-token"}`,
+			status: http.StatusOK, assertHeaders: ok, schema: "#/components/schemas/SignInLinkRedeemed"},
 	}
 }

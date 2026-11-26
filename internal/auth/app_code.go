@@ -334,14 +334,20 @@ type appCodeRow struct {
 	sessionID     string
 	identityID    *int64
 	providerBound bool
+	// signInLinkID and signInLinkCreatedBy: a sign-in link's code's link and
+	// the account that made it.
+	signInLinkID        *int64
+	signInLinkCreatedBy *int
 }
 
 func readAppCode(ctx context.Context, db rowQuerier, hash []byte) (appCodeRow, error) {
 	var row appCodeRow
 	var username, email, sessionID *string
-	err := db.QueryRow(ctx, `SELECT kind, user_id, invitation_id, reserved_username, reserved_email, session_id, identity_id, provider_bound
+	err := db.QueryRow(ctx, `SELECT kind, user_id, invitation_id, reserved_username, reserved_email, session_id, identity_id, provider_bound,
+			sign_in_link_id, sign_in_link_created_by
 		FROM auth_app_codes WHERE code_hash = $1 AND redeemed_at IS NULL AND expires_at > clock_timestamp()`, hash).Scan(
-		&row.kind, &row.userID, &row.invitationID, &username, &email, &sessionID, &row.identityID, &row.providerBound)
+		&row.kind, &row.userID, &row.invitationID, &username, &email, &sessionID, &row.identityID, &row.providerBound,
+		&row.signInLinkID, &row.signInLinkCreatedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return appCodeRow{}, ErrAppCodeInvalid
 	}
@@ -376,9 +382,9 @@ func spendAppCode(ctx context.Context, tx pgx.Tx, hash []byte) error {
 // lost every other device replaces it afterwards with ReplacePersonKey).
 // A sign-in link's code enrolls both keys on its account, unbound to any
 // provider, and its person key replaces a different one the account holds
-// (redeemSignInLinkCode). Keys from a code start active, also on an
-// administrator's account: the code came from the account's own session,
-// its invitation, or a link an administrator made for the person.
+// (redeemSignInLinkCode); it is refused for an administrator's account. Keys
+// from a code start active, also on an administrator's account: the code
+// came from the account's own session or its invitation.
 func (a *AppKeySignIn) RedeemAppCode(ctx context.Context, req KeyRedeemRequest) (*KeySignInResult, error) {
 	if err := req.Envelope.CheckShape(appkeys.PurposeRedeem); err != nil {
 		return nil, err

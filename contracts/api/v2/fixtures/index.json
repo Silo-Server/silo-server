@@ -14879,6 +14879,24 @@
       "body_file": "redeem_app_key_grant_invalid.json"
     },
     {
+      "name": "redeem_sign_in_link_administrator",
+      "operation_id": "redeemSignInLink",
+      "scenario": "A link for an administrator's account: the password route only, no app code; the page says to set a password, sign in on the site and open the app from there.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/sign-in-links/redeem",
+        "body": "{\"token\":\"admin-token\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/SignInLinkRedeemed",
+      "body_file": "redeem_sign_in_link_administrator.json"
+    },
+    {
       "name": "redeem_sign_in_link_keys_off",
       "operation_id": "redeemSignInLink",
       "scenario": "The same while the server has app key sign-in off: only the set-password token.",

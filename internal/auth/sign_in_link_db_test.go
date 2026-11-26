@@ -1,12 +1,14 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
 	"sync"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auditmutation/audittest"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -59,7 +61,7 @@ func TestRedeemSignInLinkDB(t *testing.T) {
 
 	t.Run("app keys off: only the set-password token", func(t *testing.T) {
 		got, err := env.signIn.RedeemSignInLink(ctx, env.issueLink(t, env.localAccount(t, "link-keysoff", models.RoleUser)).Token, false)
-		if err != nil || got.AppCode != nil || got.SetPasswordToken == "" {
+		if err != nil || got.AppCode != nil || got.NoCode != NoCodeAppKeysOff || got.SetPasswordToken == "" {
 			t.Fatalf("redeem = %+v, %v", got, err)
 		}
 	})
@@ -131,28 +133,106 @@ func TestRedeemSignInLinkConcurrentDB(t *testing.T) {
 	}
 }
 
-// A sign-in link's app code enrolls the app's keys on its account, active
-// on an administrator's account too and bound to no provider. The person
-// lost every device, so the sent person key becomes the account's: a
-// different one is revoked with the device it introduced that still waits
-// for approval, while a device already enrolled keeps its key. Regression
-// guard: keeping the old key would leave whoever holds it able to introduce
-// devices the person never approved.
+// linkCode redeems a new sign-in link for user with app keys on and answers
+// what the redeem handed out.
+func (e *keyEnv) linkCode(t *testing.T, user *models.User) SignInLinkRedemption {
+	t.Helper()
+	got, err := e.signIn.RedeemSignInLink(t.Context(), e.issueLink(t, user).Token, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+// personKeyCount counts the account's person key rows, revoked or not.
+func (e *keyEnv) personKeyCount(t *testing.T, userID int) int {
+	t.Helper()
+	var n int
+	if err := e.pool.QueryRow(t.Context(), `SELECT count(*) FROM auth_person_keys WHERE user_id = $1`, userID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// A link gives an administrator the password route only. Whether the
+// account is an administrator's is judged when the link is redeemed: a link
+// made for an administrator hands out the set-password token and no code,
+// enrolling nothing, and one made for an administrator who was demoted since
+// hands out a code. Regression guard: a link's code used to enroll active
+// keys on an administrator's account, a way in that skips the approval an
+// administrator's new device needs.
+func TestRedeemSignInLinkAdministratorDB(t *testing.T) {
+	env := newKeyEnv(t, "signinlinkadmin")
+	ctx := t.Context()
+
+	t.Run("an administrator gets the password route only", func(t *testing.T) {
+		admin := env.localAccount(t, "linkadmin", models.RoleAdmin)
+		got := env.linkCode(t, admin)
+		if got.AppCode != nil || got.NoCode != NoCodeAdministrator || got.SetPasswordToken == "" {
+			t.Fatalf("redeem = %+v", got)
+		}
+		if n := env.personKeyCount(t, admin.ID); n != 0 {
+			t.Fatalf("person keys = %d, want none", n)
+		}
+	})
+
+	t.Run("an administrator demoted before redeeming gets a code", func(t *testing.T) {
+		admin := env.localAccount(t, "linkdemoted", models.RoleAdmin)
+		issued := env.issueLink(t, admin)
+		env.exec(t, `UPDATE users SET role = 'user' WHERE id = $1`, admin.ID)
+		got, err := env.signIn.RedeemSignInLink(ctx, issued.Token, true)
+		if err != nil || got.AppCode == nil || got.NoCode != "" {
+			t.Fatalf("redeem = %+v, %v", got, err)
+		}
+	})
+
+	// Promotion deletes the account's link codes; the code's redeem refuses
+	// an administrator's account anyway, so the rule doesn't rest on the
+	// deletion alone.
+	t.Run("a code redeemed after promotion", func(t *testing.T) {
+		for _, tc := range []struct {
+			name    string
+			promote func(t *testing.T, user *models.User)
+		}{
+			{"promoted the ordinary way, which deletes the code", func(t *testing.T, user *models.User) {
+				if err := NewUserRepository(env.pool).Update(ctx, user.ID, models.UpdateUserInput{Role: new(models.RoleAdmin)}); err != nil {
+					t.Fatal(err)
+				}
+			}},
+			{"the role changed with the code left in place", func(t *testing.T, user *models.User) {
+				env.exec(t, `UPDATE users SET role = 'admin' WHERE id = $1`, user.ID)
+			}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				user := env.localAccount(t, "linkpromo-"+strconv.Itoa(len(tc.name)), models.RoleUser)
+				code := env.linkCode(t, user).AppCode.Code
+				tc.promote(t, user)
+				if _, _, err := env.redeemCode(t, newTestKey(t), code); !errors.Is(err, ErrAppCodeInvalid) {
+					t.Fatalf("redeem: %v", err)
+				}
+				if n := env.personKeyCount(t, user.ID); n != 0 {
+					t.Fatalf("person keys = %d, want none", n)
+				}
+			})
+		}
+	})
+}
+
+// A sign-in link's app code enrolls the app's keys on its account, bound to
+// no provider. The person lost every device, so the sent person key becomes
+// the account's: a different one is revoked (its row kept) with the device
+// it introduced that still waits for approval, while a device already
+// enrolled keeps its key, and the audit row names the link and the account
+// that made it. The account's own key sent again stays, as enrolled.
+// Regression guard: keeping the old key would leave whoever holds it able to
+// introduce devices the person never approved.
 func TestRedeemSignInLinkAppCodeDB(t *testing.T) {
 	env := newKeyEnv(t, "signinlinkcode")
 	ctx := t.Context()
-	code := func(t *testing.T, user *models.User) string {
-		t.Helper()
-		got, err := env.signIn.RedeemSignInLink(ctx, env.issueLink(t, user).Token, true)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return got.AppCode.Code
-	}
 
 	t.Run("an account with no person key", func(t *testing.T) {
 		user := env.localAccount(t, "linkcode-new", models.RoleUser)
-		result, device, err := env.redeemCode(t, newTestKey(t), code(t, user))
+		result, device, err := env.redeemCode(t, newTestKey(t), env.linkCode(t, user).AppCode.Code)
 		if err != nil || result.PersonKeyStatus != PersonKeyEnrolled || result.Pair == nil {
 			t.Fatalf("redeem = %+v, %v", result, err)
 		}
@@ -161,6 +241,17 @@ func TestRedeemSignInLinkAppCodeDB(t *testing.T) {
 		}
 	})
 
+	t.Run("the account's own person key", func(t *testing.T) {
+		user := env.localAccount(t, "linkcode-same", models.RoleUser)
+		person, _, _ := env.enroll(t, user)
+		result, _, err := env.redeemCode(t, person, env.linkCode(t, user).AppCode.Code)
+		if err != nil || result.PersonKeyStatus != PersonKeyEnrolled || env.personKeyCount(t, user.ID) != 1 {
+			t.Fatalf("redeem = %+v, %v; person keys %d", result, err, env.personKeyCount(t, user.ID))
+		}
+	})
+
+	// The account was an administrator's, so a device the old key
+	// introduced still waits for approval, and is now an ordinary account.
 	t.Run("a different person key is replaced", func(t *testing.T) {
 		user := env.localAccount(t, "linkcode-replace", models.RoleAdmin)
 		oldPerson, oldDevice, _ := env.enroll(t, user)
@@ -169,15 +260,37 @@ func TestRedeemSignInLinkAppCodeDB(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, waiting := env.introduceWaiting(t, oldPerson)
-		result, device, err := env.redeemCode(t, newTestKey(t), code(t, user))
-		if err != nil || result.PersonKeyStatus != PersonKeyReplaced || result.Pair == nil {
+		env.exec(t, `UPDATE users SET role = 'user' WHERE id = $1`, user.ID)
+		issuer := env.localAccount(t, "linkcode-issuer", models.RoleAdmin)
+		env.exec(t, `UPDATE users SET is_owner = true WHERE id = $1`, issuer.ID)
+		t.Cleanup(func() {
+			if _, err := env.pool.Exec(context.Background(), `UPDATE users SET is_owner = false WHERE id = $1`, issuer.ID); err != nil {
+				t.Error(err)
+			}
+		})
+		issued, err := env.signIn.IssueSignInLink(ctx, SignInLinkIssue{UserID: user.ID, IssuedBy: issuer.ID, Delivery: "link"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := env.signIn.RedeemSignInLink(ctx, issued.Token, true)
+		if err != nil || got.AppCode == nil {
+			t.Fatalf("link redeem = %+v, %v", got, err)
+		}
+		var linkID int64
+		if err := env.pool.QueryRow(ctx, `SELECT id FROM auth_sign_in_links WHERE user_id = $1`, user.ID).Scan(&linkID); err != nil {
+			t.Fatal(err)
+		}
+		auditCtx := env.addedCtx(t, "/api/v2/auth/app-codes/redeem", nil)
+		person, device := newTestKey(t), newTestKey(t)
+		result, err := env.signIn.RedeemAppCode(auditCtx, KeyRedeemRequest{
+			KeyRequest: from(auditCtx, env.request(t, message{purpose: appkeys.PurposeRedeem, signer: person, device: &device, fields: map[string]any{"code": got.AppCode.Code}})),
+			PersonKey:  person.pub,
+		})
+		if err != nil || result.PersonKeyStatus != PersonKeyReplaced || result.PersonKeyID != person.pub.KeyID() {
 			t.Fatalf("redeem = %+v, %v", result, err)
 		}
 		if !env.personKeyRevoked(t, oldPersonRow.ID) {
-			t.Fatal("the replaced person key is still live")
-		}
-		if key := env.deviceKeyRow(t, device); key.Status != models.DeviceKeyStatusActive {
-			t.Fatalf("new device on an administrator's account = %s, want active", key.Status)
+			t.Fatal("the replaced person key is still live (or its row is gone)")
 		}
 		if key := env.deviceKeyRow(t, oldDevice); key.Status != models.DeviceKeyStatusActive || key.RevokedAt != nil {
 			t.Fatalf("enrolled device = %+v, want kept", key)
@@ -185,6 +298,20 @@ func TestRedeemSignInLinkAppCodeDB(t *testing.T) {
 		if key := env.deviceKeyRow(t, waiting); key.Status != models.DeviceKeyStatusDenied {
 			t.Fatalf("waiting device = %s, want denied with the old key", key.Status)
 		}
+		row := audittest.One(t, env.pool, auditmutation.ActionAppCodeRedeemed, auditmutation.TargetUser, strconv.Itoa(user.ID))
+		for field, want := range map[string]string{
+			"sign_in_link_id":         strconv.FormatInt(linkID, 10),
+			"sign_in_link_created_by": strconv.Itoa(issuer.ID),
+			"person_key_kid":          `"` + person.pub.KeyID() + `"`,
+		} {
+			if got := audittest.Value(row.Change(t, field).After); got != want {
+				t.Fatalf("%s = %s, want %s", field, got, want)
+			}
+		}
+		if before := audittest.Value(row.Change(t, "person_key_kid").Before); before != `"`+oldPerson.pub.KeyID()+`"` {
+			t.Fatalf("replaced person key in the audit row = %s, want %s", before, oldPerson.pub.KeyID())
+		}
+		row.AssertNoSecrets(t, got.AppCode.Code, issued.Token)
 	})
 }
 

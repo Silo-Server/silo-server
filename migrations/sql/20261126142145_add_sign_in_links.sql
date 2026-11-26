@@ -13,6 +13,8 @@
 -- or the reverse.
 CREATE TABLE public.auth_sign_in_links (
     token_hash bytea PRIMARY KEY CHECK (octet_length(token_hash) = 32),
+    -- Names the link in audit rows, which never carry the token.
+    id bigint GENERATED ALWAYS AS IDENTITY UNIQUE,
     user_id integer NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
     created_by integer REFERENCES public.users(id) ON DELETE SET NULL,
     expires_at timestamptz NOT NULL,
@@ -32,11 +34,21 @@ CREATE INDEX auth_sign_in_links_expires_at_idx ON public.auth_sign_in_links (exp
 ALTER TABLE public.auth_app_codes DROP CONSTRAINT auth_app_codes_kind_check;
 ALTER TABLE public.auth_app_codes ADD CONSTRAINT auth_app_codes_kind_check
     CHECK (kind IN ('join', 'session', 'sign_in_link'));
+-- A sign-in link's code records the link it came from and who made that
+-- link, for the audit row of its redeem. No reference constraints: a new
+-- link deletes the old link's row, and the code keeps its record.
+ALTER TABLE public.auth_app_codes ADD COLUMN sign_in_link_id bigint;
+ALTER TABLE public.auth_app_codes ADD COLUMN sign_in_link_created_by integer;
+ALTER TABLE public.auth_app_codes ADD CONSTRAINT auth_app_codes_sign_in_link_check
+    CHECK ((kind = 'sign_in_link') = (sign_in_link_id IS NOT NULL));
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
 DELETE FROM public.auth_app_codes WHERE kind = 'sign_in_link';
+ALTER TABLE public.auth_app_codes DROP CONSTRAINT auth_app_codes_sign_in_link_check;
+ALTER TABLE public.auth_app_codes DROP COLUMN sign_in_link_created_by;
+ALTER TABLE public.auth_app_codes DROP COLUMN sign_in_link_id;
 ALTER TABLE public.auth_app_codes DROP CONSTRAINT auth_app_codes_kind_check;
 ALTER TABLE public.auth_app_codes ADD CONSTRAINT auth_app_codes_kind_check
     CHECK (kind IN ('join', 'session'));

@@ -60,12 +60,27 @@ type IssuedSignInLink struct {
 	ExpiresAt time.Time
 }
 
+// Why a redeemed link handed out no app code (SignInLinkRedemption.NoCode).
+const (
+	// NoCodeAppKeysOff: app key sign-in is off (or the server is in demo
+	// mode).
+	NoCodeAppKeysOff = "app_keys_off"
+	// NoCodeAdministrator: the account is an administrator's when the link
+	// is redeemed. A link gives an administrator the password route only:
+	// no key appears on such an account without its holder signing in.
+	NoCodeAdministrator = "administrator"
+)
+
 // SignInLinkRedemption is what a redeemed link hands its holder.
 type SignInLinkRedemption struct {
 	// AppCode is the app code for the Silo app; nil while app key sign-in
-	// is off. Its LinkAllowed is false: the code is for an existing
-	// account and never travels in a link.
+	// is off or for an administrator's account (NoCode says which). Its
+	// LinkAllowed is false: the code is for an existing account and never
+	// travels in a link.
 	AppCode *IssuedAppCode
+	// NoCode is NoCodeAppKeysOff or NoCodeAdministrator when AppCode is
+	// nil.
+	NoCode string
 	// SetPasswordToken sets the account's password once
 	// (SetPasswordWithSignInLink); empty when the account may not set one.
 	SetPasswordToken string
@@ -196,7 +211,10 @@ func lockSignInLinkAccounts(ctx context.Context, tx pgx.Tx, userID, issuerID int
 // marked redeemed and, while app key sign-in is on (keysOn), an app code of
 // kind sign_in_link is stored for its account, so of two concurrent
 // redemptions exactly one succeeds. A set-password token comes with it; it
-// lives an hour, never past the link. An unknown, used or expired link, and
+// lives an hour, never past the link. An account that is an administrator's
+// when the link is redeemed, judged under its row lock in the transaction
+// that spends the link, gets the set-password token only: no app code and
+// no key. An unknown, used or expired link, and
 // one whose account is disabled, is ErrSignInLinkInvalid; while local
 // password sign-in is off it is ErrSignInLinkNeedsProvider and stays
 // unspent.
@@ -221,30 +239,41 @@ func (a *AppKeySignIn) RedeemSignInLink(ctx context.Context, token string, keysO
 	var out SignInLinkRedemption
 	var audit *auditmutation.Entry
 	err = a.inTx(ctx, func(tx pgx.Tx) error {
-		if err := lockSignInLinkAccount(ctx, tx, userID); err != nil {
+		user, err := lockSignInLinkAccount(ctx, tx, userID)
+		if err != nil {
 			return err
 		}
-		tag, err := tx.Exec(ctx, `UPDATE auth_sign_in_links SET redeemed_at = clock_timestamp(),
+		var link spentSignInLink
+		err = tx.QueryRow(ctx, `UPDATE auth_sign_in_links SET redeemed_at = clock_timestamp(),
 				set_password_hash = $3,
 				set_password_expires_at = LEAST(clock_timestamp() + make_interval(secs => $4), expires_at)
-			WHERE token_hash = $1 AND user_id = $2 AND redeemed_at IS NULL AND expires_at > clock_timestamp()`,
-			hash, userID, passwordHash, SignInLinkSetPasswordLifetime.Seconds())
+			WHERE token_hash = $1 AND user_id = $2 AND redeemed_at IS NULL AND expires_at > clock_timestamp()
+			RETURNING id, created_by`,
+			hash, userID, passwordHash, SignInLinkSetPasswordLifetime.Seconds()).Scan(&link.id, &link.createdBy)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrSignInLinkInvalid
+		}
 		if err != nil {
 			return fmt.Errorf("spending sign-in link: %w", err)
 		}
-		if tag.RowsAffected() != 1 {
-			return ErrSignInLinkInvalid
-		}
 		out.SetPasswordToken = passwordToken
-		values := keyAdded{"set_password_offered": true}
-		if keysOn {
-			code, err := insertSignInLinkAppCodeTx(ctx, tx, userID)
+		values := keyAdded{"set_password_offered": true, auditFieldSignInLink: link.id}
+		switch {
+		case user.Role == models.RoleAdmin:
+			out.NoCode = NoCodeAdministrator
+		case !keysOn:
+			out.NoCode = NoCodeAppKeysOff
+		default:
+			code, err := insertSignInLinkAppCodeTx(ctx, tx, userID, link)
 			if err != nil {
 				return err
 			}
 			out.AppCode = &code
 			values[auditFieldAppCodeKind] = appCodeKindSignInLink
 			values[auditFieldExpiresAt] = auditInstant(code.ExpiresAt)
+		}
+		if out.NoCode != "" {
+			values["no_code_reason"] = out.NoCode
 		}
 		audit, err = recordKeyAdded(ctx, tx, auditmutation.ActionSignInLinkRedeemed, userID, http.StatusOK, values)
 		return err
@@ -256,44 +285,59 @@ func (a *AppKeySignIn) RedeemSignInLink(ctx context.Context, token string, keysO
 	return out, nil
 }
 
+// Audit fields naming the link a redeem spent and the account that made
+// it; never its token.
+const (
+	auditFieldSignInLink          = "sign_in_link_id"
+	auditFieldSignInLinkCreatedBy = "sign_in_link_created_by"
+)
+
+// spentSignInLink is the link a redeem spent, as its app code records it.
+type spentSignInLink struct {
+	id        int64
+	createdBy *int
+}
+
 // lockSignInLinkAccount locks the account a link or its set-password token
-// belongs to, then the settings: a disabled account's link is
-// ErrSignInLinkInvalid, and while local password sign-in is off the link is
-// ErrSignInLinkNeedsProvider. Holding the settings lock serializes the use
-// with a change of auth.local_password_login.
-func lockSignInLinkAccount(ctx context.Context, tx pgx.Tx, userID int) error {
-	_, err := lockEnabledUser(ctx, tx, userID)
+// belongs to, then the settings, and answers the account as locked: a
+// disabled account's link is ErrSignInLinkInvalid, and while local password
+// sign-in is off the link is ErrSignInLinkNeedsProvider. Holding the
+// settings lock serializes the use with a change of
+// auth.local_password_login.
+func lockSignInLinkAccount(ctx context.Context, tx pgx.Tx, userID int) (*models.User, error) {
+	user, err := lockEnabledUser(ctx, tx, userID)
 	if errors.Is(err, ErrUserDisabled) || IsNotFound(err) {
-		return ErrSignInLinkInvalid
+		return nil, ErrSignInLinkInvalid
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := lockServerSettings(ctx, tx); err != nil {
-		return err
+		return nil, err
 	}
 	allowed, err := localPasswordLoginAllowed(ctx, tx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !allowed {
-		return ErrSignInLinkNeedsProvider
+		return nil, ErrSignInLinkNeedsProvider
 	}
-	return nil
+	return user, nil
 }
 
 // insertSignInLinkAppCodeTx stores an app code of kind sign_in_link for the
-// account. Such a code is bound to no session and no provider identity:
-// the administrator who made the link vouched for the person.
-func insertSignInLinkAppCodeTx(ctx context.Context, tx pgx.Tx, userID int) (IssuedAppCode, error) {
+// account, recording the link and who made it. Such a code is bound to no
+// session and no provider identity: the administrator who made the link
+// vouched for the person.
+func insertSignInLinkAppCodeTx(ctx context.Context, tx pgx.Tx, userID int, link spentSignInLink) (IssuedAppCode, error) {
 	code, hash, err := newAppCode()
 	if err != nil {
 		return IssuedAppCode{}, err
 	}
 	out := IssuedAppCode{Code: code}
-	if err := tx.QueryRow(ctx, `INSERT INTO auth_app_codes (code_hash, kind, user_id, expires_at)
-		VALUES ($1, $2, $3, clock_timestamp() + make_interval(secs => $4)) RETURNING expires_at`,
-		hash, appCodeKindSignInLink, userID, AppCodeLifetime.Seconds()).Scan(&out.ExpiresAt); err != nil {
+	if err := tx.QueryRow(ctx, `INSERT INTO auth_app_codes (code_hash, kind, user_id, sign_in_link_id, sign_in_link_created_by, expires_at)
+		VALUES ($1, $2, $3, $4, $5, clock_timestamp() + make_interval(secs => $6)) RETURNING expires_at`,
+		hash, appCodeKindSignInLink, userID, link.id, link.createdBy, AppCodeLifetime.Seconds()).Scan(&out.ExpiresAt); err != nil {
 		return IssuedAppCode{}, fmt.Errorf("storing app code: %w", err)
 	}
 	return out, nil
@@ -326,7 +370,7 @@ func (a *AppKeySignIn) SetPasswordWithSignInLink(ctx context.Context, token, new
 	}
 	var audit *auditmutation.Entry
 	err = a.inTx(ctx, func(tx pgx.Tx) error {
-		if err := lockSignInLinkAccount(ctx, tx, userID); err != nil {
+		if _, err := lockSignInLinkAccount(ctx, tx, userID); err != nil {
 			return err
 		}
 		tag, err := tx.Exec(ctx, `UPDATE auth_sign_in_links SET set_password_used_at = clock_timestamp()
@@ -374,6 +418,11 @@ func (a *AppKeySignIn) redeemSignInLinkCode(ctx context.Context, req KeyRedeemRe
 		if err != nil {
 			return err
 		}
+		// A link gives an administrator the password route only. Promotion
+		// deletes the account's link codes; this holds the line without it.
+		if user.Role == models.RoleAdmin {
+			return ErrAppCodeInvalid
+		}
 		if err := spendAppCode(ctx, tx, hash); err != nil {
 			return err
 		}
@@ -390,6 +439,11 @@ func (a *AppKeySignIn) redeemSignInLinkCode(ctx context.Context, req KeyRedeemRe
 			return err
 		}
 		values := keyAdded{auditFieldAppCodeKind: appCodeKindSignInLink}.withDevice(key).withPerson(took.person, took.created)
+		// The link the code came from and the account that made it.
+		values[auditFieldSignInLink] = code.signInLinkID
+		if code.signInLinkCreatedBy != nil {
+			values[auditFieldSignInLinkCreatedBy] = *code.signInLinkCreatedBy
+		}
 		before := map[string]any{}
 		if took.replaced != "" {
 			before[auditFieldPersonKey] = took.replaced
