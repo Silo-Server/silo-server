@@ -228,6 +228,10 @@ After `POST /account/password` succeeds, refresh the tokens: the access token ke
 the restriction until it is replaced, and the refreshed pair no longer carries it.
 The change revokes every other session of the account, since each was opened with
 the temporary password.
+In [demo mode](#demo-mode) an account that is not an administrator cannot change its
+password, a temporary one included, so such an account can only read `GET /account/me` and
+sign out until an administrator sets it a regular password or turns demo mode off. Don't give
+a demo's shared account a temporary password.
 An administrator impersonating the account is not restricted. Jellyfin and
 Audiobookshelf compatible sign-ins refuse an account holding a temporary password,
 because those clients cannot run the change; the account signs in to Silo first.
@@ -1117,11 +1121,11 @@ account resolution: a linking flow that ends on an account that is not an admini
 demo mode is on, including one started before demo mode was turned on, is refused with
 `not_permitted` and attaches nothing. Email auto-match (`auth.email_auto_match`) does not apply
 in demo mode, as when it is off, so a provider sign-in whose verified email equals the demo
-account's goes on as an unmatched one: account creation refuses the taken email where the
-binding's `auto_provision` is on, and the sign-in is `account_required` where it is off.
-Matching applies to no
-account in demo mode, not only the shared demo account. Demo mode is read before resolution's
-transaction; a process that has never read it fails the link and matches nothing.
+account's goes on as an unmatched one: account creation refuses the taken email
+(`409 email_in_use`) where the binding's `auto_provision` is on, and the sign-in is
+`account_required` where it is off. Matching applies to no account in demo mode, not only the
+shared demo account. Demo mode is read before resolution's transaction; a process that has
+never read it fails the link and matches nothing.
 
 The capability answers clients read before offering these actions say no to a visitor:
 `getAccountPasswordCapability` `allowed`, `getLoginSessionCapabilities`
