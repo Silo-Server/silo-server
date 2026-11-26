@@ -198,8 +198,8 @@ uses them as evidence, and only to stop push to the account's own registrations.
 When the server records an edit to a profile from an account's profile set
 (see [Edits made on this server](auth-api.md#edits-made-on-this-server)), it
 wakes every registered, enabled phone of the account whose login is
-live, on the platforms whose push delivery is on, up to the 20 most recently
-seen. The app should read
+live, on the platforms whose push delivery is on, up to 20: those a push was
+most recently accepted for, then the most recently registered. The app should read
 `GET /api/v2/profiles/set` when woken.
 
 The relay request is the one an alert uses, with:

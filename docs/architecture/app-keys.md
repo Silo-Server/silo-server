@@ -988,16 +988,22 @@ After a request that recorded an edit, the middleware calls the server's
 waker for each account that got one, on its own goroutine so the response
 never waits for it. A caller that needs the answer calls the waker after its
 write commits and gets it within five seconds. The waker queues a
-`background_wake` push for each of the account's registered phones, at most
-the 20 most recently seen (`internal/notifications/push_profile_set.go`): a
-person can set a wake off from their own session, and each phone costs an
-attempt row and a relay call. It wakes only for an edit that
+`background_wake` push for each of the account's registered phones, at most 20
+(`internal/notifications/push_profile_set.go`): a person can set a wake off
+from their own session, and each phone costs an attempt row and a relay call.
+The 20 are the phones a push was most recently accepted for, then the most
+recently registered. APNs and FCM accept a push only for a real token of the
+app, so registrations that never received a push, such as ones with made-up
+tokens, cannot take the place of the person's phones. With more than 20 live
+registrations, a new phone that has not had a push accepted yet ranks behind
+20 that have, and gets no wake until another push reaches it. It wakes only for an edit that
 committed: the request remembers the first edit revision it recorded per
 account, and the waker checks that a row at or above it exists, so a write
 that rolled back sends nothing. At most one wake goes out a minute per
-account, on every API server. One statement decides and records it: an
-upsert of the account's row in `push_profile_set_wakes` that writes the new
-time only when the last one is a minute old. Two servers recording at once
+account, on every API server, measured from when each wake is recorded. One
+statement decides and records it: an upsert of the account's row in
+`push_profile_set_wakes` that writes the new time, from the statement's own
+clock, only when the last one is a minute old. Two servers recording at once
 queue one wake, no server keeps a timer, and removing a phone and registering
 it again does not reset the limit, since the row is not tied to the account's
 devices. The time is recorded in the transaction that queues the wake's
@@ -1024,10 +1030,12 @@ including one of the previous release that would send it as an alert, ever
 picks a wake up.
 
 One wake of an account never overlaps the next. The whole wake runs under a
-budget of half the one-minute interval, started when it is queued, so it has
-ended before the account's limit lets another start. The phones are sent one
-after another, most recently seen first, each under what is left of the
-budget. One send can take up to seven relay requests, more than the budget
+budget of 30 seconds, half the one-minute interval, started when it is
+queued. A wake is queued up to five seconds after its time is recorded, so it
+has ended within 35 seconds of that, before the account's limit lets another
+start; a test holds the budget under the interval less those five seconds.
+The phones are sent one after another in the order above, each under what is
+left of the budget. One send can take up to seven relay requests, more than the budget
 allows, so there is no deadline per phone, and a slow phone can use up the
 budget. A phone the budget doesn't reach, or doesn't let finish, is recorded
 `failed` as `wake_out_of_time`; it gets the next wake, and the app reads the
