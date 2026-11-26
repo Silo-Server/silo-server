@@ -987,7 +987,8 @@ by a set built elsewhere.
   `sync_id` and the household has room (otherwise the item is left off); a
   set refused as a whole (a name clash, say) writes nothing; a set that
   pairs the `sync_id` with a profile on the account with no `sync_id`
-  gives it to that profile, which keeps its history; and a repeat of the held version
+  gives it to that profile, which keeps its history and needs no room, since
+  the limit applies only to new profiles; and a repeat of the held version
   creates nothing. Each clear then calls the wake hook
   (`profileedits.Waker`) itself, since its writes record nothing for the
   request's middleware to wake on, and answers what the hook reported: true

@@ -8,13 +8,13 @@ import (
 	"time"
 )
 
-// Profile represents a user profile.
 // ProfileName is a profile's ID and name, as a name check reads them.
 type ProfileName struct {
 	ID   string
 	Name string
 }
 
+// Profile represents a user profile.
 type Profile struct {
 	ID               string
 	Name             string

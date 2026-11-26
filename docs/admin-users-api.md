@@ -452,7 +452,8 @@ otherwise the item is in `left_off`, or not in the set, and nothing comes back.
 A set that has the item can still be refused as a whole (for example, its name
 is now another profile's on the account), and then nothing is written. If it
 pairs the `sync_id` with a profile on the account with no `sync_id`, that
-profile takes the `sync_id` and keeps its history instead.
+profile takes the `sync_id` and keeps its history instead, and needs no room
+in the household, since the profile limit applies only to new profiles.
 `wake_queued` says only that a push was queued, not that the profile returned.
 After a clear of an override or a hidden
 profile commits, the server tries to wake the person's apps with a push, and
