@@ -500,7 +500,9 @@ its payload. The challenge is spent once the signature verifies. Then:
   person who has lost every other device redeems a code and then calls
   `PUT /auth/keys/person` from the new session as the main profile. The
   issuing session's row is read last; one that ended rolls the redeem back.
-- A sign-in link's code locks the account, spends the code, takes the settings
+- A sign-in link's code locks the account (an administrator's account is
+  refused with `app_code_invalid`; see [Sign-in links](#sign-in-links)),
+  spends the code, takes the settings
   lock and checks local password sign-in as a key sign-in does, then makes the
   request's person key the account's: enrolled when the account has none or
   holds it already, otherwise in place of the account's key, which is revoked
@@ -603,9 +605,30 @@ disabled-account links answer the same `not_found`. While app keys are off (or
 in demo mode, where they always are) no code is made and the answer carries
 only the set-password token. The code enrolls keys as described under
 "Redeem" above: it replaces a different person key, because the person lost
-the devices that hold the old one, and leaves enrolled devices alone. Keys
-from it start active on an administrator's account too: the owner made the
-link for that person on purpose.
+the devices that hold the old one, and leaves enrolled devices alone. The
+code's audit row names the link (`sign_in_link_id`) and the account that made
+it (`sign_in_link_created_by`), never the token or the code.
+
+**Administrators get the password route only.** Redeeming a link for an
+account that is an administrator's at that moment, judged from the role under
+the account row lock in the transaction that spends the link, hands out the
+set-password token and no app code (`no_code_reason: administrator`), and
+enrolls nothing. The rule is the role at redeem: a link made for an
+administrator who has been demoted since hands out a code, and a link made for
+an ordinary account that has been promoted since is gone (promotion deletes
+the account's links and their unused codes). A link's code is also refused at
+its own redeem for an administrator's account, so the rule doesn't rest on
+that deletion. Whoever may make the link could already set that
+administrator's password, so the link adds nothing to that, and no key appears
+on an administrator's account without its holder signing in. An administrator
+who lost every device sets a password, signs in on the server's site, uses
+"Open in Silo" (`POST /auth/app-codes`) as the main profile, and redeems that
+session code in the app. The redeem keeps the account's old person key
+(`kept`) and enrolls the new device key active; `PUT /auth/keys/person` from
+the new device's key session, or from the password session on the site, as
+the main profile, then makes the app's key the account's person key. The lost
+devices' keys stay active until removed from the key list, and devices waiting
+on the old key are denied with it.
 
 **Setting a password.** The set-password token lives an hour, never past the
 link, and works once. The password passes the rules a reset's completion
