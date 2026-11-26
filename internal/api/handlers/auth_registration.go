@@ -142,15 +142,46 @@ func (h *AuthHandler) CurrentLoginSession(ctx context.Context, userID int, sessi
 	return session, nil
 }
 
-// RevokeSession revokes one of the caller's sessions. v1 DELETE
-// /auth/sessions/{id} and v2 deleteSession both call it.
+// ListSessionsPageByID is ListSessionsPage in ascending id order, strictly
+// after afterID: the listing a session limited to itself is served.
+func (h *AuthHandler) ListSessionsPageByID(ctx context.Context, userID int, afterID string, limit int) ([]*models.AuthSession, bool, error) {
+	sessions, err := h.service.GetSessionsPageByID(ctx, userID, afterID, limit+1)
+	if err != nil {
+		return nil, false, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	}
+	if len(sessions) > limit {
+		return sessions[:limit], true, nil
+	}
+	return sessions, false, nil
+}
+
+// SessionLimitedToItself reports whether the caller's login session may see
+// and end only itself (auth.LimitedToItself); false for an API-key caller.
+func (h *AuthHandler) SessionLimitedToItself(ctx context.Context, sessionID string) (bool, error) {
+	limited, err := h.service.SessionLimitedToItself(ctx, sessionID)
+	if err != nil {
+		return false, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	}
+	return limited, nil
+}
+
+// RevokeSession revokes one of the caller's sessions for v2 deleteSession,
+// from the login session the request authenticated with (none for an API
+// key): a session limited to itself may end only itself.
 func (h *AuthHandler) RevokeSession(ctx context.Context, sessionID string, userID int) error {
 	if sessionID == "" {
 		return apiError(http.StatusBadRequest, "bad_request", "Session ID is required")
 	}
-	if err := h.service.RevokeSession(ctx, sessionID, userID); err != nil {
+	callerSessionID := ""
+	if claims := apimw.GetClaims(ctx); claims != nil {
+		callerSessionID = claims.SessionID
+	}
+	if err := h.service.RevokeSessionFrom(ctx, callerSessionID, sessionID, userID); err != nil {
 		if auth.IsSessionNotFound(err) {
 			return apiError(http.StatusNotFound, "not_found", "Session not found")
+		}
+		if errors.Is(err, auth.ErrSessionOutOfReach) {
+			return apiError(http.StatusForbidden, "permission_denied", "A device signed in with a code can end only its own session.")
 		}
 		return apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}

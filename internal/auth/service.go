@@ -1615,11 +1615,17 @@ func (s *Service) LoginSessionActive(ctx context.Context, sessionID string) (boo
 // RevokeSession revokes a specific session. It verifies the session belongs
 // to the given user before revoking.
 func (s *Service) RevokeSession(ctx context.Context, sessionID string, userID int) error {
+	return s.revokeSession(ctx, sessionID, userID, func(*models.AuthSession) error { return nil })
+}
+
+// revokeSession revokes one of userID's sessions; a session of another
+// account is ErrSessionNotFound before reach judges the locked session.
+func (s *Service) revokeSession(ctx context.Context, sessionID string, userID int, reach func(*models.AuthSession) error) error {
 	return s.sessions.revokeChecked(ctx, sessionID, func(session *models.AuthSession) error {
 		if session.UserID != userID {
 			return ErrSessionNotFound
 		}
-		return nil
+		return reach(session)
 	}, func(tx pgx.Tx, session *models.AuthSession) (*auditmutation.Entry, error) {
 		return auditmutation.RecordMutation(ctx, tx, auditmutation.ActionLoginSessionRevoked, auditmutation.TargetUser,
 			strconv.Itoa(session.UserID), http.StatusNoContent, auditmutation.Removed(auditFieldLoginSession, session.ID))

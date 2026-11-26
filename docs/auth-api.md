@@ -346,6 +346,49 @@ login-session rows daily at 05:00 by default. Revoked sessions remain stored unt
 expiry passes. Jellyfin-compatible clients check their login session on
 every request too; cleanup removes only sessions that have already expired.
 
+### Sessions opened by device sign-in
+
+A session opened by device sign-in may sit on a device the account holder doesn't control,
+such as a shared TV, so it sees and ends only itself. `auth_sessions.via_device_sign_in`
+records how each session was opened: `true` when a device sign-in request (a code a
+signed-in person approved, Jellyfin Quick Connect, or a remote-playback handoff) opened it,
+`false` for any other sign-in, and no value for a session that existed before the column.
+`auth.LimitedToItself` decides; the two routes below read it, no other request does.
+
+A session is limited to itself when its flag is `true`, whatever its platform, or when it
+has no value and its recorded `device_platform` is a TV's: `tvOS`, `android-tv` or `roku`,
+in any case. That covers TVs signed in by code before the column; an older TV session opened
+with a password is limited too, which costs nothing because no TV app reads more of the list
+than `id` and `current` or ends another session. A session with `false`, a TV that signed in
+with a password after the upgrade included, or with no value and any other platform, is
+ordinary, as are a session an administrator opened to act as the account and an API-key
+caller. During a rolling deploy a server of the previous release inserts sessions with no
+value, so they are judged as sessions from before the column. The limit covers only the
+account's own session list: a device signed in by code on an administrator's account still
+holds that account's administrator powers, including ending any account's sessions, so a code
+on a shared device should not be approved from an administrator's account.
+
+For a limited caller, `listSessions` still answers `200` with every live session of the
+account, because released Apple apps read the session ids to recognize one server saved under
+two addresses. Its own item and `current_session` are complete. Every other item carries only
+`id` and `current`: `device_name` and `ip_address` are empty strings, `device_id` and
+`device_platform` are absent, `last_seen_at` is null, and `created_at` and `expires_at` repeat
+the caller's own values, since they have no null form. The page is ordered by `id` and the
+cursor holds only the last id, so neither tells which sessions are newer. A cursor minted for
+one kind of caller is `400 invalid_cursor` for the other. `limit` and `page.has_more` behave as
+for any caller.
+
+`deleteSession` from a limited caller ends its own session as for any caller. Another session
+of the account is `403 permission_denied`, with a detail saying a device signed in with a code
+can end only its own session. A session of another account, or an unknown id, is `404
+not_found` exactly as for an ordinary caller: the account check comes first, so the 403 says
+nothing about other accounts' sessions. `POST /auth/logout` is unchanged.
+
+What such a session still learns is how many live sessions the account has and their opaque
+ids. A device sign-in session opened before the column from a device that isn't a TV has no
+recorded mark and stays ordinary until it ends; an account holder ends shared devices'
+sessions from their session list, or an administrator ends all of the account's sessions.
+
 ### Access tokens after a role change
 
 An access token carries the account's role, and admin checks trust it. When an

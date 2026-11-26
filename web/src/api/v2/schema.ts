@@ -7128,7 +7128,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the caller's live login sessions, newest first. */
+    /**
+     * List the caller's live login sessions, newest first.
+     * @description A session opened by device sign-in (a code a signed-in person approved, Jellyfin Quick Connect, or a remote-playback handoff), and a session from before this rule was recorded whose X-Silo-Device-Platform was tvOS, android-tv or roku, sees only itself in full. It still gets every live session of the account, but another session's item carries only its id and current: device_name and ip_address are empty, device_id and device_platform are absent, last_seen_at is null, and created_at and expires_at repeat the caller's own. For such a caller the page is ordered by id, not newest first, and a cursor from the other kind of caller is invalid_cursor.
+     */
     get: operations["listSessions"];
     put?: never;
     post?: never;
@@ -7148,7 +7151,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Revoke one of the caller's login sessions. */
+    /**
+     * Revoke one of the caller's login sessions.
+     * @description A session opened by device sign-in (see listSessions) may revoke only itself: another session of the account is 403 permission_denied, and a session of another account or an unknown id is 404 as for every caller.
+     */
     delete: operations["deleteSession"];
     options?: never;
     head?: never;
@@ -30970,46 +30976,46 @@ export interface components {
     LoginSession: {
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision
+       * @description When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at
        * @example 2026-01-02T03:04:05.678Z
        */
       created_at: string;
       /** @description Whether this is the login session making this request */
       current: boolean;
       /**
-       * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing
+       * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in
        * @example 8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50
        */
       device_id?: string;
       /**
-       * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device
+       * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in
        * @example Living Room Apple TV
        */
       device_name: string;
       /**
-       * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none
+       * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in
        * @example tvOS
        */
       device_platform?: string;
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision
+       * @description When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at
        * @example 2026-02-01T03:04:05.678Z
        */
       expires_at: string;
       /**
-       * @description Session identifier; the value deleteSession takes
+       * @description Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current
        * @example 6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c
        */
       id: string;
       /**
-       * @description Client address recorded at login; empty when unknown
+       * @description Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in
        * @example 203.0.113.7
        */
       ip_address: string;
       /**
        * Format: date-time
-       * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded
+       * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in
        * @example 2026-01-02T03:04:05.678Z
        */
       last_seen_at: string | null;
@@ -31035,46 +31041,46 @@ export interface components {
       current_session: {
         /**
          * Format: date-time
-         * @description RFC 3339 instant in UTC with millisecond precision
+         * @description When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at
          * @example 2026-01-02T03:04:05.678Z
          */
         created_at: string;
         /** @description Whether this is the login session making this request */
         current: boolean;
         /**
-         * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing
+         * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in
          * @example 8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50
          */
         device_id?: string;
         /**
-         * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device
+         * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in
          * @example Living Room Apple TV
          */
         device_name: string;
         /**
-         * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none
+         * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in
          * @example tvOS
          */
         device_platform?: string;
         /**
          * Format: date-time
-         * @description RFC 3339 instant in UTC with millisecond precision
+         * @description When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at
          * @example 2026-02-01T03:04:05.678Z
          */
         expires_at: string;
         /**
-         * @description Session identifier; the value deleteSession takes
+         * @description Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current
          * @example 6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c
          */
         id: string;
         /**
-         * @description Client address recorded at login; empty when unknown
+         * @description Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in
          * @example 203.0.113.7
          */
         ip_address: string;
         /**
          * Format: date-time
-         * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded
+         * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in
          * @example 2026-01-02T03:04:05.678Z
          */
         last_seen_at: string | null;
@@ -102236,6 +102242,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

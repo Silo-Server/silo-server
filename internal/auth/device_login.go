@@ -913,7 +913,10 @@ func (s *DeviceLoginService) deviceLoginSession(record *deviceLoginRecord, user 
 		DeviceName:     record.DeviceName,
 		DevicePlatform: clampClientDeviceValue(record.DevicePlatform, maxClientDevicePlatformLen),
 		IPAddress:      record.IPAddress,
-		ExpiresAt:      sessionExpiresAt,
+		// Device sign-in, Quick Connect and the remote-playback handoff all
+		// open their session here; LimitedToItself reads the mark.
+		ViaDeviceSignIn: true,
+		ExpiresAt:       sessionExpiresAt,
 		// The device continues the approving session's provider chain, so a
 		// provider that cannot re-check it ends the device's session when it
 		// would have ended the approver's.
