@@ -400,6 +400,7 @@
 ./internal/auth TestSignInLinkReplacementStartsUnboundDB
 ./internal/auth TestSignInLinkNetworkRefusalDB
 ./internal/auth TestRedeemSignInLinkReadsSwitchInTransactionDB
+./internal/auth TestRedeemSignInLinkCodeReadsSwitchInTransactionDB
 ./internal/apiv2 TestCreateSignInLinkAuthorityDB
 ./internal/apiv2 TestCreateSignInLinkNeedsPublicURLDB
 ./internal/apiv2 TestAdminUserLocalPasswordAllowedDB
