@@ -1,6 +1,7 @@
 package apiv2
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/watchtogether"
 )
 
 // documentedDecision reads an operation's published decision for a session
@@ -505,6 +507,39 @@ func TestPluginContentMountsAllReachTheContentHandler(t *testing.T) {
 			if len(content.served) != before+1 {
 				t.Errorf("%s %s did not reach the content handler: %d", method, mount.Path, rec.Code)
 			}
+		}
+	}
+}
+
+// attachedRoomRead answers a room whose member, the account and profile
+// asking, has the person's own device's stream attached.
+type attachedRoomRead struct{}
+
+func (attachedRoomRead) ReadWatchTogetherRoom(context.Context, string, int, string, string) (watchtogether.Snapshot, string, error) {
+	return watchtogether.Snapshot{RoomID: "room", Code: "ABCD", AnchorUpdatedAt: "2026-01-02T03:04:05Z", AttachedSessionID: "phone-stream"}, "proof", nil
+}
+
+// TestRoomReadLeavesOutAnotherDevicesStream: a Watch Together member is the
+// account and profile, so the room read names the stream attached to it,
+// which may be the person's own device's. A session another app's key opened
+// is not told that playback session id; the person's own session still is.
+// Catches another device's id reaching such a session through the room read.
+func TestRoomReadLeavesOutAnotherDevicesStream(t *testing.T) {
+	deps := parityDeps(false)
+	deps.WatchTogetherRoomRead = attachedRoomRead{}
+	h := newTestHandler(t, deps)
+	for token, want := range map[string]string{grantedAppToken: "", memberToken: "phone-stream"} {
+		rec := do(t, h, http.MethodGet, Prefix+"/watch-together/rooms/room", "", with(with(bearer(token), "X-Profile-Id", "p-owner"), "X-Room-Token", "proof"))
+		var body struct {
+			Room struct {
+				AttachedSessionID string `json:"attached_session_id"`
+			} `json:"room"`
+		}
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &body) != nil {
+			t.Fatalf("%s: %d %s", token, rec.Code, rec.Body.String())
+		}
+		if body.Room.AttachedSessionID != want {
+			t.Fatalf("%s: attached_session_id %q, want %q", token, body.Room.AttachedSessionID, want)
 		}
 	}
 }

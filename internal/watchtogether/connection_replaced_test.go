@@ -183,3 +183,44 @@ func TestOtherAppDoesNotTakeASeatOnAnotherServerPG(t *testing.T) {
 		t.Fatalf("the device lost its seat on the other server: %v", err)
 	}
 }
+
+// TestOtherAppStartsWithNoAttachedStream: a member is its account and
+// profile, so a stream the person's own device attached stays on the member
+// after that device leaves its seat, and a session another app opened taking
+// the free seat would be shown that device's playback session id in its
+// snapshot. Such a connection starts with no attached stream; an ordinary
+// reconnection keeps it. Catches another device's id reaching such a session
+// through the room snapshot.
+func TestOtherAppStartsWithNoAttachedStream(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		otherApp bool
+		want     string
+	}{{"another app", true, ""}, {"the person's own device", false, "phone-stream"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			repo := &stubRepo{room: baseRoom(now)}
+			s := newServiceForTest(now, repo, nil, nil, nil)
+			t.Cleanup(s.Close)
+			if _, _, err := s.Connect(t.Context(), repo.room.ID, 8, "guest", new(replacementConn)); err != nil {
+				t.Fatal(err)
+			}
+			// The device attached a stream, then its seat came free.
+			s.mu.Lock()
+			member := s.rooms[repo.room.ID].members[buildMemberKey(8, "guest")]
+			member.sessionID, member.connection, member.remoteConnected = "phone-stream", nil, false
+			s.mu.Unlock()
+			connect := s.Connect
+			if tc.otherApp {
+				connect = s.ConnectOtherApp
+			}
+			_, snapshot, err := connect(t.Context(), repo.room.ID, 8, "guest", new(replacementConn))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if snapshot.AttachedSessionID != tc.want {
+				t.Fatalf("attached session %q, want %q", snapshot.AttachedSessionID, tc.want)
+			}
+		})
+	}
+}

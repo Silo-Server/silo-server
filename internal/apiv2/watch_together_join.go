@@ -42,6 +42,12 @@ func registerWatchTogetherJoin(reg *Registry) {
 			}
 			return nil, suggestionProblem(err)
 		}
+		// A member is the account and profile, so the stream attached to it
+		// may be the person's own device's; a session another app's key
+		// opened is not told another device's playback session id.
+		if grantedAppSession(claimsFrom(ctx)) {
+			row.AttachedSessionID = ""
+		}
 		return watchTogetherRoomOutput(row, token)
 	})
 }

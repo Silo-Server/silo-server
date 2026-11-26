@@ -573,6 +573,12 @@ func (s *Service) connect(
 	} else if current.connection != nil && current.connection != conn {
 		previousConn = current.connection
 	}
+	if otherApp {
+		// The seat is free (checked above), so whatever stream a previous
+		// connection attached is another device's: such a connection starts
+		// with none and sees only one it attaches itself.
+		current.sessionID = ""
+	}
 	current.connection = conn
 	current.connectionID = uuid.NewString()
 	current.remoteConnected = false
