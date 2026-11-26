@@ -199,12 +199,14 @@ func TestSearchAndNormalizeReportsFailedProviders(t *testing.T) {
 	t.Parallel()
 
 	down := &idSearchProvider{slug: "tmdb", err: errors.New("tmdb: server error 503 after 3 retries")}
+	// A provider's 404 for the looked-up ID is a miss, not an outage.
+	missing := &idSearchProvider{slug: "omdb", err: errors.New("rpc error: code = Unknown desc = omdb: HTTP 404: not found")}
 	up := &idSearchProvider{slug: "tvdb", results: map[string][]SearchResult{
 		"imdb:tt0113277": {{Name: "Heat", Year: 1995, ProviderIDs: map[string]string{"imdb": "tt0113277", "tvdb": "81"}, Provider: "tvdb"}},
 	}}
 	svc := &MetadataService{
 		chainCache: map[string]chainCacheEntry{
-			"0:movie": {providers: []Provider{down, up}, expiresAt: time.Now().Add(time.Hour)},
+			"0:movie": {providers: []Provider{down, missing, up}, expiresAt: time.Now().Add(time.Hour)},
 		},
 		chainCacheTTL: time.Hour,
 	}
@@ -221,5 +223,13 @@ func TestSearchAndNormalizeReportsFailedProviders(t *testing.T) {
 	}
 	if len(failed) != 1 || failed["tmdb"] == nil {
 		t.Fatalf("provider errors = %v, want only tmdb", failed)
+	}
+
+	// Without an ID to look up, a 404 says nothing about the title: it fails.
+	_, failed, err = svc.SearchAndNormalize(context.Background(), SearchQuery{
+		Title: "Heat", Year: 1995, ContentType: "movie", Language: "en",
+	}, 0)
+	if err != nil || len(failed) != 2 || failed["omdb"] == nil {
+		t.Fatalf("title search provider errors = %v, err = %v, want tmdb and omdb", failed, err)
 	}
 }

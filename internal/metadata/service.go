@@ -5707,6 +5707,8 @@ func mergedImageThumbhash(previousPath, previousThumbhash, nextPath, nextThumbha
 // SearchProviders runs only the search phase and returns results for the UI.
 // A provider whose search fails does not stop the others: its error is
 // returned keyed by provider slug, so callers can tell an outage from a miss.
+// A provider's HTTP 404 on a search by provider ID means it has no such ID:
+// that is a miss and is not reported.
 // The error result is non-nil only when the provider chain cannot be resolved.
 func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery, folderID int) ([]SearchResult, map[string]error, error) {
 	if strings.TrimSpace(query.Language) == "" && folderID > 0 {
@@ -5729,6 +5731,11 @@ func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery
 			continue
 		}
 		results, err := sp.Search(ctx, query)
+		if len(query.ProviderIDs) > 0 && isProvider404(err) {
+			slog.InfoContext(ctx, "metadata: match search provider has no such ID", "component", "metadata",
+				"provider", p.Slug(), "error", logredact.SanitizeText(err.Error()))
+			continue
+		}
 		if err != nil {
 			slog.WarnContext(ctx, "metadata: match search provider error", "component", "metadata",
 				"provider", p.Slug(), "error", logredact.SanitizeText(err.Error()))

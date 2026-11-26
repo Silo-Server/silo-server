@@ -5,6 +5,8 @@ import { joinList } from "@/lib/appLocale";
 /**
  * Names the metadata providers whose match search failed, so an outage does
  * not read as "no candidates". Renders nothing when every provider answered.
+ * It shares the image picker's "Could not load from {providers}" string,
+ * whose wording fits a failed search as well.
  */
 export function MatchSearchProviderErrors({ providers }: { providers: string[] }) {
   const t = useT();
