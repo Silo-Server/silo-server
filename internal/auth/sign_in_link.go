@@ -254,14 +254,17 @@ func (a *AppKeySignIn) IssueSignInLink(ctx context.Context, in SignInLinkIssue) 
 		if in.IssuedBy > 0 {
 			createdBy = new(in.IssuedBy)
 		}
+		var linkID int64
 		if err := tx.QueryRow(ctx, `INSERT INTO auth_sign_in_links (token_hash, user_id, created_by, expires_at)
-			VALUES ($1, $2, $3, clock_timestamp() + make_interval(secs => $4)) RETURNING expires_at`,
-			hash, target.ID, createdBy, SignInLinkLifetime.Seconds()).Scan(&out.ExpiresAt); err != nil {
+			VALUES ($1, $2, $3, clock_timestamp() + make_interval(secs => $4)) RETURNING id, expires_at`,
+			hash, target.ID, createdBy, SignInLinkLifetime.Seconds()).Scan(&linkID, &out.ExpiresAt); err != nil {
 			return fmt.Errorf("storing sign-in link: %w", err)
 		}
+		// The entry names the link as its redeem's entries do: ending a link
+		// deletes its row, so the audit log is its only history.
 		audit, err = auditmutation.RecordMutation(ctx, tx, auditmutation.ActionSignInLinkCreated, auditmutation.TargetUser,
 			strconv.Itoa(target.ID), http.StatusCreated, auditmutation.Changes(nil, map[string]any{
-				"delivery": in.Delivery, auditFieldExpiresAt: auditInstant(out.ExpiresAt),
+				auditFieldSignInLink: linkID, "delivery": in.Delivery, auditFieldExpiresAt: auditInstant(out.ExpiresAt),
 			}))
 		return err
 	})
@@ -404,8 +407,8 @@ func (a *AppKeySignIn) RedeemSignInLink(ctx context.Context, token string, canDe
 	return out, nil
 }
 
-// Audit fields naming the link a redeem spent and the account that made
-// it; never its token.
+// Audit fields naming a link (made, or spent by a redeem) and the account
+// that made it; never its token.
 const (
 	auditFieldSignInLink          = "sign_in_link_id"
 	auditFieldSignInLinkCreatedBy = "sign_in_link_created_by"

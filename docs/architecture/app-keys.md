@@ -945,9 +945,10 @@ step deletes links past their expiry; the table is left out of backups. Ending
 a link deletes its row and the account's link codes with it
 (`EndSignInLinksTx`), so a link's history is not in these tables but in the
 audit log: `user.sign_in_link_created` (by its maker, with the delivery and
-expiry), and `user.sign_in_link_redeemed`, `user.app_code_redeemed` and
-`user.person_key_replaced`, which name the link's `sign_in_link_id`, the last
-two with the account that made it.
+expiry), `user.sign_in_link_redeemed`, `user.app_code_redeemed` and
+`user.person_key_replaced` all name the link's `sign_in_link_id`, the last two
+with the account that made it, so a redeem ties to the link made and a link
+ended unredeemed still has its entry.
 
 **Redeeming.** The link is marked redeemed in the transaction that makes the
 app code; of two redemptions exactly one succeeds. Unknown, used, expired and

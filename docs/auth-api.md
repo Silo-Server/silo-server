@@ -329,8 +329,8 @@ only, as a reset link's does. The architecture is in
   Otherwise 409 `provider_sign_in_required` (the switch off) or 403
   `not_permitted` (a network provider's refusal); redeem and set-password check
   it again and leave the link or token unspent.
-  Audited as `user.sign_in_link_created` with `delivery` and `expires_at`, never
-  the token. A new link, a password set by any route, a change of its email address,
+  Audited as `user.sign_in_link_created` with `sign_in_link_id`, `delivery` and
+  `expires_at`, never the token. A new link, a password set by any route, a change of its email address,
   signing the account out everywhere (or out of every other session), disabling it
   and promoting it each end its link, the code the link's redeem left and its set-password token. The account capability (`getAdminAccountCapabilities`) reports
   `sign_in_links` and `sign_in_link_email`.

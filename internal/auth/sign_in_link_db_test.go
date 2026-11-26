@@ -388,7 +388,8 @@ func TestSetPasswordWithSignInLinkDB(t *testing.T) {
 	}
 }
 
-// Making a link is audited with its delivery and expiry, never the token.
+// Making a link is audited with its id, delivery and expiry, never the
+// token; the redeem's entry names the same id.
 func TestIssueSignInLinkAuditDB(t *testing.T) {
 	env := newKeyEnv(t, "signinlinkaudit")
 	user := env.localAccount(t, "linkaudit", models.RoleUser)
@@ -402,7 +403,21 @@ func TestIssueSignInLinkAuditDB(t *testing.T) {
 	if got := audittest.Value(row.Change(t, "delivery").After); got != `"email"` {
 		t.Fatalf("delivery = %s", got)
 	}
+	var linkID int64
+	if err := env.pool.QueryRow(ctx, `SELECT id FROM auth_sign_in_links WHERE user_id = $1`, user.ID).Scan(&linkID); err != nil {
+		t.Fatal(err)
+	}
+	if got := audittest.Value(row.Change(t, auditFieldSignInLink).After); got != strconv.FormatInt(linkID, 10) {
+		t.Fatalf("sign_in_link_id = %s, want %d", got, linkID)
+	}
 	row.AssertNoSecrets(t, issued.Token)
+	if _, err := env.signIn.RedeemSignInLink(ctx, issued.Token, true); err != nil {
+		t.Fatal(err)
+	}
+	redeemed := audittest.One(t, env.pool, auditmutation.ActionSignInLinkRedeemed, auditmutation.TargetUser, strconv.Itoa(user.ID))
+	if got := audittest.Value(redeemed.Change(t, auditFieldSignInLink).After); got != strconv.FormatInt(linkID, 10) {
+		t.Fatalf("redeemed sign_in_link_id = %s, want %d", got, linkID)
+	}
 }
 
 // App key sign-in turned off while a redemption is on its way is the
