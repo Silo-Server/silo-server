@@ -52,12 +52,14 @@ func (f *fakeAdminInsights) ReadAdminInsightsActivity(_ context.Context, q handl
 		Buckets: []handlers.AdminInsightsActivityBucket{{
 			BucketStart: fixedTime().AddDate(0, 0, -1), LabelDate: fixedTime().AddDate(0, 0, -1).Format("2006-01-02"),
 			Plays: 10, WatchSeconds: 18000, Direct: 7, Remux: 2, Transcode: 1, Movies: 3, Episodes: 7,
+			ActiveAccounts: 3, ActiveProfiles: 4,
 		}},
 		Heatmap: []handlers.AdminInsightsHeatmapCell{{DayOfWeek: 4, Hour: 20, Plays: 8, WatchSeconds: 14400}},
 		PeakStreams: []handlers.AdminInsightsPeakStreamsPoint{{
 			Date: fixedTime().AddDate(0, 0, -1).Format("2006-01-02"), PeakStreams: 4, PeakDirect: 3, PeakRemux: 1, PeakTranscode: 1,
 			PeakStreamsDirect: 2, PeakStreamsRemux: 1, PeakStreamsTranscode: 1, PeakStreamsAt: &peakAt,
 		}},
+		EndReasons: []handlers.AdminInsightsLabeledCount{{Key: "stopped", Sessions: 39}, {Key: "expired", Sessions: 6}, {Key: "unknown", Sessions: 3}},
 	}, nil
 }
 
@@ -84,6 +86,7 @@ func (f *fakeAdminInsights) ReadAdminInsightsPeople(_ context.Context, q handler
 				CompletionRate: 0.8889, LastSeenAt: &lastSeen,
 			}},
 		}},
+		TopProfiles: []handlers.AdminInsightsTopProfile{{UserID: 7, Username: "alex", ProfileID: "p-main", ProfileName: "Alex", Plays: 18, WatchSeconds: 40000}},
 	}, nil
 }
 
@@ -92,6 +95,7 @@ func (f *fakeAdminInsights) ReadAdminInsightsDevices(_ context.Context, q handle
 	if f.err != nil {
 		return nil, f.err
 	}
+	lastSeen := fixedTime().Add(-15 * time.Minute)
 	return &handlers.AdminInsightsDevices{
 		From: fixedTime().AddDate(0, 0, -29), To: fixedTime(), TZ: q.TZ,
 		Coverage: f.coverage(),
@@ -115,6 +119,25 @@ func (f *fakeAdminInsights) ReadAdminInsightsDevices(_ context.Context, q handle
 		SourceResolutions:    []handlers.AdminInsightsLabeledCount{{Key: "2160p", Sessions: 20}, {Key: "1080p", Sessions: 26}, {Key: "unknown", Sessions: 2}},
 		DeliveredResolutions: []handlers.AdminInsightsLabeledCount{{Key: "2160p", Sessions: 17}, {Key: "1080p", Sessions: 27}, {Key: "unknown", Sessions: 4}},
 		ResolutionChanges:    []handlers.AdminInsightsResolutionChange{{From: "2160p", To: "1080p", Sessions: 3}},
+		BucketUnit:           handlers.InsightsBucketDay,
+		ClientVersions: []handlers.AdminInsightsClientVersionRow{{
+			ClientName: "Silo Apple", DevicePlatform: "tvOS", ClientVersion: "1.4.2", Sessions: 18, LastSeenAt: &lastSeen,
+		}},
+		ProtocolBuckets: []handlers.AdminInsightsProtocolBucket{{
+			BucketStart: fixedTime().AddDate(0, 0, -1), LabelDate: fixedTime().AddDate(0, 0, -1).Format("2006-01-02"),
+			NativeSessions: 9, JellyfinSessions: 3,
+		}},
+		Subtitles: handlers.AdminInsightsSubtitleUsage{
+			Sessions: 44, SubtitledSessions: 12, ForcedSessions: 2, HearingImpairedSessions: 1,
+			Languages:  []handlers.AdminInsightsLabeledCount{{Key: "en", Sessions: 9}, {Key: "es", Sessions: 3}},
+			Deliveries: []handlers.AdminInsightsLabeledCount{{Key: "embedded", Sessions: 8}, {Key: "burn_in", Sessions: 2}, {Key: "sidecar", Sessions: 2}},
+		},
+		Audio: handlers.AdminInsightsAudioUsage{
+			Sessions:          44,
+			Languages:         []handlers.AdminInsightsLabeledCount{{Key: "en", Sessions: 38}, {Key: "ja", Sessions: 6}},
+			Decisions:         []handlers.AdminInsightsLabeledCount{{Key: "direct", Sessions: 34}, {Key: "transcode", Sessions: 6}, {Key: "remux", Sessions: 4}},
+			DeliveredChannels: []handlers.AdminInsightsLabeledCount{{Key: "surround", Sessions: 24}, {Key: "stereo", Sessions: 20}},
+		},
 	}, nil
 }
 
@@ -168,6 +191,40 @@ func (f *fakeAdminInsights) ReadAdminInsightsTitles(_ context.Context, q handler
 			Episodes: 9, WatchSeconds: 54000, LastPlayedAt: &lastPlayed,
 		}},
 		Libraries: []handlers.AdminInsightsLibraryRow{{LibraryID: 2, Name: "TV Shows", Plays: 18, Viewers: 3, WatchSeconds: 54000}},
+		LeastFinished: []handlers.AdminInsightsTitleRow{{
+			ContentID: "movie-2", Kind: "movie", Title: "The Glass Harbor", Year: &year, Plays: 4, Viewers: 3, CompletedPlays: 1,
+			WatchSeconds: 12000, LastPlayedAt: &lastPlayed,
+		}},
+	}, nil
+}
+
+func (f *fakeAdminInsights) ReadAdminInsightsLibrary(_ context.Context, q handlers.AdminInsightsWindowQuery, refresh bool) (*handlers.AdminInsightsLibrary, error) {
+	f.lastRefresh = refresh
+	if f.err != nil {
+		return nil, f.err
+	}
+	oldest := fixedTime().AddDate(0, -6, 0)
+	median := 2.5
+	year := 2024
+	return &handlers.AdminInsightsLibrary{
+		From: fixedTime().AddDate(0, 0, -29), To: fixedTime(), TZ: q.TZ, OldestHistoryAt: &oldest,
+		Summary: handlers.AdminInsightsLibrarySummary{
+			Titles: 420, PlayedTitles: 63, PlayedShare: 0.15, NeverStarted: 210, AddedTitles: 12, AddedPlayed: 7,
+			MedianDaysToFirstPlay: &median,
+		},
+		Libraries: []handlers.AdminInsightsLibraryCoverage{
+			{LibraryID: 1, Name: "Movies", Titles: 300, PlayedTitles: 41, PlayedShare: 0.1367, NeverStarted: 160, AddedTitles: 9},
+			{LibraryID: 2, Name: "TV Shows", Titles: 120, PlayedTitles: 22, PlayedShare: 0.1833, NeverStarted: 50, AddedTitles: 3},
+		},
+		Genres:         []handlers.AdminInsightsLabeledPlays{{Key: "Drama", Plays: 40, Titles: 22}, {Key: "Science Fiction", Plays: 18, Titles: 7}},
+		Decades:        []handlers.AdminInsightsLabeledPlays{{Key: "1990", Plays: 6, Titles: 4}, {Key: "2020", Plays: 51, Titles: 38}},
+		ContentRatings: []handlers.AdminInsightsLabeledPlays{{Key: "PG-13", Plays: 25, Titles: 14}, {Key: "TV-MA", Plays: 20, Titles: 9}},
+		TimeToFirstPlay: []handlers.AdminInsightsLabeledCount{
+			{Key: "day", Sessions: 3}, {Key: "week", Sessions: 3}, {Key: "month", Sessions: 1}, {Key: "later", Sessions: 0}, {Key: "not_yet", Sessions: 5},
+		},
+		RecentlyAddedUnplayed: []handlers.AdminInsightsUnplayedTitle{{
+			ContentID: "movie-9", Kind: "movie", Title: "Civil War", Year: &year, AddedAt: fixedTime().AddDate(0, 0, -2), LibraryID: 1, LibraryName: "Movies",
+		}},
 	}, nil
 }
 
@@ -207,6 +264,7 @@ func adminInsightsFixtureCases() []fixtureCase {
 		{name: "get_admin_insights_bandwidth_ok", operationID: "getAdminInsightsBandwidth", method: http.MethodGet, path: Prefix + "/admin/insights/bandwidth?range=30d&tz=UTC", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminInsightsBandwidth", scenario: "Administrator insights bandwidth returns daily archive + live egress totals and per-node breakdown."},
 		{name: "get_admin_insights_titles_ok", operationID: "getAdminInsightsTitles", method: http.MethodGet, path: Prefix + "/admin/insights/titles?range=30d&tz=UTC&sort=plays&limit=10", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminInsightsTitles", scenario: "Administrator insights titles ranks the most watched movies, series and libraries."},
 		{name: "get_admin_insights_title_ok", operationID: "getAdminInsightsTitle", method: http.MethodGet, path: Prefix + "/admin/insights/titles/series-1?range=30d&tz=UTC", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminInsightsTitle", scenario: "Administrator insights title detail returns a series' plays over time, viewers, and episodes."},
+		{name: "get_admin_insights_library_ok", operationID: "getAdminInsightsLibrary", method: http.MethodGet, path: Prefix + "/admin/insights/library?range=30d&tz=UTC", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminInsightsLibrary", scenario: "Administrator insights library returns per-library coverage, plays by genre, decade and rating, and how soon new titles get a first play."},
 	}
 }
 
@@ -235,6 +293,7 @@ func TestAdminInsightsValidationAndMonitorScope(t *testing.T) {
 		"/admin/insights/bandwidth?range=30d&refresh=true",
 		"/admin/insights/titles?range=30d&refresh=true",
 		"/admin/insights/titles/series-1?range=30d",
+		"/admin/insights/library?range=30d&refresh=true",
 		"/admin/playback-history/sess-1",
 	} {
 		rec := do(t, h, http.MethodGet, Prefix+path, "", bearer("sa_monitor"))

@@ -365,6 +365,30 @@
       "value": "Această valoare este în afara intervalului permis."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Includeți cel puțin un caracter special, cum ar fi ! sau #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Includeți cel puțin o literă mare."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Această parolă este prea lungă."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Această parolă este prea scurtă."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Sesiunea a expirat. Conectați-vă din nou."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Cât timp conectarea cu parolă este dezactivată, trebuie să rămână activat un furnizor de conectare pe care îl pot folosi utilizatorii. OpenID Connect necesită și adresa URL publică a serverului."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8242,6 +8272,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Carduri"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Aspect"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabel"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -55126,7 +55174,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tendințe de vizionare, titluri populare, activitatea din gospodărie, redarea pe dispozitive și lățimea de bandă."
+      "value": "Streamuri în direct, tendințe de vizionare, titluri populare, activitatea din gospodărie, redarea pe dispozitive și lățimea de bandă."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -74972,7 +75020,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Verificați dacă routerul acceptă UPnP, NAT-PMP sau PCP."
+      "value": "Solicitați routerului o mapare de port prin UPnP, NAT-PMP sau PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -74981,16 +75029,40 @@
       "value": "Maparea porturilor"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Interval: de la "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " la "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Verificările de pregătire nu pornesc redarea directă."
+      "value": "Activarea acestei opțiuni pornește motorul conexiunilor directe. Acesta deschide un port UDP și, când opțiunea „Mapare porturi” este activată, solicită routerului o mapare de port. „Rulați verificarea” doar citește starea gazdei."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Dezactivat de administrator"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Valoarea a fost limitată la intervalul permis"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -75002,7 +75074,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Motorul conexiunilor directe nu a putut porni"
+      "value": "Motorul conexiunilor directe s-a oprit sau nu a putut porni"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -75033,6 +75105,12 @@
     {
       "type": 0,
       "value": "Valoare nevalidă; setarea este dezactivată"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Valoare nevalidă; se folosește valoarea implicită"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -86454,6 +86532,20 @@
       "value": "Activați mai întâi un furnizor de conectare. Cu conectarea cu parolă dezactivată și fără niciun furnizor activat, s-ar putea conecta doar administratorii de urgență."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Setați mai întâi adresa URL publică a serverului. Furnizorul "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " nu poate conecta pe nimeni fără ea, așa că, având conectarea cu parolă dezactivată, doar administratorii cu acces de urgență s-ar putea conecta."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -86544,6 +86636,283 @@
       "value": "Permiteți utilizatorilor să creeze chei API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Dezactivați conectarea cu parolă"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Doar administratorii cu acces de urgență se vor conecta cu o parolă. Toți ceilalți se conectează cu furnizorul "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Furnizorul "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " creează conturi la prima conectare, așa că, dacă una dintre aceste persoane se conectează prin el înainte să o asociați, va primi un cont nou, separat."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Asociați fiecare cont cu un cont "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " din pagina acestuia din Utilizatori."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " cont nu se poate conecta până când un administrator nu îl asociază"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " conturi nu se pot conecta până când un administrator nu le asociază"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de conturi nu se pot conecta până când un administrator nu le asociază"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-a putut verifica ce conturi sunt afectate. Puteți totuși dezactiva conectarea cu parolă."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Se verifică cine se conectează cu o parolă…"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Când furnizorul "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " confirmă una dintre aceste adrese de e-mail la conectare, Silo asociază persoana respectivă cu contul său."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " cont se asociază prin e-mail"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " conturi se asociază prin e-mail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de conturi se asociază prin e-mail"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați încă "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " cont"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați încă "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " conturi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Afișați încă "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de conturi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Nu s-au putut încărca mai multe conturi. Încercați din nou."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Toate conturile se vor putea conecta în continuare după această modificare."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administrator"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Asocierea prin e-mail este dezactivată"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Fără e-mail"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Această acțiune nu deconectează pe nimeni. Persoanele deja conectate rămân conectate, cheile lor API funcționează în continuare și pot aproba în continuare dispozitive noi. Pentru a deconecta pe cineva, încheiați-i sesiunile din pagina sa din "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Utilizatori"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Dezactivați conectarea cu parolă?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Vedeți toate conturile în Utilizatori"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -86578,6 +86947,28 @@
     {
       "type": 0,
       "value": "Nu s-a putut modifica furnizorul "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Conectarea cu parolă este dezactivată, deci toți utilizatorii, cu excepția administratorilor cu acces de urgență, se conectează prin furnizorul "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Mai întâi reactivați conectarea cu parolă, apoi dezactivați furnizorul "
     },
     {
       "type": 1,
@@ -88658,7 +89049,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tendințe de vizionare, titluri populare, conturi, dispozitive și lățime de bandă."
+      "value": "Streamuri în direct, tendințe de vizionare, titluri populare, conturi, dispozitive și lățime de bandă."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -110935,6 +111326,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Ascunderea titlurilor vizionate"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Fiecare profil vede această colecție fără titlurile pe care le-a vizionat, pe pagina colecției, în rândurile ei și în numărul de titluri. Nu se elimină nimic. O colecție inteligentă cu o limită de titluri își alege mai întâi titlurile, așa că poate afișa mai puține."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -132568,6 +132971,16 @@
     {
       "type": 0,
       "value": "Data ultimei difuzări"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Blocați câmpul "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

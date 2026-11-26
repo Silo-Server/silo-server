@@ -43,7 +43,7 @@ func TestAttachmentServesActualFontAndRejectsWrongRoute(t *testing.T) {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("fixture: %v %s", err, output)
 	}
-	bundle, err := playback.ExtractAttachedSubtitleFonts(t.Context(), mediaPath, ffmpeg)
+	bundle, err := playback.ExtractAttachedSubtitleFonts(t.Context(), mediaPath, ffmpeg, 0, nil)
 	if err != nil || len(bundle) != 2 || !bytes.Equal(bundle[0].Data, font) || !bytes.Equal(bundle[1].Data, secondFont) || bundle[0].StreamIndex != 2 || bundle[1].StreamIndex != 3 {
 		t.Fatalf("real bundle framing: %d fonts, %v", len(bundle), err)
 	}

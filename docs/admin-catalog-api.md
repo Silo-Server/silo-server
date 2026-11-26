@@ -202,6 +202,13 @@ storage object. Source bytes are not frozen at submission. Local paths must be
 available on the worker that claims the job; remote content may change between
 submission and execution.
 
+An import job names its source in `source_label`: the remote URL, the local
+file name, the artifact key's file name, or the English text `Export job <id>`.
+An import queued with `export_job_id` also returns that ID as
+`source_export_job_id`; clients that show the source should build their own
+label from it, since `source_label` is not translated. Imports queued before the
+server recorded that ID have only `source_label`.
+
 The publish operation requires a completed export artifact. It saves a signed URL
 with a seven-day signature lifetime and returns `job_id`, `url`, and `expires_at`.
 It does not change the storage ACL. Repeating it returns the saved URL and original
@@ -580,7 +587,8 @@ Each file reports `state`, `servable`, and `failures`, with optional
 `last_error`, `generated_at`, `thumbnail_count`, `thumbnail_width`, `interval_ms`,
 and `sheet_bytes`. `state` is `off` for a disabled library, a library with an
 unsupported type, or one with previews turned off; `unusable` for an ineligible
-file or a permanent sampling failure; otherwise it reflects `pending`,
+file or one whose sampling failed on the file's data several times in a
+row; otherwise it reflects `pending`,
 `running`, or `ready`. An eligible file with
 no queue row yet reports `pending`. `servable` independently reports whether
 the current store has a published revision matching the file: previous sheets

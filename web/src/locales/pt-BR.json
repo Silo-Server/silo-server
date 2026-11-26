@@ -365,6 +365,30 @@
       "value": "Este valor está fora do intervalo."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Inclua pelo menos um caractere especial, como ! ou #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Inclua pelo menos uma letra maiúscula."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Esta senha é longa demais."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Esta senha é curta demais."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Sua sessão expirou. Entre novamente."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Enquanto o login com senha estiver desativado, um provedor de login que as pessoas possam usar precisa continuar ativado. O OpenID Connect também precisa da URL pública do servidor."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8218,6 +8248,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Cartões"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Layout"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabela"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -55250,7 +55298,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tendências de exibição, títulos populares, atividade da casa, reprodução por dispositivo e largura de banda."
+      "value": "Transmissões ao vivo, tendências de exibição, títulos populares, atividade da casa, reprodução por dispositivo e largura de banda."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -74960,7 +75008,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Verificar se o roteador oferece suporte a UPnP, NAT-PMP ou PCP."
+      "value": "Solicitar ao roteador um mapeamento de porta UPnP, NAT-PMP ou PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -74969,16 +75017,40 @@
       "value": "Mapeamento de portas"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Intervalo: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " a "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "As verificações de prontidão não iniciam a reprodução direta."
+      "value": "Ativar esta opção inicia o mecanismo de conexão direta. Ele abre uma porta UDP e, quando Mapeamento de portas está ativado, solicita ao roteador um mapeamento de porta. Executar verificação apenas lê o estado do host."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Desativado pelo administrador"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Limitado ao intervalo permitido"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -74990,7 +75062,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Não foi possível iniciar o mecanismo de conexão direta"
+      "value": "O mecanismo de conexão direta parou ou não pôde ser iniciado"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -75021,6 +75093,12 @@
     {
       "type": 0,
       "value": "Valor inválido; usando desativado"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Valor inválido; usando o padrão"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -86382,6 +86460,20 @@
       "value": "Ative um provedor de login primeiro. Com o login com senha desativado e nenhum provedor ativado, só administradores de emergência poderiam entrar."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Defina primeiro a URL pública do servidor. Sem ela, "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " não consegue fazer o login de ninguém; assim, com o login com senha desativado, só administradores de emergência poderiam entrar."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -86472,6 +86564,267 @@
       "value": "Permitir que usuários criem chaves de API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Desativar login com senha"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Apenas administradores de emergência entrarão com senha. Todos os demais entram com "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " cria contas no primeiro login; por isso, se uma dessas pessoas entrar com ele antes que você a vincule, ela receberá uma conta nova e separada."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Vincule cada uma a uma conta de "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " pela página dela em Usuários."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " conta não pode entrar até que um administrador a vincule"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de contas não podem entrar até que um administrador as vincule"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " contas não podem entrar até que um administrador as vincule"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível verificar quais contas isso afeta. Você ainda pode desativá-lo."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Verificando quem entra com senha"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Quando "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " confirmar um desses e-mails no login, o Silo conectará essa pessoa à conta dela."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " conta se conecta por e-mail"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de contas se conectam por e-mail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " contas se conectam por e-mail"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrar mais "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrar mais "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrar mais "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível carregar mais contas. Tente novamente."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Todas as contas ainda poderão entrar depois disso."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administrador"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Correspondência por e-mail desativada"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Sem e-mail"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Isso não desconecta ninguém. Quem já entrou continua conectado, as chaves de API continuam funcionando e ainda é possível aprovar novos dispositivos. Para desconectar alguém, encerre as sessões da pessoa pela página dela em "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Usuários"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Desativar o login com senha?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Ver todas as contas em Usuários"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -86506,6 +86859,28 @@
     {
       "type": 0,
       "value": "Não foi possível alterar "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "O login com senha está desativado, então todos, exceto os administradores de emergência, entram com "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Reative o login com senha primeiro e depois desative "
     },
     {
       "type": 1,
@@ -88566,7 +88941,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tendências de exibição, títulos populares, contas, dispositivos e largura de banda."
+      "value": "Transmissões ao vivo, tendências de exibição, títulos populares, contas, dispositivos e largura de banda."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -110647,6 +111022,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Ocultar títulos assistidos"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Cada perfil vê esta coleção sem os títulos que já assistiu, na página, nas fileiras e na contagem. Nada é removido. Uma coleção inteligente com limite de títulos escolhe os títulos primeiro, então pode mostrar menos."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
@@ -132102,6 +132489,16 @@
     {
       "type": 0,
       "value": "Data da última exibição"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Bloquear "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

@@ -242,9 +242,12 @@ func queryAdminInsightsActivity(ctx context.Context, pool *pgxpool.Pool, q Admin
 			OldestRouteFactsAt: oldestRoute, OldestMetricAt: oldestMetric,
 		},
 		Buckets: make([]AdminInsightsActivityBucket, 0), Heatmap: make([]AdminInsightsHeatmapCell, 0),
-		PeakStreams: make([]AdminInsightsPeakStreamsPoint, 0),
+		PeakStreams: make([]AdminInsightsPeakStreamsPoint, 0), EndReasons: make([]AdminInsightsLabeledCount, 0),
 	}
 	if err := queryInsightsActivityPlays(ctx, tx, win, newInsightsPlaysScope(win, q), out); err != nil {
+		return nil, err
+	}
+	if err := queryInsightsEndReasons(ctx, tx, win, q, out); err != nil {
 		return nil, err
 	}
 	if err := queryInsightsActivityPeakStreams(ctx, tx, win, dbNow, out); err != nil {
@@ -258,8 +261,8 @@ func queryAdminInsightsActivity(ctx context.Context, pool *pgxpool.Pool, q Admin
 
 // insightsActivityPlaysSQL is the statement behind queryInsightsActivityPlays:
 // the summary, the time buckets and the heatmap over one materialized pass of
-// the viewing grouping. The buckets and heatmap hash-aggregate; only the
-// summary row needs the distinct account and profile counts, which sort.
+// the viewing grouping. Every aggregate hashes: the distinct account and
+// profile counts come from a pre-grouped set of who played in each bucket.
 func insightsActivityPlaysSQL(win resolvedInsightsWindow, scope insightsPlaysScope) (string, []any) {
 	var args []any
 	with, counted := scope.viewingRowsSQL(&args)
@@ -289,13 +292,26 @@ func insightsActivityPlaysSQL(win resolvedInsightsWindow, scope insightsPlaysSco
 				(EXTRACT(ISODOW FROM (vr.started_at AT TIME ZONE $%[3]d))::int - 1) AS dow,
 				EXTRACT(HOUR FROM (vr.started_at AT TIME ZONE $%[3]d))::int AS hour
 			FROM vr WHERE %[4]s
+		),
+		-- Distinct accounts and profiles come from this small set of who
+		-- played in each bucket, so the aggregates over counted hash rather
+		-- than sort every session for COUNT(DISTINCT).
+		people AS MATERIALIZED (
+			SELECT local_bucket, user_id, profile_id FROM counted GROUP BY 1, 2, 3
+		),
+		bucket_people AS (
+			SELECT local_bucket, COUNT(DISTINCT user_id)::bigint AS accounts, COUNT(*)::bigint AS profiles
+			FROM people GROUP BY local_bucket
 		)
 		SELECT 1, 3, NULL::timestamptz, '', 0, 0, %[5]s,
-			COUNT(DISTINCT user_id)::bigint, COUNT(DISTINCT (user_id, profile_id))::bigint
+			(SELECT COUNT(DISTINCT user_id) FROM people)::bigint,
+			(SELECT COUNT(*) FROM (SELECT DISTINCT user_id, profile_id FROM people) p)::bigint
 		FROM counted
 		UNION ALL
-		SELECT 0, 3, local_bucket AT TIME ZONE $%[3]d, to_char(local_bucket, 'YYYY-MM-DD'), 0, 0, %[5]s, 0::bigint, 0::bigint
-		FROM counted GROUP BY local_bucket
+		SELECT 0, 3, local_bucket AT TIME ZONE $%[3]d, to_char(local_bucket, 'YYYY-MM-DD'), 0, 0, %[5]s,
+			bp.accounts, bp.profiles
+		FROM counted JOIN bucket_people bp USING (local_bucket)
+		GROUP BY local_bucket, bp.accounts, bp.profiles
 		UNION ALL
 		SELECT 1, 0, NULL::timestamptz, '', dow, hour, %[5]s, 0::bigint, 0::bigint
 		FROM counted GROUP BY dow, hour
@@ -329,6 +345,7 @@ func queryInsightsActivityPlays(ctx context.Context, tx pgx.Tx, win resolvedInsi
 			out.Buckets = append(out.Buckets, AdminInsightsActivityBucket{
 				BucketStart: bucketStart.UTC(), LabelDate: label, Plays: plays, WatchSeconds: watch,
 				Direct: direct, Remux: remux, Transcode: transcode, Movies: movies, Episodes: episodes, OtherMedia: other,
+				ActiveAccounts: accounts, ActiveProfiles: profiles,
 			})
 		case gCell == 0:
 			out.Heatmap = append(out.Heatmap, AdminInsightsHeatmapCell{DayOfWeek: dow, Hour: hour, Plays: plays, WatchSeconds: watch})
@@ -343,6 +360,23 @@ func queryInsightsActivityPlays(ctx context.Context, tx pgx.Tx, win resolvedInsi
 		}
 	}
 	return rows.Err()
+}
+
+// queryInsightsEndReasons counts the window's sessions by end reason. It reads
+// sessions, not plays: every session ends on its own.
+func queryInsightsEndReasons(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, q AdminInsightsWindowQuery, out *AdminInsightsActivity) error {
+	whereSQL, whereArgs := buildInsightsHistoryWhere(win, q.LibraryID, q.UserID, q.ProfileID)
+	counts, err := queryLabeledCountMap(ctx, tx, `
+		SELECT COALESCE(NULLIF(LOWER(BTRIM(h.end_reason)), ''), '`+insightsUnknownKey+`'), COUNT(*)::bigint
+		FROM admin_playback_history h `+insightsLibraryJoinSQL(q.LibraryID)+`
+		WHERE `+whereSQL+`
+		GROUP BY 1
+	`, whereArgs, nil)
+	if err != nil {
+		return fmt.Errorf("querying insights end reasons: %w", err)
+	}
+	out.EndReasons = counts
+	return nil
 }
 
 func queryInsightsActivityPeakStreams(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, dbNow time.Time, out *AdminInsightsActivity) error {

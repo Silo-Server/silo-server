@@ -115,5 +115,91 @@
       "sessions": 3
     }
   ],
-  "top_transcoders": []
+  "top_transcoders": [],
+  "bucket_unit": "day",
+  "client_versions": [
+    {
+      "client_name": "Silo Apple",
+      "device_platform": "tvOS",
+      "client_version": "1.4.2",
+      "is_jellyfin_client": false,
+      "sessions": 18,
+      "last_seen_at": "2026-01-02T02:49:05.678Z"
+    }
+  ],
+  "protocol_buckets": [
+    {
+      "bucket_start": "2026-01-01T03:04:05.678Z",
+      "label_date": "2026-01-01",
+      "native_sessions": 9,
+      "jellyfin_sessions": 3
+    }
+  ],
+  "subtitles": {
+    "sessions": 44,
+    "subtitled_sessions": 12,
+    "forced_sessions": 2,
+    "hearing_impaired_sessions": 1,
+    "languages": [
+      {
+        "key": "en",
+        "sessions": 9
+      },
+      {
+        "key": "es",
+        "sessions": 3
+      }
+    ],
+    "deliveries": [
+      {
+        "key": "embedded",
+        "sessions": 8
+      },
+      {
+        "key": "burn_in",
+        "sessions": 2
+      },
+      {
+        "key": "sidecar",
+        "sessions": 2
+      }
+    ]
+  },
+  "audio": {
+    "sessions": 44,
+    "languages": [
+      {
+        "key": "en",
+        "sessions": 38
+      },
+      {
+        "key": "ja",
+        "sessions": 6
+      }
+    ],
+    "decisions": [
+      {
+        "key": "direct",
+        "sessions": 34
+      },
+      {
+        "key": "transcode",
+        "sessions": 6
+      },
+      {
+        "key": "remux",
+        "sessions": 4
+      }
+    ],
+    "delivered_channels": [
+      {
+        "key": "surround",
+        "sessions": 24
+      },
+      {
+        "key": "stereo",
+        "sessions": 20
+      }
+    ]
+  }
 }

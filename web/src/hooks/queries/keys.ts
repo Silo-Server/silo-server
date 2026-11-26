@@ -445,8 +445,6 @@ export const adminKeys = {
   dashboardTimeseries: (hours: number) => ["admin", "dashboard", "timeseries", hours] as const,
   playbackActivityRoot: () => ["admin", "dashboard", "playback-activity"] as const,
   playbackActivity: (hours: number) => ["admin", "dashboard", "playback-activity", hours] as const,
-  topActivityRoot: () => ["admin", "dashboard", "top-activity"] as const,
-  topActivity: (days: number) => ["admin", "dashboard", "top-activity", days] as const,
   downloadsStatsRoot: () => ["admin", "dashboard", "downloads-stats"] as const,
   downloadsStats: (limit: number) => ["admin", "dashboard", "downloads-stats", limit] as const,
   apiClientsRoot: () => ["admin", "dashboard", "api-clients"] as const,
@@ -521,6 +519,8 @@ export const adminKeys = {
     ["admin", "insights", "bandwidth", params] as const,
   insightsTitles: (params: Record<string, unknown>) =>
     ["admin", "insights", "titles", params] as const,
+  insightsLibrary: (params: Record<string, unknown>) =>
+    ["admin", "insights", "library", params] as const,
   insightsTitle: (contentId: string, params: Record<string, unknown>) =>
     ["admin", "insights", "title", contentId, params] as const,
   userIPs: (userId: number, days?: number) => ["admin", "users", userId, "ips", days] as const,

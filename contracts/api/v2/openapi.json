@@ -454,7 +454,7 @@
             "type": "integer"
           },
           "minimum_password_length": {
-            "description": "Fewest characters a new password may have",
+            "description": "Fewest characters a new password may have. getPasswordPolicy describes the rest of the password policy",
             "examples": [
               8
             ],
@@ -12395,6 +12395,13 @@
           "coverage": {
             "$ref": "#/components/schemas/AdminInsightsCoverage"
           },
+          "end_reasons": {
+            "description": "Sessions that started in the window by end reason (stopped, terminated, expired, aborted, replaced); unknown covers rows recorded before end reasons were",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsLabeledCount"
+            },
+            "type": "array"
+          },
           "from": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -12437,13 +12444,24 @@
           "summary",
           "buckets",
           "heatmap",
-          "peak_streams"
+          "peak_streams",
+          "end_reasons"
         ],
         "type": "object"
       },
       "AdminInsightsActivityBucket": {
         "additionalProperties": false,
         "properties": {
+          "active_accounts": {
+            "description": "Distinct accounts with a session that started in the bucket",
+            "format": "int64",
+            "type": "integer"
+          },
+          "active_profiles": {
+            "description": "Distinct household profiles with a session that started in the bucket",
+            "format": "int64",
+            "type": "integer"
+          },
           "bucket_start": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -12499,7 +12517,9 @@
           "transcode",
           "movies",
           "episodes",
-          "other_media"
+          "other_media",
+          "active_accounts",
+          "active_profiles"
         ],
         "type": "object"
       },
@@ -12618,6 +12638,44 @@
           "reason",
           "sessions",
           "share_of_adapted"
+        ],
+        "type": "object"
+      },
+      "AdminInsightsAudioUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "decisions": {
+            "description": "Sessions by audio handling: direct, remux (copied into a new container) or transcode",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsLabeledCount"
+            },
+            "type": "array"
+          },
+          "delivered_channels": {
+            "description": "Sessions by delivered channel layout: mono, stereo, surround or unknown",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsLabeledCount"
+            },
+            "type": "array"
+          },
+          "languages": {
+            "description": "Sessions by the played audio track's language",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsLabeledCount"
+            },
+            "type": "array"
+          },
+          "sessions": {
+            "description": "Sessions with route facts, the ones that record their audio track",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sessions",
+          "languages",
+          "decisions",
+          "delivered_channels"
         ],
         "type": "object"
       },
@@ -12842,6 +12900,14 @@
           "available": {
             "type": "boolean"
           },
+          "breakdowns": {
+            "description": "Activity carries per-bucket active accounts and profiles and end_reasons; Titles carries least_finished; Devices carries client_versions, protocol_buckets, subtitles and audio; People carries top_profiles",
+            "type": "boolean"
+          },
+          "library": {
+            "description": "The Library read (getAdminInsightsLibrary) is served",
+            "type": "boolean"
+          },
           "node_egress_daily": {
             "description": "Long-term per-node daily egress archive survives past the 31-day minute-sample window",
             "type": "boolean"
@@ -12874,6 +12940,8 @@
           "node_egress_daily",
           "titles",
           "profile_filter",
+          "library",
+          "breakdowns",
           "revision",
           "state",
           "allowed"
@@ -12969,6 +13037,46 @@
         ],
         "type": "object"
       },
+      "AdminInsightsClientVersionRow": {
+        "additionalProperties": false,
+        "properties": {
+          "client_name": {
+            "type": "string"
+          },
+          "client_version": {
+            "type": "string"
+          },
+          "device_platform": {
+            "type": "string"
+          },
+          "is_jellyfin_client": {
+            "type": "boolean"
+          },
+          "last_seen_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision, or null",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sessions": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "client_name",
+          "device_platform",
+          "client_version",
+          "is_jellyfin_client",
+          "sessions",
+          "last_seen_at"
+        ],
+        "type": "object"
+      },
       "AdminInsightsCoverage": {
         "additionalProperties": false,
         "properties": {
@@ -13048,6 +13156,25 @@
             },
             "type": "array"
           },
+          "audio": {
+            "$ref": "#/components/schemas/AdminInsightsAudioUsage"
+          },
+          "bucket_unit": {
+            "description": "Bucket size of protocol_buckets",
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ],
+            "type": "string"
+          },
+          "client_versions": {
+            "description": "Up to 50 reported client versions with the most sessions; sessions without a version are left out",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsClientVersionRow"
+            },
+            "type": "array"
+          },
           "codecs": {
             "items": {
               "type": "string"
@@ -13084,6 +13211,13 @@
             },
             "type": "array"
           },
+          "protocol_buckets": {
+            "description": "Sessions per bucket from Silo's own clients and from Jellyfin-protocol clients",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsProtocolBucket"
+            },
+            "type": "array"
+          },
           "resolution_changes": {
             "description": "Sessions delivered at a lower resolution class than their source, by source and delivered class",
             "items": {
@@ -13103,6 +13237,9 @@
               "$ref": "#/components/schemas/AdminInsightsLabeledCount"
             },
             "type": "array"
+          },
+          "subtitles": {
+            "$ref": "#/components/schemas/AdminInsightsSubtitleUsage"
           },
           "summary": {
             "$ref": "#/components/schemas/AdminInsightsDevicesSummary"
@@ -13146,7 +13283,12 @@
           "source_resolutions",
           "delivered_resolutions",
           "resolution_changes",
-          "top_transcoders"
+          "top_transcoders",
+          "bucket_unit",
+          "client_versions",
+          "protocol_buckets",
+          "subtitles",
+          "audio"
         ],
         "type": "object"
       },
@@ -13349,6 +13491,166 @@
         ],
         "type": "object"
       },
+      "AdminInsightsLabeledPlays": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "plays": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "titles": {
+            "description": "Distinct played titles behind the plays",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "plays",
+          "titles"
+        ],
+        "type": "object"
+      },
+      "AdminInsightsLibrary": {
+        "additionalProperties": false,
+        "properties": {
+          "content_ratings": {
+            "description": "Up to 15 content ratings by plays",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsLabeledPlays"
+            },
+            "type": "array"
+          },
+          "decades": {
+            "description": "Plays by release decade (key is the decade's first year), oldest first, unknown last",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsLabeledPlays"
+            },
+            "type": "array"
+          },
+          "from": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "genres": {
+            "description": "Up to 20 genres by plays; a title counts in each of its genres",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsLabeledPlays"
+            },
+            "type": "array"
+          },
+          "libraries": {
+            "description": "Libraries with movies or series, most titles first",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsLibraryCoverage"
+            },
+            "type": "array"
+          },
+          "oldest_history_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision, or null",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recently_added_unplayed": {
+            "description": "Up to 20 titles added in the window with no play yet, newest first",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsUnplayedTitle"
+            },
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/AdminInsightsLibrarySummary"
+          },
+          "time_to_first_play": {
+            "description": "Titles added in the window by how long they waited for a first play: day, week, month, later or not_yet; sessions holds the title count",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsLabeledCount"
+            },
+            "type": "array"
+          },
+          "to": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "tz": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "tz",
+          "oldest_history_at",
+          "summary",
+          "libraries",
+          "genres",
+          "decades",
+          "content_ratings",
+          "time_to_first_play",
+          "recently_added_unplayed"
+        ],
+        "type": "object"
+      },
+      "AdminInsightsLibraryCoverage": {
+        "additionalProperties": false,
+        "properties": {
+          "added_titles": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "library_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "never_started": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "played_share": {
+            "format": "double",
+            "type": "number"
+          },
+          "played_titles": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "titles": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "library_id",
+          "name",
+          "titles",
+          "played_titles",
+          "played_share",
+          "never_started",
+          "added_titles"
+        ],
+        "type": "object"
+      },
       "AdminInsightsLibraryRow": {
         "additionalProperties": false,
         "properties": {
@@ -13382,6 +13684,58 @@
           "plays",
           "viewers",
           "watch_seconds"
+        ],
+        "type": "object"
+      },
+      "AdminInsightsLibrarySummary": {
+        "additionalProperties": false,
+        "properties": {
+          "added_played": {
+            "description": "Titles added in the window that have a play since, up to now",
+            "format": "int64",
+            "type": "integer"
+          },
+          "added_titles": {
+            "description": "Titles first seen in the window",
+            "format": "int64",
+            "type": "integer"
+          },
+          "median_days_to_first_play": {
+            "description": "Median days from being added to the first play, over titles added in the window that have one",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "never_started": {
+            "description": "Titles with no playback session at all, up to now",
+            "format": "int64",
+            "type": "integer"
+          },
+          "played_share": {
+            "format": "double",
+            "type": "number"
+          },
+          "played_titles": {
+            "description": "Titles with a play in the window; a series counts when any episode has one",
+            "format": "int64",
+            "type": "integer"
+          },
+          "titles": {
+            "description": "Distinct movies and series in scope; a title in two libraries counts once",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "titles",
+          "played_titles",
+          "played_share",
+          "never_started",
+          "added_titles",
+          "added_played",
+          "median_days_to_first_play"
         ],
         "type": "object"
       },
@@ -13483,6 +13837,13 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "top_profiles": {
+            "description": "Up to 10 household profiles across all accounts with the most plays, whatever the sort, search or page",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsTopProfile"
+            },
+            "type": "array"
+          },
           "total_accounts": {
             "format": "int64",
             "type": "integer"
@@ -13505,7 +13866,8 @@
           "live_accounts",
           "total_watch_seconds",
           "coverage",
-          "accounts"
+          "accounts",
+          "top_profiles"
         ],
         "type": "object"
       },
@@ -13743,6 +14105,38 @@
         ],
         "type": "object"
       },
+      "AdminInsightsProtocolBucket": {
+        "additionalProperties": false,
+        "properties": {
+          "bucket_start": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "jellyfin_sessions": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "label_date": {
+            "description": "Local bucket start date (YYYY-MM-DD in requested tz)",
+            "format": "date",
+            "type": "string"
+          },
+          "native_sessions": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bucket_start",
+          "label_date",
+          "native_sessions",
+          "jellyfin_sessions"
+        ],
+        "type": "object"
+      },
       "AdminInsightsResolutionChange": {
         "additionalProperties": false,
         "properties": {
@@ -13763,6 +14157,51 @@
           "from",
           "to",
           "sessions"
+        ],
+        "type": "object"
+      },
+      "AdminInsightsSubtitleUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "deliveries": {
+            "description": "Subtitled sessions by delivery: embedded, sidecar, hls_rendition or burn_in",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsLabeledCount"
+            },
+            "type": "array"
+          },
+          "forced_sessions": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "hearing_impaired_sessions": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "languages": {
+            "description": "Subtitled sessions by subtitle language (ISO 639-1 where one exists, unknown when untagged)",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsLabeledCount"
+            },
+            "type": "array"
+          },
+          "sessions": {
+            "description": "Sessions with route facts, the ones that record their subtitle",
+            "format": "int64",
+            "type": "integer"
+          },
+          "subtitled_sessions": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sessions",
+          "subtitled_sessions",
+          "forced_sessions",
+          "hearing_impaired_sessions",
+          "languages",
+          "deliveries"
         ],
         "type": "object"
       },
@@ -14111,6 +14550,13 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "least_finished": {
+            "description": "Movies and series with at least 3 plays and at least one left unfinished, lowest completion rate first, up to limit",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsTitleRow"
+            },
+            "type": "array"
+          },
           "libraries": {
             "items": {
               "$ref": "#/components/schemas/AdminInsightsLibraryRow"
@@ -14155,7 +14601,52 @@
           "sort",
           "movies",
           "shows",
-          "libraries"
+          "libraries",
+          "least_finished"
+        ],
+        "type": "object"
+      },
+      "AdminInsightsTopProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "plays": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "profile_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "profile_name": {
+            "type": "string"
+          },
+          "user_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "watch_seconds": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "user_id",
+          "username",
+          "profile_id",
+          "profile_name",
+          "plays",
+          "watch_seconds"
         ],
         "type": "object"
       },
@@ -14186,6 +14677,59 @@
           "is_jellyfin_client",
           "total_sessions",
           "transcode_sessions"
+        ],
+        "type": "object"
+      },
+      "AdminInsightsUnplayedTitle": {
+        "additionalProperties": false,
+        "properties": {
+          "added_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "content_id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "movie",
+              "series"
+            ],
+            "type": "string"
+          },
+          "library_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "library_name": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "content_id",
+          "kind",
+          "title",
+          "year",
+          "added_at",
+          "library_id",
+          "library_name"
         ],
         "type": "object"
       },
@@ -25648,7 +26192,12 @@
           "refresh_result": {
             "$ref": "#/components/schemas/LibraryRefreshJobResult"
           },
+          "source_export_job_id": {
+            "description": "The export job a catalog_import job reads from, when it was queued with export_job_id. Clients format their own label from it.",
+            "type": "string"
+          },
           "source_label": {
+            "description": "An import's source as English text: the remote URL, the file name, or \"Export job \u003cid\u003e\". Prefer source_export_job_id when present.",
             "type": "string"
           },
           "started_at": {
@@ -30561,6 +31110,11 @@
             ],
             "type": "string"
           },
+          "air_date": {
+            "description": "An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date",
+            "format": "date",
+            "type": "string"
+          },
           "authors": {
             "description": "On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author",
             "examples": [
@@ -30614,6 +31168,16 @@
             "description": "The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair",
             "format": "double",
             "type": "number"
+          },
+          "episode_labels": {
+            "description": "How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers",
+            "enum": [
+              "air_date"
+            ],
+            "examples": [
+              "air_date"
+            ],
+            "type": "string"
           },
           "episode_number": {
             "format": "int64",
@@ -31119,6 +31683,16 @@
           "episode_count": {
             "format": "int64",
             "type": "integer"
+          },
+          "episode_labels": {
+            "description": "How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers",
+            "enum": [
+              "air_date"
+            ],
+            "examples": [
+              "air_date"
+            ],
+            "type": "string"
           },
           "episode_number": {
             "format": "int64",
@@ -32332,7 +32906,7 @@
             "type": "string"
           },
           "new_password": {
-            "description": "The replacement; the capability document names the length limits",
+            "description": "The replacement; getPasswordPolicy describes the rules it must meet",
             "examples": [
               "margin fossil quench hollow"
             ],
@@ -36250,6 +36824,7 @@
           "feature": {
             "enum": [
               "direct",
+              "engine",
               "nat_mapping",
               "nat_hairpin",
               "ipv4",
@@ -36290,7 +36865,14 @@
               "no_gateway",
               "gateway_unsupported",
               "mapping_varies",
-              "not_measured"
+              "not_measured",
+              "multiple_api_replicas",
+              "replica_census_unavailable",
+              "replica_lease_pending",
+              "replica_lease_held",
+              "udp_port_invalid",
+              "udp_port_bind_failed",
+              "engine_start_failed"
             ],
             "type": "string"
           },
@@ -36372,6 +36954,12 @@
             "type": "string"
           },
           "env": {
+            "type": "string"
+          },
+          "max": {
+            "type": "string"
+          },
+          "min": {
             "type": "string"
           },
           "reason": {
@@ -39794,6 +40382,11 @@
             ],
             "type": "string"
           },
+          "air_date": {
+            "description": "An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date",
+            "format": "date",
+            "type": "string"
+          },
           "authors": {
             "description": "On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author",
             "examples": [
@@ -39847,6 +40440,16 @@
             "description": "The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair",
             "format": "double",
             "type": "number"
+          },
+          "episode_labels": {
+            "description": "How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers",
+            "enum": [
+              "air_date"
+            ],
+            "examples": [
+              "air_date"
+            ],
+            "type": "string"
           },
           "episode_number": {
             "format": "int64",
@@ -43108,7 +43711,7 @@
         "additionalProperties": false,
         "properties": {
           "created_at": {
-            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "description": "When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at",
             "examples": [
               "2026-01-02T03:04:05.678Z"
             ],
@@ -43122,7 +43725,7 @@
             "type": "boolean"
           },
           "device_id": {
-            "description": "Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing",
+            "description": "Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in",
             "examples": [
               "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
             ],
@@ -43140,21 +43743,21 @@
             ]
           },
           "device_name": {
-            "description": "Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device",
+            "description": "Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in",
             "examples": [
               "Living Room Apple TV"
             ],
             "type": "string"
           },
           "device_platform": {
-            "description": "Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none",
+            "description": "Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in",
             "examples": [
               "tvOS"
             ],
             "type": "string"
           },
           "expires_at": {
-            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "description": "When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at",
             "examples": [
               "2026-02-01T03:04:05.678Z"
             ],
@@ -43164,7 +43767,7 @@
             "type": "string"
           },
           "id": {
-            "description": "Session identifier; the value deleteSession takes",
+            "description": "Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current",
             "examples": [
               "6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"
             ],
@@ -43172,14 +43775,14 @@
             "type": "string"
           },
           "ip_address": {
-            "description": "Client address recorded at login; empty when unknown",
+            "description": "Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in",
             "examples": [
               "203.0.113.7"
             ],
             "type": "string"
           },
           "last_seen_at": {
-            "description": "Most recent authenticated request, coalesced to at most one update per minute; null until recorded",
+            "description": "Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in",
             "examples": [
               "2026-01-02T03:04:05.678Z"
             ],
@@ -43255,7 +43858,7 @@
             "description": "The caller's live session, even when it falls outside this page; null for API-key callers or another account's admin listing",
             "properties": {
               "created_at": {
-                "description": "RFC 3339 instant in UTC with millisecond precision",
+                "description": "When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at",
                 "examples": [
                   "2026-01-02T03:04:05.678Z"
                 ],
@@ -43269,7 +43872,7 @@
                 "type": "boolean"
               },
               "device_id": {
-                "description": "Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing",
+                "description": "Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in",
                 "examples": [
                   "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
                 ],
@@ -43287,21 +43890,21 @@
                 ]
               },
               "device_name": {
-                "description": "Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device",
+                "description": "Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in",
                 "examples": [
                   "Living Room Apple TV"
                 ],
                 "type": "string"
               },
               "device_platform": {
-                "description": "Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none",
+                "description": "Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in",
                 "examples": [
                   "tvOS"
                 ],
                 "type": "string"
               },
               "expires_at": {
-                "description": "RFC 3339 instant in UTC with millisecond precision",
+                "description": "When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at",
                 "examples": [
                   "2026-02-01T03:04:05.678Z"
                 ],
@@ -43311,7 +43914,7 @@
                 "type": "string"
               },
               "id": {
-                "description": "Session identifier; the value deleteSession takes",
+                "description": "Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current",
                 "examples": [
                   "6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"
                 ],
@@ -43319,14 +43922,14 @@
                 "type": "string"
               },
               "ip_address": {
-                "description": "Client address recorded at login; empty when unknown",
+                "description": "Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in",
                 "examples": [
                   "203.0.113.7"
                 ],
                 "type": "string"
               },
               "last_seen_at": {
-                "description": "Most recent authenticated request, coalesced to at most one update per minute; null until recorded",
+                "description": "Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in",
                 "examples": [
                   "2026-01-02T03:04:05.678Z"
                 ],
@@ -47643,6 +48246,48 @@
           "legacy_only_truncated",
           "mismatches",
           "mismatches_truncated"
+        ],
+        "type": "object"
+      },
+      "PasswordPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "maximum_bytes": {
+            "description": "Most UTF-8 bytes a new password may have",
+            "examples": [
+              72
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "minimum_length": {
+            "description": "Fewest characters a new password may have; never fewer than 8",
+            "examples": [
+              8
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "require_special": {
+            "description": "Whether a new password needs a punctuation mark or symbol (Unicode categories P and S); letters, digits and spaces do not count",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "require_uppercase": {
+            "description": "Whether a new password needs a capital letter (Unicode category Lu)",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "minimum_length",
+          "maximum_bytes",
+          "require_uppercase",
+          "require_special"
         ],
         "type": "object"
       },
@@ -57222,7 +57867,7 @@
             "type": "string"
           },
           "password": {
-            "description": "Account password; at least 8 characters and at most 72 UTF-8 bytes",
+            "description": "Account password; at least 8 characters and at most 72 UTF-8 bytes. The server's password policy can require more; getPasswordPolicy describes it",
             "examples": [
               "correct horse battery staple"
             ],
@@ -57467,7 +58112,7 @@
             "type": "string"
           },
           "password": {
-            "description": "Account password; at least 8 characters and at most 72 UTF-8 bytes",
+            "description": "Account password; at least 8 characters and at most 72 UTF-8 bytes. The server's password policy can require more; getPasswordPolicy describes it",
             "examples": [
               "correct horse battery staple"
             ],
@@ -58204,7 +58849,7 @@
         "additionalProperties": false,
         "properties": {
           "value": {
-            "description": "The subtitle appearance as a JSON document; the server validates only that it is JSON",
+            "description": "The subtitle appearance as a JSON document; it must satisfy the settings contract's subtitle-appearance schema",
             "examples": [
               "{\"fontSize\":\"xxlarge\"}"
             ],
@@ -60999,6 +61644,11 @@
       "WatchDetail": {
         "additionalProperties": false,
         "properties": {
+          "air_date": {
+            "description": "An episode's air date, YYYY-MM-DD; sent when episode_labels is air_date",
+            "format": "date",
+            "type": "string"
+          },
           "backdrop_thumbhash": {
             "type": "string"
           },
@@ -61042,6 +61692,16 @@
           },
           "effective_version_resolution": {
             "description": "The version resolution the profile last played",
+            "type": "string"
+          },
+          "episode_labels": {
+            "description": "The series' episode labels, as on CatalogItem: air_date means show air_date where the season and episode numbers would go; absent or unknown means show the numbers",
+            "enum": [
+              "air_date"
+            ],
+            "examples": [
+              "air_date"
+            ],
             "type": "string"
           },
           "episode_number": {
@@ -63154,6 +63814,11 @@
             ],
             "type": "string"
           },
+          "air_date": {
+            "description": "An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date",
+            "format": "date",
+            "type": "string"
+          },
           "authors": {
             "description": "On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author",
             "examples": [
@@ -63214,6 +63879,16 @@
             "description": "The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair",
             "format": "double",
             "type": "number"
+          },
+          "episode_labels": {
+            "description": "How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers",
+            "enum": [
+              "air_date"
+            ],
+            "examples": [
+              "air_date"
+            ],
+            "type": "string"
           },
           "episode_number": {
             "format": "int64",
@@ -63593,6 +64268,11 @@
             ],
             "type": "string"
           },
+          "air_date": {
+            "description": "An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date",
+            "format": "date",
+            "type": "string"
+          },
           "authors": {
             "description": "On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author",
             "examples": [
@@ -63646,6 +64326,16 @@
             "description": "The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair",
             "format": "double",
             "type": "number"
+          },
+          "episode_labels": {
+            "description": "How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers",
+            "enum": [
+              "air_date"
+            ],
+            "examples": [
+              "air_date"
+            ],
+            "type": "string"
           },
           "episode_number": {
             "format": "int64",
@@ -96914,6 +97604,251 @@
           }
         ],
         "summary": "Read client x source video codec direct-play matrix, adaptation reasons, hardware acceleration, subtitle burn-in, and HDR tone-mapping diagnostics.",
+        "tags": [
+          "admin-observability"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/insights/library": {
+      "get": {
+        "operationId": "getAdminInsightsLibrary",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Preset time window or custom",
+            "explode": false,
+            "in": "query",
+            "name": "range",
+            "schema": {
+              "default": "30d",
+              "description": "Preset time window or custom",
+              "enum": [
+                "7d",
+                "30d",
+                "90d",
+                "1y",
+                "all",
+                "custom"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Inclusive local start date (YYYY-MM-DD in tz), required when range=custom",
+            "explode": false,
+            "in": "query",
+            "name": "from_date",
+            "schema": {
+              "description": "Inclusive local start date (YYYY-MM-DD in tz), required when range=custom",
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Inclusive local end date (YYYY-MM-DD in tz), required when range=custom",
+            "explode": false,
+            "in": "query",
+            "name": "to_date",
+            "schema": {
+              "description": "Inclusive local end date (YYYY-MM-DD in tz), required when range=custom",
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "IANA timezone identifier for day/week/month bucketing and heatmap alignment",
+            "explode": false,
+            "in": "query",
+            "name": "tz",
+            "schema": {
+              "default": "UTC",
+              "description": "IANA timezone identifier for day/week/month bucketing and heatmap alignment",
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Restrict playback analytics to media belonging to this library",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "Restrict playback analytics to media belonging to this library",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Restrict playback analytics to this login account",
+            "explode": false,
+            "in": "query",
+            "name": "user_id",
+            "schema": {
+              "description": "Restrict playback analytics to this login account",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Restrict playback analytics to this household profile of user_id; requires user_id because profile ids repeat across accounts",
+            "explode": false,
+            "in": "query",
+            "name": "profile_id",
+            "schema": {
+              "description": "Restrict playback analytics to this household profile of user_id; requires user_id because profile ids repeat across accounts",
+              "maxLength": 1024,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Invalidate cached insights aggregates before reading; ignored for scoped API keys",
+            "explode": false,
+            "in": "query",
+            "name": "refresh",
+            "schema": {
+              "default": false,
+              "description": "Invalidate cached insights aggregates before reading; ignored for scoped API keys",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminInsightsLibrary"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read how much of each movie and TV library was played, titles never started, plays by genre, decade and content rating, and how soon new titles get their first play.",
         "tags": [
           "admin-observability"
         ],
@@ -158932,6 +159867,79 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/auth/password-policy": {
+      "get": {
+        "operationId": "getPasswordPolicy",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordPolicy"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Describe the rules a new password must meet.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "public",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/auth/plugin-launch": {
       "post": {
         "operationId": "createPluginLaunch",
@@ -159381,6 +160389,7 @@
     },
     "/api/v2/auth/sessions": {
       "get": {
+        "description": "A session opened by device sign-in (a code a signed-in person approved, Jellyfin Quick Connect, or a remote-playback handoff), and a session from before this rule was recorded whose X-Silo-Device-Platform was tvOS, android-tv or roku, sees only itself in full. It still gets every live session of the account, but another session's item carries only its id and current: device_name and ip_address are empty, device_id and device_platform are absent, last_seen_at is null, and created_at and expires_at repeat the caller's own. For such a caller the page is ordered by id, not newest first, and a cursor from the other kind of caller is invalid_cursor.",
         "operationId": "listSessions",
         "parameters": [
           {
@@ -159669,6 +160678,7 @@
     },
     "/api/v2/auth/sessions/{id}": {
       "delete": {
+        "description": "A session opened by device sign-in (see listSessions) may revoke only itself: another session of the account is 403 permission_denied, and a session of another account or an unknown id is 404 as for every caller.",
         "operationId": "deleteSession",
         "parameters": [
           {
@@ -159709,6 +160719,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {
@@ -215633,6 +216653,14 @@
             }
           },
           {
+            "description": "Opaque transport generation the plan's HLS URL carries, when the attempt listed hls_transport_marker_v1 in deliveries.hls.features, and the playlist echoes into its URIs; clients must not compose, strip or move it. When the session has a recorded current transport, a request naming a transport a replan replaced answers 404 playback_transport_superseded. A session rebuilt from its recipe (after a server restart, or on a server that did not hold it) has none until its next replan and serves the request as if the marker were absent. Absent, the request is served by the session's current transport.",
+            "in": "query",
+            "name": "silo_transport",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Set by the multivariant playlist of a plan with subtitle.hls_rendition: video selects the media playlist, subtitles the WebVTT subtitle playlist. Absent, such a plan's manifest is the multivariant playlist.",
             "in": "query",
             "name": "silo_rendition",
@@ -215845,6 +216873,14 @@
             }
           },
           {
+            "description": "Opaque transport generation the plan's HLS URL carries, when the attempt listed hls_transport_marker_v1 in deliveries.hls.features, and the playlist echoes into its URIs; clients must not compose, strip or move it. When the session has a recorded current transport, a request naming a transport a replan replaced answers 404 playback_transport_superseded. A session rebuilt from its recipe (after a server restart, or on a server that did not hold it) has none until its next replan and serves the request as if the marker were absent. Absent, the request is served by the session's current transport.",
+            "in": "query",
+            "name": "silo_transport",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Set by the multivariant playlist of a plan with subtitle.hls_rendition: video selects the media playlist, subtitles the WebVTT subtitle playlist. Absent, such a plan's manifest is the multivariant playlist.",
             "in": "query",
             "name": "silo_rendition",
@@ -216045,6 +217081,14 @@
             "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media.",
             "in": "query",
             "name": "st",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque transport generation the plan's HLS URL carries, when the attempt listed hls_transport_marker_v1 in deliveries.hls.features, and the playlist echoes into its URIs; clients must not compose, strip or move it. When the session has a recorded current transport, a request naming a transport a replan replaced answers 404 playback_transport_superseded. A session rebuilt from its recipe (after a server restart, or on a server that did not hold it) has none until its next replan and serves the request as if the marker were absent. Absent, the request is served by the session's current transport.",
+            "in": "query",
+            "name": "silo_transport",
             "schema": {
               "type": "string"
             }
@@ -262247,6 +263291,10 @@
           },
           "speech": {
             "$ref": "#/x-silo-worker-protocols/schemas/mediasample_SpeechLevels"
+          },
+          "video_frames": {
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [

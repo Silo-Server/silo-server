@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/danielgtaylor/huma/v2"
 	chimw "github.com/go-chi/chi/v5/middleware"
 )
@@ -126,12 +127,15 @@ var (
 	// stopped after it stayed paused too long, for a client that advertised
 	// paused_timeout_v1; it leaves the player with its own notice.
 	TypePlaybackSessionPausedTimeout = ProblemType{handlers.PlaybackCodeSessionPausedTimeout, http.StatusGone, "Playback session paused too long"}
-	TypePlaybackProgressConflict     = ProblemType{handlers.PlaybackCodeProgressConflict, http.StatusConflict, "Playback progress conflict"}
-	TypeDeviceLoginExpired           = ProblemType{"device_login_expired", http.StatusGone, "Device login expired"}
-	TypeUnsupportedSource            = ProblemType{codeUnsupportedSource, http.StatusGone, "Unsupported source"}
-	TypeSyncResetRequired            = ProblemType{"sync_reset_required", http.StatusConflict, "Progress reset required"}
-	TypeSnapshotRequestConflict      = ProblemType{"snapshot_request_conflict", http.StatusConflict, "Snapshot request conflict"}
-	TypeProgressSnapshotTooLarge     = ProblemType{"progress_snapshot_too_large", http.StatusRequestEntityTooLarge, "Progress snapshot too large"}
+	// TypePlaybackTransportSuperseded: a media request from a playlist whose
+	// transport a replan replaced. The session lives on; play the current plan.
+	TypePlaybackTransportSuperseded = ProblemType{playback.TransportSupersededCode, http.StatusNotFound, "Playback transport superseded"}
+	TypePlaybackProgressConflict    = ProblemType{handlers.PlaybackCodeProgressConflict, http.StatusConflict, "Playback progress conflict"}
+	TypeDeviceLoginExpired          = ProblemType{"device_login_expired", http.StatusGone, "Device login expired"}
+	TypeUnsupportedSource           = ProblemType{codeUnsupportedSource, http.StatusGone, "Unsupported source"}
+	TypeSyncResetRequired           = ProblemType{"sync_reset_required", http.StatusConflict, "Progress reset required"}
+	TypeSnapshotRequestConflict     = ProblemType{"snapshot_request_conflict", http.StatusConflict, "Snapshot request conflict"}
+	TypeProgressSnapshotTooLarge    = ProblemType{"progress_snapshot_too_large", http.StatusRequestEntityTooLarge, "Progress snapshot too large"}
 
 	TypeMalformedRequest                              = ProblemType{"malformed_request", http.StatusBadRequest, "Malformed request"}
 	TypeInvalidCursor                                 = ProblemType{"invalid_cursor", http.StatusBadRequest, "Invalid cursor"}
@@ -165,7 +169,7 @@ var (
 	TypeDependencyUnavailable                         = ProblemType{"dependency_unavailable", http.StatusServiceUnavailable, "Dependency unavailable"}
 	TypeClientUpgradeRequired                         = ProblemType{"client_upgrade_required", http.StatusGone, "Client upgrade required"}
 	TypeProfileSetStale                               = ProblemType{"profile_set_stale", http.StatusConflict, "Profile set stale"}
-	catalog                                           = []ProblemType{TypeRangeNotSatisfiable, TypeDeviceLoginExpired, TypeUnsupportedSource, TypeMalformedRequest, TypeInvalidCursor, TypeAuthenticationRequired, TypeInvalidToken, TypeSessionExpired, TypePermissionDenied, TypeProfileVerificationRequired, TypePushInstallationKeyMismatch, TypeNotFound, TypeMethodNotAllowed, TypeNotAcceptable, TypeRequestTimeout, TypeConflict, TypeIdempotencyConflict, TypeJobNotCancelable, TypeCapabilityDisabled, TypeCapabilityNotConfigured, TypePreconditionFailed, TypePayloadTooLarge, TypeUnsupportedMediaType, TypeValidationFailed, TypePreconditionRequired, TypeRateLimited, TypeInternalError, TypeCapabilityUnsupported, TypeDependencyUnavailable, TypeClientUpgradeRequired, TypeSyncResetRequired, TypeSnapshotRequestConflict, TypeProgressSnapshotTooLarge, TypePlaybackInstallationChanged, TypePlaybackSessionEnded, TypePlaybackSessionPausedTimeout, TypePlaybackProgressConflict, TypePasswordChangeRequired, TypeNotPermitted, TypeAccountRequired, TypeLocalLoginDisabled, TypeProviderPasswordExpired, TypeEmailInUse, TypeIdentityLinkedElsewhere, TypeProviderAlreadyEnabled, TypeBreakGlassRequired, TypeLastSignInMethod, TypeProviderUnavailable, TypeInvalidGrant, TypeAccountDisabled, TypeLocalPasswordRequired, TypeAlreadyLinked, TypeTokenRefreshRequired, TypeNetworkIdentityRequired, TypePreparedFileExpired, TypeDeviceBindingMismatch, TypeRestoreSetChanged, TypeBackupUnauthenticated, TypeNodeDeploymentManaged, TypeUploadLimitReached, TypeChallengeInvalid, TypeSignatureInvalid, TypeOriginMismatch, TypeKeyDenied, TypeProviderSignInRequired, TypeAppGrantInvalid, TypeAppGrantExpired, TypeProfileSetStale, TypeMainProfileRequired}
+	catalog                                           = []ProblemType{TypeRangeNotSatisfiable, TypeDeviceLoginExpired, TypeUnsupportedSource, TypeMalformedRequest, TypeInvalidCursor, TypeAuthenticationRequired, TypeInvalidToken, TypeSessionExpired, TypePermissionDenied, TypeProfileVerificationRequired, TypePushInstallationKeyMismatch, TypeNotFound, TypeMethodNotAllowed, TypeNotAcceptable, TypeRequestTimeout, TypeConflict, TypeIdempotencyConflict, TypeJobNotCancelable, TypeCapabilityDisabled, TypeCapabilityNotConfigured, TypePreconditionFailed, TypePayloadTooLarge, TypeUnsupportedMediaType, TypeValidationFailed, TypePreconditionRequired, TypeRateLimited, TypeInternalError, TypeCapabilityUnsupported, TypeDependencyUnavailable, TypeClientUpgradeRequired, TypeSyncResetRequired, TypeSnapshotRequestConflict, TypeProgressSnapshotTooLarge, TypePlaybackInstallationChanged, TypePlaybackSessionEnded, TypePlaybackSessionPausedTimeout, TypePlaybackTransportSuperseded, TypePlaybackProgressConflict, TypePasswordChangeRequired, TypeNotPermitted, TypeAccountRequired, TypeLocalLoginDisabled, TypeProviderPasswordExpired, TypeEmailInUse, TypeIdentityLinkedElsewhere, TypeProviderAlreadyEnabled, TypeBreakGlassRequired, TypeLastSignInMethod, TypeProviderUnavailable, TypeInvalidGrant, TypeAccountDisabled, TypeLocalPasswordRequired, TypeAlreadyLinked, TypeTokenRefreshRequired, TypeNetworkIdentityRequired, TypePreparedFileExpired, TypeDeviceBindingMismatch, TypeRestoreSetChanged, TypeBackupUnauthenticated, TypeNodeDeploymentManaged, TypeUploadLimitReached, TypeChallengeInvalid, TypeSignatureInvalid, TypeOriginMismatch, TypeKeyDenied, TypeProviderSignInRequired, TypeAppGrantInvalid, TypeAppGrantExpired, TypeProfileSetStale, TypeMainProfileRequired}
 	defaultTypeByStatus                               = map[int]ProblemType{}
 	problemContentType                                = "application/problem+json"
 	_                               error             = (*Problem)(nil)
@@ -448,6 +452,12 @@ const (
 	codeMalformedForm    = "malformed_form"
 	// codeManagedByEnvironment refuses a change owned by an environment declaration.
 	codeManagedByEnvironment = "managed_by_environment"
+	// A new password the server's password policy refused, by the rule it
+	// broke (auth.PasswordPolicy.Check).
+	codePasswordTooShort       = "password_too_short"
+	codePasswordTooLong        = "password_too_long"
+	codePasswordNeedsUppercase = "password_needs_uppercase"
+	codePasswordNeedsSpecial   = "password_needs_special"
 
 	locationBody     = "body"
 	locationBodyFile = "body.file"

@@ -12,6 +12,7 @@ import {
 } from "./authPage.test-support";
 import InviteClaim from "./InviteClaim";
 import accepted from "../../../contracts/api/v2/fixtures/invitation_accepted.json";
+import policyFixture from "../../../contracts/api/v2/fixtures/get_password_policy_ok.json";
 const auth = vi.hoisted(() => ({ completeLogin: vi.fn() }));
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ user: null, loading: false, completeLogin: auth.completeLogin }),
@@ -77,6 +78,7 @@ beforeEach(() => {
     if (String(url).endsWith("/accept")) return submit();
     if (String(url).endsWith("/capabilities"))
       return json({ revision: "1", state: "available", default_profile: true, profileless: true });
+    if (String(url).endsWith("/auth/password-policy")) return json(policyFixture);
     return lookup();
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -260,10 +262,20 @@ it.each([
   { status: 429, type: "rate_limited", message: /Too many requests from this network/ },
   { status: 501, type: "capability_unsupported", message: /cannot create the profile required/ },
   { status: 409, type: "conflict", message: /An account already uses this email address/ },
-  { status: 422, type: "validation_failed", message: /Password must not exceed 72 bytes/ },
+  // A policy refusal: the field detail names the rule, not the summary.
+  { status: 422, type: "validation_failed", message: /Include at least one capital letter/ },
 ])("lets the invitee retry after a $status $type refusal", async ({ status, type, message }) => {
   submit = async () =>
-    problemResponse(status, type, { detail: "Password must not exceed 72 bytes." });
+    problemResponse(status, type, {
+      detail: "The request did not pass validation; see errors.",
+      errors: [
+        {
+          location: "body.password",
+          code: "invalid",
+          detail: "Include at least one capital letter.",
+        },
+      ],
+    });
   mount();
   await fill();
   send();

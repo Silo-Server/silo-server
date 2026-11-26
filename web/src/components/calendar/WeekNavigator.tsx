@@ -74,7 +74,7 @@ export default function WeekNavigator({
 
       <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
         {weekDays.map((dateStr) => {
-          const { label, day } = formatShortDay(dateStr);
+          const { label, compactLabel, day } = formatShortDay(dateStr);
           const today = isToday(dateStr);
           const hasEvents = datesWithEvents.has(dateStr);
           const isSelected = selectedDay === dateStr;
@@ -99,7 +99,10 @@ export default function WeekNavigator({
               className={`group/day focus-visible:ring-primary/50 flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-xl px-0.5 py-2 transition-all duration-150 outline-none focus-visible:ring-2 active:scale-[0.97] sm:min-h-[3.5rem] sm:gap-1 sm:px-2 sm:py-2.5 ${variant}`}
             >
               <span className="text-[0.625rem] font-medium tracking-wide uppercase sm:text-[0.6875rem]">
-                {label}
+                {/* Phone-width buttons are too narrow for long short names
+                    (pt-PT "segunda"); the button's name keeps the short one. */}
+                <span className="md:hidden">{compactLabel}</span>
+                <span className="hidden md:inline">{label}</span>
               </span>
               <span
                 className={`text-[0.875rem] font-bold tabular-nums sm:text-base ${

@@ -50,14 +50,8 @@ github.com/PuerkitoBio/goquery v1.8.0 h1:PJTF7AmFCFKk1N6V6jmKfrNH9tV5pNE6lZMkG0g
 github.com/PuerkitoBio/goquery v1.8.0/go.mod h1:ypIiRMtY7COPGk+I/YbZLbxsxn9g5ejnI2HSMtkjZvI=
 github.com/SherClockHolmes/webpush-go v1.4.0 h1:ocnzNKWN23T9nvHi6IfyrQjkIc0oJWv1B1pULsf9i3s=
 github.com/SherClockHolmes/webpush-go v1.4.0/go.mod h1:XSq8pKX11vNV8MJEMwjrlTkxhAj1zKfxmyhdV7Pd6UA=
-github.com/Silo-Server/quic-go v0.64.1-shunpike.2 h1:Ow3e4JwKvoc+NejkMjdgJN9C17t6LFcfqWLFP4ePd+0=
-github.com/Silo-Server/quic-go v0.64.1-shunpike.2/go.mod h1:RAro2j2yN9a9EiPACLHT9IB2NXCvGQmmo/alT0yYI0w=
-github.com/Silo-Server/shunpike v0.1.2 h1:kcFi+H4fTpd2IbsSemN5lM4HlQU0W2PA0qk/gUmSRDk=
-github.com/Silo-Server/shunpike v0.1.2/go.mod h1:WhSQ0L22ScxWxka1Xc+7EmbriLv2lf/w2Wf6Xfc8C9I=
 github.com/Silo-Server/silo-plugin-sdk v0.35.0 h1:hOYY3BpXKVBty71/3ws3mvd7DQWX0VhHbQouQ6Zj5/A=
 github.com/Silo-Server/silo-plugin-sdk v0.35.0/go.mod h1:+r4X2TAiB9Gk22sUj1gFWUj65lll1P1/dMS+Ncvy3Y0=
-github.com/Silo-Server/tailscale v1.104.2-shunpike.2 h1:SZouGrYAFjNuDXLgJrwxTzLk+aeVfFPqotl/oRg3a+o=
-github.com/Silo-Server/tailscale v1.104.2-shunpike.2/go.mod h1:D+gqEyJjFnwIaojBLaKxUbOfEO3cRXOaFaOZ5BIvYqs=
 github.com/TwiN/go-color v1.4.1 h1:mqG0P/KBgHKVqmtL5ye7K0/Gr4l6hTksPgTgMk3mUzc=
 github.com/TwiN/go-color v1.4.1/go.mod h1:WcPf/jtiW95WBIsEeY1Lc/b8aaWoiqQpu5cf8WFxu+s=
 github.com/abadojack/whatlanggo v1.0.1 h1:19N6YogDnf71CTHm3Mp2qhYfkRdyvbgwWdd2EPxJRG4=
@@ -162,6 +156,12 @@ github.com/danielgtaylor/huma/v2 v2.38.0 h1:fb0WZCatnaiHLphMQDDWDjygNxfMkX/ENma3
 github.com/danielgtaylor/huma/v2 v2.38.0/go.mod h1:k9hwjlgWFt1t2jsmQGlsgXAG2FBTZa4kkjV581qAtfo=
 github.com/danieljoos/wincred v1.2.2 h1:774zMFJrqaeYCK2W57BgAem/MLi6mtSE47MB6BOJ0i0=
 github.com/danieljoos/wincred v1.2.2/go.mod h1:w7w4Utbrz8lqeMbDAK0lkNJUv5sAOkFi7nd/ogr0Uh8=
+github.com/darthShadow/quic-go v0.64.1-shunpike.2 h1:7v0OFZ+w+mpdoS0uoW/VwTIcEZ593xdGK1jCyjclu10=
+github.com/darthShadow/quic-go v0.64.1-shunpike.2/go.mod h1:RAro2j2yN9a9EiPACLHT9IB2NXCvGQmmo/alT0yYI0w=
+github.com/darthShadow/shunpike v0.1.1 h1:ASTvIBodpFN8J4dK34EsNyDHzlKme+j0GMmstFnokEI=
+github.com/darthShadow/shunpike v0.1.1/go.mod h1:dnxsvd/OZh7kzBSbj0winitKxr7zh5RCO2QDgEcKjbc=
+github.com/darthShadow/tailscale v1.104.2-shunpike.2 h1:YGnyOHX2DdH70chiPGOmxIOhxqDfFGVPLVRT+djb4YM=
+github.com/darthShadow/tailscale v1.104.2-shunpike.2/go.mod h1:D+gqEyJjFnwIaojBLaKxUbOfEO3cRXOaFaOZ5BIvYqs=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dblohm7/wingoes v0.0.0-20260526185140-fb298caac7ca h1:h1Awca4lQOspNR/2eeo04Ricn5NixDX9mb17WSAgLhQ=

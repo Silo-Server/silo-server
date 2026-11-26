@@ -2329,8 +2329,9 @@ window. The implementation and its edge cases are documented in
 
 - `GET /api/v2/admin/insights/capabilities` (`getAdminInsightsCapabilities`) advertises
   whether Insights and its long-term per-node egress archive are configured (`available`,
-  `node_egress_daily`), the Titles reads (`titles`), and the `profile_id` filter
-  (`profile_filter`).
+  `node_egress_daily`), the Titles reads (`titles`), the `profile_id` filter
+  (`profile_filter`), the Library read (`library`), and the breakdown fields listed below
+  (`breakdowns`).
 - `GET /api/v2/admin/insights/activity` (`getAdminInsightsActivity`) accepts optional
   `library_id`, `user_id` and `profile_id` filters and returns window totals (`plays`,
   `sessions`, completion and play-method counts over plays), auto-bucketed local-timezone
@@ -2339,18 +2340,23 @@ window. The implementation and its edge cases are documented in
   unioned from `dashboard_metric_daily` and unarchived `dashboard_metric_samples`, and
   data-coverage boundaries (`oldest_history_at`, `oldest_measured_at`,
   `oldest_route_facts_at`, `oldest_metric_at`, `total_sessions`, `measured_sessions`,
-  `route_facts_sessions`).
+  `route_facts_sessions`). Each bucket also counts `active_accounts` and `active_profiles`,
+  the distinct accounts and profiles with a session that started in it, and `end_reasons`
+  counts the window's sessions by end reason (`stopped`, `terminated`, `expired`, `aborted`,
+  `replaced`; `unknown` for rows recorded before end reasons were).
 - `GET /api/v2/admin/insights/people` (`getAdminInsightsPeople`) accepts optional
   `library_id`, `search`, `sort` (`watch_time`, `plays`, `direct_pct`, `completion_pct`,
   `last_seen`), `dir` (`asc`, `desc`), `limit` (1..100), and `offset`, returning account
   rollups with `total_watch_seconds`, nested household profiles, and live session indicators.
-  An account or profile appears when it has any session in the window.
+  An account or profile appears when it has any session in the window. `top_profiles` ranks
+  up to 10 profiles across all accounts by plays, whatever the sort, search or page.
 - `GET /api/v2/admin/insights/titles` (`getAdminInsightsTitles`) accepts optional
   `library_id`, `user_id`, `profile_id`, `sort` (`plays`, `watch_time`, `viewers`) and `limit`
   (1..50, default 10), and ranks movies, series (episodes roll up to their series) and
   libraries with at least one play; titles no longer in the catalog do not rank. `viewers`
   counts distinct profiles with a play. A library row counts plays by the library of each
-  play's first session.
+  play's first session. `least_finished` lists up to `limit` movies and series with at least
+  3 plays and at least one left unfinished, lowest completion rate first.
 - `GET /api/v2/admin/insights/titles/{content_id}` (`getAdminInsightsTitle`) reads one movie or
   series with the same window and filters: totals, plays per bucket, the profiles with a play
   (most recent first, capped at 100, `viewers_truncated`), and a series' episodes with a play
@@ -2368,6 +2374,16 @@ window. The implementation and its edge cases are documented in
   use the scanner's width-and-height buckets (`480p`, `720p`, `1080p`, `2160p`, `4320p`,
   `unknown`); a transcode target, stored as its exact output height, is classified with the
   source's aspect ratio, and transcodes recorded before route facts are `unknown`.
+  `client_versions` lists up to 50 reported client versions with the most sessions (sessions
+  without a version are left out). `protocol_buckets` splits each `bucket_unit` bucket's
+  sessions between Silo's own clients and Jellyfin-protocol clients (the compatibility layer,
+  or a client name carrying a known Jellyfin client token). `subtitles` and `audio` cover only
+  sessions with route facts, since older rows cannot tell "none" from "not recorded":
+  subtitled sessions with their languages, delivery (`embedded`, `sidecar`, `hls_rendition`,
+  `burn_in`), forced and hearing-impaired counts; and the played audio track's language,
+  audio handling (`direct`, `remux`, `transcode`) and delivered channel layout (`mono`,
+  `stereo`, `surround`; the target's channels when the audio was converted, else the
+  track's). Languages fold onto one code per language (`eng` and `en` are `en`).
 - `GET /api/v2/admin/insights/bandwidth` (`getAdminInsightsBandwidth`) unions
   `dashboard_metric_daily` and `dashboard_node_egress_daily` with unarchived live minute
   samples across the requested UTC calendar date span (exact 7/30/90/365 UTC days for presets;
@@ -2375,9 +2391,29 @@ window. The implementation and its edge cases are documented in
   historical totals or peaks) to report multi-year egress volume, API vs. node totals, peak
   throughput, per-node daily breakdown, and remote vs. local session share. Activity's
   `peak_streams` series uses the same UTC-day daily rollup union.
+- `GET /api/v2/admin/insights/library` (`getAdminInsightsLibrary`) accepts optional
+  `library_id`, `user_id` and `profile_id` and reads the catalog against the window's plays.
+  Titles are movies and series; a series is played when any of its episodes has a play.
+  Coverage is per title: `libraries` (libraries with movies or series, most titles first) and
+  `summary` count titles, titles played in the window, titles never started (no playback
+  session at all, up to now, so a false start counts as started), and titles added in the
+  window (`media_item_libraries.first_seen_at`; across libraries the earliest, so `summary`
+  counts titles new to the server, while a library's own row counts titles first seen in that
+  library, including one that reached it from another library during the window). A title in
+  two libraries counts once in `summary` and is played in both when either file played; the
+  account and profile filters narrow "played" and "started" to that person. `genres` (up to
+  20; a title counts in each of its genres), `decades` (key is the decade's first year,
+  oldest first) and `content_ratings` (up to 15) count plays, narrowed by the library of each
+  play like the other reads. `time_to_first_play` buckets the titles added in the window by how
+  long they waited for a first play (`day`, `week`, `month`, `later`, `not_yet`; `sessions`
+  holds the title count), `summary.median_days_to_first_play` is the median wait over those
+  with a play, and `recently_added_unplayed` lists up to 20 of the newest still waiting. The
+  first play is looked up to now, so a window that ended in the past still reports a title
+  first played after it as played, with its full wait, though it is not "played in the window".
 
-The dashboard's Top Titles widget (`getAdminDashboardTopActivity`) counts completed watch
-history rows, not Insights plays, so its numbers differ from the Titles tab's.
+The dashboard's Top Titles and Most active profiles widgets read `getAdminInsightsTitles` and
+`top_profiles`, so they count plays the same way as the Titles and People tabs. The older
+`getAdminDashboardTopActivity` read still counts completed watch history rows.
 
 ## History imports
 

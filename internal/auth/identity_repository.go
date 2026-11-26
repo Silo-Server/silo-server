@@ -102,6 +102,33 @@ func listIdentitiesForUser(ctx context.Context, db dbQuerier, userID int) ([]Lin
 	return identities, nil
 }
 
+// lockIdentitiesBeforeSessions locks one account's provider identities, in
+// id order. It takes a single account: an account holds at most one
+// identity at an installation, so an uninstall, which deletes an
+// installation's identities in an order of its own, meets at most one of the
+// rows locked here. Every transaction that writes an account's device sign-in
+// requests or login sessions and may meet a plugin uninstall locks the
+// account row, then calls this before touching those rows: revocation,
+// account delete, approving and collecting a device sign-in. An uninstall
+// deletes the identities first, so it waits here, or this waits for it,
+// instead of the two deadlocking on requests and sessions. forDelete takes
+// the lock that deleting them needs. Otherwise the lock only stops an
+// uninstall or unlink from deleting them meanwhile. Unlinking an identity,
+// the provider re-check and opening a provider sign-in's session
+// (lockOAuthIdentity) lock the identity FOR UPDATE and so wait for it, as
+// they already wait on the account row; account resolution's non-key update
+// of the identity after a sign-in does not.
+func lockIdentitiesBeforeSessions(ctx context.Context, db dbQuerier, userID int, forDelete bool) error {
+	lock := "FOR KEY SHARE"
+	if forDelete {
+		lock = "FOR UPDATE"
+	}
+	if _, err := db.Exec(ctx, `SELECT id FROM plugin_auth_identities WHERE user_id = $1 ORDER BY id `+lock, userID); err != nil {
+		return fmt.Errorf("locking provider identities: %w", err)
+	}
+	return nil
+}
+
 // usableIdentityCount counts links whose installation and sign-in binding
 // are enabled. A disabled provider cannot be a fallback after unlinking.
 func usableIdentityCount(ctx context.Context, db rowQuerier, userID int, excludeID int64) (int, error) {

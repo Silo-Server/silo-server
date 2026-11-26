@@ -156,6 +156,10 @@ sign-in on, the flag also works for an account that had it off. A
 password sent without the flag is not temporary and clears a pending change. Setting a password still revokes the account's login
 sessions.
 
+A password set on create or update follows the server's
+[password policy](auth-api.md#account-passwords); a refused one returns
+`422 validation_failed` at `body.password`, with a code and detail that name the rule.
+
 `POST /api/v2/admin/users/{id}/password-reset` issues a password reset link, so an
 administrator can help a locked-out account without handling its password. The body
 is `{ "delivery": "email" }` or `{ "delivery": "link" }`, and the response is 201:

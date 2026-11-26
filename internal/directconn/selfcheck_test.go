@@ -13,7 +13,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/Silo-Server/shunpike/engine"
+	"github.com/darthShadow/shunpike/engine"
 
 	"github.com/Silo-Server/silo-server/internal/tuning"
 )
@@ -365,6 +365,9 @@ func newRetryService(t *testing.T) (*Service, *failingSettings, func() (int, str
 	calls, servers := 0, ""
 	cfg := testConfig(store.memorySettings)
 	cfg.Settings = store
+	// These cases sleep settingsRecheck; a recheck tick at the same fake instant
+	// would race the Status reread they assert on.
+	cfg.recheckInterval = -1
 	cfg.NAT = func(_ context.Context, _ *slog.Logger, s []string) (engine.NATReport, error) {
 		mu.Lock()
 		defer mu.Unlock()

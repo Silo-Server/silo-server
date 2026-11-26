@@ -90,6 +90,62 @@ func TestQueueUnavailableAndStaleSamplesOmitValues(t *testing.T) {
 	}
 }
 
+func findQueueGauge(t *testing.T, registry *prometheus.Registry, metricName, queue, state string) (float64, bool) {
+	t.Helper()
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range families {
+		if family.GetName() != metricName {
+			continue
+		}
+		for _, m := range family.GetMetric() {
+			var gotQueue, gotState string
+			for _, lp := range m.GetLabel() {
+				switch lp.GetName() {
+				case labelQueue:
+					gotQueue = lp.GetValue()
+				case "state":
+					gotState = lp.GetValue()
+				}
+			}
+			if gotQueue == queue && gotState == state {
+				return m.GetGauge().GetValue(), true
+			}
+		}
+	}
+	return 0, false
+}
+
+func TestQueueSamplerOmitsNilOldestTimestamp(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	runningAt := now.Add(-10 * time.Minute)
+	s := &QueueSampler{
+		samples: map[string]queueSample{
+			workloadImages: {
+				at:        now,
+				available: true,
+				states: map[string]queueState{
+					stateQueued:  {count: 4, oldest: nil},
+					stateRunning: {count: 1, oldest: &runningAt},
+				},
+			},
+		},
+	}
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(s)
+	if got, ok := findQueueGauge(t, registry, "silo_queue_items", workloadImages, stateQueued); !ok || got != 4 {
+		t.Fatalf("queued depth = (%v, %v), want (4, true)", got, ok)
+	}
+	if got, ok := findQueueGauge(t, registry, "silo_queue_oldest_requested_timestamp_seconds", workloadImages, stateQueued); ok {
+		t.Fatalf("queued oldest timestamp unexpectedly exported: %v", got)
+	}
+	if got, ok := findQueueGauge(t, registry, "silo_queue_oldest_requested_timestamp_seconds", workloadImages, stateRunning); !ok || got != float64(runningAt.Unix()) {
+		t.Fatalf("running oldest timestamp = (%v, %v), want (%v, true)", got, ok, float64(runningAt.Unix()))
+	}
+}
+
 func BenchmarkWorkAttempt(b *testing.B) {
 	ctx := context.Background()
 	for b.Loop() {

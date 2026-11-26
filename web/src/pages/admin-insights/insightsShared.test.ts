@@ -12,17 +12,16 @@ import {
 } from "./insightsHelpers";
 
 describe("parseInsightsUrlState", () => {
-  it("defaults to playback tab, 30d range, and browser timezone", () => {
+  it("defaults to the live activity tab, 30d range, and browser timezone", () => {
     const state = parseInsightsUrlState(new URLSearchParams(), "America/New_York");
-    expect(state.tab).toBe("playback");
+    expect(state.tab).toBe("activity");
     expect(state.range).toBe("30d");
     expect(state.tz).toBe("America/New_York");
     expect(state.libraryId).toBeUndefined();
     expect(state.userId).toBeUndefined();
   });
 
-  it("maps legacy tab=activity URLs to playback and maps dashboard widget ranges", () => {
-    expect(parseInsightsUrlState(new URLSearchParams("tab=activity"), "UTC").tab).toBe("playback");
+  it("maps dashboard widget ranges", () => {
     expect(widgetRangeToInsightsRange("hour")).toBe("7d");
     expect(widgetRangeToInsightsRange("day")).toBe("7d");
     expect(widgetRangeToInsightsRange("week")).toBe("7d");
@@ -56,7 +55,7 @@ describe("parseInsightsUrlState", () => {
   it("ignores invalid tab, range, and non-positive numeric filter params", () => {
     const params = new URLSearchParams("tab=bogus&range=999d&library_id=-3&user_id=abc");
     const state = parseInsightsUrlState(params, "UTC");
-    expect(state.tab).toBe("playback");
+    expect(state.tab).toBe("activity");
     expect(state.range).toBe("30d");
     expect(state.libraryId).toBeUndefined();
     expect(state.userId).toBeUndefined();

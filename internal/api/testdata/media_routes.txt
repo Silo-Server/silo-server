@@ -253,6 +253,7 @@ GET /api/v2/admin/insights/activity	non-media
 GET /api/v2/admin/insights/bandwidth	non-media
 GET /api/v2/admin/insights/capabilities	non-media
 GET /api/v2/admin/insights/devices	non-media
+GET /api/v2/admin/insights/library	non-media
 GET /api/v2/admin/insights/people	non-media
 GET /api/v2/admin/insights/titles	non-media
 GET /api/v2/admin/insights/titles/{content_id}	non-media
@@ -594,6 +595,7 @@ GET /api/v2/auth/oauth/{install_id}/callback	non-media
 POST /api/v2/auth/oauth/{install_id}/init	non-media
 GET /api/v2/auth/oauth/{install_id}/native/start	non-media
 GET /api/v2/auth/oauth/{install_id}/start	non-media
+GET /api/v2/auth/password-policy	non-media
 POST /api/v2/auth/plugin-launch	non-media
 GET /api/v2/auth/provider-logout	non-media
 GET /api/v2/auth/providers	non-media
@@ -1361,6 +1363,7 @@ GET /api/v2/admin/insights/activity	non-media
 GET /api/v2/admin/insights/bandwidth	non-media
 GET /api/v2/admin/insights/capabilities	non-media
 GET /api/v2/admin/insights/devices	non-media
+GET /api/v2/admin/insights/library	non-media
 GET /api/v2/admin/insights/people	non-media
 GET /api/v2/admin/insights/titles	non-media
 GET /api/v2/admin/insights/titles/{content_id}	non-media
@@ -1702,6 +1705,7 @@ GET /api/v2/auth/oauth/{install_id}/callback	non-media
 POST /api/v2/auth/oauth/{install_id}/init	non-media
 GET /api/v2/auth/oauth/{install_id}/native/start	non-media
 GET /api/v2/auth/oauth/{install_id}/start	non-media
+GET /api/v2/auth/password-policy	non-media
 POST /api/v2/auth/plugin-launch	non-media
 GET /api/v2/auth/provider-logout	non-media
 GET /api/v2/auth/providers	non-media

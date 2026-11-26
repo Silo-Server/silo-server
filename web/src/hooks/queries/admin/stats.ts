@@ -1,5 +1,5 @@
 import { v2 } from "@/api/v2/request";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   captureProfileRequestContext,
   isCapturedProfileAuthorityActive,
@@ -12,7 +12,7 @@ import { adminKeys } from "../keys";
 import { listAdminPlaybackSessions } from "@/api/v2/adminSessions";
 import { captureAdminAuthority } from "@/api/v2/adminAuthority";
 
-import { adminSessionsKey } from "@/api/v2/adminSessionsCache";
+import { adminSessionsKey, readAdminSessionsKeepingPauseEvents } from "@/api/v2/adminSessionsCache";
 
 const ADMIN_STALE_TIME = 30_000;
 
@@ -51,10 +51,14 @@ export function useAdminStats() {
 }
 
 export function useAdminSessions() {
+  const queryClient = useQueryClient();
   const context = captureProfileRequestContext();
   return useQuery({
     queryKey: adminSessionsKey(context),
-    queryFn: () => listAdminPlaybackSessions(context ?? captureAdminAuthority()),
+    queryFn: () =>
+      readAdminSessionsKeepingPauseEvents(queryClient, context, () =>
+        listAdminPlaybackSessions(context ?? captureAdminAuthority()),
+      ),
     enabled: context !== null,
     staleTime: ADMIN_STALE_TIME,
   });

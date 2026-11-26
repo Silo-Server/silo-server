@@ -365,6 +365,30 @@
       "value": "यह वैल्यू सीमा से बाहर है।"
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "कम से कम एक विशेष वर्ण शामिल करें, जैसे ! या #।"
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "कम से कम एक कैपिटल अक्षर शामिल करें।"
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "यह पासवर्ड बहुत लंबा है।"
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "यह पासवर्ड बहुत छोटा है।"
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "आपका सेशन खत्म हो गया है। फिर से साइन इन करें।"
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "पासवर्ड से साइन इन बंद रहने तक, कोई ऐसा साइन इन प्रोवाइडर चालू रहना ज़रूरी है जिसका लोग इस्तेमाल कर सकें। OpenID Connect के लिए सर्वर का सार्वजनिक URL भी ज़रूरी है।"
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8005,6 +8035,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "कार्ड"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "लेआउट"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "टेबल"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -48905,7 +48953,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "देखने के रुझान, लोकप्रिय टाइटल, परिवार की गतिविधि, डिवाइस पर प्लेबैक और बैंडविड्थ।"
+      "value": "लाइव स्ट्रीम, देखने के रुझान, लोकप्रिय टाइटल, परिवार की गतिविधि, डिवाइस पर प्लेबैक और बैंडविड्थ।"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -67408,7 +67456,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "राउटर में UPnP, NAT-PMP या PCP का समर्थन जाँचें।"
+      "value": "राउटर से UPnP, NAT-PMP या PCP पोर्ट मैपिंग का अनुरोध करें।"
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67417,16 +67465,44 @@
       "value": "पोर्ट मैपिंग"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "सीमा: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " से "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " तक"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "तैयारी की जाँच से डायरेक्ट प्लेबैक शुरू नहीं होता।"
+      "value": "इसे चालू करने पर डायरेक्ट कनेक्शन इंजन शुरू हो जाता है। यह एक UDP पोर्ट खोलता है और “पोर्ट मैपिंग” चालू होने पर राउटर से पोर्ट मैपिंग का अनुरोध करता है। “जाँच चलाएँ” से सिर्फ़ होस्ट की स्थिति पढ़ी जाती है।"
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "एडमिनिस्ट्रेटर द्वारा बंद किया गया"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "अनुमत सीमा के अंदर सीमित किया गया"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67438,7 +67514,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "डायरेक्ट कनेक्शन इंजन शुरू नहीं हो सका"
+      "value": "डायरेक्ट कनेक्शन इंजन रुक गया या शुरू नहीं हो सका"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67469,6 +67545,12 @@
     {
       "type": 0,
       "value": "अमान्य वैल्यू; बंद किया गया"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "अमान्य मान; डिफ़ॉल्ट इस्तेमाल हो रहा है"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -78719,6 +78801,20 @@
       "value": "पहले कोई साइन-इन प्रोवाइडर चालू करें। पासवर्ड साइन-इन बंद और कोई प्रोवाइडर चालू न होने पर, सिर्फ़ ब्रेक-ग्लास एडमिन ही साइन इन कर पाएँगे।"
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "पहले सर्वर का सार्वजनिक URL सेट करें। इसके बिना "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " से कोई साइन इन नहीं कर सकता, इसलिए पासवर्ड से साइन इन बंद होने पर सिर्फ़ ब्रेक-ग्लास एडमिन ही साइन इन कर पाएँगे।"
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -78809,6 +78905,246 @@
       "value": "उपयोगकर्ताओं को API कुंजियाँ बनाने दें"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "पासवर्ड से साइन इन बंद करें"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "सिर्फ़ ब्रेक-ग्लास एडमिन पासवर्ड से साइन इन करेंगे। बाकी सभी लोग "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " से साइन इन करेंगे।"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "प्रोवाइडर "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " पहली बार साइन इन करने पर खाते बनाता है, इसलिए अगर इनमें से कोई व्यक्ति आपके लिंक करने से पहले "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " से साइन इन करता है, तो उसके लिए एक नया, अलग खाता बन जाएगा।"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "उपयोगकर्ता पेज पर हर खाते के अपने पेज से उसे किसी "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " खाते से लिंक करें।"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " खाता तब तक साइन इन नहीं कर सकता जब तक कोई एडमिन उसे लिंक न करे"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " खाते तब तक साइन इन नहीं कर सकते जब तक कोई एडमिन उन्हें लिंक न करे"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "यह जाँचा नहीं जा सका कि इसका किन खातों पर असर होगा। इसे फिर भी बंद किया जा सकता है।"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "जाँच हो रही है कि कौन पासवर्ड से साइन इन करता है…"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "जब साइन इन के समय "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " से इनमें से किसी ईमेल की पुष्टि होती है, तो Silo उस व्यक्ति को उसके खाते से कनेक्ट कर देता है।"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " खाता ईमेल से कनेक्ट होगा"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " खाते ईमेल से कनेक्ट होंगे"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " और दिखाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " और दिखाएँ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "और खाते लोड नहीं किए जा सके। फिर से कोशिश करें।"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "इसके बाद भी हर खाते से साइन इन किया जा सकेगा।"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "एडमिन"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "ईमेल मैचिंग बंद है"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "कोई ईमेल नहीं"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "इससे कोई साइन आउट नहीं होता। जो लोग पहले से साइन इन हैं, वे साइन इन रहते हैं, उनकी API कुंजियाँ काम करती रहती हैं और वे अब भी नए डिवाइसों को मंज़ूरी दे सकते हैं। किसी को साइन आउट करने के लिए, "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "उपयोगकर्ता"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " में उनके पेज से उनके सेशन खत्म करें।"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "पासवर्ड से साइन इन बंद करें?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "उपयोगकर्ता पेज पर सभी खाते देखें"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -78847,6 +79183,28 @@
     {
       "type": 0,
       "value": " को बदला नहीं जा सका।"
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "पासवर्ड से साइन इन बंद है, इसलिए ब्रेक-ग्लास एडमिन को छोड़कर बाकी सभी लोग प्रोवाइडर "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " से साइन इन करते हैं। पहले पासवर्ड से साइन इन फिर से चालू करें, फिर "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " को बंद करें।"
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -80872,7 +81230,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "देखने के रुझान, लोकप्रिय टाइटल, खाते, डिवाइस और बैंडविड्थ।"
+      "value": "लाइव स्ट्रीम, देखने के रुझान, लोकप्रिय टाइटल, खाते, डिवाइस और बैंडविड्थ।"
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -100674,6 +101032,18 @@
           "value": "वैकल्पिक"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "देखे गए टाइटल छिपाएँ"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "हर प्रोफ़ाइल को यह कलेक्शन उन टाइटल के बिना दिखता है जो उस प्रोफ़ाइल ने देखे हैं: कलेक्शन के पेज पर, उसकी पंक्तियों में और उसकी गिनती में। कुछ भी हटाया नहीं जाता। टाइटल की सीमा वाला स्मार्ट कलेक्शन पहले अपने टाइटल चुनता है, इसलिए उसमें कम टाइटल दिख सकते हैं।"
     }
   ],
   "web.collections.details.label": [
@@ -120695,6 +121065,16 @@
     {
       "type": 0,
       "value": "आखिरी प्रसारण की तारीख"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 1,
+      "value": "field"
+    },
+    {
+      "type": 0,
+      "value": " लॉक करें"
     }
   ],
   "web.item.editMetadata.locked": [

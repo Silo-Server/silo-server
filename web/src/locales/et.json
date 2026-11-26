@@ -365,6 +365,30 @@
       "value": "See väärtus on lubatud vahemikust väljas."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Lisage vähemalt üks erimärk, näiteks ! või #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Lisage vähemalt üks suurtäht."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "See parool on liiga pikk."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "See parool on liiga lühike."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Teie seanss on aegunud. Logige uuesti sisse."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Kui parooliga sisselogimine on välja lülitatud, peab sisse jääma sisselogimise teenusepakkuja, mida kasutajad saavad kasutada. OpenID Connect vajab lisaks serveri avalikku URL-i."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8017,6 +8047,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kaardid"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Paigutus"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabel"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -49713,7 +49761,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Vaatamistrendid, populaarsed pealkirjad, leibkonna tegevus, seadmete esitus ja ribalaius."
+      "value": "Aktiivsed vood, vaatamistrendid, populaarsed pealkirjad, leibkonna tegevus, seadmete esitus ja ribalaius."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -68320,7 +68368,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Kontrollib, kas ruuter toetab UPnP-d, NAT-PMP-d või PCP-d."
+      "value": "Küsib ruuterilt pordisuunamist protokolli UPnP, NAT-PMP või PCP kaudu."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -68329,16 +68377,40 @@
       "value": "Pordivastendus"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Vahemik: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " kuni "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Valmisoleku kontrollid ei käivita otseesitust."
+      "value": "Selle sisselülitamine käivitab otseühenduste mootori. See avab UDP-pordi ja küsib ruuterilt pordisuunamist, kui valik „Pordisuunamine“ on sees. Nupp „Käivita kontroll“ loeb ainult hosti olekut."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Administraator on keelanud"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Viidud lubatud vahemikku"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -68350,7 +68422,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Otseühenduste mootori käivitamine ebaõnnestus"
+      "value": "Otseühenduste mootor seiskus või ei käivitunud"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -68381,6 +68453,12 @@
     {
       "type": 0,
       "value": "Sobimatu väärtus; lülitati välja"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Sobimatu väärtus; kasutatakse vaikeväärtust"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -79675,6 +79753,20 @@
       "value": "Lülitage kõigepealt sisse sisselogimise teenusepakkuja. Kui parooliga sisselogimine on väljas ja ükski teenusepakkuja pole sees, saaksid sisse logida ainult hädaolukorra administraatorid."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Määrake esmalt serveri avalik URL. Teenusepakkuja "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ei saa ilma selleta kedagi sisse logida, nii et kui parooliga sisselogimine on väljas, saaksid sisse logida ainult hädajuurdepääsuga administraatorid."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -79765,6 +79857,238 @@
       "value": "Luba kasutajatel API-võtmeid luua"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Lülita parooliga sisselogimine välja"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Parooliga saavad sisse logida ainult hädajuurdepääsuga administraatorid. Kõik teised logivad sisse teenusepakkuja "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " kaudu."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Teenusepakkuja "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " loob kontod esmakordsel sisselogimisel, nii et kui mõni neist kasutajatest logib selle kaudu sisse enne, kui olete tema konto sidunud, saab ta uue, eraldi konto."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Siduge igaüks neist teenusepakkuja "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " kontoga selle lehel jaotises „Kasutajad“."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konto ei saa sisse logida, kuni administraator selle seob"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " kontot ei saa sisse logida, kuni administraator need seob"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Ei õnnestunud kontrollida, milliseid kontosid see mõjutab. Saate selle siiski välja lülitada."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Parooliga sisselogivate kontode kontrollimine"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Kui teenusepakkuja "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " kinnitab sisselogimisel mõne neist e-posti aadressidest, ühendab Silo selle kasutaja tema kontoga."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konto ühendatakse e-posti kaudu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " kontot ühendatakse e-posti kaudu"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita veel "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita veel "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Rohkemate kontode laadimine ebaõnnestus. Proovige uuesti."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Pärast seda saavad kõik kontod endiselt sisse logida."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administraator"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "E-posti sobitamine on väljas"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "E-post puudub"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "See ei logi kedagi välja. Juba sisse logitud kasutajad jäävad sisselogituks, nende API-võtmed töötavad edasi ja nad saavad endiselt uusi seadmeid kinnitada. Kellegi väljalogimiseks lõpetage tema seansid tema lehel jaotises "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Kasutajad"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Kas lülitada parooliga sisselogimine välja?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Vaata kõiki kontosid jaotises „Kasutajad“"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -79807,6 +80131,28 @@
     {
       "type": 0,
       "value": " muutmine ebaõnnestus."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Parooliga sisselogimine on väljas, seega logivad kõik peale hädajuurdepääsuga administraatorite sisse teenusepakkuja "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " kaudu. Lülitage esmalt parooliga sisselogimine uuesti sisse ja seejärel lülitage teenusepakkuja "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " välja."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -81876,7 +82222,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Vaatamistrendid, populaarsed pealkirjad, kontod, seadmed ja ribalaius."
+      "value": "Aktiivsed vood, vaatamistrendid, populaarsed pealkirjad, kontod, seadmed ja ribalaius."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -101908,6 +102254,18 @@
           "value": "Valikuline"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Peida vaadatud pealkirjad"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Iga profiil näeb seda kollektsiooni ilma pealkirjadeta, mida see profiil on vaadanud: kollektsiooni lehel, ridades ja pealkirjade arvus. Midagi ei eemaldata. Pealkirjade piiranguga nutikas kollektsioon valib oma pealkirjad kõigepealt, nii et see võib näidata vähem pealkirju."
     }
   ],
   "web.collections.details.label": [
@@ -122199,6 +122557,16 @@
     {
       "type": 0,
       "value": "Viimane eetrikuupäev"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Lukusta väli "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

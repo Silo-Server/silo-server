@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func (reg *Registry) getAdminSectionCapabilities(ctx context.Context, _ *CapabilityInput) (*AdminSectionCapabilitiesOutput, error) {
@@ -92,7 +93,16 @@ func (reg *Registry) previewAdminSection(ctx context.Context, in *AdminSectionPr
 		// Preview models carry internal artwork storage keys, not public URLs.
 		// Expose the stable catalog card fields and the poster the service
 		// presigned, without serializing storage state.
-		out.Items = append(out.Items, withShownRatings(CatalogItem{ContentID: item.ContentID, Type: item.Type, Title: item.Title, PlayContentID: item.PlayContentID, Year: item.Year, Runtime: item.Runtime, Genres: NonNil(item.Genres), Keywords: NonNil(item.Keywords), Studios: item.Studios, Networks: item.Networks, ContentRating: item.ContentRating, AdvisoryAge: item.AdvisoryAge, AdvisorySource: item.AdvisorySource, Status: item.Status, ShowStatus: item.ShowStatus, RatingIMDB: item.RatingIMDB, RatingTMDB: item.RatingTMDB, RatingRTCritic: item.RatingRTCritic, RatingRTAudience: item.RatingRTAudience, OriginalLanguage: item.OriginalLanguage, Overview: item.Overview, ReleaseDate: calendarDatePtr(item.ReleaseDate), LastAirDate: calendarDatePtr(item.LastAirDate), PosterURL: value.PosterURLs[item.ContentID], PosterThumbhash: item.PosterThumbhash, BackdropThumbhash: item.BackdropThumbhash}, sel))
+		out.Items = append(out.Items, withShownRatings(CatalogItem{ContentID: item.ContentID, Type: item.Type, Title: item.Title, PlayContentID: item.PlayContentID, Year: item.Year, Runtime: item.Runtime, Genres: NonNil(item.Genres), Keywords: NonNil(item.Keywords), Studios: item.Studios, Networks: item.Networks, ContentRating: item.ContentRating, AdvisoryAge: item.AdvisoryAge, AdvisorySource: item.AdvisorySource, Status: item.Status, ShowStatus: item.ShowStatus, EpisodeLabels: item.EpisodeLabels, AirDate: previewCardAirDate(item), RatingIMDB: item.RatingIMDB, RatingTMDB: item.RatingTMDB, RatingRTCritic: item.RatingRTCritic, RatingRTAudience: item.RatingRTAudience, OriginalLanguage: item.OriginalLanguage, Overview: item.Overview, ReleaseDate: calendarDatePtr(item.ReleaseDate), LastAirDate: calendarDatePtr(item.LastAirDate), PosterURL: value.PosterURLs[item.ContentID], PosterThumbhash: item.PosterThumbhash, BackdropThumbhash: item.BackdropThumbhash}, sel))
 	}
 	return &AdminSectionPreviewOutput{Body: out}, nil
+}
+
+// previewCardAirDate is a preview episode card's air date (an episode row's
+// release date), sent only for a date-labeled series, as on section cards.
+func previewCardAirDate(item *models.MediaItem) *string {
+	if item.Type != "episode" || item.EpisodeLabels == "" {
+		return nil
+	}
+	return calendarDatePtr(item.ReleaseDate)
 }

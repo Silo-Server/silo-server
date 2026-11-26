@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   reset: vi.fn(),
   userId: 1,
+  // Layout writes other pages still have running (see useDashboardLayoutWrites).
+  writesRunning: 0,
 }));
 
 vi.mock("@/hooks/queries/admin/dashboardLayout", async (importOriginal) => {
@@ -36,6 +38,10 @@ vi.mock("@/hooks/queries/admin/dashboardLayout", async (importOriginal) => {
     useAdminDashboardLayout: () => mocks.query,
     useSaveAdminDashboardLayout: () => ({ mutate: mocks.save, mutateCaptured }),
     useResetAdminDashboardLayout: () => ({ mutate: mocks.reset }),
+    useDashboardLayoutWrites: () => ({
+      running: mocks.writesRunning,
+      isRunning: () => mocks.writesRunning > 0,
+    }),
   };
 });
 
@@ -89,6 +95,7 @@ beforeEach(() => {
   setProfileToken("pin-a");
   mocks.userId = ADMIN_USER_ID;
   mocks.query = { data: undefined, isSuccess: false };
+  mocks.writesRunning = 0;
   mocks.save.mockReset();
   mocks.reset.mockReset();
 });
@@ -190,11 +197,11 @@ describe("useDashboardLayout", () => {
       name: "keeps a stored window the widget allows",
       stored: [
         { id: "egress-24h", span: 6, rows: 3, range: "month" },
-        { id: "top-titles", span: 6, rows: 3, range: "day" },
+        { id: "top-titles", span: 6, rows: 3, range: "year" },
       ],
       expected: [
         { id: "egress-24h", span: 6, rows: 3, range: "month" },
-        { id: "top-titles", span: 6, rows: 3, range: "day" },
+        { id: "top-titles", span: 6, rows: 3, range: "year" },
       ],
     },
   ])("$name", ({ stored, expected }) => {
@@ -205,13 +212,15 @@ describe("useDashboardLayout", () => {
     expect(result.current.entries).toEqual(expected);
   });
 
-  // The leaderboards do not offer an hour, and an unranged widget must not
-  // start carrying a window because one was stored for it.
+  // The leaderboards do not offer an hour, a sampled chart cannot reach past
+  // the sampler's month, and an unranged widget must not start carrying a
+  // window because one was stored for it.
   it("replaces a window the widget does not offer and drops one it cannot use", () => {
     writeStored([
       { id: "top-profiles", span: 6, rows: 3, range: "hour" },
       { id: "egress-24h", span: 6, rows: 3, range: "fortnight" },
       { id: "concurrent-streams-24h", span: 6, rows: 3, range: 7 },
+      { id: "playback-24h", span: 6, rows: 3, range: "year" },
       { id: "users", span: 5, rows: 4, range: "month" },
     ]);
 
@@ -221,9 +230,10 @@ describe("useDashboardLayout", () => {
       { id: "top-profiles", span: 6, rows: 3, range: "week" },
       { id: "egress-24h", span: 6, rows: 3, range: "day" },
       { id: "concurrent-streams-24h", span: 6, rows: 3, range: "day" },
+      { id: "playback-24h", span: 6, rows: 3, range: "day" },
       { id: "users", span: 5, rows: 4 },
     ]);
-    expect(result.current.entries[3]).not.toHaveProperty("range");
+    expect(result.current.entries[4]).not.toHaveProperty("range");
   });
 
   // The Egress Total/Nodes switch is a viewing choice like the window, so it
@@ -394,6 +404,30 @@ describe("useDashboardLayout server persistence", () => {
 
     expect(mocks.save).not.toHaveBeenCalled();
     expect(result.current.entries).toEqual(DEFAULT_LAYOUT);
+  });
+
+  // Insights' Add to dashboard saves as that page unmounts, so the dashboard
+  // mounts with a cached copy older than the save still on its way.
+  it("waits for another page's layout save before adopting the server layout", () => {
+    const placed = [
+      { id: "libraries", span: 7, rows: 4 },
+      { id: "insights-weekday", span: 6, rows: 4, range: "quarter" },
+    ];
+    writeStored(placed);
+    serverLayout([{ id: "libraries", span: 7, rows: 4 }]);
+    mocks.writesRunning = 1;
+
+    const { result, rerender } = renderHook(() => useDashboardLayout());
+
+    expect(result.current.entries).toEqual(placed);
+
+    serverLayout(placed, "2026-08-26T10:05:00Z");
+    mocks.writesRunning = 0;
+    rerender();
+
+    expect(result.current.entries).toEqual(placed);
+    expect(readStored().entries).toEqual(placed);
+    expect(mocks.save).not.toHaveBeenCalled();
   });
 
   it("does not adopt a server layout over an edit made while the query was in flight", () => {

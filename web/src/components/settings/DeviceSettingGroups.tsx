@@ -339,7 +339,7 @@ function DeviceSettingControl({
         variant="outline"
         disabled={disabled}
         onClick={() => onOpenPanel?.(settingKey)}
-        className="min-h-11 w-full sm:h-8 sm:min-h-0 sm:px-3 sm:text-sm @lg:w-auto"
+        className="w-full max-sm:min-h-[max(2.75rem,calc(1lh+2px))] sm:h-8 sm:px-3 sm:text-sm @lg:w-auto"
       >
         {t("web.settings.deviceSettingGroups.changeAppearance")}
       </Button>

@@ -365,6 +365,30 @@
       "value": "Tämä arvo on sallitun alueen ulkopuolella."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Lisää vähintään yksi erikoismerkki, kuten ! tai #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Lisää vähintään yksi iso kirjain."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Tämä salasana on liian pitkä."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Tämä salasana on liian lyhyt."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Istuntosi on vanhentunut. Kirjaudu sisään uudelleen."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Kun salasanalla kirjautuminen on poistettu käytöstä, käytössä on oltava jokin kirjautumispalvelu, jota käyttäjät voivat käyttää. OpenID Connect vaatii lisäksi palvelimen julkisen URL-osoitteen."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8013,6 +8043,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kortit"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Asettelu"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Taulukko"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -49261,7 +49309,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Katselutrendit, suosituimmat nimikkeet, kotitalouden toiminta, laitteiden toisto ja kaistanleveys."
+      "value": "Käynnissä olevat suoratoistot, katselutrendit, suosituimmat nimikkeet, kotitalouden toiminta, laitteiden toisto ja kaistanleveys."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -67744,7 +67792,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Tarkista reitittimen UPnP-, NAT-PMP- tai PCP-tuki."
+      "value": "Pyydä reitittimeltä UPnP-, NAT-PMP- tai PCP-porttiohjaus."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67753,16 +67801,40 @@
       "value": "Porttikartoitus"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Alue: "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": "–"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Valmiustarkistukset eivät käynnistä suoraa toistoa."
+      "value": "Tämän ottaminen käyttöön käynnistää suorien yhteyksien moottorin. Se avaa UDP-portin ja pyytää reitittimeltä porttiohjausta, kun Porttiohjaus on päällä. Suorita tarkistus -painike vain lukee isännän tilan."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Ylläpitäjä poisti käytöstä"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Rajattu sallitulle alueelle"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67774,7 +67846,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Suorien yhteyksien moottorin käynnistys epäonnistui"
+      "value": "Suorien yhteyksien moottori pysähtyi, tai sen käynnistys epäonnistui"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -67805,6 +67877,12 @@
     {
       "type": 0,
       "value": "Virheellinen arvo; käytetään asetusta Pois"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Virheellinen arvo; käytetään oletusta"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -79071,6 +79149,20 @@
       "value": "Ota ensin kirjautumispalvelu käyttöön. Jos salasanakirjautuminen on pois käytöstä eikä mikään palvelu ole käytössä, vain hätäylläpitäjät voisivat kirjautua sisään."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Aseta ensin palvelimen julkinen URL-osoite. Palvelu "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ei voi kirjata ketään sisään ilman sitä, joten kun salasanalla kirjautuminen on poistettu käytöstä, vain hätäpääsyn järjestelmänvalvojat voisivat kirjautua sisään."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -79161,6 +79253,246 @@
       "value": "Salli käyttäjien luoda API-avaimia"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Poista salasanalla kirjautuminen käytöstä"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Vain hätäpääsyn järjestelmänvalvojat kirjautuvat sisään salasanalla. Kaikki muut kirjautuvat sisään palvelun "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " kautta."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Palvelu "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " luo tilit ensimmäisellä kirjautumiskerralla, joten jos joku näistä henkilöistä kirjautuu sisään sen kautta ennen kuin linkität hänet, hän saa uuden, erillisen tilin."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Linkitä kukin tili palvelun "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " tiliin tilin omalta sivulta Käyttäjät-sivulla."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tili ei voi kirjautua sisään, ennen kuin järjestelmänvalvoja linkittää sen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tiliä ei voi kirjautua sisään, ennen kuin järjestelmänvalvoja linkittää ne"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Ei voitu tarkistaa, mihin tileihin tämä vaikuttaa. Voit silti poistaa sen käytöstä."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Tarkistetaan, ketkä kirjautuvat sisään salasanalla…"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Kun palvelu "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " vahvistaa jonkin näistä sähköpostiosoitteista kirjautumisen yhteydessä, Silo yhdistää henkilön hänen tiliinsä."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tili yhdistetään sähköpostin perusteella"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tiliä yhdistetään sähköpostin perusteella"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näytä "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " lisää"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näytä "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " lisää"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Lisää tilejä ei voitu ladata. Yritä uudelleen."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Kaikki tilit voivat edelleen kirjautua sisään tämän jälkeen."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Järjestelmänvalvoja"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Sähköpostin täsmäytys on pois käytöstä"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Ei sähköpostia"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Tämä ei kirjaa ketään ulos. Jo kirjautuneet henkilöt pysyvät kirjautuneina, heidän API-avaimensa toimivat edelleen ja he voivat yhä hyväksyä uusia laitteita. Jos haluat kirjata jonkun ulos, lopeta hänen istuntonsa hänen omalta sivultaan "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Käyttäjät"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "-sivulla."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Poistetaanko salasanalla kirjautuminen käytöstä?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Näytä kaikki tilit Käyttäjät-sivulla"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -79203,6 +79535,28 @@
     {
       "type": 0,
       "value": " muuttaminen epäonnistui."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Salasanalla kirjautuminen on poistettu käytöstä, joten kaikki paitsi hätäpääsyn järjestelmänvalvojat kirjautuvat sisään palvelun "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " kautta. Ota ensin salasanalla kirjautuminen uudelleen käyttöön ja poista sitten palvelu "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " käytöstä."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -81236,7 +81590,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Katselutrendit, suosituimmat nimikkeet, tilit, laitteet ja kaistanleveys."
+      "value": "Käynnissä olevat suoratoistot, katselutrendit, suosituimmat nimikkeet, tilit, laitteet ja kaistanleveys."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -101222,6 +101576,18 @@
           "value": "Valinnainen"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Katsottujen nimikkeiden piilotus"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Jokainen profiili näkee tämän kokoelman ilman katsomiaan nimikkeitä kokoelman sivulla, riveillä ja nimikemäärässä. Mitään ei poisteta. Älykäs kokoelma, jolla on nimikeraja, valitsee nimikkeensä ensin, joten siinä voi näkyä vähemmän nimikkeitä."
     }
   ],
   "web.collections.details.label": [
@@ -121549,6 +121915,16 @@
     {
       "type": 0,
       "value": "Viimeinen esityspäivä"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Lukitse kenttä "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

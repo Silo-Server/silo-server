@@ -3038,6 +3038,12 @@ func (s *MetadataService) mergeAndPersist(
 					"content_id", contentID, "error", creditsErr)
 			}
 		}
+		// Episode labels belong to whichever provider the series is matched
+		// to. An Identify picks that provider anew, even when no trusted ID
+		// differs (a Sportarr league has none), so only its answer counts.
+		if req.Mode == ModeIdentify {
+			existingResult.EpisodeLabels = ""
+		}
 		// A correction's stored values describe another title, and a reset's
 		// or a Complete Refresh's are what the admin asked to replace: either
 		// way a value the providers lack must not stay behind.
@@ -9663,6 +9669,7 @@ func itemToMetadataResult(item *models.MediaItem) *MetadataResult {
 		result.SeasonCount = *item.SeasonCount
 	}
 	result.ShowStatus = item.ShowStatus
+	result.EpisodeLabels = item.EpisodeLabels
 
 	return result
 }
@@ -9747,6 +9754,7 @@ func metadataResultToItem(r *MetadataResult, contentType string) *models.MediaIt
 	// manga enrichment pipeline). Pass non-series values through untouched so
 	// a round-trip through itemToMetadataResult can never mangle them.
 	if contentType == "series" {
+		item.EpisodeLabels = models.NormalizeEpisodeLabels(r.EpisodeLabels)
 		item.ShowStatus = showstatus.Normalize(r.ShowStatus)
 	} else {
 		item.ShowStatus = r.ShowStatus

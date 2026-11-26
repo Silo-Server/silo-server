@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { episodeSubtitle } from "@/lib/episodeCardLabels";
 import type { WatchTogetherRoomMember } from "@/lib/watchTogether";
 import { useSeasonEpisodes } from "@/hooks/queries/episodes";
 import { useT } from "@/i18n";
@@ -140,7 +141,12 @@ function CandidateBody({
           content_id: pick.episode.content_id,
           content_type: "episode",
           title: pick.episode.title,
-          subtitle: `${pick.series.title} · S${pick.seasonNumber} E${pick.episode.episode_number}`,
+          subtitle: `${pick.series.title} · ${episodeSubtitle(
+            pick.series.episode_labels,
+            pick.episode.air_date,
+            pick.seasonNumber,
+            pick.episode.episode_number,
+          )}`,
           poster_url: pick.series.poster_url ?? "",
           library_id: pick.series.library_id,
         });

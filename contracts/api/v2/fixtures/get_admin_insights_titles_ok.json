@@ -39,5 +39,19 @@
       "viewers": 3,
       "watch_seconds": 54000
     }
+  ],
+  "least_finished": [
+    {
+      "content_id": "movie-2",
+      "kind": "movie",
+      "title": "The Glass Harbor",
+      "year": 2021,
+      "plays": 4,
+      "viewers": 3,
+      "completed_plays": 1,
+      "episodes": 0,
+      "watch_seconds": 12000,
+      "last_played_at": "2026-01-02T01:34:05.678Z"
+    }
   ]
 }

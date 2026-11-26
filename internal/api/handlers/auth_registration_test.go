@@ -5,11 +5,15 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/auth"
 )
 
-func TestRegistrationPasswordRejectedBeforeService(t *testing.T) {
+// The auth service refuses the password before reading any store (it has
+// none here); the handler reports it at the password member.
+func TestRegistrationPasswordRejectedAtPasswordMember(t *testing.T) {
 	t.Parallel()
-	h := &AuthHandler{}
+	h := &AuthHandler{service: &auth.Service{}}
 	for _, tt := range []struct{ password, code string }{
 		{"short", codeWeakPassword},
 		{strings.Repeat("界", 25), codePasswordTooLong},
@@ -25,5 +29,15 @@ func TestRegistrationPasswordRejectedBeforeService(t *testing.T) {
 				t.Fatalf("registration error = %#v", err)
 			}
 		}
+	}
+}
+
+// The administrator's refusal keeps the rule it broke, so the v2 listener can
+// name it at the password member.
+func TestAdminPasswordRefusalKeepsTheRule(t *testing.T) {
+	t.Parallel()
+	err := (&AdminHandler{}).validateAdminPassword(t.Context(), "short")
+	if message, ok := auth.PasswordRuleMessage(err); !ok || message != "Use at least 8 characters." {
+		t.Fatalf("validateAdminPassword error = %v; want the policy's rule", err)
 	}
 }

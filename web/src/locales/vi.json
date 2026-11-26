@@ -365,6 +365,30 @@
       "value": "Giá trị này nằm ngoài phạm vi."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Thêm ít nhất một ký tự đặc biệt, chẳng hạn như ! hoặc #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Thêm ít nhất một chữ cái viết hoa."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Mật khẩu này quá dài."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Mật khẩu này quá ngắn."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -615,6 +639,12 @@
     {
       "type": 0,
       "value": "Phiên của bạn đã hết hạn. Đăng nhập lại."
+    }
+  ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Khi đăng nhập bằng mật khẩu đang tắt, phải luôn bật ít nhất một nhà cung cấp đăng nhập mà mọi người có thể dùng. OpenID Connect cũng cần URL công khai của máy chủ."
     }
   ],
   "error.snapshot_request_conflict": [
@@ -8009,6 +8039,24 @@
     {
       "type": 1,
       "value": "id"
+    }
+  ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Thẻ"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Bố cục"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Bảng"
     }
   ],
   "web.admin.apiKeys.access.full": [
@@ -49413,7 +49461,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Xu hướng xem, nội dung hàng đầu, hoạt động trong gia đình, phát trên thiết bị và băng thông."
+      "value": "Luồng đang phát, xu hướng xem, nội dung hàng đầu, hoạt động trong gia đình, phát trên thiết bị và băng thông."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -67968,7 +68016,7 @@
   "web.admin.settings.network.direct.portMapping.description": [
     {
       "type": 0,
-      "value": "Kiểm tra xem bộ định tuyến có hỗ trợ UPnP, NAT-PMP hoặc PCP không."
+      "value": "Yêu cầu bộ định tuyến ánh xạ cổng qua UPnP, NAT-PMP hoặc PCP."
     }
   ],
   "web.admin.settings.network.direct.portMapping.label": [
@@ -67977,16 +68025,40 @@
       "value": "Ánh xạ cổng"
     }
   ],
+  "web.admin.settings.network.direct.range": [
+    {
+      "type": 0,
+      "value": "Phạm vi: từ "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": " đến "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.settings.network.direct.readinessNote": [
     {
       "type": 0,
-      "value": "Lượt kiểm tra mức độ sẵn sàng không bắt đầu phát trực tiếp."
+      "value": "Bật tùy chọn này sẽ khởi động bộ máy kết nối trực tiếp. Bộ máy sẽ mở một cổng UDP và, khi Ánh xạ cổng đang bật, yêu cầu bộ định tuyến ánh xạ cổng. Chạy kiểm tra chỉ đọc trạng thái của máy chủ."
     }
   ],
   "web.admin.settings.network.direct.reason.admin_off": [
     {
       "type": 0,
       "value": "Quản trị viên đã tắt"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.clamped": [
+    {
+      "type": 0,
+      "value": "Đã giới hạn trong phạm vi cho phép"
     }
   ],
   "web.admin.settings.network.direct.reason.disabled": [
@@ -67998,7 +68070,7 @@
   "web.admin.settings.network.direct.reason.engine_start_failed": [
     {
       "type": 0,
-      "value": "Không thể khởi động bộ máy kết nối trực tiếp"
+      "value": "Bộ máy kết nối trực tiếp đã dừng hoặc không thể khởi động"
     }
   ],
   "web.admin.settings.network.direct.reason.force_failed": [
@@ -68029,6 +68101,12 @@
     {
       "type": 0,
       "value": "Giá trị không hợp lệ; đang dùng Tắt"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid_default": [
+    {
+      "type": 0,
+      "value": "Giá trị không hợp lệ; đang dùng giá trị mặc định"
     }
   ],
   "web.admin.settings.network.direct.reason.kernel_error": [
@@ -79311,6 +79389,20 @@
       "value": "Hãy bật một nhà cung cấp đăng nhập trước. Khi tắt đăng nhập bằng mật khẩu và không bật nhà cung cấp nào, chỉ quản trị viên khẩn cấp mới có thể đăng nhập."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Đặt URL công khai của máy chủ trước. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " không thể đăng nhập cho bất kỳ ai nếu thiếu URL này, nên khi tắt đăng nhập bằng mật khẩu, chỉ quản trị viên truy cập khẩn cấp mới có thể đăng nhập."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -79401,6 +79493,242 @@
       "value": "Cho phép người dùng tạo khóa API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Tắt đăng nhập bằng mật khẩu"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Chỉ quản trị viên truy cập khẩn cấp mới đăng nhập bằng mật khẩu. Những người khác đăng nhập bằng "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " tạo tài khoản ở lần đăng nhập đầu tiên, nên nếu một trong những người này đăng nhập bằng "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " trước khi bạn liên kết, họ sẽ nhận một tài khoản mới, riêng biệt."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Liên kết từng tài khoản với một tài khoản "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " từ trang của tài khoản đó trong Người dùng."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tài khoản không thể đăng nhập cho đến khi quản trị viên liên kết"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tài khoản không thể đăng nhập cho đến khi quản trị viên liên kết"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Không thể kiểm tra những tài khoản bị ảnh hưởng. Bạn vẫn có thể tắt đăng nhập bằng mật khẩu."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Đang kiểm tra những ai đăng nhập bằng mật khẩu…"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Khi "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " xác nhận một trong các email này lúc đăng nhập, Silo sẽ kết nối người đó với tài khoản của họ."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tài khoản kết nối qua email"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tài khoản kết nối qua email"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị thêm "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị thêm "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Không thể tải thêm tài khoản. Vui lòng thử lại."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Mọi tài khoản vẫn có thể đăng nhập sau thay đổi này."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Quản trị viên"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "So khớp email đang tắt"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Không có email"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Thao tác này không đăng xuất bất kỳ ai. Những người đã đăng nhập vẫn giữ trạng thái đăng nhập, khóa API của họ vẫn hoạt động và họ vẫn có thể phê duyệt thiết bị mới. Để đăng xuất một người, kết thúc các phiên của người đó từ trang của họ trong "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Người dùng"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Tắt đăng nhập bằng mật khẩu?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Xem mọi tài khoản trong Người dùng"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -79435,6 +79763,28 @@
     {
       "type": 0,
       "value": "Không thể thay đổi "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Đăng nhập bằng mật khẩu đang tắt, nên mọi người, trừ quản trị viên truy cập khẩn cấp, đều đăng nhập bằng "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Bật lại đăng nhập bằng mật khẩu trước, rồi tắt "
     },
     {
       "type": 1,
@@ -81516,7 +81866,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Xu hướng xem, nội dung hàng đầu, tài khoản, thiết bị và băng thông."
+      "value": "Luồng đang phát, xu hướng xem, nội dung hàng đầu, tài khoản, thiết bị và băng thông."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
@@ -101560,6 +101910,18 @@
           "value": "Không bắt buộc"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Ẩn các tựa đã xem"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Mỗi hồ sơ sẽ thấy bộ sưu tập này mà không có các tựa hồ sơ đó đã xem, trên trang, trong các hàng và trong số lượng của bộ sưu tập. Không có gì bị xóa. Bộ sưu tập thông minh có giới hạn số tựa sẽ chọn tựa trước, nên có thể hiển thị ít tựa hơn."
     }
   ],
   "web.collections.details.label": [
@@ -121777,6 +122139,16 @@
     {
       "type": 0,
       "value": "Ngày phát sóng cuối cùng"
+    }
+  ],
+  "web.item.editMetadata.lockField": [
+    {
+      "type": 0,
+      "value": "Khóa "
+    },
+    {
+      "type": 1,
+      "value": "field"
     }
   ],
   "web.item.editMetadata.locked": [

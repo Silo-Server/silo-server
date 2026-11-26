@@ -243,7 +243,12 @@ func TestInvitationUnconfiguredAndPasswordBounds(t *testing.T) {
 	h = invitationTestHandler(f)
 	for _, password := range []string{"short", strings.Repeat("界", 25)} {
 		body, _ := json.Marshal(map[string]string{"password": password})
-		requireProblem(t, do(t, h, http.MethodPost, Prefix+"/invitations/token/accept", string(body), nil), TypeValidationFailed)
+		rec := do(t, h, http.MethodPost, Prefix+"/invitations/token/accept", string(body), nil)
+		requireProblem(t, rec, TypeValidationFailed)
+		// Every password refusal is at the member, as the contract states.
+		if !strings.Contains(rec.Body.String(), `"location":"body.password"`) {
+			t.Errorf("%d-byte password: refusal not at body.password: %s", len(password), rec.Body.String())
+		}
 	}
 	if f.writes != 0 {
 		t.Fatal("invalid password reached acceptance")

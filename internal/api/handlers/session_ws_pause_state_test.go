@@ -3,12 +3,14 @@ package handlers
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
@@ -693,5 +695,93 @@ func TestRealtimeStopRetriesTransientStoreErrors(t *testing.T) {
 	record, err := store.progressPlanStore.GetAttempt(t.Context(), f.session.ID)
 	if err != nil || !attemptEndedByAdmin(record) {
 		t.Fatalf("attempt = %+v, %v; want stopped by administrator", record, err)
+	}
+}
+
+// orderedLifecycleStore records each confirmed pause it is asked to commit
+// into the log the syncer below also writes to. With rowUnchanged set, the
+// row already holds the state and the commit changes nothing.
+type orderedLifecycleStore struct {
+	lifecycleTestStore
+	log          *[]string
+	rowUnchanged bool
+}
+
+func (s *orderedLifecycleStore) ConfirmLifecyclePause(ctx context.Context, id string, paused bool, received int64) (LifecycleTransition, bool, error) {
+	*s.log = append(*s.log, "lifecycle "+lifecycleState(paused))
+	if s.rowUnchanged {
+		return LifecycleTransition{}, false, nil
+	}
+	return s.lifecycleTestStore.ConfirmLifecyclePause(ctx, id, paused, received)
+}
+
+type orderedSyncer struct{ log *[]string }
+
+func (s orderedSyncer) SyncNow(context.Context) error {
+	*s.log = append(*s.log, "sync")
+	return nil
+}
+
+// A confirmed pause or resume moves the session's lifecycle row, which the
+// admin list reads its pause state from, before the sync tells monitors to
+// re-read that list, and announces the transition on the sessions channel.
+func TestRealtimeConfirmedPauseMovesTheLifecycleBeforeTheSync(t *testing.T) {
+	file := &models.MediaFile{ID: 42, ContentID: "movie-1", Duration: 3600}
+	sessionMgr := playback.NewSessionManager(0, 0)
+	handler := newKeyedPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
+	handler.CommandTracker = playback.NewCommandTracker()
+	defer handler.CommandTracker.Close()
+	var log []string
+	hub := evt.NewHub("test", nil)
+	events, unsubscribe := hub.Subscribe()
+	defer unsubscribe()
+	store := &orderedLifecycleStore{log: &log}
+	handler.AdminStore = store
+	handler.SessionSyncer = orderedSyncer{log: &log}
+	handler.EventsHub, handler.LifecycleViews, handler.LifecycleEncoder = hub, lifecycleTestViews{}, lifecycleTestEncoder{}
+	session, err := sessionMgr.StartSession(1, "profile-1", file.ID, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []struct {
+		name  playback.CommandName
+		state string
+		event string // empty when nothing changed, so nothing is announced or synced
+	}{
+		{name: playback.CommandPause, state: LifecyclePaused, event: LifecycleEventPaused},
+		{name: playback.CommandUnpause, state: LifecyclePlaying, event: LifecycleEventResumed},
+		// Progress another replica accepted paused the lifecycle row but not
+		// this copy's memory: the confirmation still moves the row, and the
+		// sync still cues monitors to re-read the list.
+		{name: playback.CommandUnpause, state: LifecyclePlaying, event: LifecycleEventResumed},
+		// A repeated confirmation finds the row and this copy already playing.
+		{name: playback.CommandUnpause, state: LifecyclePlaying},
+	} {
+		log = nil
+		store.rowUnchanged = step.event == ""
+		commandID := uuid.NewString()
+		handler.rememberRealtimeCommand(commandID, session.ID, step.name)
+		if err := handler.handleRealtimeClientMessage(session.ID, realtimeResultMessage(t, session.ID, commandID, playback.RealtimeResultStatusCompleted)); err != nil {
+			t.Fatal(err)
+		}
+		waitConfirmedPauseStates(t, handler, session.ID)
+		want := []string{"lifecycle " + step.state, "sync"}
+		if step.event == "" {
+			want = want[:1]
+		}
+		if !slices.Equal(log, want) {
+			t.Fatalf("%s: steps = %v, want %v", step.name, log, want)
+		}
+		if step.event == "" {
+			continue
+		}
+		select {
+		case env := <-events:
+			if env.Event != step.event || !env.AdminOnly {
+				t.Fatalf("%s: event %s admin=%v, want %s", step.name, env.Event, env.AdminOnly, step.event)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("%s: no %s event", step.name, step.event)
+		}
 	}
 }

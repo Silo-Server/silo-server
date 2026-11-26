@@ -442,6 +442,10 @@ func (s *Service) Accept(ctx context.Context, token, email, password, deviceName
 	} else if !allowed {
 		return nil, nil, auth.ErrLocalLoginDisabled
 	}
+	// Checked before the claim, so a refused password leaves it unspent.
+	if err := auth.CheckNewPassword(ctx, s.settings, password); err != nil {
+		return nil, nil, err
+	}
 	linkInvitation := false
 	var entered string
 	linkAddress := func() (string, error) {
