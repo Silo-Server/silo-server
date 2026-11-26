@@ -1641,6 +1641,26 @@ func (s *Service) RevokeSession(ctx context.Context, sessionID string, userID in
 	return s.revokeSession(ctx, sessionID, userID, func(*models.AuthSession) error { return nil })
 }
 
+// RevokeSessionChecked is RevokeSessionFrom with a further check on the
+// loaded session, run after the ownership and reach checks in the same
+// transaction. An error from check leaves the session live and is returned
+// unchanged.
+func (s *Service) RevokeSessionChecked(ctx context.Context, callerSessionID, sessionID string, userID int, check func(*models.AuthSession) error) error {
+	limited, err := s.SessionLimitedToItself(ctx, callerSessionID)
+	if err != nil {
+		return err
+	}
+	return s.revokeSession(ctx, sessionID, userID, func(session *models.AuthSession) error {
+		if limited && session.ID != callerSessionID {
+			return ErrSessionOutOfReach
+		}
+		if check != nil {
+			return check(session)
+		}
+		return nil
+	})
+}
+
 // revokeSession revokes one of userID's sessions; a session of another
 // account is ErrSessionNotFound before reach judges the locked session.
 func (s *Service) revokeSession(ctx context.Context, sessionID string, userID int, reach func(*models.AuthSession) error) error {

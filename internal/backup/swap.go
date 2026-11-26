@@ -19,9 +19,9 @@ type ControlDB interface {
 	OID(ctx context.Context, name string) (oid uint32, found bool, err error)
 	// NameOf returns the current name of the database with oid.
 	NameOf(ctx context.Context, oid uint32) (name string, found bool, err error)
-	// OtherConnections counts client sessions on name other than this
-	// command's: not the control session, and not a connection made under
-	// OwnApplicationName.
+	// OtherConnections counts the sessions on name other than this
+	// command's (the control session and connections made under
+	// OwnApplicationName) and autovacuum workers.
 	OtherConnections(ctx context.Context, name string) (int, error)
 	// OwnApplicationName is the application name the restore gives its own
 	// connections to the live database so OtherConnections can leave them

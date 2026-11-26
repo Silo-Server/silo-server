@@ -23,10 +23,11 @@ export default function SignedInSessions() {
         <p role="status">{t("web.settings.signedInSessions.unavailable")}</p>
       </>
     );
+  // Absent from a server that doesn't send it yet: other sessions stay manageable.
   return (
     <>
       <OpenInSiloSection />
-      <LoginSessionsPanel />
+      <LoginSessionsPanel manageOthers={capabilities.data.revoke_other_sessions !== false} />
     </>
   );
 }
