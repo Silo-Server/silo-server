@@ -1006,12 +1006,14 @@ that keeps the time, and the account's next edit inside the minute is not
 pushed; the app learns of it when it opens. A second edit inside the minute
 queues nothing; the phone learns of it from the next wake or when the app
 opens. The table has no foreign key to `users`, which would lock the account
-row on every wake and could deadlock with an account deletion; retention
-deletes rows a day old, a deleted account's included.
+row on every wake and could deadlock with an account deletion. Notification
+retention deletes rows a day old instead, a deleted account's included; until
+then a deleted account's row is harmless, since account IDs are not reused.
 
 The waker answers true when it queued a wake, or one was queued inside the
-minute, even if that earlier send failed: the phone has been told, or will
-be within the minute, and a failed send is repaired when the app opens. With
+minute, even if that earlier send failed, or a wake for the account is still
+in flight on this server: the phone has been told, or will be within the
+minute, and a failed send is repaired when the app opens. With
 push off or no registered phone it answers false and writes nothing. It never
 fails the edit: errors are logged and the send runs in the background.
 
@@ -1019,11 +1021,26 @@ A wake is sent once and never retried. Its attempt row is inserted in flight,
 as `retrying` with no `next_retry_at`, and the send records `delivered` or
 `failed`. No claim query selects any of those, so no server's retry sweep,
 including one of the previous release that would send it as an alert, ever
-picks a wake up. The account's phones are sent one after another, each under
-its own deadline, so a slow relay call delays only its own phone. A send that
-runs out of time, panics, or stops before it records an outcome is recorded
-`failed` on a fresh context, and the next phone is still sent. Only a process
-that stops mid-send leaves a row in flight.
+picks a wake up.
+
+One wake of an account never overlaps the next. The whole wake runs under a
+budget of half the one-minute interval, started when it is queued, so it has
+ended before the account's limit lets another start. The phones are sent one
+after another, most recently seen first, each under what is left of the
+budget. One send can take up to seven relay requests, more than the budget
+allows, so there is no deadline per phone, and a slow phone can use up the
+budget. A phone the budget doesn't reach, or doesn't let finish, is recorded
+`failed` as `wake_out_of_time`; it gets the next wake, and the app reads the
+set when it opens. A send that panics or stops before it records an outcome is
+recorded `failed` as `wake_send_unfinished`, and the next phone is still sent.
+These failure writes run on a fresh context the budget cannot have canceled.
+On each server, a wake of an account also does not start while the previous
+one is still in flight there. That guard is a mark in the process, released
+when the wake ends, a panic included; a row in the database would outlive a
+process that stopped mid-wake and hold the account's wakes until retention.
+Across servers, the budget and the account's limit row keep wakes apart. The
+worst case for one account is one wake at a time on a server, each lasting at
+most the budget. Only a process that stops mid-wake leaves a row in flight.
 The push queue gauge leaves wake rows out, because no worker ever claims one,
 and the daily notification retention run marks a row that has been in flight
 for more than ten minutes as failed. Retention deletes wake rows after seven
