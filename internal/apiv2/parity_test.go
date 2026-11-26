@@ -147,6 +147,11 @@ const (
 	remotePlaybackToken = "tok-remote-playback"
 	// grantedAppToken is member 1's session another app's key opened.
 	grantedAppToken = "tok-granted-app"
+	// liveMemberToken and liveGrantedAppToken are memberToken's and
+	// grantedAppToken's sessions with an access expiry, which a capability
+	// read that answers for the login session (capabilityLoginAllowed) needs.
+	liveMemberToken     = "tok-events"
+	liveGrantedAppToken = "tok-granted-app-live"
 	// deviceLoginToken is member 1's session a device signed in by code
 	// opened: no kind of its own, so it passes like a password session.
 	deviceLoginToken = "tok-device-login"
@@ -219,6 +224,7 @@ func fakeAuth(users map[int]*models.User) *apimw.AuthMiddleware {
 		householdToken:         {UserID: householdUserID, Role: "user", SessionID: "s5", TokenType: auth.TokenTypeAccess},
 		storeDownToken:         {UserID: 1, Role: "user", SessionID: storeDownSession, TokenType: auth.TokenTypeAccess},
 		grantedAppToken:        {UserID: 1, Role: "user", SessionID: grantedAppSessionID, TokenType: auth.TokenTypeAccess},
+		liveGrantedAppToken:    {UserID: 1, Role: "user", SessionID: grantedAppSessionID, TokenType: auth.TokenTypeAccess, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))}},
 		deviceLoginToken:       {UserID: 1, Role: "user", SessionID: "s6", TokenType: auth.TokenTypeAccess},
 		remotePlaybackToken:    {UserID: 1, Role: "user", SessionID: remotePlaybackSession, TokenType: auth.TokenTypeAccess, SessionPurpose: models.SessionPurposeRemotePlayback, ProfileID: "p-owner"},
 	}
