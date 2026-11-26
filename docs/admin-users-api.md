@@ -302,6 +302,7 @@ response replay; after an uncertain result, reload before starting another inten
 | `PUT /users/{id}/settings/values/{key}` | Validated setting value |
 | `DELETE /users/{id}/settings/values/{key}` | 204 |
 | `GET /users/{id}/devices` | Complete device collection for one account (`listAdminUserDevices`) |
+| `GET /users/{id}/keys` | The account's Silo app keys (`listAdminUserAppKeys`), each with `enrolled_at` and `enrolled_ip_address`, the address it was enrolled from (empty when unknown); see [auth-api.md](auth-api.md) |
 | `GET /users/{id}/watch-summary` | Finalized play totals over recent days (`getAdminUserWatchSummary`) |
 | `GET /users/{id}/downloads` | Paginated managed device downloads (`listAdminUserDownloads`) |
 | `GET /users/{id}/downloads/summary` | Managed download totals (`getAdminUserDownloadSummary`) |

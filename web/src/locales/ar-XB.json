@@ -142598,6 +142598,16 @@
       "value": "device"
     }
   ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFrom \u202C"
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
   "web.settings.appKeys.row.identityGone": [
     {
       "type": 0,

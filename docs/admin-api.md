@@ -3867,6 +3867,13 @@ identifies the acting administrator. Actor filters use
 | `user.device_key_approved`, `user.device_key_denied` | `approvePendingAppKey`, `denyPendingAppKey`, `denyAdminUserPendingKey` | `device_key_id` (after) |
 | `user.device_key_revoked` | `revokeAdminUserDeviceKey` | `device_key_id` (before); recorded only when the key was not already revoked |
 | `user.person_key_revoked` | `revokeAdminUserPersonKey` | `person_key_kid` (before); `denied_device_keys` count (after) when it denied waiting devices |
+| `user.app_keys_enrolled` | `enrollAppKeys` | `device_key_id` (after); `person_key_kid` (after) when the call enrolled the person key; `session_opened_via` (after), the enrolling session's `opened_via` (`password`, `provider` or `app_key`) |
+| `user.person_key_replaced` | `replacePersonKey` | `person_key_kid` (before: the replaced key; after: the new key). A row with no before side is the account's first person key, by the convention that an absent side is a creation; `session_opened_via` (after) as for enrolling; `denied_device_keys` count (after) when it denied waiting devices |
+| `user.device_key_introduced` | `introduceAppKey` | `device_key_id` and `device_key_status` (`active` or `pending`) (after) |
+| `user.app_code_issued` | `createAppCode` | `app_code_kind` (`session`) and `expires_at` (after); never the code or its hash |
+| `user.app_code_redeemed` | `redeemAppCode`; target is the account the keys joined, created by the redeem for a join code | `app_code_kind` (`join` or `session`), `device_key_id`, and `person_key_kid` when the redeem enrolled it (after); never the code |
+| `user.app_grant_redeemed` | `redeemAppKeyGrant` | `device_key_id` (after) |
+| `user.device_sign_in_preapproved` | `preapproveDeviceLogin` | `device_login_request_id`, `device_name` and `expires_at` (after); never the device code or binding |
 | `user.login_sessions_revoked` | `deleteAdminUserLoginSessions` | `revoked_login_sessions` count; recorded when the call ended any login session or Audiobookshelf, Jellyfin-compatible or device sign-in |
 | `api_key.created`, `api_key.updated`, `api_key.deleted` | `createAdminAPIKey`, `updateAdminAPIKeyTier`, `deleteAdminAPIKey`, `createPersonalAPIKey`, `revokePersonalAPIKey` | `user_id` (owner), `label`, `rate_tier`, `scopes` (an empty list is an unscoped key with its owner's full access) |
 | `profile.created`, `profile.updated`, `profile.deleted` | `createProfile`, `updateProfile`, `deleteProfile`, `putProfileSet` (one row per profile the set creates, changes or removes) | `name`, `is_child`, `is_primary`, `max_content_rating`, `max_advisory_age`, `require_advisory_age`, `library_restrictions_enabled`, `allowed_library_ids`, `max_playback_quality`, `pin` |
@@ -3891,6 +3898,13 @@ token in its body, so its path has none; the path of the deprecated
 `completePasswordReset` is stored with its link token replaced by
 `[redacted]`. Neither row has a `user_id`, because the request is
 unauthenticated.
+
+Nor do they contain an app code or its hash, a device sign-in's device code
+or binding, or any key material beyond a person key's public ID. The rows of
+`introduceAppKey`, `redeemAppCode` and `redeemAppKeyGrant` have no `user_id`
+either, since a signed envelope, not a login session, authenticates them;
+their `target_id` names the account the key joined, and their `client_ip` is
+the address the new key row records as `enrolled_ip_address`.
 
 Rollbacks and refused requests record no domain action, and neither does a
 write that changes no allowlisted value: a repeated identical policy write,

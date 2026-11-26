@@ -135790,6 +135790,16 @@
       "value": "device"
     }
   ],
+  "web.settings.appKeys.row.enrolledFrom": [
+    {
+      "type": 0,
+      "value": "From "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
   "web.settings.appKeys.row.identityGone": [
     {
       "type": 0,
