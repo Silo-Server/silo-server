@@ -108,8 +108,9 @@ with a detail that names the accounts (the first ten, then how many more):
 
 - Turning `auth.local_password_login` off while any enabled account holds Silo
   app keys and has no usable password and no sign-in provider account. Its keys
-  would be its only way in afterwards, or it would have none, so the detail
-  names one remedy: link a provider account for each.
+  would be its only way in afterwards, or it would have none. The detail names
+  linking a provider account for each, and giving a password only to a
+  break-glass administrator it names, the one kind a password signs in then.
 - Turning app keys off (`auth.app_key_sign_in` off, or `demo.enabled` on) while
   any enabled account signs in only with its keys. Otherwise the write ends
   every login session a key opened, in the same transaction.

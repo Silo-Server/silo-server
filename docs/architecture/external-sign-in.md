@@ -210,9 +210,10 @@ ordered against each other.
   usable password and no provider identity it can sign in with; the detail
   names those accounts. Afterwards a key that is not provider-bound works only
   for a break-glass account, so such an account would be left with its keys as
-  its only way in, or with none. A password would not help it once local
-  passwords are off, so the refusal names one remedy: link a provider account
-  for each. The break-glass check runs first. While the switch is off, an
+  its only way in, or with none. A password would not sign it in once local
+  passwords are off unless it is a break-glass administrator, so the refusal
+  names linking a provider account for each, and a password only where a
+  break-glass administrator is named. The break-glass check runs first. While the switch is off, an
   administrator change that would leave a break-glass admin with keys as its
   only way in (setting the flag on an account with keys and no usable password
   or provider identity, or turning such an account's password sign-in off) is

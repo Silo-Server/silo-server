@@ -1595,8 +1595,11 @@ invitation lookup reports `app_join: false`. The capability,
 `pending/{id}/deny` stay open. Turning the switch off ends every login session
 a key opened, a granted app's included, in the same transaction as the
 settings write; sessions opened by a password, a provider or device sign-in
-stay. A key session is also refused at refresh while the switch is off
-(`session_expired`, as a revoked session). Turning it back on needs nothing:
+stay. A key session a hand-written database left live is ended at its next
+refresh while the switch is off (401 `session_expired`, as a revoked
+session), and stays ended when the switch comes back; until it refreshes,
+its access token keeps working until it expires (8 hours by default).
+Turning it back on needs nothing:
 each device signs in again with its key. A server in demo
 mode (`demo.enabled`) behaves as if the switch were off, for administrators
 too, and its capability reports `disabled`: every visitor shares one account

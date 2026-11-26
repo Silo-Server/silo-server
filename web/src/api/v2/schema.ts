@@ -5591,7 +5591,7 @@ export interface paths {
     };
     /**
      * List the accounts a sign-in switch change would leave with no way in.
-     * @description app_keys_off lists the enabled accounts whose Silo app keys sign in now and that have no password that signs in and no sign-in provider account: with app keys off they have no way in. updateAdminSettings refuses turning app keys off while it lists any account. The list is the same while app keys are already off, where it names the accounts that still have no way in. local_passwords_off lists the enabled accounts that hold app keys and have no usable password and no sign-in provider account: afterwards their keys would be their only way in, or they would have none, and only linking a provider account takes one off the list. updateAdminSettings refuses turning local passwords off while it lists any account.
+     * @description app_keys_off lists the enabled accounts whose Silo app keys sign in now and that have no password that signs in and no sign-in provider account: with app keys off they have no way in. updateAdminSettings refuses turning app keys off while it lists any account. The list is the same while app keys are already off, where it names the accounts that still have no way in. local_passwords_off lists the enabled accounts that hold app keys and have no usable password and no sign-in provider account: afterwards their keys would be their only way in, or they would have none. Linking a provider account takes one off the list, and so does a password, though a password signs in only a break-glass administrator once local passwords are off. updateAdminSettings refuses turning local passwords off while it lists any account.
      */
     get: operations["listSignInAccountsAtRisk"];
     put?: never;

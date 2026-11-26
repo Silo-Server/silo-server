@@ -396,6 +396,9 @@
 ./internal/auth TestAppKeySwitchOffEndsKeySessionsDB
 ./internal/auth TestKeySignInRacesSwitchOffDB
 ./internal/api/handlers TestAppKeySwitchWriteEndsKeySessionsDB
+./internal/apiv2 TestKeySessionSweepMissedEndsAtRefreshDB
+./internal/auth TestSwitchOffSweepAndAccountRevokeDoNotDeadlockDB
+./internal/api/handlers TestAppKeysOffJudgedOnTheBatchLocalSettingDB
 # Keys are never the only way in: who each switch change leaves at risk, the
 # refusals that name them, and the restore's list of accounts with no way in.
 ./internal/auth TestAccountsAtRiskDB

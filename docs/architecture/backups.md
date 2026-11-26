@@ -2135,7 +2135,9 @@ that holds a bearer secret or a public capability, each one way:
   every full restore lists each enabled account the restored database leaves
   with no way to sign in under its app key switch (`auth.app_key_sign_in`, off
   in demo mode) and `auth.local_password_login`: no provider identity it can
-  sign in with (an enabled installation with an enabled sign-in binding), no
+  sign in with (a provider that can sign people in from an ordinary device:
+  an enabled installation with an enabled binding that is not a network
+  identity binding, and a public URL for an OAuth one), no
   password that signs in, and no key that does (`StrandedAccounts`, built on
   `auth.AccountHasNoWayInSQL`, the rule the sign-in switch checks use; see
   app-keys.md, "Keys are never the only way in"). Every account is
@@ -2144,8 +2146,9 @@ that holds a bearer secret or a public capability, each one way:
   backup that predates the key tables. Keys the restore revoked or left out
   are revoked or absent in the restored rows, so they count as gone. It
   prints how many accounts and the first 20 by name and id, then how many
-  more, and says to give each a password or link a sign-in provider account
-  for it. It changes nothing and never fails the restore. What a person sees
+  more, and the remedy true for the restored switches: a password or a
+  provider account while local passwords are on; a provider account, or a
+  password for a break-glass administrator it names, while they are off. It changes nothing and never fails the restore. What a person sees
   for what is left out:
   - Login sessions: every app signs in again; one with a working key does
     so by itself.

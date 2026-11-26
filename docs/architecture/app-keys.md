@@ -871,13 +871,20 @@ same list to the settings page:
 
 The facts are SQL fragments in `internal/auth` (`sign_in_risk.go`), each tied
 to the Go check it mirrors: a usable password is `HasLocalPassword`; a usable
-provider identity is an identity at an enabled installation with an enabled
-sign-in binding (the unlink guard's rule); a working key follows
+provider identity is an identity at an installation whose provider can sign
+people in from an ordinary device (`signInProviders`: an enabled
+installation with an enabled sign-in binding that is not a network identity
+binding, and for an OAuth provider a public URL, without which its browser
+and native starts refuse); a working key follows
 `keySignInPolicy` (a local key under the local password rule, a person key
 only on an account that isn't an administrator's, a provider-bound key while
 its identity's installation is enabled; a waiting key is no way in). A full
 restore lists the accounts it brings back with no way in with the same SQL
-(`auth.AccountHasNoWayInSQL`), over every enabled account.
+(`auth.AccountHasNoWayInSQL`), over every enabled account. Each refusal, and
+the restore, names a remedy true for the switches (`auth.WayInRemedy`):
+while local passwords are on, a password or a provider account; while they
+are off, a provider account, or a password for a break-glass administrator
+it names.
 
 ### Sessions that can't manage keys
 
@@ -1685,13 +1692,24 @@ it already holds exclusive is granted at once). Two key paths therefore don't
 wait for each other, and none can hold it shared while waiting to take it
 exclusive, the pattern that would deadlock two of them.
 
-A session a key opened is also refused at renewal while the switch is off
+The sweep ends key sessions in one order (`endKeySessionsTx`): every plugin
+installation row (share), then the device sign-ins those sessions approved in
+advance (the rows the `auth_sessions_withdraw_preapprovals` trigger writes as
+a session ends), then the sessions, each in id order. Ending all of an
+account's sessions (`revokeSignInsInTransaction`) also takes the requests
+before the sessions, so the two can't deadlock.
+
+A key session can survive the sweep only in a database written or put back
+by hand (`auth.app_key_sign_in` or `demo.enabled` stored without the
+settings write). Such a session is ended at its next renewal
 (`checkSessionStanding`, which `Service.Refresh` and plugin access renewal
-share), with the answer a revoked session gets. Only a session with a
-`device_key_id` reads the switch there. That covers a session that a
-database write skipped the sweep for, such as `demo.enabled` set straight in
-`server_settings`: it ends at its next renewal instead of refreshing on for
-the refresh lifetime.
+share): the renewal reads the switch under the settings lock and, finding it
+off, ends the session in the sweep's order and answers as for a revoked
+session. Its access token is refused from then on, and the session does not
+come back when the switch does. Only a session with a `device_key_id` reads
+the switch there; requests with an access token don't. So a key session the
+sweep missed that never refreshes keeps its access token until it expires
+(8 hours by default).
 
 A session another app's key opened, if one still existed, would be answered
 403 `permission_denied` by the origin gate on `createAppCode`,
