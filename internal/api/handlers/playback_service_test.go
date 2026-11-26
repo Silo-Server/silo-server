@@ -1,13 +1,16 @@
 package handlers
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -1645,85 +1648,131 @@ func TestReplanV2FailsClosedForAnotherApp(t *testing.T) {
 	assertPlaybackOperationError(t, err, http.StatusServiceUnavailable, "unavailable")
 }
 
+// countingSessions counts the session loads the media routes make: every
+// load or rebuild of a playback session, and so every encode a load could
+// restart, begins with GetSession. It wraps the in-memory session manager;
+// no encoder runs in this test.
+type countingSessions struct {
+	SessionManagerInterface
+	loads int
+}
+
+func (c *countingSessions) GetSession(id string) (*playback.Session, error) {
+	c.loads++
+	return c.SessionManagerInterface.GetSession(id)
+}
+
 // TestMediaRoutesKeepAnotherAppToItsStreams: the media routes check the
 // account and profile only, so a session another app's key opened that held
 // another device's playback session id could fetch that stream's bytes,
-// manifest, segments, subtitles and fonts. Such a session is refused another
-// login session's stream and one with no recorded login session, and reaches
-// its own; the person's own session is not asked. Catches the tie to the
-// stream's login session going missing on any one of the media routes.
+// manifest, segments, subtitles and fonts, and loading a live session whose
+// encode died restarts it. Such a session is refused another login session's
+// stream, and one with no recorded login session, before anything is loaded:
+// the session manager is never asked, so no session is rebuilt and no encode
+// started. Its own stream gets past the tie into the load and answers what
+// the route answers when the fixture has no media behind it (404 for the
+// file or transcode). The person's own session is never refused. Catches the
+// tie going missing on a media route, or moving behind the load.
 func TestMediaRoutesKeepAnotherAppToItsStreams(t *testing.T) {
 	manager := playback.NewSessionManager(0, 0)
 	session, err := manager.StartSession(1, "profile-1", 100, playback.PlayTranscode, false)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The original-file route serves a direct play.
+	direct, err := manager.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := &countingSessions{SessionManagerInterface: manager}
 	store := playback.NewMemoryPlanStoreV3()
-	handler := newKeyedPlaybackHandler(manager)
+	handler := newKeyedPlaybackHandler(sessions)
 	handler.PlanStoreV3 = store
-	stream := NewStreamHandler(manager, testPlaybackFileResolver{})
+	// A real file, so the original-file route serves the owning session.
+	media := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(media, []byte("synthetic media bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stream := NewStreamHandler(sessions, testPlaybackFileResolver{file: &models.MediaFile{ID: 100, FilePath: media}})
 	stream.TM = handler.TranscodeManager()
 	stream.PlanStoreV3 = store
-	params := map[string]string{"session_id": session.ID, "track": "0", "name": "segment0.m4s"}
-	caller := func(loginSession string, kind auth.SessionKind) context.Context {
-		ctx := apimw.SetClaims(context.Background(), &auth.Claims{UserID: 1, Role: "user", TokenType: auth.TokenTypeAccess, SessionID: loginSession, SessionKind: kind})
-		return apimw.SetProfileID(ctx, "profile-1")
-	}
-	// answer is the route's outcome: refused as another app's, and whether
-	// the media was served at all.
-	answer := func(name string, ctx context.Context) (refused, served bool) {
+	// answer runs one route as the caller and reports its status and code.
+	answer := func(name, loginSession string, kind auth.SessionKind) (int, string) {
 		t.Helper()
+		id := session.ID
+		if name == "stream" {
+			id = direct.ID
+		}
+		req := playbackTestRequest(http.MethodGet, "/", nil, map[string]string{"session_id": id, "track": "0", "name": "segment0.m4s"})
+		ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 1, Role: "user", TokenType: auth.TokenTypeAccess, SessionID: loginSession, SessionKind: kind})
+		ctx = apimw.SetProfileID(ctx, "profile-1")
 		if name == "fonts" {
 			_, err := stream.SubtitleFonts(ctx, SubtitleFontRequest{SessionID: session.ID, Track: "0", Query: url.Values{}})
 			var apiErr *APIError
-			return errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden && apiErr.Message == SessionNotAllowedDetail, err == nil
+			if !errors.As(err, &apiErr) {
+				return http.StatusOK, ""
+			}
+			return apiErr.Status, apiErr.Code + ": " + apiErr.Message
 		}
-		serve := map[string]http.HandlerFunc{
+		rr := httptest.NewRecorder()
+		map[string]http.HandlerFunc{
 			"manifest": handler.HandleGetTranscodeManifest,
 			"segment":  handler.HandleGetTranscodeSegment,
 			"stream":   stream.HandleStream,
 			"subtitle": stream.HandleSubtitle,
-		}[name]
-		req := playbackTestRequest(http.MethodGet, "/", nil, params)
-		claims := apimw.GetClaims(ctx)
-		reqCtx := apimw.SetProfileID(apimw.SetClaims(req.Context(), claims), "profile-1")
-		rr := httptest.NewRecorder()
-		serve(rr, req.WithContext(reqCtx))
-		return rr.Code == http.StatusForbidden && strings.Contains(rr.Body.String(), SessionNotAllowedDetail), rr.Code < 400
+		}[name](rr, req.WithContext(ctx))
+		var body struct{ Error, Message string }
+		_ = json.Unmarshal(rr.Body.Bytes(), &body)
+		return rr.Code, body.Error + ": " + body.Message
 	}
-	refused := func(name string, ctx context.Context) bool {
-		t.Helper()
-		r, _ := answer(name, ctx)
-		return r
+	refusal := "forbidden: " + SessionNotAllowedDetail
+	// What the owning session gets past the tie: the original file is
+	// served; the fixture has no transcode output and no subtitle track, so
+	// those routes answer their own 404 once the session is loaded.
+	ownStatus := map[string]int{"stream": http.StatusOK}
+	ownAnswer := map[string]string{
+		"manifest": "not_found: Transcode session not found",
+		"segment":  "not_found: Transcode session not found",
+		"stream":   ": ",
+		"subtitle": "not_found: Subtitle track not found",
+		"fonts":    "not_found: Embedded subtitle track not found",
 	}
 	routes := []string{"manifest", "segment", "stream", "subtitle", "fonts"}
-	// No attempt row yet: a stream with no recorded login session is never
-	// served to such a session (the HLS routes answer 404 for it before
-	// the tie; the others refuse it).
-	for _, name := range routes {
-		if r, served := answer(name, caller("login-app", auth.SessionKindGrantedApp)); served || (!r && name != "manifest" && name != "segment") {
-			t.Fatalf("%s: another app reached a stream with no recorded login session", name)
+	refused := func(name, why string) {
+		t.Helper()
+		before := sessions.loads
+		if status, got := answer(name, "login-app", auth.SessionKindGrantedApp); status != http.StatusForbidden || got != refusal {
+			t.Fatalf("%s, %s: %d %q", name, why, status, got)
+		}
+		if sessions.loads != before {
+			t.Fatalf("%s, %s: the refused request loaded the session %d times", name, why, sessions.loads-before)
 		}
 	}
-	if err := store.SaveAttempt(context.Background(), playback.AttemptRecordV3{
-		PlaybackAttemptID: uuid.NewString(), SessionID: session.ID, UserID: 1, ProfileID: "profile-1",
-		RequestedMediaFileID: 100, EffectiveMediaFileID: 100, ExpiresAt: time.Now().Add(time.Hour), LoginSessionID: "login-phone",
-	}); err != nil {
-		t.Fatal(err)
+	for _, name := range routes {
+		refused(name, "a stream with no recorded login session")
+	}
+	for _, id := range []string{session.ID, direct.ID} {
+		if err := store.SaveAttempt(context.Background(), playback.AttemptRecordV3{
+			PlaybackAttemptID: uuid.NewString(), SessionID: id, UserID: 1, ProfileID: "profile-1",
+			RequestedMediaFileID: 100, EffectiveMediaFileID: 100, ExpiresAt: time.Now().Add(time.Hour), LoginSessionID: "login-phone",
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, name := range routes {
-		// This fixture's sidecar routes (subtitle, fonts) load no session
-		// once the attempt row exists (404 for every caller); they refused
-		// such a session above, before the row, at the same check.
-		sidecar := name == "subtitle" || name == "fonts"
-		if r, served := answer(name, caller("login-app", auth.SessionKindGrantedApp)); served || (!r && !sidecar) {
-			t.Fatalf("%s: another app reached another device's stream", name)
-		}
-		if refused(name, caller("login-phone", auth.SessionKindGrantedApp)) {
-			t.Fatalf("%s: another app was refused its own stream", name)
-		}
-		if refused(name, caller("login-tv", "")) {
-			t.Fatalf("%s: the person's own session was refused", name)
+		refused(name, "another device's stream")
+		for _, own := range []struct {
+			who  string
+			kind auth.SessionKind
+		}{{"login-phone", auth.SessionKindGrantedApp}, {"login-tv", ""}} {
+			before := sessions.loads
+			want := cmp.Or(ownStatus[name], http.StatusNotFound)
+			if status, got := answer(name, own.who, own.kind); status != want || got != ownAnswer[name] {
+				t.Fatalf("%s as %s: %d %q, want %d %q", name, own.who, status, got, want, ownAnswer[name])
+			}
+			if sessions.loads == before {
+				t.Fatalf("%s as %s: never reached the load", name, own.who)
+			}
 		}
 	}
 }

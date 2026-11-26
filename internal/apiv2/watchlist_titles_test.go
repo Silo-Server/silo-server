@@ -230,9 +230,9 @@ func TestDeleteWatchlistTitleKeepsRequestOfConcurrentReadd(t *testing.T) {
 // Catches the request step running again for such a session.
 func TestWatchlistTitleForAnotherAppMakesNoRequest(t *testing.T) {
 	for _, tc := range []struct {
-		token                  string
-		wantRequest, wantPulls bool
-	}{{grantedAppToken, false, false}, {memberToken, true, true}} {
+		token                         string
+		wantRequests, wantWithdrawals int
+	}{{grantedAppToken, 0, 0}, {memberToken, 1, 1}} {
 		t.Run(tc.token, func(t *testing.T) {
 			titles := &fakeWatchlistTitles{}
 			reqs := &fakeWatchlistRequests{details: map[int]*tmdb.MediaDetail{949: {MediaType: "movie", ID: 949, Title: "Heat", Year: 1995}}}
@@ -241,13 +241,13 @@ func TestWatchlistTitleForAnotherAppMakesNoRequest(t *testing.T) {
 			if rec := do(t, h, http.MethodPut, "/api/v2/watchlist/titles/movie/949", "", headers); rec.Code != http.StatusOK {
 				t.Fatalf("add: %d %s", rec.Code, rec.Body.String())
 			}
-			if len(titles.added) != 1 || (len(reqs.requested) == 1) != tc.wantRequest {
+			if len(titles.added) != 1 || len(reqs.requested) != tc.wantRequests {
 				t.Fatalf("added %d entries, requested %v", len(titles.added), reqs.requested)
 			}
 			if rec := do(t, h, http.MethodDelete, "/api/v2/watchlist/titles/movie/949", "", headers); rec.Code != http.StatusNoContent {
 				t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
 			}
-			if len(titles.removed) != 1 || (len(reqs.withdrawn) > 0) != tc.wantPulls {
+			if len(titles.removed) != 1 || (tc.wantWithdrawals == 0 && len(reqs.withdrawn) != 0) || len(reqs.withdrawn) < tc.wantWithdrawals {
 				t.Fatalf("removed %d entries, withdrew %v", len(titles.removed), reqs.withdrawn)
 			}
 		})

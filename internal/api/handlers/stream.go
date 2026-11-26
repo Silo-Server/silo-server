@@ -137,6 +137,10 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		writePlaybackSessionEnded(w)
 		return
 	}
+	// Before the session is looked up or reconstructed from its recipe.
+	if !requireGrantedAppOwnStream(w, r, h.PlanStoreV3, sessionID) {
+		return
+	}
 
 	// Look up the session, reconstructing it from the recipe card on a not-found
 	// miss (e.g. after a server restart) so a direct/remux stream resumes instead
@@ -191,9 +195,6 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !requireOwningProfile(w, r, session) {
-		return
-	}
-	if !requireGrantedAppOwnStream(w, r, h.PlanStoreV3, session.ID) {
 		return
 	}
 
@@ -298,6 +299,10 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 // replica that never served the media, and checks account and selected-profile
 // ownership before exposing a sidecar.
 func (h *StreamHandler) loadSidecarSession(ctx context.Context, reference, sessionID string, userID int) (*playback.Session, *streamtoken.Claims, error) {
+	// Before the session is looked up or reconstructed from its recipe.
+	if err := grantedAppStreamError(ctx, h.PlanStoreV3, sessionID); err != nil {
+		return nil, nil, err
+	}
 	card, claims := verifiedStreamCardFromToken(reference, sessionID, h.JWTSecret)
 	loadCard := card
 	if _, err := h.sessionMgr.GetSession(sessionID); err == nil {
@@ -327,9 +332,6 @@ func (h *StreamHandler) loadSidecarSession(ctx context.Context, reference, sessi
 	}
 	if profileID := apimw.GetProfileID(ctx); profileID != "" && session.ProfileID != "" && profileID != session.ProfileID {
 		return nil, nil, apiError(http.StatusForbidden, "forbidden", "Session belongs to another profile")
-	}
-	if err := grantedAppStreamError(ctx, h.PlanStoreV3, session.ID); err != nil {
-		return nil, nil, err
 	}
 	return session, claims, nil
 }

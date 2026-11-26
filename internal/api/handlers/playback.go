@@ -2369,6 +2369,12 @@ func alignedSeekSeconds(seekSeconds float64, segmentDuration int, targetVideoCod
 // mapping is a separate surface and unchanged.
 func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
+	// Before anything is loaded or rebuilt: loading a live session whose
+	// encode has died restarts it, so a refusal after the load would already
+	// have spent another device's transcode.
+	if !requireGrantedAppOwnStream(w, r, h.PlanStoreV3, sessionID) {
+		return
+	}
 	session, status, card, claims, reconstructErr := h.loadTranscodeServeSession(r, sessionID, -1)
 	switch status {
 	case playback.SessionMissing:
@@ -2402,9 +2408,6 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 		return
 	}
 	if !requireOwningProfile(w, r, session) {
-		return
-	}
-	if !requireGrantedAppOwnStream(w, r, h.PlanStoreV3, session.ID) {
 		return
 	}
 	if !requireNativeSessionAPIEgressV3(w, session) {
@@ -2508,6 +2511,12 @@ func writePlaybackToneMapExecutionError(w http.ResponseWriter, err error) bool {
 // and unchanged.
 func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
+	// Before anything is loaded or rebuilt: loading a live session whose
+	// encode has died restarts it, so a refusal after the load would already
+	// have spent another device's transcode.
+	if !requireGrantedAppOwnStream(w, r, h.PlanStoreV3, sessionID) {
+		return
+	}
 	requestedSegment := -1
 	subtitleSegment, isSubtitleSegment := playback.ParseSubtitleSegmentNumber(chi.URLParam(r, "name"))
 	if segNum, parseErr := playback.ParseSegmentNumber(chi.URLParam(r, "name")); parseErr == nil {
@@ -2548,9 +2557,6 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 		return
 	}
 	if !requireOwningProfile(w, r, session) {
-		return
-	}
-	if !requireGrantedAppOwnStream(w, r, h.PlanStoreV3, session.ID) {
 		return
 	}
 	if !requireNativeSessionAPIEgressV3(w, session) {
