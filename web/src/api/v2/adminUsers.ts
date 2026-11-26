@@ -65,6 +65,7 @@ export function adminUserFromV2(user: AdminUserV2): AdminUser {
     password_change_required: user.password_change_required,
     is_owner: user.is_owner,
     break_glass: user.break_glass,
+    local_password_allowed: user.local_password_allowed,
     effective_policy: {
       library_ids:
         user.effective_policy.library_ids === null

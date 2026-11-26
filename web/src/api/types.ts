@@ -2704,6 +2704,11 @@ export interface AdminUser {
    * it off (auth.local_password_login).
    */
   break_glass: boolean;
+  /**
+   * The server lets the account sign in with a local password now (its switch
+   * is on, or the account is break-glass): a sign-in link can be made for it.
+   */
+  local_password_allowed: boolean;
   effective_policy: AdminUserEffectivePolicy;
   created_at: string;
   updated_at: string;

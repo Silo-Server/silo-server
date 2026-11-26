@@ -129,9 +129,12 @@ export function UserDetailHeader({
   const deleteBlocked = activeEdit !== null && activeEdit.changeCount > 0;
   const showReset = user.password_login && manageable;
   const showSetPassword = !user.password_login && manageable;
-  // A link is refused for a disabled account; the server applies the rules
-  // for who may set the account's password and says why it refuses.
-  const canSignInLink = manageable && user.enabled && onCreateSignInLink !== undefined;
+  // A link is refused for a disabled account and for one the server won't
+  // let sign in with a local password (local_password_allowed, the rule
+  // password sign-in uses); the server applies the rules for who may set the
+  // account's password and says why it refuses.
+  const canSignInLink =
+    manageable && user.enabled && user.local_password_allowed && onCreateSignInLink !== undefined;
   const hasMenu = canSignInLink || transferable || canDisable || canEnable || canDelete;
   const viewAsReasonKey = available
     ? viewAsDisabledReason(user, ownAccount, viewAsDisabled)

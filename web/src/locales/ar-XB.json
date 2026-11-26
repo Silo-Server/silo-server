@@ -100760,6 +100760,12 @@
       "value": "\u200F\u202EYour password is saved. Sign in with it.\u202C"
     }
   ],
+  "web.auth.signInLink.passwordSetLostDevices": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELost devices that used the Silo app can still sign in until you remove them. After you sign in, remove them from your devices in your account settings.\u202C"
+    }
+  ],
   "web.auth.signInLink.passwordTitle": [
     {
       "type": 0,

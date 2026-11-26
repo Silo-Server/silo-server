@@ -89,6 +89,7 @@ it("sets a password with the redeem's token", async () => {
   });
   fireEvent.submit(screen.getByRole("button", { name: "Save password" }).closest("form")!);
   expect(await screen.findByRole("status")).toHaveTextContent("Your password is saved.");
+  expect(screen.getByText(/Lost devices that used the Silo app can still sign in/)).toBeTruthy();
   expect(bodiesSentTo(fetchMock, "/api/v2/auth/sign-in-links/set-password")).toEqual([
     { token: redeemed.set_password_token, new_password: "margin fossil" },
   ]);
@@ -137,6 +138,7 @@ it("asks before leaving, and says the link is used after a reload", async () => 
   first.unmount();
   renderRoutes("/sign-in-link", { "/sign-in-link": <SignInLink /> });
   expect(await screen.findByText(/Ask an administrator of this server for a new one/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
   expect(redeems()).toHaveLength(1);
 });
 

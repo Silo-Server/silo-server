@@ -118,6 +118,9 @@ export default function SignInLink() {
         <p role="status" className="mb-4 text-sm">
           {t("web.auth.signInLink.passwordSet")}
         </p>
+        <p className="text-muted-foreground mb-4 text-sm">
+          {t("web.auth.signInLink.passwordSetLostDevices")}
+        </p>
         <Button asChild className="w-full">
           <Link to="/login">{t("web.auth.signIn")}</Link>
         </Button>
