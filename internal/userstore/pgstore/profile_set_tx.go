@@ -137,12 +137,15 @@ func readProfileScopeSettings(ctx context.Context, tx pgx.Tx, userID int) (map[s
 // WithProfileSetTransaction runs fn in one transaction that holds, in order:
 // the account's preference-settings and section-override locks (every
 // profile writer takes the first before any row), the audit actors, the
-// collections of the profiles the set removes in ID order, every profile
-// row of the account in ID order, and the account row last; fn locks the
-// account's edit rows only at its end (SettleEdits). A profile save
-// locks its profile row before the account row, and a profile delete takes
-// the same prefix of locks, so neither can wait on this transaction while
-// holding something it needs.
+// account row, the collections of the profiles the set removes in ID order,
+// and every profile row of the account in ID order; fn locks the account's
+// edit rows only at its end (SettleEdits). A profile save locks its profile
+// row before the account row, but it takes the preference-settings lock
+// first, so it runs wholly before or after the set. The account row comes
+// before the profile rows because writers without that lock take them in
+// that order: approving a device sign-in for a profile locks the account row
+// and then, through the request's foreign key, the profile row, and an
+// allowance change locks the account row and then the acting profile.
 func (s *PostgresUserStore) WithProfileSetTransaction(ctx context.Context, inSet []string, fn func(userstore.ProfileSetWriter) error) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -156,6 +159,11 @@ func (s *PostgresUserStore) WithProfileSetTransaction(ctx context.Context, inSet
 		if err := auditmutation.LockActors(ctx, tx); err != nil {
 			return err
 		}
+	}
+	// At the strength the access-revision update a profile save makes takes
+	// anyway, and the one Accept's update needs.
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR NO KEY UPDATE`, s.userID); err != nil {
+		return fmt.Errorf("locking the account: %w", err)
 	}
 	if inSet == nil {
 		inSet = []string{}
@@ -187,11 +195,6 @@ func (s *PostgresUserStore) WithProfileSetTransaction(ctx context.Context, inSet
 	}
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM user_profiles WHERE user_id = $1 ORDER BY id FOR UPDATE`, s.userID); err != nil {
 		return fmt.Errorf("locking the household: %w", err)
-	}
-	// The account row last, at the strength the access-revision update a
-	// profile save makes takes anyway.
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR NO KEY UPDATE`, s.userID); err != nil {
-		return fmt.Errorf("locking the account: %w", err)
 	}
 	writer := &profileSetTx{preferenceSettingsTx: preferenceSettingsTx{exec: tx, userID: s.userID, defaults: s.adminDefaults}, tx: tx, removable: removable}
 	if err := fn(writer); err != nil {
