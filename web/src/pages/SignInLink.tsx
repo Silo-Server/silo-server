@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router";
 import {
@@ -15,12 +15,19 @@ import { Label } from "@/components/ui/label";
 import { usePasswordPolicy } from "@/hooks/queries/account";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useLinkToken } from "@/hooks/useLinkToken";
+import { linkTokenSpent, markLinkTokenSpent } from "@/lib/linkToken";
 import { newPasswordHint, newPasswordProblem, passwordErrorMessage } from "@/lib/newPassword";
 import { useT } from "@/i18n";
 
 type Stage =
   | { kind: "intro" }
-  | { kind: "redeemed"; redeemed: SignInLinkRedeemed; view: "code" | "password" }
+  | {
+      kind: "redeemed";
+      redeemed: SignInLinkRedeemed;
+      view: "code" | "password";
+      /** When the code expires: the redeem's answer time plus expires_in. */
+      codeExpiresAt?: number;
+    }
   | { kind: "passwordSet" }
   | { kind: "unavailable" }
   | { kind: "provider" };
@@ -30,18 +37,29 @@ type Stage =
  * ten minutes, so nothing happens on load: the page says what will happen,
  * and redeems when the person presses Continue. The code is a session code
  * for an existing account, shown to type with the shared step and never put
- * in a link.
+ * in a link. The code and the set-password token live in memory only, so
+ * while either is on screen the page says to keep it open and asks before
+ * it is left; after a reload it says the link has been used.
  */
 export default function SignInLink() {
   const token = useLinkToken();
   const t = useT();
   useDocumentTitle(t("web.auth.signInLink.documentTitle"));
-  const [stage, setStage] = useState<Stage>(token ? { kind: "intro" } : { kind: "unavailable" });
+  const [stage, setStage] = useState<Stage>(() =>
+    token && !linkTokenSpent() ? { kind: "intro" } : { kind: "unavailable" },
+  );
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   // A second press, or a second render's handler, must not redeem again:
   // the first redeem spent the link.
   const busy = useRef(false);
+  const holding = stage.kind === "redeemed";
+  useEffect(() => {
+    if (!holding) return;
+    const ask = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", ask);
+    return () => window.removeEventListener("beforeunload", ask);
+  }, [holding]);
 
   async function redeem() {
     if (busy.current || stage.kind !== "intro") return;
@@ -50,7 +68,13 @@ export default function SignInLink() {
     setError("");
     try {
       const redeemed = await redeemSignInLink(token);
-      setStage({ kind: "redeemed", redeemed, view: redeemed.appCode ? "code" : "password" });
+      markLinkTokenSpent();
+      setStage({
+        kind: "redeemed",
+        redeemed,
+        view: redeemed.appCode ? "code" : "password",
+        codeExpiresAt: redeemed.appCode ? Date.now() + redeemed.appCode.expires_in * 1000 : undefined,
+      });
     } catch (err) {
       if (err instanceof V2ProblemError && err.status === 404) setStage({ kind: "unavailable" });
       else if (err instanceof V2ProblemError && err.problemType === "provider_sign_in_required")
@@ -114,12 +138,13 @@ export default function SignInLink() {
     if (redeemed.appCode) {
       return (
         <AuthCard title={t("web.auth.signInLink.title")}>
+          <KeepOpen />
           <SessionCodeStep
             appCode={redeemed.appCode}
-            // The link is spent, so there is no new code to get: the person
-            // asks the server's owner for a new link.
-            onRenew={() => setStage({ kind: "unavailable" })}
-            renewing={false}
+            expiresAt={stage.codeExpiresAt}
+            // The link is spent, so there is no new code to get; the password
+            // route below stays while its token lives.
+            expiredNote={t("web.auth.signInLink.codeExpired")}
           />
           {redeemed.setPasswordToken && (
             <Button
@@ -149,6 +174,12 @@ export default function SignInLink() {
       <SignInHint />
     </AuthCard>
   );
+}
+
+/** Says to keep the page open while it holds what the spent link handed out. */
+function KeepOpen() {
+  const t = useT();
+  return <p className="mb-4 text-sm font-medium">{t("web.auth.signInLink.keepOpen")}</p>;
 }
 
 /** Chooses a password with the token the redeem handed out, once. */
@@ -202,6 +233,7 @@ function SetPasswordForm({
       title={t("web.auth.signInLink.passwordTitle")}
       description={t("web.auth.signInLink.passwordDescription")}
     >
+      <KeepOpen />
       {noCodeReason && (
         <p className="mb-4 text-sm">
           {noCodeReason === "administrator"
@@ -245,7 +277,13 @@ function SetPasswordForm({
           {submitting ? t("web.ui.saving") : t("web.auth.passwordRules.savePassword")}
         </Button>
         {onBack && (
-          <Button type="button" variant="ghost" className="w-full" onClick={onBack}>
+          <Button
+            type="button"
+            variant="ghost"
+            className="w-full"
+            disabled={submitting}
+            onClick={onBack}
+          >
             {t("web.auth.signInLink.backToCode")}
           </Button>
         )}

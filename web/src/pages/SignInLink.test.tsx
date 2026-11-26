@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken } from "@/api/client";
 import { expectNoLinkCarrying } from "@/components/appKeys/codeLinkGuard.test-support";
@@ -119,6 +119,65 @@ it("says a used link needs a new one from the owner", async () => {
   mount();
   fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
   await waitFor(() =>
-    expect(screen.getByText(/Ask the server’s owner for a new one/)).toBeTruthy(),
+    expect(screen.getByText(/Ask an administrator of this server for a new one/)).toBeTruthy(),
+  );
+});
+
+// The code and the set-password token live in memory only. While they are
+// on screen the page asks before it is left, and a reload says the link has
+// been used, without asking the server again.
+it("asks before leaving, and says the link is used after a reload", async () => {
+  const first = mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+  await screen.findByText(redeemed.code);
+  expect(screen.getByText(/Keep this page open/)).toBeTruthy();
+  const leaving = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(leaving);
+  expect(leaving.defaultPrevented).toBe(true);
+  first.unmount();
+  renderRoutes("/sign-in-link", { "/sign-in-link": <SignInLink /> });
+  expect(await screen.findByText(/Ask an administrator of this server for a new one/)).toBeTruthy();
+  expect(redeems()).toHaveLength(1);
+});
+
+// The code's expiry is fixed when the redeem answers: going to the password
+// form and back doesn't restart it. Once the code runs out, only the code is
+// gone: the password route stays.
+it("keeps the code's expiry across the password form, and keeps the password route after it", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    redeem = async () => json({ ...redeemed, expires_in: 2 });
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+    await screen.findByText(redeemed.code);
+    await act(async () => vi.advanceTimersByTime(1500));
+    fireEvent.click(screen.getByRole("button", { name: "Set a password instead" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Back to the code" }));
+    await act(async () => vi.advanceTimersByTime(700));
+    expect(screen.getByText("This code has expired.")).toBeTruthy();
+    expect(screen.getByText(/Ask an administrator of this server for a new link/)).toBeTruthy();
+    expect(screen.queryByText(redeemed.code)).toBeNull();
+    expect(screen.getByRole("button", { name: "Set a password instead" })).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+// Back to the code is off while a password is being saved.
+it("disables Back while the password is saved", async () => {
+  setPassword = () => new Promise<Response>(() => {});
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Set a password instead" }));
+  fireEvent.change(screen.getByLabelText("New password"), { target: { value: "margin fossil" } });
+  fireEvent.change(screen.getByLabelText("Confirm new password"), {
+    target: { value: "margin fossil" },
+  });
+  fireEvent.submit(screen.getByRole("button", { name: "Save password" }).closest("form")!);
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Back to the code" })).toHaveProperty(
+      "disabled",
+      true,
+    ),
   );
 });

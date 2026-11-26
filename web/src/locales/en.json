@@ -95800,6 +95800,12 @@
       "value": "Back to the code"
     }
   ],
+  "web.auth.signInLink.codeExpired": [
+    {
+      "type": 0,
+      "value": "Ask an administrator of this server for a new link to get another code."
+    }
+  ],
   "web.auth.signInLink.documentTitle": [
     {
       "type": 0,
@@ -95822,6 +95828,12 @@
     {
       "type": 0,
       "value": "An admin sent you this link so you can sign in again. Continue to get a code for the Silo app, or to choose a password."
+    }
+  ],
+  "web.auth.signInLink.keepOpen": [
+    {
+      "type": 0,
+      "value": "Keep this page open until you’re done. The link is used up, so reloading or leaving loses what it gave you."
     }
   ],
   "web.auth.signInLink.noCodeAdministrator": [
@@ -95875,7 +95887,7 @@
   "web.auth.signInLink.unavailable": [
     {
       "type": 0,
-      "value": "This link was already used, replaced by a newer one, or expired. Ask the server’s owner for a new one."
+      "value": "This link was already used, replaced by a newer one, or expired. Ask an administrator of this server for a new one."
     }
   ],
   "web.auth.signup.closed": [
