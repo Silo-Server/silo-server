@@ -29175,7 +29175,7 @@
             "type": "integer"
           },
           "link_allowed": {
-            "description": "Whether a page may put this code in a link (the join link). True only for a join code whose redeem creates an account with no administrative power. When false, show the server address and the code as text to type in the app, and never build a link, a scannable link or anything a device could open from them: a link can be received by an app other than Silo, which would redeem the code first. Always false for createAppCode",
+            "description": "Whether a page may put this code in a link (the join link). True only for a join code whose redeem creates an account with no administrative power. When false, show the server address and the code as text to type or copy in the app, and never build a link, a scannable link or anything a device could open from them: a link can be received by an app other than Silo, which would redeem the code first. A scan code (text only the Silo app's own scanner reads, drawn as a QR code; see docs/architecture/app-keys.md) is not such a link. Always false for createAppCode",
             "examples": [
               true
             ],
@@ -58599,7 +58599,7 @@
             "type": "integer"
           },
           "link_allowed": {
-            "description": "Present with code, and always false: show the server address and the code as text to type in the app, and never build a link or anything a device could open from them",
+            "description": "Present with code, and always false: show the server address and the code as text to type or copy in the app, and never build a link or anything a device could open from them. A scan code (text only the Silo app's own scanner reads, drawn as a QR code) is not such a link",
             "examples": [
               false
             ],

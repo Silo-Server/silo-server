@@ -729,16 +729,24 @@ administrator's included, and an administrator's join code would hand the
 intercepting app a working administrator session (keys from a join code start
 active, and the redeem opens a session at once). The code a sign-in link hands
 out is a session code too: it reaches an existing account, so its answer says
-`link_allowed: false` and its page shows it to type.
+`link_allowed: false` and its page shows it to type, copy or scan.
 
 The server decides, and says so in the answer that issues the code:
 `link_allowed`. A page builds the join link only when it is true; otherwise it
-shows the server address and the code as text to type, never a link, a
-scannable link or anything a device could open. The server can't tell a typed
-code from one lifted out of a link, so the protection is that no page makes
-such a link. (The protocol defines no scannable form for an app code: its link
-vectors carry a code only in the join link, which a camera would open as a
-URL.)
+shows the server address and the code as text to type, a Copy code button,
+and the scan code, never a link, a scannable link (a URL in a QR code) or
+anything a device could open. The server can't tell a typed code from one
+lifted out of a link, so the protection is that no page makes such a link.
+
+**The scan code** is not a link. It is the text
+`SILOSCANA <app code> <server address>`, each byte written as two letters from
+`A` to `P`, drawn as a QR code: it has no `:`, `.`, `/`, `@` or digit, so
+nothing takes it for a URL, an email address or a phone number, and only the
+Silo app's own scanner acts on it. A server address longer than 128 bytes has
+no scan code; the page shows the address and the code to type or copy. The web
+app writes it in `web/src/lib/scanCode.ts` and checks the writer against the
+format's test vectors (`web/src/lib/scanCode.vectors.json`). How phone cameras
+and messaging apps treat a scan code has not been checked on a device.
 
 `link_allowed` is decided at issue from the account input the redeem will
 create (`joinAccountInput`, `linkAllowed` in `internal/invitations`), field by
