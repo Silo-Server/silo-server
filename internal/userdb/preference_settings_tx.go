@@ -39,6 +39,23 @@ func (s *SQLiteUserStore) WithPreferenceSettingsTransaction(
 	})
 }
 
+func (tx *preferenceSettingsTx) ListProfileNames(_ context.Context) ([]userstore.ProfileName, error) {
+	rows, err := tx.exec.Query("SELECT id, name FROM profiles ORDER BY created_at, id")
+	if err != nil {
+		return nil, fmt.Errorf("listing profile names: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // a read-only query: a close error changes nothing the scan returned
+	var out []userstore.ProfileName
+	for rows.Next() {
+		var p userstore.ProfileName
+		if err := rows.Scan(&p.ID, &p.Name); err != nil {
+			return nil, fmt.Errorf("scanning profile name: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 func (tx *preferenceSettingsTx) ListProfileIDs(_ context.Context) ([]string, error) {
 	rows, err := tx.exec.Query("SELECT id FROM profiles ORDER BY created_at, id")
 	if err != nil {

@@ -798,6 +798,17 @@ func TestProfileSetNamesWithOwnerRenamesDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Kid's profile keeps the owner's Buddy, so the profiles would end up
+	// Buddy and Pal; the set itself still names two items Pal, and clearing
+	// the owner's name would leave two Pals.
+	t.Run("two items of one name, one of them keeping the owner's name", func(t *testing.T) {
+		before := f.state(t)
+		_, err := f.apply(t, setDoc(t, 2, main, kid.with("name", "Pal"), newSetItem("pal")))
+		assertSetNameConflict(t, err, "set.items[2].name")
+		if f.state(t) != before {
+			t.Fatal("a refused set wrote")
+		}
+	})
 	t.Run("an item named like a local profile whose own profile keeps the owner's name", func(t *testing.T) {
 		if _, err := f.apply(t, setDoc(t, 2, main, kid)); err != nil {
 			t.Fatalf("apply: %v", err)
@@ -949,6 +960,15 @@ func TestProfileSetRefusalOrderDB(t *testing.T) {
 	t.Run("a newer set without the latest edits is stale before its names are judged", func(t *testing.T) {
 		before := f.state(t)
 		if _, err := f.applySeen(t, setDoc(t, 2, main, kid, guest), ""); !isStale(err) {
+			t.Fatalf("err = %v, want profile_set_stale", err)
+		}
+		if f.state(t) != before {
+			t.Fatal("a stale set wrote")
+		}
+	})
+	t.Run("other content at the held version is stale before two items of one name are judged", func(t *testing.T) {
+		before := f.state(t)
+		if _, err := f.applySeen(t, setDoc(t, 1, main, kid, guest.with("name", "kid")), f.held(t).EditsToken); !isStale(err) {
 			t.Fatalf("err = %v, want profile_set_stale", err)
 		}
 		if f.state(t) != before {

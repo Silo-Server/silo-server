@@ -95,6 +95,23 @@ func (tx *preferenceSettingsTx) GetProfile(ctx context.Context, id string) (*use
 	return getProfile(ctx, tx.exec, tx.userID, id)
 }
 
+func (tx *preferenceSettingsTx) ListProfileNames(ctx context.Context) ([]userstore.ProfileName, error) {
+	rows, err := tx.exec.Query(ctx, "SELECT id, name FROM user_profiles WHERE user_id = $1 ORDER BY created_at, id", tx.userID)
+	if err != nil {
+		return nil, fmt.Errorf("listing profile names: %w", err)
+	}
+	defer rows.Close()
+	var out []userstore.ProfileName
+	for rows.Next() {
+		var p userstore.ProfileName
+		if err := rows.Scan(&p.ID, &p.Name); err != nil {
+			return nil, fmt.Errorf("scanning profile name: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 func (tx *preferenceSettingsTx) ListProfileIDs(ctx context.Context) ([]string, error) {
 	rows, err := tx.exec.Query(ctx,
 		"SELECT id FROM user_profiles WHERE user_id = $1 ORDER BY created_at, id", tx.userID)
