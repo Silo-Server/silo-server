@@ -346,6 +346,10 @@ type SessionAuthority struct {
 	// decide for apart from the person's own sessions; empty for every
 	// other session. The auth middleware copies it onto the claims.
 	Kind SessionKind
+	// GrantedAppKeyID is, for a SessionKindGrantedApp session, the device
+	// key that opened it; empty for every other session. The auth
+	// middleware copies it onto the claims beside Kind.
+	GrantedAppKeyID string
 }
 
 // SessionKind names a kind of login session, by how it was opened, that
@@ -392,16 +396,19 @@ func (a SessionAuthority) Narrow(claims *Claims) {
 // The same lookup says whether another app's key opened the session
 // (SessionKindGrantedApp): the session's device key is joined by its primary
 // key, one more index lookup, so the gate that reads the kind costs no query
-// of its own. The rule matches ReadSessionOrigin's GrantKey.
+// of its own. The rule matches ReadSessionOrigin's GrantKey. For such a
+// session the same row gives the key's id (GrantedAppKeyID), so the PIN
+// check can count the app's attempts by its key without a read of its own.
 func (r *SessionRepository) ActiveSession(ctx context.Context, id string, userID int) (authority SessionAuthority, active bool, err error) {
 	query := `SELECT u.role, s.purpose, COALESCE(s.bound_profile_id, ''),
-		s.device_key_id IS NOT NULL AND (k.id IS NULL OR k.enrolled_via = $3)
+		s.device_key_id IS NOT NULL AND (k.id IS NULL OR k.enrolled_via = $3), COALESCE(s.device_key_id::text, '')
 		FROM auth_sessions s
 		JOIN users u ON u.id = s.user_id
 		LEFT JOIN auth_device_keys k ON k.id = s.device_key_id
 		WHERE s.id = $1 AND s.user_id = $2 AND s.revoked_at IS NULL AND s.expires_at > NOW()`
 	var grantedApp bool
-	err = r.pool.QueryRow(ctx, query, id, userID, models.AppKeyEnrolledGrant).Scan(&authority.Role, &authority.Purpose, &authority.BoundProfileID, &grantedApp)
+	var deviceKeyID string
+	err = r.pool.QueryRow(ctx, query, id, userID, models.AppKeyEnrolledGrant).Scan(&authority.Role, &authority.Purpose, &authority.BoundProfileID, &grantedApp, &deviceKeyID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SessionAuthority{}, false, nil
 	}
@@ -416,6 +423,7 @@ func (r *SessionRepository) ActiveSession(ctx context.Context, id string, userID
 	}
 	if grantedApp {
 		authority.Kind = SessionKindGrantedApp
+		authority.GrantedAppKeyID = deviceKeyID
 	}
 	return authority, true, nil
 }

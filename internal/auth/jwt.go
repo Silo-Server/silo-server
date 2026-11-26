@@ -53,6 +53,10 @@ type Claims struct {
 	// other session and for API keys. Never serialized: the row is the
 	// authority, not the token.
 	SessionKind SessionKind `json:"-"`
+	// GrantedAppKeyID is, beside SessionKindGrantedApp, the device key that
+	// opened the session, from the same session-row lookup; empty
+	// otherwise. Never serialized.
+	GrantedAppKeyID string `json:"-"`
 	// SessionEndsAt, when set, caps the expiry of tokens generated from
 	// these claims at the session's absolute end. Never serialized.
 	SessionEndsAt time.Time `json:"-"`

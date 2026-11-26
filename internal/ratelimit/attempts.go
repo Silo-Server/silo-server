@@ -34,6 +34,25 @@ func ProfilePINKey(userID int, profileID string) string {
 	return "profile_pin:" + strconv.Itoa(userID) + ":" + profileID
 }
 
+// GrantedAppPINPolicy is the PIN limit of a login session another app's key
+// opened (a key enrolled through a grant): three attempts, then an hour
+// locked. Such an app counts under its own key (GrantedAppPINKey) and never
+// spends the household's count, so its wrong guesses cannot lock the
+// person's own devices out of a profile. The allowance is smaller than the
+// household's because the app needs one attempt to act as a profile the
+// person unlocks for it, and a person typing into the app who misses twice
+// still gets in; the longer lock holds an app that keeps guessing to about
+// seventy guesses a day at one profile, against the household's
+// fourteen hundred.
+var GrantedAppPINPolicy = AttemptPolicy{MaxAttempts: 3, Window: time.Hour}
+
+// GrantedAppPINKey is the attempt key for one profile's PIN as tried by one
+// app device key. It names the key, not the login session, so the app does
+// not get a fresh allowance by signing in again with the same key.
+func GrantedAppPINKey(userID int, profileID, deviceKeyID string) string {
+	return "profile_pin_app:" + strconv.Itoa(userID) + ":" + profileID + ":" + deviceKeyID
+}
+
 // QuickConnectCodePolicy bounds how many six-digit Jellyfin Quick Connect
 // codes one account may try: twenty lookups or decisions, then fifteen
 // minutes locked. Approving one device takes two (the lookup and the
@@ -78,6 +97,7 @@ type AttemptLimiter struct {
 type attemptBackend interface {
 	reserve(ctx context.Context, key string, p AttemptPolicy) (allowed bool, retryAfter time.Duration, err error)
 	reset(ctx context.Context, key string) error
+	locked(ctx context.Context, key string, p AttemptPolicy) (bool, time.Duration, error)
 }
 
 // NewMemoryAttemptLimiter returns a process-local AttemptLimiter.
@@ -97,6 +117,13 @@ func NewRedisAttemptLimiter(client *redis.Client, p AttemptPolicy) *AttemptLimit
 // node) deployment.
 func NewProfilePINAttemptLimiter(client *redis.Client) *AttemptLimiter {
 	return newSharedAttemptLimiter(client, ProfilePINPolicy)
+}
+
+// NewGrantedAppPINAttemptLimiter returns the PIN limiter for login sessions
+// another app's key opened (GrantedAppPINPolicy), shared through Redis on the
+// same terms as the profile PIN limiter.
+func NewGrantedAppPINAttemptLimiter(client *redis.Client) *AttemptLimiter {
+	return newSharedAttemptLimiter(client, GrantedAppPINPolicy)
 }
 
 // NewQuickConnectCodeAttemptLimiter returns the per-account Quick Connect
@@ -139,6 +166,25 @@ func (l *AttemptLimiter) Reserve(ctx context.Context, key string) (retryAfter ti
 		return 0, true
 	}
 	return retryAfter, allowed
+}
+
+// Locked reports whether key is locked, with the time left, without counting
+// an attempt or changing the count. A backend error reports not locked
+// (logged), as Reserve allows on one; a request whose own context is done is
+// reported locked, so it gets no check.
+func (l *AttemptLimiter) Locked(ctx context.Context, key string) (retryAfter time.Duration, locked bool) {
+	if l == nil {
+		return 0, false
+	}
+	locked, retryAfter, err := l.backend.locked(ctx, key, l.policy)
+	if err != nil {
+		if ctx.Err() != nil {
+			return 0, true
+		}
+		slog.WarnContext(ctx, "attempt limit backend error, treating key as unlocked", "component", "ratelimit", "error", err, "key", key)
+		return 0, false
+	}
+	return retryAfter, locked
 }
 
 // Reset clears key's count after a correct secret.
@@ -212,6 +258,17 @@ func (m *memoryAttempts) reserve(_ context.Context, key string, p AttemptPolicy)
 	return true, 0, nil
 }
 
+func (m *memoryAttempts) locked(_ context.Context, key string, p AttemptPolicy) (bool, time.Duration, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.now()
+	e, ok := m.entries[key]
+	if !ok || !now.Before(e.expires) || e.count < p.MaxAttempts {
+		return false, 0, nil
+	}
+	return true, e.expires.Sub(now), nil
+}
+
 func (m *memoryAttempts) reset(_ context.Context, key string) error {
 	m.mu.Lock()
 	delete(m.entries, key)
@@ -244,6 +301,23 @@ end
 return {1, 0}
 `)
 
+// attemptLockedScript reads whether a key is locked without changing it.
+// KEYS[1] = counter key; ARGV[1] = max attempts; ARGV[2] = window in ms.
+// Returns {locked(0/1), lockout ms remaining}. A locked key with no expiry,
+// which attemptScript would give one on its next attempt, reports a full
+// window.
+var attemptLockedScript = redis.NewScript(`
+local count = tonumber(redis.call('GET', KEYS[1]) or "0")
+if count < tonumber(ARGV[1]) then
+    return {0, 0}
+end
+local ttl = redis.call('PTTL', KEYS[1])
+if ttl < 0 then
+    ttl = tonumber(ARGV[2])
+end
+return {1, ttl}
+`)
+
 type redisAttempts struct {
 	client *redis.Client
 }
@@ -252,6 +326,14 @@ func redisAttemptKey(key string) string { return "silo:attempts:" + key }
 
 func (r redisAttempts) reserve(ctx context.Context, key string, p AttemptPolicy) (bool, time.Duration, error) {
 	res, err := attemptScript.Run(ctx, r.client, []string{redisAttemptKey(key)}, p.MaxAttempts, p.Window.Milliseconds()).Int64Slice()
+	if err != nil {
+		return false, 0, err
+	}
+	return res[0] == 1, time.Duration(res[1]) * time.Millisecond, nil
+}
+
+func (r redisAttempts) locked(ctx context.Context, key string, p AttemptPolicy) (bool, time.Duration, error) {
+	res, err := attemptLockedScript.Run(ctx, r.client, []string{redisAttemptKey(key)}, p.MaxAttempts, p.Window.Milliseconds()).Int64Slice()
 	if err != nil {
 		return false, 0, err
 	}

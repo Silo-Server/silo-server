@@ -360,6 +360,7 @@
 ./internal/apiv2 TestWatchTogetherRefusesAnotherAppDB
 ./internal/apiv2 TestNativePushRefusesAnotherAppDB
 ./internal/apiv2 TestSuggestionDeleteForAnotherAppDB
+./internal/apiv2 TestGrantedAppPINAllowanceDB
 ./internal/auth TestKeyAddingOperationsAuditedDB
 ./internal/auth TestKeyAddingRefusalsLeaveNoAuditDB
 ./internal/auth TestKeyWithoutAddressListsEmptyDB
