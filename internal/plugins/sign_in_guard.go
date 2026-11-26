@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -24,10 +25,14 @@ var ErrSignInProviderRequired = errors.New("a sign-in provider people can use is
 // It names the ways back in the order to try them: the declaration itself, a
 // break-glass administrator (who keeps a password while it is off), and the
 // recovery command, which needs only a shell with the server's DATABASE_URL.
-const SignInProviderWarning = "Password sign-in is off and no sign-in provider can sign people in, so only break-glass administrators can sign in. " +
+const SignInProviderWarning = signInWarningLead + ", so only break-glass administrators can sign in. " +
 	"To restore sign-in for everyone else: put the sign-in provider back in SILO_CONFIG or SILO_PLUGINS and restart the server; " +
 	"or have a break-glass administrator sign in with their password at /login?local=1 and turn on Allow password sign-in under Settings > Sign-in; " +
 	"or run `silo auth local-login enable` on a server with its DATABASE_URL."
+
+// signInWarningLead opens every wording of the warning, including those
+// earlier builds of this check stored in the provisioning status.
+const signInWarningLead = "Password sign-in is off and no sign-in provider can sign people in"
 
 // SignInQuerier is what the sign-in check reads through: a pool or a
 // transaction.
@@ -123,6 +128,13 @@ func logProvisionSignIn(ctx context.Context, tx pgx.Tx) error {
 func withSignInWarning(ctx context.Context, db SignInQuerier, statuses []ProvisionStatus) ([]ProvisionStatus, error) {
 	if len(statuses) == 0 {
 		return statuses, nil
+	}
+	// The read owns the warning: a stored one, written by an earlier build
+	// that kept it in the status, is dropped and worked out again.
+	for i := range statuses {
+		if strings.HasPrefix(statuses[i].Detail, signInWarningLead) {
+			statuses[i].Detail = ""
+		}
 	}
 	works, err := signInWorks(ctx, db)
 	if err != nil || works {

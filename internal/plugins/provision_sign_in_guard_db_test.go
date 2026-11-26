@@ -150,3 +150,24 @@ func TestSignInWarningOnlyOnPluginsThatCanBeTheProviderDB(t *testing.T) {
 		t.Errorf("network identity plugin detail = %q, want none", statuses[1].Detail)
 	}
 }
+
+// TestStoredSignInWarningIsWorkedOutAgainDB: a status an earlier build stored
+// with the warning does not keep it once sign-in works again.
+func TestStoredSignInWarningIsWorkedOutAgainDB(t *testing.T) {
+	previous := signInCheck
+	t.Cleanup(func() { RegisterSignInCheck(previous) })
+	RegisterSignInCheck(func(context.Context, SignInQuerier) (bool, error) { return true, nil })
+	statuses, err := withSignInWarning(t.Context(), builtinGuardTestPool(t), []ProvisionStatus{
+		{PluginID: "stored-warning", State: "applied", Detail: "Password sign-in is off and no sign-in provider can sign people in, so only break-glass administrators can sign in. Turn password sign-in back on or enable a sign-in provider."},
+		{PluginID: "other", State: "refused", Detail: "The sign-in binding conflicts with another active binding."},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statuses[0].Detail != "" {
+		t.Errorf("stored warning kept: %q", statuses[0].Detail)
+	}
+	if statuses[1].Detail == "" {
+		t.Error("an unrelated detail was dropped")
+	}
+}
