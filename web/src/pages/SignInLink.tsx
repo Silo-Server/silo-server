@@ -73,7 +73,9 @@ export default function SignInLink() {
         kind: "redeemed",
         redeemed,
         view: redeemed.appCode ? "code" : "password",
-        codeExpiresAt: redeemed.appCode ? Date.now() + redeemed.appCode.expires_in * 1000 : undefined,
+        codeExpiresAt: redeemed.appCode
+          ? Date.now() + redeemed.appCode.expires_in * 1000
+          : undefined,
       });
     } catch (err) {
       if (err instanceof V2ProblemError && err.status === 404) setStage({ kind: "unavailable" });

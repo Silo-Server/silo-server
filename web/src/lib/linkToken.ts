@@ -74,5 +74,7 @@ export function markLinkTokenSpent(): void {
 /** Whether the current entry's link token was spent on an earlier load. */
 export function linkTokenSpent(): boolean {
   const token = linkToken();
-  return token !== "" && (window.history.state as Record<string, unknown> | null)?.[SPENT_KEY] === token;
+  return (
+    token !== "" && (window.history.state as Record<string, unknown> | null)?.[SPENT_KEY] === token
+  );
 }
