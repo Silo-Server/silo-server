@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -71,39 +72,58 @@ func (s *Server) SetArtifactBudget(bytes int64) {
 // jobSlot is new work of kind admitted under the job caps and not yet
 // counted in activeJobs. The admitted-but-uncounted slots count against the
 // caps too, so two starts arriving together at a cap less one cannot both
-// pass.
+// pass. A kindOnly slot holds room under the kind's cap alone: it continues
+// a job the node holds, which the job cap already counts, as another kind.
 type jobSlot struct {
-	s    *Server
-	kind nodepool.JobKind
-	done bool
+	s        *Server
+	kind     nodepool.JobKind
+	kindOnly bool
+	done     bool
 }
 
 // admitJob admits new work of kind under the job cap and the kind's own cap:
 // work that is not a session, remux or preparation the node already holds.
-// It reports false at either cap. The health report counts the slot from
-// here, so the core sees the job while it gets ready (a RequireReady start
-// waiting on its first segment). The caller counts the slot with countJob
-// once the job runs, and releases it on every other return (release after
-// count does nothing).
-func (s *Server) admitJob(kind nodepool.JobKind) (*jobSlot, bool) {
+// It reports false at either cap, with capKind naming the kind whose own cap
+// refused it, or empty when the job cap did (writeAtCapacity). The health
+// report counts the slot from here, so the core sees the job while it gets
+// ready (a RequireReady start waiting on its first segment). The caller counts
+// the slot with countJob once the job runs, and releases it on every other
+// return (release after count does nothing).
+func (s *Server) admitJob(kind nodepool.JobKind) (slot *jobSlot, capKind nodepool.JobKind, ok bool) {
+	return s.admit(kind, false)
+}
+
+// admitKind admits work that continues a job the node holds but changes its
+// kind, under kind's own cap only: the job cap counts the job it continues,
+// and a kind cap would otherwise let a replan from a remux add a video encode
+// past its cap. It reports false, with capKind set, at that cap.
+func (s *Server) admitKind(kind nodepool.JobKind) (slot *jobSlot, capKind nodepool.JobKind, ok bool) {
+	return s.admit(kind, true)
+}
+
+func (s *Server) admit(kind nodepool.JobKind, kindOnly bool) (*jobSlot, nodepool.JobKind, bool) {
 	s.admission.Lock()
 	defer s.admission.Unlock()
-	if s.fullLocked(kind) {
-		return nil, false
+	if full, capKind := s.fullLocked(kind, kindOnly); full {
+		return nil, capKind, false
 	}
-	s.admitted++
 	if s.admittedKinds == nil {
 		s.admittedKinds = make(map[nodepool.JobKind]int, len(nodepool.JobKinds))
 	}
+	if !kindOnly {
+		s.admitted++
+	}
 	s.admittedKinds[kind]++
-	return &jobSlot{s: s, kind: kind}, true
+	return &jobSlot{s: s, kind: kind, kindOnly: kindOnly}, "", true
 }
 
 // unadmitLocked takes an uncounted slot out of the admitted counts. The caller
 // holds s.admission.
 func (s *Server) unadmitLocked(slot *jobSlot) {
 	slot.done = true
-	s.admitted--
+	if !slot.kindOnly {
+		s.admitted--
+	}
 	s.admittedKinds[slot.kind]--
 }
 
@@ -205,13 +225,17 @@ func (slot *jobSlot) release() {
 }
 
 // fullLocked reports whether the counted and admitted jobs fill the job cap,
-// or those of kind fill the kind's own cap. The caller holds s.admission.
-func (s *Server) fullLocked(kind nodepool.JobKind) bool {
-	if limit := int(s.jobCap.Load()); limit > 0 && int(s.activeJobs.Load())+s.admitted >= limit {
-		return true
+// or those of kind fill the kind's own cap, and which: capKind is kind when
+// its own cap is full, empty when the job cap is. kindOnly checks the kind's
+// cap alone (admitKind). The caller holds s.admission.
+func (s *Server) fullLocked(kind nodepool.JobKind, kindOnly bool) (full bool, capKind nodepool.JobKind) {
+	if limit := int(s.jobCap.Load()); !kindOnly && limit > 0 && int(s.activeJobs.Load())+s.admitted >= limit {
+		return true, ""
 	}
-	limit := s.kindCaps[kind]
-	return limit > 0 && s.jobKinds.count(kind)+s.admittedKinds[kind] >= limit
+	if limit := s.kindCaps[kind]; limit > 0 && s.jobKinds.count(kind)+s.admittedKinds[kind] >= limit {
+		return true, kind
+	}
+	return false, ""
 }
 
 // setRefusal adds the headers of a capacity or storage refusal.
@@ -220,11 +244,22 @@ func setRefusal(w http.ResponseWriter, reason string) {
 	w.Header().Set(nodepool.NodeRefusalHeader, reason)
 }
 
-// writeAtCapacity refuses new work at the job cap: 503, Retry-After and
-// RefusalAtCapacity, a plain-text body as a draining refusal has.
-func writeAtCapacity(w http.ResponseWriter) {
-	setRefusal(w, nodepool.RefusalAtCapacity)
+// writeAtCapacity refuses new work at the job cap, or at capKind's own cap
+// when capKind is set: 503, Retry-After and RefusalAtCapacity, a plain-text
+// body as a draining refusal has.
+func writeAtCapacity(w http.ResponseWriter, capKind nodepool.JobKind) {
+	setAtCapacity(w, capKind)
 	http.Error(w, errNodeAtCapacity, http.StatusServiceUnavailable)
+}
+
+// setAtCapacity adds the headers of a refusal at the job cap, naming capKind
+// (nodepool.NodeRefusalKindHeader) when that kind's own cap refused the
+// work, so the core holds the node back from that kind only.
+func setAtCapacity(w http.ResponseWriter, capKind nodepool.JobKind) {
+	setRefusal(w, nodepool.RefusalAtCapacity)
+	if capKind != "" {
+		w.Header().Set(nodepool.NodeRefusalKindHeader, string(capKind))
+	}
 }
 
 // admitPreparation admits a prepared-download request under the job cap and
@@ -251,9 +286,9 @@ func (s *Server) admitNewPreparation(w http.ResponseWriter, kind nodepool.JobKin
 		http.Error(w, errNodeStorageFull, http.StatusServiceUnavailable)
 		return nil, true
 	}
-	slot, ok := s.admitJob(kind)
+	slot, capKind, ok := s.admitJob(kind)
 	if !ok {
-		writeAtCapacity(w)
+		writeAtCapacity(w, capKind)
 		return nil, true
 	}
 	return slot, false
@@ -306,7 +341,17 @@ const continuationWindow = sessionIdleTTL
 type continuation struct {
 	s                 *Server
 	playbackSessionID string
-	done              bool
+	// kinds are the kinds of the jobs the node holds for the playback
+	// session; see covers.
+	kinds []nodepool.JobKind
+	done  bool
+}
+
+// covers reports whether work of kind continues a job of the same kind. Work
+// of another kind needs room under its own kind's cap (admitKind): the
+// overlap allowance stands in for the job cap only.
+func (c *continuation) covers(kind nodepool.JobKind) bool {
+	return c != nil && slices.Contains(c.kinds, kind)
 }
 
 // claimContinuation reports whether work for playbackSessionID continues a
@@ -330,15 +375,20 @@ func (s *Server) claimContinuation(playbackSessionID string, now time.Time) (*co
 		return nil, false
 	}
 	running := 0
+	var kinds []nodepool.JobKind
 	s.mu.RLock()
-	for _, identity := range s.identities {
+	for transportID, identity := range s.identities {
 		if identity.playbackSessionID == playbackSessionID {
 			running++
+			if session, ok := s.sessions[transportID]; ok {
+				kinds = append(kinds, sessionJobKind(session))
+			}
 		}
 	}
 	for _, remux := range s.progressiveRemuxes {
 		if remux.playbackSessionID == playbackSessionID {
 			running++
+			kinds = append(kinds, remux.kind)
 		}
 	}
 	s.mu.RUnlock()
@@ -349,35 +399,64 @@ func (s *Server) claimContinuation(playbackSessionID string, now time.Time) (*co
 	case held > 1:
 		return nil, false
 	case held == 0:
-		if last, ok := s.remuxSeen[playbackSessionID]; !ok || now.Sub(last) >= continuationWindow {
+		seen, ok := s.remuxSeen[playbackSessionID]
+		if !ok || now.Sub(seen.at) >= continuationWindow {
 			return nil, false
 		}
+		kinds = append(kinds, seen.kind)
 	}
 	if s.continuing == nil {
 		s.continuing = make(map[string]int)
 	}
 	s.continuing[playbackSessionID]++
-	return &continuation{s: s, playbackSessionID: playbackSessionID}, true
+	return &continuation{s: s, playbackSessionID: playbackSessionID, kinds: kinds}, true
 }
 
 // admitStart admits a start under the job caps, classed by its target codecs
 // as sessionJobKind classes the session it starts. One that replaces a session
 // the node runs, or that holds the overlap allowance of its playback session,
-// continues a job and takes no slot; any other is new work. release gives
-// back whatever was held and is called once the start has registered its
-// session or failed. It reports false at the cap.
-func (s *Server) admitStart(req TranscodeStartRequest, now time.Time) (slot *jobSlot, release func(), ok bool) {
-	if s.hostsSession(req.SessionID) {
-		return nil, func() {}, true
+// continues a job and takes no slot under the job cap; it takes one under its
+// kind's cap when the job it continues is of another kind. Any other is new
+// work. release gives back whatever was held and is called once the start has
+// registered its session or failed. It reports false at a cap, with capKind
+// as admitJob reports it.
+func (s *Server) admitStart(req TranscodeStartRequest, now time.Time) (slot *jobSlot, release func(), capKind nodepool.JobKind, ok bool) {
+	kind := nodepool.CodecJobKind(req.TargetCodecVideo, req.TargetCodecAudio)
+	if hosted, hosts := s.hostedSessionKind(req.SessionID); hosts {
+		if hosted == kind {
+			return nil, func() {}, "", true
+		}
+		if slot, capKind, ok = s.admitKind(kind); !ok {
+			return nil, nil, capKind, false
+		}
+		return slot, slot.release, "", true
 	}
 	if overlap, continues := s.claimContinuation(req.PlaybackSessionID, now); continues {
-		return nil, overlap.release, true
+		if overlap.covers(kind) {
+			return nil, overlap.release, "", true
+		}
+		if slot, capKind, ok = s.admitKind(kind); !ok {
+			overlap.release()
+			return nil, nil, capKind, false
+		}
+		return slot, func() { slot.release(); overlap.release() }, "", true
 	}
-	slot, ok = s.admitJob(nodepool.CodecJobKind(req.TargetCodecVideo, req.TargetCodecAudio))
+	if slot, capKind, ok = s.admitJob(kind); !ok {
+		return nil, nil, capKind, false
+	}
+	return slot, slot.release, "", true
+}
+
+// hostedSessionKind returns the kind of the HLS session sessionID the node
+// runs, and whether it runs one.
+func (s *Server) hostedSessionKind(sessionID string) (nodepool.JobKind, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	session, ok := s.sessions[sessionID]
 	if !ok {
-		return nil, nil, false
+		return "", false
 	}
-	return slot, slot.release, true
+	return sessionJobKind(session), true
 }
 
 // release gives the allowance back; nil and repeated calls do nothing.
@@ -398,22 +477,29 @@ func (c *continuation) release() {
 	c.s.continuing[c.playbackSessionID]--
 }
 
-// noteRemux records that the node serves a progressive remux for
+// remuxSighting is when the node last served a playback session's
+// progressive remux, and the remux's kind.
+type remuxSighting struct {
+	at   time.Time
+	kind nodepool.JobKind
+}
+
+// noteRemux records that the node serves a progressive remux of kind for
 // playbackSessionID now, and drops sessions it has not served for
 // continuationWindow.
-func (s *Server) noteRemux(playbackSessionID string, now time.Time) {
+func (s *Server) noteRemux(playbackSessionID string, kind nodepool.JobKind, now time.Time) {
 	s.admission.Lock()
 	defer s.admission.Unlock()
 	if s.remuxSeen == nil {
-		s.remuxSeen = make(map[string]time.Time)
+		s.remuxSeen = make(map[string]remuxSighting)
 	}
-	s.remuxSeen[playbackSessionID] = now
+	s.remuxSeen[playbackSessionID] = remuxSighting{at: now, kind: kind}
 	if now.Sub(s.remuxSeenPruned) < stopFencePruneInterval {
 		return
 	}
 	s.remuxSeenPruned = now
-	for id, last := range s.remuxSeen {
-		if now.Sub(last) >= continuationWindow {
+	for id, seen := range s.remuxSeen {
+		if now.Sub(seen.at) >= continuationWindow {
 			delete(s.remuxSeen, id)
 		}
 	}
@@ -425,6 +511,8 @@ func jobCapRefusalHeaders() map[string]*huma.Param {
 	return map[string]*huma.Param{
 		nodepool.NodeRefusalHeader: {Schema: &huma.Schema{Type: huma.TypeString, Enum: []any{nodepool.RefusalAtCapacity, nodepool.RefusalStorageFull}},
 			Description: "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES) or the cap it declares for the work's kind (SILO_NODE_MAX_VIDEO_TRANSCODES, SILO_NODE_MAX_AUDIO_TRANSCODES, SILO_NODE_MAX_REMUXES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal."},
+		nodepool.NodeRefusalKindHeader: {Schema: &huma.Schema{Type: huma.TypeString, Enum: []any{string(nodepool.JobKindVideoTranscode), string(nodepool.JobKindAudioTranscode), string(nodepool.JobKindRemux), string(nodepool.JobKindTrickplay)}},
+			Description: "With at_capacity, the job kind whose own cap refused the work; absent when the node's job cap did. The core then holds the node back from that kind only."},
 		"Retry-After": {Schema: &huma.Schema{Type: huma.TypeString}, Description: "Seconds, with the refusal header."},
 	}
 }

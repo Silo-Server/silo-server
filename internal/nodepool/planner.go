@@ -141,10 +141,10 @@ type Planner struct {
 	// health checker can recheck the node and tell other API servers. Without
 	// it a report only marks the pool.
 	unreachable atomic.Pointer[func(nodeURL string) bool]
-	// atCapacity records, by normalized URL, when a transcode node last
-	// refused new work at its own job cap. Guarded by mu. See
-	// ReportAtCapacity.
-	atCapacity map[string]time.Time
+	// atCapacity records, by normalized URL and job kind, when a transcode
+	// node last refused new work at its own job cap (kind "") or at one
+	// kind's cap. Guarded by mu. See ReportAtCapacity.
+	atCapacity map[atCapacityKey]time.Time
 }
 
 // NewPlanner creates a planner over the given pools.
@@ -1039,7 +1039,7 @@ func (p *Planner) pickProxy(proxies []*Node, groupHealthy map[string]bool, group
 // A node that refused new work at its own cap is not, until its next health
 // check (ReportAtCapacity).
 func (p *Planner) underCap(n *Node, now time.Time) bool {
-	if p.heldAtCapacity(n, now) {
+	if p.heldAtCapacity(n, "", now) {
 		return false
 	}
 	return n.MaxJobs == nil || p.effectiveJobs(n, now) < *n.MaxJobs
@@ -1049,11 +1049,15 @@ func (p *Planner) underCap(n *Node, now time.Time) bool {
 // under the cap it reported for that kind: its reported jobs of the kind plus
 // this planner's reservations of it the report does not include yet. A node
 // with no cap for the kind, or work of no kind, always can; the job cap is
-// underCap's to judge. So can the node at currentURL: a replan of a session
+// underCap's to judge. A node that refused the kind at its cap cannot until
+// its next health check (ReportAtCapacity). The node at currentURL can: a replan of a session
 // it runs is counted there already, and the node never refuses it at the cap.
 func (p *Planner) underKindCap(n *Node, currentURL string, kind JobKind, now time.Time) bool {
 	if kind == "" || (currentURL != "" && sameNodeURL(n.URL, currentURL)) {
 		return true
+	}
+	if p.heldAtCapacity(n, kind, now) {
+		return false
 	}
 	view, ok := reportedJobStats(n)
 	limit := view.JobCapsByKind[kind]

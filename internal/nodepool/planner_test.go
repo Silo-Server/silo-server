@@ -508,7 +508,7 @@ func TestNodeAtCapacityIsHeldUntilItsNextHealthCheck(t *testing.T) {
 	now := time.Unix(1_000, 0)
 	planner.now = func() time.Time { return now }
 
-	ReportAtCapacity(planner, "http://transcode-a/")
+	ReportAtCapacity(planner, "http://transcode-a/", "")
 	if planner.TranscodeWorkAvailableWith(nil) {
 		t.Fatal("a node that refused at its cap still takes work")
 	}
@@ -519,12 +519,32 @@ func TestNodeAtCapacityIsHeldUntilItsNextHealthCheck(t *testing.T) {
 	// A refusal newer than the last health check holds the node again, and
 	// then only time lifts it.
 	now = now.Add(2 * time.Second)
-	ReportAtCapacity(planner, "http://transcode-a")
+	ReportAtCapacity(planner, "http://transcode-a", "")
 	if planner.TranscodeWorkAvailableWith(nil) {
 		t.Fatal("a refusal after the last health check did not hold the node")
 	}
 	now = now.Add(atCapacityHold)
 	if !planner.TranscodeWorkAvailableWith(nil) {
 		t.Fatal("the hold outlasted atCapacityHold")
+	}
+}
+
+// A refusal at one kind's own cap holds the node back from that kind only: the
+// node still takes the kinds under their caps.
+func TestNodeAtKindCapacityIsHeldForThatKindOnly(t *testing.T) {
+	node := &Node{ID: 1, URL: "http://transcode-a", Enabled: true, Healthy: true}
+	planner := NewPlanner(NewProxyPool(), newKeyedTranscodePool())
+	now := time.Unix(1_000, 0)
+	planner.now = func() time.Time { return now }
+
+	ReportAtCapacity(planner, "http://transcode-a/", JobKindVideoTranscode)
+	if !planner.underCap(node, now) {
+		t.Fatal("a refusal at the video cap held the whole node")
+	}
+	if planner.underKindCap(node, "", JobKindVideoTranscode, now) {
+		t.Fatal("a refusal at the video cap did not hold video work")
+	}
+	if !planner.underKindCap(node, "", JobKindRemux, now) {
+		t.Fatal("a refusal at the video cap held remuxes")
 	}
 }

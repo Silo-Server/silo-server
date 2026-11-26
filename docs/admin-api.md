@@ -763,8 +763,12 @@ setting bounds it. These are set only in the node's environment, never on its
 row, so they are not part of `max_jobs` or the admin edit form.
 
 The node enforces them as it does its job cap: past a kind's cap it refuses new
-work of that kind with `at_capacity`, and continuing work (a quality switch,
-seek or reconnect of a session it serves) is never refused. It reports them in
+work of that kind with `at_capacity`, naming the kind in
+`X-Silo-Node-Refusal-Kind`, so the API server holds the node back from that
+kind only until its next health report. Continuing work (a quality switch,
+seek or reconnect of a session it serves) is never refused at the job cap, and
+at its kind's cap only when it changes kind, as a remux replanned to a video
+encode does. It reports them in
 `job_caps_by_kind`, and placement skips a node whose effective jobs of the kind
 (as in balancing above) have reached its cap. When every node is at its cap for
 the kind, the placement finds no transcode node and the API server falls back as

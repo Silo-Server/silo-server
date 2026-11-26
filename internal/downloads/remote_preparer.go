@@ -212,7 +212,7 @@ func (p *NodeAwarePreparer) prepareFile(ctx context.Context, artifactID string, 
 	stopProgress()
 	release()
 	if errors.Is(err, downloadprepare.ErrNodeAtCapacity) {
-		nodepool.ReportAtCapacity(p.planner, node.URL)
+		nodepool.ReportAtCapacity(p.planner, node.URL, downloadprepare.RefusedKind(err))
 	}
 	if errors.Is(err, downloadprepare.ErrNodeAtCapacity) && refusals+1 < maxCapacityRefusals && ctx.Err() == nil {
 		slog.InfoContext(ctx, "transcode node is at its job limit; placing the download artifact prepare again", "component", "downloads", "artifact_id", artifactID, "node", node.URL)

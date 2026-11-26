@@ -403,6 +403,7 @@ const progressiveRemuxShutdownTimeout = 10 * time.Second
 type progressiveRemuxRequest struct {
 	id                uint64
 	playbackSessionID string
+	kind              nodepool.JobKind
 	cancel            context.CancelFunc
 	done              <-chan struct{}
 }
@@ -490,7 +491,7 @@ type Server struct {
 	admission       sync.Mutex
 	admitted        int
 	admittedKinds   map[nodepool.JobKind]int
-	remuxSeen       map[string]time.Time
+	remuxSeen       map[string]remuxSighting
 	continuing      map[string]int
 	remuxSeenPruned time.Time
 	// declaredHWAccel and artifactBudget are what the node's operator
@@ -1799,9 +1800,9 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	// (a quality switch or replan), continues a job the node holds, so the
 	// cap never refuses it. Admitted before the source opens, so a refusal
 	// costs the core nothing.
-	slot, releaseAdmission, admitted := s.admitStart(req, time.Now())
+	slot, releaseAdmission, capKind, admitted := s.admitStart(req, time.Now())
 	if !admitted {
-		writeAtCapacity(w)
+		writeAtCapacity(w, capKind)
 		return
 	}
 	defer releaseAdmission()
@@ -2465,13 +2466,20 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		overlap   *continuation
 		continues bool
 	)
+	remuxKind := nodepool.StreamJobKind(false, claims.TranscodeAudio)
 	if r.Method != http.MethodHead {
 		overlap, continues = s.claimContinuation(playbackSessionID, time.Now())
 		defer overlap.release()
-		if !continues {
-			admitted, ok := s.admitJob(nodepool.StreamJobKind(false, claims.TranscodeAudio))
+		// A continuation of another kind still needs room under the remux
+		// kind's own cap (admitKind).
+		if !overlap.covers(remuxKind) {
+			admit := s.admitJob
+			if continues {
+				admit = s.admitKind
+			}
+			admitted, capKind, ok := admit(remuxKind)
 			if !ok {
-				writeAtCapacity(w)
+				writeAtCapacity(w, capKind)
 				return
 			}
 			slot = admitted
@@ -2564,7 +2572,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.progressiveRemuxes[transportID] = progressiveRemuxRequest{
-		id: requestID, playbackSessionID: playbackSessionID, cancel: stop, done: done,
+		id: requestID, playbackSessionID: playbackSessionID, kind: remuxKind, cancel: stop, done: done,
 	}
 	s.mu.Unlock()
 	unlock()
@@ -2581,12 +2589,11 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 
 	// The remux is registered above, so it counts as running from here: its
 	// slot when it was new work, the overlap allowance when it continued.
-	remuxKind := nodepool.StreamJobKind(false, claims.TranscodeAudio)
 	s.countJob(slot, remuxKind)
 	overlap.release()
 	defer s.endJob(remuxKind)
-	s.noteRemux(playbackSessionID, time.Now())
-	defer func() { s.noteRemux(playbackSessionID, time.Now()) }()
+	s.noteRemux(playbackSessionID, remuxKind, time.Now())
+	defer func() { s.noteRemux(playbackSessionID, remuxKind, time.Now()) }()
 	if s.tracker != nil {
 		startedAt, startedAtSource := resolvedStart(resolution)
 		trackerType := "remux"

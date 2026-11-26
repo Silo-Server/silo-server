@@ -63,7 +63,7 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 		// next health check; the caller tries another executor, as it does
 		// after any refused start.
 		if nodepool.RefusedAtCapacity(response) {
-			nodepool.ReportAtCapacity(h.NodePlanner, nodeURL)
+			nodepool.ReportAtCapacity(h.NodePlanner, nodeURL, nodepool.RefusedKind(response))
 		}
 		if request.ToneMapMode != "" {
 			if validationErr := transcodenode.ToneMapExecutionErrorForResponse(
