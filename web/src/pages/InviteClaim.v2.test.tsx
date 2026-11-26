@@ -19,6 +19,9 @@ vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ user: null, loading: false, completeLogin: auth.completeLogin }),
 }));
 vi.mock("@/components/auth/AuthBackground", () => ({ AuthBackground: () => null }));
+vi.mock("react-qr-code", async () =>
+  (await import("@/components/appKeys/codeLinkGuard.test-support")).qrCodeMock(),
+);
 const invitation = {
   email: "invitee@example.test",
   server_name: "Test server",
@@ -534,6 +537,7 @@ it("shows a code the server keeps out of links as text to type", async () => {
   expect(await screen.findByRole("heading", { name: "Join with this code" })).toBeTruthy();
   expect(screen.getByText(issuedCode.code)).toBeTruthy();
   expect(screen.queryByRole("link", { name: "Open Silo" })).toBeNull();
+  expect(screen.getByRole("img", { name: "Scan code for the Silo app" })).toBeTruthy();
   expectNoLinkCarrying(container, issuedCode.code);
 });
 
