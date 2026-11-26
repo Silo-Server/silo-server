@@ -733,7 +733,7 @@ func groupAudiobookCandidates(scans []audiobookRootScan) [][]string {
 	return groups
 }
 
-func (s *Scanner) reconcileAudiobookAliases(ctx context.Context, folder *models.MediaFolder, aliases []string, inventory audiobookInventory, inventoryAt time.Time, skipped, unreadable *int64) error {
+func (s *Scanner) reconcileAudiobookAliases(ctx context.Context, folder *models.MediaFolder, aliases []string, inventory audiobookInventory, inventoryAt time.Time, skipped, unreadable *int64, indexed *audiobookIndexCounts) error {
 	// Prefer the already indexed location. Adding an alias should not churn
 	// file IDs or overwrite a filesystem-derived title on every scan.
 	if s.fileRepo != nil && len(aliases) > 1 {
@@ -754,7 +754,7 @@ func (s *Scanner) reconcileAudiobookAliases(ctx context.Context, folder *models.
 			return err
 		}
 		walked := inventory.book(path)
-		err := s.reconcileAudiobookFolder(ctx, folder, path, inventory.seen, walked, inventoryAt, skipped, unreadable)
+		err := s.reconcileAudiobookFolder(ctx, folder, path, inventory.seen, walked, inventoryAt, skipped, unreadable, indexed)
 		walked.release()
 		if err != nil {
 			if !errors.Is(err, errFolderHasNoMedia) {
@@ -776,17 +776,33 @@ func (s *Scanner) reconcileAudiobookAliases(ctx context.Context, folder *models.
 //
 // This bypasses the per-file movie/TV pipeline because audiobooks are
 // inherently folder-scoped (one book = one item, possibly multi-file).
-func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaFolder, fullScan bool) error {
+//
+// The returned ScanResult counts books, not files: New and Updated are the
+// books indexed or rebuilt, Unchanged the books skipped, and Missing the files
+// this scan newly marked missing. Library ingest reads it to decide whether
+// the scan changed the catalog.
+func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaFolder, fullScan bool) (*ScanResult, error) {
 	if folder == nil {
-		return fmt.Errorf("ScanAudiobookFolder: nil folder")
+		return nil, errors.New("ScanAudiobookFolder: nil folder")
 	}
 	return s.scanAudiobookPaths(ctx, folder, folder.Paths, fullScan, true, "")
 }
 
-func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFolder, roots []string, fullScan, honorIgnores bool, admit string) error {
+func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFolder, roots []string, fullScan, honorIgnores bool, admit string) (*ScanResult, error) {
 	if s == nil || folder == nil {
-		return fmt.Errorf("ScanAudiobookFolder: nil scanner or folder")
+		return nil, errors.New("ScanAudiobookFolder: nil scanner or folder")
 	}
+	result := &ScanResult{}
+	err := s.scanAudiobookPathsInto(ctx, folder, roots, fullScan, honorIgnores, admit, result)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// scanAudiobookPathsInto runs the scan for scanAudiobookPaths, adding its
+// counts to result as it goes.
+func (s *Scanner) scanAudiobookPathsInto(ctx context.Context, folder *models.MediaFolder, roots []string, fullScan, honorIgnores bool, admit string, result *ScanResult) error {
 	ctx = withScopedScan(ctx, fullScan)
 
 	warning, err := s.scanWarningBeforeWalk(ctx, folder.ID, fullScan)
@@ -830,7 +846,7 @@ func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFo
 		// library converges — but only when a root was readable, and the
 		// empty-walk guard requires operator confirmation before deleting.
 		if len(reconcileRoots) > 0 {
-			if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, inventoryAt, seenPaths, protectedPaths, fullScan); err != nil {
+			if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, inventoryAt, seenPaths, protectedPaths, fullScan, result); err != nil {
 				slog.WarnContext(ctx, "audiobook scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
 			}
 		} else if len(scans) > 0 {
@@ -846,13 +862,13 @@ func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFo
 		return nil
 	}
 
-	if err := s.reconcileAudiobookCandidates(ctx, folder, candidates, inventory, inventoryAt); err != nil {
+	if err := s.reconcileAudiobookCandidates(ctx, folder, candidates, inventory, inventoryAt, result); err != nil {
 		return err
 	}
 
 	// Reconcile files that vanished from disk now that the full walk's
 	// seenPaths is known and the scan completed without cancellation.
-	if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, inventoryAt, seenPaths, protectedPaths, fullScan); err != nil {
+	if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, inventoryAt, seenPaths, protectedPaths, fullScan, result); err != nil {
 		slog.WarnContext(ctx, "audiobook scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
 	}
 	if walkFailures > 0 {
@@ -868,8 +884,8 @@ func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFo
 // parallel. ffprobe dominates per-book wall time (hundreds of ms each), so
 // single-threaded scans of a large library take days; the worker pool brings
 // this to hours. It fails when the scan is canceled, or when every attempted
-// book failed.
-func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *models.MediaFolder, candidates [][]string, inventory audiobookInventory, inventoryAt time.Time) error {
+// book failed. It adds the books it indexed, rebuilt and skipped to result.
+func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *models.MediaFolder, candidates [][]string, inventory audiobookInventory, inventoryAt time.Time, result *ScanResult) error {
 	workers := audiobookScanWorkers()
 	slog.InfoContext(ctx, "audiobook scan: starting", "component", "scanner",
 		"folder_id", folder.ID,
@@ -889,8 +905,14 @@ func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *mode
 		cancelMu   sync.Mutex
 		failures   scanFailures
 		cancelErr  error
+		indexed    audiobookIndexCounts
 	)
 	start := time.Now()
+	defer func() {
+		result.New += int(atomic.LoadInt64(&indexed.added))
+		result.Updated += int(atomic.LoadInt64(&indexed.rebuilt))
+		result.Unchanged += int(atomic.LoadInt64(&skipped))
+	}()
 	for range workers {
 		wg.Go(func() {
 			for aliases := range ch {
@@ -898,7 +920,7 @@ func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *mode
 				if ctx.Err() != nil {
 					return
 				}
-				if err := s.reconcileAudiobookAliases(ctx, folder, aliases, inventory, inventoryAt, &skipped, &unreadable); err != nil {
+				if err := s.reconcileAudiobookAliases(ctx, folder, aliases, inventory, inventoryAt, &skipped, &unreadable, &indexed); err != nil {
 					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 						cancelMu.Lock()
 						if cancelErr == nil {
@@ -973,8 +995,9 @@ func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *mode
 // remaining files are removed (a rename therefore converges on the newly
 // indexed path instead of leaving a stale duplicate). A scan that saw zero
 // files while the DB still has rows only reconciles when the operator has
-// confirmed cleanup, so an unmounted source can't wipe the catalog.
-func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *models.MediaFolder, roots []string, inventoryAt time.Time, seenPaths map[string]bool, protectedPaths []string, fullScan bool) error {
+// confirmed cleanup, so an unmounted source can't wipe the catalog. It adds
+// the files it newly marked missing and the rows its sweep removed to result.
+func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *models.MediaFolder, roots []string, inventoryAt time.Time, seenPaths map[string]bool, protectedPaths []string, fullScan bool, result *ScanResult) error {
 	if s.fileRepo == nil || s.libraryRepo == nil || len(roots) == 0 {
 		return nil
 	}
@@ -1020,12 +1043,16 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 						"folder_id", folder.ID, "path", mf.FilePath, "error", err)
 					continue
 				}
+				result.Missing++
 			}
 			missing++
 		}
 	}
 
 	trashed, removedMemberships, deletedItems, err := s.sweepMissingWithProtectedRoots(ctx, folder, protectedPaths)
+	result.FilesDeleted += trashed
+	result.MembershipsRemoved += removedMemberships
+	result.ItemsDeleted += deletedItems
 	if trashed > 0 {
 		slog.InfoContext(ctx, "audiobook scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 	}
@@ -1113,7 +1140,7 @@ func audiobookRootUnmoved(folderPath, physical string, physicalErr error) error 
 
 // unreadable, when set, counts audio files ffprobe rejected that the book was
 // indexed without.
-func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.MediaFolder, folderPath string, allowedPaths map[string]bool, walked *audiobookWalkedBook, inventoryAt time.Time, skipped, unreadable *int64) error {
+func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.MediaFolder, folderPath string, allowedPaths map[string]bool, walked *audiobookWalkedBook, inventoryAt time.Time, skipped, unreadable *int64, indexed *audiobookIndexCounts) error {
 	// Resolved once per book, so the skip check, the identity lookup and the
 	// rows it writes agree on the physical root.
 	physical, physicalErr := canonicalWalkPath(folderPath)
@@ -1168,11 +1195,12 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 	if err := s.upsertAudiobookSeriesTx(ctx, tx, contentID, parsed); err != nil {
 		return fmt.Errorf("upsert audiobook series: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `
+	membership, err := tx.Exec(ctx, `
 		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
 		VALUES ($1, $2, NOW())
 		ON CONFLICT (content_id, media_folder_id) DO NOTHING
-	`, contentID, folder.ID); err != nil {
+	`, contentID, folder.ID)
+	if err != nil {
 		return fmt.Errorf("upsert audiobook library membership: %w", err)
 	}
 	if parsed.ASIN != "" {
@@ -1187,6 +1215,7 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit audiobook folder transaction: %w", err)
 	}
+	indexed.count(membership.RowsAffected() > 0)
 	s.applyAudiobookCovers(ctx, folder.ID, contentID, folderPath, parsed)
 	if err := s.upsertAudiobookPeople(ctx, contentID, parsed); err != nil {
 		return fmt.Errorf("upsert audiobook people: %w", err)
@@ -2285,4 +2314,22 @@ func parseSeriesIndex(raw string) *float64 {
 		return nil
 	}
 	return &v
+}
+
+// audiobookIndexCounts counts the books a scan wrote: added joined the
+// library, rebuilt were already in it. Workers update it concurrently.
+type audiobookIndexCounts struct {
+	added, rebuilt int64
+}
+
+// count records one written book; a nil receiver counts nothing.
+func (c *audiobookIndexCounts) count(added bool) {
+	if c == nil {
+		return
+	}
+	if added {
+		atomic.AddInt64(&c.added, 1)
+		return
+	}
+	atomic.AddInt64(&c.rebuilt, 1)
 }

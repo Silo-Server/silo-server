@@ -252,7 +252,7 @@ func TestAudiobookRootMovedWhileReadKeepsItsItemDB(t *testing.T) {
 	}
 	s := NewScanner(NewFileRepository(pool), probe("First Book", ""), nil, 1, false, 0)
 	var skipped int64
-	if err := s.reconcileAudiobookFolder(ctx, folder, link, nil, nil, time.Time{}, &skipped, nil); err != nil {
+	if err := s.reconcileAudiobookFolder(ctx, folder, link, nil, nil, time.Time{}, &skipped, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	// Make the first book's file look changed, so the next scan reads it, and
@@ -261,7 +261,7 @@ func TestAudiobookRootMovedWhileReadKeepsItsItemDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.ffprobePath = probe("Second Book", fmt.Sprintf("ln -sfn '%s' '%s'\n", second, link))
-	if err := s.reconcileAudiobookFolder(ctx, folder, link, nil, nil, time.Time{}, &skipped, nil); err == nil {
+	if err := s.reconcileAudiobookFolder(ctx, folder, link, nil, nil, time.Time{}, &skipped, nil, nil); err == nil {
 		t.Fatal("scan of a book whose link moved while it was read succeeded")
 	}
 	var titles []string
