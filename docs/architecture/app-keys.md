@@ -865,16 +865,36 @@ to a password write and refuses a scoped API key on an administrator's
 account): a link lets its holder in as surely as a new password. The issuer and
 the account are locked in id order before the link is stored, as a reset
 link's issue does, so a promotion or ownership move that commits first is
-judged. Promoting the account deletes its links and their unredeemed codes, as
-it deletes its reset links. A disabled account gets no link, and its existing
-link answers `not_found`.
+judged. A link follows the set-password action: an account a sign-in provider
+manages, with its own password sign-in off, can have its password set by an
+administrator, so it can have a link too. The link's keys start unbound, and
+setting a password with it turns the account's local sign-in on: an
+administrator's link takes the account out from under its provider exactly as
+their set-password does, and no more quietly. A disabled account gets no link.
+
+**The address.** The link is built on the server's public URL
+(`server.public_url`, `mail.AccountLinkBase`), as a password reset link is, for
+the answer and the email alike, so it opens wherever the person is. A server
+with no public URL refuses to make one (409 `capability_not_configured`), as it
+refuses a reset link; it never falls back to the address the administrator's
+request arrived on. An email goes to the address the account has when the link
+is stored: an address changed since the administrator's page read it is
+refused (409 `conflict`), as a reset link's issue refuses it.
+
+**What ends a link.** Whatever ends a link ends the app code its redeem left
+and the set-password token it handed out, in the same transaction
+(`auth.EndSignInLinksTx`): a new link for the account (one link is live per
+account); a password set by any route (with the link itself, a completed
+reset, an administrator's set, the person's own change); signing the account
+out everywhere, or out of every other session; disabling the account
+(enabling it again never brings a link back); and promoting it to
+administrator.
 
 **Its own table.** `auth_sign_in_links`, not `password_reset_tokens`: that
 table holds one link per account bound to a fingerprint of the current
 password, so it can't serve an account with no password, and a sign-in link
 there would cancel a pending reset link and the reverse. Only SHA-256 digests
-of the link token and the set-password token are stored. A new link deletes the
-account's earlier ones, so one link is live per account. The hourly retention
+of the link token and the set-password token are stored. The hourly retention
 step deletes links past their expiry; the table is left out of backups.
 
 **Redeeming.** The link is marked redeemed in the transaction that makes the
@@ -883,9 +903,22 @@ disabled-account links answer the same `not_found`. While app keys are off (or
 in demo mode, where they always are) no code is made and the answer carries
 only the set-password token. The code enrolls keys as described under
 "Redeem" above: it replaces a different person key, because the person lost
-the devices that hold the old one, and leaves enrolled devices alone. The
-code's audit row names the link (`sign_in_link_id`) and the account that made
-it (`sign_in_link_created_by`), never the token or the code.
+the devices that hold the old one, and leaves enrolled devices alone. A new or
+replacing person key and its device start unbound to any provider; the
+account's own person key sent again keeps its provider binding, and the device
+enrolled under it takes that binding, as a device that key introduces does.
+The code's `user.app_code_redeemed` row names the link (`sign_in_link_id`) and
+the account that made it (`sign_in_link_created_by`); a replacement is also
+recorded as `user.person_key_replaced`, with the person key before and after
+and the same two facts, never the token or the code.
+
+What `person_key` in a redeem's sealed answer says, for every kind of code:
+
+| Value | Meaning |
+| --- | --- |
+| `enrolled` | The request's person key is the account's person key, now or already. |
+| `kept` | The account kept a different person key (a session code); the request's key is not stored. |
+| `replaced` | A sign-in link's code brought a different key, and the account's old person key was revoked. |
 
 **Administrators get the password route only.** Redeeming a link for an
 account that is an administrator's at that moment, judged from the role under
@@ -907,6 +940,10 @@ the new device's key session, or from the password session on the site, as
 the main profile, then makes the app's key the account's person key. The lost
 devices' keys stay active until removed from the key list, and devices waiting
 on the old key are denied with it.
+
+**The capability.** `sign_in_links` in the app key capability, and in the
+account administration capability, is true only while a link can be made: the
+server has a public URL and local password sign-in on.
 
 **Setting a password.** The set-password token lives an hour, never past the
 link, and works once. The password passes the rules a reset's completion

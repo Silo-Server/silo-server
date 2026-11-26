@@ -307,7 +307,10 @@ only, as a reset link's does. The architecture is in
 [app keys](architecture/app-keys.md#sign-in-links).
 
 - `POST /admin/users/{user_id}/sign-in-links` (`createAdminUserSignInLink`), acting
-  admin, body `{ "send_email": false }`. Answers 201
+  admin, body `{ "send_email": false }`. The link is built on the server's public
+  URL, as a reset link is; without one the answer is 409
+  `capability_not_configured`. An address changed since it was read is 409
+  `conflict`. Answers 201
   `{ "url", "expires_at", "delivery_status" }`; `delivery_status` is
   `not_requested`, or with `send_email` `sent` or `failed_or_unknown` (the link is
   live either way and is still returned). A new link replaces the account's earlier
@@ -320,7 +323,9 @@ only, as a reset link's does. The architecture is in
   `capability_not_configured`, both before a link is made. While
   `auth.local_password_login` is off the answer is 409 `provider_sign_in_required`.
   Audited as `user.sign_in_link_created` with `delivery` and `expires_at`, never
-  the token. The account capability (`getAdminAccountCapabilities`) reports
+  the token. A new link, a password set by any route, signing the account out
+  everywhere (or out of every other session), disabling it and promoting it each
+  end its link, the code the link's redeem left and its set-password token. The account capability (`getAdminAccountCapabilities`) reports
   `sign_in_links` and `sign_in_link_email`.
 - `POST /auth/sign-in-links/redeem` (`redeemSignInLink`), public, body
   `{ "token" }`. Answers `{ "code", "expires_in", "server_address", "link_allowed",
