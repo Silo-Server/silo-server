@@ -304,9 +304,9 @@ func (d *reachDB) mayRevokeOthers(t *testing.T, token string) bool {
 // one account, a session opened by device sign-in and an ordinary one are
 // each refused another session of the account, an unknown session is still
 // not found for both, each may end itself, and the capability says no to
-// both. Each caller's refusal names its own rule (the device sign-in rule
-// answers first), so the test fails when either rule stops applying where
-// they meet.
+// both. The ordinary caller gets the demo refusal and the limited caller a
+// different one (the device sign-in rule answers first), so the test fails
+// when either rule stops applying where they meet.
 func TestDemoVisitorOnALimitedSessionDB(t *testing.T) {
 	d := newReachDBIn(t, true)
 	yes := true
@@ -315,12 +315,13 @@ func TestDemoVisitorOnALimitedSessionDB(t *testing.T) {
 	ordinary := d.store(t, account, reachSession{platform: "web"})
 	bystander := uuid.NewString()
 	d.store(t, account, reachSession{id: bystander, platform: "web"})
-	for name, caller := range map[string]struct{ token, rule string }{
-		"limited": {limited, "signed in with a code"}, "ordinary": {ordinary, "demo mode"},
-	} {
+	for name, caller := range map[string]struct {
+		token string
+		demo  bool
+	}{"limited": {limited, false}, "ordinary": {ordinary, true}} {
 		refusal := requireProblem(t, do(t, d.handler, http.MethodDelete, Prefix+"/auth/sessions/"+bystander, "", bearer(caller.token)), TypePermissionDenied)
-		if !d.live(t, bystander) || !strings.Contains(refusal.Detail, caller.rule) {
-			t.Fatalf("%s: refusal %q (other session live: %v), want one naming %q", name, refusal.Detail, d.live(t, bystander), caller.rule)
+		if !d.live(t, bystander) || (refusal.Detail == demoRefusalDetail) != caller.demo {
+			t.Fatalf("%s: refusal %q (other session live: %v), want the demo refusal: %v", name, refusal.Detail, d.live(t, bystander), caller.demo)
 		}
 		requireProblem(t, do(t, d.handler, http.MethodDelete, Prefix+"/auth/sessions/"+uuid.NewString(), "", bearer(caller.token)), TypeNotFound)
 		if d.mayRevokeOthers(t, caller.token) {
