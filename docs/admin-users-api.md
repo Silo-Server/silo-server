@@ -197,9 +197,10 @@ not reach this route, and the handler refuses a scoped key for an administrator
 account in any case.
 
 `POST /api/v2/admin/users/{user_id}/sign-in-links` makes a single-use sign-in link
-for a person who lost every device, with the same authority as setting the
-account's password. It works for an account with no password, and it is refused
-while local password sign-in is off. See [sign-in links](auth-api.md#sign-in-links).
+for a person who lost every device. A scoped API key can never make one;
+otherwise the rule is the one for setting the account's password. It works for
+an account with no password, and it is refused for an account that may not sign
+in with a local password on this server (`local_password_allowed` false). See [sign-in links](auth-api.md#sign-in-links).
 
 `POST /api/v2/admin/users/{id}/impersonate` returns the shared token-pair contract.
 It creates a login session and has no replay identity. Clients must not retry an

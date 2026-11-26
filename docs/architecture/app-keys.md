@@ -859,10 +859,11 @@ either types the code into the Silo app or sets a password
 (`setSignInLinkPassword`). The page redeems only when the person presses
 Continue, never on load: the link works once and the code lives ten minutes.
 
-**Who may make one.** Exactly who may set that account's password as an
-administrator (`auth.CheckSignInLinkIssuer`, which applies `CheckOwnerUpdate`
-to a password write and refuses a scoped API key on an administrator's
-account): a link lets its holder in as surely as a new password. The issuer and
+**Who may make one.** A scoped API key never: no scope names the operation,
+so the scope check refuses every scoped key, and a link lets its holder in as
+surely as a new password. Otherwise the rule is the one for setting that
+account's password as an administrator (`auth.CheckSignInLinkIssuer`, which
+applies `CheckOwnerUpdate` to a password write). The issuer and
 the account are locked in id order before the link is stored, as a reset
 link's issue does, so a promotion or ownership move that commits first is
 judged. A link follows the set-password action: an account a sign-in provider
@@ -886,7 +887,9 @@ and the set-password token it handed out, in the same transaction
 (`auth.EndSignInLinksTx`): a new link for the account (one link is live per
 account); a password set by any route (with the link itself, a completed
 reset, an administrator's set, the person's own change); signing the account
-out everywhere, or out of every other session; disabling the account
+out everywhere, or out of every other session; a change of the account's
+email address, since the link may have been emailed to the old one; disabling
+the account
 (enabling it again never brings a link back); and promoting it to
 administrator.
 
@@ -942,8 +945,11 @@ devices' keys stay active until removed from the key list, and devices waiting
 on the old key are denied with it.
 
 **The capability.** `sign_in_links` in the app key capability, and in the
-account administration capability, is true only while a link can be made: the
-server has a public URL and local password sign-in on.
+account administration capability, says whether the server can build links:
+it has a public URL. Whether a link can be made for one account is that
+account's, and the administrator account view says it as
+`local_password_allowed`; the Users page offers the action exactly where it
+is true.
 
 **Setting a password.** The set-password token lives an hour, never past the
 link, and works once. The password passes the rules a reset's completion
@@ -952,12 +958,19 @@ password sign-in on and revokes every login session of the account as a reset
 does (`ResetPasswordInTransaction`); app keys stay, and devices signed in with
 them sign back in.
 
-**Refused with local passwords off.** While `auth.local_password_login` is
-off, making a link, redeeming one and setting its password answer
-`provider_sign_in_required` (409), and a link stays unspent. On such a server
-the link could only create a way in that skips the sign-in provider. There the
-person signs in with the provider on the server's site and uses "Open in Silo"
-(`POST /auth/app-codes`) instead.
+**Refused where local passwords can't be used.** A link is allowed for an
+account exactly when that account may sign in with a local password on this
+server, decided by the function password sign-in uses
+(`localPasswordSwitchAllows`): the server-wide `auth.local_password_login`
+switch is on, or the account is break-glass. It does not read the account's
+own `local_password_login_enabled`. Making a link, redeeming one and setting
+its password each check it, and a refused link stays unspent
+(`provider_sign_in_required`, 409): for an ordinary account on a server with
+the switch off, the link could only create a way in that skips the sign-in
+provider, and there the person signs in with the provider on the server's
+site and uses "Open in Silo" (`POST /auth/app-codes`) instead. A break-glass
+administrator, who still signs in with a password while the switch is off,
+gets a link with the password route only, as any administrator does.
 
 ### Sessions that can't manage keys
 

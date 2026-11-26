@@ -314,18 +314,21 @@ only, as a reset link's does. The architecture is in
   `{ "url", "expires_at", "delivery_status" }`; `delivery_status` is
   `not_requested`, or with `send_email` `sent` or `failed_or_unknown` (the link is
   live either way and is still returned). A new link replaces the account's earlier
-  links. Who may make one is who may set that account's password as an
-  administrator: any administrator for an ordinary account, only the Owner for
-  another administrator or the Owner, only the Owner for an account of their own
-  whose password sign-in is off, and never a scoped API key for an administrator
-  (403). A disabled account is 409 `conflict`. With `send_email`, an account with
+  links. A scoped API key can never make one (403 from the scope check: no scope
+  names the operation). Otherwise who may make one follows the rule for setting
+  that account's password as an administrator: any administrator for an ordinary
+  account, only the Owner for another administrator or the Owner, and only the
+  Owner for an account of their own whose password sign-in is off (403). A disabled account is 409 `conflict`. With `send_email`, an account with
   no email address is 409 `conflict` and a server without mail 409
-  `capability_not_configured`, both before a link is made. While
-  `auth.local_password_login` is off the answer is 409 `provider_sign_in_required`.
+  `capability_not_configured`, both before a link is made. A link
+  is made only for an account allowed to sign in with a local password on this
+  server (the switch on, or a break-glass account; the account view's
+  `local_password_allowed`), otherwise 409 `provider_sign_in_required`; redeem and
+  set-password check it again.
   Audited as `user.sign_in_link_created` with `delivery` and `expires_at`, never
-  the token. A new link, a password set by any route, signing the account out
-  everywhere (or out of every other session), disabling it and promoting it each
-  end its link, the code the link's redeem left and its set-password token. The account capability (`getAdminAccountCapabilities`) reports
+  the token. A new link, a password set by any route, a change of its email address,
+  signing the account out everywhere (or out of every other session), disabling it
+  and promoting it each end its link, the code the link's redeem left and its set-password token. The account capability (`getAdminAccountCapabilities`) reports
   `sign_in_links` and `sign_in_link_email`.
 - `POST /auth/sign-in-links/redeem` (`redeemSignInLink`), public, body
   `{ "token" }`. Answers `{ "code", "expires_in", "server_address", "link_allowed",
