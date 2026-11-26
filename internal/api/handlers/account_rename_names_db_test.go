@@ -3,9 +3,9 @@ package handlers
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +33,7 @@ type renameRig struct {
 func newRenameRig(t *testing.T) *renameRig {
 	t.Helper()
 	f := newEditsFixture(t)
-	tag := fmt.Sprintf("%d", time.Now().UnixNano())
+	tag := strconv.FormatInt(time.Now().UnixNano(), 10)
 	r := &renameRig{f: f, tag: tag, old: "parent-" + tag, adminID: f.adminID}
 	if _, err := f.pool.Exec(t.Context(), `UPDATE users SET username = $2 WHERE id = $1`, f.userID, r.old); err != nil {
 		t.Fatal(err)
@@ -105,15 +105,6 @@ func start(fn func() error) *started {
 	return s
 }
 
-func (s *started) finished() bool {
-	select {
-	case <-s.done:
-		return true
-	default:
-		return false
-	}
-}
-
 // wait returns the request's error, failing if it doesn't finish in time:
 // a lock cycle PostgreSQL did not break fails here instead of hanging.
 func (s *started) wait(t *testing.T) error {
@@ -131,26 +122,28 @@ func (s *started) wait(t *testing.T) error {
 // orDone, a request that finished instead also ends the wait.
 func waitBlocked(t *testing.T, pool *pgxpool.Pool, app string, s *started, orDone bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.After(10 * time.Second)
 	for {
-		if s.finished() {
+		select {
+		case <-s.done:
 			if orDone {
 				return
 			}
 			t.Fatalf("%s finished (%v) while it should have been waiting", app, s.err)
-		}
-		var blocked bool
-		if err := pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
-			WHERE application_name = $1 AND cardinality(pg_blocking_pids(pid)) > 0)`, app).Scan(&blocked); err != nil {
-			t.Fatal(err)
-		}
-		if blocked {
-			return
-		}
-		if time.Now().After(deadline) {
+		case <-deadline:
 			t.Fatalf("%s never waited on a lock", app)
+		case <-ticker.C:
+			var blocked bool
+			if err := pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+				WHERE application_name = $1 AND cardinality(pg_blocking_pids(pid)) > 0)`, app).Scan(&blocked); err != nil {
+				t.Fatal(err)
+			}
+			if blocked {
+				return
+			}
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 
