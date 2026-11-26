@@ -454,6 +454,34 @@ ids. A device sign-in session opened before the column from a device that isn't 
 recorded mark and stays ordinary until it ends; an account holder ends shared devices'
 sessions from their session list, or an administrator ends all of the account's sessions.
 
+### Other devices' playback and web push
+
+One rule decides which sessions are limited: the one above. Each surface applies it as its
+shape allows. The login session list redacts the other entries. Two other surfaces show or
+act on one device's entries from another, and they apply only the half of the rule about
+another app the person allowed (`auth.SessionMayReachOtherDevices`, the grant-enrolled key
+of `SessionOrigin`). A device signed in by code is not limited on them:
+
+- `listHouseholdSessions` (`GET /profiles/household/sessions`) gives such a session only the
+  playback sessions its own login session started, in full. Every other entry is left out,
+  including a stream with no recorded login session (one started through the
+  Jellyfin-compatible or Audiobookshelf-compatible surface, or before the record). The item
+  shape is unchanged.
+- The web push routes (`listNotificationWebPushSubscriptions`, `subscribeNotificationWebPush`,
+  `unsubscribeNotificationWebPush`, `deleteNotificationWebPushSubscription`) refuse it with
+  403 `permission_denied` before anything is read or written: a profile's subscriptions
+  belong to every browser it registered, and subscribing takes an endpoint's registration
+  over.
+- Reporting progress (`updatePlaybackProgress`), stopping (`stopPlayback`), replanning
+  (`replanPlayback`) and minting a control ticket (`createPlaybackControlSocketTicket`) check
+  the account and profile, and for such a session also that its own login session started
+  the playback session: another login session's stream, or one with no recorded login
+  session, is 403 `permission_denied`. The check runs only when the stream's login session is
+  not the caller's, so a client acting on its own stream pays nothing for it.
+
+The refusals carry the same detail as the key routes' refusal of a session that may not make
+a change.
+
 ### Access tokens after a role change
 
 An access token carries the account's role, and admin checks trust it. When an
@@ -1219,7 +1247,8 @@ the app opens can't enroll keys, replace the person key, approve a device
 sign-in now or in advance, read the key list, or revoke any key but its own.
 It is also refused (403 `permission_denied`) on creating a personal API key
 (`createPersonalAPIKey`) and on the operations that link a sign-in provider
-account.
+account. It doesn't reach the person's other devices
+([Other devices' playback and web push](#other-devices-playback-and-web-push)).
 
 | Refusal | Problem |
 | --- | --- |

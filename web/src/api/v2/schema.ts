@@ -11167,10 +11167,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Manage the acting profile's notification inbox. */
+    /**
+     * Manage the acting profile's notification inbox.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: the profile's subscriptions belong to every browser it registered. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     get: operations["listNotificationWebPushSubscriptions"];
     put?: never;
-    /** Register or reassign a browser endpoint to the current profile. Send once; replay can replace newer intent or re-enable delivery. */
+    /**
+     * Register or reassign a browser endpoint to the current profile. Send once; replay can replace newer intent or re-enable delivery.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: the profile's subscriptions belong to every browser it registered. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     post: operations["subscribeNotificationWebPush"];
     delete?: never;
     options?: never;
@@ -11188,7 +11194,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Remove a server subscription belonging to the current profile. Does not unsubscribe the browser or order concurrent registration intents. */
+    /**
+     * Remove a server subscription belonging to the current profile. Does not unsubscribe the browser or order concurrent registration intents.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: the profile's subscriptions belong to every browser it registered. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     delete: operations["deleteNotificationWebPushSubscription"];
     options?: never;
     head?: never;
@@ -11204,7 +11213,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Remove the account's current registration for a browser endpoint. Send once; a retry can delete a newer registration. */
+    /**
+     * Remove the account's current registration for a browser endpoint. Send once; a retry can delete a newer registration.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied before anything is read or written: the profile's subscriptions belong to every browser it registered. A session the person's own app key opened, and one opened by device sign-in, are not refused.
+     */
     post: operations["unsubscribeNotificationWebPush"];
     delete?: never;
     options?: never;
@@ -12037,7 +12049,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the live playback sessions on the signed-in account, for a household manager. */
+    /**
+     * List the live playback sessions on the signed-in account, for a household manager.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) gets only the playback sessions that login session started; every other entry is left out, including a stream with no recorded login session, such as one started through the Jellyfin-compatible or Audiobookshelf-compatible surface. A session the person's own app key opened, and one opened by device sign-in, get every entry.
+     */
     get: operations["listHouseholdSessions"];
     put?: never;
     post?: never;
