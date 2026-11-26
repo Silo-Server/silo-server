@@ -156,6 +156,15 @@ import { mediaElementReleased, sourceLoadStarted } from "../bandwidth-probe";
 import { networkInformation, type NetworkInformationLike } from "../network-information";
 import { isRightToLeft } from "@/lib/direction";
 
+/**
+ * Whether focus sits in the player controls while they are hidden, as it does
+ * on the seek slider after a pill press once the controls fade. The viewer
+ * cannot see that focus, so a skip pill treats it as no focus at all.
+ */
+function focusInHiddenControls(element: HTMLElement | null): boolean {
+  return element?.closest('[data-controls-hidden="true"]') != null;
+}
+
 function pillKey(
   event: KeyboardEvent,
   promptSelector: string,
@@ -179,7 +188,8 @@ function pillKey(
   // at the document/player root. Back remains global for the pill.
   const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const promptHasFocus = targetInPrompt || active?.closest(promptSelector) != null;
-  const focusIsUnclaimed = active === null || active === document.body || active === root;
+  const focusIsUnclaimed =
+    active === null || active === document.body || active === root || focusInHiddenControls(active);
   if (isSelect && !promptHasFocus && !focusIsUnclaimed) return null;
   return isSelect ? "select" : "back";
 }
@@ -730,6 +740,13 @@ export function VideoPlayer({
   const backendDurationRef = useRef(propDuration ?? 0);
   const autoEnterPictureInPictureAttemptedRef = useRef(false);
   const autoSkippedRecapKeyRef = useRef<string | null>(null);
+  /**
+   * Recaps whose automatic skip was refused or failed, which offer their pill
+   * instead. A set, so a late answer for one recap cannot unmark another.
+   */
+  const [failedAutoRecapKeys, setFailedAutoRecapKeys] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const lastInputWasKeyboardRef = useRef(false);
   const endedFiredRef = useRef(false);
   const [hasEnded, setHasEnded] = useState(false);
@@ -2765,9 +2782,6 @@ export function VideoPlayer({
   const activeSkipMarker = [activeRecap, activeCredits, activePreview].find(
     (region) => region !== null && currentTime >= region.start && currentTime < region.end,
   );
-  const skipMarker = useCallback(() => {
-    if (activeSkipMarker) handleViewerSeek(activeSkipMarker.end);
-  }, [activeSkipMarker, handleViewerSeek]);
 
   const introPromptCanSeek =
     !roomPlaybackActive ||
@@ -2802,6 +2816,46 @@ export function VideoPlayer({
     onSeek: handlePlayerSeek,
   });
 
+  // Recap, credits and preview pills follow the intro's `ask` table whatever
+  // the intro mode is. One pill shows at a time, and the intro pill wins. It
+  // and the Next Up screen cover a segment pill without ending its range, so
+  // the pill is held as if paused instead of dropped: one that already showed
+  // comes back with the time it had left, one that timed out stays timed out,
+  // and one that became due under the cover starts its full timer when it
+  // first shows.
+  const autoRecapKey = activeRecap
+    ? `${sessionId}:${activeFileId ?? "unknown"}:${activeRecap.start}:${activeRecap.end}`
+    : null;
+  const segmentKey = activeSkipMarker
+    ? `${sessionId}:${activeFileId ?? selectedVersion?.file_id ?? "unknown"}:${activeSkipMarker.kind}:${activeSkipMarker.start}:${activeSkipMarker.end}`
+    : null;
+  const {
+    prompt: activeSegmentPrompt,
+    select: selectActiveSegmentPrompt,
+    dismiss: dismissActiveSegmentPrompt,
+  } = useIntroSkipPrompt({
+    mode: "ask",
+    intro: activeSkipMarker ?? null,
+    introKey: segmentKey,
+    currentTime,
+    playing: playing && displayMode === "foreground" && activeIntroPrompt === null,
+    covered: displayMode === "postroll" || activeIntroPrompt !== null,
+    controlsVisible,
+    enabled:
+      (displayMode === "foreground" || displayMode === "postroll") &&
+      isPlayerReady &&
+      !awaitingFirstFrame &&
+      introPromptCanSeek &&
+      // An automatic recap skip answers the pill, unless the seek did not take.
+      !(
+        autoSkipRecap &&
+        activeSkipMarker?.kind === "recap" &&
+        !failedAutoRecapKeys.has(autoRecapKey ?? "")
+      ),
+    onSeek: handlePlayerSeek,
+    skipLabel: activeSkipMarker ? skipMarkerLabel(t, activeSkipMarker.kind) : undefined,
+  });
+
   useEffect(() => {
     if (!autoSkipRecap || !activeRecap || !isPlayerReady || awaitingFirstFrame) {
       return;
@@ -2817,14 +2871,20 @@ export function VideoPlayer({
       return;
     }
 
-    const recapKey = `${sessionId}:${activeFileId ?? "unknown"}:${activeRecap.start}:${activeRecap.end}`;
-    if (autoSkippedRecapKeyRef.current === recapKey) {
+    const recapKey = autoRecapKey;
+    if (recapKey === null || autoSkippedRecapKeyRef.current === recapKey) {
       return;
     }
     autoSkippedRecapKeyRef.current = recapKey;
-    handlePlayerSeek(activeRecap.end);
+    // A refused or failed seek leaves the viewer in the recap, so the pill is
+    // offered instead. The skip is not retried: that would repeat on every
+    // position update.
+    const markFailed = () => setFailedAutoRecapKeys((keys) => new Set(keys).add(recapKey));
+    void Promise.resolve(handlePlayerSeek(activeRecap.end)).then((accepted) => {
+      if (!accepted) markFailed();
+    }, markFailed);
   }, [
-    activeFileId,
+    autoRecapKey,
     autoSkipRecap,
     awaitingFirstFrame,
     currentTime,
@@ -3878,26 +3938,30 @@ export function VideoPlayer({
     }, 0);
   }, [resetControlsTimer]);
 
+  // Each wrapper asks the intro prompt first. A segment prompt can sit hidden
+  // under it, but the intro prompt answers every Select while it shows, and an
+  // untimed intro pill takes no Back, so neither reaches the hidden one.
   const selectIntroPrompt = useCallback(() => {
-    if (!selectActiveIntroPrompt()) return false;
+    if (!selectActiveIntroPrompt() && !selectActiveSegmentPrompt()) return false;
     // A press on the prompt is the viewer's seek; automatic skips are not.
     resetStillWatchingStreak();
     focusTransportAfterIntroPrompt();
     return true;
-  }, [focusTransportAfterIntroPrompt, selectActiveIntroPrompt]);
+  }, [focusTransportAfterIntroPrompt, selectActiveIntroPrompt, selectActiveSegmentPrompt]);
 
   const dismissIntroPrompt = useCallback(() => {
-    if (!dismissActiveIntroPrompt()) return false;
+    if (!dismissActiveIntroPrompt() && !dismissActiveSegmentPrompt()) return false;
     focusTransportAfterIntroPrompt();
     return true;
-  }, [dismissActiveIntroPrompt, focusTransportAfterIntroPrompt]);
+  }, [dismissActiveIntroPrompt, dismissActiveSegmentPrompt, focusTransportAfterIntroPrompt]);
 
-  const introPromptVisible = activeIntroPrompt !== null;
+  const visibleSkipPrompt = activeIntroPrompt ?? activeSegmentPrompt;
+  const introPromptVisible = visibleSkipPrompt !== null;
   // Only a timed prompt takes focus and claims Enter/Space/Escape from the rest
   // of the player. The untimed offer that returns with the controls answers
   // Enter/Space only while it has focus, or Space with nothing focused would
-  // skip the intro instead of resuming.
-  const introPromptTimed = activeIntroPrompt?.timer != null;
+  // skip the range instead of resuming.
+  const introPromptTimed = visibleSkipPrompt?.timer != null;
 
   useEffect(() => {
     if (!introPromptVisible || displayMode !== "foreground") return;
@@ -3927,11 +3991,12 @@ export function VideoPlayer({
   // open menu or a text field.
   const pillMayTakeFocus = () => {
     if (!lastInputWasKeyboardRef.current) return false;
-    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const active = focusInHiddenControls(focused) ? null : focused;
     const interactionInProgress =
       active?.closest(
         'input, textarea, select, [contenteditable="true"], dialog, [role="dialog"], [role="menu"], [role="listbox"], [role="slider"]',
-      ) !== null ||
+      ) != null ||
       containerRef.current?.querySelector('[role="dialog"], [role="menu"], [role="listbox"]') !=
         null;
     return !interactionInProgress;
@@ -5130,10 +5195,10 @@ export function VideoPlayer({
     }),
     [plan, activeQualityId],
   );
-  // Intro skip and the other segment skips take priority; a
-  // buffering pill waits behind them with its timer frozen. A minimized
+  // A skip pill on screen, timed or back with the controls, takes priority; a
+  // buffering pill waits behind it with its timer frozen. A minimized
   // player shows no pill either, so the pill waits for it to come back.
-  const higherPriorityPillActive = activeIntroPrompt !== null || activeSkipMarker !== undefined;
+  const higherPriorityPillActive = activeIntroPrompt !== null || activeSegmentPrompt !== null;
   const bufferingQuality = useAutoQualityDownshift({
     videoRef,
     planRevision,
@@ -6057,6 +6122,7 @@ export function VideoPlayer({
       {/* Intro skip / undo prompt */}
       {!isDetached && activeIntroPrompt && (
         <IntroSkipButton
+          key={introKey}
           onSkip={selectIntroPrompt}
           label={activeIntroPrompt.label}
           caption={activeIntroPrompt.caption}
@@ -6070,12 +6136,18 @@ export function VideoPlayer({
           showSource={showMarkerSource}
         />
       )}
-      {!isDetached && !activeIntroPrompt && activeSkipMarker && (
+      {!isDetached && !activeIntroPrompt && activeSegmentPrompt && (
         <IntroSkipButton
-          onSkip={skipMarker}
-          label={skipMarkerLabel(t, activeSkipMarker.kind)}
+          // Adjacent ranges (credits into a preview) are separate pills, each
+          // free to take focus as it appears.
+          key={segmentKey}
+          onSkip={selectIntroPrompt}
+          label={activeSegmentPrompt.label}
+          timer={activeSegmentPrompt.timer ?? undefined}
+          introPrompt
           controlsVisible={controlsVisible}
           dockHeight={dockClearance}
+          focusOnMount={focusIntroPromptOnMount}
           provenance={activeSkipMarker}
           showConfidence={showMarkerConfidence}
           showSource={showMarkerSource}

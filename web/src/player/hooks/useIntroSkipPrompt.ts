@@ -3,7 +3,7 @@ import { t } from "@/i18n";
 
 import type { IntroSkipMode, PlayerTimeRange } from "../types";
 
-export const INTRO_PROMPT_SECONDS = 5;
+export const INTRO_PROMPT_SECONDS = 10;
 export const PLAYBACK_PAUSE_GRACE_MS = 1_500;
 
 const INTRO_PROMPT_MS = INTRO_PROMPT_SECONDS * 1_000;
@@ -77,6 +77,12 @@ interface UseIntroSkipPromptOptions {
    */
   controlsVisible: boolean;
   /**
+   * Whether something covers the player, such as the Next Up screen. Pass
+   * `playing` false as well. A cover is not a rebuffer, so the timer freezes
+   * at once instead of after the pause grace window.
+   */
+  covered?: boolean;
+  /**
    * Moves playback and reports whether the seek was accepted.
    *
    * A seek can be refused without anything moving — a watch-together room that
@@ -85,6 +91,11 @@ interface UseIntroSkipPromptOptions {
    * and hidden once the seek that resolves it actually took.
    */
   onSeek: (seconds: number) => boolean | Promise<boolean>;
+  /**
+   * The `ask` offer's action, for a recap, credits or preview range that runs
+   * on this same state machine. Defaults to "Skip Intro".
+   */
+  skipLabel?: string;
 }
 
 /**
@@ -101,7 +112,9 @@ export function useIntroSkipPrompt({
   playing,
   enabled,
   controlsVisible,
+  covered = false,
   onSeek,
+  skipLabel,
 }: UseIntroSkipPromptOptions) {
   const [activePrompt, setActivePromptState] = useState<ActivePrompt | null>(null);
   const activePromptRef = useRef<ActivePrompt | null>(null);
@@ -245,9 +258,21 @@ export function useIntroSkipPrompt({
       return;
     }
 
-    if (pausedRemainingRef.current !== null || pauseGraceTimerRef.current !== null) {
+    if (pausedRemainingRef.current !== null) return;
+
+    if (covered) {
+      // Frozen now. A pause edge already in its grace window keeps the value
+      // it captured at that edge.
+      clearPauseGraceTimer();
+      clearCountdownTimers();
+      const remaining = remainingAtEdgeRef.current ?? Math.max(0, deadlineRef.current - Date.now());
+      remainingAtEdgeRef.current = null;
+      pausedRemainingRef.current = remaining;
+      replacePrompt({ ...current, deadlineMs: null, remainingMs: remaining });
       return;
     }
+
+    if (pauseGraceTimerRef.current !== null) return;
 
     // The false edge. What the clock has left is captured here rather than when
     // the grace timer fires, or every real pause would silently eat the grace
@@ -270,6 +295,7 @@ export function useIntroSkipPrompt({
     activePrompt?.key,
     clearCountdownTimers,
     clearPauseGraceTimer,
+    covered,
     playing,
     replacePrompt,
     scheduleCountdown,
@@ -385,8 +411,11 @@ export function useIntroSkipPrompt({
     if (!current || !intro) return false;
     settleSeek(onSeekRef.current(current.kind === "skip" ? intro.end : intro.start), (accepted) => {
       if (!accepted) return;
-      if (!promptStillActive(activePromptRef.current, current.key, current.kind)) return;
+      // The seek took, so the range is answered even when an async seek lands
+      // after the prompt has gone: a reanchor moves the position first. Only
+      // the clearing waits on the prompt, so a late answer leaves a newer one.
       resolvedKeysRef.current.add(current.key);
+      if (!promptStillActive(activePromptRef.current, current.key, current.kind)) return;
       clearPrompt();
     });
     return true;
@@ -400,10 +429,11 @@ export function useIntroSkipPrompt({
     return true;
   }, [clearPrompt]);
 
+  const skipText = skipLabel ?? t("introSkip.pill.skip");
   const prompt: IntroSkipPrompt | null = activePrompt
     ? {
         kind: activePrompt.kind,
-        label: activePrompt.kind === "skip" ? t("introSkip.pill.skip") : t("introSkip.pill.undo"),
+        label: activePrompt.kind === "skip" ? skipText : t("introSkip.pill.undo"),
         caption: activePrompt.kind === "skip" ? undefined : t("introSkip.pill.undoCaption"),
         timer: {
           durationMs: INTRO_PROMPT_MS,
@@ -412,7 +442,7 @@ export function useIntroSkipPrompt({
         },
       }
     : reofferKey !== null
-      ? { kind: "skip", label: t("introSkip.pill.skip"), timer: null }
+      ? { kind: "skip", label: skipText, timer: null }
       : null;
 
   return { prompt, select, dismiss };

@@ -199,7 +199,7 @@ describe("useIntroSkipPrompt", () => {
     const { result, rerender } = renderPrompt();
     rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
 
-    act(() => vi.advanceTimersByTime(4_000));
+    act(() => vi.advanceTimersByTime(9_000));
     rerender({ mode: "ask", currentTime: 12, playing: false, enabled: true });
     act(() => vi.advanceTimersByTime(10_000));
 
@@ -214,7 +214,7 @@ describe("useIntroSkipPrompt", () => {
   });
 
   // A rebuffer must leave the deadline exactly where it was, so the prompt
-  // still ends five wall-clock seconds after it appeared.
+  // still ends ten wall-clock seconds after it appeared.
   it("resumes a sub-grace rebuffer against the original deadline", () => {
     const { result, rerender } = renderPrompt();
     rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
@@ -224,7 +224,7 @@ describe("useIntroSkipPrompt", () => {
     act(() => vi.advanceTimersByTime(1_000));
     rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
 
-    act(() => vi.advanceTimersByTime(2_999));
+    act(() => vi.advanceTimersByTime(7_999));
     expect(result.current.prompt).not.toBeNull();
     act(() => vi.advanceTimersByTime(1));
     expect(result.current.prompt).toBeNull();
@@ -253,5 +253,161 @@ describe("useIntroSkipPrompt", () => {
     // Nothing moved, so "Intro skipped" would be a lie.
     expect(onSeek).toHaveBeenCalledWith(20);
     expect(result.current.prompt).toBeNull();
+  });
+
+  // Recap, credits and preview ranges run on this hook in `ask` mode. One case
+  // per row of the recap and credits table in the intro-skip design document,
+  // which every client's tests assert.
+  describe("a credits range", () => {
+    const credits = { start: 100, end: 160 };
+    const PROMPT_MS = 10_000;
+
+    interface SegmentProps {
+      currentTime: number;
+      playing?: boolean;
+      controlsVisible?: boolean;
+      covered?: boolean;
+    }
+
+    function renderCredits() {
+      const view = renderHook(
+        ({ currentTime, playing = true, controlsVisible = false, covered }: SegmentProps) =>
+          useIntroSkipPrompt({
+            mode: "ask",
+            intro: credits,
+            introKey: "session:file:credits:100:160",
+            currentTime,
+            playing,
+            enabled: true,
+            controlsVisible,
+            covered,
+            onSeek,
+            skipLabel: "Skip Credits",
+          }),
+        { initialProps: { currentTime: 90 } as SegmentProps },
+      );
+      view.rerender({ currentTime: 101 });
+      return view;
+    }
+
+    function leaveAndReturn(rerender: (props: SegmentProps) => void) {
+      rerender({ currentTime: 170 });
+      rerender({ currentTime: 110 });
+    }
+
+    it("shows its pill with a full timer on entering the range", () => {
+      const { result } = renderCredits();
+      expect(result.current.prompt?.label).toBe("Skip Credits");
+      expect(result.current.prompt?.timer).toMatchObject({
+        durationMs: PROMPT_MS,
+        remainingMs: PROMPT_MS,
+      });
+    });
+
+    it("skips to the end in one press and stays resolved", () => {
+      const { result, rerender } = renderCredits();
+      act(() => expect(result.current.select()).toBe(true));
+      expect(onSeek).toHaveBeenCalledWith(160);
+      expect(result.current.prompt).toBeNull();
+
+      leaveAndReturn(rerender);
+      expect(result.current.prompt).toBeNull();
+    });
+
+    // A reanchor moves the position to the range end before its replan
+    // answers, so the pill has already gone when the skip is accepted.
+    it("stays resolved when the accepted skip lands after the pill has gone", async () => {
+      let landReanchor: ((accepted: boolean) => void) | null = null;
+      onSeek.mockImplementation(
+        () =>
+          new Promise<boolean>((resolve) => {
+            landReanchor = resolve;
+          }),
+      );
+      const { result, rerender } = renderCredits();
+      act(() => expect(result.current.select()).toBe(true));
+      rerender({ currentTime: 160 });
+      expect(result.current.prompt).toBeNull();
+      await act(async () => landReanchor?.(true));
+
+      rerender({ currentTime: 110 });
+      expect(result.current.prompt).toBeNull();
+    });
+
+    it("hides unresolved when the timer runs out, giving Select back", () => {
+      const { result } = renderCredits();
+      act(() => vi.advanceTimersByTime(PROMPT_MS - 1));
+      expect(result.current.prompt).not.toBeNull();
+      act(() => vi.advanceTimersByTime(1));
+      expect(result.current.prompt).toBeNull();
+      expect(result.current.select()).toBe(false);
+      expect(onSeek).not.toHaveBeenCalled();
+    });
+
+    it("comes back without a timer with the controls after timing out", () => {
+      const { result, rerender } = renderCredits();
+      act(() => vi.advanceTimersByTime(PROMPT_MS));
+      rerender({ currentTime: 115, controlsVisible: true });
+      expect(result.current.prompt?.label).toBe("Skip Credits");
+      expect(result.current.prompt?.timer).toBeNull();
+      // Back is not the returned pill's to claim.
+      expect(result.current.dismiss()).toBe(false);
+    });
+
+    it("takes one Back to hide and resolve it", () => {
+      const { result, rerender } = renderCredits();
+      act(() => expect(result.current.dismiss()).toBe(true));
+      expect(result.current.prompt).toBeNull();
+      // The next Back is the player's again.
+      expect(result.current.dismiss()).toBe(false);
+
+      leaveAndReturn(rerender);
+      act(() => vi.advanceTimersByTime(PROMPT_MS));
+      rerender({ currentTime: 120, controlsVisible: true });
+      expect(result.current.prompt).toBeNull();
+      expect(onSeek).not.toHaveBeenCalled();
+    });
+
+    it("freezes its timer across a pause and resumes from there", () => {
+      const { result, rerender } = renderCredits();
+      act(() => vi.advanceTimersByTime(3_000));
+      rerender({ currentTime: 104, playing: false });
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(result.current.prompt?.timer).toMatchObject({ deadlineMs: null, remainingMs: 7_000 });
+
+      rerender({ currentTime: 104 });
+      act(() => vi.advanceTimersByTime(6_999));
+      expect(result.current.prompt).not.toBeNull();
+      act(() => vi.advanceTimersByTime(1));
+      expect(result.current.prompt).toBeNull();
+    });
+
+    // The Next Up screen covering the player is not a rebuffer: a visit
+    // shorter than the pause grace window must not spend the timer.
+    it("freezes its timer at once while the player is covered", () => {
+      const { result, rerender } = renderCredits();
+      act(() => vi.advanceTimersByTime(9_000));
+      rerender({ currentTime: 109, playing: false, covered: true });
+      act(() => vi.advanceTimersByTime(1_200));
+      expect(result.current.prompt?.timer).toMatchObject({ deadlineMs: null, remainingMs: 1_000 });
+
+      rerender({ currentTime: 109 });
+      act(() => vi.advanceTimersByTime(999));
+      expect(result.current.prompt).not.toBeNull();
+      act(() => vi.advanceTimersByTime(1));
+      expect(result.current.prompt).toBeNull();
+    });
+
+    it("hides unresolved on a seek out, and a seek back in restarts the full timer", () => {
+      const { result, rerender } = renderCredits();
+      act(() => vi.advanceTimersByTime(6_000));
+      rerender({ currentTime: 170 });
+      expect(result.current.prompt).toBeNull();
+
+      rerender({ currentTime: 110 });
+      expect(result.current.prompt?.timer?.remainingMs).toBe(PROMPT_MS);
+      act(() => vi.advanceTimersByTime(PROMPT_MS - 1));
+      expect(result.current.prompt).not.toBeNull();
+    });
   });
 });

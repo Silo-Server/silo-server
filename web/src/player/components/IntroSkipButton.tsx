@@ -16,7 +16,7 @@ interface IntroSkipButtonProps {
    */
   caption?: string;
   timer?: { durationMs: number; deadlineMs: number | null; remainingMs: number };
-  /** Marks the pill as the intro prompt the player's root key handler acts on. */
+  /** Marks the pill as the skip prompt the player's root key handler acts on. */
   introPrompt?: boolean;
   controlsVisible?: boolean;
   /** Height of the control dock; with controls up the pill sits just above it. */
@@ -34,8 +34,8 @@ interface IntroSkipButtonProps {
 }
 
 /**
- * The shared intro/recap pill. Intro prompts provide progress from their
- * wall-clock controller; recap retains the plain button shape for now.
+ * The shared skip pill for intro, recap, credits and preview ranges. Its
+ * progress comes from the prompt's wall-clock controller.
  */
 export function IntroSkipButton({
   onSkip,
@@ -54,9 +54,12 @@ export function IntroSkipButton({
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [now, setNow] = useState(() => Date.now());
 
+  // Decided once as the pill appears: a pill that came up unfocused, under a
+  // menu or during a scrub, must not take focus later in its timer.
+  const [takeFocus] = useState(focusOnMount);
   useEffect(() => {
-    if (focusOnMount) buttonRef.current?.focus({ preventScroll: true });
-  }, [focusOnMount]);
+    if (takeFocus) buttonRef.current?.focus({ preventScroll: true });
+  }, [takeFocus]);
 
   // A timed pill that runs out can stay on screen as the untimed offer. It
   // gives up the focus it held, as it did when it unmounted, so the next Space

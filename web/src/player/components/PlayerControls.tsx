@@ -428,6 +428,7 @@ export function PlayerControls({
       ref={controlsRef}
       data-compact={compactControls}
       data-touch={isCoarsePointer}
+      data-controls-hidden={visible ? undefined : "true"}
       className={`player-controls hud absolute inset-0 z-10 transition-opacity duration-300 ${
         visible ? "opacity-100" : "pointer-events-none opacity-0"
       }`}

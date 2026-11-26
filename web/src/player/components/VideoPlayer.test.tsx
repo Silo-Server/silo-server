@@ -223,7 +223,13 @@ vi.mock("./PlayerControls", () => ({
       onVideoFitToggle?: () => void;
     }) => {
       controls.current = props;
-      return null;
+      // The seek slider a pill press moves focus to, inside the controls'
+      // hidden marker.
+      return createElement(
+        "div",
+        { "data-controls-hidden": props.visible ? undefined : "true" },
+        createElement("div", { role: "slider", "data-player-seek-slider": "", tabIndex: 0 }),
+      );
     },
   ),
 }));
@@ -1529,6 +1535,140 @@ describe("VideoPlayer lost connection", () => {
   });
 });
 
+describe("VideoPlayer automatic recap skip", () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  // A refused skip leaves the viewer inside the recap, and the automatic skip
+  // does not try again, so the pill is the viewer's way past it.
+  it("offers Skip Recap when the automatic skip was refused", async () => {
+    const onReanchorSeek = vi.fn(() => false);
+    const { container, findByRole } = renderPlayer({
+      plan: fixturePlanV3({
+        ...directPlan,
+        delivery: "server_remux_progressive",
+        timeline: { ...directPlan.timeline, can_seek_anywhere: false },
+      }),
+      recap: { start: 10, end: 40 },
+      autoSkipRecap: true,
+      onReanchorSeek,
+    });
+    const video = container.querySelector("video")!;
+    video.currentTime = 15;
+    fireFrameTimeUpdate(video);
+
+    await waitFor(() => expect(onReanchorSeek).toHaveBeenCalledWith(40));
+    expect(await findByRole("button", { name: "Skip Recap" })).toBeTruthy();
+  });
+});
+
+// An intro that overlaps a recap: the intro pill has priority, so a recap pill
+// that has shown is covered by it, hidden with its timer frozen, rather than
+// dropped and restarted.
+describe("VideoPlayer recap pill under the intro pill", () => {
+  const PROMPT_MS = 10_000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  async function setup(recap: { start: number; end: number }) {
+    const rendered = renderPlayer({
+      plan: fixturePlanV3({
+        ...directPlan,
+        delivery: "server_remux_progressive",
+        timeline: { ...directPlan.timeline, can_seek_anywhere: false },
+      }),
+      intro: { start: 10, end: 60 },
+      recap,
+    });
+    const video = rendered.container.querySelector("video")!;
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    const at = (seconds: number) => {
+      video.currentTime = seconds;
+      fireFrameTimeUpdate(video);
+    };
+    const pill = (name: string) => rendered.queryByRole("button", { name });
+    const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+    // Moving the pointer brings the controls up; they hide 3 s later.
+    const showControls = () => fireEvent.mouseMove(rendered.container.firstElementChild!);
+    at(5);
+    fireEvent.play(video);
+    await advance(3_000);
+    at(11);
+    expect(pill("Skip Intro")).not.toBeNull();
+    return { at, pill, advance, showControls };
+  }
+
+  it("hides a shown recap pill under the intro pill and resumes it with the time left", async () => {
+    const { at, pill, advance, showControls } = await setup({ start: 25, end: 40 });
+    await advance(PROMPT_MS);
+    expect(pill("Skip Intro")).toBeNull();
+    at(26);
+    expect(pill("Skip Recap")).not.toBeNull();
+    await advance(4_000);
+
+    showControls();
+    expect(pill("Skip Intro")).not.toBeNull();
+    expect(pill("Skip Recap")).toBeNull();
+    await advance(2_999);
+    expect(pill("Skip Recap")).toBeNull();
+    await advance(1);
+
+    expect(pill("Skip Intro")).toBeNull();
+    expect(pill("Skip Recap")).not.toBeNull();
+    await advance(5_999);
+    expect(pill("Skip Recap")).not.toBeNull();
+    await advance(1);
+    expect(pill("Skip Recap")).toBeNull();
+  });
+
+  it("starts a recap pill that became due under the intro pill with its full timer", async () => {
+    const { at, pill, advance } = await setup({ start: 12, end: 40 });
+    at(13);
+    expect(pill("Skip Recap")).toBeNull();
+    await advance(PROMPT_MS);
+
+    expect(pill("Skip Intro")).toBeNull();
+    expect(pill("Skip Recap")).not.toBeNull();
+    await advance(PROMPT_MS - 1);
+    expect(pill("Skip Recap")).not.toBeNull();
+    await advance(1);
+    expect(pill("Skip Recap")).toBeNull();
+  });
+
+  it("does not restart a timed-out recap pill after the intro pill goes", async () => {
+    const { at, pill, advance, showControls } = await setup({ start: 25, end: 40 });
+    await advance(PROMPT_MS);
+    at(26);
+    await advance(PROMPT_MS);
+    expect(pill("Skip Recap")).toBeNull();
+
+    showControls();
+    expect(pill("Skip Intro")).not.toBeNull();
+    await advance(3_000);
+    expect(pill("Skip Intro")).toBeNull();
+    expect(pill("Skip Recap")).toBeNull();
+  });
+});
+
 describe("VideoPlayer session end", () => {
   beforeEach(() => {
     realtimeOptions.current = null;
@@ -1565,5 +1705,160 @@ describe("VideoPlayer session end", () => {
     });
 
     await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
+  });
+});
+
+// The player root routes Enter, Space and Escape to a timed credits pill, as
+// it does for Skip Intro. Once the timer has run out the keys are the player's
+// again, even with the untimed pill back over the controls.
+describe("VideoPlayer credits pill keys", () => {
+  const PROMPT_MS = 10_000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  async function setup() {
+    const onReanchorSeek = vi.fn(() => true);
+    const onExit = vi.fn();
+    const rendered = renderPlayer({
+      plan: fixturePlanV3({
+        ...directPlan,
+        delivery: "server_remux_progressive",
+        timeline: { ...directPlan.timeline, can_seek_anywhere: false },
+      }),
+      credits: { start: 20, end: 50 },
+      onReanchorSeek,
+      onExit,
+    });
+    const video = rendered.container.querySelector("video")!;
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    video.currentTime = 5;
+    fireFrameTimeUpdate(video);
+    fireEvent.play(video);
+    // The controls hide 3 s after playback starts.
+    await act(() => vi.advanceTimersByTimeAsync(3_000));
+    video.currentTime = 21;
+    fireFrameTimeUpdate(video);
+    const pill = () => rendered.queryByRole("button", { name: "Skip Credits" });
+    expect(pill()).not.toBeNull();
+    const press = (key: string) => fireEvent.keyDown(document.body, { key });
+    return { ...rendered, onReanchorSeek, onExit, pill, press };
+  }
+
+  it("skips in one press of Space while the timer runs", async () => {
+    const { onReanchorSeek, pill, press } = await setup();
+    expect(press(" ")).toBe(false);
+    expect(onReanchorSeek).toHaveBeenCalledWith(50);
+    expect(pill()).toBeNull();
+  });
+
+  it("hides on Escape without leaving the player", async () => {
+    const { onReanchorSeek, onExit, pill, press } = await setup();
+    expect(press("Escape")).toBe(false);
+    expect(pill()).toBeNull();
+    expect(onExit).not.toHaveBeenCalled();
+    expect(onReanchorSeek).not.toHaveBeenCalled();
+  });
+
+  // A press on Skip Intro parks focus on the seek slider, which stays there
+  // after the controls fade. The credits pill must still answer Space.
+  it("skips with Space after a click on Skip Intro left focus in the hidden controls", async () => {
+    const onReanchorSeek = vi.fn(() => true);
+    const rendered = renderPlayer({
+      plan: fixturePlanV3({
+        ...directPlan,
+        delivery: "server_remux_progressive",
+        timeline: { ...directPlan.timeline, can_seek_anywhere: false },
+      }),
+      intro: { start: 10, end: 15 },
+      credits: { start: 20, end: 50 },
+      onReanchorSeek,
+    });
+    const video = rendered.container.querySelector("video")!;
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    const at = (seconds: number) => {
+      video.currentTime = seconds;
+      fireFrameTimeUpdate(video);
+    };
+    at(5);
+    fireEvent.play(video);
+    await act(() => vi.advanceTimersByTimeAsync(3_000));
+    at(11);
+    const skipIntro = rendered.getByRole("button", { name: "Skip Intro" });
+    fireEvent.pointerDown(skipIntro);
+    fireEvent.click(skipIntro);
+    expect(onReanchorSeek).toHaveBeenCalledWith(15);
+    at(15);
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
+    const slider = rendered.container.querySelector("[data-player-seek-slider]");
+    expect(document.activeElement).toBe(slider);
+
+    at(21);
+    expect(rendered.queryByRole("button", { name: "Skip Credits" })).not.toBeNull();
+    fireEvent.keyDown(slider!, { key: " " });
+    expect(onReanchorSeek).toHaveBeenCalledWith(50);
+  });
+
+  // Focus is taken as the pill appears or not at all: a pill that came up
+  // during a scrub stays unfocused when the viewer moves on.
+  it("does not take focus later in its timer", async () => {
+    const rendered = renderPlayer({
+      plan: fixturePlanV3({
+        ...directPlan,
+        delivery: "server_remux_progressive",
+        timeline: { ...directPlan.timeline, can_seek_anywhere: false },
+      }),
+      credits: { start: 20, end: 50 },
+    });
+    const video = rendered.container.querySelector("video")!;
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    video.currentTime = 5;
+    fireFrameTimeUpdate(video);
+    fireEvent.play(video);
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    fireEvent.mouseMove(rendered.container.firstElementChild!);
+    const slider = rendered.container.querySelector<HTMLElement>("[data-player-seek-slider]")!;
+    slider.focus();
+    fireEvent.keyDown(slider, { key: "ArrowRight" });
+    video.currentTime = 21;
+    fireFrameTimeUpdate(video);
+    const pill = rendered.getByRole("button", { name: "Skip Credits" });
+    expect(document.activeElement).toBe(slider);
+
+    slider.blur();
+    fireEvent.keyDown(document.body, { key: "Tab" });
+    video.currentTime = 22;
+    fireFrameTimeUpdate(video);
+    expect(document.activeElement).not.toBe(pill);
+  });
+
+  it("leaves Space and Escape to the player once the timer has run out", async () => {
+    const { container, onReanchorSeek, pill, press } = await setup();
+    await act(() => vi.advanceTimersByTimeAsync(PROMPT_MS));
+    expect(pill()).toBeNull();
+
+    fireEvent.mouseMove(container.firstElementChild!);
+    expect(pill()).not.toBeNull();
+    // The pill's handler listens in the capture phase and stops a key it
+    // claims, so a key that reaches the body was left to the player.
+    const reached: string[] = [];
+    const listen = (event: KeyboardEvent) => reached.push(event.key);
+    document.body.addEventListener("keydown", listen);
+    press(" ");
+    press("Escape");
+    document.body.removeEventListener("keydown", listen);
+    expect(reached).toEqual([" ", "Escape"]);
+    expect(onReanchorSeek).not.toHaveBeenCalled();
+    expect(pill()).not.toBeNull();
   });
 });
