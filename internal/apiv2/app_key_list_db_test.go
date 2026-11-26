@@ -19,19 +19,21 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// TestKeyRoutesRefuseSessionsDB: the key list and the device sign-ins
-// approved in advance name the devices the person signed in, so only a
-// session the person opened by password (or provider, or their own key)
-// lists them or withdraws one. Through the real services: a TV's session
-// (device sign-in), a session another app's key opened, a session with no
-// record of how it was opened, and an administrator acting as the account
-// are each 403 permission_denied, and the refused withdraw leaves the
-// approval waiting. Regression: the pre-approval routes checked only that
-// the caller was the account's own login session, so a shared TV listed and
-// withdrew them; and the key list would lose its refusal of an
-// administrator acting as the account unnoticed, pinned only below the
-// route.
-func TestKeyRoutesRefuseSessionsDB(t *testing.T) {
+// keyRoutesDB serves the key and pre-approval routes through the real
+// services, with one account holding a session of each kind, by token:
+// tok-phone (password), tok-tv (device sign-in), tok-app (another app's
+// grant-enrolled key), tok-old (no record of how it was opened) and
+// tok-acting (an administrator acting as the account).
+type keyRoutesDB struct {
+	pool    *pgxpool.Pool
+	handler http.Handler
+	devices *auth.DeviceLoginService
+	userID  int
+	claims  map[string]*auth.Claims
+}
+
+func newKeyRoutesDB(t *testing.T) *keyRoutesDB {
+	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -95,8 +97,24 @@ func TestKeyRoutesRefuseSessionsDB(t *testing.T) {
 	deps.Devices = handler
 	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{roles}, fakeAPIKeys{},
 		fakeUsers{map[int]*models.User{userID: {ID: userID, Role: "user", Enabled: true}}})
-	h := NewHandler(deps)
+	return &keyRoutesDB{pool: pool, handler: NewHandler(deps), devices: devices, userID: userID, claims: claims}
+}
 
+// TestKeyRoutesRefuseSessionsDB: the key list and the device sign-ins
+// approved in advance name the devices the person signed in, so only a
+// session the person opened by password (or provider, or their own key)
+// lists them or withdraws one. Through the real services: a TV's session
+// (device sign-in), a session another app's key opened, a session with no
+// record of how it was opened, and an administrator acting as the account
+// are each 403 permission_denied, and the refused withdraw leaves the
+// approval waiting. Regression: the pre-approval routes checked only that
+// the caller was the account's own login session, so a shared TV listed and
+// withdrew them; and the key list would lose its refusal of an
+// administrator acting as the account unnoticed, pinned only below the
+// route.
+func TestKeyRoutesRefuseSessionsDB(t *testing.T) {
+	d := newKeyRoutesDB(t)
+	ctx, pool, h, devices, userID, claims := t.Context(), d.pool, d.handler, d.devices, d.userID, d.claims
 	// A sign-in approved in advance from the password session, for the
 	// withdraw to aim at.
 	secret := make([]byte, 32)
