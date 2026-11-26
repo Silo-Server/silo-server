@@ -797,6 +797,10 @@ func (h *PlaybackHandler) ReplanPlaybackV2(ctx context.Context, caller PlaybackC
 	// Only the attempt's owner learns how it ended; anyone else gets the 403
 	// the replan itself answers.
 	record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID)
+	if caller.MayReachOtherDevices != nil && err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
+		// The check below needs the attempt; it fails closed.
+		return playback.DecisionResponseV3{}, playbackStoreOperationError()
+	}
 	if err == nil && record != nil && attemptOwnedBy(record, caller) {
 		if err := mayActOnAttempt(ctx, record.LoginSessionID, caller); err != nil {
 			return playback.DecisionResponseV3{}, err

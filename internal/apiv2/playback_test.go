@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -112,10 +113,16 @@ func TestPlaybackV2ProgressAndStop(t *testing.T) {
 	deps, _ := catalogDeps(t)
 	fake := &fakePlaybackService{mutation: handlers.PlaybackMutationView{Outcome: "applied"}}
 	deps.Playback = fake
+	deps.AppKeys = &fakeAppKeys{reachErr: auth.ErrSessionNotAllowed}
 	h := newTestHandler(t, deps)
 	response := do(t, h, http.MethodPost, Prefix+"/playback/session-1/progress", playbackJSON(t, map[string]any{"installation_id": playbackTestInstallation, "sequence": 42, "position": 0, "is_paused": true}), viewerHeaders())
 	if response.Code != 200 || fake.progress.Sequence != 42 || fake.progress.Position != 0 || !fake.progress.IsPaused {
 		t.Fatalf("progress: %d %s %+v", response.Code, response.Body.String(), fake.progress)
+	}
+	// The service gets the caller's login session and the rule it asks
+	// before acting on a stream another login session started.
+	if rule := fake.caller.MayReachOtherDevices; fake.caller.LoginSessionID == "" || rule == nil || !errors.Is(rule(t.Context()), auth.ErrSessionNotAllowed) {
+		t.Fatalf("caller = %+v", fake.caller)
 	}
 	fake.mutation = handlers.PlaybackMutationView{Outcome: "stopped", StopID: playbackTestStop}
 	stopBody := map[string]any{"installation_id": playbackTestInstallation, "stop_id": playbackTestStop}
