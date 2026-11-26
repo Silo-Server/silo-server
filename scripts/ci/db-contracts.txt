@@ -366,6 +366,7 @@
 ./migrations TestAppKeyEnrolledIPMigrationUpAndDownPostgres
 ./internal/apiv2 TestProfileSetNameConflictOnTheWireDB
 ./internal/apiv2 TestClearOverrideNameConflictOnTheWireDB
+./internal/apiv2 TestClearOverridePreconditionDB
 ./internal/auth TestRevokeOwnDeviceKeyRulesDB
 ./internal/auth TestKeySignInLocalPasswordsOffDB
 ./internal/auth TestKeySessionContinuesProviderChainDB
@@ -1302,6 +1303,7 @@
 ./internal/api/handlers TestProfileSetOwnerOverridesDB
 ./internal/api/handlers TestClearProfileSetOverrideDB
 ./internal/api/handlers TestClearMirroredSettingDB
+./internal/api/handlers TestOverrideTokenDB
 ./internal/api/handlers TestProfileSetOwnerEditsFollowTheProfileDB
 ./internal/api/handlers TestProfileSetNamesWithOwnerRenamesDB
 ./internal/api/handlers TestProfileSetRefusalOrderDB

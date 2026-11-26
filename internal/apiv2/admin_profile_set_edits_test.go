@@ -127,3 +127,27 @@ func (r recordingProfileSetEdits) ListProfileSetEdits(ctx context.Context, id in
 	r.seen.UserID = id
 	return r.fixtureProfileSets.ListProfileSetEdits(ctx, id)
 }
+
+// The override clear is in the record of guarded operations, a PATCH that
+// answers a receipt, and the DELETE it replaced is gone from the document.
+// It catches the clear dropping out of the guarded record, which would let
+// it run without If-Match, and the old unguarded route coming back.
+func TestOverrideClearIsGuarded(t *testing.T) {
+	doc := generatedDocument(t)
+	item, ok := doc["paths"].(map[string]any)["/api/v2/admin/users/{id}/profiles/{profile_id}/overrides/{field}"].(map[string]any)
+	if !ok {
+		t.Fatal("no override clear path in the document")
+	}
+	if _, has := item["delete"]; has {
+		t.Fatal("the unguarded DELETE is still in the document")
+	}
+	patch, _ := item["patch"].(map[string]any)
+	if patch == nil || patch["operationId"] != "clearAdminUserProfileOverride" || patch[extGuarded] != true {
+		t.Fatalf("override clear = %v; want the guarded PATCH", patch)
+	}
+	for _, status := range []string{"412", "428"} {
+		if _, ok := patch["responses"].(map[string]any)[status]; !ok {
+			t.Fatalf("the clear does not document %s", status)
+		}
+	}
+}
