@@ -752,9 +752,11 @@ A provider whose search fails does not fail the request: the response adds
 `provider_errors`, keyed by provider slug with the generic message
 `Metadata search failed`, and still returns the other providers' candidates.
 The field is absent when every provider answered, so an empty `candidates`
-without it means no provider found a match. On a search by provider ID, a
-provider's HTTP 404 means it has no such ID and counts as a miss, not a
-failure. The provider's own error is logged, never returned. The Match Item and Split dialogs name the failed providers
+without it means no provider found a match. On a search that sends a
+provider an ID, its HTTP 404 or plugin `NotFound` means it has no such ID and
+counts as a miss, not a failure. Work-level book IDs are not sent to plugins,
+so a search carrying only those is a title search. The provider's own error is
+logged, never returned. The Match Item and Split dialogs name the failed providers
 instead of showing "No candidates found."
 
 Hints return the `title`, `year` and `provider_ids` (`tmdb`, `imdb`, `tvdb`)

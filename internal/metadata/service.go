@@ -5707,8 +5707,8 @@ func mergedImageThumbhash(previousPath, previousThumbhash, nextPath, nextThumbha
 // SearchProviders runs only the search phase and returns results for the UI.
 // A provider whose search fails does not stop the others: its error is
 // returned keyed by provider slug, so callers can tell an outage from a miss.
-// A provider's HTTP 404 on a search by provider ID means it has no such ID:
-// that is a miss and is not reported.
+// A provider that answers a search by provider ID with "not found" has no
+// such ID: that is a miss and is not reported (see searchMissedID).
 // The error result is non-nil only when the provider chain cannot be resolved.
 func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery, folderID int) ([]SearchResult, map[string]error, error) {
 	if strings.TrimSpace(query.Language) == "" && folderID > 0 {
@@ -5731,7 +5731,7 @@ func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery
 			continue
 		}
 		results, err := sp.Search(ctx, query)
-		if len(query.ProviderIDs) > 0 && isProvider404(err) {
+		if searchMissedID(query, err) {
 			slog.InfoContext(ctx, "metadata: match search provider has no such ID", "component", "metadata",
 				"provider", p.Slug(), "error", logredact.SanitizeText(err.Error()))
 			continue
@@ -5748,6 +5748,22 @@ func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery
 		allResults = append(allResults, results...)
 	}
 	return allResults, failed, nil
+}
+
+// searchMissedID reports a search error that says the provider has no such
+// ID: an HTTP 404 or a plugin NotFound status on a search that sent it a
+// provider ID. Plugins are not sent work-level book IDs, so a search carrying
+// only those is a title search, where "not found" is a failure.
+func searchMissedID(query SearchQuery, err error) bool {
+	if !providerDoesNotKnow(err) {
+		return false
+	}
+	for _, id := range pluginRequestProviderIDs(query.ContentType, query.ProviderIDs) {
+		if strings.TrimSpace(id) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // ResolveSeriesTVDBID asks the enabled series providers for the TVDB ID of a

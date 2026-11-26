@@ -14,7 +14,7 @@ export function MatchSearchProviderErrors({ providers }: { providers: string[] }
   return (
     <div
       role="alert"
-      className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-sm text-amber-600 dark:text-amber-400"
+      className="border-warning/25 bg-warning/10 text-warning-label flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"
     >
       <AlertCircle className="size-4 shrink-0" />
       <span>
