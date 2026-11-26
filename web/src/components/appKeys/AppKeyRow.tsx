@@ -28,6 +28,22 @@ export type AppKeyRowAction = { label: string; ariaLabel: string; onClick: () =>
 /** Between the parts of a row line; punctuation, not words. */
 const SEPARATOR = " · ";
 
+/**
+ * Where a key was added from, after the date it was added: nothing when the
+ * server doesn't know (a key added before it recorded the address). An
+ * address reads left to right in every language.
+ */
+function EnrolledFrom({ address }: { address: string }) {
+  const t = useT();
+  if (!address) return null;
+  return (
+    <>
+      {SEPARATOR}
+      {t("web.settings.appKeys.row.enrolledFrom", { address: <bdi dir="ltr">{address}</bdi> })}
+    </>
+  );
+}
+
 const ICONS = { tv: Tv, phone: Smartphone, desktop: Monitor, unknown: HelpCircle } as const;
 
 /**
@@ -119,6 +135,7 @@ export function AppKeyRow({
       {how}
       {SEPARATOR}
       {formatDateTime(appKey.enrolled_at, { seconds: false })}
+      <EnrolledFrom address={appKey.enrolled_ip_address} />
     </>,
   ];
   if (appKey.identity_gone) {

@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/appkeys"
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -247,6 +249,7 @@ func (a *AppKeySignIn) Introduce(ctx context.Context, req KeyRequest) (*KeySignI
 		return nil, err
 	}
 	gone := false
+	var audit *auditmutation.Entry
 	out := &KeySignInResult{ReplyKey: *payload.ReplyKey, Challenge: payload.Challenge}
 	err = a.inTx(ctx, func(tx pgx.Tx) error {
 		user, err := lockEnabledUser(ctx, tx, person.UserID)
@@ -282,8 +285,13 @@ func (a *AppKeySignIn) Introduce(ctx context.Context, req KeyRequest) (*KeySignI
 			UserID: user.ID, PublicKey: *payload.DeviceKey, Kind: models.DeviceKeyKindDevice,
 			Name: payload.DeviceName, Platform: payload.DevicePlatform, Status: status,
 			EnrolledVia: models.AppKeyEnrolledIntroduce, PersonKeyID: &locked.ID,
-			IdentityID: locked.IdentityID, ProviderBound: locked.ProviderBound,
+			IdentityID: locked.IdentityID, ProviderBound: locked.ProviderBound, IP: req.IP,
 		})
+		if err != nil {
+			return err
+		}
+		audit, err = recordKeyAdded(ctx, tx, auditmutation.ActionDeviceKeyIntroduced, user.ID, http.StatusOK,
+			keyAdded{auditFieldDeviceKeyStatus: status}.withDevice(key))
 		if err != nil {
 			return err
 		}
@@ -301,6 +309,7 @@ func (a *AppKeySignIn) Introduce(ctx context.Context, req KeyRequest) (*KeySignI
 	if gone {
 		return nil, ErrKeySignatureInvalid
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	return a.signedIn(ctx, out), nil
 }
 
@@ -463,6 +472,7 @@ func (a *AppKeySignIn) Enroll(ctx context.Context, req KeyEnrollRequest) (*KeySi
 	if err != nil {
 		return nil, sessionIdentityGone(err)
 	}
+	var audit *auditmutation.Entry
 	out := &KeySignInResult{ReplyKey: *payload.ReplyKey, Challenge: payload.Challenge, PersonKeyID: req.PersonKey.KeyID()}
 	err = a.inTx(ctx, func(tx pgx.Tx) error {
 		user, err := lockEnabledUser(ctx, tx, req.Claims.UserID)
@@ -477,7 +487,7 @@ func (a *AppKeySignIn) Enroll(ctx context.Context, req KeyEnrollRequest) (*KeySi
 			return sessionIdentityGone(err)
 		}
 		binding := enrolling.binding()
-		person, err := enrollPersonKeyTx(ctx, tx, user.ID, req.PersonKey, binding.IdentityID, binding.ProviderBound)
+		person, personCreated, err := enrollPersonKeyTx(ctx, tx, user.ID, req.PersonKey, binding, req.IP)
 		if err != nil {
 			return err
 		}
@@ -485,7 +495,7 @@ func (a *AppKeySignIn) Enroll(ctx context.Context, req KeyEnrollRequest) (*KeySi
 			UserID: user.ID, PublicKey: *payload.DeviceKey, Kind: models.DeviceKeyKindDevice,
 			Name: payload.DeviceName, Platform: payload.DevicePlatform,
 			EnrolledVia: models.AppKeyEnrolledSession, PersonKeyID: &person.ID,
-			IdentityID: binding.IdentityID, ProviderBound: binding.ProviderBound,
+			IdentityID: binding.IdentityID, ProviderBound: binding.ProviderBound, IP: req.IP,
 		})
 		if err != nil {
 			return err
@@ -502,11 +512,17 @@ func (a *AppKeySignIn) Enroll(ctx context.Context, req KeyEnrollRequest) (*KeySi
 		}
 		out.User, out.DeviceID, out.Status = user, key.ID, appkeys.ReplySignedIn
 		out.Pair, err = a.service.openKeySessionTx(ctx, tx, user, key, locked.session(req.IP, expiry))
+		if err != nil {
+			return err
+		}
+		audit, err = recordKeyAdded(ctx, tx, auditmutation.ActionAppKeysEnrolled, user.ID, http.StatusOK,
+			keyAdded{auditFieldSessionOpenedVia: chain.openedVia}.withDevice(key).withPerson(person, personCreated))
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	return a.signedIn(ctx, out), nil
 }
 
@@ -572,20 +588,23 @@ func livePersonKeyTx(ctx context.Context, tx pgx.Tx, userID int) (*models.AppPer
 }
 
 // enrollPersonKeyTx returns the account's person key when it is key, or
-// enrolls key when the account has none. A different live person key is
-// ErrPersonKeyConflict.
-func enrollPersonKeyTx(ctx context.Context, tx pgx.Tx, userID int, key appkeys.PublicKey, identityID *int64, bound bool) (*models.AppPersonKey, error) {
+// enrolls key when the account has none, recording ip as the enrolling
+// request's address. A different live person key is ErrPersonKeyConflict.
+// created reports that this call enrolled it.
+func enrollPersonKeyTx(ctx context.Context, tx pgx.Tx, userID int, key appkeys.PublicKey, binding KeyBinding, ip string) (person *models.AppPersonKey, created bool, err error) {
 	current, err := livePersonKeyTx(ctx, tx, userID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if current != nil {
 		if current.KeyID != key.KeyID() {
-			return nil, ErrPersonKeyConflict
+			return nil, false, ErrPersonKeyConflict
 		}
-		return current, nil
+		return current, false, nil
 	}
-	return insertPersonKeyTx(ctx, tx, NewPersonKey{
-		UserID: userID, PublicKey: key, IdentityID: identityID, ProviderBound: bound, EnrolledVia: models.AppKeyEnrolledSession,
+	person, err = insertPersonKeyTx(ctx, tx, NewPersonKey{
+		UserID: userID, PublicKey: key, IdentityID: binding.IdentityID, ProviderBound: binding.ProviderBound,
+		EnrolledVia: models.AppKeyEnrolledSession, IP: ip,
 	})
+	return person, err == nil, err
 }

@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,8 +107,9 @@ func newKeyRoutesDB(t *testing.T, with ...func(*Dependencies)) *keyRoutesDB {
 	return &keyRoutesDB{pool: pool, handler: NewHandler(deps), devices: devices, userID: userID, claims: claims}
 }
 
-// TestKeyRoutesRefuseSessionsDB: the key list and the device sign-ins
-// approved in advance name the devices the person signed in, so only a
+// TestKeyRoutesRefuseSessionsDB: the key list, the list of devices waiting
+// for approval and the device sign-ins approved in advance name the devices
+// the person signed in (and where each key was enrolled from), so only a
 // session the person opened by password (or provider, or their own key)
 // lists them or withdraws one. Through the real services: a TV's session
 // (device sign-in), a session another app's key opened, a session with no
@@ -144,6 +147,7 @@ func TestKeyRoutesRefuseSessionsDB(t *testing.T) {
 
 	routes := []struct{ method, path string }{
 		{http.MethodGet, Prefix + "/auth/keys"},
+		{http.MethodGet, Prefix + "/auth/keys/pending"},
 		{http.MethodGet, Prefix + "/auth/device/preapprovals"},
 		{http.MethodDelete, Prefix + "/auth/device/preapprovals/" + waiting.ID},
 	}
@@ -167,5 +171,37 @@ func TestKeyRoutesRefuseSessionsDB(t *testing.T) {
 	}
 	if got := status(); got != auth.DeviceLoginStatusDenied {
 		t.Fatalf("the password session's withdraw left the approval %s", got)
+	}
+}
+
+// The key list carries each key's enrolled_ip_address as stored, and an
+// empty one for a key with none (every key enrolled before the server
+// recorded it). Regression: the list named a key only by what the device
+// called itself and when it was added.
+func TestKeyListCarriesEnrolledAddressDB(t *testing.T) {
+	d := newKeyRoutesDB(t)
+	read := func() string {
+		t.Helper()
+		rec := do(t, d.handler, http.MethodGet, Prefix+"/auth/keys", "", bearer("tok-phone"))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list: status %d: %s", rec.Code, rec.Body.String())
+		}
+		var list AppKeyList
+		if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil || len(list.Devices) != 1 {
+			t.Fatalf("list = %s (%v)", rec.Body.String(), err)
+		}
+		if !strings.Contains(rec.Body.String(), `"enrolled_ip_address":`) {
+			t.Fatalf("the list has no enrolled_ip_address member: %s", rec.Body.String())
+		}
+		return list.Devices[0].EnrolledIPAddress
+	}
+	if got := read(); got != "" {
+		t.Fatalf("a key with no stored address lists %q", got)
+	}
+	if _, err := d.pool.Exec(t.Context(), `UPDATE auth_device_keys SET enrolled_ip_address = '2001:db8::7' WHERE user_id = $1`, d.userID); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != "2001:db8::7" {
+		t.Fatalf("enrolled_ip_address = %q", got)
 	}
 }

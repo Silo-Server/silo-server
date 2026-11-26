@@ -1,7 +1,8 @@
 {
   "person_key": {
     "kid": "PgujdSfBbNNyXngLWCsOgw",
-    "enrolled_at": "2026-01-02T03:04:05.678Z"
+    "enrolled_at": "2026-01-02T03:04:05.678Z",
+    "enrolled_ip_address": "127.0.0.2"
   },
   "devices": [
     {
@@ -14,6 +15,7 @@
       "enrolled_by": "introduce",
       "allowed_by": null,
       "enrolled_at": "2026-01-02T03:04:05.678Z",
+      "enrolled_ip_address": "2001:db8::17",
       "last_used_at": "2026-01-02T04:04:05.678Z"
     },
     {
@@ -26,6 +28,7 @@
       "enrolled_by": "app-code",
       "allowed_by": null,
       "enrolled_at": "2026-01-02T03:04:05.678Z",
+      "enrolled_ip_address": "127.0.0.2",
       "last_used_at": null
     },
     {
@@ -38,6 +41,7 @@
       "enrolled_by": "grant",
       "allowed_by": "sam",
       "enrolled_at": "2026-01-02T03:04:05.678Z",
+      "enrolled_ip_address": "",
       "last_used_at": "2026-01-02T04:04:05.678Z"
     }
   ]

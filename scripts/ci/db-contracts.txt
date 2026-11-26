@@ -356,6 +356,14 @@
 ./internal/apiv2 TestWatchTogetherRefusesAnotherAppDB
 ./internal/apiv2 TestNativePushRefusesAnotherAppDB
 ./internal/apiv2 TestSuggestionDeleteForAnotherAppDB
+./internal/auth TestKeyAddingOperationsAuditedDB
+./internal/auth TestKeyAddingRefusalsLeaveNoAuditDB
+./internal/auth TestKeyWithoutAddressListsEmptyDB
+./internal/auth TestKeyChangesRecordSessionOpenedViaDB
+./internal/auth TestKeyStoresNoUnspecifiedAddressDB
+./internal/auth TestIntroduceFailingAfterItsAuditRowLeavesNoneDB
+./internal/apiv2 TestKeyListCarriesEnrolledAddressDB
+./migrations TestAppKeyEnrolledIPMigrationUpAndDownPostgres
 ./internal/auth TestRevokeOwnDeviceKeyRulesDB
 ./internal/auth TestKeySignInLocalPasswordsOffDB
 ./internal/auth TestKeySessionContinuesProviderChainDB
@@ -406,6 +414,7 @@
 ./internal/invitations TestInvitationAtomicConcurrentAccept
 ./internal/invitations TestInvitationAtomicRollbackAndExpiry
 ./internal/invitations TestJoinWithAppCodeDB
+./internal/invitations TestJoinWithAppCodeRecordsAddedKeysDB
 ./internal/invitations TestJoinWithAppCodeRefusalsDB
 ./internal/invitations TestJoinWithAppCodeConcurrentRedeemDB
 ./internal/invitations TestClaimsTakeSettingsLockFirstDB
