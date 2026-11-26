@@ -1757,6 +1757,8 @@
 ./internal/api/handlers TestAdminInsightsPlayGroupingDB
 ./internal/api/handlers TestAdminInsightsBreakdownsDB
 ./internal/api/handlers TestPlaybackHistoryEntrySkipsTheReadGateDB
+./internal/api/handlers TestRefreshAccountCreatedAtDB
+./internal/api/handlers TestViewAsPairCarriesTheViewedAccountsCreatedAtDB
 ./internal/backup TestCarryCredentialsReconcilesRestoredStreamNodesDB
 ./internal/backup TestCarryCredentialsKeepsNodeSamplesWithoutDailyArchiveDB
 
