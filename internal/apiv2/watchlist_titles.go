@@ -266,41 +266,53 @@ func (reg *Registry) addWatchlistTitle(ctx context.Context, in *WatchlistTitleIn
 	var state mediarequests.RequestState
 	// A session another app's key opened keeps the entry but makes and
 	// follows no media request: that spends the person's request allowance
-	// in their name. It reports the state as it stands.
+	// in their name. It reports the state as it stands, as when the library
+	// has the title.
 	if added.ItemID != "" || grantedAppSession(claimsFrom(ctx)) {
-		// The library has it: nothing to request, only the state to report.
-		states, err := reg.deps.WatchlistRequests.WatchlistRequestStates(ctx, rv, []mediarequests.WatchlistTitle{title})
-		if err != nil {
-			return nil, requestProblem(err)
-		}
-		state = states[mediarequests.WatchlistKey{MediaType: title.MediaType, TMDBID: title.TMDBID}]
+		state, p = reg.watchlistTitleState(ctx, rv, title)
 	} else {
-		if state, err = reg.deps.WatchlistRequests.RequestFromWatchlist(ctx, rv, title); err != nil {
-			return nil, requestProblem(err)
-		}
-		// A delete of the same title can run between the save and the
-		// request: it withdraws, then removes the entry. Rechecking the entry
-		// after requesting, with the delete withdrawing again after its
-		// removal, leaves no request behind whichever way the two interleave.
-		off, err := reg.deps.WatchlistTitles.WatchlistTitleOff(ctx, viewer, snap)
-		if err != nil {
-			return nil, serviceProblem(err)
-		}
-		if off {
-			if err := reg.withdrawWatchlistRequests(ctx, rv, snap.MediaType, append([]int{snap.TMDBID}, snap.FormerTMDBIDs...)); err != nil {
-				return nil, requestProblem(err)
-			}
-			states, err := reg.deps.WatchlistRequests.WatchlistRequestStates(ctx, rv, []mediarequests.WatchlistTitle{title})
-			if err != nil {
-				return nil, requestProblem(err)
-			}
-			state = states[mediarequests.WatchlistKey{MediaType: title.MediaType, TMDBID: title.TMDBID}]
-		}
+		state, p = reg.requestWatchlistTitle(ctx, viewer, rv, snap, title)
+	}
+	if p != nil {
+		return nil, p
 	}
 	return &WatchlistTitleEntryOutput{Body: WatchlistTitleEntry{
 		MediaType: snap.MediaType, TMDBID: snap.TMDBID, AddedAt: NewInstant(added.AddedAt),
 		ItemID: ID(added.ItemID), Request: requestMediaStateOf(state),
 	}}, nil
+}
+
+// watchlistTitleState is the request state of one watchlist title.
+func (reg *Registry) watchlistTitleState(ctx context.Context, rv mediarequests.Viewer, title mediarequests.WatchlistTitle) (mediarequests.RequestState, *Problem) {
+	states, err := reg.deps.WatchlistRequests.WatchlistRequestStates(ctx, rv, []mediarequests.WatchlistTitle{title})
+	if err != nil {
+		return mediarequests.RequestState{}, requestProblem(err)
+	}
+	return states[mediarequests.WatchlistKey{MediaType: title.MediaType, TMDBID: title.TMDBID}], nil
+}
+
+// requestWatchlistTitle applies watchlist requests to a title just added that
+// the library doesn't have.
+func (reg *Registry) requestWatchlistTitle(ctx context.Context, viewer handlers.PersonalListViewer, rv mediarequests.Viewer, snap watchlist.Snapshot, title mediarequests.WatchlistTitle) (mediarequests.RequestState, *Problem) {
+	state, err := reg.deps.WatchlistRequests.RequestFromWatchlist(ctx, rv, title)
+	if err != nil {
+		return mediarequests.RequestState{}, requestProblem(err)
+	}
+	// A delete of the same title can run between the save and the
+	// request: it withdraws, then removes the entry. Rechecking the entry
+	// after requesting, with the delete withdrawing again after its
+	// removal, leaves no request behind whichever way the two interleave.
+	off, err := reg.deps.WatchlistTitles.WatchlistTitleOff(ctx, viewer, snap)
+	if err != nil {
+		return mediarequests.RequestState{}, serviceProblem(err)
+	}
+	if !off {
+		return state, nil
+	}
+	if err := reg.withdrawWatchlistRequests(ctx, rv, snap.MediaType, append([]int{snap.TMDBID}, snap.FormerTMDBIDs...)); err != nil {
+		return mediarequests.RequestState{}, requestProblem(err)
+	}
+	return reg.watchlistTitleState(ctx, rv, title)
 }
 
 // watchlistTitleSnapshot resolves what the add stores: a title a watchlist

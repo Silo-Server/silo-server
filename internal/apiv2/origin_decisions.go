@@ -136,7 +136,6 @@ const (
 	reasonEventsSocket   = "the events socket carries the profile's own changes"
 	reasonRoomMember     = "as a member of a room the person put it in"
 	reasonOwnSession     = "its own session and its own key"
-	reasonDiagnostics    = "a diagnostics upload, for the administrator to read"
 	reasonPlayerState    = "a player's own state for the profile it acts as"
 	reasonWatchlistTitle = "the profile's own watchlist; for such a session no media request is made, followed or withdrawn"
 )
@@ -192,7 +191,6 @@ var (
 	grantedEvents         = grantedApp(decideAllowed(reasonEventsSocket))
 	grantedRoomMember     = grantedApp(decideAllowed(reasonRoomMember))
 	grantedOwnSession     = grantedApp(decideAllowed(reasonOwnSession))
-	grantedDiagnostics    = grantedApp(decideAllowed(reasonDiagnostics))
 	grantedPlayerState    = grantedApp(decideAllowed(reasonPlayerState))
 	grantedWatchlistTitle = grantedApp(decideAllowed(reasonWatchlistTitle))
 	grantedCurrentUser    = grantedApp(decideAllowed(reasonCurrentUser))
