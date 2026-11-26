@@ -365,6 +365,30 @@
       "value": "Cette valeur est hors limites."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Incluez au moins un caractère spécial, comme ! ou #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Incluez au moins une lettre majuscule."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Ce mot de passe est trop long."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Ce mot de passe est trop court."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -110503,6 +110527,18 @@
           "value": "Facultatif"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Masquer les titres vus"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Chaque profil voit cette collection sans les titres qu’il a vus, sur sa page, dans ses rangées et dans son nombre de titres. Rien n’est supprimé. Une collection intelligente avec une limite de titres choisit d’abord ses titres ; elle peut donc en afficher moins."
     }
   ],
   "web.collections.details.label": [

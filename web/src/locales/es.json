@@ -365,6 +365,30 @@
       "value": "Este valor está fuera del rango permitido."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Incluye al menos un carácter especial, como ! o #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Incluye al menos una letra mayúscula."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Esta contraseña es demasiado larga."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Esta contraseña es demasiado corta."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -110789,6 +110813,18 @@
           "value": "Opcional"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Ocultar títulos vistos"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Cada perfil ve esta colección sin los títulos que ya vio, en su página, en sus filas y en su recuento. No se elimina nada. Una colección inteligente con límite de títulos elige primero sus títulos, así que puede mostrar menos."
     }
   ],
   "web.collections.details.label": [

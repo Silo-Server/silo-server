@@ -365,6 +365,30 @@
       "value": "Ši reikšmė nepatenka į leistiną intervalą."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Įtraukite bent vieną specialųjį simbolį, pavyzdžiui, ! arba #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Įtraukite bent vieną didžiąją raidę."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Šis slaptažodis per ilgas."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Šis slaptažodis per trumpas."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -121692,6 +121716,18 @@
           "value": "Neprivaloma"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Slėpti peržiūrėtus pavadinimus"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Kiekvienas profilis šią kolekciją mato be savo peržiūrėtų pavadinimų: jos puslapyje, eilutėse ir pavadinimų skaičiuje. Niekas nepašalinama. Išmanioji kolekcija su pavadinimų apribojimu pirmiausia atrenka savo pavadinimus, todėl gali rodyti mažiau."
     }
   ],
   "web.collections.details.label": [

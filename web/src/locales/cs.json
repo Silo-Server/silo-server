@@ -365,6 +365,30 @@
       "value": "Tato hodnota je mimo povolený rozsah."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Použijte alespoň jeden speciální znak, například ! nebo #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Použijte alespoň jedno velké písmeno."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Toto heslo je příliš dlouhé."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Toto heslo je příliš krátké."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -120698,6 +120722,18 @@
           "value": "Volitelné"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Skrýt zhlédnuté tituly"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Každý profil uvidí tuto kolekci bez titulů, které už zhlédl – na stránce kolekce, v řádcích i v počtu titulů. Nic se neodebere. Chytrá kolekce s omezením počtu titulů nejprve vybere své tituly, takže jich může zobrazit méně."
     }
   ],
   "web.collections.details.label": [

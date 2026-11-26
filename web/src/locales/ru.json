@@ -365,6 +365,30 @@
       "value": "Значение вне допустимого диапазона."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Используйте хотя бы один специальный символ, например ! или #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Используйте хотя бы одну заглавную букву."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Слишком длинный пароль."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Слишком короткий пароль."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -121666,6 +121690,18 @@
           "value": "Необязательно"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Скрывать просмотренное"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Каждый профиль видит эту коллекцию без фильмов и сериалов, которые он уже посмотрел: на странице коллекции, в своих рядах и в счётчике. Ничего не удаляется. Умная коллекция с ограничением числа фильмов и сериалов сначала отбирает их, поэтому может показать меньше."
     }
   ],
   "web.collections.details.label": [

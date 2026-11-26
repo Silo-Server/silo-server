@@ -365,6 +365,30 @@
       "value": "Це значення поза допустимим діапазоном."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Додайте принаймні один спеціальний символ, наприклад ! або #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Додайте принаймні одну велику літеру."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Цей пароль задовгий."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Цей пароль закороткий."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -120356,6 +120380,18 @@
           "value": "Необов’язково"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Приховувати переглянуті фільми й серіали"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Кожен профіль бачить цю колекцію без фільмів і серіалів, які в ньому переглянуто: на сторінці колекції, у рядах і в лічильнику. Нічого не видаляється. Розумна колекція з обмеженням кількості спершу вибирає фільми й серіали, тому може показувати менше."
     }
   ],
   "web.collections.details.label": [

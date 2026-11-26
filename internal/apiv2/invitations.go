@@ -183,8 +183,8 @@ func invitationOf(inv *models.Invitation) AdminInvitation {
 	return out
 }
 func invitationProblem(err error, public bool) *Problem {
-	if message, ok := auth.PasswordRuleMessage(err); ok && public {
-		return passwordMemberProblem(message)
+	if p, ok := passwordRuleProblem(err, "password"); ok && public {
+		return p
 	}
 	switch {
 	case errors.Is(err, invitations.ErrNotFound):
@@ -303,8 +303,8 @@ func registerInvitations(reg *Registry) {
 		// The byte limit holds under every policy; the schema's maxLength
 		// counts characters. Refused at the member, in the policy's words.
 		if err := (auth.PasswordPolicy{}).Check(password); errors.Is(err, auth.ErrPasswordTooLong) {
-			message, _ := auth.PasswordRuleMessage(err)
-			return nil, passwordMemberProblem(message)
+			p, _ := passwordRuleProblem(err, "password")
+			return nil, p
 		}
 		svc, p := reg.invitationService()
 		if p != nil {

@@ -365,6 +365,30 @@
       "value": "Ez az érték a megengedett tartományon kívül esik."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Legalább egy speciális karaktert is használjon, például ! vagy # jelet."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Legalább egy nagybetűt is használjon."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Ez a jelszó túl hosszú."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Ez a jelszó túl rövid."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -100904,6 +100928,18 @@
           "value": "Nem kötelező"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Megtekintett címek elrejtése"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Minden profil az általa megtekintett címek nélkül látja ezt a gyűjteményt az oldalán, a soraiban és a darabszámában. Semmi sem törlődik. A címkorláttal rendelkező intelligens gyűjtemény előbb kiválasztja a címeit, ezért kevesebbet is megjeleníthet."
     }
   ],
   "web.collections.details.label": [

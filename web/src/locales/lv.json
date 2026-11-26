@@ -365,6 +365,30 @@
       "value": "Šī vērtība ir ārpus pieļaujamā diapazona."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "Iekļaujiet vismaz vienu speciālo rakstzīmi, piemēram, ! vai #."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "Iekļaujiet vismaz vienu lielo burtu."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Šī parole ir pārāk gara."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Šī parole ir pārāk īsa."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -112313,6 +112337,18 @@
           "value": "Pēc izvēles"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Paslēpt noskatītos vienumus"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Katram profilam šī kolekcija tiek rādīta bez šajā profilā noskatītajiem vienumiem: kolekcijas lapā, rindās un vienumu skaitā. Nekas netiek noņemts. Viedā kolekcija ar vienumu skaita ierobežojumu vispirms atlasa vienumus, tāpēc tajā var būt mazāk vienumu."
     }
   ],
   "web.collections.details.label": [

@@ -365,6 +365,30 @@
       "value": "Bu değer aralığın dışında."
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "! veya # gibi en az bir özel karakter ekleyin."
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "En az bir büyük harf ekleyin."
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "Bu parola çok uzun."
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "Bu parola çok kısa."
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -100344,6 +100368,18 @@
           "value": "İsteğe bağlı"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "İzlenen içerikleri gizle"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Her profil bu koleksiyonu, sayfasında, satırlarında ve içerik sayısında kendi izlediği içerikler olmadan görür. Hiçbir şey kaldırılmaz. İçerik sınırı olan akıllı bir koleksiyon önce içeriklerini seçer, bu yüzden daha az içerik gösterebilir."
     }
   ],
   "web.collections.details.label": [

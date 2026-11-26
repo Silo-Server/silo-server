@@ -365,6 +365,30 @@
       "value": "\u200F\u202EThis value is out of range.\u202C"
     }
   ],
+  "error.field.password_needs_special": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInclude at least one special character, such as ! or #.\u202C"
+    }
+  ],
+  "error.field.password_needs_uppercase": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInclude at least one capital letter.\u202C"
+    }
+  ],
+  "error.field.password_too_long": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis password is too long.\u202C"
+    }
+  ],
+  "error.field.password_too_short": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis password is too short.\u202C"
+    }
+  ],
   "error.field.required": [
     {
       "type": 0,
@@ -106394,6 +106418,18 @@
           "value": "\u202EOptional\u202C"
         }
       ]
+    }
+  ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide watched titles\u202C"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEach profile sees this collection without the titles it has watched, on its page, in its rows and in its count. Nothing is removed. A smart collection with a title limit picks its titles first, so it can show fewer.\u202C"
     }
   ],
   "web.collections.details.label": [
