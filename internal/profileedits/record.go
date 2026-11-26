@@ -128,7 +128,7 @@ func RecordFields(ctx context.Context, db Executor, account int, profileID strin
 		return fmt.Errorf("recording an edit of profile %s: %w", profileID, err)
 	}
 	if len(revisions) > 0 {
-		FromContext(ctx).noteAccount(account, slices.Min(revisions))
+		FromContext(ctx).noteAccount(account, revisions...)
 	}
 	return nil
 }
