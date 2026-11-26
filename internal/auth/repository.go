@@ -640,8 +640,9 @@ func endImpersonationsInvolving(ctx context.Context, db interface {
 	return nil
 }
 
-// revokeCredentialsIssuedToNonAdmin deletes the API keys and reset links of
-// an account being made an admin or the Owner, and revokes its app keys.
+// revokeCredentialsIssuedToNonAdmin deletes the API keys, reset links and
+// sign-in links (with the app codes redeemed links left) of an account being
+// made an admin or the Owner, and revokes its app keys.
 // Other admins may have minted them and kept them; afterwards they would
 // carry authority that only the Owner grants. An admin's app keys also need
 // the admin's own approval, which keys enrolled before were never given.
@@ -653,6 +654,12 @@ func revokeCredentialsIssuedToNonAdmin(ctx context.Context, db interface {
 	}
 	if _, err := db.Exec(ctx, `DELETE FROM password_reset_tokens WHERE user_id = $1`, id); err != nil {
 		return fmt.Errorf("deleting the promoted account's reset links: %w", err)
+	}
+	if _, err := db.Exec(ctx, `DELETE FROM auth_sign_in_links WHERE user_id = $1`, id); err != nil {
+		return fmt.Errorf("deleting the promoted account's sign-in links: %w", err)
+	}
+	if _, err := db.Exec(ctx, `DELETE FROM auth_app_codes WHERE user_id = $1 AND kind = $2`, id, appCodeKindSignInLink); err != nil {
+		return fmt.Errorf("deleting the promoted account's sign-in link codes: %w", err)
 	}
 	return revokeAccountKeysTx(ctx, db, id)
 }

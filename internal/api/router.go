@@ -94,6 +94,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/shuffle"
+	"github.com/Silo-Server/silo-server/internal/signinlinks"
 	"github.com/Silo-Server/silo-server/internal/storagetransition"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -2887,6 +2888,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		authHandler.SetHouseholdStores(deps.UserStoreProvider, profilesOutsidePostgres(deps.Config))
 		v2deps.AppKeys = authHandler
 		v2deps.AdminAppKeys = authHandler
+		if userRepo != nil && settingsRepo != nil {
+			signInLinks := signinlinks.NewService(appKeySignIn, userRepo, mail.NewSMTPSender(settingsRepo), settingsRepo, deps.EmailBrand)
+			signInLinks.OnSessionsRevoked(deps.OnUserSessionsRevoked)
+			v2deps.SignInLinks = handlers.NewSignInLinkHandler(signInLinks)
+		}
 	}
 	if markersHandler != nil {
 		v2deps.Markers = markersHandler

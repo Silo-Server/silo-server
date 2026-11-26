@@ -63,6 +63,8 @@ type AdminAccountCapabilitiesOutputBody struct {
 	OwnershipTransfer    bool `json:"ownership_transfer" doc:"Whether transferAdminUserOwnership can make another enabled admin the server Owner"`
 	AccountDevices       bool `json:"account_devices" doc:"Whether listAdminUserDevices can list an account's registered devices"`
 	LoginSessions        bool `json:"login_sessions" doc:"Whether administrators can inspect and revoke a user's login sessions; separate from playback sessions and device registrations"`
+	SignInLinks          bool `json:"sign_in_links" doc:"Whether createAdminUserSignInLink can make a sign-in link"`
+	SignInLinkEmail      bool `json:"sign_in_link_email" doc:"Whether createAdminUserSignInLink can email the link: a mail server is configured"`
 	AppKeys              bool `json:"app_keys" doc:"Whether listAdminUserAppKeys, revokeAdminUserDeviceKey, revokeAdminUserPersonKey and denyAdminUserPendingKey are served. Read the app key capability (getAppKeyCapability) for whether keys sign in now"`
 	WatchSummary         bool `json:"watch_summary" doc:"Whether getAdminUserWatchSummary can total an account's finalized plays"`
 	AccountDownloads     bool `json:"account_downloads" doc:"Whether listAdminUserDownloads, getAdminUserDownloadSummary and listAdminUserDownloadSubscriptions are available"`
@@ -277,6 +279,9 @@ func registerAdminAccounts(reg *Registry) {
 		out.Body.ProfileManagement = reg.deps.AdminAccounts != nil && reg.deps.Profiles != nil
 		out.Body.ProfileSetEdits = reg.deps.AdminAccounts != nil && reg.deps.ProfileSetEdits != nil &&
 			reg.deps.ProfileSet != nil && reg.deps.ProfileSet.ProfileSetSupported()
+		if links := reg.deps.SignInLinks; links != nil {
+			out.Body.SignInLinks, out.Body.SignInLinkEmail = true, links.SignInLinkEmailAvailable(ctx)
+		}
 		if resets := reg.deps.PasswordResets; resets != nil {
 			caps := resets.PasswordResetCapabilities(ctx)
 			out.Body.PasswordResetLink, out.Body.PasswordResetEmail = caps.Link, caps.Email
