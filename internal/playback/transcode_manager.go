@@ -1272,7 +1272,7 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 			return
 		}
 
-		m.closeCrashedTranscode(sessionID, session)
+		m.closeCrashedTranscode(sessionID, session, restartsOnCPU)
 	}()
 }
 
@@ -1283,10 +1283,15 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 // registered transcode and still crashed (a failed restart counts): a segment
 // request that restarted it, even one whose FFmpeg has since finished cleanly,
 // or registered a successor in the meantime keeps what it started.
-func (m *TranscodeManager) closeCrashedTranscode(sessionID string, session *TranscodeSession) {
+// sawCPUFallback reports whether the crash this monitor saw qualified for the
+// CPU-decode fallback. When it did not and the session's crash now does, a
+// restart crashed in the meantime; its own monitor answers that crash with
+// the fallback, so this cleanup leaves it.
+func (m *TranscodeManager) closeCrashedTranscode(sessionID string, session *TranscodeSession, sawCPUFallback bool) {
 	unlock := m.LockSessionLifecycle(sessionID)
 	defer unlock()
-	if crashed, _ := session.crashState(); !crashed {
+	crashed, restartsOnCPU := session.crashState()
+	if !crashed || (restartsOnCPU && !sawCPUFallback) {
 		return
 	}
 	m.CloseTranscodeSessionIf(sessionID, session, "")

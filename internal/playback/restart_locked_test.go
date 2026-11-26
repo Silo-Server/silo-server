@@ -382,3 +382,37 @@ func (s *lineSignalingFFmpegLogSink) WriteLine(_ context.Context, _ string, _ FF
 }
 
 func (s *lineSignalingFFmpegLogSink) WriteEvent(context.Context, string, FFmpegLogAttrs, string) {}
+
+// The exit monitor's cleanup waits for the lifecycle lock. A segment request
+// can restart the session meanwhile, and the restart can crash on a failure
+// the CPU-decode fallback answers although the first crash did not. That
+// crash belongs to the restart's own monitor, so the cleanup leaves it.
+func TestCrashCleanupLeavesARestartsCPUFallbackToItsMonitor(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		sawCPUFallback bool
+		wantRegistered bool
+	}{
+		{name: "restart crashed on a CPU-fallback failure", wantRegistered: true},
+		{name: "fallback already tried for this crash", sawCPUFallback: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const sessionID = "crash-cleanup"
+			dir := t.TempDir()
+			exited := make(chan struct{})
+			close(exited)
+			stderr := newBoundedTailBuffer(0)
+			_, _ = stderr.Write([]byte("[vf#0:0 @ 0x5ad071e0c0c0] Error reinitializing filters!\n"))
+			s := &TranscodeSession{
+				outputDir: dir, done: exited, waitErr: errors.New("exit status 187"), stderr: stderr,
+				opts: TranscodeOpts{OutputDir: dir, SessionID: sessionID, HWAccel: transcodeHWQSV},
+			}
+			m := NewTranscodeManager()
+			m.RegisterTranscodeSession(sessionID, s)
+			m.closeCrashedTranscode(sessionID, s, tc.sawCPUFallback)
+			if got := m.GetTranscodeSession(sessionID) == s; got != tc.wantRegistered {
+				t.Fatalf("session still registered = %v, want %v", got, tc.wantRegistered)
+			}
+		})
+	}
+}
