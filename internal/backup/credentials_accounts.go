@@ -103,7 +103,7 @@ func (l PGLoader) AdvanceAccountIDs(ctx context.Context, dbURL, liveURL string) 
 	var live liveAccounts
 	conn, err := pgx.Connect(ctx, liveURL)
 	if err != nil {
-		return err
+		return fmt.Errorf("connecting to the live server: %w", err)
 	}
 	err = pgx.BeginTxFunc(ctx, conn, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		live, err = readLiveAccounts(ctx, tx)
