@@ -26,10 +26,12 @@ const (
 	appCodeKindSession = "session"
 )
 
-// What redeeming an app code did to the account's person key.
+// What redeeming an app code did with the request's person key: enrolled
+// as the account's person key (or already it), or kept out because the
+// account holds a different one.
 const (
 	PersonKeyEnrolled = "enrolled"
-	PersonKeyReplaced = "replaced"
+	PersonKeyKept     = "kept"
 )
 
 var (
@@ -357,10 +359,12 @@ func spendAppCode(ctx context.Context, tx pgx.Tx, hash []byte) error {
 // device key in it with the app code in its payload, and opens the device
 // key's session. A join code creates the account, with no password, and
 // claims its invitation in the same transaction. A session code enrolls
-// the keys on the account that issued it: the person key is enrolled when
-// the account has none and replaces a different one. Keys from a code start
-// active, also on an administrator's account: the code came from the
-// account's own session or its invitation.
+// the device key on the account that issued it: the person key is enrolled
+// when the account has none, and an account holding a different one keeps
+// it, with the device key enrolled under the account's key (a person who
+// lost every other device replaces it afterwards with ReplacePersonKey).
+// Keys from a code start active, also on an administrator's account: the
+// code came from the account's own session or its invitation.
 func (a *AppKeySignIn) RedeemAppCode(ctx context.Context, req KeyRedeemRequest) (*KeySignInResult, error) {
 	if err := req.Envelope.CheckShape(appkeys.PurposeRedeem); err != nil {
 		return nil, err
@@ -473,25 +477,22 @@ func (a *AppKeySignIn) redeemSession(ctx context.Context, req KeyRedeemRequest, 
 	})
 }
 
-// redeemPersonKeyTx makes key the account's person key: enrolled when the
-// account has none (or already holds key), replacing a different one
-// otherwise. A replaced key is revoked and the devices waiting on it are
-// refused, as replacing it from a session does; devices already approved
-// keep their keys.
+// redeemPersonKeyTx returns the person key a redeemed device key enrolls
+// under: key, enrolled, when the account has no live person key or already
+// holds key; otherwise the account's own person key, kept. A redeem never
+// replaces or revokes the account's person key, so its other devices and
+// the devices waiting for approval are untouched; key was only the proof
+// the device signed with, and is not stored.
 func redeemPersonKeyTx(ctx context.Context, tx pgx.Tx, userID int, key appkeys.PublicKey, binding KeyBinding) (*models.AppPersonKey, string, error) {
 	current, err := livePersonKeyTx(ctx, tx, userID)
 	if err != nil {
 		return nil, "", err
 	}
-	status := PersonKeyEnrolled
 	if current != nil {
 		if current.KeyID == key.KeyID() {
 			return current, PersonKeyEnrolled, nil
 		}
-		if err := retirePersonKeyTx(ctx, tx, userID, current.ID); err != nil {
-			return nil, "", err
-		}
-		status = PersonKeyReplaced
+		return current, PersonKeyKept, nil
 	}
 	person, err := insertPersonKeyTx(ctx, tx, NewPersonKey{
 		UserID: userID, PublicKey: key, IdentityID: binding.IdentityID,
@@ -500,7 +501,7 @@ func redeemPersonKeyTx(ctx context.Context, tx pgx.Tx, userID int, key appkeys.P
 	if err != nil {
 		return nil, "", err
 	}
-	return person, status, nil
+	return person, PersonKeyEnrolled, nil
 }
 
 // enrollRedeemedDevice enrolls the payload's device key under person with
@@ -517,7 +518,8 @@ func (a *AppKeySignIn) enrollRedeemedDevice(ctx context.Context, tx pgx.Tx, user
 	if err != nil {
 		return keyEnrolledAs(KeyMemberDevice, err)
 	}
-	out.User, out.DeviceID, out.Status, out.PersonKeyStatus = user, key.ID, appkeys.ReplySignedIn, personStatus
+	out.User, out.DeviceID, out.Status = user, key.ID, appkeys.ReplySignedIn
+	out.PersonKeyID, out.PersonKeyStatus = person.KeyID, personStatus
 	out.Pair, err = a.service.openKeySessionTx(ctx, tx, user, key, session)
 	return err
 }

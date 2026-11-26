@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -175,5 +176,35 @@ func TestPendingKeyRoutesRefusals(t *testing.T) {
 				requireProblem(t, do(t, NewHandler(appKeyDeps(keys)), route.method, Prefix+route.path, route.body, mainProfile(adminToken)), tc.want)
 			})
 		}
+	}
+}
+
+// Listing and denying waiting devices need neither a profile nor an
+// administrator account: a member's session that names no profile lists
+// nothing, and denying a key it does not own is 404, not 403. Approving
+// checks the main profile before the administrator role, so a
+// non-administrator naming another profile is sent to the main profile, and
+// the same account as its verified main profile is told it may not.
+func TestPendingKeyRoutesForANonAdministrator(t *testing.T) {
+	rec := do(t, NewHandler(appKeyDeps(&fakeAppKeys{enabled: true})), http.MethodGet, Prefix+"/auth/keys/pending", "", bearer(memberToken))
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"items":[]}` {
+		t.Fatalf("list: status %d: %s", rec.Code, rec.Body.String())
+	}
+	notOwned := &fakeAppKeys{enabled: true, pendingErr: auth.ErrAppKeyNotFound}
+	requireProblem(t, do(t, NewHandler(appKeyDeps(notOwned)), http.MethodPost, Prefix+pendingKeyPath+"/deny", `{}`, bearer(memberToken)), TypeNotFound)
+
+	verifiedMain := with(with(bearer(householdToken), "X-Profile-Id", "p-primary-locked"), "X-Profile-Token", "ptok")
+	for _, tc := range []struct {
+		name    string
+		headers map[string]string
+		want    ProblemType
+	}{
+		{name: "another profile", headers: with(bearer(householdToken), "X-Profile-Id", "p-kid"), want: TypeMainProfileRequired},
+		{name: "the verified main profile", headers: verifiedMain, want: TypePermissionDenied},
+	} {
+		t.Run("approve as "+tc.name, func(t *testing.T) {
+			keys := &fakeAppKeys{enabled: true, pendingErr: auth.ErrApproverNotAdmin}
+			requireProblem(t, do(t, NewHandler(appKeyDeps(keys)), http.MethodPost, Prefix+pendingKeyPath+"/approve", `{}`, tc.headers), tc.want)
+		})
 	}
 }
