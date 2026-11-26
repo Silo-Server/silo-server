@@ -96,14 +96,5 @@ func (s *Service) GetSessionsPageByID(ctx context.Context, userID int, afterID s
 // another account, or none, is ErrSessionNotFound for every caller, judged
 // first, so the refusal says nothing about sessions outside the account.
 func (s *Service) RevokeSessionFrom(ctx context.Context, callerSessionID, sessionID string, userID int) error {
-	limited, err := s.SessionLimitedToItself(ctx, callerSessionID)
-	if err != nil {
-		return err
-	}
-	return s.revokeSession(ctx, sessionID, userID, func(session *models.AuthSession) error {
-		if limited && session.ID != callerSessionID {
-			return ErrSessionOutOfReach
-		}
-		return nil
-	})
+	return s.RevokeSessionChecked(ctx, callerSessionID, sessionID, userID, nil)
 }

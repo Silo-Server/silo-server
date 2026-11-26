@@ -1330,6 +1330,9 @@ type SessionService interface {
 	ListSessionsPageByID(ctx context.Context, userID int, afterID string, limit int) ([]*models.AuthSession, bool, error)
 	SessionLimitedToItself(ctx context.Context, sessionID string) (bool, error)
 	RevokeSession(ctx context.Context, sessionID string, userID int) error
+	// RevokeSessionChecked runs check on the session after confirming it is
+	// userID's, in the same transaction; check's error leaves it live.
+	RevokeSessionChecked(ctx context.Context, sessionID string, userID int, check func(*models.AuthSession) error) error
 	SetupInitialUser(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
 	SignupEnabled(ctx context.Context) (bool, error)
 	Signup(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)

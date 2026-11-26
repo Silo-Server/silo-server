@@ -29,6 +29,11 @@ var (
 	// the frozen v1 surface and the Jellyfin one keep answering not_permitted;
 	// the v2 login, the web login page and the app redirect tell it apart.
 	ErrAccountRequired = fmt.Errorf("%w: no account on this server, and account creation is off", ErrNotPermitted)
+	// ErrDemoRestricted: a linking flow ended on an account that is not an
+	// administrator while the server runs in demo mode, whose visitors share
+	// that account. It is an ErrNotPermitted, so every transport answers
+	// not_permitted.
+	ErrDemoRestricted = fmt.Errorf("%w: demo mode keeps how the shared account signs in", ErrNotPermitted)
 	// ErrEmailInUse: a new account would take an email another account
 	// already holds, and email auto-match does not apply.
 	ErrEmailInUse = errors.New("an account with this email already exists")

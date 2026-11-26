@@ -66,15 +66,24 @@ SDK's `docs/auth-provider.md`.
 
 One order, shared by OIDC and LDAP, in one database transaction under an
 advisory lock on (installation, subject), so concurrent first sign-ins on any
-node create one account:
+node create one account. Demo mode is read before that transaction, through
+the server's shared `demomode.Setting`, so a failed read never aborts it: a
+failed read uses the last value the process read, and a process that has
+never read it refuses a linking flow onto an account that is not an
+administrator and matches no email.
 
 1. **Linked identity.** Sign in its account. A disabled account is refused.
 2. **Linking flow** (a signed-in account linking the provider): link to that
    account. An identity linked to another account is refused with
-   `identity_linked_elsewhere`.
+   `identity_linked_elsewhere`. In demo mode (`demo.enabled`), where every
+   visitor shares one account, a flow that ends on an account that is not an
+   administrator is refused with `not_permitted` (`ErrDemoRestricted`) and
+   attaches nothing, including a flow started before demo mode was turned on.
 3. **Email auto-match.** Only when `auth.email_auto_match` is on (off by
-   default) and the provider said `email_verified` is true; unset counts as
-   false. Link to the account holding that email if it is an ordinary account
+   default), demo mode is off, and the provider said `email_verified` is true;
+   unset counts as false. In demo mode matching applies to no account on the
+   server, as when it is off, so such a sign-in goes on to creation below.
+   Link to the account holding that email if it is an ordinary account
    (role `user`, not the Owner, not break-glass) with no identity at this
    installation. An email the provider asserts never hands it an admin: when
    an admin, the Owner or a break-glass account holds the email, creation

@@ -325,6 +325,7 @@
 ./internal/auth TestExpiredSessionCleanupSkipsHeldRequestDB
 ./internal/auth TestAPIKeyCreationRefusesRevokedCredentialDB
 ./internal/auth TestPasswordSignInForRoutesDB
+./internal/auth TestExternalSignInDemoModeDB
 ./internal/auth TestExternalAccountCannotPreemptInitialSetupDB
 ./internal/auth TestPluginAuthBindingCallbackModeDB
 ./internal/auth TestLocalPasswordOffAccountsDB
@@ -1396,6 +1397,7 @@
 ./internal/backup TestCarryMovesAnswerSequencePastCarriedLinksDB
 ./internal/backup TestEncryptedS3RoundTripDB
 ./internal/backup TestFullRestoresAreSerializedDB
+./internal/backup TestOtherConnectionsCountsOnlyOtherClientsDB
 ./internal/backup TestServerSpecificSettingsComeFromTheLiveServerDB
 ./internal/backup TestControlConnectionIsNeverOnTheLiveDatabaseDB
 ./internal/backup TestCustomPoliciesComeFromTheLiveServerDB
@@ -1635,4 +1637,5 @@
 ./internal/auth TestDeviceSignInMigrationMarksKeptRequestsDB
 ./internal/apiv2 TestSessionReachRuleDB
 ./internal/apiv2 TestLimitedSessionDeleteDB
+./internal/apiv2 TestDemoVisitorOnALimitedSessionDB
 ./internal/apiv2 TestLimitedSessionPagesByIDDB
