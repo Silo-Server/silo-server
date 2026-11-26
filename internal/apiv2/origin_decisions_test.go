@@ -3,12 +3,15 @@ package apiv2
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -300,5 +303,41 @@ func TestCurrentUserLeavesTheEmailOutForAnotherApp(t *testing.T) {
 		if body.Email != want || body.Username != "laura" {
 			t.Fatalf("%s: email %q, username %q", token, body.Email, body.Username)
 		}
+	}
+}
+
+// TestOriginDecisionsTakeAnotherKind: a second kind of session is one more
+// OriginDecisions member and its row in originMembers; the gate, the
+// registration check and the published extension then judge it without
+// changing. This adds a scratch kind in the test only and checks the gate
+// refuses it where its decision says so, passes the granted app as before,
+// validates the scratch decision and publishes it. Catches any of the four
+// reading the granted app's member alone.
+func TestOriginDecisionsTakeAnotherKind(t *testing.T) {
+	const scratch auth.SessionKind = "scratch_kind"
+	scratchDecision := decideRefused("scratch reason")
+	saved := originMembers
+	t.Cleanup(func() { originMembers = saved })
+	originMembers = append(slices.Clone(saved), originMember{scratch, func(OriginDecisions) *SessionDecision { return scratchDecision }})
+
+	decisions := grantedApp(decideAllowed("r"))
+	passed := false
+	gate := originGate(decisions)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { passed = true }))
+	for kind, wantPass := range map[auth.SessionKind]bool{scratch: false, auth.SessionKindGrantedApp: true, "": true} {
+		passed = false
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r = r.WithContext(apimw.SetClaims(r.Context(), &auth.Claims{UserID: 1, SessionID: "s", TokenType: auth.TokenTypeAccess, SessionKind: kind}))
+		rec := httptest.NewRecorder()
+		gate.ServeHTTP(rec, r)
+		if passed != wantPass || !wantPass && rec.Code != http.StatusForbidden {
+			t.Fatalf("kind %q: passed %v, status %d", kind, passed, rec.Code)
+		}
+	}
+	if got := decisions.byKind()[scratch]; got != scratchDecision {
+		t.Fatalf("published decisions lack the scratch kind: %v", decisions.byKind())
+	}
+	scratchDecision = &SessionDecision{Verdict: VerdictRefused}
+	if checkOriginDecisions(Operation{Class: ClassProfileScoped, Origins: decisions}) == nil {
+		t.Fatal("a scratch decision without its reason was accepted")
 	}
 }

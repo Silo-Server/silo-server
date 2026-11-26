@@ -49,24 +49,51 @@ type SessionDecision struct {
 
 // OriginDecisions holds an operation's decision for each kind of session
 // judged apart, one member per auth.SessionKind. A kind is added by adding
-// its member, its case in decisionFor, and the session lookup that sets it on
-// the claims; the gate does not change.
+// its member and its row in originMembers, and the session lookup that sets
+// it on the claims. The gate, the registration check and the published
+// extension read every kind through originMembers and do not change; what a
+// kind does beyond its verdict (the granted app's declared-device strip,
+// stripsDeclaredDevice) is per kind.
 type OriginDecisions struct {
 	// GrantedApp is the decision for a session another app's key opened.
 	GrantedApp *SessionDecision `json:"granted_app,omitempty"`
 }
 
+// originMember is one judged kind of session and how to read its decision.
+type originMember struct {
+	kind auth.SessionKind
+	of   func(OriginDecisions) *SessionDecision
+}
+
+// originMembers lists every judged kind, one row per OriginDecisions member.
+var originMembers = []originMember{
+	{auth.SessionKindGrantedApp, func(d OriginDecisions) *SessionDecision { return d.GrantedApp }},
+}
+
 // decisionFor is the decision for a kind of session; nil for a kind no
 // member judges (the person's own sessions).
 func (d OriginDecisions) decisionFor(kind auth.SessionKind) *SessionDecision {
-	switch kind {
-	case auth.SessionKindGrantedApp:
-		return d.GrantedApp
+	for _, m := range originMembers {
+		if m.kind == kind {
+			return m.of(d)
+		}
 	}
 	return nil
 }
 
-func (d OriginDecisions) empty() bool { return d.GrantedApp == nil }
+// byKind is every decision the operation states, keyed by kind: what the
+// document publishes and the registration check validates.
+func (d OriginDecisions) byKind() map[auth.SessionKind]*SessionDecision {
+	out := map[auth.SessionKind]*SessionDecision{}
+	for _, m := range originMembers {
+		if dec := m.of(d); dec != nil {
+			out[m.kind] = dec
+		}
+	}
+	return out
+}
+
+func (d OriginDecisions) empty() bool { return len(d.byKind()) == 0 }
 
 // decideAllowed, decideOwnOnly and decideRefused build the three verdicts.
 func decideAllowed(reason string) *SessionDecision {
@@ -244,10 +271,7 @@ func checkOriginDecisions(op Operation) error {
 	if op.Class == ClassPublic || op.Class == ClassActingAdmin {
 		return errors.New("an origin decision is inert on class " + string(op.Class) + ": no session another app opened reaches it through a gate that reads it")
 	}
-	for kind, d := range map[auth.SessionKind]*SessionDecision{auth.SessionKindGrantedApp: op.Origins.GrantedApp} {
-		if d == nil {
-			continue
-		}
+	for kind, d := range op.Origins.byKind() {
 		switch d.Verdict {
 		case VerdictAllowed, VerdictRefused:
 			if d.Check != "" {
@@ -277,7 +301,7 @@ func recordOriginDecisions(op *Operation) {
 	if op.Extensions == nil {
 		op.Extensions = map[string]any{}
 	}
-	op.Extensions[extOriginDecisions] = op.Origins
+	op.Extensions[extOriginDecisions] = op.Origins.byKind()
 }
 
 // originGate refuses a session whose kind the operation's decisions refuse,
@@ -290,12 +314,15 @@ func originGate(decisions OriginDecisions) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims := claimsFrom(r.Context())
-			if !claims.IsGrantedApp() {
+			kind := judgedKind(claims)
+			if kind == "" {
 				next.ServeHTTP(w, r)
 				return
 			}
-			stripDeclaredDevice(r.Header)
-			if d := decisions.decisionFor(auth.SessionKindGrantedApp); d != nil && d.Verdict != VerdictRefused {
+			if stripsDeclaredDevice(kind) {
+				stripDeclaredDevice(r.Header)
+			}
+			if d := decisions.decisionFor(kind); d != nil && d.Verdict != VerdictRefused {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -305,6 +332,24 @@ func originGate(decisions OriginDecisions) func(http.Handler) http.Handler {
 			_, _ = w.Write(body)
 		})
 	}
+}
+
+// judgedKind is the kind of session the claims' operations judge apart, or
+// "" for every caller that passes the gate untouched: only the account's own
+// login sessions carry a kind (Claims.IsOwnLoginSession), so an API key, an
+// administrator acting as the account, a remote-playback session and a
+// stream reference are never judged.
+func judgedKind(claims *auth.Claims) auth.SessionKind {
+	if claims == nil || !claims.IsOwnLoginSession() {
+		return ""
+	}
+	return claims.SessionKind
+}
+
+// stripsDeclaredDevice reports whether a kind of session has its declared
+// device removed before anything reads it.
+func stripsDeclaredDevice(kind auth.SessionKind) bool {
+	return kind == auth.SessionKindGrantedApp
 }
 
 // declaredDeviceHeaders are the headers a client names its device with.
