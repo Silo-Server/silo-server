@@ -3,10 +3,14 @@ package auth
 import (
 	"context"
 	"errors"
+	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/demomode"
@@ -59,7 +63,7 @@ func newDemoSignInFixture(t *testing.T) *demoSignInFixture {
 	env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "true")
 	users, sessions := NewUserRepository(env.pool), NewSessionRepository(env.pool)
 	f := &demoSignInFixture{env: env, limiter: newCountingSignInAttempts(1), settings: &countedSettings{store: poolSettings{env}}, users: users}
-	f.demo = NewDemoSignIn(users, demomode.New(f.settings))
+	f.demo = NewDemoSignIn(users, f.settings)
 	f.newSvc = func(d *DemoSignIn) *Service {
 		svc := NewService(NewLocalProvider(users, sessions), NewJWTService("synthetic-demo-signin-secret-0123456789", time.Minute, 24*time.Hour), sessions, users, nil, nil, nil)
 		svc.SetSignInAttempts(f.limiter)
@@ -172,7 +176,8 @@ func TestDemoSignInNameBudgetDB(t *testing.T) {
 }
 
 // TestDemoSignInFailsClosedDB: the per-name budget still applies when the
-// settings were never read, when the named account became an administrator
+// settings or the account cannot be read at the attempt, whatever an
+// earlier refresh found, when the named account became an administrator
 // after the names were last refreshed, and when the password goes to a
 // provider other than the local one. Catches the exemption trusting a stale
 // or unreadable answer, or covering a password the demo does not share.
@@ -183,23 +188,61 @@ func TestDemoSignInFailsClosedDB(t *testing.T) {
 		return func(name, password string) error { return f.listeners[0].signIn(d, name, password) }
 	}
 
-	t.Run("the setting unreadable with no earlier value", func(t *testing.T) {
-		visitor := env.localAccount(t, "demo-cold", models.RoleUser)
-		f.name(t, demomode.OnValue, demoID(visitor))
-		// A process that has never read the settings, holding the names
-		// another refresh found: the exemption checks again and fails closed.
-		unread := &countedSettings{store: poolSettings{env}}
-		unread.fail.Store(true)
-		cold := NewDemoSignIn(f.users, demomode.New(unread))
-		cold.keys.Store(f.demo.keys.Load())
-		for _, l := range f.listeners {
-			f.reset()
-			signIn := func(name, password string) error { return l.signIn(cold, name, password) }
-			if throttled, err := throttledAfterFailure(t, signIn, visitor.Username); !throttled {
-				t.Fatalf("%s: %v, want the per-name budget's refusal", l.name, err)
+	// Each case holds the names an earlier refresh found while demo mode was
+	// on and the account named, then fails the read an attempt makes before
+	// it is exempted: a failed read never falls back to the names or values
+	// read before.
+	for _, tc := range []struct {
+		name string
+		cold func(t *testing.T) *DemoSignIn
+	}{
+		{"every settings read fails", func(t *testing.T) *DemoSignIn {
+			// It read demo mode on and the account named, then the store
+			// failed.
+			failing := &countedSettings{store: poolSettings{env}}
+			cold := NewDemoSignIn(f.users, failing)
+			cold.Refresh(t.Context())
+			failing.fail.Store(true)
+			return cold
+		}},
+		{"the settings unreadable with no earlier value", func(*testing.T) *DemoSignIn {
+			// A process that has never read the settings, holding the names
+			// another refresh found.
+			unread := &countedSettings{store: poolSettings{env}}
+			unread.fail.Store(true)
+			return NewDemoSignIn(f.users, unread)
+		}},
+		{"only the account read fails", func(t *testing.T) *DemoSignIn {
+			closed, err := pgxpool.New(ctx, os.Getenv("SILO_TEST_DATABASE_URL"))
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
-	})
+			closed.Close()
+			return NewDemoSignIn(NewUserRepository(closed), f.settings)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			visitor := env.localAccount(t, "demo-"+strings.ReplaceAll(tc.name, " ", "-"), models.RoleUser)
+			f.name(t, demomode.OnValue, demoID(visitor))
+			cold := tc.cold(t)
+			if known := cold.keys.Load(); known == nil || len(*known) == 0 {
+				cold.keys.Store(f.demo.keys.Load())
+			}
+			for _, l := range f.listeners {
+				f.reset()
+				signIn := func(name, password string) error { return l.signIn(cold, name, password) }
+				if throttled, err := throttledAfterFailure(t, signIn, visitor.Username); !throttled {
+					t.Fatalf("%s: %v, want the per-name budget's refusal", l.name, err)
+				}
+			}
+			// The same names with working reads are exempt, so the refusal
+			// above came from the failed read.
+			f.reset()
+			if _, err := throttledAfterFailure(t, native(f.demo), visitor.Username); err != nil {
+				t.Fatalf("with working reads: %v, want a sign-in", err)
+			}
+		})
+	}
 
 	t.Run("an account promoted after the setting was written", func(t *testing.T) {
 		defer f.reset()

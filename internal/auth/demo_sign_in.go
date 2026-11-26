@@ -24,17 +24,26 @@ const DemoSignInRefreshInterval = 30 * time.Second
 // on (demomode.SettingKey) and demomode.AccountSettingKey names an existing,
 // enabled account that is not an administrator and signs in with its local
 // password (DemoAccountUsable), and covers that account's own sign-in names
-// only (ownSignInKeys), checked by the local provider. Anything else, including a setting
-// this process has never read, leaves the ordinary per-name limit in place.
-// Limits on the client address are not this type's and still apply.
+// only (ownSignInKeys), checked by the local provider. Anything else,
+// including a settings or account read that fails, leaves the ordinary
+// per-name limit in place. Limits on the client address are not this
+// type's and still apply.
+//
+// The settings are read straight from the store, not through the
+// remembered demomode.Setting the demo refusals use. The refusals tighten
+// what a visitor may do, so on a failed read they keep the last value read;
+// the exemption loosens a limit, so it rests only on a read that just
+// succeeded.
 //
 // An attempt for any other name must do what it does without the exemption,
 // with no query whose presence or timing depends on the name. So the names
 // to exempt are worked out off the sign-in path (Run, Refresh) and an
 // attempt only compares its budget key with them in memory. An attempt
 // whose key matches re-reads the settings and the account before it is
-// exempted, so an account promoted to administrator, disabled or deleted,
-// or demo mode turned off, is never exempted on a stale answer.
+// exempted, and is exempted only when that read succeeds, so an account
+// promoted to administrator, disabled or deleted, demo mode turned off, or
+// keys left from an earlier refresh never grant the exemption by
+// themselves.
 //
 // One DemoSignIn serves every Service a process runs (SetDemoSignIn). It is
 // safe for concurrent use; a nil *DemoSignIn exempts no name.
@@ -47,7 +56,8 @@ type DemoSignIn struct {
 }
 
 // NewDemoSignIn returns a DemoSignIn reading accounts from users and the
-// demo settings through settings (the process's shared demomode.Setting).
+// demo settings from settings, a store that returns its read errors (not
+// demomode.Setting).
 func NewDemoSignIn(users *UserRepository, settings demomode.Reader) *DemoSignIn {
 	return &DemoSignIn{users: users, settings: settings}
 }
@@ -75,8 +85,9 @@ func (d *DemoSignIn) Run(ctx context.Context) {
 }
 
 // Refresh re-reads which names belong to the demo account. When it cannot
-// tell, it keeps the names it had: an attempt at one of them checks again
-// before it is exempted.
+// tell, it keeps the names it had: they only select which attempts read
+// again, and an attempt at one of them is exempted only when that read
+// succeeds and still finds the name.
 func (d *DemoSignIn) Refresh(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, signInLookupTimeout)
 	defer cancel()
@@ -112,7 +123,8 @@ func (d *DemoSignIn) exempts(ctx context.Context, spend *signInSpend, providerID
 }
 
 // accountKeys are the budget keys of the demo account's sign-in names, and
-// whether the settings and the account could be read. No demo mode, no
+// whether the settings and the account could be read; any failed read is
+// false, which exempts no name. No demo mode, no
 // account named, or an account that is missing, disabled or an
 // administrator's has none.
 func (d *DemoSignIn) accountKeys(ctx context.Context) ([]string, bool) {

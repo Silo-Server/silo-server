@@ -1591,8 +1591,10 @@ func main() {
 	var shuttingDown atomic.Bool
 	demoMode := demomode.New(settingsRepo)
 	// Every password sign-in surface shares one demo account exemption,
-	// refreshed off the sign-in path.
-	demoSignIn := auth.NewDemoSignIn(auth.NewUserRepository(pool), demoMode)
+	// refreshed off the sign-in path. It reads the settings store directly:
+	// the exemption loosens a limit, so a failed read must not fall back to
+	// the remembered value the demo refusals use.
+	demoSignIn := auth.NewDemoSignIn(auth.NewUserRepository(pool), settingsRepo)
 	// Every mode that serves the native sign-in refreshes it (frontend too).
 	if mode == "" || mode == "integrated" || mode == "api" || mode == "frontend" {
 		go demoSignIn.Run(appCtx)

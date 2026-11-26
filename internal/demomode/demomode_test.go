@@ -27,29 +27,25 @@ func (f *failAfter) Get(context.Context, string) (string, error) {
 func TestSettingRemembersLastRead(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
-		name, key, first, want string
+		name, first, want string
 	}{
-		{"off then failure", SettingKey, "", ""},
-		{"false then failure", SettingKey, "false", ""},
-		{"on then failure", SettingKey, OnValue, OnValue},
-		{"no account then failure", AccountSettingKey, "", ""},
-		{"account then failure", AccountSettingKey, "42", "42"},
+		{"off then failure", "", ""},
+		{"false then failure", "false", ""},
+		{"on then failure", OnValue, OnValue},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := New(&failAfter{value: tc.first})
-			if _, err := s.Get(ctx, tc.key); err != nil {
+			if _, err := s.Get(ctx, SettingKey); err != nil {
 				t.Fatal(err)
 			}
-			got, err := s.Get(ctx, tc.key)
+			got, err := s.Get(ctx, SettingKey)
 			if err != nil || got != tc.want {
 				t.Fatalf("after a failed read = %q, %v; want %q", got, err, tc.want)
 			}
 		})
 	}
-	for _, key := range []string{SettingKey, AccountSettingKey} {
-		never := New(&failAfter{reads: 1})
-		if _, err := never.Get(ctx, key); err == nil {
-			t.Fatalf("a process that never read %s answered without an error", key)
-		}
+	never := New(&failAfter{reads: 1})
+	if _, err := never.Get(ctx, SettingKey); err == nil {
+		t.Fatal("a process that never read the setting answered without an error")
 	}
 }
