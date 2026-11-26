@@ -407,6 +407,9 @@
 ./internal/auth TestSwitchOffAfterRenewalReadDB
 ./internal/api/handlers TestPublicURLWritesKeepAWayInDB
 ./internal/api/handlers TestSwitchOffKeepsOwnerProtectionDB
+./internal/api/handlers TestLocalPasswordsOffJudgesTheStateLeftDB
+./internal/api/handlers TestOwnershipMoveAgainstSwitchOffDB
+./migrations TestDropSessionPreapprovalTriggerUpAndDownPostgres
 # Keys are never the only way in: who each switch change leaves at risk, the
 # refusals that name them, and the restore's list of accounts with no way in.
 ./internal/auth TestAccountsAtRiskDB
