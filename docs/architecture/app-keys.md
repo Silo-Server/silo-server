@@ -502,8 +502,10 @@ resolver (`TestPluginContentMountsAllReachTheContentHandler`,
   socket's snapshots name no power it is refused: `self_can_manage_room`,
   `self_can_control_transport` and the host's `invite_path` are false or
   absent for it. `self_role` stays: it names the profile's seat, not what
-  this session may do. The room read
-  leaves out the playback session id
+  this session may do. The strip follows who is asking: it marks the app's
+  connection, never the seat, so the person's own device in the same profile
+  is told its powers while the app holds the seat and after it leaves. The
+  room read leaves out the playback session id
   attached to the member (a member is the account and profile, so it may be
   the person's own device's), and a connection of such a session starts with
   no attached stream and attaches only one its own login session started;
