@@ -54,34 +54,28 @@ func (e *keyEnv) keyIP(t *testing.T, table, column, value string) string {
 	return ip
 }
 
-// Each way a key or an approval in advance comes to exist leaves one audit
-// row on the account, in the transaction that made it, naming what was
-// added and never a secret; each key row records the request's address,
-// the one the session that request opened records. Regression: enrolling
-// from a session, introducing, replacing the person key, issuing and
-// redeeming an app code, redeeming a grant and approving a sign-in in
-// advance left no trace an owner could read, and a key looked like any
-// other whatever address added it.
-func TestKeyAddingOperationsAuditedDB(t *testing.T) {
-	env := newKeyEnv(t, "keyadded")
-	ctx := t.Context()
-	devices := NewDeviceLoginService(env.pool, NewUserRepository(env.pool), env.jwt, NewSessionRepository(env.pool), nil, nil)
+// added is what one key-adding call did, for checkAdded.
+type added struct {
+	userID int
+	// after is each change's after side as JSON; before likewise.
+	after, before map[string]string
+	// secrets must appear nowhere in the row.
+	secrets []string
+	// keys are the key rows the call wrote, by table and kid, that
+	// must carry the request's address; session is the one it opened.
+	personKid, deviceKid, session string
+}
 
-	type added struct {
-		userID int
-		// after is each change's after side as JSON; before likewise.
-		after, before map[string]string
-		// secrets must appear nowhere in the row.
-		secrets []string
-		// keys are the key rows the call wrote, by table and kid, that
-		// must carry the request's address; session is the one it opened.
-		personKid, deviceKid, session string
-	}
-	quoted := func(s string) string { raw, _ := json.Marshal(s); return string(raw) }
-	cases := []struct {
-		name, action, pattern string
-		run                   func(t *testing.T, label string) added
-	}{
+// keyAddingCase is one way a key or an approval in advance comes to exist.
+type keyAddingCase struct {
+	name, action, pattern string
+	run                   func(t *testing.T, label string) added
+}
+
+func quoted(s string) string { raw, _ := json.Marshal(s); return string(raw) }
+
+func keyAddingCases(env *keyEnv, devices *DeviceLoginService) []keyAddingCase {
+	return []keyAddingCase{
 		{"enroll from a session", auditmutation.ActionAppKeysEnrolled, "/api/v2/auth/keys/enroll", func(t *testing.T, label string) added {
 			user := env.localAccount(t, label, models.RoleUser)
 			person, device := newTestKey(t), newTestKey(t)
@@ -134,7 +128,7 @@ func TestKeyAddingOperationsAuditedDB(t *testing.T) {
 		}},
 		{"redeem an app code", auditmutation.ActionAppCodeRedeemed, "/api/v2/auth/app-codes/redeem", func(t *testing.T, label string) added {
 			user := env.localAccount(t, label, models.RoleUser)
-			issued, err := env.signIn.IssueSessionAppCode(ctx, env.loginSession(t, user, models.SessionOpenedPassword, nil), ActingProfile{})
+			issued, err := env.signIn.IssueSessionAppCode(t.Context(), env.loginSession(t, user, models.SessionOpenedPassword, nil), ActingProfile{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -175,50 +169,69 @@ func TestKeyAddingOperationsAuditedDB(t *testing.T) {
 				auditFieldExpiresAt: quoted(auditInstant(result.ExpiresAt))}, secrets: []string{result.DeviceCode, secret, binding}}
 		}},
 	}
-	for i, tc := range cases {
+}
+
+// checkAdded asserts tc's one audit row and the address on the key rows got
+// names.
+func (env *keyEnv) checkAdded(t *testing.T, tc keyAddingCase, got added) {
+	t.Helper()
+	row := audittest.One(t, env.pool, tc.action, auditmutation.TargetUser, strconv.Itoa(got.userID))
+	if row.PathPattern != tc.pattern || row.StatusCode < 200 || row.StatusCode > 201 {
+		t.Fatalf("row %s at %d, want %s", row.PathPattern, row.StatusCode, tc.pattern)
+	}
+	fields := map[string]bool{}
+	for field := range got.after {
+		fields[field] = true
+	}
+	for field := range got.before {
+		fields[field] = true
+	}
+	if len(row.Changes) != len(fields) {
+		t.Fatalf("changes = %+v, want only %v", row.Changes, fields)
+	}
+	for field, want := range got.after {
+		if v := audittest.Value(row.Change(t, field).After); v != want {
+			t.Fatalf("%s after = %s, want %s", field, v, want)
+		}
+	}
+	for field, want := range got.before {
+		if v := audittest.Value(row.Change(t, field).Before); v != want {
+			t.Fatalf("%s before = %s, want %s", field, v, want)
+		}
+	}
+	row.AssertNoSecrets(t, got.secrets...)
+	want := "192.0.2.1"
+	if got.session != "" {
+		if want = env.sessionIP(t, got.session); want == "" {
+			t.Fatal("the session the request opened recorded no address")
+		}
+	}
+	if got.personKid != "" {
+		if ip := env.keyIP(t, "auth_person_keys", "key_id", got.personKid); ip != want {
+			t.Fatalf("person key address = %q, want %q", ip, want)
+		}
+	}
+	if got.deviceKid != "" {
+		if ip := env.keyIP(t, "auth_device_keys", "key_id", got.deviceKid); ip != want {
+			t.Fatalf("device key address = %q, want %q", ip, want)
+		}
+	}
+}
+
+// Each way a key or an approval in advance comes to exist leaves one audit
+// row on the account, in the transaction that made it, naming what was
+// added and never a secret; each key row records the request's address,
+// the one the session that request opened records. Regression: enrolling
+// from a session, introducing, replacing the person key, issuing and
+// redeeming an app code, redeeming a grant and approving a sign-in in
+// advance left no trace an owner could read, and a key looked like any
+// other whatever address added it.
+func TestKeyAddingOperationsAuditedDB(t *testing.T) {
+	env := newKeyEnv(t, "keyadded")
+	devices := NewDeviceLoginService(env.pool, NewUserRepository(env.pool), env.jwt, NewSessionRepository(env.pool), nil, nil)
+	for i, tc := range keyAddingCases(env, devices) {
 		t.Run(tc.name, func(t *testing.T) {
-			got := tc.run(t, "keyadded-"+strconv.Itoa(i))
-			row := audittest.One(t, env.pool, tc.action, auditmutation.TargetUser, strconv.Itoa(got.userID))
-			if row.PathPattern != tc.pattern || row.StatusCode < 200 || row.StatusCode > 201 {
-				t.Fatalf("row %s at %d, want %s", row.PathPattern, row.StatusCode, tc.pattern)
-			}
-			fields := map[string]bool{}
-			for field := range got.after {
-				fields[field] = true
-			}
-			for field := range got.before {
-				fields[field] = true
-			}
-			if len(row.Changes) != len(fields) {
-				t.Fatalf("changes = %+v, want only %v", row.Changes, fields)
-			}
-			for field, want := range got.after {
-				if v := audittest.Value(row.Change(t, field).After); v != want {
-					t.Fatalf("%s after = %s, want %s", field, v, want)
-				}
-			}
-			for field, want := range got.before {
-				if v := audittest.Value(row.Change(t, field).Before); v != want {
-					t.Fatalf("%s before = %s, want %s", field, v, want)
-				}
-			}
-			row.AssertNoSecrets(t, got.secrets...)
-			want := "192.0.2.1"
-			if got.session != "" {
-				if want = env.sessionIP(t, got.session); want == "" {
-					t.Fatal("the session the request opened recorded no address")
-				}
-			}
-			if got.personKid != "" {
-				if ip := env.keyIP(t, "auth_person_keys", "key_id", got.personKid); ip != want {
-					t.Fatalf("person key address = %q, want %q", ip, want)
-				}
-			}
-			if got.deviceKid != "" {
-				if ip := env.keyIP(t, "auth_device_keys", "key_id", got.deviceKid); ip != want {
-					t.Fatalf("device key address = %q, want %q", ip, want)
-				}
-			}
+			env.checkAdded(t, tc, tc.run(t, "keyadded-"+strconv.Itoa(i)))
 		})
 	}
 }
