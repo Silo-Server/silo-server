@@ -224,10 +224,14 @@ ordered against each other.
   repository restates it in its own SQL (`eligibleAccount`). Change them
   together, not in a copy.
 - Turning the switch off ends no session: refresh does not read it
-  (`checkSessionStanding`) and slides the session forward, so an affected
-  account stays signed in until it signs out or an administrator ends its
-  sessions; its personal API keys keep working and it can still approve a new
-  device.
+  (`checkSessionStanding`), so each session ends as it otherwise would. A
+  password session slides forward at each refresh and lasts until the account
+  signs out, an administrator ends it, or it goes unrefreshed past
+  `auth.refresh_token_expiry`. A session opened through a provider is
+  re-checked: a refusal ends it, and once its identity is unlinked it stops
+  sliding and ends `auth.refresh_token_expiry` after the provider last
+  vouched for it. Personal API keys keep working, and a session can still
+  approve a new device.
 - Recovery from a shell with the server's `DATABASE_URL`:
   `silo auth local-login enable` turns the switch back on;
   `silo auth local-login enable -user <name or email>` turns one account's

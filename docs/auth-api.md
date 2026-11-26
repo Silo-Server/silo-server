@@ -974,10 +974,15 @@ needs a break-glass admin and an OIDC or LDAP provider people can sign in
 with, and is otherwise applied at once: the settings write takes no
 acknowledgement, so a client that wants to show who is affected reads
 `listAdminLocalPasswordOffAccounts` first. Turning it off signs nobody out:
-nothing but password sign-in, signup and invitations reads the switch, and
-refresh slides a session forward, so people already signed in stay signed in
-until they sign out or an administrator ends their sessions, their personal
-API keys keep working, and they can still approve new devices. While it is
+nothing but password sign-in, signup and invitations reads the switch, so
+every session ends as it would anyway. A session opened with a password
+slides forward at each refresh, so it lasts until the person signs out, an
+administrator ends it, or it goes unrefreshed past `auth.refresh_token_expiry`.
+A session opened through a provider is re-checked as described under
+provider re-check below: a refusal ends it, and once its identity is
+unlinked it stops sliding and ends `auth.refresh_token_expiry` after the
+provider last vouched for it. Personal API keys keep working, and a
+signed-in session can still approve new devices. While it is
 off, `signup` and `acceptInvitation`
 are refused with 403 `local_login_disabled` and `getSignupStatus` reports
 signup off), `auth.email_auto_match` (default `false`; matches ordinary

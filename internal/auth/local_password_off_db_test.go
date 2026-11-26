@@ -210,9 +210,11 @@ func TestLocalPasswordOffAccountsDB(t *testing.T) {
 
 // TestLocalPasswordOffKeepsOpenSessionsDB pins what turning local password
 // sign-in off does to sessions already open: nothing. Refresh does not read
-// the switch (checkSessionStanding) and slides the session forward, so an
-// account whose password no longer signs in stays signed in until it signs
-// out or its sessions are revoked, and can still approve a new device. The
+// the switch (checkSessionStanding), so each session ends as it otherwise
+// would: a password session, as here, keeps sliding at each refresh until the
+// account signs out, an administrator ends it, or it goes unrefreshed past
+// auth.refresh_token_expiry (a provider session is re-checked with its
+// provider as before). The account can still approve a new device. The
 // Sign-in settings page tells the administrator so; if this changes, that
 // text must change with it.
 func TestLocalPasswordOffKeepsOpenSessionsDB(t *testing.T) {
