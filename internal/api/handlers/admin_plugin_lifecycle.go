@@ -30,6 +30,23 @@ type PluginInstallationUpdateInput struct {
 // no recorded available version or no repository to update from.
 var ErrPluginUpdateUnavailable = errors.New("plugin has no applicable update")
 
+// stopPlugin and restartPlugin stop and start installation id's plugin
+// through the service, or through the test seams when a test set them.
+func (h *PluginHandler) stopPlugin(id int) error {
+	if h.stopForTest != nil {
+		return h.stopForTest(id)
+	}
+	return h.service.Stop(id)
+}
+
+func (h *PluginHandler) restartPlugin(ctx context.Context, id int) error {
+	if h.startForTest != nil {
+		return h.startForTest(id)
+	}
+	_, err := h.service.Start(ctx, id)
+	return err
+}
+
 func (h *PluginHandler) pluginLifecycleReady() error {
 	if h == nil || h.installations == nil || h.service == nil {
 		return apiError(http.StatusServiceUnavailable, "unavailable", "Plugin service not configured")
@@ -114,14 +131,14 @@ func (h *PluginHandler) UpdateAdminPluginInstallation(ctx context.Context, id in
 		if err := h.installations.CheckSignInProviderRemoval(ctx, id); err != nil {
 			return PluginInstallationView{}, err
 		}
-		if err := h.service.Stop(id); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
+		if err := h.stopPlugin(id); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
 			return PluginInstallationView{}, err
 		}
 		stopped = true
 	}
 	if err := h.installations.Update(ctx, id, plugins.UpdateInstallationInput{Enabled: in.Enabled, UpdatePolicy: in.UpdatePolicy}); err != nil {
 		if stopped {
-			if _, restartErr := h.service.Start(ctx, id); restartErr != nil {
+			if restartErr := h.restartPlugin(ctx, id); restartErr != nil {
 				slog.ErrorContext(ctx, "restarting plugin after failed disable", "component", "api", "installation_id", id, "error", restartErr)
 			}
 		}
@@ -240,14 +257,14 @@ func (h *PluginHandler) DeleteAdminPluginInstallation(ctx context.Context, id in
 
 	stopped := false
 	if h.service != nil {
-		if err := h.service.Stop(id); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
+		if err := h.stopPlugin(id); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
 			return err
 		}
 		stopped = true
 	}
 	if err := h.installations.Delete(ctx, id); err != nil {
 		if stopped && installation.Enabled {
-			if _, restartErr := h.service.Start(ctx, id); restartErr != nil {
+			if restartErr := h.restartPlugin(ctx, id); restartErr != nil {
 				slog.ErrorContext(ctx, "restarting plugin after failed uninstall", "component", "api", "installation_id", id, "error", restartErr)
 			}
 		}
