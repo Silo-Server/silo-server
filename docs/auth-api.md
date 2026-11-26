@@ -153,8 +153,9 @@ version. It supports ETag revalidation and uses `Cache-Control: private, no-cach
 `allowed` is true only when the caller may change the password: an access-token
 session, not an API key or "View as user", acting as the account's primary profile,
 or as an administrator with no profile selected. A session holding a temporary
-password is always allowed. In [demo mode](#demo-mode) `allowed` is false for a caller that
-is not an administrator. The policy fields describe the server contract even when
+password is exempt from the profile rule, since it cannot select a profile.
+[Demo mode](#demo-mode) comes first: there `allowed` is false for every caller that is not an
+administrator, a temporary-password session included. The policy fields describe the server contract even when
 `allowed` is false. A server without a password service reports `state`
 `not_configured`, with `allowed` and `sign_out_other_sessions` false.
 `sign_out_other_sessions` says whether the change accepts that member; a server that
@@ -1116,7 +1117,9 @@ account resolution: a linking flow that ends on an account that is not an admini
 demo mode is on, including one started before demo mode was turned on, is refused with
 `not_permitted` and attaches nothing. Email auto-match (`auth.email_auto_match`) does not apply
 in demo mode, as when it is off, so a provider sign-in whose verified email equals the demo
-account's goes on to account creation, which refuses the taken email. Matching applies to no
+account's goes on as an unmatched one: account creation refuses the taken email where the
+binding's `auto_provision` is on, and the sign-in is `account_required` where it is off.
+Matching applies to no
 account in demo mode, not only the shared demo account. Demo mode is read before resolution's
 transaction; a process that has never read it fails the link and matches nothing.
 
