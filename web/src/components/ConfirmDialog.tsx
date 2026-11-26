@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,7 +15,7 @@ interface ConfirmDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
-  description: string;
+  description: ReactNode;
   confirmLabel?: string;
   /** Label for the dismiss button; change it when "Cancel" would read as the action. */
   cancelLabel?: string;

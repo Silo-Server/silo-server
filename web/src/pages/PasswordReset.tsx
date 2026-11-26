@@ -22,6 +22,8 @@ import { Label } from "@/components/ui/label";
 import { AuthCard, SignInHint } from "@/components/auth/AuthCard";
 import { usePasswordPolicy } from "@/hooks/queries/account";
 import { useT } from "@/i18n";
+import { SignsBackInNote } from "@/components/appKeys/SignsBackInNote";
+import { ownDevicesPath } from "@/components/appKeys/devicePaths";
 
 export default function PasswordReset() {
   const token = useLinkToken();
@@ -209,6 +211,9 @@ function ResetForm({ token }: { token: string }) {
         expires: formatDateTime(reset.expires_at),
       })}
     >
+      <p className="text-muted-foreground mb-4 text-sm leading-6">
+        <SignsBackInNote to={ownDevicesPath()} />
+      </p>
       {error && (
         <p role="alert" className="text-destructive mb-4 text-sm">
           {error}

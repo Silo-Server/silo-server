@@ -3,6 +3,8 @@ import { Link } from "react-router";
 import { ChevronRight } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { SignsBackInNote } from "@/components/appKeys/SignsBackInNote";
+import { adminDevicesPath } from "@/components/appKeys/devicePaths";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -243,13 +245,22 @@ function ApiClientDetail({ client, hours }: { client: AdminApiClient; hours: num
         title={t("web.admin.dashboard.widgets.apiClients.confirmTitle", {
           client: clientLabel(t, client),
         })}
-        description={t("web.admin.dashboard.widgets.apiClients.confirmDescription", {
-          user:
-            client.username ||
-            t("web.admin.dashboard.widgets.apiClients.confirmUserFallback", {
-              id: String(client.user_id),
-            }),
-        })}
+        description={
+          <>
+            {t("web.admin.dashboard.widgets.apiClients.confirmDescription", {
+              user:
+                client.username ||
+                t("web.admin.dashboard.widgets.apiClients.confirmUserFallback", {
+                  id: String(client.user_id),
+                }),
+            })}
+            <SignsBackInNote
+              // While the sign-out runs the dialog stays open for its result.
+              to={revoke.isPending ? undefined : adminDevicesPath(client.user_id)}
+              onNavigate={() => setConfirming(false)}
+            />
+          </>
+        }
         confirmLabel={t("web.admin.dashboard.widgets.apiClients.confirmLabel")}
         variant="destructive"
         isPending={revoke.isPending}
