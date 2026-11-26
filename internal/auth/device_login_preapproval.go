@@ -196,8 +196,27 @@ func (s *DeviceLoginService) Preapprove(ctx context.Context, input DevicePreappr
 }
 
 // ListPreapprovals lists userID's waiting pre-approved sign-ins, newest
-// first. The cap keeps the list short, so it is not paged.
+// first, for the account's own login session in ctx. The list names the
+// devices the person approved, so it takes a session that may read the
+// account's keys (ActionReadKeys): not one a device sign-in or another app's
+// key opened. The cap keeps the list short, so it is not paged.
 func (s *DeviceLoginService) ListPreapprovals(ctx context.Context, userID int) ([]DevicePreapproval, error) {
+	claims := ClaimsFromContext(ctx)
+	if claims == nil {
+		return nil, ErrSessionRevoked
+	}
+	if claims.UserID != userID {
+		return nil, ErrSessionNotAllowed
+	}
+	if err := SessionAllows(ctx, s.pool, claims, ActionReadKeys); err != nil {
+		return nil, err
+	}
+	return s.listPreapprovals(ctx, userID)
+}
+
+// listPreapprovals lists userID's waiting pre-approved sign-ins, newest
+// first, with no check on the caller.
+func (s *DeviceLoginService) listPreapprovals(ctx context.Context, userID int) ([]DevicePreapproval, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, device_name, device_platform, created_at, expires_at FROM device_login_requests
 		WHERE approved_by_user_id = $1 AND preapproved_at IS NOT NULL AND status = $2 AND expires_at > $3
@@ -220,13 +239,26 @@ func (s *DeviceLoginService) ListPreapprovals(ctx context.Context, userID int) (
 	return out, nil
 }
 
-// RevokePreapproval withdraws one of userID's waiting pre-approved sign-ins:
-// it moves to denied, and the device's next poll is told so. Revoking one
-// already withdrawn succeeds; any other id, a redeemed or expired one
-// included, is ErrDeviceLoginNotFound.
+// RevokePreapproval withdraws one of userID's waiting pre-approved sign-ins,
+// for the account's own login session in ctx: it moves to denied, and the
+// device's next poll is told so. Withdrawing changes what the account's
+// devices may do, so it takes a session that may manage the account's keys
+// (ActionManageKeys), as approving in advance does. Revoking one already
+// withdrawn succeeds; any other id, a redeemed or expired one included, is
+// ErrDeviceLoginNotFound.
 func (s *DeviceLoginService) RevokePreapproval(ctx context.Context, userID int, id string) error {
+	claims := ClaimsFromContext(ctx)
+	if claims == nil {
+		return ErrSessionRevoked
+	}
+	if claims.UserID != userID {
+		return ErrSessionNotAllowed
+	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := lockUser(ctx, tx, userID); err != nil {
+			return err
+		}
+		if err := SessionAllows(ctx, tx, claims, ActionManageKeys); err != nil {
 			return err
 		}
 		return s.revokePreapprovalTx(ctx, tx, userID, id)
@@ -239,7 +271,7 @@ func (s *DeviceLoginService) AdminListPreapprovals(ctx context.Context, userID i
 	if _, err := s.users.GetByID(ctx, userID); err != nil {
 		return nil, err
 	}
-	return s.ListPreapprovals(ctx, userID)
+	return s.listPreapprovals(ctx, userID)
 }
 
 // AdminRevokePreapproval revokes one of userID's pre-approved sign-ins as
