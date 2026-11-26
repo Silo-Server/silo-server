@@ -9,6 +9,12 @@ import (
 )
 
 // Profile represents a user profile.
+// ProfileName is a profile's ID and name, as a name check reads them.
+type ProfileName struct {
+	ID   string
+	Name string
+}
+
 type Profile struct {
 	ID               string
 	Name             string

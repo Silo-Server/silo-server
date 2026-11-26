@@ -1301,6 +1301,8 @@
 
 # The household profile limit holds under concurrent creates (issue #2423).
 ./internal/api/handlers TestCreateProfileLimitConcurrentDB
+# Overlapping creates and renames of one name leave one profile with it.
+./internal/api/handlers TestProfileNameRaceDB
 ./internal/api/handlers TestProfileAvatarSourceHashDB
 ./internal/api/handlers TestProfileSetIdenticalApplyWritesNothingDB
 ./internal/api/handlers TestProfileSetVersionRuleDB

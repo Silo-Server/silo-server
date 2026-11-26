@@ -1193,9 +1193,10 @@ hidden by the owner counts, and so does one whose profile keeps a name the
 owner gave it: clearing that name would otherwise bring the clash back with
 nobody sending anything. Then the household as the set leaves it is checked,
 so a rename chain applies, and an item named like a profile outside the set
-refuses the whole set. There is no unique index on names: the set
-transaction holds every profile row and the account's preference lock, which
-every other profile writer takes first.
+refuses the whole set. There is no unique index on names. A profile create,
+a profile rename, the set, and the owner's clear of a name override each take
+the account's preference-settings lock before they read the names they check,
+so they run one at a time and none can take a name another just took.
 
 **What a new profile starts with.** The item's fields and settings, no picture
 unless the item names a preset this server knows, and no PIN unless the item
