@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -189,5 +190,41 @@ func TestWatchTogetherRefusesAnotherAppDB(t *testing.T) {
 		if rec := do(t, d.handler, http.MethodPost, ticket, "", headers(token)); rec.Code != http.StatusOK || socket.otherApp != otherApp {
 			t.Fatalf("%s: ticket status %d, minted as another app %v: %s", token, rec.Code, socket.otherApp, rec.Body.String())
 		}
+	}
+}
+
+// TestNativePushRefusesAnotherAppDB: an Android registration with no ordered
+// record yet is bound only to the account and device id, and an Apple reset
+// needs no installation key, so a session another app's key opened could
+// remove or take over another device's push registration. Each write refuses
+// such a session with 403 permission_denied before the service is reached; a
+// password session and a device sign-in session pass the rule and reach the
+// service (unwired here, so 503). Regression: the routes ignored how the
+// caller's session was opened.
+func TestNativePushRefusesAnotherAppDB(t *testing.T) {
+	d := newKeyRoutesDB(t)
+	for _, claims := range d.claims {
+		claims.ExpiresAt = jwt.NewNumericDate(time.Now().Add(time.Minute))
+	}
+	key := strings.Repeat("k", 43)
+	token := strings.Repeat("a", 64)
+	routes := []struct{ method, path, body string }{
+		{http.MethodPost, "/notifications/push/devices", `{"device_id":"phone-1","platform":"android","token":"` + token + `"}`},
+		{http.MethodDelete, "/notifications/push/devices/phone-1", ""},
+		{http.MethodPost, "/devices/push/apple", `{"device_id":"phone-1","apns_token":"` + token + `","apns_environment":"production","apns_topic":"org.siloserver.silo"}`},
+		{http.MethodPost, "/devices/push/apple/reset", `{"device_id":"phone-1"}`},
+	}
+	headers := func(token string) map[string]string {
+		return with(with(with(bearer(token), "X-Profile-Id", "p-owner"), "X-Push-Installation-Key", key), "X-Push-Generation", "1")
+	}
+	for _, r := range routes {
+		t.Run(r.method+" "+r.path, func(t *testing.T) {
+			if p := requireProblem(t, do(t, d.handler, r.method, Prefix+r.path, r.body, headers("tok-app")), TypePermissionDenied); p.Detail != handlers.SessionNotAllowedDetail {
+				t.Fatalf("detail = %q", p.Detail)
+			}
+			for _, token := range []string{"tok-phone", "tok-tv"} {
+				requireProblem(t, do(t, d.handler, r.method, Prefix+r.path, r.body, headers(token)), TypeDependencyUnavailable)
+			}
+		})
 	}
 }
