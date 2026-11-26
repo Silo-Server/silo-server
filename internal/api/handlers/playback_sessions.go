@@ -154,6 +154,12 @@ type PlaybackSessionsQuery struct {
 	Lifecycle bool
 	// SessionID, when set, limits results to one session.
 	SessionID string
+	// LoginSessionID, when set, limits results to the sessions whose
+	// playback attempt that login session started. A session with no
+	// attempt or no recorded login session (a Jellyfin-compatible or
+	// Audiobookshelf-compatible play, or an attempt older than the record)
+	// is left out.
+	LoginSessionID string
 	// Detached reads one session from this playback_sessions_sync row,
 	// rendered by worker.SessionSyncRowJSON, instead of the table.
 	Detached json.RawMessage
@@ -381,6 +387,11 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 	if query.SessionID != "" {
 		args = append(args, query.SessionID)
 		predicates = append(predicates, fmt.Sprintf("s.session_id = $%d", len(args)))
+	}
+	if query.LoginSessionID != "" {
+		args = append(args, query.LoginSessionID)
+		predicates = append(predicates, fmt.Sprintf(`EXISTS (SELECT 1 FROM playback_v3_attempts a
+			WHERE a.user_id = s.user_id AND a.session_id::text = s.session_id AND a.login_session_id = $%d)`, len(args)))
 	}
 	if query.Lifecycle {
 		predicates = append(predicates, "lc.state IS DISTINCT FROM 'stopped'")

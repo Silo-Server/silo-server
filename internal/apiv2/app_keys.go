@@ -48,6 +48,10 @@ type AppKeyService interface {
 	// session another app opened with a grant, which must not be handed a
 	// personal API key or a linked sign-in.
 	SessionMayIssueCredential(context.Context, *auth.Claims) error
+	// SessionMayReachOtherDevices answers auth.ErrSessionNotAllowed for a
+	// session another app opened with a grant, which sees only its own
+	// entries in the household playback list and may not use web push.
+	SessionMayReachOtherDevices(context.Context, *auth.Claims) error
 }
 
 // credentialSessionProblem refuses handing the account a credential that
@@ -69,6 +73,37 @@ func (reg *Registry) credentialSessionProblem(ctx context.Context, claims *auth.
 		return NewProblem(TypePermissionDenied, handlers.SessionNotAllowedDetail)
 	}
 	return serviceProblem(err)
+}
+
+// sessionReachesOtherDevices reports whether the caller's session may see or
+// change what the account's other devices hold (auth.ActionReachOtherDevices):
+// false for a session another app opened with a grant, true for every other
+// caller, a device sign-in included. Without app keys wired no such session
+// exists.
+func (reg *Registry) sessionReachesOtherDevices(ctx context.Context) (bool, *Problem) {
+	if reg.deps.AppKeys == nil {
+		return true, nil
+	}
+	err := reg.deps.AppKeys.SessionMayReachOtherDevices(ctx, claimsFrom(ctx))
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, auth.ErrSessionNotAllowed):
+		return false, nil
+	case errors.Is(err, auth.ErrSessionRevoked):
+		return false, NewProblem(TypeSessionExpired, "The login session is no longer valid.")
+	}
+	return false, serviceProblem(err)
+}
+
+// otherDevicesProblem refuses a session another app opened with a grant
+// (sessionReachesOtherDevices) with 403 permission_denied.
+func (reg *Registry) otherDevicesProblem(ctx context.Context) *Problem {
+	ok, p := reg.sessionReachesOtherDevices(ctx)
+	if p != nil || ok {
+		return p
+	}
+	return NewProblem(TypePermissionDenied, handlers.SessionNotAllowedDetail)
 }
 
 // appKeyDomain names the capability in its problems.

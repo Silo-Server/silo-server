@@ -48,6 +48,8 @@ type fakeAppKeys struct {
 	appCodeErr    error
 	// manageErr answers SessionMayManageKeys.
 	manageErr error
+	// reachErr answers SessionMayReachOtherDevices.
+	reachErr error
 }
 
 // ActsAsVerifiedMainProfile runs the production rule against the fake
@@ -158,6 +160,10 @@ func testIssuedAppCode() auth.IssuedAppCode {
 
 func (f *fakeAppKeys) SessionMayIssueCredential(context.Context, *auth.Claims) error {
 	return f.credentialErr
+}
+
+func (f *fakeAppKeys) SessionMayReachOtherDevices(context.Context, *auth.Claims) error {
+	return f.reachErr
 }
 
 // A syntactically valid envelope; the fake service never verifies it.
