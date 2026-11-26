@@ -240,16 +240,20 @@ func storeOpening(t *testing.T, pool *pgxpool.Pool, id string, o openedSession) 
 }
 
 // TestSessionOpenedViaReconcileMigrationDB applies the reconcile migration
+// and then the check's, each in its own transaction as the server runs them,
 // after the two columns' own migrations in both orders a database can have
 // taken them: opened_via first, as a fresh database applies them, and
 // via_device_sign_in first, as a database of the previous release does. Both
 // end in the same state: a flagged device sign-in gains opened_via, a
 // recorded opened_via sets the flag, and a session flagged false or not at
 // all gains nothing, since the flag does not say how else it was opened.
-// The check then refuses a row whose columns disagree, in both directions,
-// and the Down and a second Up leave it in place with opened_via winning.
+// The check then refuses a row whose columns disagree, in both directions;
+// applying it again where it exists changes nothing, as on a database that
+// took it from the reconcile migration's earlier form; and its Down and a
+// second Up leave it in place with opened_via winning.
 func TestSessionOpenedViaReconcileMigrationDB(t *testing.T) {
-	up, down := deviceSignInMigration(t, "20261126011336_reconcile_session_opened_via.sql")
+	reconcileUp, _ := deviceSignInMigration(t, "20261126011336_reconcile_session_opened_via.sql")
+	checkUp, checkDown := deviceSignInMigration(t, "20261126030510_check_session_opened_via_matches_flag.sql")
 	flagUp, _ := deviceSignInMigration(t, "20261125210607_record_device_sign_in_sessions.sql")
 	markUp, _ := deviceSignInMigration(t, "20261125224536_mark_device_sign_in_sessions.sql")
 	openedUp, _ := deviceSignInMigration(t, "20261125061150_add_app_key_challenges.sql")
@@ -305,7 +309,14 @@ func TestSessionOpenedViaReconcileMigrationDB(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			exec(up)
+			up := func() {
+				t.Helper()
+				exec(reconcileUp)
+				exec(checkUp)
+			}
+			up()
+			// Where the check exists already, its migration changes nothing.
+			exec(checkUp)
 			for label, expected := range want {
 				if got := storedOpening(t, pool, ids[label]); got.String() != expected.String() {
 					t.Errorf("%s: %s, want %s", label, got, expected)
@@ -327,12 +338,12 @@ func TestSessionOpenedViaReconcileMigrationDB(t *testing.T) {
 				t.Fatalf("a row with the flag and no opened_via: %v", err)
 			}
 
-			exec(down)
+			exec(checkDown)
 			disagreeing := uuid.NewString()
 			if err := storeOpening(t, pool, disagreeing, openedSession{"password", &yes}); err != nil {
 				t.Fatalf("after Down the check is still there: %v", err)
 			}
-			exec(up)
+			up()
 			if got, expected := storedOpening(t, pool, disagreeing), (openedSession{"password", &no}); got.String() != expected.String() {
 				t.Errorf("a disagreeing row after Up: %s, want %s", got, expected)
 			}
