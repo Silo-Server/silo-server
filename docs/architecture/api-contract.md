@@ -227,8 +227,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
 - **Operation classes.** Every v2 operation declares one class at registration — `public`,
   `authenticated`, `profile_scoped`, `acting_admin`, or `permission_gated` (the last with the
   policy permission it needs) — and the listener composes the existing `internal/api/middleware`
-  gates onto it per class, in the order the v1 authenticated group ran them: auth, then demo
-  mode for operations marked demo-restricted, then the rate limiter, then viewer access for
+  gates onto it per class, in the order the v1 authenticated group ran them: auth, then the
+  origin gate (v2 only; below), then demo mode for operations marked demo-restricted, then the
+  rate limiter, then viewer access for
   every class that resolves a profile (`profile_scoped`, `acting_admin`, `permission_gated`),
   then the profile, acting-admin, or permission gate. The shared gates still write the legacy
   JSON error body v1 answered with; v2 re-renders a denial as the matching Problem Details
@@ -248,6 +249,17 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   claims with a positive account ID after the auth gate; public operations and helpers
   called outside that gate must check explicitly. A resolved profile remains a separate
   invariant of the profile-aware classes.
+- **Origin decisions.** Every operation of class `authenticated`, `profile_scoped` or
+  `permission_gated` states what a login session opened a given way may do with it
+  (`Operation.Origins`); today the one kind judged is a session another app's key opened
+  ([app keys](app-keys.md#what-a-granted-app-can-do)). The document carries the decision as
+  `x-silo-origin-decisions`: an object keyed by kind (`granted_app`), each value
+  `{verdict, reason, check?}` with `verdict` one of `allowed`, `own_only` or `refused`, and
+  `check` naming the handler check on `own_only`. The origin gate refuses a `refused`
+  operation to such a session with `403 permission_denied` before anything else is judged;
+  `allowed` and `own_only` pass, and an own-only limit is the handler's. `Register` refuses a
+  decision without its reason and one on `public` or `acting_admin`, and
+  `TestEveryOperationDecidesForGrantedApps` fails on an operation with none.
 - **The delegation row.** The API listener hands the `/api/v2/` subtree to the sealed
   `apiv2` handler with one wildcard registration, built in the registration itself. The route
   inventory records that as a delegation row per method (`delegates_to: api_v2`, namespace

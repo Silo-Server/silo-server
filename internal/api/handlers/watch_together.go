@@ -300,7 +300,7 @@ func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn 
 		if errors.Is(err, watchtogether.ErrRoomNotFound) {
 			_ = writeWebSocketJSON(conn, map[string]string{watchTogetherTypeKey: watchTogetherRoomClosed, watchTogetherReasonKey: watchTogetherNotFound})
 		} else if errors.Is(err, watchtogether.ErrMemberAlreadyConnected) {
-			writeWebSocketError(conn, "forbidden", "This profile is already connected to the room from another device")
+			writeWebSocketError(conn, "forbidden", otherAppSeatHeldMessage)
 		} else if errors.Is(err, watchtogether.ErrRoomClosed) {
 			_ = writeWebSocketJSON(conn, map[string]string{watchTogetherTypeKey: watchTogetherRoomClosed, watchTogetherReasonKey: "ended"})
 		} else {
@@ -341,6 +341,14 @@ func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn 
 		}
 	}
 }
+
+// otherAppSeatHeldMessage is the error frame's message when a session
+// another app opened would take a member's seat that is still held. The room
+// does not record which login session holds a seat, and a seat stays held for
+// a while after a socket that dropped without closing (or whose API server
+// died), so the holder may be the app's own earlier connection: the message
+// says the seat is held and invites a retry, never which device holds it.
+const otherAppSeatHeldMessage = "This profile's place in the room is still held by another connection; try again shortly"
 
 // errOtherAppTransport refuses a transport request from a session another
 // app opened, as the error frame any refused request gets.

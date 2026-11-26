@@ -423,3 +423,54 @@ func TestRoomSocketV2CarriesTheOtherAppMarkToTheConnection(t *testing.T) {
 		}
 	}
 }
+
+// TestRoomSocketV2OtherAppSeatHeld: while a member's seat is held, a session
+// another app opened for the same account and profile is refused with an
+// error frame of code forbidden whose message says the seat is still held
+// and to try again: the holder may be the app's own connection that dropped
+// without closing, so it must not claim another device holds it. Catches the
+// refusal going back to naming another device, or changing the code a
+// client acts on.
+func TestRoomSocketV2OtherAppSeatHeld(t *testing.T) {
+	h, _, _ := roomSocketHandler(t)
+	server := roomSocketServer(t, h)
+	dial := func(otherApp bool) *websocket.Conn {
+		t.Helper()
+		proof, _, err := h.Room.TokenService.Mint(watchtogether.RoomTokenClaims{RoomID: "room", UserID: 7, ProfileID: "profile"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "user", ProfileID: "profile", AccessExpiresAt: time.Now().Add(time.Minute)}
+		ticket, _, err := h.MintRoomSocket(t.Context(), "room", proof, identity, otherApp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dialer := websocket.Dialer{Subprotocols: []string{watchtogether.RoomSocketProtocol, eventsTicketProtocolPrefix + ticket}}
+		conn, resp, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+"/rooms/room/ws", http.Header{"Origin": []string{server.URL}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		t.Cleanup(func() { _ = conn.Close() })
+		return conn
+	}
+	holder := dial(false)
+	// The holder's first frame says it is connected, so its seat is held.
+	_ = holder.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := holder.ReadMessage(); err != nil {
+		t.Fatal(err)
+	}
+	app := dial(true)
+	_ = app.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, body, err := app.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var frame map[string]string
+	if err := json.Unmarshal(body, &frame); err != nil {
+		t.Fatal(err)
+	}
+	if frame["type"] != "error" || frame["code"] != "forbidden" || frame["message"] != "This profile's place in the room is still held by another connection; try again shortly" {
+		t.Fatalf("frame = %s", body)
+	}
+}

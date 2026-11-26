@@ -459,8 +459,12 @@ sessions from their session list, or an administrator ends all of the account's 
 One rule decides which sessions are limited: the one above. Each surface applies it as its
 shape allows. The login session list redacts the other entries. The surfaces below show or
 act on one device's entries from another, and they apply only the half of the rule about
-another app the person allowed (`auth.SessionMayReachOtherDevices`, the grant-enrolled key
-of `SessionOrigin`). A device signed in by code is not limited on them:
+another app the person allowed (the session kind the authentication lookup puts on the
+claims, the grant-enrolled key of `SessionOrigin`). A device signed in by code is not limited
+on them. Every operation also states what such a session may do with it, and a refused one is
+answered by the gate before its handler; see
+[app keys](architecture/app-keys.md#what-a-granted-app-can-do). The surfaces whose handlers
+check:
 
 - `listHouseholdSessions` (`GET /profiles/household/sessions`) gives such a session only the
   playback sessions its own login session started, in full. Every other entry is left out,
@@ -504,9 +508,13 @@ of `SessionOrigin`). A device signed in by code is not limited on them:
   room's guest policy. Like any member, a `buffering` frame from it can still pause the room
   for everyone while it catches up, within the room's spacing and cooldown. A member is its
   account and profile, so connecting replaces a connection already held for them; such a
-  session is instead refused (an error frame with code `forbidden`, then the socket closes)
-  while that member is connected, on this API server or another, as the room's stored
-  runtime records. The person's own device connecting later still replaces the app. Deleting
+  session is instead refused (an error frame with code `forbidden` and the message "This
+  profile's place in the room is still held by another connection; try again shortly", then
+  the socket closes) while that member's seat is held, on this API server or another, as the
+  room's stored runtime records. The room does not record which login session holds a seat,
+  and a seat stays held for up to 30 seconds after a socket that dropped without closing and
+  up to 45 seconds after its API server died, so the holder may be the app's own earlier
+  connection; a client retries after a short wait. The person's own device connecting later still replaces the app. Deleting
   a suggestion (`deleteWatchTogetherSuggestion`) is limited to one its account and profile
   made, without the host's power to delete any; the suggester is recorded only as an account
   and profile, so that includes the person's own devices' suggestions on that profile.
