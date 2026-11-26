@@ -90851,7 +90851,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E can’t sign in to \u202C"
+      "value": "\u202E won’t be able to sign in to \u202C"
     },
     {
       "type": 1,
@@ -90899,7 +90899,7 @@
   "web.admin.users.detail.appKeys.confirm.removeDescription": [
     {
       "type": 0,
-      "value": "\u200F"
+      "value": "\u200F\u202ERemoving \u202C"
     },
     {
       "type": 1,
@@ -90907,7 +90907,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E is signed out of \u202C"
+      "value": "\u202E signs it out of \u202C"
     },
     {
       "type": 1,
@@ -90915,7 +90915,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E’s account now and can’t sign in with its key again. To use it again, \u202C"
+      "value": "\u202E’s account now and stops its key: it can’t sign in with it again. To use it again, \u202C"
     },
     {
       "type": 1,
@@ -90937,7 +90937,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E can’t use this approval to sign in to \u202C"
+      "value": "\u202E won’t be able to use this approval to sign in to \u202C"
     },
     {
       "type": 1,
@@ -142483,7 +142483,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E can sign in to your account with the Silo app until you remove it. Approve it only if you just set it up.\u202C"
+      "value": "\u202E will be able to sign in to your account with the Silo app until you remove it. Approve it only if you just set it up.\u202C"
     }
   ],
   "web.settings.appKeys.confirm.approveTitle": [
@@ -142517,7 +142517,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E can’t sign in to your account. If it was yours, add it again in the Silo app.\u202C"
+      "value": "\u202E won’t be able to sign in to your account. If it was yours, add it again in the Silo app.\u202C"
     }
   ],
   "web.settings.appKeys.confirm.denyTitle": [
@@ -142543,7 +142543,7 @@
   "web.settings.appKeys.confirm.removeDescription": [
     {
       "type": 0,
-      "value": "\u200F"
+      "value": "\u200F\u202ERemoving \u202C"
     },
     {
       "type": 1,
@@ -142551,7 +142551,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E is signed out now and can’t sign in with its key again. To use it again, add it again in the Silo app.\u202C"
+      "value": "\u202E signs it out now and stops its key: it can’t sign in with it again. To use it again, add it again in the Silo app.\u202C"
     }
   ],
   "web.settings.appKeys.confirm.removeTitle": [
@@ -142585,7 +142585,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E can’t use this approval to sign in to your account.\u202C"
+      "value": "\u202E won’t be able to use this approval to sign in to your account.\u202C"
     }
   ],
   "web.settings.appKeys.confirm.withdrawTitle": [

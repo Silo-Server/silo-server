@@ -24,7 +24,9 @@ vi.mock("@/lib/clipboard", () => ({ copyTextToClipboard: copy }));
 // The Silo app sentence asks the server whether app keys are on; a marker
 // stands in for it, so a test sees only whether the dialog shows it.
 vi.mock("@/components/appKeys/SignsBackInNote", () => ({
-  SignsBackInNote: () => <span>Silo app sentence</span>,
+  SignsBackInNote: ({ to }: { to?: unknown }) => (
+    <span>{to === undefined ? "Silo app sentence without link" : "Silo app sentence"}</span>
+  ),
 }));
 
 const user = {
@@ -139,4 +141,14 @@ it.each([
 ])("says devices sign back in only for an enabled account (enabled: %s)", (enabled, shown) => {
   mount({ user: { ...user, enabled } });
   expect(Boolean(screen.queryByText("Silo app sentence"))).toBe(shown);
+});
+
+// While a request runs the dialog must stay open for its result: the
+// sentence's link, which would close it, becomes words.
+it("drops the sentence's link while a request runs", async () => {
+  issue.mockReturnValue(new Promise(() => {}));
+  mount();
+  expect(screen.getByText("Silo app sentence")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Email link" }));
+  expect(await screen.findByText("Silo app sentence without link")).toBeTruthy();
 });

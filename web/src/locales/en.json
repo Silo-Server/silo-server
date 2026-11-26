@@ -86443,7 +86443,7 @@
     },
     {
       "type": 0,
-      "value": " can’t sign in to "
+      "value": " won’t be able to sign in to "
     },
     {
       "type": 1,
@@ -86490,12 +86490,16 @@
   ],
   "web.admin.users.detail.appKeys.confirm.removeDescription": [
     {
+      "type": 0,
+      "value": "Removing "
+    },
+    {
       "type": 1,
       "value": "device"
     },
     {
       "type": 0,
-      "value": " is signed out of "
+      "value": " signs it out of "
     },
     {
       "type": 1,
@@ -86503,7 +86507,7 @@
     },
     {
       "type": 0,
-      "value": "’s account now and can’t sign in with its key again. To use it again, "
+      "value": "’s account now and stops its key: it can’t sign in with it again. To use it again, "
     },
     {
       "type": 1,
@@ -86521,7 +86525,7 @@
     },
     {
       "type": 0,
-      "value": " can’t use this approval to sign in to "
+      "value": " won’t be able to use this approval to sign in to "
     },
     {
       "type": 1,
@@ -135679,7 +135683,7 @@
     },
     {
       "type": 0,
-      "value": " can sign in to your account with the Silo app until you remove it. Approve it only if you just set it up."
+      "value": " will be able to sign in to your account with the Silo app until you remove it. Approve it only if you just set it up."
     }
   ],
   "web.settings.appKeys.confirm.approveTitle": [
@@ -135709,7 +135713,7 @@
     },
     {
       "type": 0,
-      "value": " can’t sign in to your account. If it was yours, add it again in the Silo app."
+      "value": " won’t be able to sign in to your account. If it was yours, add it again in the Silo app."
     }
   ],
   "web.settings.appKeys.confirm.denyTitle": [
@@ -135734,12 +135738,16 @@
   ],
   "web.settings.appKeys.confirm.removeDescription": [
     {
+      "type": 0,
+      "value": "Removing "
+    },
+    {
       "type": 1,
       "value": "device"
     },
     {
       "type": 0,
-      "value": " is signed out now and can’t sign in with its key again. To use it again, add it again in the Silo app."
+      "value": " signs it out now and stops its key: it can’t sign in with it again. To use it again, add it again in the Silo app."
     }
   ],
   "web.settings.appKeys.confirm.removeTitle": [
@@ -135769,7 +135777,7 @@
     },
     {
       "type": 0,
-      "value": " can’t use this approval to sign in to your account."
+      "value": " won’t be able to use this approval to sign in to your account."
     }
   ],
   "web.settings.appKeys.confirm.withdrawTitle": [
