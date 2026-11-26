@@ -89,9 +89,9 @@ func (h wakeHarness) receive(n int) []relayedWake {
 	return got
 }
 
-// editThenWake records a name edit of account 7's profile in a request that
-// commits or rolls it back, then wakes with that request's context.
-func (h wakeHarness) editThenWake(node *System, commit bool) bool {
+// edit records an edit of field of account 7's profile in a new request that
+// commits or rolls it back, and returns that request's context.
+func (h wakeHarness) edit(field string, commit bool) context.Context {
 	h.t.Helper()
 	ctx, req := profileedits.WithRequest(h.t.Context())
 	req.SetActor(7, false, nil)
@@ -99,18 +99,23 @@ func (h wakeHarness) editThenWake(node *System, commit bool) bool {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	if err := profileedits.RecordFields(ctx, tx, 7, "default", []string{profileedits.FieldName}); err != nil {
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	if err := profileedits.RecordFields(ctx, tx, 7, "default", []string{field}); err != nil {
 		h.t.Fatal(err)
 	}
 	if commit {
-		err = tx.Commit(ctx)
-	} else {
-		err = tx.Rollback(ctx)
+		if err := tx.Commit(ctx); err != nil {
+			h.t.Fatal(err)
+		}
 	}
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	return node.WakeProfileSetDevices(ctx, 7)
+	return ctx
+}
+
+// editThenWake records a name edit of account 7's profile in a request that
+// commits or rolls it back, then wakes with that request's context.
+func (h wakeHarness) editThenWake(node *System, commit bool) bool {
+	h.t.Helper()
+	return node.WakeProfileSetDevices(h.edit(profileedits.FieldName, commit), 7)
 }
 
 // wakeTogether wakes account 7 from every node at once, staged so that the
@@ -250,6 +255,37 @@ func TestProfileSetWakeDebounceDB(t *testing.T) {
 		t.Fatalf("unexpected relay request to %s", wake.path)
 	default:
 	}
+}
+
+// A request's wake answers for that request's own edits: one whose edit
+// rolled back answers false and queues nothing, even when another request's
+// later edit of the same account committed first, and that other request
+// queues its own wake. Regression: the commit check looked for any edit row at
+// or above the request's first revision, so the rolled-back request found the
+// other's row, queued a wake and answered true, and the request whose edit did
+// commit then met the limit and answered false.
+func TestProfileSetWakeAnswersForItsOwnEditDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	if _, err := pool.Exec(t.Context(), `
+		CREATE TABLE profile_set_edits (LIKE public.profile_set_edits INCLUDING ALL);
+		CREATE TABLE user_profiles (user_id integer NOT NULL, id text NOT NULL, sync_id uuid);
+		INSERT INTO user_profiles VALUES (7, 'default', gen_random_uuid())`); err != nil {
+		t.Fatal(err)
+	}
+	registerForSession(t, repo, "live")
+	h := wakeHarness{t: t, pool: pool, relayed: make(chan relayedWake, 4)}
+	node := profileSetWakeSystem(t, pool, repo, nil, h.relayed)
+
+	rolledBack := h.edit(profileedits.FieldName, false)
+	committed := h.edit(profileedits.FieldPicture, true)
+	if node.WakeProfileSetDevices(rolledBack, 7) || h.attempts() != 0 {
+		t.Fatalf("wake of the rolled-back request: %d attempts, want 0 and a false answer", h.attempts())
+	}
+	if !node.WakeProfileSetDevices(committed, 7) || h.attempts() != 2 {
+		t.Fatalf("wake of the committed request: %d attempts, want 2 and a true answer", h.attempts())
+	}
+	h.receive(2)
+	waitForWakeEnded(t, node)
 }
 
 // The relay mode follows the attempt's trigger: alerts and the
@@ -824,7 +860,7 @@ func TestProfileSetWakeGuardFollowsTheCommitCheckDB(t *testing.T) {
 		{name: "committed", revision: committed, wantClaim: true, wantSent: 2},
 	} {
 		claimed := false
-		sendNow, err := repo.EnqueueProfileSetWake(t.Context(), 7, []string{PushPlatformApple, PushPlatformAndroid}, &tc.revision,
+		sendNow, err := repo.EnqueueProfileSetWake(t.Context(), 7, []string{PushPlatformApple, PushPlatformAndroid}, []int64{tc.revision},
 			func() bool { claimed = true; return true })
 		if err != nil {
 			t.Fatal(err)

@@ -95,9 +95,10 @@ const profileSetWakeMaxPhones = 20
 // lists the attempts it created and committed, in flight, for the caller to
 // send; it is empty when no wake was queued.
 //
-// minRevision, when not nil, is the first profile_set_edits revision the
-// calling request recorded: the wake goes out only when an edit row at or
-// above it exists, that is, when one of the request's edits committed. claim
+// revisions, when not nil, are the profile_set_edits revisions the calling
+// request recorded for the account: the wake goes out only when an edit row
+// carrying one of them exists, that is, when one of the request's own edits
+// committed. Another request's edit never counts: it has its own wake. claim
 // is called once that is known, before anything is recorded, and a false
 // answer queues nothing: it is the caller's in-flight guard, so an edit that
 // rolled back never takes it.
@@ -108,7 +109,7 @@ const profileSetWakeMaxPhones = 20
 // time is recorded in the transaction that queues the attempts: a failure
 // to queue rolls it back, and an account whose phones all went away in the
 // meantime records nothing.
-func (r *PushDeviceRepository) EnqueueProfileSetWake(ctx context.Context, userID int, platforms []string, minRevision *int64, claim func() bool) (sendNow []PushDeliveryAttempt, err error) {
+func (r *PushDeviceRepository) EnqueueProfileSetWake(ctx context.Context, userID int, platforms []string, revisions []int64, claim func() bool) (sendNow []PushDeliveryAttempt, err error) {
 	if r == nil || r.pool == nil || len(platforms) == 0 {
 		return nil, nil
 	}
@@ -118,11 +119,11 @@ func (r *PushDeviceRepository) EnqueueProfileSetWake(ctx context.Context, userID
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if minRevision != nil {
+	if revisions != nil {
 		var committed bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (
-			SELECT 1 FROM profile_set_edits WHERE user_id = $1 AND revision >= $2)`,
-			userID, *minRevision).Scan(&committed); err != nil {
+			SELECT 1 FROM profile_set_edits WHERE user_id = $1 AND revision = ANY($2))`,
+			userID, revisions).Scan(&committed); err != nil {
 			return nil, fmt.Errorf("check profile set edit: %w", err)
 		}
 		if !committed {
@@ -267,7 +268,8 @@ func (r *PushDeviceRepository) RetireProfileSetWakes(ctx context.Context) (int64
 // it stays true if the send then fails or runs out of budget. It answers
 // false when the account had a wake inside the last profileSetWakeInterval,
 // when a wake for the account is still in flight on this server, when the
-// request's edits all rolled back, when the account has no phone to wake,
+// request's own edits all rolled back (another request's edit has its own
+// wake), when the account has no phone to wake,
 // and when push delivery is off for every platform. A wake that left before
 // this edit existed says nothing about it.
 //
@@ -285,10 +287,7 @@ func (s *System) WakeProfileSetDevices(ctx context.Context, userID int) bool {
 	if len(platforms) == 0 {
 		return false
 	}
-	var minRevision *int64
-	if revision, ok := profileedits.FromContext(ctx).FirstRevision(userID); ok {
-		minRevision = &revision
-	}
+	revisions := profileedits.FromContext(ctx).Revisions(userID)
 	claimed, handedOff := false, false
 	defer func() {
 		if claimed && !handedOff {
@@ -299,7 +298,7 @@ func (s *System) WakeProfileSetDevices(ctx context.Context, userID int) bool {
 		claimed = s.claimProfileSetWake(userID)
 		return claimed
 	}
-	sendNow, err := s.pushDeviceRepo.EnqueueProfileSetWake(enqueueCtx, userID, platforms, minRevision, claim)
+	sendNow, err := s.pushDeviceRepo.EnqueueProfileSetWake(enqueueCtx, userID, platforms, revisions, claim)
 	if err != nil {
 		s.logger.WarnContext(ctx, "queueing profile set wake failed", "user_id", userID, "error", err)
 		return false
