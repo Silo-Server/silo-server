@@ -122,6 +122,33 @@ func (d *grantPINDB) requireLocked(t *testing.T, label, token string, window tim
 	}
 }
 
+// appGuesses sends as many wrong PINs from the app as lock the household's
+// own count and returns each answer's status, for requireAppGuessCodes to
+// check after the household's devices have had their turn.
+func (d *grantPINDB) appGuesses(t *testing.T, app string) []int {
+	t.Helper()
+	var codes []int
+	for range ratelimit.ProfilePINPolicy.MaxAttempts {
+		codes = append(codes, d.verify(t, app, grantPINWrong).Code)
+	}
+	return codes
+}
+
+// requireAppGuessCodes checks the app's allowance: its first guesses are
+// checked, the rest refused.
+func requireAppGuessCodes(t *testing.T, codes []int) {
+	t.Helper()
+	for i, code := range codes {
+		want := http.StatusOK
+		if i >= ratelimit.GrantedAppPINPolicy.MaxAttempts {
+			want = http.StatusTooManyRequests
+		}
+		if code != want {
+			t.Fatalf("app guess %d = %d, want %d", i+1, code, want)
+		}
+	}
+}
+
 // TestGrantedAppPINAllowanceDB: a session another app's key opened counts
 // its PIN attempts under its own key and allowance, so it cannot lock a
 // household's profile for the household's own devices, nor reset its own
@@ -131,36 +158,30 @@ func TestGrantedAppPINAllowanceDB(t *testing.T) {
 
 	// The defect: the app's wrong guesses locked the profile for the
 	// person's own phone. After the app has used up its allowance, the
-	// person's devices verify the right PIN at once, and the household's
-	// own count did not move.
+	// person's devices verify the right PIN at once.
 	t.Run("app guesses never lock the household", func(t *testing.T) {
 		d := newGrantPINDB(t)
 		app, _ := d.grantedSession(t, "")
 		password := d.store(t, d.userID, reachSession{opened: models.SessionOpenedPassword})
 		deviceLogin := d.store(t, d.userID, reachSession{opened: models.SessionOpenedDeviceLogin, platform: "tvos"})
-
-		// As many wrong guesses as lock the household's own count; what the
-		// app gets for each is checked after the household's devices.
-		var codes []int
-		for range ratelimit.ProfilePINPolicy.MaxAttempts {
-			codes = append(codes, d.verify(t, app, grantPINWrong).Code)
-		}
+		codes := d.appGuesses(t, app)
 		d.requireValid(t, "password session", password)
 		d.requireValid(t, "device sign-in session", deviceLogin)
-		// Untouched household count: four wrong guesses still leave the
-		// fifth attempt to the right PIN.
-		d.requireWrong(t, "password session", password, ratelimit.ProfilePINPolicy.MaxAttempts-1)
-		d.requireValid(t, "password session after four wrong", password)
-		for i, code := range codes {
-			want := http.StatusOK
-			if i >= ratelimit.GrantedAppPINPolicy.MaxAttempts {
-				want = http.StatusTooManyRequests
-			}
-			if code != want {
-				t.Fatalf("app guess %d = %d, want %d", i+1, code, want)
-			}
-		}
+		requireAppGuessCodes(t, codes)
 		d.requireLocked(t, "app past its allowance", app, appWindow)
+	})
+
+	// Nor do they spend the household's count without locking it: straight
+	// after them, before any household success could clear the count, the
+	// household still has all five attempts.
+	t.Run("app guesses never charge the household", func(t *testing.T) {
+		d := newGrantPINDB(t)
+		app, _ := d.grantedSession(t, "")
+		password := d.store(t, d.userID, reachSession{opened: models.SessionOpenedPassword})
+		codes := d.appGuesses(t, app)
+		d.requireWrong(t, "password session", password, ratelimit.ProfilePINPolicy.MaxAttempts-1)
+		d.requireValid(t, "password session on its fifth attempt", password)
+		requireAppGuessCodes(t, codes)
 	})
 
 	t.Run("the allowance follows the key, not the session", func(t *testing.T) {

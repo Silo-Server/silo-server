@@ -883,10 +883,13 @@ type ProfileVerifyPINCommand struct {
 	SessionID string
 	ProfileID string
 	PIN       string
-	// GrantedAppKeyID is the device key that opened the login session when
-	// another app's key opened it (auth.Claims.GrantedAppKey), and empty for
-	// every other caller. When set, the attempt counts under that app's own
-	// allowance instead of the household's.
+	// GrantedApp reports that another app's key opened the login session
+	// (auth.Claims.IsGrantedApp). Such a session's attempts count under that
+	// app's own allowance, by GrantedAppKeyID, never the household's; one
+	// whose key id is missing is refused before anything is read or counted.
+	GrantedApp bool
+	// GrantedAppKeyID is the device key that opened such a session
+	// (auth.Claims.GrantedAppKeyID); ignored for every other caller.
 	GrantedAppKeyID string
 }
 
@@ -912,7 +915,7 @@ type ProfileVerification struct {
 // PIN move the household's count.
 func (h *ProfileHandler) reservePINAttempt(ctx context.Context, cmd ProfileVerifyPINCommand) (string, *ratelimit.AttemptLimiter, error) {
 	householdKey := ratelimit.ProfilePINKey(cmd.UserID, cmd.ProfileID)
-	if cmd.GrantedAppKeyID == "" {
+	if !cmd.GrantedApp {
 		if retryAfter, ok := h.PINAttempts.Reserve(ctx, householdKey); !ok {
 			return "", nil, PINLockedError(retryAfter)
 		}
@@ -934,6 +937,12 @@ func (h *ProfileHandler) reservePINAttempt(ctx context.Context, cmd ProfileVerif
 // status, code and message.
 func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINCommand) (ProfileVerification, error) {
 	var none ProfileVerification
+	// Another app's session must be counted by its key. Without the key it
+	// cannot be, and counting it as a household device would let it lock the
+	// household out, so it is refused before any count or hash is touched.
+	if cmd.GrantedApp && cmd.GrantedAppKeyID == "" {
+		return none, apiError(http.StatusForbidden, "forbidden", SessionNotAllowedDetail)
+	}
 	store, err := h.storeProvider.ForUser(ctx, cmd.UserID)
 	if err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")

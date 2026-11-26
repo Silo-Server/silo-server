@@ -55,7 +55,7 @@ type Claims struct {
 	SessionKind SessionKind `json:"-"`
 	// GrantedAppKeyID is, beside SessionKindGrantedApp, the device key that
 	// opened the session, from the same session-row lookup; empty
-	// otherwise. Never serialized. Read it through GrantedAppKey.
+	// otherwise. Never serialized.
 	GrantedAppKeyID string `json:"-"`
 	// SessionEndsAt, when set, caps the expiry of tokens generated from
 	// these claims at the session's absolute end. Never serialized.
@@ -114,15 +114,6 @@ func (c *Claims) IsOwnLoginSession() bool {
 // carry a kind; claims standing for one playback stream's media carry none.
 func (c *Claims) IsGrantedApp() bool {
 	return c != nil && c.SessionKind == SessionKindGrantedApp && c.IsOwnLoginSession()
-}
-
-// GrantedAppKey returns the device key that opened the login session when
-// another app's key opened it (IsGrantedApp), and "" for every other caller.
-func (c *Claims) GrantedAppKey() string {
-	if !c.IsGrantedApp() {
-		return ""
-	}
-	return c.GrantedAppKeyID
 }
 
 // SkipsProfilePIN reports whether the credential may act as a PIN-locked

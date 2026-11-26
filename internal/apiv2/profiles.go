@@ -590,7 +590,7 @@ func (reg *Registry) verifyProfilePIN(ctx context.Context, in *ProfilePINCheckIn
 	}
 	result, err := reg.deps.Profiles.VerifyPIN(ctx, handlers.ProfileVerifyPINCommand{
 		UserID: claims.UserID, SessionID: claims.SessionID, ProfileID: string(in.ID), PIN: in.Body.PIN,
-		GrantedAppKeyID: claims.GrantedAppKey(),
+		GrantedApp: claims.IsGrantedApp(), GrantedAppKeyID: claims.GrantedAppKeyID,
 	})
 	if err != nil {
 		return nil, profileProblem(err)
