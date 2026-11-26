@@ -33,7 +33,7 @@ func (h *PlaybackHandler) ownedAttemptV2(ctx context.Context, caller PlaybackCal
 // started before the record) started the attempt: a session another app
 // opened must not stop, seek or report progress for the person's other
 // devices. It asks only for an attempt the caller's session did not start,
-// so a client acting on its own stream pays nothing for it.
+// so a client acting on its own stream adds no query here.
 func mayActOnAttempt(ctx context.Context, attemptLoginSessionID string, caller PlaybackCaller) error {
 	if caller.MayReachOtherDevices == nil || (caller.LoginSessionID != "" && attemptLoginSessionID == caller.LoginSessionID) {
 		return nil
