@@ -130,6 +130,10 @@ func TestJoinWithAppCodeDB(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// An administrator's join code never travels in a link.
+			if issued.LinkAllowed != (role == models.RoleUser) {
+				t.Fatalf("link allowed = %v for a %s invitation", issued.LinkAllowed, role)
+			}
 			if env.invitationAccepted(t, inv.ID) || env.accountExists(t, username) {
 				t.Fatal("issuing a code created the account or used the invitation")
 			}

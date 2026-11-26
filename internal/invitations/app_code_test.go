@@ -72,3 +72,39 @@ func TestIssueAppCodeRefusedWhereAcceptIs(t *testing.T) {
 		t.Fatalf("IssueAppCode = %v, want ErrTransactionalProfileUnavailable", err)
 	}
 }
+
+// A join code may travel in a link only when the account it creates has no
+// administrative power: a link can reach an app other than Silo, which would
+// redeem the code first. One row per field an invitation carries.
+func TestJoinLinkAllowed(t *testing.T) {
+	group := int64(3)
+	for _, tc := range []struct {
+		name string
+		inv  models.Invitation
+		edit func(*auth.CreateAccountInput)
+		want bool
+	}{
+		{name: "an ordinary invitation", inv: models.Invitation{Role: models.RoleUser}, want: true},
+		{name: "the administrator role", inv: models.Invitation{Role: models.RoleAdmin}},
+		{name: "a role this server doesn't know", inv: models.Invitation{Role: "owner"}},
+		{name: "no role", inv: models.Invitation{}},
+		{name: "an access group, which only narrows", inv: models.Invitation{Role: models.RoleUser, AccessGroupID: &group}, want: true},
+		{name: "a library list", inv: models.Invitation{Role: models.RoleUser, LibraryIDs: []int{1, 2}}, want: true},
+		{name: "a first profile", inv: models.Invitation{Role: models.RoleUser, CreateProfile: true}, want: true},
+		{name: "an address", inv: models.Invitation{Role: models.RoleUser, Email: "sam@example.test"}, want: true},
+		{name: "catalog curation, were an account to start with it", inv: models.Invitation{Role: models.RoleUser},
+			edit: func(in *auth.CreateAccountInput) {
+				in.User.Permissions = []string{string(auth.PermissionMetadataCuration)}
+			}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := joinAccountInput(&tc.inv, "sam", tc.inv.Email)
+			if tc.edit != nil {
+				tc.edit(&input)
+			}
+			if got := linkAllowed(input); got != tc.want {
+				t.Fatalf("linkAllowed = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

@@ -83,6 +83,12 @@ func keyEnrolledAs(member string, err error) error {
 type IssuedAppCode struct {
 	Code      string
 	ExpiresAt time.Time
+	// LinkAllowed reports that a page may put the code in a link: redeeming
+	// it creates a new account with no administrative power. A link can be
+	// received by an app other than Silo, which would redeem the code first,
+	// so every other code (a session code, a join code for an administrator's
+	// invitation) moves only by the person's own hands.
+	LinkAllowed bool
 }
 
 // ExpiresIn is the code's remaining life in whole seconds, at least one.

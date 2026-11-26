@@ -18,7 +18,8 @@ import (
 type AppCode struct {
 	Code          string `json:"code" doc:"The app code: base64url of 32 random bytes. Good for one redeemAppCode within expires_in seconds" example:"8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA"`
 	ExpiresIn     int    `json:"expires_in" doc:"Seconds the code stays good: ten minutes, or less when the invitation expires sooner" example:"600"`
-	ServerAddress string `json:"server_address" doc:"The server address the page puts in the link that opens the app: server.public_url when the request arrived on that address (so a path prefix survives), otherwise the address the request arrived on" example:"https://media.example.com"`
+	ServerAddress string `json:"server_address" doc:"The server address the app connects to, which a page shows with the code or puts in the link: server.public_url when the request arrived on that address (so a path prefix survives), otherwise the address the request arrived on" example:"https://media.example.com"`
+	LinkAllowed   bool   `json:"link_allowed" doc:"Whether a page may put this code in a link (the join link). True only for a join code whose redeem creates an account with no administrative power. When false, show the server address and the code as text to type in the app, and never build a link, a scannable link or anything a device could open from them: a link can be received by an app other than Silo, which would redeem the code first. Always false for createAppCode" example:"true"`
 }
 
 // AppCodeOutput is the response of both operations that issue an app code.
@@ -205,7 +206,7 @@ func (reg *Registry) appCodeAnswer(ctx context.Context, issued auth.IssuedAppCod
 	if !ok {
 		return nil, NewProblem(TypeInternalError, "This server could not work out the address it was reached on.")
 	}
-	return &AppCodeOutput{Body: AppCode{Code: issued.Code, ExpiresIn: issued.ExpiresIn(time.Now()), ServerAddress: address}}, nil
+	return &AppCodeOutput{Body: AppCode{Code: issued.Code, ExpiresIn: issued.ExpiresIn(time.Now()), ServerAddress: address, LinkAllowed: issued.LinkAllowed}}, nil
 }
 
 // appCodeServerAddress is the server address a page puts in the link that

@@ -73,6 +73,7 @@ func (s *Service) IssueAppCode(ctx context.Context, in AppCodeRequest) (auth.Iss
 		out, err = auth.IssueJoinAppCodeTx(ctx, tx, auth.JoinAppCode{
 			InvitationID: inv.ID, Username: username, Email: email, InvitationExpiresAt: inv.ExpiresAt,
 		})
+		out.LinkAllowed = linkAllowed(joinAccountInput(inv, username, email))
 		return err
 	})
 	return out, err
@@ -116,16 +117,65 @@ func (s *Service) ClaimJoinTx(ctx context.Context, tx pgx.Tx, join auth.JoinAcco
 	}
 	user, err := s.claims.ClaimByIDTx(ctx, tx, join.InvitationID, func() (string, error) { return join.Email, nil },
 		func(inv *models.Invitation, tx pgx.Tx) (*models.User, error) {
-			return s.accounts.CreateAccountInTransaction(ctx, tx, auth.CreateAccountInput{
-				User: models.CreateUserInput{
-					Username: join.Username, Email: join.Email, NoPassword: true,
-					Role: inv.Role, LibraryIDs: inv.LibraryIDs, AccessGroupID: inv.AccessGroupID,
-				},
-				DefaultProfile: auth.DefaultProfileOptions{Enabled: inv.CreateProfile, Name: profileNameFromEmail(join.Username)},
-			})
+			return s.accounts.CreateAccountInTransaction(ctx, tx, joinAccountInput(inv, join.Username, join.Email))
 		})
 	if errors.Is(err, ErrNotFound) || errors.Is(err, ErrNotClaimable) {
 		return nil, auth.ErrAppCodeInvalid
 	}
 	return user, err
+}
+
+// joinAccountInput is the account a join creates from an invitation: no
+// password, the chosen name and email, and the invitation's role, libraries,
+// access group and first-profile choice. Issuing a code judges linkAllowed
+// on it and redeeming creates it, so the two can't disagree.
+func joinAccountInput(inv *models.Invitation, username, email string) auth.CreateAccountInput {
+	return auth.CreateAccountInput{
+		User: models.CreateUserInput{
+			Username: username, Email: email, NoPassword: true,
+			Role: inv.Role, LibraryIDs: inv.LibraryIDs, AccessGroupID: inv.AccessGroupID,
+		},
+		DefaultProfile: auth.DefaultProfileOptions{Enabled: inv.CreateProfile, Name: profileNameFromEmail(username)},
+	}
+}
+
+// linkPermissions are the only permissions an account whose join code may
+// travel in a link can hold. marker_edit edits the account's own markers;
+// metadata_curation edits catalog data every account sees, which is close
+// enough to administrative power that it is refused.
+var linkPermissions = map[string]bool{string(auth.PermissionMarkerEdit): true}
+
+// linkAllowed reports whether a join code that creates this account may be
+// put in a link (auth.IssuedAppCode.LinkAllowed): only when the account has
+// no administrative power. Field by field, for what an invitation carries:
+//
+//   - Role: only the user role; the admin role, or any other value, refuses.
+//   - Permissions: the invitation sets none, so the account takes the
+//     defaults for its role (auth.NewUserPermissions); anything outside
+//     linkPermissions refuses.
+//   - AccessGroupID: a group narrows an account's permissions and limits and
+//     never adds any (access.ApplyGroupPolicy intersects), so it can't
+//     confer power.
+//   - LibraryIDs, the first profile, the email and the name: access to media
+//     and identity, no power.
+//   - Ownership and break-glass: an invitation can't carry them, and
+//     creating an account never sets them.
+//
+// Nothing changes an invitation after it is issued: resending makes a new
+// invitation (copying role, group and libraries) whose codes are new, and
+// the old invitation's codes stop working.
+func linkAllowed(input auth.CreateAccountInput) bool {
+	if input.User.Role != models.RoleUser {
+		return false
+	}
+	permissions, err := auth.NewUserPermissions(input.User)
+	if err != nil {
+		return false
+	}
+	for _, permission := range permissions {
+		if !linkPermissions[permission] {
+			return false
+		}
+	}
+	return true
 }

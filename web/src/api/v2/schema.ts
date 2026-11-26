@@ -25386,7 +25386,12 @@ export interface components {
        */
       expires_in: number;
       /**
-       * @description The server address the page puts in the link that opens the app: server.public_url when the request arrived on that address (so a path prefix survives), otherwise the address the request arrived on
+       * @description Whether a page may put this code in a link (the join link). True only for a join code whose redeem creates an account with no administrative power. When false, show the server address and the code as text to type in the app, and never build a link, a scannable link or anything a device could open from them: a link can be received by an app other than Silo, which would redeem the code first. Always false for createAppCode
+       * @example true
+       */
+      link_allowed: boolean;
+      /**
+       * @description The server address the app connects to, which a page shows with the code or puts in the link: server.public_url when the request arrived on that address (so a path prefix survives), otherwise the address the request arrived on
        * @example https://media.example.com
        */
       server_address: string;
