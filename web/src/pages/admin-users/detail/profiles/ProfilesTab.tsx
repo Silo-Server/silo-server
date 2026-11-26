@@ -93,7 +93,7 @@ export function ProfilesTab({ user, manageable }: { user: AdminUser; manageable:
   const atLimit = count !== undefined && limit >= 1 && count >= limit;
 
   return (
-    <>
+    <div className="space-y-4">
       <DetailCard
         title={t("web.admin.users.detail.profiles.title")}
         description={
@@ -186,7 +186,7 @@ export function ProfilesTab({ user, manageable }: { user: AdminUser; manageable:
           />
         </>
       ) : null}
-    </>
+    </div>
   );
 }
 
