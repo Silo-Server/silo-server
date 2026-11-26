@@ -264,7 +264,9 @@ func (h wakeHarness) assertNeverClaimed(repo *PushDeviceRepository, state string
 // send records it.
 func (h wakeHarness) waitForOutcome(outcome string) {
 	h.t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.After(30 * time.Second)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for {
 		var other int
 		if err := h.pool.QueryRow(h.t.Context(), `SELECT count(*) FROM push_delivery_attempts
@@ -275,10 +277,11 @@ func (h wakeHarness) waitForOutcome(outcome string) {
 		if other == 0 {
 			return
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-deadline:
 			h.t.Fatalf("%d wake rows not %s with no next retry", other, outcome)
+		case <-poll.C:
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 
