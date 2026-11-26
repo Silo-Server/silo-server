@@ -12,6 +12,8 @@ package profileedits
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"sync"
@@ -199,9 +201,20 @@ func Middleware(wake Waker) func(http.Handler) http.Handler {
 			wakeCtx := context.WithoutCancel(ctx)
 			go func() {
 				for _, account := range accounts {
-					wake.Wake(wakeCtx, account)
+					wakeRecovered(wakeCtx, wake, account)
 				}
 			}()
 		})
 	}
+}
+
+// wakeRecovered calls wake for account, logging a panic instead of letting
+// it end the process: the wake runs outside the HTTP recoverer.
+func wakeRecovered(ctx context.Context, wake Waker, account int) {
+	defer func() {
+		if p := recover(); p != nil {
+			slog.ErrorContext(ctx, "profile set wake panicked", "user_id", account, "panic", fmt.Sprint(p))
+		}
+	}()
+	wake.Wake(ctx, account)
 }

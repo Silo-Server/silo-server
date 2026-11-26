@@ -508,6 +508,7 @@
 # it one row at a time, before session cleanup removes its evidence.
 ./internal/notifications TestProfileSetWakeDebounceDB
 ./internal/notifications TestProfileSetWakeIsNeverClaimedDB
+./internal/notifications TestProfileSetWakeSlowPhoneDB
 ./internal/notifications TestPushEnqueueSkipsTargetsRemovedAfterListingDB
 ./internal/notifications TestPushRetentionSkipsTargetsADeliveryHoldsDB
 ./internal/notifications TestPushRetentionKeepsTheLastChanceForAnExpiredAppleLoginDB
@@ -1720,6 +1721,7 @@
 # Image cache queue metrics count future-deferred retries in queued depth while
 # reporting oldest queued age only for due rows (next_attempt_at <= NOW()).
 ./internal/workmetrics TestQueueSamplerImagesReportsDueQueuedAgeDB
+./internal/workmetrics TestQueueSamplerLeavesProfileSetWakesOutDB
 # A session opened by device sign-in is recorded as such and sees and ends only itself.
 ./internal/auth TestSessionsRecordDeviceSignInDB
 ./internal/auth TestDeviceSignInMigrationMarksKeptRequestsDB

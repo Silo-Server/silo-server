@@ -25,14 +25,20 @@ const (
 	// profileSetEnqueueTimeout bounds the enqueue, which runs before the
 	// edit's response completes.
 	profileSetEnqueueTimeout = 5 * time.Second
-	// profileSetSendTimeout bounds the background send.
-	profileSetSendTimeout = 30 * time.Second
+	// profileSetFinalizeTimeout bounds the write that records a wake its
+	// send left unfinished.
+	profileSetFinalizeTimeout = 5 * time.Second
 	// profileSetWakeStale is when retention marks a wake whose send never
 	// finished (the process stopped mid-send) as failed.
 	profileSetWakeStale = 10 * time.Minute
 	// profileSetWakeRetention is how long a wake attempt is kept.
 	profileSetWakeRetention = 7 * 24 * time.Hour
 )
+
+// profileSetPhoneTimeout bounds one phone's send: a relay call, and a second
+// one after the relay credential is recovered (pushRelayRequestTimeout
+// each). Each phone gets its own, so a slow one costs the others nothing.
+var profileSetPhoneTimeout = 2*pushRelayRequestTimeout + 5*time.Second
 
 // A wake is sent once and never retried: the next edit or the app opening
 // repairs a missed one. Its row is never in a state any server's claim
@@ -216,17 +222,57 @@ func (s *System) WakeProfileSetDevices(ctx context.Context, userID int) bool {
 	return queued
 }
 
-// sendProfileSetWakeDetached sends the wake on its own goroutine and
-// deadline, as the service's other detached sends do
-// (PostServerChannelRequestEvent): the caller never waits for the relay, and
-// a send cut short by shutdown leaves its row in flight, which no claim
-// selects and retention marks failed.
+// failUnfinishedProfileSetWake records as failed a wake its send left in
+// flight: its deadline passed, or it stopped before writing an outcome. A
+// row the send did finish is left as it is.
+func (r *PushDeviceRepository) failUnfinishedProfileSetWake(ctx context.Context, attemptID, reason string) error {
+	if _, err := r.pool.Exec(ctx, `UPDATE push_delivery_attempts
+		SET outcome = $2, attempt_number = attempt_number + 1, attempted_at = now(),
+		    upstream_reason = $3, failure_message = $3, updated_at = now()
+		WHERE id = $1 AND trigger_type = $4 AND outcome = $5 AND next_retry_at IS NULL`,
+		attemptID, PushOutcomeFailed, reason, PushTriggerProfileSet, PushOutcomeRetrying); err != nil {
+		return fmt.Errorf("fail unfinished profile set wake: %w", err)
+	}
+	return nil
+}
+
+// sendProfileSetWakeDetached sends the wake on its own goroutine, as the
+// service's other detached sends do (PostServerChannelRequestEvent): the
+// caller never waits for the relay. Each phone is sent in turn under its own
+// deadline, and a send that did not record an outcome is recorded failed on
+// a fresh context its deadline cannot have cancelled, so no wake row outlives
+// its send in flight. Only a process that stops mid-send leaves one, which no
+// claim selects, the queue gauge leaves out, and retention marks failed.
 func (s *System) sendProfileSetWakeDetached(ctx context.Context, attempts []PushDeliveryAttempt) {
-	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), profileSetSendTimeout)
+	ctx = context.WithoutCancel(ctx)
 	go func() {
-		defer cancel()
+		defer func() {
+			if p := recover(); p != nil {
+				s.logger.ErrorContext(ctx, "profile set wake send panicked", "panic", fmt.Sprint(p))
+			}
+		}()
 		for _, attempt := range attempts {
-			s.pushSender.processAttempt(sendCtx, attempt)
+			s.sendProfileSetWakeTo(ctx, attempt)
 		}
 	}()
+}
+
+// sendProfileSetWakeTo sends one phone's wake and records its outcome.
+func (s *System) sendProfileSetWakeTo(ctx context.Context, attempt PushDeliveryAttempt) {
+	phoneCtx, cancel := context.WithTimeout(ctx, profileSetPhoneTimeout)
+	finished := s.pushSender.processAttempt(phoneCtx, attempt)
+	timedOut := phoneCtx.Err() != nil
+	cancel()
+	if finished != nil && finished.Outcome != PushOutcomeRetrying {
+		return
+	}
+	reason := "wake_send_unfinished"
+	if timedOut {
+		reason = "wake_send_timed_out"
+	}
+	finalizeCtx, cancelFinalize := context.WithTimeout(ctx, profileSetFinalizeTimeout)
+	defer cancelFinalize()
+	if err := s.pushDeviceRepo.failUnfinishedProfileSetWake(finalizeCtx, attempt.ID, reason); err != nil {
+		s.logger.WarnContext(ctx, "recording an unfinished profile set wake failed", "attempt_id", attempt.ID, "error", err)
+	}
 }

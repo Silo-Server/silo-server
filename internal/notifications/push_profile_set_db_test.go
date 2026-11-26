@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -106,14 +107,55 @@ func (h wakeHarness) editThenWake(node *System, commit bool) bool {
 	return node.WakeProfileSetDevices(ctx, 7)
 }
 
-// wakeTogether wakes account 7 from every node at the same moment.
-func wakeTogether(nodes ...*System) []bool {
+// wakeTogether wakes account 7 from every node at once, staged so that the
+// wakes overlap: a third connection holds the account's wake lock until every
+// node is waiting on it. A node that never waits on the lock fails the test,
+// so it fails whenever the lock is missing, not only when the timing happens
+// to line up.
+func (h wakeHarness) wakeTogether(nodes ...*System) []bool {
+	h.t.Helper()
+	ctx := h.t.Context()
+	holder, err := h.pool.Begin(ctx)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(context.Background()) }()
+	var key int64
+	if err := holder.QueryRow(ctx, `SELECT hashtextextended($1, $2) FROM (SELECT pg_advisory_xact_lock(hashtextextended($1, $2))) held`,
+		profileSetWakeLock, 7).Scan(&key); err != nil {
+		h.t.Fatal(err)
+	}
+
 	answers := make([]bool, len(nodes))
 	var wg sync.WaitGroup
 	for i, node := range nodes {
 		wg.Go(func() { answers[i] = node.WakeProfileSetDevices(context.Background(), 7) })
 	}
-	wg.Wait()
+	finished := make(chan struct{})
+	go func() { wg.Wait(); close(finished) }()
+
+	deadline := time.After(30 * time.Second)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for waiting := 0; waiting < len(nodes); {
+		select {
+		case <-finished:
+			h.t.Fatal("the wakes finished without waiting on the account's wake lock")
+		case <-deadline:
+			h.t.Fatalf("%d of %d wakes waiting on the account's wake lock", waiting, len(nodes))
+		case <-poll.C:
+		}
+		if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks
+			WHERE locktype = 'advisory' AND NOT granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+			  AND classid = (($1::bigint >> 32) & 4294967295)::oid AND objid = ($1::bigint & 4294967295)::oid AND objsubid = 1`,
+			key).Scan(&waiting); err != nil {
+			h.t.Fatal(err)
+		}
+	}
+	if err := holder.Commit(ctx); err != nil {
+		h.t.Fatal(err)
+	}
+	<-finished
 	return answers
 }
 
@@ -137,7 +179,7 @@ func TestProfileSetWakeDebounceDB(t *testing.T) {
 	nodeB := profileSetWakeSystem(t, pool, repo, nil, h.relayed)
 
 	// Two servers recording at the same moment queue one wake per phone.
-	if answers := wakeTogether(nodeA, nodeB); !answers[0] || !answers[1] || h.attempts() != 2 {
+	if answers := h.wakeTogether(nodeA, nodeB); !answers[0] || !answers[1] || h.attempts() != 2 {
 		t.Fatalf("concurrent wakes answered %v with %d attempts, want true, true and 2", answers, h.attempts())
 	}
 	paths := map[string]bool{}
@@ -325,4 +367,59 @@ func TestProfileSetWakeIsNeverClaimedDB(t *testing.T) {
 	}
 	h.waitForOutcome(PushOutcomeDelivered)
 	h.assertNeverClaimed(repo, "delivered")
+}
+
+// One phone's slow relay call costs the other phones nothing, and no wake row
+// outlives its send in flight: the phone whose send ran out of time is
+// recorded failed, and the next phone is still sent. Regression: every phone
+// shared one deadline, so a slow relay left later phones unsent and their
+// rows in flight, counted as queued, until the daily retention run.
+func TestProfileSetWakeSlowPhoneDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	registerForSession(t, repo, "live")
+	defer func(previous time.Duration) { profileSetPhoneTimeout = previous }(profileSetPhoneTimeout)
+	profileSetPhoneTimeout = 200 * time.Millisecond
+
+	var calls atomic.Int32
+	node := profileSetWakeSystem(t, pool, repo, nil, nil)
+	node.pushSender.client = &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if calls.Add(1) == 1 {
+			<-req.Context().Done() // the first phone's relay call hangs
+			return nil, req.Context().Err()
+		}
+		return relayResponse(http.StatusOK, `{"request_id":"r","status":"accepted"}`), nil
+	})}
+	if !node.WakeProfileSetDevices(t.Context(), 7) {
+		t.Fatal("wake answered false")
+	}
+
+	deadline := time.After(30 * time.Second)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		rows, err := pool.Query(t.Context(), `SELECT outcome, COALESCE(upstream_reason, '') FROM push_delivery_attempts
+			WHERE trigger_type = $1 ORDER BY outcome`, PushTriggerProfileSet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (string, error) {
+			var outcome, reason string
+			err := row.Scan(&outcome, &reason)
+			return outcome + ":" + reason, err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) == 2 && got[0] == PushOutcomeDelivered+":" && got[1] == PushOutcomeFailed+":wake_send_timed_out" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("wake rows = %v after %d relay calls, want one delivered and one failed as timed out", got, calls.Load())
+		case <-poll.C:
+		}
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("relay calls = %d, want 2: the second phone must still be sent", calls.Load())
+	}
 }
