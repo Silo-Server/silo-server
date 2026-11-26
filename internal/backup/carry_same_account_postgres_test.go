@@ -195,34 +195,42 @@ func TestFullRestoreCarriesCredentialsOnlyOntoTheSameAccountDB(t *testing.T) {
 			})
 			out := server.restore(t, between)
 
-			server.with(t, func(pool *pgxpool.Pool) {
-				var username string
-				var enabled bool
-				var keys, links int
-				var restoredCreated time.Time
-				if err := pool.QueryRow(ctx, `SELECT username, enabled, created_at,
-					(SELECT count(*) FROM api_keys WHERE user_id = $1),
-					(SELECT count(*) FROM plugin_auth_identities WHERE user_id = $1)
-					FROM users WHERE id = $1`, first).Scan(&username, &enabled, &restoredCreated, &keys, &links); err != nil {
-					t.Fatal(err)
-				}
-				if username != "first" || !restoredCreated.Equal(created) {
-					t.Errorf("restored account %d is %q created %s, want the backup's account, created %s", first, username, restoredCreated, created)
-				}
-				if keys != 0 || links != 0 {
-					t.Errorf("the backup's account %d holds %d API keys and %d sign-in links of another live account\n%s", first, keys, links, out)
-				}
-				if !enabled {
-					t.Errorf("the backup's account %d was disabled by another live account's switch\n%s", first, out)
-				}
-				if dropped := fmt.Sprintf("'second key' (account %d)", first); !strings.Contains(out, dropped) {
-					t.Errorf("the restore does not report the dropped key %s\n%s", dropped, out)
-				}
-				// The next account must not take an id the live server used.
-				if next := createAccount(t, pool, "next"); next <= third {
-					t.Errorf("the next account after the restore has id %d, want above %d, the live server's last", next, third)
-				}
-			})
+			server.with(t, func(pool *pgxpool.Pool) { checkSameAccountRestored(t, pool, first, third, created, out) })
 		})
+	}
+}
+
+// checkSameAccountRestored: the restored account first is the backup's, as
+// it was created, without the live credentials or switches of the other
+// account that held its id, and the next account takes an id above third,
+// the live server's last.
+func checkSameAccountRestored(t *testing.T, pool *pgxpool.Pool, first, third int, created time.Time, out string) {
+	t.Helper()
+	ctx := t.Context()
+	var username string
+	var enabled bool
+	var keys, links int
+	var restoredCreated time.Time
+	if err := pool.QueryRow(ctx, `SELECT username, enabled, created_at,
+		(SELECT count(*) FROM api_keys WHERE user_id = $1),
+		(SELECT count(*) FROM plugin_auth_identities WHERE user_id = $1)
+		FROM users WHERE id = $1`, first).Scan(&username, &enabled, &restoredCreated, &keys, &links); err != nil {
+		t.Fatal(err)
+	}
+	if username != "first" || !restoredCreated.Equal(created) {
+		t.Errorf("restored account %d is %q created %s, want the backup's account, created %s", first, username, restoredCreated, created)
+	}
+	if keys != 0 || links != 0 {
+		t.Errorf("the backup's account %d holds %d API keys and %d sign-in links of another live account\n%s", first, keys, links, out)
+	}
+	if !enabled {
+		t.Errorf("the backup's account %d was disabled by another live account's switch\n%s", first, out)
+	}
+	if dropped := fmt.Sprintf("'second key' (account %d)", first); !strings.Contains(out, dropped) {
+		t.Errorf("the restore does not report the dropped key %s\n%s", dropped, out)
+	}
+	// The next account must not take an id the live server used.
+	if next := createAccount(t, pool, "next"); next <= third {
+		t.Errorf("the next account after the restore has id %d, want above %d, the live server's last", next, third)
 	}
 }
