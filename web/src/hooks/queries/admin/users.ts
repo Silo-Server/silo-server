@@ -25,6 +25,7 @@ import {
   deleteAdminUser,
   impersonateAdminUser,
   issueAdminPasswordReset,
+  createAdminSignInLink,
   transferAdminUserOwnership,
   getAdminUserCapabilities,
   getAdminUserPolicyDefaults,
@@ -687,6 +688,17 @@ export function useIssuePasswordReset() {
     retry: false,
     mutationFn: ({ id, delivery }: { id: number; delivery: "email" | "link" }) =>
       issueAdminPasswordReset(id, delivery),
+    gcTime: 0,
+  });
+}
+
+/** Makes a single-use sign-in link for an account, for a person who lost
+ * every device. */
+export function useCreateSignInLink() {
+  return useMutation({
+    retry: false,
+    mutationFn: ({ id, sendEmail }: { id: number; sendEmail: boolean }) =>
+      createAdminSignInLink(id, sendEmail),
     gcTime: 0,
   });
 }

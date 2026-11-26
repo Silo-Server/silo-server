@@ -34,6 +34,8 @@ export interface UserDetailHeaderProps {
   onResetPassword(): void;
   /** Opens the Sign-in tab's Set password dialog, for an account without password sign-in. */
   onSetPassword(): void;
+  /** Opens the sign-in link dialog; absent when the server can't make one. */
+  onCreateSignInLink?: () => void;
   onTransfer(): void;
   onDisable(): void;
   onEnable(): void;
@@ -76,6 +78,7 @@ export function UserDetailHeader({
   onViewAs,
   onResetPassword,
   onSetPassword,
+  onCreateSignInLink,
   onTransfer,
   onDisable,
   onEnable,
@@ -126,7 +129,10 @@ export function UserDetailHeader({
   const deleteBlocked = activeEdit !== null && activeEdit.changeCount > 0;
   const showReset = user.password_login && manageable;
   const showSetPassword = !user.password_login && manageable;
-  const hasMenu = transferable || canDisable || canEnable || canDelete;
+  // A link is refused for a disabled account; the server applies the rules
+  // for who may set the account's password and says why it refuses.
+  const canSignInLink = manageable && user.enabled && onCreateSignInLink !== undefined;
+  const hasMenu = canSignInLink || transferable || canDisable || canEnable || canDelete;
   const viewAsReasonKey = available
     ? viewAsDisabledReason(user, ownAccount, viewAsDisabled)
     : undefined;
@@ -289,6 +295,14 @@ export function UserDetailHeader({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className={cn("min-w-52", TOUCH_TARGETS)}>
+                {canSignInLink ? (
+                  <DropdownMenuItem disabled={!available} onSelect={onCreateSignInLink}>
+                    {t("web.admin.users.signInLinkDialog.action")}
+                    <span className="text-muted-foreground ms-auto text-xs">
+                      {t("web.admin.users.signInLinkDialog.actionHint")}
+                    </span>
+                  </DropdownMenuItem>
+                ) : null}
                 {transferable ? (
                   <DropdownMenuItem disabled={!available} onSelect={onTransfer}>
                     {t("web.admin.users.detail.header.makeOwner")}
@@ -312,7 +326,9 @@ export function UserDetailHeader({
                 ) : null}
                 {canDelete ? (
                   <>
-                    {transferable || canDisable || canEnable ? <DropdownMenuSeparator /> : null}
+                    {canSignInLink || transferable || canDisable || canEnable ? (
+                      <DropdownMenuSeparator />
+                    ) : null}
                     <DropdownMenuItem
                       variant="destructive"
                       disabled={!available || deleteBlocked}

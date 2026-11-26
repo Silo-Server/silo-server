@@ -536,3 +536,18 @@ it("shows a code the server keeps out of links as text to type", async () => {
   expect(screen.queryByRole("link", { name: "Open Silo" })).toBeNull();
   expectNoLinkCarrying(container, issuedCode.code);
 });
+
+// A server from before link_allowed (two versions running during a deploy)
+// leaves the member out. That means no link: the code is shown to type, not
+// refused as a broken answer.
+it("shows a code to type when the answer has no link_allowed", async () => {
+  lookup = async () => json({ ...invitation, app_join: true });
+  const { link_allowed: _dropped, ...withoutMember } = issuedCode;
+  appCode = async () => json(withoutMember);
+  const { container } = mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(await screen.findByRole("heading", { name: "Join with this code" })).toBeTruthy();
+  expect(screen.getByText(issuedCode.code)).toBeTruthy();
+  expectNoLinkCarrying(container, issuedCode.code);
+});

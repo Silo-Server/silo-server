@@ -1,5 +1,5 @@
 /**
- * The one-time token of a password reset or invitation link.
+ * The one-time token of a password reset, invitation or sign-in link.
  *
  * Links carry it in the fragment (`/reset-password#<token>`), which a browser
  * never sends to the server or in a Referer header. Links issued before that
@@ -10,7 +10,7 @@
  */
 
 const STATE_KEY = "siloLinkToken";
-const LINK_PAGES = ["/reset-password", "/invite"];
+const LINK_PAGES = ["/reset-password", "/invite", "/sign-in-link"];
 
 function tokenInAddress(): { page: string; token: string } | null {
   const { pathname, hash } = window.location;

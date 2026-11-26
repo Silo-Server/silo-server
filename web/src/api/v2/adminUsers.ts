@@ -246,6 +246,25 @@ export async function issueAdminPasswordReset(
   requireAdminUserAuthority(profileContext);
   return result;
 }
+export type AdminSignInLink = V2Result<"POST /api/v2/admin/users/{user_id}/sign-in-links">;
+
+/** Makes a single-use sign-in link for an account, replacing its earlier
+ * ones; `sendEmail` also emails it to the account's address. */
+export async function createAdminSignInLink(
+  id: number,
+  sendEmail: boolean,
+  profileContext = captureAdminUserAuthority(),
+): Promise<AdminSignInLink> {
+  requireAdminUserAuthority(profileContext);
+  const result = await v2("POST /api/v2/admin/users/{user_id}/sign-in-links", {
+    path: { user_id: String(id) },
+    body: { send_email: sendEmail },
+    profileContext,
+    retryAuthentication: false,
+  });
+  requireAdminUserAuthority(profileContext);
+  return result;
+}
 export async function getAdminUserCapabilities(profileContext = captureAdminUserAuthority()) {
   requireAdminUserAuthority(profileContext);
   const result = await v2("GET /api/v2/admin/users/capabilities", { profileContext });

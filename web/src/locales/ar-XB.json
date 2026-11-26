@@ -97170,6 +97170,144 @@
       "value": "\u200F\u202ESet a password\u202C"
     }
   ],
+  "web.admin.users.signInLinkDialog.action": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECreate sign-in link\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.actionHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELost every device\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA single-use link for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E if they lost every device. It opens a page that gives them a code for the Silo app, or lets them choose a password. It works for 24 hours, and a new link replaces the last one.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailAction": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEmail it\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECreate the link to copy and send it yourself, or email it to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoAddress": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECreate the link, then copy it and send it yourself. This account has no email address to send it to.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailHintNoMail": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECreate the link, then copy it and send it yourself. Set up email in Settings to send it from here.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailSent": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESent the link to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "email"
+    },
+    {
+      "type": 0,
+      "value": "\u202E. It expires \u202C"
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.emailUnconfirmed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe mail server did not confirm delivery. The link below still works: copy it and send it another way.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.failed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECould not create a sign-in link.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.linkShare": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESend this link only to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E. Anyone who has it can sign in to this account until it is used or expires \u202C"
+    },
+    {
+      "type": 1,
+      "value": "expires"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.providerRequired": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELocal password sign-in is off on this server, so a sign-in link would skip its sign-in provider. Ask \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E to sign in with the provider on this server's site, then use Open in Silo in their account settings.\u202C"
+    }
+  ],
+  "web.admin.users.signInLinkDialog.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign-in link for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    }
+  ],
   "web.audiobooks.chapter.fallbackTitle": [
     {
       "type": 0,
@@ -100554,6 +100692,78 @@
     {
       "type": 0,
       "value": "\u200F\u202ESign in\u202C"
+    }
+  ],
+  "web.auth.signInLink.backToCode": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBack to the code\u202C"
+    }
+  ],
+  "web.auth.signInLink.documentTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign-in link\u202C"
+    }
+  ],
+  "web.auth.signInLink.failed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo couldn’t open this link. Try again.\u202C"
+    }
+  ],
+  "web.auth.signInLink.installFirst": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe link works once, and the code lasts a few minutes. Install the Silo app on your phone or tablet first, then press Continue.\u202C"
+    }
+  ],
+  "web.auth.signInLink.intro": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAn admin sent you this link so you can sign in again. Continue to get a code for the Silo app, or to choose a password.\u202C"
+    }
+  ],
+  "web.auth.signInLink.passwordDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESaving signs this account out on every device. Devices signed in with the Silo app sign back in by themselves.\u202C"
+    }
+  ],
+  "web.auth.signInLink.passwordSet": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour password is saved. Sign in with it.\u202C"
+    }
+  ],
+  "web.auth.signInLink.passwordTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChoose a password\u202C"
+    }
+  ],
+  "web.auth.signInLink.providerRequired": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis server signs people in through its sign-in provider, so this link doesn’t work. Sign in with the provider instead.\u202C"
+    }
+  ],
+  "web.auth.signInLink.setPasswordInstead": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESet a password instead\u202C"
+    }
+  ],
+  "web.auth.signInLink.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EGet back into your account\u202C"
+    }
+  ],
+  "web.auth.signInLink.unavailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis link was already used, replaced by a newer one, or expired. Ask the server’s owner for a new one.\u202C"
     }
   ],
   "web.auth.signup.closed": [

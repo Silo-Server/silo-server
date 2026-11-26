@@ -51,6 +51,8 @@ const PUBLIC_OPERATIONS = new Set<string>([
   "GET /api/v2/capabilities/password-reset",
   "GET /api/v2/theme/branding",
   "POST /api/v2/auth/refresh",
+  "POST /api/v2/auth/sign-in-links/redeem",
+  "POST /api/v2/auth/sign-in-links/set-password",
 ]);
 
 const operationMatchers = Object.keys(v2Operations).map((key) => {

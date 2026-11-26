@@ -19,8 +19,10 @@ type StepProps<Code extends AppCode> = {
  * The person may have to install the app first, so the step stays until the
  * code expires, and then offers a new one. Nothing fires automatically: the
  * page can't tell whether the app is installed, and a custom-scheme link only
- * works reliably when tapped. Only a join code goes in a link: an app that
- * intercepts it gets a new, empty account, which the invited person notices.
+ * works reliably when tapped. Only a join code the server allows in a link
+ * (link_allowed) goes in one, which an administrator's invitation is not: an
+ * app that intercepts it gets a new, empty account with no administrative
+ * power, which the invited person notices.
  */
 export function JoinLinkStep({ appCode, onRenew, renewing }: StepProps<LinkableJoinAppCode>) {
   const t = useT();
