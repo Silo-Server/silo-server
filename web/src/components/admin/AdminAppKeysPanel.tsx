@@ -48,7 +48,7 @@ export function AdminAppKeysPanel({
   user,
   manageable,
 }: {
-  user: { id: number; username: string };
+  user: { id: number; username: string; enabled?: boolean };
   manageable: boolean;
 }) {
   const t = useT();
@@ -295,7 +295,11 @@ export function AdminAppKeysPanel({
           {!manageable && <p className="text-muted-foreground text-xs">{t(`${P}.ownerOnly`)}</p>}
         </>
       )}
-      <p className="text-muted-foreground text-xs leading-relaxed">{t(`${S}.footnote`)}</p>
+      {/* It says a signed-out device signs back in: not while app key sign-in
+          is off, nor for a disabled account, whose keys are refused. */}
+      {capability === "available" && user.enabled !== false && (
+        <p className="text-muted-foreground text-xs leading-relaxed">{t(`${S}.footnote`)}</p>
+      )}
       <AlertDialog
         open={selection !== null}
         onOpenChange={(next) => {

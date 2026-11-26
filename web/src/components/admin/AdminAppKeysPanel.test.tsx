@@ -22,10 +22,10 @@ const key = (id: string, name: string, extra: Record<string, unknown> = {}) => (
   waiting_until: null,
   ...extra,
 });
-const mocks = vi.hoisted(() => ({ revokeDevice: vi.fn() }));
+const mocks = vi.hoisted(() => ({ revokeDevice: vi.fn(), capability: "available" }));
 const idle = { isPending: false, mutateAsync: vi.fn() };
 vi.mock("@/hooks/queries/appKeys", () => ({
-  useAppKeyCapability: () => ({ data: { state: "available" } }),
+  useAppKeyCapability: () => ({ data: { state: mocks.capability } }),
 }));
 vi.mock("@/hooks/queries/admin/appKeys", () => ({
   useAdminAppKeys: () => ({
@@ -114,4 +114,20 @@ it("shows the address each key was added from, and none when it is unknown", () 
   expect(shown).toHaveLength(2);
   expect(shown[0]).toBe("From 203.0.113.7");
   expect(shown[1]).toMatch(/ · From 198\.51\.100\.24$/);
+});
+
+// The footnote says a signed-out device signs back in with its key. That is
+// false while app key sign-in is off, and for a disabled account, whose keys
+// are refused at sign-in.
+it.each([
+  { name: "enabled account, app keys on", capability: "available", enabled: true, shown: true },
+  { name: "app keys off", capability: "disabled", enabled: true, shown: false },
+  { name: "disabled account", capability: "available", enabled: false, shown: false },
+])("says devices sign back in only where they do ($name)", (row) => {
+  mocks.capability = row.capability;
+  render(<AdminAppKeysPanel user={{ id: 2, username: "sam", enabled: row.enabled }} manageable />, {
+    wrapper: MemoryRouter,
+  });
+  expect(Boolean(screen.queryByText(/it signs back in with its key/))).toBe(row.shown);
+  mocks.capability = "available";
 });
