@@ -307,6 +307,31 @@ func TestProfileSetWakeAnswersForItsOwnEditDB(t *testing.T) {
 	waitForWakeEnded(t, node)
 }
 
+// An administrator's clear of an override records no edit (it ends one),
+// and calls the waker only after its own transaction committed, with a
+// request that recorded nothing. That wakes the account: nothing recorded
+// means nothing to check, not an edit that rolled back. It catches the
+// commit check reading an empty record as a rolled-back edit, which would
+// leave every clear answering wake_queued false.
+func TestProfileSetWakeForARequestThatRecordedNothingDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	if _, err := pool.Exec(t.Context(), `
+		CREATE TABLE profile_set_edits (LIKE public.profile_set_edits INCLUDING ALL);
+		CREATE TABLE user_profiles (user_id integer NOT NULL, id text NOT NULL, sync_id uuid);
+		INSERT INTO user_profiles VALUES (7, 'default', gen_random_uuid())`); err != nil {
+		t.Fatal(err)
+	}
+	registerForSession(t, repo, "live")
+	h := wakeHarness{t: t, pool: pool, relayed: make(chan relayedWake, 4)}
+	node := profileSetWakeSystem(t, pool, repo, nil, h.relayed)
+	clear, _ := profileedits.WithRequest(t.Context())
+	if !node.WakeProfileSetDevices(clear, 7) || h.attempts() != 2 {
+		t.Fatalf("wake after a clear: %d attempts, want 2 and a true answer", h.attempts())
+	}
+	h.receive(2)
+	waitForWakeEnded(t, node)
+}
+
 // The relay mode follows the attempt's trigger: alerts and the
 // administrator's test push keep the alert mode and the delivery's collapse
 // ID, and only a profile set wake is a background wake.

@@ -395,12 +395,12 @@ func overrideToken(contract *settingscontract.Manifest, userID int, row *usersto
 		parts = append(parts, part)
 	}
 	doc, err := json.Marshal(struct {
-		Version int                 `json:"v"`
-		Account int                 `json:"a"`
-		Profile string              `json:"p"`
-		Field   string              `json:"f"`
-		Parts   []overrideTokenPart `json:"parts"`
-	}{2, userID, row.ID, field, parts})
+		Version int    `json:"v"`
+		Account int    `json:"a"`
+		Profile string `json:"p"`
+		// Parts[0] is the field itself, named by its Field.
+		Parts []overrideTokenPart `json:"parts"`
+	}{3, userID, row.ID, parts})
 	if err != nil {
 		return "", err
 	}
