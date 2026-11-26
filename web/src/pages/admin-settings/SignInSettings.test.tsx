@@ -1195,6 +1195,67 @@ describe("SignInSettings password sign-in", () => {
     ).toBeInTheDocument();
     expect(confirm).toBeEnabled();
   });
+
+  it.each([
+    ["nobody affected", () => {}, "Every account can still sign in after this."],
+    [
+      "a list",
+      () => {
+        localOff.admin_link = { items: [account(50, "administrator")], total: 1 };
+      },
+      "person50",
+    ],
+  ])(
+    "shows a failed reload as a load failure, not the cached answer (%s)",
+    async (_name, seed, cached) => {
+      const user = userEvent.setup();
+      seed();
+      mount();
+      await user.click(passwordSwitch());
+      let dialog = await screen.findByRole("alertdialog");
+      await within(dialog).findByText(cached);
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+      failures["GET /api/v2/admin/sign-in/local-password-off/accounts"] = problem(
+        "internal_error",
+        500,
+      );
+      await user.click(passwordSwitch());
+      dialog = await screen.findByRole("alertdialog");
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        "Couldn't check which accounts this affects",
+      );
+      expect(within(dialog).queryByText(cached)).toBeNull();
+      await user.click(within(dialog).getByRole("button", { name: "Turn off password sign-in" }));
+      expect(state.setValue).toHaveBeenCalledWith("auth.local_password_login", "false");
+    },
+  );
+
+  it("keeps the shown accounts when Show more fails, and retries", async () => {
+    const user = userEvent.setup();
+    localOff.email_match = { items: Array.from({ length: 8 }, (_, i) => account(i + 1)), total: 8 };
+    mount();
+    await user.click(passwordSwitch());
+    const dialog = await screen.findByRole("alertdialog");
+    const group = await within(dialog).findByRole("region", {
+      name: "8 accounts connect by email",
+    });
+    failures["GET /api/v2/admin/sign-in/local-password-off/accounts"] = problem(
+      "internal_error",
+      500,
+    );
+    await user.click(within(group).getByRole("button", { name: "Show 3 more" }));
+    expect(await within(group).findByRole("alert")).toHaveTextContent(
+      "Couldn't load more accounts",
+    );
+    expect(within(group).getAllByRole("listitem")).toHaveLength(5);
+    expect(within(dialog).queryByText(/Couldn't check which accounts/)).toBeNull();
+
+    delete failures["GET /api/v2/admin/sign-in/local-password-off/accounts"];
+    await user.click(within(group).getByRole("button", { name: "Show 3 more" }));
+    await waitFor(() => expect(within(group).getAllByRole("listitem")).toHaveLength(8));
+    expect(within(group).queryByRole("alert")).toBeNull();
+  });
 });
 
 /** Confirms the open "Turn off password sign-in?" dialog. */

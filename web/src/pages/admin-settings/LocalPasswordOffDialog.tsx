@@ -54,15 +54,17 @@ interface LocalPasswordOffDialogProps extends LocalPasswordOffContext {
 }
 
 /**
- * A group's state for the dialog. A first load or a reload (the dialog
- * reopened, or its values changed) is loading, so a cached answer from an
- * earlier opening is never confirmed against; fetching a further page is not.
+ * A group's state for the dialog, which never presents an answer older than
+ * its current opening. A first load or a reload (the dialog reopened, or its
+ * values changed) is loading, and a reload that fails is a load failure
+ * whatever an earlier opening cached. A failed Show more is neither: the
+ * pages already shown stay, with a retry (AccountGroup).
  */
 function groupState(query: GroupQuery) {
   const pages = query.data?.pages ?? [];
   return {
     loading: query.isPending || (query.isFetching && !query.isFetchingNextPage),
-    failed: query.isError && !query.isFetchingNextPage && pages.length === 0,
+    failed: query.isError && !query.isFetchNextPageError,
     accounts: pages.flatMap((page) => page.items),
     totals: pages[0]?.totals,
   };
@@ -233,9 +235,9 @@ function AccountGroup({
           );
         })}
       </ul>
-      {query.isError && query.hasNextPage ? (
+      {query.isFetchNextPageError ? (
         <p role="alert" className="text-destructive">
-          {t("web.admin.settings.signIn.passwordsOff.loadFailed")}
+          {t("web.admin.settings.signIn.passwordsOff.moreFailed")}
         </p>
       ) : null}
       {more > 0 && query.hasNextPage ? (
