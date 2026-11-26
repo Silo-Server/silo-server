@@ -2175,11 +2175,8 @@ func (h *LibraryCollectionHandler) itemListResponsesOf(ctx context.Context, item
 	out := make([]itemListResponse, 0, len(items))
 	for _, item := range items {
 		resp := h.itemListResponseOf(ctx, item)
-		if meta, ok := episodes[item.ContentID]; ok && item.Type == itemTypeEpisode {
-			resp.SeriesID = meta.SeriesID
-			resp.SeriesTitle = meta.SeriesTitle
-			resp.SeasonNumber = meta.SeasonNumber
-			resp.EpisodeNumber = meta.EpisodeNumber
+		if meta, ok := episodes[item.ContentID]; ok {
+			setEpisodeCardIdentity(&resp, meta)
 		}
 		out = append(out, resp)
 	}

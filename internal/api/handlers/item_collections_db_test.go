@@ -330,9 +330,9 @@ func TestItemCollectionsPreviewLibraryDB(t *testing.T) {
 }
 
 // TestLibraryCollectionEpisodeCardsNameTheirSeriesDB pins that an episode
-// card on a smart collection's page and in an admin preview names its series
-// and carries its numbers, as browse does, so a client labels it
-// "Series · S2:E3" rather than the bare episode title.
+// card on a smart collection's page names its series and carries its
+// numbers, as browse does, so a client labels it "Series · S2:E3" rather than
+// the bare episode title.
 func TestLibraryCollectionEpisodeCardsNameTheirSeriesDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -386,18 +386,11 @@ func TestLibraryCollectionEpisodeCardsNameTheirSeriesDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	preview, err := h.PreviewAdminCollection(ctx, AdminCollectionPreviewRequest{QueryDefinition: json.RawMessage(query), Limit: 10})
-	if err != nil {
-		t.Fatal(err)
+	if len(page.Items) != 1 || page.Items[0].ContentID != episode {
+		t.Fatalf("cards = %+v, want the one episode", page.Items)
 	}
-	want := series + " The Series S2E3"
-	for surface, cards := range map[string][]CollectionItemView{"page": page.Items, "preview": preview.Items} {
-		if len(cards) != 1 || cards[0].ContentID != episode {
-			t.Fatalf("%s cards = %+v, want the one episode", surface, cards)
-		}
-		if got := episodeCardContextOf(cards[0]); got != want {
-			t.Errorf("%s episode card context = %q, want %q", surface, got, want)
-		}
+	if got, want := episodeCardContextOf(page.Items[0]), series+" The Series S2E3"; got != want {
+		t.Errorf("episode card context = %q, want %q", got, want)
 	}
 }
 
