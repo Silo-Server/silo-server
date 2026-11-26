@@ -70,7 +70,7 @@ func registerAdminCatalogMatch(reg *Registry) {
 		return Operation{Operation: humaOp("POST", Prefix+"/admin/items/{id}/match/"+suffix, id, "admin-catalog", "Search or apply provider matches for an authorized catalog item."), Class: ClassPermissionGated, Permission: policy.PermissionMetadataCuration, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable}
 	}
 	hints := Operation{Operation: humaOp("GET", Prefix+"/admin/items/{id}/match/hints", "getAdminItemMatchHints", "admin-catalog", "Read the title, year, and provider IDs the scanner parsed from an authorized catalog item's folder and file names."), Class: ClassPermissionGated, Permission: policy.PermissionMetadataCuration, ServiceBacked: true}
-	Register(reg, hints, func(ctx context.Context, in *AdminMatchHintsInput) (*AdminMatchHintsOutput, error) {
+	Register(reg, withOrigins(hints, grantedRefusedCatalogEdit), func(ctx context.Context, in *AdminMatchHintsInput) (*AdminMatchHintsOutput, error) {
 		if reg.deps.AdminCatalogMatch == nil {
 			return nil, unavailable("item matching")
 		}
@@ -84,7 +84,7 @@ func registerAdminCatalogMatch(reg *Registry) {
 		}
 		return &AdminMatchHintsOutput{Body: AdminMatchHints{Title: result.Title, Year: result.Year, ProviderIDs: NonNilMap(result.ProviderIDs)}}, nil
 	})
-	Register(reg, op("search", "searchAdminItemMatches"), func(ctx context.Context, in *AdminMatchSearchInput) (*AdminMatchSearchOutput, error) {
+	Register(reg, withOrigins(op("search", "searchAdminItemMatches"), grantedRefusedCatalogEdit), func(ctx context.Context, in *AdminMatchSearchInput) (*AdminMatchSearchOutput, error) {
 		if reg.deps.AdminCatalogMatch == nil {
 			return nil, unavailable("item matching")
 		}
@@ -113,7 +113,7 @@ func registerAdminCatalogMatch(reg *Registry) {
 		}
 		return &AdminMatchSearchOutput{Body: AdminMatchCandidates{Candidates: rows, Truncated: truncated}}, nil
 	})
-	Register(reg, op("apply", "applyAdminItemMatch"), func(ctx context.Context, in *AdminMatchApplyInput) (*AdminMatchApplyOutput, error) {
+	Register(reg, withOrigins(op("apply", "applyAdminItemMatch"), grantedRefusedCatalogEdit), func(ctx context.Context, in *AdminMatchApplyInput) (*AdminMatchApplyOutput, error) {
 		if reg.deps.AdminCatalogMatch == nil {
 			return nil, unavailable("item matching")
 		}

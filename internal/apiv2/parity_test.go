@@ -43,12 +43,18 @@ const storeDownSession = "s-store-down"
 // remotePlaybackSession is a remote-playback handoff session bound to p-owner.
 const remotePlaybackSession = "s-remote-playback"
 
+// grantedAppSessionID is member 1's session another app's key opened.
+const grantedAppSessionID = "s-granted-app"
+
 func (f fakeSessions) ActiveSession(_ context.Context, id string, _ int) (auth.SessionAuthority, bool, error) {
 	if id == storeDownSession {
 		return auth.SessionAuthority{}, false, errors.New("checking session validity: dial tcp: connection refused")
 	}
 	if id == remotePlaybackSession {
 		return auth.SessionAuthority{Role: "user", Purpose: models.SessionPurposeRemotePlayback, BoundProfileID: "p-owner"}, true, nil
+	}
+	if id == grantedAppSessionID {
+		return auth.SessionAuthority{Role: "user", Purpose: models.SessionPurposeAccount, Kind: auth.SessionKindGrantedApp}, true, nil
 	}
 	role, ok := f.roles[id]
 	return auth.SessionAuthority{Role: role, Purpose: models.SessionPurposeAccount}, ok, nil
@@ -139,6 +145,11 @@ const (
 	householdAPIKeyToken = "sa_household"
 	// remotePlaybackToken is member 1's remote-playback handoff session.
 	remotePlaybackToken = "tok-remote-playback"
+	// grantedAppToken is member 1's session another app's key opened.
+	grantedAppToken = "tok-granted-app"
+	// deviceLoginToken is member 1's session a device signed in by code
+	// opened: no kind of its own, so it passes like a password session.
+	deviceLoginToken = "tok-device-login"
 	// storeDownToken is member 1's token for a session the store cannot
 	// look up (the database is unreachable).
 	storeDownToken = "tok-store-down"
@@ -207,10 +218,12 @@ func fakeAuth(users map[int]*models.User) *apimw.AuthMiddleware {
 		demotedToken:           {UserID: 1, Role: "admin", SessionID: "s1", TokenType: auth.TokenTypeAccess},
 		householdToken:         {UserID: householdUserID, Role: "user", SessionID: "s5", TokenType: auth.TokenTypeAccess},
 		storeDownToken:         {UserID: 1, Role: "user", SessionID: storeDownSession, TokenType: auth.TokenTypeAccess},
+		grantedAppToken:        {UserID: 1, Role: "user", SessionID: grantedAppSessionID, TokenType: auth.TokenTypeAccess},
+		deviceLoginToken:       {UserID: 1, Role: "user", SessionID: "s6", TokenType: auth.TokenTypeAccess},
 		remotePlaybackToken:    {UserID: 1, Role: "user", SessionID: remotePlaybackSession, TokenType: auth.TokenTypeAccess, SessionPurpose: models.SessionPurposeRemotePlayback, ProfileID: "p-owner"},
 	}
 	keys := fakeAPIKeys{map[string]*models.APIKey{apiKeyToken: {ID: 7, UserID: 1}, householdAPIKeyToken: {ID: 11, UserID: householdUserID}}}
-	return apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]string{"s1": "user", "s2": "admin", "s3": "admin", "s4": "user", "s5": "user"}}, keys, fakeUsers{users})
+	return apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]string{"s1": "user", "s2": "admin", "s3": "admin", "s4": "user", "s5": "user", "s6": "user"}}, keys, fakeUsers{users})
 }
 
 func parityDeps(demo bool) Dependencies {

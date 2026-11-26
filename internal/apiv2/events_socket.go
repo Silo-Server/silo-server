@@ -90,7 +90,7 @@ func socketAuthorityUnavailable(err error) *Problem {
 
 func registerEventsSocket(reg *Registry) {
 	mint := Operation{Operation: humaOp(http.MethodPost, Prefix+"/events/ws-ticket", "createEventsSocketTicket", "realtime", "Delegate the current login session, or an API key holding admin:monitor:read, catalog:read, watch:read or notifications, for one realtime handshake."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
-	Register(reg, mint, func(ctx context.Context, _ *struct{}) (*EventsSocketTicketOutput, error) {
+	Register(reg, withOrigins(mint, grantedEvents), func(ctx context.Context, _ *struct{}) (*EventsSocketTicketOutput, error) {
 		svc := reg.deps.EventsSocket
 		if svc == nil {
 			return nil, unavailable("realtime events")

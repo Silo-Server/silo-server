@@ -73,7 +73,7 @@ func registerNotificationDestinationCreate(reg *Registry) {
 	op.Summary = "Create a profile webhook and reveal its signing secret once."
 	op.DefaultStatus = http.StatusCreated
 	op.RetrySafety = RetrySafetyNonRetryable
-	Register(reg, op, func(ctx context.Context, in *NotificationWebhookCreateInput) (*NotificationDestinationCreatedOutput, error) {
+	Register(reg, withOrigins(op, grantedRefusedLeaves), func(ctx context.Context, in *NotificationWebhookCreateInput) (*NotificationDestinationCreatedOutput, error) {
 		svc := reg.deps.NotificationDestinationCreate
 		if svc == nil {
 			return nil, unavailable("notification destinations")

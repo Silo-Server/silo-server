@@ -123,8 +123,15 @@ func (p *pluginAccessResolver) resolve(r *http.Request) pluginAccess {
 	// account's current role rather than the token's.
 	// A remote-playback handoff only plays on its device; plugins are not
 	// part of that.
+	// A session another app's key opened is answered as a caller with no
+	// session, whichever way its token came (the bearer header, the token
+	// query, or a launch cookie minted from it): the plugin-content proxy is
+	// outside the operation registry and its origin gate, and a plugin told
+	// the account and profile would let the app link an account, make a
+	// request or store a credential that outlives its key. It reaches only
+	// what a plugin serves publicly.
 	authority, active, err := p.sessions.ActiveSession(r.Context(), claims.SessionID, claims.UserID)
-	if err != nil || !active || authority.IsRemotePlayback() {
+	if err != nil || !active || authority.IsRemotePlayback() || authority.Kind == auth.SessionKindGrantedApp {
 		return pluginAccess{}
 	}
 	current := *claims

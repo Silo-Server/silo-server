@@ -211,6 +211,9 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				writeUnauthorized(w, "The account's role changed; refresh the access token", ReasonTokenRefreshRequired)
 				return
 			}
+			// How the session was opened rides on the claims, from the
+			// same lookup, for the gates that decide by it.
+			claims.SessionKind = authority.Kind
 			am.sessionLastSeen.Touch(claims.SessionID)
 		}
 
@@ -295,6 +298,7 @@ func (am *AuthMiddleware) sessionClaims(r *http.Request) (claims *auth.Claims, m
 	if claims.PasswordChangeRequired {
 		return nil, true
 	}
+	claims.SessionKind = authority.Kind
 	am.sessionLastSeen.Touch(claims.SessionID)
 	return claims, false
 }

@@ -33,6 +33,11 @@ type WatchTogetherHandler struct {
 	MemberStateCatalog interface {
 		GetSearchItemsByIDsWithAccess(context.Context, []string, catalog.AccessFilter) ([]*models.MediaItem, error)
 	}
+	// StreamLoginSession answers the login session that started a playback
+	// session (its attempt row). A connection of a session another app's key
+	// opened attaches only a stream its own login session started; nil
+	// refuses every such attach.
+	StreamLoginSession func(ctx context.Context, playbackSessionID string) (string, error)
 }
 
 type watchTogetherRoomResponse struct {
@@ -280,7 +285,7 @@ func (h *WatchTogetherHandler) buildRoomResponse(
 // closeTransport ends the connection on the way out, before the room's own
 // writer is torn down, so a close frame the caller owes the peer is sent
 // while the transport is still open.
-func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn *websocket.Conn, roomID string, userID int, profileID string, otherApp bool, closeTransport func()) {
+func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn *websocket.Conn, roomID string, userID int, profileID string, otherApp bool, loginSessionID string, closeTransport func()) {
 	realtimeConn := newWatchTogetherRoomConn(conn)
 	defer func() {
 		closeTransport()
@@ -300,7 +305,7 @@ func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn 
 		if errors.Is(err, watchtogether.ErrRoomNotFound) {
 			_ = writeWebSocketJSON(conn, map[string]string{watchTogetherTypeKey: watchTogetherRoomClosed, watchTogetherReasonKey: watchTogetherNotFound})
 		} else if errors.Is(err, watchtogether.ErrMemberAlreadyConnected) {
-			writeWebSocketError(conn, "forbidden", "This profile is already connected to the room from another device")
+			writeWebSocketError(conn, "forbidden", otherAppSeatHeldMessage)
 		} else if errors.Is(err, watchtogether.ErrRoomClosed) {
 			_ = writeWebSocketJSON(conn, map[string]string{watchTogetherTypeKey: watchTogetherRoomClosed, watchTogetherReasonKey: "ended"})
 		} else {
@@ -336,15 +341,35 @@ func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn 
 			continue
 		}
 
-		if err := h.handleRoomClientMessage(ctx, realtimeConn, reg, userID, profileID, otherApp, data); err != nil {
+		if err := h.handleRoomClientMessage(ctx, realtimeConn, reg, userID, profileID, roomCaller{otherApp: otherApp, loginSessionID: loginSessionID}, data); err != nil {
 			realtimeConn.WriteError("bad_request", err.Error())
 		}
 	}
 }
 
+// otherAppSeatHeldMessage is the error frame's message when a session
+// another app opened would take a member's seat that is still held. The room
+// does not record which login session holds a seat, and a seat stays held for
+// a while after a socket that dropped without closing (or whose API server
+// died), so the holder may be the app's own earlier connection: the message
+// says the seat is held and invites a retry, never which device holds it.
+const otherAppSeatHeldMessage = "This profile's place in the room is still held by another connection; try again shortly"
+
 // errOtherAppTransport refuses a transport request from a session another
 // app opened, as the error frame any refused request gets.
 var errOtherAppTransport = errors.New("watch together transport is not allowed for a sign-in another app opened")
+
+// errOtherAppAttach refuses an attach from a session another app opened of a
+// playback session its own login session did not start.
+var errOtherAppAttach = errors.New("watch together attach is not allowed for a stream this sign-in did not start")
+
+// roomCaller is what the room socket knows of the connection's sign-in.
+type roomCaller struct {
+	// otherApp marks a session another app's key opened.
+	otherApp bool
+	// loginSessionID is the connection's login session.
+	loginSessionID string
+}
 
 func (h *WatchTogetherHandler) handleRoomClientMessage(
 	ctx context.Context,
@@ -352,9 +377,10 @@ func (h *WatchTogetherHandler) handleRoomClientMessage(
 	reg *watchtogether.Registration,
 	userID int,
 	profileID string,
-	otherApp bool,
+	caller roomCaller,
 	data []byte,
 ) error {
+	otherApp := caller.otherApp
 	var base watchTogetherClientMessage
 	if err := json.Unmarshal(data, &base); err != nil {
 		return err
@@ -368,6 +394,9 @@ func (h *WatchTogetherHandler) handleRoomClientMessage(
 		}
 		if msg.SessionID == "" {
 			return errors.New("session_id is required")
+		}
+		if otherApp && !h.ownStream(ctx, caller.loginSessionID, msg.SessionID) {
+			return errOtherAppAttach
 		}
 		_, err := h.Service.AttachSessionForConnection(ctx, reg, userID, profileID, msg.SessionID)
 		return err
@@ -457,4 +486,14 @@ func (h *WatchTogetherHandler) handleRoomClientMessage(
 	default:
 		return errors.New("unsupported room websocket message")
 	}
+}
+
+// ownStream reports whether the caller's login session started the playback
+// session, by its attempt row; a missing row or a failed read is no.
+func (h *WatchTogetherHandler) ownStream(ctx context.Context, loginSessionID, playbackSessionID string) bool {
+	if h.StreamLoginSession == nil || loginSessionID == "" {
+		return false
+	}
+	started, err := h.StreamLoginSession(ctx, playbackSessionID)
+	return err == nil && started == loginSessionID
 }

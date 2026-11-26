@@ -41,10 +41,10 @@ type collectionContinuation struct {
 
 func registerCollectionPaging(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/collections/{id}/items", "getCollectionItems", "collections", "Page collection items in stable order. Restart after a collection change."), Class: ClassProfileScoped, ServiceBacked: true}, func(ctx context.Context, in *PersonalCollectionItemsInput) (*PersonalCollectionItemsOutput, error) {
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/collections/{id}/items", "getCollectionItems", "collections", "Page collection items in stable order. Restart after a collection change."), Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedCollectionRead}, func(ctx context.Context, in *PersonalCollectionItemsInput) (*PersonalCollectionItemsOutput, error) {
 		return reg.personalCollectionPage(ctx, cursors, in)
 	})
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/library/{id}/collections/{collection_id}/items", "getLibraryCollectionItems", "libraries", "Page visible library collection items in stable order. Restart after a collection change."), Class: ClassProfileScoped, ServiceBacked: true}, func(ctx context.Context, in *LibraryCollectionItemsInput) (*CatalogItemCollectionOutput, error) {
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/library/{id}/collections/{collection_id}/items", "getLibraryCollectionItems", "libraries", "Page visible library collection items in stable order. Restart after a collection change."), Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedLibraryRead}, func(ctx context.Context, in *LibraryCollectionItemsInput) (*CatalogItemCollectionOutput, error) {
 		return reg.libraryCollectionPage(ctx, cursors, in)
 	})
 }

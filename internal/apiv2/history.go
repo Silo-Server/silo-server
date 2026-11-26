@@ -79,6 +79,7 @@ func registerHistory(reg *Registry) {
 			"List the acting profile's watch history as catalog cards, most recent watch first."),
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
+		Origins:       grantedProfileState,
 	}, func(ctx context.Context, in *HistoryListInput) (*HistoryCollectionOutput, error) {
 		return reg.listHistory(ctx, cursors, in)
 	})
@@ -86,7 +87,7 @@ func registerHistory(reg *Registry) {
 	remove := humaOp(http.MethodPost, Prefix+"/history/remove", "removeHistoryEntries", "history",
 		"Hide the targets' watches from the acting profile's history; the server chooses the cutoff when this request runs.")
 	remove.DefaultStatus = http.StatusNoContent
-	Register(reg, Operation{Operation: remove, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, reg.removeHistoryEntries)
+	Register(reg, Operation{Operation: remove, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, Origins: grantedProfileState}, reg.removeHistoryEntries)
 }
 
 // listHistory pages the same rows v1 GET /history does, by keyset rather

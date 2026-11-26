@@ -1791,6 +1791,16 @@ func newChiRouter(deps Dependencies) chi.Router {
 				watchTogetherHandler.Details = detailSvc
 				watchTogetherHandler.MemberStateCatalog = itemRepo
 			}
+			if playbackHandler != nil && playbackHandler.PlanStoreV3 != nil {
+				plans := playbackHandler.PlanStoreV3
+				watchTogetherHandler.StreamLoginSession = func(ctx context.Context, playbackSessionID string) (string, error) {
+					record, err := plans.GetAttempt(ctx, playbackSessionID)
+					if err != nil {
+						return "", err
+					}
+					return record.LoginSessionID, nil
+				}
+			}
 		}
 	}
 

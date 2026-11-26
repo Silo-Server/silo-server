@@ -48,10 +48,6 @@ type AppKeyService interface {
 	// session another app opened with a grant, which must not be handed a
 	// personal API key or a linked sign-in.
 	SessionMayIssueCredential(context.Context, *auth.Claims) error
-	// SessionMayReachOtherDevices answers auth.ErrSessionNotAllowed for a
-	// session another app opened with a grant, which sees only its own
-	// entries in the household playback list and may not use web push.
-	SessionMayReachOtherDevices(context.Context, *auth.Claims) error
 }
 
 // credentialSessionProblem refuses handing the account a credential that
@@ -74,51 +70,28 @@ func (reg *Registry) credentialSessionProblem(ctx context.Context, claims *auth.
 }
 
 // sessionReachesOtherDevices reports whether the caller's session may see or
-// change what the account's other devices hold (auth.ActionReachOtherDevices):
-// false for a session another app opened with a grant, true for every other
-// caller, a device sign-in included. Without app keys wired no such session
-// exists.
+// change what the account's other devices hold: false for a session another
+// app's key opened, true for every other caller, a device sign-in included.
+// It reads the claim the authentication gate set from the session lookup
+// (auth.Claims.IsGrantedApp), so it costs no query. The *Problem result is
+// always nil; it keeps the callers' shape.
 func (reg *Registry) sessionReachesOtherDevices(ctx context.Context) (bool, *Problem) {
-	if reg.deps.AppKeys == nil {
-		return true, nil
-	}
-	err := reg.deps.AppKeys.SessionMayReachOtherDevices(ctx, claimsFrom(ctx))
-	switch {
-	case err == nil:
-		return true, nil
-	case errors.Is(err, auth.ErrSessionNotAllowed):
-		return false, nil
-	case errors.Is(err, auth.ErrSessionRevoked):
-		return false, NewProblem(TypeSessionExpired, "The login session is no longer valid.")
-	}
-	return false, serviceProblem(err)
+	return !grantedAppSession(claimsFrom(ctx)), nil
 }
 
 // otherDevicesRule is the caller's login session and the rule a playback
 // service asks, only for a stream another login session started, whether
-// the caller may act on it (auth.SessionMayReachOtherDevices). The rule is
-// nil when app keys are not wired, since no session another app opened
-// exists then.
+// the caller may act on it. The rule is nil for every caller but a session
+// another app's key opened, which it refuses with auth.ErrSessionNotAllowed.
 func (reg *Registry) otherDevicesRule(ctx context.Context) (string, func(context.Context) error) {
 	claims := claimsFrom(ctx)
 	if claims == nil {
 		return "", nil
 	}
-	if reg.deps.AppKeys == nil {
+	if !grantedAppSession(claims) {
 		return claims.SessionID, nil
 	}
-	keys := reg.deps.AppKeys
-	return claims.SessionID, func(ctx context.Context) error { return keys.SessionMayReachOtherDevices(ctx, claims) }
-}
-
-// otherDevicesProblem refuses a session another app opened with a grant
-// (sessionReachesOtherDevices) with 403 permission_denied.
-func (reg *Registry) otherDevicesProblem(ctx context.Context) *Problem {
-	ok, p := reg.sessionReachesOtherDevices(ctx)
-	if p != nil || ok {
-		return p
-	}
-	return NewProblem(TypePermissionDenied, handlers.SessionNotAllowedDetail)
+	return claims.SessionID, func(context.Context) error { return auth.ErrSessionNotAllowed }
 }
 
 // appKeyDomain names the capability in its problems.

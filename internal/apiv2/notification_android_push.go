@@ -109,7 +109,7 @@ func (reg *Registry) androidPushCommand(ctx context.Context, authority AndroidPu
 func registerOrderedAndroidPush(reg *Registry) {
 	capOp := notificationOperation(http.MethodGet, "/push/devices/capabilities", "getPushRegistrationCapabilities")
 	capOp.Summary = "Describe ordered registration support separately from push delivery availability."
-	Register(reg, capOp, func(context.Context, *CapabilityInput) (*AndroidPushRegistrationCapabilityOutput, error) {
+	Register(reg, withOrigins(capOp, grantedCapability), func(context.Context, *CapabilityInput) (*AndroidPushRegistrationCapabilityOutput, error) {
 		return &AndroidPushRegistrationCapabilityOutput{Body: AndroidPushRegistrationCapability{RegistrationAvailable: reg.deps.OrderedAndroidPush != nil && reg.deps.OrderedAndroidPush.OrderedAndroidPushAvailable(), Platforms: []string{notifications.PushPlatformAndroid}, BindsLoginSession: true}}, nil
 	})
 	op := notificationOperation(http.MethodPost, "/push/devices", "registerPushDevice")
@@ -118,10 +118,7 @@ func registerOrderedAndroidPush(reg *Registry) {
 	op.Errors = []int{409}
 	op.MaxBodyBytes = 4096
 	op.Description = nativePushOtherAppRule
-	Register(reg, op, func(ctx context.Context, in *AndroidPushRegistrationInput) (*AndroidPushRegistrationOutput, error) {
-		if p := reg.otherDevicesProblem(ctx); p != nil {
-			return nil, p
-		}
+	Register(reg, withOrigins(op, grantedRefusedOtherDevice), func(ctx context.Context, in *AndroidPushRegistrationInput) (*AndroidPushRegistrationOutput, error) {
 		cmd, err := reg.androidPushCommand(ctx, in.AndroidPushAuthority, in.Body.DeviceID)
 		if err != nil {
 			return nil, err
@@ -139,10 +136,7 @@ func registerOrderedAndroidPush(reg *Registry) {
 	remove.DefaultStatus = http.StatusNoContent
 	remove.Errors = []int{409}
 	remove.Description = nativePushOtherAppRule
-	Register(reg, remove, func(ctx context.Context, in *AndroidPushRemovalInput) (*struct{}, error) {
-		if p := reg.otherDevicesProblem(ctx); p != nil {
-			return nil, p
-		}
+	Register(reg, withOrigins(remove, grantedRefusedOtherDevice), func(ctx context.Context, in *AndroidPushRemovalInput) (*struct{}, error) {
 		cmd, err := reg.androidPushCommand(ctx, in.AndroidPushAuthority, in.DeviceID)
 		if err != nil {
 			return nil, err

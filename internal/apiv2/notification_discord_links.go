@@ -40,7 +40,7 @@ func registerNotificationDiscordLinks(reg *Registry) {
 	init.Summary = "Begin one account-bound Discord consent flow."
 	init.Description = discordManagementDescription
 	init.RetrySafety = RetrySafetyNonRetryable
-	Register(reg, init, func(ctx context.Context, _ *struct{}) (*NotificationDiscordLinkOutput, error) {
+	Register(reg, withOrigins(init, grantedRefusedLeaves), func(ctx context.Context, _ *struct{}) (*NotificationDiscordLinkOutput, error) {
 		if p := reg.requireDiscordNotificationManagement(ctx); p != nil {
 			return nil, p
 		}

@@ -200,7 +200,7 @@ type NotificationPushDisplayOutput struct{ Body NotificationPushDisplay }
 func registerNotificationInbox(reg *Registry) {
 	display := notificationOperation(http.MethodGet, "/push/apple/display/{delivery_id}", notificationApplePushDisplayOperation)
 	display.Summary = "Read compact display metadata for an Apple push notification."
-	Register(reg, display, func(ctx context.Context, in *NotificationPushDisplayInput) (*NotificationPushDisplayOutput, error) {
+	Register(reg, withOrigins(display, grantedInbox), func(ctx context.Context, in *NotificationPushDisplayInput) (*NotificationPushDisplayOutput, error) {
 		svc, p := reg.notificationInbox()
 		if p != nil {
 			return nil, p
@@ -212,7 +212,7 @@ func registerNotificationInbox(reg *Registry) {
 		return &NotificationPushDisplayOutput{Body: NotificationPushDisplay{DeliveryID: ID(view.DeliveryID), Title: view.Title, Body: view.Body, ThreadID: view.ThreadID, Category: view.Category, URL: view.URL}}, nil
 	})
 	cursors := NewCursors(reg.deps.CursorSecret)
-	Register(reg, notificationOperation(http.MethodGet, "/capabilities", "getNotificationCapabilities"), func(ctx context.Context, _ *CapabilityInput) (*NotificationCapabilitiesOutput, error) {
+	Register(reg, withOrigins(notificationOperation(http.MethodGet, "/capabilities", "getNotificationCapabilities"), grantedCapability), func(ctx context.Context, _ *CapabilityInput) (*NotificationCapabilitiesOutput, error) {
 		svc := reg.deps.NotificationInbox
 		if svc == nil {
 			body := notificationCapabilitiesOf(handlers.NotificationCapabilitiesView{})
@@ -229,7 +229,7 @@ func registerNotificationInbox(reg *Registry) {
 		}
 		return &NotificationCapabilitiesOutput{Body: body}, nil
 	})
-	Register(reg, notificationOperation(http.MethodGet, "", "listNotifications"), func(ctx context.Context, in *NotificationListInput) (*NotificationListOutput, error) {
+	Register(reg, withOrigins(notificationOperation(http.MethodGet, "", "listNotifications"), grantedInbox), func(ctx context.Context, in *NotificationListInput) (*NotificationListOutput, error) {
 		svc, p := reg.notificationInbox()
 		if p != nil {
 			return nil, p
@@ -268,7 +268,7 @@ func registerNotificationInbox(reg *Registry) {
 		out.Body.ReadCutoff = cutoff
 		return out, nil
 	})
-	Register(reg, notificationOperation(http.MethodGet, "/sync", "syncNotifications"), func(ctx context.Context, in *NotificationSyncInput) (*NotificationSyncOutput, error) {
+	Register(reg, withOrigins(notificationOperation(http.MethodGet, "/sync", "syncNotifications"), grantedInbox), func(ctx context.Context, in *NotificationSyncInput) (*NotificationSyncOutput, error) {
 		svc, p := reg.notificationInbox()
 		if p != nil {
 			return nil, p
@@ -312,7 +312,7 @@ func registerNotificationInbox(reg *Registry) {
 		out.Body.InitialSnapshot = since == nil
 		return out, nil
 	})
-	Register(reg, notificationOperation(http.MethodGet, "/unread-count", "getNotificationUnreadCount"), func(ctx context.Context, _ *struct{}) (*NotificationCountOutput, error) {
+	Register(reg, withOrigins(notificationOperation(http.MethodGet, "/unread-count", "getNotificationUnreadCount"), grantedInbox), func(ctx context.Context, _ *struct{}) (*NotificationCountOutput, error) {
 		svc, p := reg.notificationInbox()
 		if p != nil {
 			return nil, p
@@ -325,7 +325,7 @@ func registerNotificationInbox(reg *Registry) {
 		out.Body.Count = count
 		return out, nil
 	})
-	Register(reg, notificationOperation(http.MethodGet, "/{id}", "getNotification"), func(ctx context.Context, in *NotificationItemInput) (*NotificationItemOutput, error) {
+	Register(reg, withOrigins(notificationOperation(http.MethodGet, "/{id}", "getNotification"), grantedInbox), func(ctx context.Context, in *NotificationItemInput) (*NotificationItemOutput, error) {
 		svc, p := reg.notificationInbox()
 		if p != nil {
 			return nil, p
@@ -338,7 +338,7 @@ func registerNotificationInbox(reg *Registry) {
 	})
 	one := notificationOperation(http.MethodPost, "/{id}/read", "markNotificationRead")
 	one.DefaultStatus = 204
-	Register(reg, one, func(ctx context.Context, in *NotificationItemInput) (*struct{}, error) {
+	Register(reg, withOrigins(one, grantedInbox), func(ctx context.Context, in *NotificationItemInput) (*struct{}, error) {
 		svc, p := reg.notificationInbox()
 		if p != nil {
 			return nil, p
@@ -350,7 +350,7 @@ func registerNotificationInbox(reg *Registry) {
 	})
 	all := notificationOperation(http.MethodPost, "/read-all", "markNotificationsRead")
 	all.DefaultStatus = 204
-	Register(reg, all, func(ctx context.Context, in *NotificationReadAllInput) (*struct{}, error) {
+	Register(reg, withOrigins(all, grantedInbox), func(ctx context.Context, in *NotificationReadAllInput) (*struct{}, error) {
 		svc, p := reg.notificationInbox()
 		if p != nil {
 			return nil, p
@@ -364,7 +364,7 @@ func registerNotificationInbox(reg *Registry) {
 		}
 		return &struct{}{}, nil
 	})
-	Register(reg, notificationOperation(http.MethodGet, "/preferences", "getNotificationPreferences"), func(ctx context.Context, _ *struct{}) (*NotificationPreferencesOutput, error) {
+	Register(reg, withOrigins(notificationOperation(http.MethodGet, "/preferences", "getNotificationPreferences"), grantedSettingsRead), func(ctx context.Context, _ *struct{}) (*NotificationPreferencesOutput, error) {
 		svc, p := reg.notificationInbox()
 		if p != nil {
 			return nil, p
@@ -375,7 +375,7 @@ func registerNotificationInbox(reg *Registry) {
 		}
 		return &NotificationPreferencesOutput{Body: notificationPreferencesOf(prefs)}, nil
 	})
-	Register(reg, notificationOperation(http.MethodPut, "/preferences", "updateNotificationPreferences"), func(ctx context.Context, in *NotificationPreferencesInput) (*NotificationPreferencesOutput, error) {
+	Register(reg, withOrigins(notificationOperation(http.MethodPut, "/preferences", "updateNotificationPreferences"), grantedRefusedNotifyPrefs), func(ctx context.Context, in *NotificationPreferencesInput) (*NotificationPreferencesOutput, error) {
 		svc, p := reg.notificationInbox()
 		if p != nil {
 			return nil, p
@@ -403,7 +403,7 @@ func registerNotificationInbox(reg *Registry) {
 // once: the display-token path before the long-lived token's session lookup,
 // the access-token path after RequireAuth. A credential that does not validate
 // is refused before any limiter, as on every other authenticated operation.
-func notificationDisplayGateChain(deps Dependencies) ([]func(http.Handler) http.Handler, string) {
+func notificationDisplayGateChain(deps Dependencies, origins OriginDecisions) ([]func(http.Handler) http.Handler, string) {
 	if deps.Auth == nil {
 		return nil, "auth"
 	}
@@ -420,7 +420,10 @@ func notificationDisplayGateChain(deps Dependencies) ([]func(http.Handler) http.
 		}
 		return h
 	}
-	fallback := func(next http.Handler) http.Handler { return deps.Auth.RequireAuth(limited(next)) }
+	// A login session's bearer is judged by the operation's origin
+	// decisions as on every other route; the display token is not a login
+	// session and carries no session kind.
+	fallback := func(next http.Handler) http.Handler { return deps.Auth.RequireAuth(originGate(origins)(limited(next))) }
 	return []func(http.Handler) http.Handler{deps.Auth.RequireApplePushDisplayAuth(fallback, deps.RateLimit, viewer)}, ""
 }
 

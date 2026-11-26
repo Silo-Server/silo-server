@@ -102,7 +102,7 @@ func registerAppCodes(reg *Registry) {
 	session.Errors = []int{http.StatusForbidden, http.StatusConflict, http.StatusTooManyRequests}
 	sessionOp := mainProfileOnly(Operation{Operation: session, RetrySafety: RetrySafetyNonRetryable, ServiceBacked: true, Audited: true,
 		RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 1 << 10})
-	Register(reg, sessionOp, reg.createAppCode)
+	Register(reg, withOrigins(sessionOp, grantedRefusedSignIn), reg.createAppCode)
 
 	redeem := humaOp(http.MethodPost, Prefix+"/auth/app-codes/redeem", "redeemAppCode", "app-keys",
 		"Enroll a person key and a device key with an app code and open the device's login session.")
@@ -115,7 +115,7 @@ func registerAppCodes(reg *Registry) {
 	sessionAccess := humaOp(http.MethodGet, Prefix+"/auth/keys/session", "getAppKeySessionAccess", "app-keys",
 		"Describe what the caller's login session may do with the account's app keys.")
 	sessionAccess.Description = "So a page can tell, before it asks, whether this session may list or manage keys, and whether signing in again would help. Answers while auth.app_key_sign_in is off; read getAppKeyCapability for the switch. approve follows the X-Profile-Id the request declares."
-	Register(reg, Operation{Operation: sessionAccess, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, reg.getAppKeySessionAccess)
+	Register(reg, Operation{Operation: sessionAccess, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, Origins: grantedOwnSession}, reg.getAppKeySessionAccess)
 
 	declareRetryAfter(reg, "Seconds to wait before asking again.", sessionOp)
 	declareRetryAfter(reg, "Seconds to wait before asking again, on a fresh challenge.", redeemOp)

@@ -66,6 +66,7 @@ func registerRatings(reg *Registry) {
 			"List the acting profile's ratings, most recently rated first; items the viewer may not see are omitted."),
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
+		Origins:       grantedProfileState,
 	}, func(ctx context.Context, in *RatingListInput) (*RatingCollectionOutput, error) {
 		return reg.listRatings(ctx, cursors, in)
 	})
@@ -74,15 +75,16 @@ func registerRatings(reg *Registry) {
 			"Answer the acting profile's rating of the item, or 404 when the profile has not rated it (or the viewer may not see it)."),
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
+		Origins:       grantedProfileState,
 	}, reg.getRating)
 	set := humaOp(http.MethodPut, Prefix+"/ratings/{item_id}", "setRating", "ratings",
 		"Set the acting profile's rating of the item, replacing any earlier rating; automatic retries repeat the rating timestamp and recommendation refresh.")
 	set.DefaultStatus = http.StatusNoContent
-	Register(reg, Operation{Operation: set, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, reg.setRating)
+	Register(reg, Operation{Operation: set, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, Origins: grantedProfileState}, reg.setRating)
 	del := humaOp(http.MethodDelete, Prefix+"/ratings/{item_id}", "deleteRating", "ratings",
 		"Remove the acting profile's rating of the item; an absent rating succeeds, but automatic retries repeat the recommendation refresh.")
 	del.DefaultStatus = http.StatusNoContent
-	Register(reg, Operation{Operation: del, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, reg.deleteRating)
+	Register(reg, Operation{Operation: del, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, Origins: grantedProfileState}, reg.deleteRating)
 }
 
 // getRating answers the rating of an item the viewer may see; an item

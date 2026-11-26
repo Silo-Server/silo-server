@@ -167,7 +167,7 @@ func registerPersonalAPIKeys(reg *Registry) {
 		}
 		return o
 	}
-	Register(reg, op(http.MethodGet, "/api-keys/scopes", "getPersonalAPIKeyScopes"), func(ctx context.Context, _ *struct{}) (*PersonalAPIKeyScopesOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "/api-keys/scopes", "getPersonalAPIKeyScopes"), grantedRefusedAccountSetup), func(ctx context.Context, _ *struct{}) (*PersonalAPIKeyScopesOutput, error) {
 		out := new(PersonalAPIKeyScopesOutput)
 		out.Body.Available = reg.deps.PersonalAPIKeys != nil
 		out.Body.Scopes = auth.APIKeyScopeCatalog()
@@ -191,7 +191,7 @@ func registerPersonalAPIKeys(reg *Registry) {
 	list.ProfileOptional = true
 	list.HouseholdProfileGate = true
 	list.Description = "The account's primary profile lists every key on the account; any other profile lists only the keys bound to it. A request without X-Profile-Id lists them all while no profile on the account is PIN-protected or access-restricted, and is otherwise 422, as on the catalog reads. This is for a login session: an API key cannot list keys and receives 403 permission_denied."
-	Register(reg, list, func(ctx context.Context, in *CursorListInput) (*PersonalAPIKeyListOutput, error) {
+	Register(reg, withOrigins(list, grantedRefusedSignIn), func(ctx context.Context, in *CursorListInput) (*PersonalAPIKeyListOutput, error) {
 		userID, p := personalAPIKeyAccount(ctx)
 		if p != nil {
 			return nil, p
@@ -250,7 +250,7 @@ func registerPersonalAPIKeys(reg *Registry) {
 	create.ProfileOptional = true
 	create.Description = "A server admin's login session creates an account key (no profile_id) acting through the account's primary profile: X-Profile-Id must name the primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied. A request without X-Profile-Id is accepted only while no profile on the account is PIN-protected or access-restricted (content-rating, advisory-age or library limits); otherwise it is 403 permission_denied. While user_keys_enabled is true (getPersonalAPIKeyScopes), any account may also create keys that carry user scopes only: the primary profile an account key or a key bound to any profile of the account (profile_id), and any other profile a key bound to itself, each with its own X-Profile-Token when PIN-protected. Past max_user_keys the request is 409 conflict."
 	create.Errors = append(create.Errors, http.StatusConflict)
-	Register(reg, create, func(ctx context.Context, in *PersonalAPIKeyCreateInput) (*PersonalAPIKeyCreatedOutput, error) {
+	Register(reg, withOrigins(create, grantedRefusedSignIn), func(ctx context.Context, in *PersonalAPIKeyCreateInput) (*PersonalAPIKeyCreatedOutput, error) {
 		userID, p := personalAPIKeyAccount(ctx)
 		if p != nil {
 			return nil, p
@@ -298,7 +298,7 @@ func registerPersonalAPIKeys(reg *Registry) {
 	revoke.ProfileOptional = true
 	revoke.HouseholdProfileGate = true
 	revoke.Description = "Revokes a key the caller can list (listPersonalAPIKeys); any other key is 404. This is for a login session: an API key cannot revoke keys and receives 403 permission_denied."
-	Register(reg, revoke, func(ctx context.Context, in *PersonalAPIKeyIDInput) (*struct{}, error) {
+	Register(reg, withOrigins(revoke, grantedRefusedSignIn), func(ctx context.Context, in *PersonalAPIKeyIDInput) (*struct{}, error) {
 		userID, p := personalAPIKeyAccount(ctx)
 		if p != nil {
 			return nil, p

@@ -33,7 +33,7 @@ func registerSubtitleAICreate(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/subtitles/ai/translate", "createSubtitleAIJob", "subtitles", "Start subtitle translation or transcription for an accessible file."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
 	op.DefaultStatus = http.StatusAccepted
 	op.Description = "Send once. Active-job deduplication does not provide durable request replay or worker recovery. Optional live delivery requires the caller's local playback session and exact file; it is best effort and is not attached to an existing deduplicated job. Poll the returned job for persisted outcome."
-	Register(reg, op, func(ctx context.Context, in *SubtitleAICreateInput) (*SubtitleAICreateOutput, error) {
+	Register(reg, withOrigins(op, grantedRefusedSubtitleEdit), func(ctx context.Context, in *SubtitleAICreateInput) (*SubtitleAICreateOutput, error) {
 		id, p := in.Body.MediaFileID.positive("body.media_file_id")
 		if p != nil {
 			return nil, p

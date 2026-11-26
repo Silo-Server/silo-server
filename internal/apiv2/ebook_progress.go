@@ -48,15 +48,18 @@ func registerEbookProgress(reg *Registry) {
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/capabilities/ebooks", "getEbookCapability", "ebooks", "Discover ordered reader progress and Kindle conversion support."),
 		Class:     ClassProfileScoped,
+		Origins:   grantedCapability,
 	}, reg.getEbookCapability)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/ebooks/{content_id}/progress", "getEbookProgress", "ebooks", "Read the acting profile's saved ebook position."),
 		Class:     ClassProfileScoped, ServiceBacked: true,
+		Origins: grantedProfileState,
 	}, reg.getEbookProgress)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodPut, Prefix+"/ebooks/{content_id}/progress", "saveEbookProgress", "ebooks", "Save an ebook position only when its client event time is newer; return the current position."),
 		Class:     ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyDomainIdentity,
 		MaxBodyBytes: 16 << 10,
+		Origins:      grantedProfileState,
 	}, reg.saveEbookProgress)
 }
 

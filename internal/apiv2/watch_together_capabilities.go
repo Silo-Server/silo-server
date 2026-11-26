@@ -34,7 +34,7 @@ type WatchTogetherCapabilitiesOutput struct {
 
 func registerWatchTogetherCapabilities(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodGet, Prefix+"/watch-together/capabilities", "getWatchTogetherCapabilities", "realtime", "Read which watch-together room behaviors this server supports."), Class: ClassAuthenticated, ServiceBacked: true}
-	Register(reg, op, func(ctx context.Context, _ *CapabilityInput) (*WatchTogetherCapabilitiesOutput, error) {
+	Register(reg, withOrigins(op, grantedCapability), func(ctx context.Context, _ *CapabilityInput) (*WatchTogetherCapabilitiesOutput, error) {
 		svc := reg.deps.WatchTogetherCapability
 		if svc == nil || !svc.WatchTogetherAvailable() {
 			return &WatchTogetherCapabilitiesOutput{Body: WatchTogetherCapabilities{Capability: Capability{State: StateNotConfigured}}}, nil

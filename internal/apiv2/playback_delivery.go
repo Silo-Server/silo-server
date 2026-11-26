@@ -200,7 +200,7 @@ func registerPlaybackDelivery(reg *Registry) {
 		// the original-file stream, which the web player reads from the admin's
 		// media origin.
 		raw := RawOperation{Operation: Operation{Operation: huma.Operation{Method: route.method, Path: Prefix + route.path, OperationID: route.id, Tags: []string{playbackTag}, Parameters: params, Responses: responses}, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, Protocol: route.protocol, Reason: reason, CrossOrigin: strings.HasPrefix(route.path, playbackTranscodePath) || route.protocol == playbackMediaBytesProtocol}
-		RegisterRaw(reg, raw, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		RegisterRaw(reg, withRawOrigins(raw, grantedOwnStreamMedia), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !playbackUUID(chi.URLParam(r, "session_id")) {
 				writeProblem(w, r, validationProblem("path.session_id", "invalid", "Expected a canonical UUID."))
 				return
@@ -215,7 +215,7 @@ func registerPlaybackDelivery(reg *Registry) {
 	fonts := humaOp(http.MethodGet, Prefix+"/stream/{session_id}/subtitles/{track}/fonts", "getPlaybackSubtitleFonts", playbackTag,
 		"Read the attached-font bundle of a session's embedded ASS/SSA subtitle track. Admission is the sidecar's: account authentication, viewer authorization and the session the plan named.")
 	fonts.Errors = []int{http.StatusNotFound, http.StatusGone}
-	Register(reg, Operation{Operation: fonts, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, func(ctx context.Context, in *PlaybackSubtitleFontsInput) (*PlaybackSubtitleFontsOutput, error) {
+	Register(reg, Operation{Operation: fonts, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, Origins: grantedOwnStreamMedia}, func(ctx context.Context, in *PlaybackSubtitleFontsInput) (*PlaybackSubtitleFontsOutput, error) {
 		if !playbackUUID(string(in.SessionID)) {
 			return nil, validationProblem("path.session_id", "invalid", "Expected a canonical UUID.")
 		}

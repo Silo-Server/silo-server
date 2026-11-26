@@ -110,27 +110,27 @@ func registerMarkers(reg *Registry) {
 	write := func(method, path, id string) Operation {
 		return Operation{Operation: humaOp(method, Prefix+path, id, "playback", "Update supplied manual marker segments atomically."), Class: ClassPermissionGated, Permission: policy.PermissionMarkerEdit, HouseholdProfileGate: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
 	}
-	Register(reg, read("/markers/files/{file_id}", "getFileMarkers"), func(ctx context.Context, in *FileMarkerInput) (*FileMarkersOutput, error) {
+	Register(reg, withOrigins(read("/markers/files/{file_id}", "getFileMarkers"), grantedCatalogRead), func(ctx context.Context, in *FileMarkerInput) (*FileMarkersOutput, error) {
 		id, p := in.FileID.positive("path.file_id")
 		if p != nil {
 			return nil, p
 		}
 		return reg.markerRead(ctx, handlers.MarkerTarget{FileID: id})
 	})
-	Register(reg, read("/markers/items/{item_id}", "getItemMarkers"), func(ctx context.Context, in *ItemMarkerInput) (*FileMarkersOutput, error) {
+	Register(reg, withOrigins(read("/markers/items/{item_id}", "getItemMarkers"), grantedCatalogRead), func(ctx context.Context, in *ItemMarkerInput) (*FileMarkersOutput, error) {
 		return reg.markerRead(ctx, handlers.MarkerTarget{ItemID: string(in.ItemID)})
 	})
-	Register(reg, write(http.MethodPut, "/markers/files/{file_id}", "setFileMarkers"), func(ctx context.Context, in *FileMarkerUpdateInput) (*FileMarkersOutput, error) {
+	Register(reg, withOrigins(write(http.MethodPut, "/markers/files/{file_id}", "setFileMarkers"), grantedRefusedCatalogEdit), func(ctx context.Context, in *FileMarkerUpdateInput) (*FileMarkersOutput, error) {
 		id, p := in.FileID.positive("path.file_id")
 		if p != nil {
 			return nil, p
 		}
 		return reg.markerWrite(handlers.MarkerRequestAuditContext(ctx, in.UserAgent), handlers.MarkerTarget{FileID: id}, in.Body, in.RawBody)
 	})
-	Register(reg, write(http.MethodPut, "/markers/items/{item_id}", "setItemMarkers"), func(ctx context.Context, in *ItemMarkerUpdateInput) (*FileMarkersOutput, error) {
+	Register(reg, withOrigins(write(http.MethodPut, "/markers/items/{item_id}", "setItemMarkers"), grantedRefusedCatalogEdit), func(ctx context.Context, in *ItemMarkerUpdateInput) (*FileMarkersOutput, error) {
 		return reg.markerWrite(handlers.MarkerRequestAuditContext(ctx, in.UserAgent), handlers.MarkerTarget{ItemID: string(in.ItemID)}, in.Body, in.RawBody)
 	})
-	Register(reg, write(http.MethodDelete, "/markers/files/{file_id}/{segment}", "clearFileMarkerSegment"), func(ctx context.Context, in *ClearMarkerInput) (*FileMarkersOutput, error) {
+	Register(reg, withOrigins(write(http.MethodDelete, "/markers/files/{file_id}/{segment}", "clearFileMarkerSegment"), grantedRefusedCatalogEdit), func(ctx context.Context, in *ClearMarkerInput) (*FileMarkersOutput, error) {
 		id, p := in.FileID.positive("path.file_id")
 		if p != nil {
 			return nil, p

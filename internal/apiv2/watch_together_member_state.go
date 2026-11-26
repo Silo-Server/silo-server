@@ -48,7 +48,7 @@ func registerWatchTogetherMemberState(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/watch-together/rooms/{room_id}/member-state", "queryWatchTogetherMemberState", "realtime", "Read what each connected room member has watched of the named content: unseen, in progress (with position) or watched, and whether it is on their watchlist. A POST-shaped read: the id set exceeds what a query string carries. Members across API servers are read; inaccessible content ids are omitted."), Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	op.MaxBodyBytes = 16384
 	op.Errors = []int{409}
-	Register(reg, op, func(ctx context.Context, in *WatchTogetherMemberStateInput) (*WatchTogetherMemberStateOutput, error) {
+	Register(reg, withOrigins(op, grantedRoomMember), func(ctx context.Context, in *WatchTogetherMemberStateInput) (*WatchTogetherMemberStateOutput, error) {
 		svc := reg.deps.WatchTogetherMemberState
 		if svc == nil {
 			return nil, unavailable("watch together")

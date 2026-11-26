@@ -203,6 +203,7 @@ func registerProfiles(reg *Registry) {
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		ServiceBacked:   true,
+		Origins:         grantedWhoItIs,
 	}, reg.listProfiles)
 
 	create := humaOp(http.MethodPost, Prefix+"/profiles", "createProfile", "profiles",
@@ -224,6 +225,7 @@ func registerProfiles(reg *Registry) {
 		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
 		Audited:        true,
+		Origins:        grantedRefusedHousehold,
 	}, reg.createProfile)
 
 	update := humaOp(http.MethodPatch, Prefix+"/profiles/{id}", "updateProfile", "profiles",
@@ -251,6 +253,7 @@ func registerProfiles(reg *Registry) {
 		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
 		Audited:        true,
+		Origins:        grantedRefusedHousehold,
 	}, reg.updateProfile)
 
 	del := humaOp(http.MethodDelete, Prefix+"/profiles/{id}", "deleteProfile", "profiles",
@@ -272,6 +275,7 @@ func registerProfiles(reg *Registry) {
 		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
 		Audited:        true,
+		Origins:        grantedRefusedHousehold,
 	}, reg.deleteProfile)
 
 	household := humaOp(http.MethodGet, Prefix+"/profiles/household/sessions", "listHouseholdSessions", "profiles",
@@ -286,6 +290,7 @@ func registerProfiles(reg *Registry) {
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		ServiceBacked:   true,
+		Origins:         grantedOwnStreamsList,
 	}, reg.listHouseholdSessions)
 
 	verify := humaOp(http.MethodPost, Prefix+"/profiles/{id}/verify-pin", "verifyProfilePIN", "profiles",
@@ -302,6 +307,7 @@ func registerProfiles(reg *Registry) {
 		ProfileOptional: true,
 		RetrySafety:     RetrySafetyNonRetryable,
 		ServiceBacked:   true,
+		Origins:         grantedVerifyPIN,
 	}, reg.verifyProfilePIN)
 
 	upload := humaOp(http.MethodPut, Prefix+"/profiles/{id}/avatar", "uploadProfileAvatar", "profiles",
@@ -320,6 +326,7 @@ func registerProfiles(reg *Registry) {
 		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
 		MaxBodyBytes:   maxAvatarFormBytes,
+		Origins:        grantedRefusedHousehold,
 	}, reg.uploadProfileAvatar)
 
 	Register(reg, Operation{
@@ -336,6 +343,7 @@ func registerProfiles(reg *Registry) {
 		DemoRestricted: true,
 		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
+		Origins:        grantedRefusedHousehold,
 	}, reg.deleteProfileAvatar)
 }
 
@@ -704,6 +712,7 @@ func (reg *Registry) listProfiles(ctx context.Context, _ *struct{}) (*ProfileCol
 		if p != nil {
 			return nil, p
 		}
+		profile.RequestsAllowed = profile.RequestsAllowed && reg.memberPermitted(ctx, "listProfiles items[].requests_allowed")
 		items = append(items, profile)
 	}
 	var maxProfiles *int

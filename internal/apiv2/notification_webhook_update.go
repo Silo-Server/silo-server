@@ -32,7 +32,7 @@ func registerNotificationWebhookUpdate(reg *Registry) {
 	op.RetrySafety = RetrySafetyNaturalIdempotent
 	op.MaxBodyBytes = 16384
 	op.Summary = "Update webhook configuration using the original observed validator. Never rebase or replay an uncertain update."
-	Register(reg, op, func(ctx context.Context, in *NotificationWebhookUpdateInput) (*NotificationWebhookUpdateOutput, error) {
+	Register(reg, withOrigins(op, grantedRefusedLeaves), func(ctx context.Context, in *NotificationWebhookUpdateInput) (*NotificationWebhookUpdateOutput, error) {
 		if reg.deps.NotificationDestinations == nil {
 			return nil, unavailable("notification destinations")
 		}
