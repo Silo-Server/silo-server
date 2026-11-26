@@ -87,7 +87,8 @@ func (e *joinEnv) name(label string) string {
 	return strings.ToLower(strings.NewReplacer("/", "-", " ", "-").Replace(label)) + "-" + e.suffix
 }
 
-// redeem redeems code with new keys on a fresh challenge.
+// redeem redeems code with new keys on a fresh challenge. A join enrolls
+// the sent person key, so a successful answer's person_key_id is its ID.
 func (e *joinEnv) redeem(t *testing.T, code string) (*auth.KeySignInResult, error) {
 	t.Helper()
 	challenge, _, err := e.signIn.IssueChallenge(t.Context())
@@ -95,10 +96,14 @@ func (e *joinEnv) redeem(t *testing.T, code string) (*auth.KeySignInResult, erro
 		t.Fatal(err)
 	}
 	person, device := appkeystest.NewKey(t), appkeystest.NewKey(t)
-	return e.signIn.RedeemAppCode(t.Context(), auth.KeyRedeemRequest{
+	result, err := e.signIn.RedeemAppCode(t.Context(), auth.KeyRedeemRequest{
 		KeyRequest: auth.KeyRequest{Envelope: person.Redeem(t, device, joinTestServerID, challenge, code, time.Now()), ServerID: joinTestServerID},
 		PersonKey:  person.Public(),
 	})
+	if err == nil && result.PersonKeyID != person.Public().KeyID() {
+		t.Fatalf("person_key_id = %q, want the sent key %q", result.PersonKeyID, person.Public().KeyID())
+	}
+	return result, err
 }
 
 func (e *joinEnv) invitationAccepted(t *testing.T, id int64) bool {
@@ -193,6 +198,9 @@ func TestJoinWithAppCodeRecordsAddedKeysDB(t *testing.T) {
 		Envelope: person.Redeem(t, device, joinTestServerID, challenge, issued.Code, time.Now()), ServerID: joinTestServerID, IP: clientip.FromContext(ctx)}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if result.PersonKeyStatus != auth.PersonKeyEnrolled || result.PersonKeyID != person.Public().KeyID() {
+		t.Fatalf("person key %s %q, want enrolled %q", result.PersonKeyStatus, result.PersonKeyID, person.Public().KeyID())
 	}
 	row := audittest.One(t, env.pool, auditmutation.ActionAppCodeRedeemed, auditmutation.TargetUser, strconv.Itoa(result.User.ID))
 	for field, want := range map[string]string{"app_code_kind": `"join"`, "device_key_id": `"` + result.DeviceID + `"`, "person_key_kid": `"` + person.Public().KeyID() + `"`} {
