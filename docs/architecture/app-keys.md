@@ -1002,9 +1002,14 @@ A wake is sent once and never retried. Its attempt row is inserted in flight,
 as `retrying` with no `next_retry_at`, and the send records `delivered` or
 `failed`. No claim query selects any of those, so no server's retry sweep,
 including one of the previous release that would send it as an alert, ever
-picks a wake up. A send cut short by a stopping process leaves the row in
-flight; notification retention marks it failed after ten minutes and deletes
-wake rows after seven days.
+picks a wake up. The account's phones are sent one after another, each under
+its own deadline, so a slow relay call delays only its own phone. A send that
+runs out of time, or stops before it records an outcome, is recorded `failed`
+on a fresh context. Only a process that stops mid-send leaves a row in flight.
+The push queue gauge leaves wake rows out, because no worker ever claims one,
+and the daily notification retention run marks a row that has been in flight
+for more than ten minutes as failed. Retention deletes wake rows after seven
+days.
 
 **Mapping.** The first item is always the main profile, which the set never
 creates, deletes or swaps; a set naming the main profile's `sync_id` anywhere
