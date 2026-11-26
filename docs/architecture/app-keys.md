@@ -1814,6 +1814,37 @@ exclusive mode, so the write and the sweep commit together or not at all.
 Turning the switch back on needs nothing: each device signs in again with the
 key it holds.
 
+**What the switch does not end.** A device that a key session approved has a
+session of its own, opened by device sign-in rather than by the key, and stays
+signed in when the switch goes off: a TV signed in by device sign-in, a
+Jellyfin app paired by Quick Connect, and a remote-playback handoff. The TV and
+the Jellyfin app renew like any session; a handoff ends by itself within 24
+hours. To end them, the person ends those sessions from their list of
+sessions (`deleteSession`), or an administrator ends one of the account's
+sessions (`deleteAdminUserLoginSession`) or all of them
+(`deleteAdminUserLoginSessions`, which also deletes the account's
+Jellyfin-compatible and Audiobookshelf sessions). An uncollected device
+sign-in a key session approved in advance is withdrawn when that session ends,
+by the switch or any other way.
+
+What else a key session obtained stops working with it:
+
+| Obtained through a key session | After the switch ends the session | What checks it |
+|---|---|---|
+| Profile token (`X-Profile-Token`) | at once | it travels only with an access token, whose session row is checked on each request |
+| Events socket | within 15 seconds | the session row at connect and every 15 seconds |
+| Playback control socket | within 15 seconds | the same check, every 15 seconds |
+| Watch Together socket | within 15 seconds | the same check, every 15 seconds |
+| Stream reference | at once | the session row on each media request |
+| Plugin token or launch cookie | at once | the session row on each request |
+| Direct download link | refused for new requests at once | the session row when a request starts |
+| Audiobookshelf session | none to end | a key session can't open one: Audiobookshelf sign-in takes a password |
+
+A direct download link's check runs when a request starts, so a transfer
+already running is not cut off by this check. A download the server hands to a
+streaming node redirects to the node with a token the node checks by its
+signature alone, which lasts 15 minutes from the redirect.
+
 Every key path that opens a session, enrolls a key or verifies a signed
 profile set reads the switch again inside its transaction, under the settings
 lock (`lockChain`, which calls `lockAppKeySwitch` right after the account row

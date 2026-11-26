@@ -115,10 +115,21 @@ with a detail that names the accounts (the first ten, then how many more):
   any enabled account signs in only with its keys. Otherwise the write ends
   every login session a key opened, in the same transaction.
 
+Turning app keys off ends every session a key opened. A device such a session
+approved has a session of its own and stays signed in: a TV signed in by
+device sign-in, a Jellyfin app paired by Quick Connect, or a remote-playback
+handoff. The TV and the Jellyfin app renew like any session; a handoff ends by
+itself within 24 hours. To end them, the person ends those sessions from their
+list of sessions (`deleteSession`), or an administrator ends one of the
+account's sessions (`deleteAdminUserLoginSession`) or all of them
+(`deleteAdminUserLoginSessions`, which also deletes the account's
+Jellyfin-compatible and Audiobookshelf sessions). An uncollected device
+sign-in approved in advance is withdrawn when the approving session ends.
+
 `GET /admin/sign-in/accounts-at-risk?change=app_keys_off|local_passwords_off`
 (`listSignInAccountsAtRisk`, acting admin) lists those accounts with their id,
 username, role, `is_owner`, `break_glass`, `has_password` and
-`sign_in_link_expires_at` (always null on this server for now). The app keys
+`sign_in_link_expires_at` (always null: this server makes no sign-in links). The app keys
 list is the same while app keys are already off, where it names the accounts
 that still have no way in. It is not paged.
 
