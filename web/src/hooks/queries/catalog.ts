@@ -561,6 +561,10 @@ export function useCatalogWindow(
     },
     isLoading,
     isError: page0Result.isError || failedVisibleResults.length > 0,
+    // Offline, the data library pauses the first page instead of failing it,
+    // so it reports neither loading nor an error. With no page to show yet,
+    // nothing is known about the result, empty or not.
+    isPaused: page0Result.isPaused && page0Result.data === undefined,
     isPlaceholderData: page0Result.isPlaceholderData,
     error: page0Result.error ?? remainingError,
     // Only the first page speaks for the source itself; a later page failing
