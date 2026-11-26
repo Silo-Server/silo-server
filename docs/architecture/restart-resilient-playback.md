@@ -962,9 +962,13 @@ grant, and the node recipe. The session recipe is written when a transport
 served from the API origin commits, and re-recorded when a sidecar-only replan
 keeps the transport; a proxy-served transport has none, since its grant already
 covers it. A user's stop and an abort drop it on the replica that ends the
-session; a system teardown that leaves the attempt live (an FFmpeg exit)
-keeps it for a transcode the API runs itself, so the next
-request rebuilds as a token would. A remote transcode's teardown drops it,
+session; a system teardown that leaves the attempt live keeps it for a
+transcode the API runs itself, so the next request rebuilds as a token would.
+A local FFmpeg error exit is not a teardown: unless the exit monitor restarts
+the transcode on CPU decode, it drops only the dead transcode and keeps the
+playback session and its recipe, so the next segment request or replan
+rebuilds the transcode, and a client that never returns lets the session
+expire. A remote transcode's teardown drops it,
 since the node job and node recipe go with it. It is
 only a reconstruction aid: the durable v3 attempt row decides whether it may be
 used (same plan, same account and selected profile, not expired, not stopped),

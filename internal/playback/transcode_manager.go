@@ -1280,12 +1280,13 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 // directory, device reservation and transcode map entry) and leaves its
 // playback session to the client (#5336). It runs under the session lifecycle
 // lock that restarts and rebuilds hold, and only while session is still the
-// registered transcode and not running: a segment request that restarted it or
-// registered a successor in the meantime keeps what it started.
+// registered transcode and still crashed (a failed restart counts): a segment
+// request that restarted it, even one whose FFmpeg has since finished cleanly,
+// or registered a successor in the meantime keeps what it started.
 func (m *TranscodeManager) closeCrashedTranscode(sessionID string, session *TranscodeSession) {
 	unlock := m.LockSessionLifecycle(sessionID)
 	defer unlock()
-	if session.IsRunning() {
+	if crashed, _ := session.crashState(); !crashed {
 		return
 	}
 	m.CloseTranscodeSessionIf(sessionID, session, "")
