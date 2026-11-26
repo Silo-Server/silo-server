@@ -5,38 +5,68 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 // TestProvisionAppliesDeclarationThatLeavesNoSignInProviderDB: provisioning
 // applies the operator's declared configuration at startup. A declaration
 // that leaves password sign-in off with no provider people can sign in with
 // is applied, not refused (refusing would leave the server unable to
-// converge on its own configuration), and the provisioning status of the
-// declared sign-in plugin says so. The auth package's rule is stood in for:
-// every check here reports no provider.
+// converge on its own configuration). The provisioning status of the
+// declared sign-in plugin says so while it is true, and stops as soon as
+// password sign-in is back on (a break-glass admin's save and the recovery
+// command both write the setting) or a provider is usable. The auth
+// package's rule is stood in for: sign-in works while the setting is on or
+// the declared binding is on.
 func TestProvisionAppliesDeclarationThatLeavesNoSignInProviderDB(t *testing.T) {
-	previous := signInProviderGuard
-	t.Cleanup(func() { RegisterSignInProviderGuard(previous) })
+	previous := signInCheck
+	t.Cleanup(func() { RegisterSignInCheck(previous) })
 	ctx := t.Context()
 	writer, installation := newConfigProvisionWriter(t, ProvisionPlugin{
 		Version:     "1.2.3",
 		Config:      map[string]map[string]any{"connection": {"label": "saved"}},
 		AuthBinding: &ProvisionAuthBinding{CapabilityID: "login", Enabled: new(false)},
 	})
-	// The stand-in reports no provider while the declared binding is off.
 	checks := 0
-	RegisterSignInProviderGuard(func(ctx context.Context, tx pgx.Tx, _ int) error {
+	RegisterSignInCheck(func(ctx context.Context, db SignInQuerier, _ int) (bool, error) {
 		checks++
-		var on bool
-		if err := tx.QueryRow(ctx, `SELECT COALESCE(bool_or(enabled), false) FROM plugin_auth_bindings WHERE plugin_installation_id = $1`, installation.ID).Scan(&on); err != nil {
-			return err
-		}
-		if !on {
-			return ErrSignInProviderRequired
-		}
-		return nil
+		var works bool
+		err := db.QueryRow(ctx, `SELECT COALESCE((SELECT value = 'true' FROM server_settings WHERE key = $1), true)
+			OR COALESCE((SELECT bool_or(enabled) FROM plugin_auth_bindings WHERE plugin_installation_id = $2), false)`,
+			config.AuthLocalPasswordLoginSettingKey, installation.ID).Scan(&works)
+		return works, err
 	})
+	setting := func(value string) {
+		t.Helper()
+		if _, err := writer.pool.Exec(ctx, `INSERT INTO server_settings (key, value) VALUES ($1, $2)
+			ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, config.AuthLocalPasswordLoginSettingKey, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var saved *string
+	_ = writer.pool.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, config.AuthLocalPasswordLoginSettingKey).Scan(&saved)
+	t.Cleanup(func() {
+		if saved == nil {
+			_, _ = writer.pool.Exec(context.Background(), `DELETE FROM server_settings WHERE key = $1`, config.AuthLocalPasswordLoginSettingKey)
+			return
+		}
+		_, _ = writer.pool.Exec(context.Background(), `UPDATE server_settings SET value = $2 WHERE key = $1`, config.AuthLocalPasswordLoginSettingKey, *saved)
+	})
+	detail := func() string {
+		t.Helper()
+		statuses, err := ListProvisionStatus(ctx, writer.pool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, status := range statuses {
+			if status.PluginID == tmdbID {
+				return status.Detail
+			}
+		}
+		t.Fatal("no status for the declared plugin")
+		return ""
+	}
+	setting("false")
 
 	if err := writer.StartOffline(ctx); err != nil {
 		t.Fatalf("declaration refused: %v", err)
@@ -44,10 +74,12 @@ func TestProvisionAppliesDeclarationThatLeavesNoSignInProviderDB(t *testing.T) {
 	if checks == 0 {
 		t.Fatal("provisioning did not check for a sign-in provider")
 	}
-	assertConfigProvisionStatus(t, writer, "applied", SignInProviderWarning)
 	binding, err := writer.configs.GetAuthBinding(ctx, installation.ID, "login")
 	if err != nil || binding.Enabled {
 		t.Fatalf("declared binding not applied: %+v, %v", binding, err)
+	}
+	if got := detail(); got != SignInProviderWarning {
+		t.Fatalf("status detail = %q, want the warning", got)
 	}
 	// The warning names every way back, starting with the declaration.
 	for _, way := range []string{"SILO_CONFIG or SILO_PLUGINS", "/login?local=1", "silo auth local-login enable"} {
@@ -56,13 +88,20 @@ func TestProvisionAppliesDeclarationThatLeavesNoSignInProviderDB(t *testing.T) {
 		}
 	}
 
-	// Putting the provider back in the declaration clears the warning.
-	writer.Close()
-	desired := writer.document.Plugins[tmdbID]
-	desired.AuthBinding = &ProvisionAuthBinding{CapabilityID: "login", Enabled: new(true)}
-	writer.document.Plugins[tmdbID] = desired
-	if err := writer.StartOffline(ctx); err != nil {
-		t.Fatalf("restored declaration: %v", err)
+	// Password sign-in turned back on ends it at once, with no new apply.
+	setting("true")
+	if got := detail(); got != "" {
+		t.Fatalf("after password sign-in is back on: detail = %q", got)
 	}
-	assertConfigProvisionStatus(t, writer, "applied", "")
+	// So does a provider that can sign people in.
+	setting("false")
+	if got := detail(); got != SignInProviderWarning {
+		t.Fatalf("with password sign-in off again: detail = %q", got)
+	}
+	if _, err := writer.pool.Exec(ctx, `UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, installation.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := detail(); got != "" {
+		t.Fatalf("with the provider on: detail = %q", got)
+	}
 }

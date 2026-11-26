@@ -476,6 +476,13 @@ func (s *InstallationStore) update(ctx context.Context, id int, input UpdateInst
 	}
 	setClauses, args := installationUpdateClauses(input)
 
+	var guard signInGuard
+	if touchesBindings && !provisioning {
+		if guard, err = beginSignInGuard(ctx, tx); err != nil {
+			return err
+		}
+	}
+
 	// A guarded write always runs the row update, so the guard also holds
 	// for an Archive or Capabilities write that changes no column.
 	if len(setClauses) > 0 || input.IfVersion != nil || input.IfInstallPath != nil {
@@ -502,7 +509,7 @@ func (s *InstallationStore) update(ctx context.Context, id int, input UpdateInst
 		}
 	}
 	if touchesBindings && !provisioning {
-		if err := checkSignInProvider(ctx, tx, 0); err != nil {
+		if err := guard.finish(ctx, tx); err != nil {
 			return err
 		}
 	}
@@ -772,10 +779,14 @@ func (s *InstallationStore) Delete(ctx context.Context, id int) error {
 		if ownership.Managed {
 			return &ManagedByEnvironmentError{Field: managedInstallationField}
 		}
+		guard, err := beginSignInGuard(ctx, tx)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, id); err != nil {
 			return fmt.Errorf("deleting plugin installation: %w", err)
 		}
-		return checkSignInProvider(ctx, tx, 0)
+		return guard.finish(ctx, tx)
 	})
 	if err != nil {
 		return err

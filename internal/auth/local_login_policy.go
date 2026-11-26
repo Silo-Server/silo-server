@@ -193,8 +193,17 @@ func CheckLocalLoginSettingChange(ctx context.Context, db dbQuerier, before, aft
 		return nil
 	}
 	turningOff := settingBool(before.LocalPasswordLogin, true)
-	if !turningOff && before.PublicURL == after.PublicURL {
-		return nil
+	if !turningOff {
+		// Already off: refuse only a public URL change that takes away the
+		// last provider people can use. A server already without one may
+		// change it freely, and setting a URL is a way back.
+		if before.PublicURL == after.PublicURL {
+			return nil
+		}
+		usable, err := signInProviderEnabled(ctx, db, before.PublicURL, 0)
+		if err != nil || !usable {
+			return err
+		}
 	}
 	if turningOff {
 		count, err := usableBreakGlassCount(ctx, db, 0)
@@ -210,7 +219,7 @@ func CheckLocalLoginSettingChange(ctx context.Context, db dbQuerier, before, aft
 
 // requireSignInProvider answers ErrSignInProviderRequired unless a provider
 // other than installation removing can sign people in.
-func requireSignInProvider(ctx context.Context, db dbQuerier, publicURL string, removing int) error {
+func requireSignInProvider(ctx context.Context, db plugins.SignInQuerier, publicURL string, removing int) error {
 	enabled, err := signInProviderEnabled(ctx, db, publicURL, removing)
 	if err != nil {
 		return err
@@ -222,28 +231,23 @@ func requireSignInProvider(ctx context.Context, db dbQuerier, publicURL string, 
 }
 
 func init() {
-	plugins.RegisterSignInProviderGuard(ensureSignInProviderWhileLocalLoginOff)
+	plugins.RegisterSignInCheck(signInWorksForEveryone)
 }
 
-// ensureSignInProviderWhileLocalLoginOff is the plugins write guard: while
-// local password sign-in is off, a binding or installation write may not
-// leave the server without a provider that can sign people in. It takes the
-// settings lock, which the settings save holds while it checks the other
-// direction, so a save turning passwords off and a write disabling the last
-// provider cannot both pass.
-func ensureSignInProviderWhileLocalLoginOff(ctx context.Context, tx pgx.Tx, removing int) error {
-	if err := lockServerSettings(ctx, tx); err != nil {
-		return err
-	}
-	allowed, err := localPasswordLoginAllowed(ctx, tx)
+// signInWorksForEveryone is the check plugin writes and the provisioning
+// status use: local password sign-in is on, or an OIDC or LDAP provider other
+// than installation removing can sign people in. A plugin write holds the
+// server-settings lock while it asks (see plugins.signInGuard).
+func signInWorksForEveryone(ctx context.Context, db plugins.SignInQuerier, removing int) (bool, error) {
+	allowed, err := localPasswordLoginAllowed(ctx, db)
 	if err != nil || allowed {
-		return err
+		return allowed, err
 	}
-	publicURL, err := readServerSetting(ctx, tx, config.ServerPublicURLSettingKey)
+	publicURL, err := readServerSetting(ctx, db, config.ServerPublicURLSettingKey)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return requireSignInProvider(ctx, tx, publicURL, removing)
+	return signInProviderEnabled(ctx, db, publicURL, removing)
 }
 
 // signInProviderEnabled reports whether an OIDC or LDAP sign-in provider can
@@ -253,7 +257,7 @@ func ensureSignInProviderWhileLocalLoginOff(ctx context.Context, tx pgx.Tx, remo
 // nobody in without a public URL (OAuthSignInServed), so neither counts. A
 // credentials (directory) provider needs no public URL. Installation
 // removing (0 for none) is treated as gone.
-func signInProviderEnabled(ctx context.Context, db dbQuerier, publicURL string, removing int) (bool, error) {
+func signInProviderEnabled(ctx context.Context, db plugins.SignInQuerier, publicURL string, removing int) (bool, error) {
 	rows, err := db.Query(ctx, `SELECT COALESCE((SELECT c.metadata->'auth_modes' FROM plugin_capabilities c
 			WHERE c.plugin_installation_id = b.plugin_installation_id AND c.capability_type = 'auth_provider.v1'
 				AND c.capability_id = b.capability_id), '[]'::jsonb)

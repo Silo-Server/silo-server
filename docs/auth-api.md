@@ -981,20 +981,25 @@ A provider people can sign in with is an enabled installation with an
 enabled OIDC or LDAP binding (a network binding does not count). An OpenID
 Connect provider counts only while `server.public_url` is set, since every
 OAuth start needs it; a directory (LDAP) provider needs none. While
-`auth.local_password_login` is off, every change that would leave no such
+`auth.local_password_login` is off, a change that takes away the last such
 provider is refused with 409 `sign_in_provider_required`: turning off its
 binding (`updateAdminPluginAuthBinding`), disabling its installation
 (`updateAdminPluginInstallation`), uninstalling it
 (`deleteAdminPluginInstallation`), or clearing `server.public_url` when it is
 the only provider and uses OpenID Connect. Disable and uninstall are refused
 before the plugin stops. Turn password sign-in back on first; break-glass
-admins can sign in with a password either way. Deployment provisioning
+admins can sign in with a password either way. Only a change that takes the
+last provider away is refused: a server already without one (after
+provisioning, a restore, or a switch-off from before this check) can still
+enable, disable, update and uninstall plugins, and any change that makes a
+provider usable is allowed. Deployment provisioning
 (`SILO_CONFIG`, `SILO_PLUGINS`) is the exception: it applies the operator's
 declared configuration at startup and is never refused for this, so a
-declaration that leaves no such provider is applied, logged as a warning, and
-reported in the provisioning status of its sign-in plugins
-(`listAdminPluginProvisioningStatus`). Break-glass admins can still sign in
-then. The warning names the ways back, in this order: put the provider back
+declaration that leaves no such provider is applied and logged as a
+warning, and the provisioning status of its sign-in plugins
+(`listAdminPluginProvisioningStatus`) carries the warning for as long as it
+is true, worked out when the status is read. Break-glass admins can still
+sign in then. The warning names the ways back, in this order: put the provider back
 in the declaration and restart; have a break-glass admin sign in with a
 password at `/login?local=1` and turn password sign-in back on; or run
 `silo auth local-login enable` with the server's `DATABASE_URL`. A full

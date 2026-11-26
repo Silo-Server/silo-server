@@ -179,17 +179,23 @@ ordered against each other.
   and for an OpenID Connect binding a public URL (`OAuthSignInServed`, the
   same test every OAuth start makes). Turning the switch off without one,
   and, while it is off, turning off the binding, disabling or uninstalling the
-  installation, or clearing `server.public_url` when that leaves none, are
-  refused with `sign_in_provider_required`. Plugin writes run the check through
-  the guard the auth package registers (`plugins.RegisterSignInProviderGuard`),
-  after the write in its transaction; disable and uninstall also check before
-  the plugin stops. Plugin writes take the server-settings lock after their own
+  installation, or clearing `server.public_url` when that takes away the last
+  one, are refused with `sign_in_provider_required`. Plugin writes ask the
+  check the auth package registers (`plugins.RegisterSignInCheck`) before and
+  after the write in its transaction (`plugins.signInGuard`), and are refused
+  only when sign-in worked for everyone before and does not after: a server
+  already without a usable provider can still manage its plugins, and a write
+  that makes a provider usable is always allowed. Disable and uninstall also
+  check before the plugin stops. Plugin writes take the server-settings lock after their own
   bindings and installation locks, and the settings save takes only the
   settings lock, so the two directions serialize without deadlock.
   Deployment provisioning applies the operator's declared configuration and is
   never refused for this: it runs the same check, and a declaration that
-  leaves no provider is applied with a warning in the log and in the declared
-  sign-in plugins' provisioning status (`provisionSignInWarning`). The warning
+  leaves no provider is applied with a warning in the log
+  (`logProvisionSignIn`). The provisioning status of the declared sign-in
+  plugins carries the same warning while it is true, worked out on every read
+  (`withSignInWarning`), so it ends as soon as password sign-in is back on or
+  a provider is usable. The warning
   (`SignInProviderWarning`) names the ways back: the declaration, a break-glass
   admin turning password sign-in back on, and `silo auth local-login enable`.
 - `listAdminLocalPasswordOffAccounts` answers who the switch would lock out,

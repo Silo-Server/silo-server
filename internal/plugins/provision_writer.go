@@ -37,7 +37,11 @@ func ListProvisionStatus(ctx context.Context, db provisionConfigQuery) ([]Provis
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, pgx.RowToStructByPos[ProvisionStatus])
+	statuses, err := pgx.CollectRows(rows, pgx.RowToStructByPos[ProvisionStatus])
+	if err != nil {
+		return nil, err
+	}
+	return withSignInWarning(ctx, db, statuses)
 }
 
 type ProvisionWriter struct {

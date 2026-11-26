@@ -174,3 +174,68 @@ func TestSignInProviderGuardSerializesWithSettingsSaveDB(t *testing.T) {
 		t.Fatal("the last provider was turned off after passwords went off")
 	}
 }
+
+// TestServerWithoutUsableProviderCanStillBeRepairedAndManagedDB: a server
+// already left with password sign-in off and no provider people can use (by
+// a provisioned declaration, a restore, or a switch-off from before the check
+// existed) can still be repaired and manage its plugins. The guard refuses
+// only a write that takes the last usable provider away; enabling a disabled
+// sign-in plugin (the way back from the admin page) is allowed, and so is
+// every change to a plugin without a sign-in binding.
+func TestServerWithoutUsableProviderCanStillBeRepairedAndManagedDB(t *testing.T) {
+	broken := func(t *testing.T) *signInGuardEnv {
+		e := newSignInGuardEnv(t)
+		// The OpenID Connect provider signs nobody in without a public URL.
+		e.setSetting(t, config.ServerPublicURLSettingKey, "")
+		e.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "false")
+		return e
+	}
+	plain := func(t *testing.T, e *signInGuardEnv, enabled bool) int {
+		t.Helper()
+		var id int
+		if err := e.pool.QueryRow(t.Context(), `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
+			VALUES ($1, '0', '/nonexistent/'||$1, $2, 'manual', 'plugin') RETURNING id`, e.name("plain"), enabled).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = e.pool.Exec(context.Background(), `DELETE FROM plugin_installations WHERE id = $1`, id) })
+		return id
+	}
+	ctx := context.Background()
+	for name, write := range map[string]func(t *testing.T, e *signInGuardEnv) error{
+		"enable a plugin without sign-in": func(t *testing.T, e *signInGuardEnv) error {
+			return e.installs.Update(ctx, plain(t, e, false), plugins.UpdateInstallationInput{Enabled: new(true)})
+		},
+		"disable a plugin without sign-in": func(t *testing.T, e *signInGuardEnv) error {
+			return e.installs.Update(ctx, plain(t, e, true), plugins.UpdateInstallationInput{Enabled: new(false)})
+		},
+		"uninstall a plugin without sign-in": func(t *testing.T, e *signInGuardEnv) error {
+			id := plain(t, e, true)
+			if err := e.installs.CheckSignInProviderRemoval(ctx, id); err != nil {
+				return err
+			}
+			return e.installs.Delete(ctx, id)
+		},
+		"update the release of a plugin without sign-in": func(t *testing.T, e *signInGuardEnv) error {
+			return e.installs.Update(ctx, plain(t, e, true), plugins.UpdateInstallationInput{Capabilities: []plugins.Capability{
+				{Type: "metadata_provider.v1", ID: "meta", Metadata: map[string]any{}},
+			}})
+		},
+		"set the public URL": func(t *testing.T, e *signInGuardEnv) error {
+			return CheckLocalLoginSettingChange(ctx, e.pool,
+				LocalLoginSettings{LocalPasswordLogin: "false"},
+				LocalLoginSettings{LocalPasswordLogin: "false", PublicURL: "https://silo.example.test"})
+		},
+		"enable a disabled sign-in plugin": func(t *testing.T, e *signInGuardEnv) error {
+			e.exec(t, `UPDATE plugin_auth_bindings SET enabled = false WHERE plugin_installation_id = $1`, e.oidc)
+			ldap := e.authInstallation(t, "guard-ldap", "ldap", "password", true)
+			e.exec(t, `UPDATE plugin_installations SET enabled = false WHERE id = $1`, ldap)
+			return e.installs.Update(ctx, ldap, plugins.UpdateInstallationInput{Enabled: new(true)})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := write(t, broken(t)); err != nil {
+				t.Fatalf("refused from the broken state: %v", err)
+			}
+		})
+	}
+}

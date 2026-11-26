@@ -271,7 +271,7 @@ func (w *ProvisionWriter) commit(ctx context.Context, staged []preparedProvision
 		if err := validateProvisionBindingSet(ctx, tx, bindingIDs); err != nil {
 			return err
 		}
-		if err := provisionSignInWarning(ctx, tx, statuses, bindingIDs); err != nil {
+		if err := logProvisionSignIn(ctx, tx); err != nil {
 			return err
 		}
 		if err := writeProvisionStatuses(ctx, tx, statuses); err != nil {

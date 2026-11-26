@@ -3,19 +3,23 @@ package plugins
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
-// ErrSignInProviderRequired is the guard's refusal: the change would leave
-// local password sign-in off with no OIDC or LDAP provider people can use,
-// so nobody but the break-glass admins could sign in.
+// ErrSignInProviderRequired is the guard's refusal: the change would take
+// away the last OIDC or LDAP provider people can use while local password
+// sign-in is off, so nobody but the break-glass admins could sign in.
 var ErrSignInProviderRequired = errors.New("a sign-in provider people can use is required while local password sign-in is off")
 
-// SignInProviderWarning is what a provisioning apply logs and reports on the
-// declared sign-in plugins when it leaves that state: the deployment's
-// declaration is applied, not refused (provisionSignInWarning).
+// SignInProviderWarning is what a provisioning apply logs, and the
+// provisioning status of a declared sign-in plugin shows, while password
+// sign-in is off and no provider can sign people in: the deployment's
+// declaration is applied, not refused (logProvisionSignIn).
 //
 // It names the ways back in the order to try them: the declaration itself, a
 // break-glass administrator (who keeps a password while it is off), and the
@@ -25,62 +29,149 @@ const SignInProviderWarning = "Password sign-in is off and no sign-in provider c
 	"or have a break-glass administrator sign in with their password at /login?local=1 and turn on Allow password sign-in under Settings > Sign-in; " +
 	"or run `silo auth local-login enable` on a server with its DATABASE_URL."
 
-// SignInProviderGuard refuses a plugin write that would leave the server with
-// password sign-in off and no sign-in provider people can use. It runs in
-// the write's transaction after the change, so it judges the state the
-// write would commit; removing is an installation it treats as gone (0 for
-// none), for a check made before a change. It takes the server-settings
-// lock after the write's own locks, the order every holder of both uses.
+// SignInQuerier is what the sign-in check reads through: a pool or a
+// transaction.
+type SignInQuerier = provisionConfigQuery
+
+// SignInCheck answers whether everyone can still sign in: local password
+// sign-in is on, or an OIDC or LDAP provider people can use is on.
+// Installation removing (0 for none) is treated as gone.
 //
 // The auth package owns the rule (which providers can sign people in) and
 // registers it; plugins cannot import auth.
-type SignInProviderGuard func(ctx context.Context, tx pgx.Tx, removing int) error
+type SignInCheck func(ctx context.Context, db SignInQuerier, removing int) (bool, error)
 
-var signInProviderGuard SignInProviderGuard
+var signInCheck SignInCheck
 
-// RegisterSignInProviderGuard installs the guard every auth binding and
-// installation write runs.
-func RegisterSignInProviderGuard(guard SignInProviderGuard) {
-	signInProviderGuard = guard
+// RegisterSignInCheck installs the check the auth binding and installation
+// writes, and the provisioning status, use.
+func RegisterSignInCheck(check SignInCheck) {
+	signInCheck = check
 }
 
-func checkSignInProvider(ctx context.Context, tx pgx.Tx, removing int) error {
-	if signInProviderGuard == nil {
+func signInWorks(ctx context.Context, db SignInQuerier, removing int) (bool, error) {
+	if signInCheck == nil {
+		return true, nil
+	}
+	return signInCheck(ctx, db, removing)
+}
+
+// lockSignInSettings takes the server-settings lock, which the settings save
+// holds while it checks the other direction (turning passwords off). Plugin
+// writes take it after their own bindings and installation locks, and the
+// settings save takes neither of those, so the two serialize without
+// deadlock.
+func lockSignInSettings(ctx context.Context, tx pgx.Tx) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, config.ServerSettingsMutationLock); err != nil {
+		return fmt.Errorf("acquiring settings lock: %w", err)
+	}
+	return nil
+}
+
+// signInGuard refuses a plugin write that takes away the last provider people
+// can sign in with while password sign-in is off. Begin it in the write's
+// transaction before the change and finish it after: a write is refused only
+// when everyone could sign in before it and cannot after it. A server already
+// without a way in (a provisioned declaration, a restore, a switch-off from
+// before this check) can still manage its plugins, and any write that makes
+// a provider usable is allowed.
+type signInGuard struct{ workedBefore bool }
+
+func beginSignInGuard(ctx context.Context, tx pgx.Tx) (signInGuard, error) {
+	if err := lockSignInSettings(ctx, tx); err != nil {
+		return signInGuard{}, err
+	}
+	worked, err := signInWorks(ctx, tx, 0)
+	return signInGuard{workedBefore: worked}, err
+}
+
+func (g signInGuard) finish(ctx context.Context, tx pgx.Tx) error {
+	if !g.workedBefore {
 		return nil
 	}
-	return signInProviderGuard(ctx, tx, removing)
+	works, err := signInWorks(ctx, tx, 0)
+	if err != nil {
+		return err
+	}
+	if !works {
+		return ErrSignInProviderRequired
+	}
+	return nil
 }
 
 // CheckSignInProviderRemoval answers whether disabling or uninstalling
-// installation id would be refused by the guard, before anything changes:
-// the plugin process is stopped before those writes, so a refusal is made
-// here first. The write's own check still decides a concurrent change.
+// installation id would be refused, before anything changes: the plugin
+// process is stopped before those writes, so a refusal is made here first.
+// The write's own guard still decides a concurrent change.
 func (s *InstallationStore) CheckSignInProviderRemoval(ctx context.Context, id int) error {
 	if s.pool == nil {
 		return nil
 	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		return checkSignInProvider(ctx, tx, id)
+		if err := lockSignInSettings(ctx, tx); err != nil {
+			return err
+		}
+		works, err := signInWorks(ctx, tx, 0)
+		if err != nil || !works {
+			return err
+		}
+		without, err := signInWorks(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if !without {
+			return ErrSignInProviderRequired
+		}
+		return nil
 	})
 }
 
-// provisionSignInWarning applies the guard to a provisioning apply without
+// logProvisionSignIn applies the check to a provisioning apply without
 // refusing it. Provisioning applies the operator's declared configuration at
 // startup, with nobody at a screen; refusing it would leave the server unable
 // to converge on its own configuration, so a declaration that leaves no
-// provider people can sign in with is applied, logged as a warning, and
-// reported in the provisioning status of each declared plugin with a sign-in
-// binding. A full restore applies stated intent the same way.
-func provisionSignInWarning(ctx context.Context, tx pgx.Tx, statuses []ProvisionStatus, bindingIDs map[string]int) error {
-	err := checkSignInProvider(ctx, tx, 0)
-	if !errors.Is(err, ErrSignInProviderRequired) {
+// provider people can sign in with is applied and logged as a warning. A full
+// restore applies stated intent the same way. The provisioning status says so
+// for as long as it is true (withSignInWarning).
+func logProvisionSignIn(ctx context.Context, tx pgx.Tx) error {
+	works, err := signInWorks(ctx, tx, 0)
+	if err != nil || works {
 		return err
 	}
 	slog.WarnContext(ctx, SignInProviderWarning, "component", "plugins")
+	return nil
+}
+
+// withSignInWarning adds SignInProviderWarning, when it is true at read time,
+// to the status of each provisioned plugin with a sign-in binding that has
+// no other detail. Worked out on every read, it ends as soon as password
+// sign-in is turned back on, by a break-glass admin or the recovery command,
+// or a provider becomes usable, without waiting for the next apply.
+func withSignInWarning(ctx context.Context, db SignInQuerier, statuses []ProvisionStatus) ([]ProvisionStatus, error) {
+	if len(statuses) == 0 {
+		return statuses, nil
+	}
+	works, err := signInWorks(ctx, db, 0)
+	if err != nil || works {
+		return statuses, err
+	}
+	rows, err := db.Query(ctx, `SELECT DISTINCT i.plugin_id FROM plugin_installations i
+		JOIN plugin_auth_bindings b ON b.plugin_installation_id = i.id`)
+	if err != nil {
+		return statuses, err
+	}
+	pluginIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return statuses, err
+	}
+	signIn := make(map[string]bool, len(pluginIDs))
+	for _, id := range pluginIDs {
+		signIn[id] = true
+	}
 	for i := range statuses {
-		if _, declared := bindingIDs[statuses[i].PluginID]; declared && statuses[i].Detail == "" {
+		if signIn[statuses[i].PluginID] && statuses[i].Detail == "" {
 			statuses[i].Detail = SignInProviderWarning
 		}
 	}
-	return nil
+	return statuses, nil
 }
