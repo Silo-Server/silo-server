@@ -165,7 +165,7 @@ func networkAccessProblem(err error) error {
 func registerNetworkAccess(reg *Registry) {
 	capability := Operation{Operation: humaOp(http.MethodGet, Prefix+"/network-access/capabilities", "getNetworkAccessCapabilities", "network-access",
 		"List the installed network access providers (overlay networks such as Tailscale that reach this server without port forwarding). available when an enabled plugin declares one; not_configured otherwise. Read from plugin manifests; no plugin is launched and no health is implied."), Class: ClassAuthenticated, ServiceBacked: true}
-	Register(reg, capability, func(ctx context.Context, _ *CapabilityInput) (*NetworkAccessCapabilitiesOutput, error) {
+	Register(reg, withOrigins(capability, grantedCapability), func(ctx context.Context, _ *CapabilityInput) (*NetworkAccessCapabilitiesOutput, error) {
 		out := NetworkAccessCapabilities{Providers: []NetworkAccessProviderSummary{}}
 		if reg.deps.NetworkAccess == nil {
 			out.State = StateNotConfigured

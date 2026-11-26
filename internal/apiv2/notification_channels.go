@@ -94,7 +94,7 @@ func registerNotificationChannels(reg *Registry) {
 	clearAddress := notificationOperation(http.MethodDelete, "/email-preferences/address", "clearNotificationEmailAddress")
 	clearAddress.RetrySafety = RetrySafetyNonRetryable
 	clearAddress.Summary = "Clear the profile's verified and pending notification address and turn email delivery off. Send once; replay may clear a newer address."
-	Register(reg, clearAddress, func(ctx context.Context, _ *struct{}) (*NotificationEmailPreferencesOutput, error) {
+	Register(reg, withOrigins(clearAddress, grantedRefusedLeaves), func(ctx context.Context, _ *struct{}) (*NotificationEmailPreferencesOutput, error) {
 		svc := reg.deps.NotificationChannels
 		if svc == nil {
 			return nil, unavailable("notification channels")
@@ -114,7 +114,7 @@ func registerNotificationChannels(reg *Registry) {
 	unlink.RetrySafety = RetrySafetyNonRetryable
 	unlink.Summary = "Unlink the account's current Discord identity and turn delivery off. Send once; replay can unlink a later connection."
 	unlink.Description = discordManagementDescription
-	Register(reg, unlink, func(ctx context.Context, _ *struct{}) (*struct{}, error) {
+	Register(reg, withOrigins(unlink, grantedRefusedLeaves), func(ctx context.Context, _ *struct{}) (*struct{}, error) {
 		if p := reg.requireDiscordNotificationManagement(ctx); p != nil {
 			return nil, p
 		}
@@ -130,13 +130,13 @@ func registerNotificationChannels(reg *Registry) {
 
 	emailRead := notificationOperation(http.MethodGet, "/email-preferences", "getNotificationEmailPreferences")
 	emailRead.Summary = "Read the acting profile's email notification preferences."
-	Register(reg, emailRead, func(ctx context.Context, _ *struct{}) (*NotificationEmailPreferencesOutput, error) {
+	Register(reg, withOrigins(emailRead, grantedSettingsRead), func(ctx context.Context, _ *struct{}) (*NotificationEmailPreferencesOutput, error) {
 		return reg.notificationEmailState(ctx)
 	})
 	emailWrite := notificationOperation(http.MethodPut, "/email-preferences", "updateNotificationEmailPreferences")
 	emailWrite.RetrySafety = RetrySafetyNonRetryable
 	emailWrite.Summary = "Set the acting profile's email delivery mode."
-	Register(reg, emailWrite, func(ctx context.Context, in *NotificationChannelModeInput) (*NotificationEmailPreferencesOutput, error) {
+	Register(reg, withOrigins(emailWrite, grantedRefusedNotifyPrefs), func(ctx context.Context, in *NotificationChannelModeInput) (*NotificationEmailPreferencesOutput, error) {
 		svc := reg.deps.NotificationChannels
 		if svc == nil {
 			return nil, unavailable("notification channels")
@@ -149,7 +149,7 @@ func registerNotificationChannels(reg *Registry) {
 	discordRead := notificationOperation(http.MethodGet, "/discord-preferences", "getNotificationDiscordPreferences")
 	discordRead.ProfileOptional = true
 	discordRead.Summary = "Read the login account's Discord notification preferences."
-	Register(reg, discordRead, func(ctx context.Context, _ *struct{}) (*NotificationDiscordPreferencesOutput, error) {
+	Register(reg, withOrigins(discordRead, grantedSettingsRead), func(ctx context.Context, _ *struct{}) (*NotificationDiscordPreferencesOutput, error) {
 		return reg.notificationDiscordState(ctx)
 	})
 	discordWrite := notificationOperation(http.MethodPut, "/discord-preferences", "updateNotificationDiscordPreferences")
@@ -157,7 +157,7 @@ func registerNotificationChannels(reg *Registry) {
 	discordWrite.RetrySafety = RetrySafetyNonRetryable
 	discordWrite.Summary = "Set the login account's Discord delivery mode."
 	discordWrite.Description = discordManagementDescription
-	Register(reg, discordWrite, func(ctx context.Context, in *NotificationChannelModeInput) (*NotificationDiscordPreferencesOutput, error) {
+	Register(reg, withOrigins(discordWrite, grantedRefusedNotifyPrefs), func(ctx context.Context, in *NotificationChannelModeInput) (*NotificationDiscordPreferencesOutput, error) {
 		if p := reg.requireDiscordNotificationManagement(ctx); p != nil {
 			return nil, p
 		}

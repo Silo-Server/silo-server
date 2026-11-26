@@ -316,7 +316,7 @@ func registerNotificationPluginDestinations(reg *Registry) {
 func registerNotificationPluginDestinationReads(reg *Registry) {
 	channels := notificationOperation(http.MethodGet, "/plugin-channels", "listNotificationPluginChannels")
 	channels.Summary = "List the notification channels the enabled plugins provide, with each channel's destination settings form."
-	Register(reg, channels, func(ctx context.Context, _ *struct{}) (*NotificationPluginChannelListOutput, error) {
+	Register(reg, withOrigins(channels, grantedNotDecided), func(ctx context.Context, _ *struct{}) (*NotificationPluginChannelListOutput, error) {
 		svc, p := reg.pluginDestinations()
 		if p != nil {
 			return nil, p
@@ -339,7 +339,7 @@ func registerNotificationPluginDestinationReads(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 	list := notificationOperation(http.MethodGet, "/plugin-destinations", listNotificationPluginDestinationsOperation)
 	list.Summary = "List the acting profile's plugin destinations. A destination whose plugin is disabled or removed reads as unavailable, without its settings."
-	Register(reg, list, func(ctx context.Context, in *NotificationDestinationListInput) (*NotificationPluginDestinationListOutput, error) {
+	Register(reg, withOrigins(list, grantedRefusedLeaves), func(ctx context.Context, in *NotificationDestinationListInput) (*NotificationPluginDestinationListOutput, error) {
 		svc, p := reg.pluginDestinations()
 		if p != nil {
 			return nil, p
@@ -386,7 +386,7 @@ func registerNotificationPluginDestinationWrites(reg *Registry) {
 	create.RetrySafety = RetrySafetyNonRetryable
 	create.MaxBodyBytes = 32768
 	create.Summary = "Add a destination on a plugin-provided channel to the acting profile, after the plugin accepts its settings. A channel no enabled plugin provides is a 422 at body.capability_id. Send once; a replay answers 422 for the name already taken."
-	Register(reg, create, func(ctx context.Context, in *NotificationPluginDestinationCreateInput) (*NotificationPluginDestinationOutput, error) {
+	Register(reg, withOrigins(create, grantedRefusedLeaves), func(ctx context.Context, in *NotificationPluginDestinationCreateInput) (*NotificationPluginDestinationOutput, error) {
 		svc, p := reg.pluginDestinations()
 		if p != nil {
 			return nil, p
@@ -416,7 +416,7 @@ func registerNotificationPluginDestinationWrites(reg *Registry) {
 	// answer its check.
 	update.Errors = []int{http.StatusConflict}
 	update.Summary = "Update a plugin destination using the original observed validator. Changed settings are checked by the plugin again. Never rebase or replay an uncertain update."
-	Register(reg, update, func(ctx context.Context, in *NotificationPluginDestinationUpdateInput) (*NotificationPluginDestinationOutput, error) {
+	Register(reg, withOrigins(update, grantedRefusedLeaves), func(ctx context.Context, in *NotificationPluginDestinationUpdateInput) (*NotificationPluginDestinationOutput, error) {
 		svc, p := reg.pluginDestinations()
 		if p != nil {
 			return nil, p
@@ -446,7 +446,7 @@ func registerNotificationPluginDestinationWrites(reg *Registry) {
 	remove.Guarded = true
 	remove.RetrySafety = RetrySafetyNaturalIdempotent
 	remove.Summary = "Delete the acting profile's plugin destination and its queued messages. Does not recall a message already sent."
-	Register(reg, remove, func(ctx context.Context, in *NotificationPluginDestinationDeleteInput) (*struct{}, error) {
+	Register(reg, withOrigins(remove, grantedRefusedLeaves), func(ctx context.Context, in *NotificationPluginDestinationDeleteInput) (*struct{}, error) {
 		svc, p := reg.pluginDestinations()
 		if p != nil {
 			return nil, p
@@ -470,7 +470,7 @@ func registerNotificationPluginDestinationWrites(reg *Registry) {
 	test := notificationOperation(http.MethodPost, "/plugin-destinations/{id}/test", "testNotificationPluginDestination")
 	test.RetrySafety = RetrySafetyNonRetryable
 	test.Summary = "Send one test message to the acting profile's plugin destination now. A failed send is a 200 result with ok false; it isn't retried or counted."
-	Register(reg, test, func(ctx context.Context, in *NotificationDestinationTestInput) (*NotificationDestinationTestOutput, error) {
+	Register(reg, withOrigins(test, grantedRefusedLeaves), func(ctx context.Context, in *NotificationDestinationTestInput) (*NotificationDestinationTestOutput, error) {
 		svc, p := reg.pluginDestinations()
 		if p != nil {
 			return nil, p

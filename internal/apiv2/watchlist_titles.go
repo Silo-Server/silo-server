@@ -135,20 +135,20 @@ func registerWatchlistTitles(reg *Registry) {
 	list := humaOp(http.MethodGet, Prefix+"/watchlist/titles", opListWatchlistTitles, "watchlist",
 		"List the acting profile's watchlist entries for titles the library doesn't have, newest first. Entries whose title reached the library move to the library watchlist first; titles above the viewer's rating ceiling are omitted.")
 	list.Errors = []int{http.StatusConflict}
-	Register(reg, viewerOperation(list), func(ctx context.Context, in *WatchlistTitleListInput) (*WatchlistTitleCollectionOutput, error) {
+	Register(reg, withOrigins(viewerOperation(list), grantedProfileState), func(ctx context.Context, in *WatchlistTitleListInput) (*WatchlistTitleCollectionOutput, error) {
 		return reg.listWatchlistTitles(ctx, cursors, in)
 	})
 
 	add := humaOp(http.MethodPut, Prefix+"/watchlist/titles/{media_type}/{tmdb_id}", opAddWatchlistTitle, "watchlist",
 		"Add a title to the acting profile's watchlist. A title the library has goes onto the library watchlist; otherwise it is kept by TMDB ID and, when watchlist requests apply, requested or followed. Automatic retries are unsafe because provider, refresh and request effects are not change-gated.")
 	add.Errors = []int{http.StatusNotFound, http.StatusConflict}
-	Register(reg, Operation{Operation: add, Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable}, reg.addWatchlistTitle)
+	Register(reg, Operation{Operation: add, Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable, Origins: grantedRefusedRequests}, reg.addWatchlistTitle)
 
 	remove := humaOp(http.MethodDelete, Prefix+"/watchlist/titles/{media_type}/{tmdb_id}", opDeleteWatchlistTitle, "watchlist",
 		"Remove a title from the acting profile's watchlist by its current or a former TMDB ID, from the library watchlist too, and withdraw the request the watchlist made for it while nothing has been sent. An absent entry succeeds, but automatic retries can repeat provider and refresh effects.")
 	remove.DefaultStatus = http.StatusNoContent
 	remove.Errors = []int{http.StatusConflict}
-	Register(reg, Operation{Operation: remove, Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable}, reg.deleteWatchlistTitle)
+	Register(reg, Operation{Operation: remove, Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable, Origins: grantedRefusedRequests}, reg.deleteWatchlistTitle)
 }
 
 // watchlistTitleViewer resolves the viewer for both services and the rating

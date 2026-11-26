@@ -72,7 +72,7 @@ func registerCollectionEditors(reg *Registry) {
 	op := func(path, id string) Operation {
 		return Operation{Operation: humaOp(http.MethodGet, Prefix+path, id, "collections", "Read the canonical collection editor state and its strong validator."), Class: ClassProfileScoped, ServiceBacked: true}
 	}
-	Register(reg, op("/collections/order", "getCollectionOrder"), reg.getCollectionOrder)
+	Register(reg, withOrigins(op("/collections/order", "getCollectionOrder"), grantedCollectionRead), reg.getCollectionOrder)
 	// Personal collection groups were removed (#1615): these answer 501.
 	groupOp := func(path, id string) Operation {
 		o := op(path, id)
@@ -80,9 +80,9 @@ func registerCollectionEditors(reg *Registry) {
 		o.Errors = append(o.Errors, http.StatusNotImplemented)
 		return o
 	}
-	Register(reg, groupOp("/collections/groups/order", "getCollectionGroupsOrder"), reg.getCollectionGroupsOrder)
-	Register(reg, groupOp("/collections/groups/{id}", "getCollectionGroup"), reg.getCollectionGroup)
-	Register(reg, op("/collections/{id}/items/order", "getCollectionItemsOrder"), reg.getCollectionItemsOrder)
+	Register(reg, withOrigins(groupOp("/collections/groups/order", "getCollectionGroupsOrder"), grantedCollectionRead), reg.getCollectionGroupsOrder)
+	Register(reg, withOrigins(groupOp("/collections/groups/{id}", "getCollectionGroup"), grantedCollectionRead), reg.getCollectionGroup)
+	Register(reg, withOrigins(op("/collections/{id}/items/order", "getCollectionItemsOrder"), grantedCollectionRead), reg.getCollectionItemsOrder)
 }
 func (reg *Registry) getCollectionOrder(ctx context.Context, in *CollectionOrderReadInput) (*CollectionOrderOutput, error) {
 	s, p := reg.collectionEditors()

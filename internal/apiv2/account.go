@@ -77,11 +77,13 @@ func registerAccount(reg *Registry) {
 			"Get the authenticated caller's login account."),
 		Class:         ClassAuthenticated,
 		ServiceBacked: true,
+		Origins:       grantedWhoItIs,
 	}, reg.getCurrentUser)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/account/password/capability", "getAccountPasswordCapability", "account",
 			"Describe whether the caller may change the account password."),
 		Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true,
+		Origins: grantedCapability,
 	}, reg.getAccountPasswordCapability)
 	change := humaOp(http.MethodPost, Prefix+"/account/password", "changePassword", "account",
 		"Replace the account password.")
@@ -102,6 +104,7 @@ func registerAccount(reg *Registry) {
 		Audited:         true,
 		// Demo visitors share one account: a new password locks the others out.
 		DemoRestricted: true,
+		Origins:        grantedRefusedAccount,
 	}, reg.changePassword)
 }
 

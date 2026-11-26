@@ -108,21 +108,21 @@ func registerAppKeyPending(reg *Registry) {
 		"List the signed-in account's devices waiting for approval.")
 	list.Description = pendingSessionRule + " Only an administrator's account has waiting devices: a device a person key introduces to it waits for approval for 24 hours. Each item is a device object as listAppKeys returns it. Answers while auth.app_key_sign_in is off."
 	list.Errors = []int{http.StatusForbidden}
-	Register(reg, Operation{Operation: list, Class: ClassAuthenticated, ServiceBacked: true}, reg.listPendingAppKeys)
+	Register(reg, Operation{Operation: list, Class: ClassAuthenticated, ServiceBacked: true, Origins: grantedRefusedSignIn}, reg.listPendingAppKeys)
 
 	approve := humaOp(http.MethodPost, Prefix+"/auth/keys/pending/{id}/approve", "approvePendingAppKey", "app-keys",
 		"Approve a device waiting to sign in to the signed-in administrator account.")
 	approve.Description = pendingSessionRule + " Send an empty JSON object. The key becomes active: the device's next signInWithAppKey, on a new challenge, opens a session if it passes the usual sign-in checks. The account must still be an enabled administrator (403 permission_denied otherwise). Approving an active key changes nothing; a key that is unknown, denied, revoked or past its 24 hours is 404 not_found. 409 capability_disabled while auth.app_key_sign_in is off." + mainProfileRule
 	approve.DefaultStatus = http.StatusNoContent
 	approve.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict}
-	Register(reg, mainProfileOnly(Operation{Operation: approve, RetrySafety: RetrySafetyNaturalIdempotent, ServiceBacked: true, Audited: true}), reg.approvePendingAppKey)
+	Register(reg, withOrigins(mainProfileOnly(Operation{Operation: approve, RetrySafety: RetrySafetyNaturalIdempotent, ServiceBacked: true, Audited: true}), grantedRefusedSignIn), reg.approvePendingAppKey)
 
 	deny := humaOp(http.MethodPost, Prefix+"/auth/keys/pending/{id}/deny", "denyPendingAppKey", "app-keys",
 		"Refuse a device waiting to sign in to the signed-in account.")
 	deny.Description = pendingSessionRule + " Send an empty JSON object. The device's next signInWithAppKey that reaches the key answers 403 key_denied (409 capability_disabled comes first while auth.app_key_sign_in is off), and neither listAppKeys nor listPendingAppKeys shows the key. Denying a denied key changes nothing; an active, revoked or unknown key is 404 not_found. Answers while auth.app_key_sign_in is off. Refused in demo mode for a caller who is not an administrator."
 	deny.DefaultStatus = http.StatusNoContent
 	deny.Errors = []int{http.StatusForbidden, http.StatusNotFound}
-	Register(reg, Operation{Operation: deny, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true, DemoRestricted: true}, reg.denyPendingAppKey)
+	Register(reg, Operation{Operation: deny, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true, DemoRestricted: true, Origins: grantedRefusedSignIn}, reg.denyPendingAppKey)
 }
 
 func (reg *Registry) listPendingAppKeys(ctx context.Context, _ *struct{}) (*PendingAppKeyListOutput, error) {

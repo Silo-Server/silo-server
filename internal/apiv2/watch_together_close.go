@@ -20,7 +20,7 @@ func registerWatchTogetherClose(reg *Registry) {
 	op.DefaultStatus = http.StatusNoContent
 	op.Errors = []int{409}
 	op.Description = watchTogetherHostOtherAppRule
-	Register(reg, op, func(ctx context.Context, in *WatchTogetherCloseInput) (*struct{}, error) {
+	Register(reg, withOrigins(op, grantedRefusedRoomHost), func(ctx context.Context, in *WatchTogetherCloseInput) (*struct{}, error) {
 		if p := reg.otherDevicesProblem(ctx); p != nil {
 			return nil, p
 		}

@@ -85,7 +85,7 @@ type ThemePlaybackOutput struct {
 }
 
 func registerThemeSongs(reg *Registry) {
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/catalog/themes/capabilities", "getThemeSongsCapability", "catalog", "Local theme audio support and delivery limitations."), Class: ClassProfileScoped},
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/catalog/themes/capabilities", "getThemeSongsCapability", "catalog", "Local theme audio support and delivery limitations."), Class: ClassProfileScoped, Origins: grantedCapability},
 		func(ctx context.Context, _ *CapabilityInput) (*ThemeSongsCapabilityOutput, error) {
 			body := ThemeSongsCapability{Capability: Capability{State: configuredCapabilityState(reg.deps.ThemeSongs != nil), Allowed: ptr(capabilityLoginAllowed(ctx))}, Delivery: "local_direct_play", GrantLifetimeSeconds: int(themesongs.GrantLifetime.Seconds())}
 			if reg.deps.ThemeSongs != nil {
@@ -98,7 +98,7 @@ func registerThemeSongs(reg *Registry) {
 			return &ThemeSongsCapabilityOutput{Body: body}, nil
 		})
 	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/catalog/items/{id}/themes/{theme_id}/playback", "createThemeSongPlayback", "catalog", "Authorize theme audio for this account and profile, routed like video playback and converted to AAC when the client cannot decode the original."), Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
-	Register(reg, op, func(ctx context.Context, in *ThemePlaybackInput) (*ThemePlaybackOutput, error) {
+	Register(reg, withOrigins(op, grantedPlayback), func(ctx context.Context, in *ThemePlaybackInput) (*ThemePlaybackOutput, error) {
 		if reg.deps.ThemeSongs == nil || reg.deps.CatalogAccess == nil {
 			return nil, unavailable("theme songs")
 		}

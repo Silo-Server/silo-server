@@ -293,7 +293,7 @@ func registerProfileSet(reg *Registry) {
 		"overrides lists the owner's values, which a set leaves as they are until the account edits that field here, or, for a setting the settings contract mirrors in another key, either key of the pair; hidden_by_owner lists profiles the owner removed, which a set does not bring back. " +
 		"Strong ETag; If-None-Match answers 304. 501 capability_unsupported where profiles are not kept in PostgreSQL."
 	get.Errors = []int{http.StatusForbidden, http.StatusNotImplemented}
-	Register(reg, Operation{Operation: get, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, Conditional: true}, reg.getProfileSet)
+	Register(reg, Operation{Operation: get, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, Conditional: true, Origins: grantedWhoItIs}, reg.getProfileSet)
 }
 
 // profileSetService answers the service, or the capability problem: not

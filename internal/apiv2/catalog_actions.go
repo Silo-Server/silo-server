@@ -253,8 +253,8 @@ const (
 )
 
 func registerCatalogActions(reg *Registry) {
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/trailers", "getTrailersCapability", "catalog",
-		"Whether this server offers the viewer-facing trailer fetch, its cooldown, and the statuses the action answers.")), reg.getTrailersCapability)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/trailers", "getTrailersCapability", "catalog",
+		"Whether this server offers the viewer-facing trailer fetch, its cooldown, and the statuses the action answers.")), grantedCapability), reg.getTrailersCapability)
 	refresh := humaOp(http.MethodPost, Prefix+"/catalog/items/{id}/trailers/refresh", "refreshCatalogItemTrailers", "catalog",
 		"Ask the server to fetch a movie's or series' remote trailers; answers 202 when queued, 200 with the cooldown or disabled state otherwise.")
 	refresh.DefaultStatus = http.StatusAccepted
@@ -265,32 +265,32 @@ func registerCatalogActions(reg *Registry) {
 	refresh.Errors = []int{http.StatusConflict, http.StatusTooManyRequests}
 	refreshOperation := viewerOperation(refresh)
 	refreshOperation.RetrySafety = RetrySafetyNonRetryable
-	Register(reg, refreshOperation, reg.refreshCatalogItemTrailers)
+	Register(reg, withOrigins(refreshOperation, grantedRefusedRefresh), reg.refreshCatalogItemTrailers)
 
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/metadata-ai", "getMetadataAICapability", "catalog",
-		"Whether AI metadata translation is configured and how the viewer-facing on-view translation behaves.")), reg.getMetadataAICapability)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/metadata-ai", "getMetadataAICapability", "catalog",
+		"Whether AI metadata translation is configured and how the viewer-facing on-view translation behaves.")), grantedCapability), reg.getMetadataAICapability)
 	translate := humaOp(http.MethodPost, Prefix+"/catalog/items/{id}/translate-description", "translateCatalogItemDescription", "catalog",
 		"Queue a translation of the descriptions a page shows into the language its detail document reported missing: a movie's or series' own overview and tagline, a season's overview and its episodes' overviews, or one episode. Answers 202 with the job.")
 	translate.DefaultStatus = http.StatusAccepted
 	translate.Errors = []int{http.StatusConflict, http.StatusTooManyRequests}
 	translateOperation := viewerOperation(translate)
 	translateOperation.RetrySafety = RetrySafetyCoalescing
-	Register(reg, translateOperation, reg.translateCatalogItemDescription)
+	Register(reg, withOrigins(translateOperation, grantedRefusedRefresh), reg.translateCatalogItemDescription)
 
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/people", "listPeople", "catalog",
-		"Search people by name, with exact matches first, then the most credited for a specific query, and optional media scope.")), reg.listPeople)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/people/{id}", "getPerson", "catalog",
-		"One person; viewing queues a provider refresh when one is due, unless the read is a prefetch.")), reg.getPerson)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/people", "listPeople", "catalog",
+		"Search people by name, with exact matches first, then the most credited for a specific query, and optional media scope.")), grantedCatalogRead), reg.listPeople)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/people/{id}", "getPerson", "catalog",
+		"One person; viewing queues a provider refresh when one is due, unless the read is a prefetch.")), grantedCatalogRead), reg.getPerson)
 	refreshPerson := humaOp(http.MethodPost, Prefix+"/catalog/people/{id}/refresh", "refreshPerson", "catalog",
 		"Queue a provider refresh of the person; answers 202 once queued.")
 	refreshPerson.DefaultStatus = http.StatusAccepted
 	refreshPerson.Errors = []int{http.StatusTooManyRequests}
 	refreshPersonOperation := viewerOperation(refreshPerson)
 	refreshPersonOperation.RetrySafety = RetrySafetyNonRetryable
-	Register(reg, refreshPersonOperation, reg.refreshPerson)
+	Register(reg, withOrigins(refreshPersonOperation, grantedRefusedRefresh), reg.refreshPerson)
 
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/works/{work_id}", "getLiteraryWork", "catalog",
-		"A literary work with the ebook and audiobook editions the viewer can see and their progress.")), reg.getLiteraryWork)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/works/{work_id}", "getLiteraryWork", "catalog",
+		"A literary work with the ebook and audiobook editions the viewer can see and their progress.")), grantedCatalogRead), reg.getLiteraryWork)
 }
 
 // --- helpers ---

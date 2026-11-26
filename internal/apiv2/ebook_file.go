@@ -48,7 +48,7 @@ func registerEbookFiles(reg *Registry) {
 			"412": {Description: "File precondition failed.", Headers: headers},
 			"416": {Description: "Requested range not satisfiable.", Content: map[string]*huma.MediaType{"text/plain": {Schema: &huma.Schema{Type: huma.TypeString}}}, Headers: headers},
 		}
-		RegisterRaw(reg, RawOperation{Operation: Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true}, Protocol: "ebook-byte-range", Reason: "Ebook files and conversion results are streamed bytes with range and HEAD semantics."}, http.HandlerFunc(reg.readEbookFile))
+		RegisterRaw(reg, RawOperation{Operation: Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedCatalogRead}, Protocol: "ebook-byte-range", Reason: "Ebook files and conversion results are streamed bytes with range and HEAD semantics."}, http.HandlerFunc(reg.readEbookFile))
 	}
 }
 

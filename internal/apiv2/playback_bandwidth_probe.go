@@ -117,5 +117,5 @@ func registerPlaybackBandwidthProbe(reg *Registry) {
 	if reg.deps.ObserveBandwidthProbe != nil {
 		handler = reg.deps.ObserveBandwidthProbe(handler)
 	}
-	RegisterRaw(reg, raw, handler)
+	RegisterRaw(reg, withRawOrigins(raw, grantedPlayback), handler)
 }

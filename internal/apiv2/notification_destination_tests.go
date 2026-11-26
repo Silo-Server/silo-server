@@ -49,7 +49,7 @@ func registerNotificationDestinationTests(reg *Registry) {
 	op := notificationOperation(http.MethodPost, "/webhooks/{id}/test", testNotificationWebhookOperation)
 	op.Summary = "Send one synchronous sample to the acting profile's webhook."
 	op.RetrySafety = RetrySafetyNonRetryable
-	Register(reg, op, func(ctx context.Context, in *NotificationDestinationTestInput) (*NotificationDestinationTestOutput, error) {
+	Register(reg, withOrigins(op, grantedRefusedLeaves), func(ctx context.Context, in *NotificationDestinationTestInput) (*NotificationDestinationTestOutput, error) {
 		svc := reg.deps.NotificationDestinationTests
 		if svc == nil {
 			return nil, unavailable("notification test delivery")

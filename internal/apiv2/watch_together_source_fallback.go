@@ -29,7 +29,7 @@ func registerWatchTogetherSourceFallback(reg *Registry) {
 	op.MaxBodyBytes = 4096
 	op.Errors = []int{409}
 	op.Description = watchTogetherMemberOtherAppRule
-	Register(reg, op, func(ctx context.Context, in *WatchTogetherSourceFallbackInput) (*WatchTogetherRoomReadOutput, error) {
+	Register(reg, withOrigins(op, grantedRefusedRoomHost), func(ctx context.Context, in *WatchTogetherSourceFallbackInput) (*WatchTogetherRoomReadOutput, error) {
 		if p := reg.otherDevicesProblem(ctx); p != nil {
 			return nil, p
 		}

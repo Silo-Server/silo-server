@@ -134,7 +134,7 @@ type LibraryJobOutput struct {
 }
 
 func registerLibraryJobs(reg *Registry) {
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/library-jobs/{job_id}", "getLibraryJob", "libraries", "Poll accepted library work. Terminal jobs remain available for at least 24 hours."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, Conditional: true}, reg.getLibraryJob)
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/library-jobs/{job_id}", "getLibraryJob", "libraries", "Poll accepted library work. Terminal jobs remain available for at least 24 hours."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, Conditional: true, Origins: grantedNotDecided}, reg.getLibraryJob)
 	op := humaOp(http.MethodPost, Prefix+"/library-jobs/{job_id}/cancel", "cancelLibraryJob", "libraries", "Request best-effort cancellation of metadata refresh. Completed metadata changes remain. Deletion cannot be canceled.")
 	op.DefaultStatus = http.StatusAccepted
 	op.Errors = []int{http.StatusConflict}

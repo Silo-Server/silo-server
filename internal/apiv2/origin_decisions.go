@@ -124,10 +124,58 @@ const (
 	reasonNotDecided          = "not decided"
 )
 
-// Decisions shared by whole families.
+// Decisions shared by whole families: what a session another app's key
+// opened may do (allowed), its own things only (the handler check named),
+// and what it is refused.
 var (
-	grantedCapability = grantedApp(decideAllowed(reasonCapabilityRead))
-	grantedNotDecided = grantedApp(decideRefused(reasonNotDecided))
+	grantedWhoItIs        = grantedApp(decideAllowed(reasonWhoItIs))
+	grantedCapability     = grantedApp(decideAllowed(reasonCapabilityRead))
+	grantedCatalogRead    = grantedApp(decideAllowed(reasonCatalogRead))
+	grantedHomeRead       = grantedApp(decideAllowed(reasonHomeRead))
+	grantedLibraryRead    = grantedApp(decideAllowed(reasonLibraryRead))
+	grantedCollectionRead = grantedApp(decideAllowed(reasonCollectionRead))
+	grantedRecommendRead  = grantedApp(decideAllowed(reasonRecommendRead))
+	grantedSubtitleRead   = grantedApp(decideAllowed(reasonSubtitleRead))
+	grantedSettingsRead   = grantedApp(decideAllowed(reasonSettingsRead))
+	grantedPlayback       = grantedApp(decideAllowed(reasonPlayback))
+	grantedProfileState   = grantedApp(decideAllowed(reasonProfileState))
+	grantedInbox          = grantedApp(decideAllowed(reasonInboxState))
+	grantedEvents         = grantedApp(decideAllowed(reasonEventsSocket))
+	grantedRoomMember     = grantedApp(decideAllowed(reasonRoomMember))
+	grantedOwnSession     = grantedApp(decideAllowed(reasonOwnSession))
+	grantedDiagnostics    = grantedApp(decideAllowed(reasonDiagnostics))
+
+	grantedOwnSessionList = grantedApp(decideOwnOnly(
+		"SessionLimitedToItself: every other session's item is redacted to its id", reasonOwnSession))
+	grantedOwnSessionEnd = grantedApp(decideOwnOnly(
+		"SessionLimitedToItself in deleteSession: only the login session making the request", reasonOwnSession))
+	grantedOwnKeyRevoke = grantedApp(decideOwnOnly(
+		"RevokeOwnDeviceKey: only the device key that opened the session", reasonOwnSession))
+	grantedOwnStreamsList = grantedApp(decideOwnOnly(
+		"sessionReachesOtherDevices in listHouseholdSessions: only the streams its own login session started", reasonPlayback))
+	grantedOwnStream = grantedApp(decideOwnOnly(
+		"mayActOnAttempt / refuseOtherStream: only a stream its own login session started", reasonPlayback))
+	grantedOwnStreamTicket = grantedApp(decideOwnOnly(
+		"refuseOtherStream on the control ticket: only a stream its own login session started", reasonPlayback))
+	grantedOwnSuggestion = grantedApp(decideOwnOnly(
+		"DeleteOwnSuggestion: only suggestions of the account and profile it acts as, which includes those the person's own devices made as that profile (a suggester is stored as account and profile, not as the session)", reasonRoomMember))
+	grantedOwnSeat = grantedApp(decideOwnOnly(
+		"ConnectOtherApp: only a member's seat no other connection holds, never the host's controls", reasonRoomMember))
+
+	grantedRefusedAccount      = grantedApp(decideRefused(reasonRefusedAccount))
+	grantedRefusedSignIn       = grantedApp(decideRefused(reasonRefusedSignIn))
+	grantedRefusedOtherDevice  = grantedApp(decideRefused(reasonRefusedOtherDevice))
+	grantedRefusedLeaves       = grantedApp(decideRefused(reasonRefusedLeaves))
+	grantedRefusedOwnDevice    = grantedApp(decideRefused(reasonRefusedOwnDevice))
+	grantedRefusedHousehold    = grantedApp(decideRefused(reasonRefusedHousehold))
+	grantedRefusedRoomHost     = grantedApp(decideRefused(reasonRefusedRoomHost))
+	grantedRefusedRequests     = grantedApp(decideRefused(reasonRefusedRequests))
+	grantedRefusedSubtitleEdit = grantedApp(decideRefused(reasonRefusedSubtitleEdit))
+	grantedRefusedImport       = grantedApp(decideRefused(reasonRefusedImport))
+	grantedRefusedRefresh      = grantedApp(decideRefused(reasonRefusedRefresh))
+	grantedRefusedNotifyPrefs  = grantedApp(decideRefused(reasonRefusedNotifyPrefs))
+	grantedRefusedCatalogEdit  = grantedApp(decideRefused(reasonRefusedCatalogEdit))
+	grantedNotDecided          = grantedApp(decideRefused(reasonNotDecided))
 )
 
 // extOriginDecisions documents OriginDecisions as {kind: {verdict, reason,
@@ -215,3 +263,16 @@ func originGate(decisions OriginDecisions) func(http.Handler) http.Handler {
 // key opened, from the claims the authentication gate set: the one fact the
 // handler checks below need, without a query of their own.
 func grantedAppSession(claims *auth.Claims) bool { return claims.IsGrantedApp() }
+
+// withOrigins sets an operation's origin decisions where a helper builds the
+// operation, so the mark stays at the call that registers it.
+func withOrigins(op Operation, d OriginDecisions) Operation {
+	op.Origins = d
+	return op
+}
+
+// withRawOrigins is withOrigins for a raw operation.
+func withRawOrigins(raw RawOperation, d OriginDecisions) RawOperation {
+	raw.Origins = d
+	return raw
+}

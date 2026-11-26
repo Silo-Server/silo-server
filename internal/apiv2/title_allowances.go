@@ -152,38 +152,38 @@ const opListAllowedTitles = "listAllowedTitles"
 
 func registerTitleAllowances(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/title-allowances", "getTitleAllowanceCapability", "profiles",
-		"Whether the household's primary profile can allow limited profiles specific titles above their rating limits.")), reg.getTitleAllowanceCapability)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/title-allowances", "getTitleAllowanceCapability", "profiles",
+		"Whether the household's primary profile can allow limited profiles specific titles above their rating limits.")), grantedCapability), reg.getTitleAllowanceCapability)
 
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/profiles/{id}/allowed-titles", opListAllowedTitles, "profiles",
-		"List the movies and series allowed for a profile above its limits, as catalog cards, newest first, paged by cursor. Titles allowed only through a collection are not listed, and titles the acting profile may not see are omitted, so a page can hold fewer cards than its limit. Household managers only.")),
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/profiles/{id}/allowed-titles", opListAllowedTitles, "profiles",
+		"List the movies and series allowed for a profile above its limits, as catalog cards, newest first, paged by cursor. Titles allowed only through a collection are not listed, and titles the acting profile may not see are omitted, so a page can hold fewer cards than its limit. Household managers only.")), grantedNotDecided),
 		func(ctx context.Context, in *AllowedTitlesInput) (*AllowedTitleCollectionOutput, error) {
 			return reg.listAllowedTitles(ctx, cursors, in)
 		})
-	Register(reg, allowanceMutation(humaOp(http.MethodPut, Prefix+"/profiles/{id}/allowed-titles/{item_id}", "allowTitle", "profiles",
-		"Allow a profile a movie or series above its rating or advisory-age limit. A series allowance covers its seasons and episodes. The profile must have a limit (422 no_maturity_limits) and reach the title's library (422 no_library_access); episodes and seasons are refused with 422. A profile sees at most 10,000 of its allowed titles; the rest stay hidden. Allowing an allowed title succeeds and changes nothing. Household managers only.")),
+	Register(reg, withOrigins(allowanceMutation(humaOp(http.MethodPut, Prefix+"/profiles/{id}/allowed-titles/{item_id}", "allowTitle", "profiles",
+		"Allow a profile a movie or series above its rating or advisory-age limit. A series allowance covers its seasons and episodes. The profile must have a limit (422 no_maturity_limits) and reach the title's library (422 no_library_access); episodes and seasons are refused with 422. A profile sees at most 10,000 of its allowed titles; the rest stay hidden. Allowing an allowed title succeeds and changes nothing. Household managers only.")), grantedRefusedHousehold),
 		func(ctx context.Context, in *AllowedTitleInput) (*struct{}, error) {
 			return reg.setTitleAllowance(ctx, in, true)
 		})
-	Register(reg, allowanceMutation(humaOp(http.MethodDelete, Prefix+"/profiles/{id}/allowed-titles/{item_id}", "disallowTitle", "profiles",
-		"Remove a profile's allowance for a title. An absent allowance succeeds and changes nothing. A title an allowed collection holds stays allowed. Household managers only.")),
+	Register(reg, withOrigins(allowanceMutation(humaOp(http.MethodDelete, Prefix+"/profiles/{id}/allowed-titles/{item_id}", "disallowTitle", "profiles",
+		"Remove a profile's allowance for a title. An absent allowance succeeds and changes nothing. A title an allowed collection holds stays allowed. Household managers only.")), grantedRefusedHousehold),
 		func(ctx context.Context, in *AllowedTitleInput) (*struct{}, error) {
 			return reg.setTitleAllowance(ctx, in, false)
 		})
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}/title-allowances", "listTitleAllowanceProfiles", "profiles",
-		"For a movie or series, the standing of every other profile on the account: within its limits, allowed, or above its limits and allowable. Household managers only.")),
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}/title-allowances", "listTitleAllowanceProfiles", "profiles",
+		"For a movie or series, the standing of every other profile on the account: within its limits, allowed, or above its limits and allowable. Household managers only.")), grantedNotDecided),
 		reg.listTitleAllowanceProfiles)
 
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/profiles/{id}/allowed-collections", "listAllowedCollections", "profiles",
-		"List the personal collections allowed for a profile, newest first. Household managers only.")),
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/profiles/{id}/allowed-collections", "listAllowedCollections", "profiles",
+		"List the personal collections allowed for a profile, newest first. Household managers only.")), grantedNotDecided),
 		reg.listAllowedCollections)
-	Register(reg, allowanceMutation(humaOp(http.MethodPut, Prefix+"/profiles/{id}/allowed-collections/{collection_id}", "allowCollection", "profiles",
-		"Allow a profile every title in a personal collection, including titles added later. Only a manual collection the acting primary profile created can be allowed (422 collection_not_live); copy other collections' titles with allowCollectionTitles. A profile sees at most 10,000 of its allowed titles, from its own allowances and its live collections together, and at most 50,000 entries of its live collections together are read; the rest stay hidden. Household managers only.")),
+	Register(reg, withOrigins(allowanceMutation(humaOp(http.MethodPut, Prefix+"/profiles/{id}/allowed-collections/{collection_id}", "allowCollection", "profiles",
+		"Allow a profile every title in a personal collection, including titles added later. Only a manual collection the acting primary profile created can be allowed (422 collection_not_live); copy other collections' titles with allowCollectionTitles. A profile sees at most 10,000 of its allowed titles, from its own allowances and its live collections together, and at most 50,000 entries of its live collections together are read; the rest stay hidden. Household managers only.")), grantedRefusedHousehold),
 		func(ctx context.Context, in *AllowedCollectionInput) (*struct{}, error) {
 			return reg.setCollectionAllowance(ctx, in, true)
 		})
-	Register(reg, allowanceMutation(humaOp(http.MethodDelete, Prefix+"/profiles/{id}/allowed-collections/{collection_id}", "disallowCollection", "profiles",
-		"Stop allowing a profile a personal collection. An absent allowance succeeds and changes nothing. Household managers only.")),
+	Register(reg, withOrigins(allowanceMutation(humaOp(http.MethodDelete, Prefix+"/profiles/{id}/allowed-collections/{collection_id}", "disallowCollection", "profiles",
+		"Stop allowing a profile a personal collection. An absent allowance succeeds and changes nothing. Household managers only.")), grantedRefusedHousehold),
 		func(ctx context.Context, in *AllowedCollectionInput) (*struct{}, error) {
 			return reg.setCollectionAllowance(ctx, in, false)
 		})
@@ -198,6 +198,7 @@ func registerTitleAllowances(reg *Registry) {
 		RetrySafety:   RetrySafetyNonRetryable,
 		ServiceBacked: true,
 		Audited:       true,
+		Origins:       grantedRefusedHousehold,
 	}, reg.allowCollectionTitles)
 }
 

@@ -44,7 +44,7 @@ type NotificationEmailVerificationCapabilityOutput struct {
 func registerEmailVerification(reg *Registry) {
 	capOp := notificationOperation(http.MethodGet, "/email-preferences/address/capabilities", "getNotificationEmailVerificationCapabilities")
 	capOp.Summary = "Describe durable verification admission separately from dispatch availability."
-	Register(reg, capOp, func(ctx context.Context, _ *CapabilityInput) (*NotificationEmailVerificationCapabilityOutput, error) {
+	Register(reg, withOrigins(capOp, grantedCapability), func(ctx context.Context, _ *CapabilityInput) (*NotificationEmailVerificationCapabilityOutput, error) {
 		svc := reg.deps.NotificationEmailVerification
 		queue := svc != nil && svc.EmailVerificationAvailable()
 		allowed := queue && demoAllows(ctx, reg.deps.DemoSettings) && svc.EmailVerificationAllowed(ctx, claimsFrom(ctx).UserID, profileFrom(ctx))
@@ -55,7 +55,7 @@ func registerEmailVerification(reg *Registry) {
 	op.Errors = []int{409, 429}
 	op.MaxBodyBytes = 4096
 	op.Summary = "Durably queue one retained verification intent. Receipt is admission, not delivery; exact replay never creates another message. Dispatch retries an uncertain send once with the same message, so a duplicate email is possible after a crash."
-	Register(reg, op, func(ctx context.Context, in *NotificationEmailVerificationInput) (*NotificationEmailVerificationOutput, error) {
+	Register(reg, withOrigins(op, grantedRefusedLeaves), func(ctx context.Context, in *NotificationEmailVerificationInput) (*NotificationEmailVerificationOutput, error) {
 		svc := reg.deps.NotificationEmailVerification
 		if svc == nil || !svc.EmailVerificationAvailable() {
 			return nil, unavailable("durable email verification")

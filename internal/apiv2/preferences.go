@@ -181,6 +181,7 @@ func registerPreferences(reg *Registry) {
 			"Get the acting profile's remembered audio track for a series."),
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
+		Origins:       grantedSettingsRead,
 	}, reg.getAudioPreference)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodPut, pathAudioPreference, "updateAudioPreference", tagPreferences,
@@ -189,6 +190,7 @@ func registerPreferences(reg *Registry) {
 		DemoRestricted: true,
 		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
+		Origins:        grantedNotDecided,
 	}, reg.updateAudioPreference)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodDelete, pathAudioPreference, "deleteAudioPreference", tagPreferences,
@@ -197,12 +199,14 @@ func registerPreferences(reg *Registry) {
 		DemoRestricted: true,
 		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
+		Origins:        grantedNotDecided,
 	}, reg.deleteAudioPreference)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, pathSubtitlePreference, "getSubtitlePreference", tagPreferences,
 			"Get the acting profile's remembered subtitle choice for a series."),
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
+		Origins:       grantedSettingsRead,
 	}, reg.getSubtitlePreference)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodPut, pathSubtitlePreference, "updateSubtitlePreference", tagPreferences,
@@ -211,6 +215,7 @@ func registerPreferences(reg *Registry) {
 		DemoRestricted: true,
 		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
+		Origins:        grantedNotDecided,
 	}, reg.updateSubtitlePreference)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodDelete, pathSubtitlePreference, "deleteSubtitlePreference", tagPreferences,
@@ -219,12 +224,14 @@ func registerPreferences(reg *Registry) {
 		DemoRestricted: true,
 		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
+		Origins:        grantedNotDecided,
 	}, reg.deleteSubtitlePreference)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, pathLibraryPlaybackPreference, "listLibraryPlaybackPreferences", tagPreferences,
 			"List the acting profile's per-library playback overrides."),
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
+		Origins:       grantedSettingsRead,
 	}, reg.listLibraryPlaybackPreferences)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodPatch, pathLibraryPlaybackPreference+"/{library_id}", "updateLibraryPlaybackPreference", tagPreferences,
@@ -233,6 +240,7 @@ func registerPreferences(reg *Registry) {
 		DemoRestricted: true,
 		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
+		Origins:        grantedNotDecided,
 	}, reg.updateLibraryPlaybackPreference)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodDelete, pathLibraryPlaybackPreference+"/{library_id}", "deleteLibraryPlaybackPreference", tagPreferences,
@@ -241,6 +249,7 @@ func registerPreferences(reg *Registry) {
 		DemoRestricted: true,
 		RetrySafety:    RetrySafetyNaturalIdempotent,
 		ServiceBacked:  true,
+		Origins:        grantedNotDecided,
 	}, reg.deleteLibraryPlaybackPreference)
 }
 

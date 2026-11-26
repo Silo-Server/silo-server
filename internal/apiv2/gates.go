@@ -61,7 +61,7 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 		origins, _ := op.Metadata[metaOriginDecisions].(OriginDecisions)
 		chain, missing := gateChain(deps, class, permission, origins, demoRestricted, profileOptional, household, bucket)
 		if op.OperationID == notificationApplePushDisplayOperation {
-			chain, missing = notificationDisplayGateChain(deps)
+			chain, missing = notificationDisplayGateChain(deps, origins)
 		}
 		if link, _ := op.Metadata[metaDirectDownloadLink].(bool); link && missing == "" {
 			chain = directDownloadGateChain(deps, chain)

@@ -100,7 +100,7 @@ func registerEbookAnnotations(reg *Registry) {
 		return Operation{Operation: humaOp(method, Prefix+path, id, "ebooks", summary), Class: ClassProfileScoped, ServiceBacked: true}
 	}
 	cursors := NewCursors(reg.deps.CursorSecret)
-	Register(reg, op(http.MethodGet, "/ebooks/{content_id}/annotations", "listEbookAnnotations", "Page the acting profile's annotations by newest update and identity."), func(ctx context.Context, in *EbookAnnotationListInput) (*EbookAnnotationPageOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "/ebooks/{content_id}/annotations", "listEbookAnnotations", "Page the acting profile's annotations by newest update and identity."), grantedProfileState), func(ctx context.Context, in *EbookAnnotationListInput) (*EbookAnnotationPageOutput, error) {
 		return reg.listEbookAnnotations(ctx, cursors, in)
 	})
 	create := op(http.MethodPost, "/ebooks/{content_id}/annotations", "createEbookAnnotation", "Create an annotation using its client-selected identity; retry returns the existing scoped annotation without changing it.")
@@ -109,17 +109,17 @@ func registerEbookAnnotations(reg *Registry) {
 	create.RetrySafety = RetrySafetyUniqueConstraint
 	create.Errors = []int{409}
 	create.Responses = map[string]*huma.Response{"200": {Description: "The annotation identity already exists; returns its current state.", Content: map[string]*huma.MediaType{mediaTypeJSON: {Schema: reg.api.OpenAPI().Components.Schemas.Schema(reflect.TypeFor[EbookAnnotation](), true, "")}}}}
-	Register(reg, create, reg.createEbookAnnotation)
+	Register(reg, withOrigins(create, grantedProfileState), reg.createEbookAnnotation)
 	update := op(http.MethodPatch, "/ebooks/{content_id}/annotations/{annotation_id}", "updateEbookAnnotation", "Apply an annotation patch under its current validator; null clears a field.")
 	update.Guarded = true
 	update.MaxBodyBytes = 256 << 10
 	update.RetrySafety = RetrySafetyNaturalIdempotent
-	Register(reg, update, reg.updateEbookAnnotation)
+	Register(reg, withOrigins(update, grantedProfileState), reg.updateEbookAnnotation)
 	remove := op(http.MethodDelete, "/ebooks/{content_id}/annotations/{annotation_id}", "deleteEbookAnnotation", "Delete an annotation under its current validator.")
 	remove.Guarded = true
 	remove.DefaultStatus = 204
 	remove.RetrySafety = RetrySafetyNaturalIdempotent
-	Register(reg, remove, reg.deleteEbookAnnotation)
+	Register(reg, withOrigins(remove, grantedProfileState), reg.deleteEbookAnnotation)
 }
 
 func readerAnnotationScope(ctx context.Context, contentID string) (handlers.EbookAnnotationScope, *Problem) {

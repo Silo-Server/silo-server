@@ -260,6 +260,7 @@ func registerDeviceLogin(reg *Registry) {
 	Register(reg, Operation{
 		Operation: approve, RetrySafety: RetrySafetyDomainIdentity,
 		Class: ClassAuthenticated, ServiceBacked: true, RateLimitBucket: bucketDeviceLookup,
+		Origins: grantedRefusedSignIn,
 	}, reg.approveDeviceLogin)
 	handoff := humaOp(http.MethodPost, Prefix+"/auth/device/approve-handoff", "approveDeviceHandoff", "device-login",
 		"Approve a pairing request for the caller's verified profile: a remote-playback handoff or a Jellyfin Quick Connect request.")
@@ -268,6 +269,7 @@ func registerDeviceLogin(reg *Registry) {
 	Register(reg, Operation{
 		Operation: handoff, RetrySafety: RetrySafetyDomainIdentity,
 		Class: ClassProfileScoped, ServiceBacked: true, RateLimitBucket: bucketDeviceLookup,
+		Origins: grantedRefusedSignIn,
 	}, reg.approveDeviceHandoff)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/auth/device/capability", "getDeviceLoginCapability", "device-login",
@@ -281,6 +283,7 @@ func registerDeviceLogin(reg *Registry) {
 	Register(reg, Operation{
 		Operation: deny, RetrySafety: RetrySafetyDomainIdentity,
 		Class: ClassAuthenticated, ServiceBacked: true, RateLimitBucket: bucketDeviceLookup,
+		Origins: grantedNotDecided,
 	}, reg.denyDeviceLogin)
 	poll := humaOp(http.MethodPost, Prefix+"/auth/device/poll", "pollDeviceLogin", "device-login",
 		"Poll a pairing request from the device and collect its tokens once approved.")

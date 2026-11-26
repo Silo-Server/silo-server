@@ -43,7 +43,7 @@ func registerWatchTogetherSocket(reg *Registry) {
 	op.Description = "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied " +
 		"when the room's host is its own account and profile: it may not host a room. As a member of another host's room it may connect, " +
 		"but the socket refuses its transport_request frames (play, pause, seek for everyone) with the error frame any refused request gets."
-	Register(reg, op, func(ctx context.Context, in *WatchTogetherSocketTicketInput) (*EventsSocketTicketOutput, error) {
+	Register(reg, withOrigins(op, grantedOwnSeat), func(ctx context.Context, in *WatchTogetherSocketTicketInput) (*EventsSocketTicketOutput, error) {
 		if reg.deps.WatchTogetherSocket == nil {
 			return nil, unavailable("room socket")
 		}

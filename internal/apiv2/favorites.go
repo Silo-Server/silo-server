@@ -86,25 +86,25 @@ const opListFavorites = "listFavorites"
 func registerFavorites(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/favorites", opListFavorites, "favorites",
-		"List the acting profile's favorites as catalog cards, newest favorite first; items the viewer may not see are omitted.")),
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/favorites", opListFavorites, "favorites",
+		"List the acting profile's favorites as catalog cards, newest favorite first; items the viewer may not see are omitted.")), grantedProfileState),
 		func(ctx context.Context, in *FavoriteListInput) (*FavoriteCollectionOutput, error) {
 			return reg.listFavorites(ctx, cursors, in)
 		})
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/favorites/{item_id}", "getFavorite", "favorites",
-		"Answer whether the item is one of the acting profile's favorites: the entry, or 404 when it is not (or the viewer may not see it).")),
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/favorites/{item_id}", "getFavorite", "favorites",
+		"Answer whether the item is one of the acting profile's favorites: the entry, or 404 when it is not (or the viewer may not see it).")), grantedProfileState),
 		reg.getFavorite)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/favorites/{item_id}/membership", "getFavoriteMembership", "favorites",
-		"Answer whether the item is one of the acting profile's favorites as is_member, 200 either way; 404 only when the viewer may not see the item.")),
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/favorites/{item_id}/membership", "getFavoriteMembership", "favorites",
+		"Answer whether the item is one of the acting profile's favorites as is_member, 200 either way; 404 only when the viewer may not see the item.")), grantedProfileState),
 		reg.getFavoriteMembership)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/personal-lists", "getPersonalListCapability", "favorites",
-		"Discover the favorites and watchlist membership reads.")),
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/personal-lists", "getPersonalListCapability", "favorites",
+		"Discover the favorites and watchlist membership reads.")), grantedCapability),
 		reg.getPersonalListCapability)
-	Register(reg, viewerNoContentMutation(humaOp(http.MethodPut, Prefix+"/favorites/{item_id}", "addFavorite", "favorites",
-		"Add the item to the acting profile's favorites. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")),
+	Register(reg, withOrigins(viewerNoContentMutation(humaOp(http.MethodPut, Prefix+"/favorites/{item_id}", "addFavorite", "favorites",
+		"Add the item to the acting profile's favorites. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")), grantedProfileState),
 		reg.addFavorite)
-	Register(reg, viewerNoContentMutation(humaOp(http.MethodDelete, Prefix+"/favorites/{item_id}", "deleteFavorite", "favorites",
-		"Remove the item from the acting profile's favorites. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")),
+	Register(reg, withOrigins(viewerNoContentMutation(humaOp(http.MethodDelete, Prefix+"/favorites/{item_id}", "deleteFavorite", "favorites",
+		"Remove the item from the acting profile's favorites. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")), grantedProfileState),
 		reg.deleteFavorite)
 }
 

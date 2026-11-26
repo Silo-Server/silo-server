@@ -68,7 +68,7 @@ func registerSubtitleReads(reg *Registry) {
 	op := func(method, path, id string) Operation {
 		return Operation{Operation: humaOp(method, Prefix+path, id, "subtitles", "Read subtitles for an accessible media file."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, ServiceBacked: true}
 	}
-	Register(reg, op(http.MethodGet, "/subtitles/{media_file_id}", "listStoredSubtitles"), func(ctx context.Context, in *StoredSubtitlesInput) (*StoredSubtitlesOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "/subtitles/{media_file_id}", "listStoredSubtitles"), grantedSubtitleRead), func(ctx context.Context, in *StoredSubtitlesInput) (*StoredSubtitlesOutput, error) {
 		id, p := in.MediaFileID.positive("path.media_file_id")
 		if p != nil {
 			return nil, p
@@ -91,7 +91,7 @@ func registerSubtitleReads(reg *Registry) {
 	})
 	search := op(http.MethodPost, "/subtitles/search", "searchSubtitles")
 	search.RetrySafety = RetrySafetyNaturalIdempotent
-	Register(reg, search, func(ctx context.Context, in *SubtitleSearchInput) (*SubtitleSearchOutput, error) {
+	Register(reg, withOrigins(search, grantedSubtitleRead), func(ctx context.Context, in *SubtitleSearchInput) (*SubtitleSearchOutput, error) {
 		id, p := in.Body.MediaFileID.positive("body.media_file_id")
 		if p != nil {
 			return nil, p

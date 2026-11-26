@@ -25,7 +25,7 @@ func registerWatchTogetherSuggestionPromote(reg *Registry) {
 	op.MaxBodyBytes = 4096
 	op.Errors = []int{409}
 	op.Description = watchTogetherHostOtherAppRule
-	Register(reg, op, func(ctx context.Context, in *WatchTogetherSuggestionPromoteInput) (*WatchTogetherRoomReadOutput, error) {
+	Register(reg, withOrigins(op, grantedRefusedRoomHost), func(ctx context.Context, in *WatchTogetherSuggestionPromoteInput) (*WatchTogetherRoomReadOutput, error) {
 		if p := reg.otherDevicesProblem(ctx); p != nil {
 			return nil, p
 		}

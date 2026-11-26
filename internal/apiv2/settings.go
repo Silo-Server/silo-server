@@ -260,7 +260,7 @@ func registerSettings(reg *Registry) {
 			},
 		},
 	}
-	Register(reg, contract, getSettingsContract)
+	Register(reg, withOrigins(contract, grantedSettingsRead), getSettingsContract)
 
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/settings/contract/capabilities", "getSettingsContractCapabilities", "settings",
@@ -268,6 +268,7 @@ func registerSettings(reg *Registry) {
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		ServiceBacked:   true,
+		Origins:         grantedCapability,
 	}, reg.getSettingsContractCapabilities)
 
 	Register(reg, Operation{
@@ -276,6 +277,7 @@ func registerSettings(reg *Registry) {
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		ServiceBacked:   true,
+		Origins:         grantedSettingsRead,
 	}, reg.getOverlayConfig)
 
 	Register(reg, Operation{
@@ -283,6 +285,7 @@ func registerSettings(reg *Registry) {
 			"Get the subtitle appearance that applies to the acting profile on this device."),
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
+		Origins:       grantedSettingsRead,
 	}, reg.getEffectiveSubtitleAppearance)
 
 	Register(reg, Operation{
@@ -292,6 +295,7 @@ func registerSettings(reg *Registry) {
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
 		ServiceBacked:  true,
+		Origins:        grantedRefusedOwnDevice,
 	}, reg.updateSubtitleAppearanceDeviceOverride)
 
 	Register(reg, Operation{
@@ -301,6 +305,7 @@ func registerSettings(reg *Registry) {
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
 		ServiceBacked:  true,
+		Origins:        grantedRefusedOwnDevice,
 	}, reg.deleteSubtitleAppearanceDeviceOverride)
 
 	Register(reg, Operation{
@@ -309,6 +314,7 @@ func registerSettings(reg *Registry) {
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		ServiceBacked:   true,
+		Origins:         grantedNotDecided,
 	}, reg.listPluginSettings)
 
 	Register(reg, Operation{
@@ -317,6 +323,7 @@ func registerSettings(reg *Registry) {
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		ServiceBacked:   true,
+		Origins:         grantedNotDecided,
 	}, reg.getPluginSettings)
 
 	Register(reg, Operation{
@@ -327,6 +334,7 @@ func registerSettings(reg *Registry) {
 		ProfileOptional: true,
 		DemoRestricted:  true,
 		ServiceBacked:   true,
+		Origins:         grantedNotDecided,
 	}, reg.updatePluginSettings)
 
 	Register(reg, Operation{
@@ -334,6 +342,7 @@ func registerSettings(reg *Registry) {
 			"Get the explicit values of several settings at one scope."),
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
+		Origins:       grantedSettingsRead,
 	}, reg.listSettingValues)
 
 	Register(reg, Operation{
@@ -341,6 +350,7 @@ func registerSettings(reg *Registry) {
 			"Resolve the effective values of settings for the acting profile."),
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
+		Origins:       grantedSettingsRead,
 	}, reg.listEffectiveSettings)
 
 	Register(reg, Operation{
@@ -349,6 +359,7 @@ func registerSettings(reg *Registry) {
 			"Resolve the effective values of settings under several content contexts at once."),
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
+		Origins:       grantedSettingsRead,
 	}, reg.resolveEffectiveSettings)
 
 	shortcut := humaOp(http.MethodPut, Prefix+"/settings/values/nav.shortcuts/item", "updateNavigationShortcut", "settings",
@@ -368,6 +379,7 @@ func registerSettings(reg *Registry) {
 		Class:          ClassProfileScoped,
 		DemoRestricted: isMutatingMethod(shortcut.Method),
 		ServiceBacked:  true,
+		Origins:        grantedNotDecided,
 	}, reg.updateNavigationShortcut)
 
 	Register(reg, Operation{
@@ -375,6 +387,7 @@ func registerSettings(reg *Registry) {
 			"Get the explicit value of a setting at one scope."),
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
+		Origins:       grantedSettingsRead,
 	}, reg.getSettingValue)
 
 	Register(reg, Operation{
@@ -384,6 +397,7 @@ func registerSettings(reg *Registry) {
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
 		ServiceBacked:  true,
+		Origins:        grantedNotDecided,
 	}, reg.updateSettingValue)
 
 	Register(reg, Operation{
@@ -393,6 +407,7 @@ func registerSettings(reg *Registry) {
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
 		ServiceBacked:  true,
+		Origins:        grantedNotDecided,
 	}, reg.deleteSettingValue)
 }
 

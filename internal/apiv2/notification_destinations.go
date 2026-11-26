@@ -228,7 +228,7 @@ func registerNotificationDestinations(reg *Registry) {
 	rotate := notificationOperation(http.MethodPost, "/webhooks/{id}/rotate-secret", "rotateNotificationWebhookSecret")
 	rotate.RetrySafety = RetrySafetyNonRetryable
 	rotate.Summary = "Replace the generic webhook signing secret and reveal it once. Never replay an uncertain rotation."
-	Register(reg, rotate, func(ctx context.Context, in *NotificationWebhookRotateInput) (*NotificationWebhookSecretOutput, error) {
+	Register(reg, withOrigins(rotate, grantedRefusedLeaves), func(ctx context.Context, in *NotificationWebhookRotateInput) (*NotificationWebhookSecretOutput, error) {
 		if reg.deps.NotificationDestinations == nil {
 			return nil, unavailable("notification destinations")
 		}
@@ -289,7 +289,7 @@ func registerNotificationDestinations(reg *Registry) {
 	removeWebhook.Guarded = true
 	removeWebhook.RetrySafety = RetrySafetyNaturalIdempotent
 	removeWebhook.Summary = "Delete the profile's exact webhook ID and stored attempts. Does not recall an already-dispatched webhook."
-	Register(reg, removeWebhook, func(ctx context.Context, in *NotificationWebhookDeleteInput) (*struct{}, error) {
+	Register(reg, withOrigins(removeWebhook, grantedRefusedLeaves), func(ctx context.Context, in *NotificationWebhookDeleteInput) (*struct{}, error) {
 		if reg.deps.NotificationDestinations == nil {
 			return nil, unavailable("notification destinations")
 		}
@@ -321,7 +321,7 @@ func registerNotificationDestinations(reg *Registry) {
 	subscribe.MaxBodyBytes = 16384
 	subscribe.Summary = "Register or reassign a browser endpoint to the current profile. Send once; replay can replace newer intent or re-enable delivery."
 	subscribe.Description = webPushOtherAppRule
-	Register(reg, subscribe, func(ctx context.Context, in *NotificationWebPushSubscribeInput) (*NotificationWebPushSubscribeOutput, error) {
+	Register(reg, withOrigins(subscribe, grantedRefusedOtherDevice), func(ctx context.Context, in *NotificationWebPushSubscribeInput) (*NotificationWebPushSubscribeOutput, error) {
 		if p := reg.otherDevicesProblem(ctx); p != nil {
 			return nil, p
 		}
@@ -348,7 +348,7 @@ func registerNotificationDestinations(reg *Registry) {
 	unsubscribe.MaxBodyBytes = 4096
 	unsubscribe.Summary = "Remove the account's current registration for a browser endpoint. Send once; a retry can delete a newer registration."
 	unsubscribe.Description = webPushOtherAppRule
-	Register(reg, unsubscribe, func(ctx context.Context, in *NotificationWebPushUnsubscribeInput) (*struct{}, error) {
+	Register(reg, withOrigins(unsubscribe, grantedRefusedOtherDevice), func(ctx context.Context, in *NotificationWebPushUnsubscribeInput) (*struct{}, error) {
 		if p := reg.otherDevicesProblem(ctx); p != nil {
 			return nil, p
 		}
@@ -370,7 +370,7 @@ func registerNotificationDestinations(reg *Registry) {
 	op.RetrySafety = RetrySafetyNaturalIdempotent
 	op.Summary = "Remove a server subscription belonging to the current profile. Does not unsubscribe the browser or order concurrent registration intents."
 	op.Description = webPushOtherAppRule
-	Register(reg, op, func(ctx context.Context, in *NotificationWebPushDeleteInput) (*struct{}, error) {
+	Register(reg, withOrigins(op, grantedRefusedOtherDevice), func(ctx context.Context, in *NotificationWebPushDeleteInput) (*struct{}, error) {
 		if p := reg.otherDevicesProblem(ctx); p != nil {
 			return nil, p
 		}
@@ -391,7 +391,7 @@ func registerNotificationDestinations(reg *Registry) {
 
 	listWebPush := notificationOperation(http.MethodGet, "/web-push/subscriptions", listNotificationWebPushOperation)
 	listWebPush.Description = webPushOtherAppRule
-	Register(reg, listWebPush, func(ctx context.Context, in *NotificationDestinationListInput) (*NotificationWebPushSubscriptionListOutput, error) {
+	Register(reg, withOrigins(listWebPush, grantedRefusedOtherDevice), func(ctx context.Context, in *NotificationDestinationListInput) (*NotificationWebPushSubscriptionListOutput, error) {
 		if p := reg.otherDevicesProblem(ctx); p != nil {
 			return nil, p
 		}
@@ -434,7 +434,7 @@ func registerNotificationDestinations(reg *Registry) {
 		return &NotificationWebPushSubscriptionListOutput{Body: Paginated(items, next)}, nil
 	})
 
-	Register(reg, notificationOperation(http.MethodGet, "/webhooks", listNotificationWebhooksOperation), func(ctx context.Context, in *NotificationDestinationListInput) (*NotificationWebhookDestinationListOutput, error) {
+	Register(reg, withOrigins(notificationOperation(http.MethodGet, "/webhooks", listNotificationWebhooksOperation), grantedRefusedLeaves), func(ctx context.Context, in *NotificationDestinationListInput) (*NotificationWebhookDestinationListOutput, error) {
 		svc := reg.deps.NotificationDestinations
 		if svc == nil {
 			return nil, unavailable("notification destinations")

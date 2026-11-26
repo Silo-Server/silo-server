@@ -71,7 +71,7 @@ const (
 
 func registerPlaybackControlSocket(reg *Registry) {
 	const root = Prefix + "/playback/sessions"
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, root+"/control/capabilities", "getPlaybackControlSocketCapabilities", "playback", "Discover whether the session-bound playback control handshake is served."), Class: ClassProfileScoped, ServiceBacked: true}, func(ctx context.Context, _ *CapabilityInput) (*PlaybackControlSocketCapabilitiesOutput, error) {
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, root+"/control/capabilities", "getPlaybackControlSocketCapabilities", "playback", "Discover whether the session-bound playback control handshake is served."), Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedCapability}, func(ctx context.Context, _ *CapabilityInput) (*PlaybackControlSocketCapabilitiesOutput, error) {
 		out := &PlaybackControlSocketCapabilitiesOutput{CacheControl: playbackCacheControl}
 		out.Body.Allowed = new(capabilityLoginAllowed(ctx))
 		out.Body.Available = reg.deps.PlaybackControlSocket != nil && reg.deps.PlaybackControlSocket.Available()
@@ -83,7 +83,7 @@ func registerPlaybackControlSocket(reg *Registry) {
 
 	mint := Operation{Operation: humaOp(http.MethodPost, root+playbackControlSocketTicketPath, "createPlaybackControlSocketTicket", "playback", "Delegate the current login session and profile proof to one control handshake for a playback session this owner started."), Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	mint.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusGone}
-	Register(reg, mint, func(ctx context.Context, in *PlaybackControlSocketTicketInput) (*PlaybackControlSocketTicketOutput, error) {
+	Register(reg, withOrigins(mint, grantedOwnStreamTicket), func(ctx context.Context, in *PlaybackControlSocketTicketInput) (*PlaybackControlSocketTicketOutput, error) {
 		svc := reg.deps.PlaybackControlSocket
 		if svc == nil || !svc.Available() {
 			return nil, unavailable("playback control")
