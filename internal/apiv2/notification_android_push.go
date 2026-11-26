@@ -66,6 +66,18 @@ type AndroidPushRegistrationCapabilityOutput struct {
 	Body         AndroidPushRegistrationCapability
 }
 
+// nativePushOtherAppRule describes the native push writes for a session
+// another app opened. A registration that has no ordered record yet (a legacy
+// Android one, or an Apple installation after a reset) is bound only to the
+// account and device id, and an Apple reset needs no installation key, so such
+// a session could remove or take over the person's other devices'
+// registrations. Its own app can receive nothing through them: the Apple topic
+// and the Android relay are the first-party apps'.
+const nativePushOtherAppRule = "A login session opened by another app the person allowed (its app key was enrolled through a grant) " +
+	"is refused with 403 permission_denied before anything is read or written: a registration is bound only to the account and device id " +
+	"until it has an ordered record, and a reset needs no installation key, so the session could remove or take over another device's. " +
+	"A session the person's own app key opened, and one opened by device sign-in, are not refused."
+
 func orderedPushProblem(err error) error {
 	switch {
 	case errors.Is(err, notifications.ErrPushGenerationConflict), errors.Is(err, notifications.ErrPushLegacyWriter):
@@ -105,7 +117,11 @@ func registerOrderedAndroidPush(reg *Registry) {
 	op.RetrySafety = RetrySafetyDomainIdentity
 	op.Errors = []int{409}
 	op.MaxBodyBytes = 4096
+	op.Description = nativePushOtherAppRule
 	Register(reg, op, func(ctx context.Context, in *AndroidPushRegistrationInput) (*AndroidPushRegistrationOutput, error) {
+		if p := reg.otherDevicesProblem(ctx); p != nil {
+			return nil, p
+		}
 		cmd, err := reg.androidPushCommand(ctx, in.AndroidPushAuthority, in.Body.DeviceID)
 		if err != nil {
 			return nil, err
@@ -122,7 +138,11 @@ func registerOrderedAndroidPush(reg *Registry) {
 	remove.RetrySafety = RetrySafetyDomainIdentity
 	remove.DefaultStatus = http.StatusNoContent
 	remove.Errors = []int{409}
+	remove.Description = nativePushOtherAppRule
 	Register(reg, remove, func(ctx context.Context, in *AndroidPushRemovalInput) (*struct{}, error) {
+		if p := reg.otherDevicesProblem(ctx); p != nil {
+			return nil, p
+		}
 		cmd, err := reg.androidPushCommand(ctx, in.AndroidPushAuthority, in.DeviceID)
 		if err != nil {
 			return nil, err
