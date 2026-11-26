@@ -27,8 +27,8 @@ type RatingsCapabilityOutput struct {
 }
 
 func registerRatingsCapability(reg *Registry) {
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/ratings", "getRatingsCapability", "catalog",
-		"Whether item detail carries the ratings list, and the rating sources title pages and cards show.")), reg.getRatingsCapability)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/ratings", "getRatingsCapability", "catalog",
+		"Whether item detail carries the ratings list, and the rating sources title pages and cards show.")), grantedCapability), reg.getRatingsCapability)
 }
 
 func (reg *Registry) getRatingsCapability(ctx context.Context, _ *CapabilityInput) (*RatingsCapabilityOutput, error) {

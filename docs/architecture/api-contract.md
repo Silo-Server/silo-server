@@ -227,8 +227,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
 - **Operation classes.** Every v2 operation declares one class at registration — `public`,
   `authenticated`, `profile_scoped`, `acting_admin`, or `permission_gated` (the last with the
   policy permission it needs) — and the listener composes the existing `internal/api/middleware`
-  gates onto it per class, in the order the v1 authenticated group ran them: auth, then demo
-  mode for operations marked demo-restricted, then the rate limiter, then viewer access for
+  gates onto it per class, in the order the v1 authenticated group ran them: auth, then the
+  origin gate (v2 only; below), then demo mode for operations marked demo-restricted, then the
+  rate limiter, then viewer access for
   every class that resolves a profile (`profile_scoped`, `acting_admin`, `permission_gated`),
   then the profile, acting-admin, or permission gate. The shared gates still write the legacy
   JSON error body v1 answered with; v2 re-renders a denial as the matching Problem Details
@@ -248,6 +249,17 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   claims with a positive account ID after the auth gate; public operations and helpers
   called outside that gate must check explicitly. A resolved profile remains a separate
   invariant of the profile-aware classes.
+- **Origin decisions.** Every operation of class `authenticated`, `profile_scoped` or
+  `permission_gated` states what a login session opened a given way may do with it
+  (`Operation.Origins`); today the one kind judged is a session another app's key opened
+  ([app keys](app-keys.md#what-a-granted-app-can-do)). The document carries the decision as
+  `x-silo-origin-decisions`: an object keyed by kind (`granted_app`), each value
+  `{verdict, reason, check?}` with `verdict` one of `allowed`, `own_only` or `refused`, and
+  `check` naming the handler check on `own_only`. The origin gate refuses a `refused`
+  operation to such a session with `403 permission_denied` before anything else is judged;
+  `allowed` and `own_only` pass, and an own-only limit is the handler's. `Register` refuses a
+  decision without its reason and one on `public` or `acting_admin`, and
+  `TestEveryOperationDecidesForGrantedApps` fails on an operation with none.
 - **The delegation row.** The API listener hands the `/api/v2/` subtree to the sealed
   `apiv2` handler with one wildcard registration, built in the registration itself. The route
   inventory records that as a delegation row per method (`delegates_to: api_v2`, namespace
@@ -852,6 +864,31 @@ should not see.
 Clients use capability documents to decide whether a feature exists. The server version and
 contract digest are for diagnostics, support, cache identity, and last-resort compatibility
 messages; they are not substitutes for feature detection.
+
+A permission member of a response (a boolean named `allowed`, ending in `_allowed`, or starting
+`can_` or `self_can_`, at any depth) never reports as allowed an action whose operations are all
+refused to the session asking. Every such member of a response a judged kind of session may read has
+a row in one table (`capabilityMembers`, `internal/apiv2/origin_decisions.go`): either it governs,
+naming the operations it answers for, or it is exempt with a reason that says what the app would do
+if it believed it. A capability read's top-level `allowed` is applied by the shared capability
+adapter (`prepareCapabilityOperation`, published as `x-silo-capability-for`); a member deeper in a
+response by its handler. For a session of a kind the per-operation decisions judge
+(`x-silo-origin-decisions`), a governed member is false when every operation it names is refused to
+that kind; every other caller gets the member's own answer.
+
+`TestPermissionMembersStateTheirCase` fails by name on a member with no row. A live check, run over
+fakes that report each service available and against Postgres, fails on a true member with no row,
+or a governed one that is true when its operations are all refused. The live check sees every
+governed member except these, whose services its harness does not wire: the top-level `allowed` of
+`getApplePushRegistrationCapabilities`, `getPushRegistrationCapabilities`,
+`getDiagnosticsCapabilities`, `getHistoryImportCapability`, `getOnboardingCapabilities`,
+`getProfileExportCapability`, `getTitleAllowanceCapability`, `getTrailersCapability` and
+`getMetadataAICapability` (applied by the same adapter it does see), and the room read's and join's
+`self_can_manage_room` and `self_can_control_transport` (covered for the room read by
+`TestRoomReadLeavesOutAnotherDevicesStream`). Today the exempt members are four documents that
+describe server behavior (`getImageCapabilities`, `getNetworkAccessCapabilities`,
+`getPolicyCapability`, `getServerConnections`), whose only action is reading them, and the playback
+plan's `can_seek_anywhere`, which describes the stream's timeline, not a permission.
 
 `links.identity` points at `GET /api/v2/system/identity`, the one public per-deployment value:
 a stable `server_id` every API process answers at every address. It is self-asserted and

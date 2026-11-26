@@ -93,12 +93,6 @@ func (h *AuthHandler) SessionMayIssueCredential(ctx context.Context, claims *aut
 	return h.appKeys.SessionMayIssueCredential(ctx, claims)
 }
 
-// SessionMayReachOtherDevices reports whether the caller's session may see
-// or change what the account's other devices hold.
-func (h *AuthHandler) SessionMayReachOtherDevices(ctx context.Context, claims *auth.Claims) error {
-	return h.appKeys.SessionMayReachOtherDevices(ctx, claims)
-}
-
 // ReplacePersonKey replaces the caller's person key.
 func (h *AuthHandler) ReplacePersonKey(ctx context.Context, claims *auth.Claims, key appkeys.PublicKey, acting auth.ActingProfile) error {
 	return h.appKeys.ReplacePersonKey(ctx, claims, key, acting)

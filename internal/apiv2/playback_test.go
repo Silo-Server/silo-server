@@ -113,15 +113,21 @@ func TestPlaybackV2ProgressAndStop(t *testing.T) {
 	deps, _ := catalogDeps(t)
 	fake := &fakePlaybackService{mutation: handlers.PlaybackMutationView{Outcome: "applied"}}
 	deps.Playback = fake
-	deps.AppKeys = &fakeAppKeys{reachErr: auth.ErrSessionNotAllowed}
 	h := newTestHandler(t, deps)
-	response := do(t, h, http.MethodPost, Prefix+"/playback/session-1/progress", playbackJSON(t, map[string]any{"installation_id": playbackTestInstallation, "sequence": 42, "position": 0, "is_paused": true}), viewerHeaders())
+	progress := playbackJSON(t, map[string]any{"installation_id": playbackTestInstallation, "sequence": 42, "position": 0, "is_paused": true})
+	// A session another app's key opened hands the service the rule it
+	// asks before acting on a stream another login session started.
+	response := do(t, h, http.MethodPost, Prefix+"/playback/session-1/progress", progress, with(bearer(grantedAppToken), "X-Profile-Id", "p-owner"))
+	if rule := fake.caller.MayReachOtherDevices; response.Code != 200 || fake.caller.LoginSessionID != grantedAppSessionID || rule == nil || !errors.Is(rule(t.Context()), auth.ErrSessionNotAllowed) {
+		t.Fatalf("another app's session: %d %+v", response.Code, fake.caller)
+	}
+	response = do(t, h, http.MethodPost, Prefix+"/playback/session-1/progress", progress, viewerHeaders())
 	if response.Code != 200 || fake.progress.Sequence != 42 || fake.progress.Position != 0 || !fake.progress.IsPaused {
 		t.Fatalf("progress: %d %s %+v", response.Code, response.Body.String(), fake.progress)
 	}
-	// The service gets the caller's login session and the rule it asks
-	// before acting on a stream another login session started.
-	if rule := fake.caller.MayReachOtherDevices; fake.caller.LoginSessionID == "" || rule == nil || !errors.Is(rule(t.Context()), auth.ErrSessionNotAllowed) {
+	// The person's own session gets its login session and no rule: it
+	// may act on every stream of the account, as before.
+	if fake.caller.LoginSessionID == "" || fake.caller.MayReachOtherDevices != nil {
 		t.Fatalf("caller = %+v", fake.caller)
 	}
 	fake.mutation = handlers.PlaybackMutationView{Outcome: "stopped", StopID: playbackTestStop}

@@ -452,11 +452,6 @@ func TestSessionAllowsDB(t *testing.T) {
 			if err := SessionMayIssueCredential(ctx, env.pool, tc.claims); !refused && err != nil || refused && !errors.Is(err, ErrSessionNotAllowed) {
 				t.Fatalf("issuing a credential: err = %v, want refused %v", err, refused)
 			}
-			// So is reaching the other devices' playback and web push: a
-			// device sign-in keeps what it has there.
-			if err := SessionMayReachOtherDevices(ctx, env.pool, tc.claims); !refused && err != nil || refused && !errors.Is(err, ErrSessionNotAllowed) {
-				t.Fatalf("reaching other devices: err = %v, want refused %v", err, refused)
-			}
 		})
 	}
 }

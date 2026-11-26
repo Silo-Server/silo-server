@@ -77,11 +77,13 @@ func registerAccount(reg *Registry) {
 			"Get the authenticated caller's login account."),
 		Class:         ClassAuthenticated,
 		ServiceBacked: true,
+		Origins:       grantedCurrentUser,
 	}, reg.getCurrentUser)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/account/password/capability", "getAccountPasswordCapability", "account",
 			"Describe whether the caller may change the account password."),
 		Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true,
+		Origins: grantedCapability,
 	}, reg.getAccountPasswordCapability)
 	change := humaOp(http.MethodPost, Prefix+"/account/password", "changePassword", "account",
 		"Replace the account password.")
@@ -102,6 +104,7 @@ func registerAccount(reg *Registry) {
 		Audited:         true,
 		// Demo visitors share one account: a new password locks the others out.
 		DemoRestricted: true,
+		Origins:        grantedRefusedAccount,
 	}, reg.changePassword)
 }
 
@@ -197,7 +200,13 @@ func (reg *Registry) getCurrentUser(ctx context.Context, _ *struct{}) (*AccountO
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &AccountOutput{Body: accountFromView(view)}, nil
+	out := accountFromView(view)
+	out.DownloadAllowed = out.DownloadAllowed && reg.memberPermitted(ctx, "getCurrentUser download_allowed")
+	if grantedAppSession(claims) {
+		// The person's email is not an app's to read; the shape's "none".
+		out.Email = ""
+	}
+	return &AccountOutput{Body: out}, nil
 }
 
 func accountFromView(v handlers.UserView) Account {

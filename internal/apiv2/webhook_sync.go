@@ -198,7 +198,7 @@ func registerWebhookSync(reg *Registry) {
 		}
 		return scope, &webhooksync.PageKey{At: pos.At, ID: pos.ID}, nil
 	}
-	Register(reg, op(http.MethodGet, "/connections", "listWebhookConnections", "List the account's webhook connections."), func(ctx context.Context, in *WebhookPageInput) (*WebhookConnectionsOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "/connections", "listWebhookConnections", "List the account's webhook connections."), grantedRefusedLeaves), func(ctx context.Context, in *WebhookPageInput) (*WebhookConnectionsOutput, error) {
 		s, u, p := svc(ctx)
 		if p != nil {
 			return nil, p
@@ -227,7 +227,7 @@ func registerWebhookSync(reg *Registry) {
 	})
 	create := op(http.MethodPost, "/connections", "createWebhookConnection", "Create an external webhook connection.")
 	create.DefaultStatus = http.StatusCreated
-	Register(reg, create, func(ctx context.Context, in *WebhookCreateInput) (*WebhookCreateOutput, error) {
+	Register(reg, withOrigins(create, grantedRefusedLeaves), func(ctx context.Context, in *WebhookCreateInput) (*WebhookCreateOutput, error) {
 		s, u, p := svc(ctx)
 		if p != nil {
 			return nil, p
@@ -242,7 +242,7 @@ func registerWebhookSync(reg *Registry) {
 		out.Body.WebhookURL = out.Body.Connection.WebhookURL
 		return out, nil
 	})
-	Register(reg, op(http.MethodPut, "/connections/{id}", "updateWebhookConnection", "Update a webhook connection."), func(ctx context.Context, in *WebhookUpdateInput) (*WebhookConnectionOutput, error) {
+	Register(reg, withOrigins(op(http.MethodPut, "/connections/{id}", "updateWebhookConnection", "Update a webhook connection."), grantedRefusedLeaves), func(ctx context.Context, in *WebhookUpdateInput) (*WebhookConnectionOutput, error) {
 		s, u, p := svc(ctx)
 		if p != nil {
 			return nil, p
@@ -255,7 +255,7 @@ func registerWebhookSync(reg *Registry) {
 	})
 	del := op(http.MethodDelete, "/connections/{id}", "deleteWebhookConnection", "Delete a webhook connection.")
 	del.DefaultStatus = http.StatusNoContent
-	Register(reg, del, func(ctx context.Context, in *WebhookConnectionID) (*struct{}, error) {
+	Register(reg, withOrigins(del, grantedRefusedLeaves), func(ctx context.Context, in *WebhookConnectionID) (*struct{}, error) {
 		s, u, p := svc(ctx)
 		if p != nil {
 			return nil, p
@@ -265,7 +265,7 @@ func registerWebhookSync(reg *Registry) {
 		}
 		return nil, nil
 	})
-	Register(reg, op(http.MethodPost, "/connections/{id}/webhook/rotate", "rotateWebhookConnection", "Rotate the external receiver URL."), func(ctx context.Context, in *WebhookConnectionID) (*WebhookRotateOutput, error) {
+	Register(reg, withOrigins(op(http.MethodPost, "/connections/{id}/webhook/rotate", "rotateWebhookConnection", "Rotate the external receiver URL."), grantedRefusedLeaves), func(ctx context.Context, in *WebhookConnectionID) (*WebhookRotateOutput, error) {
 		s, u, p := svc(ctx)
 		if p != nil {
 			return nil, p
@@ -276,7 +276,7 @@ func registerWebhookSync(reg *Registry) {
 		}
 		return &WebhookRotateOutput{Body: *r}, nil
 	})
-	Register(reg, op(http.MethodGet, "/connections/{id}/profile-mappings", "getWebhookMappings", "Read external-user profile mappings."), func(ctx context.Context, in *WebhookConnectionID) (*WebhookMappingsOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "/connections/{id}/profile-mappings", "getWebhookMappings", "Read external-user profile mappings."), grantedRefusedLeaves), func(ctx context.Context, in *WebhookConnectionID) (*WebhookMappingsOutput, error) {
 		s, u, p := svc(ctx)
 		if p != nil {
 			return nil, p
@@ -291,7 +291,7 @@ func registerWebhookSync(reg *Registry) {
 		out.Body.AccountDiscoveryAvailable = r.AccountDiscoveryAvailable
 		return out, nil
 	})
-	Register(reg, op(http.MethodPut, "/connections/{id}/profile-mappings", "updateWebhookMappings", "Replace external-user profile mappings."), func(ctx context.Context, in *WebhookMappingsInput) (*WebhookMappingsOutput, error) {
+	Register(reg, withOrigins(op(http.MethodPut, "/connections/{id}/profile-mappings", "updateWebhookMappings", "Replace external-user profile mappings."), grantedRefusedLeaves), func(ctx context.Context, in *WebhookMappingsInput) (*WebhookMappingsOutput, error) {
 		s, u, p := svc(ctx)
 		if p != nil {
 			return nil, p
@@ -314,7 +314,7 @@ func registerWebhookSync(reg *Registry) {
 		out.Body.DiscoveredUsers = []webhooksync.DiscoveredUser{}
 		return out, nil
 	})
-	Register(reg, op(http.MethodGet, "/connections/{id}/events", "listWebhookEvents", "List webhook events with stable pagination."), func(ctx context.Context, in *WebhookEventsInput) (*WebhookEventsOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "/connections/{id}/events", "listWebhookEvents", "List webhook events with stable pagination."), grantedRefusedLeaves), func(ctx context.Context, in *WebhookEventsInput) (*WebhookEventsOutput, error) {
 		s, u, p := svc(ctx)
 		if p != nil {
 			return nil, p

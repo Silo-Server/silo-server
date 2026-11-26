@@ -342,7 +342,22 @@ type SessionAuthority struct {
 	// BoundProfileID is the only profile a remote-playback session may act
 	// as; empty for an ordinary sign-in.
 	BoundProfileID string
+	// Kind is the kind of session, by how it was opened, that operations
+	// decide for apart from the person's own sessions; empty for every
+	// other session. The auth middleware copies it onto the claims.
+	Kind SessionKind
 }
+
+// SessionKind names a kind of login session, by how it was opened, that
+// each operation states its own decision for (apiv2's OriginDecisions).
+// Only a session another app's key opened is judged apart today.
+type SessionKind string
+
+// SessionKindGrantedApp is a login session a device key enrolled through a
+// grant opened: another app the person allowed. A session naming a device
+// key whose row is not stored counts too, failing closed, as in
+// SessionOrigin.GrantKey.
+const SessionKindGrantedApp SessionKind = "granted_app"
 
 // IsRemotePlayback reports whether the session is a remote-playback handoff.
 func (a SessionAuthority) IsRemotePlayback() bool {
@@ -373,11 +388,20 @@ func (a SessionAuthority) Narrow(claims *Claims) {
 // active is false, with no error, for a missing, revoked or expired session,
 // a session of another account, and a remote-playback session that names no
 // profile.
+//
+// The same lookup says whether another app's key opened the session
+// (SessionKindGrantedApp): the session's device key is joined by its primary
+// key, one more index lookup, so the gate that reads the kind costs no query
+// of its own. The rule matches ReadSessionOrigin's GrantKey.
 func (r *SessionRepository) ActiveSession(ctx context.Context, id string, userID int) (authority SessionAuthority, active bool, err error) {
-	query := `SELECT u.role, s.purpose, COALESCE(s.bound_profile_id, '') FROM auth_sessions s
+	query := `SELECT u.role, s.purpose, COALESCE(s.bound_profile_id, ''),
+		s.device_key_id IS NOT NULL AND (k.id IS NULL OR k.enrolled_via = $3)
+		FROM auth_sessions s
 		JOIN users u ON u.id = s.user_id
+		LEFT JOIN auth_device_keys k ON k.id = s.device_key_id
 		WHERE s.id = $1 AND s.user_id = $2 AND s.revoked_at IS NULL AND s.expires_at > NOW()`
-	err = r.pool.QueryRow(ctx, query, id, userID).Scan(&authority.Role, &authority.Purpose, &authority.BoundProfileID)
+	var grantedApp bool
+	err = r.pool.QueryRow(ctx, query, id, userID, models.AppKeyEnrolledGrant).Scan(&authority.Role, &authority.Purpose, &authority.BoundProfileID, &grantedApp)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SessionAuthority{}, false, nil
 	}
@@ -389,6 +413,9 @@ func (r *SessionRepository) ActiveSession(ctx context.Context, id string, userID
 			return SessionAuthority{}, false, nil
 		}
 		authority.Role = models.RoleUser
+	}
+	if grantedApp {
+		authority.Kind = SessionKindGrantedApp
 	}
 	return authority, true, nil
 }

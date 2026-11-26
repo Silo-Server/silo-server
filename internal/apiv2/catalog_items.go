@@ -636,44 +636,44 @@ func registerCatalogItems(reg *Registry) {
 	browse := viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog", opListCatalogItems, "catalog",
 		"Page the catalog, a section, a collection, a personal list, or a person's credits, filtered and sorted."))
 	browse.Errors = append(browse.Errors, http.StatusNotImplemented)
-	Register(reg, browse,
+	Register(reg, withOrigins(browse, grantedCatalogRead),
 		func(ctx context.Context, in *CatalogBrowseInput) (*CatalogBrowseOutput, error) {
 			return reg.listCatalogItems(ctx, cursors, in)
 		})
 	groups := viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/audiobook-groups", opListAudiobookGroups, "catalog",
 		"Page the authors, narrators, or series of an audiobook library with aggregate stats and cover stacks."))
 	groups.Errors = append(groups.Errors, http.StatusNotImplemented)
-	Register(reg, groups,
+	Register(reg, withOrigins(groups, grantedCatalogRead),
 		func(ctx context.Context, in *AudiobookGroupsInput) (*AudiobookGroupCollectionOutput, error) {
 			return reg.listAudiobookGroups(ctx, cursors, in)
 		})
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/filters", "getCatalogFilters", "catalog",
-		"The facet values available in a scope, for filter menus.")), reg.getCatalogFilters)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/filters/search", "searchCatalogFacet", "catalog",
-		"Typeahead over one facet of a scope, with title counts.")), reg.searchCatalogFacet)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/filters", "getCatalogFilters", "catalog",
+		"The facet values available in a scope, for filter menus.")), grantedCatalogRead), reg.getCatalogFilters)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/filters/search", "searchCatalogFacet", "catalog",
+		"Typeahead over one facet of a scope, with title counts.")), grantedCatalogRead), reg.searchCatalogFacet)
 	query := humaOp(http.MethodPost, Prefix+"/catalog/query", opQueryCatalogItems, "catalog",
 		"Page the catalog by a JSON rule-group query; the body form of the browse.")
 	query.DefaultStatus = http.StatusOK
 	queryOperation := viewerOperation(query)
 	queryOperation.RetrySafety = RetrySafetyNaturalIdempotent
 	queryOperation.Errors = append(queryOperation.Errors, http.StatusNotImplemented)
-	Register(reg, queryOperation, func(ctx context.Context, in *CatalogQueryInput) (*CatalogBrowseOutput, error) {
+	Register(reg, withOrigins(queryOperation, grantedCatalogRead), func(ctx context.Context, in *CatalogQueryInput) (*CatalogBrowseOutput, error) {
 		return reg.queryCatalogItems(ctx, cursors, in)
 	})
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}", "getCatalogItem", "catalog",
-		"The detail page of one item, with the viewer's state.")), reg.getCatalogItem)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}/episodes", "listCatalogItemEpisodes", "catalog",
-		"The episodes of a season item.")), reg.listCatalogItemEpisodes)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}/manga-files", "listCatalogItemMangaFiles", "catalog",
-		"The chapter files of a manga series, as file descriptors.")), reg.listCatalogItemMangaFiles)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}/versions", "listCatalogItemVersions", "catalog",
-		"The playable file versions of an item.")), reg.listCatalogItemVersions)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/series/{id}/seasons", "listSeriesSeasons", "catalog",
-		"The seasons of a series with the viewer's rollups.")), reg.listSeriesSeasons)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/series/{id}/seasons/{num}", "getSeriesSeason", "catalog",
-		"One season of a series by number.")), reg.getSeriesSeason)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/series/{id}/seasons/{num}/episodes", "listSeasonEpisodes", "catalog",
-		"The episodes of one season of a series by number.")), reg.listSeasonEpisodes)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}", "getCatalogItem", "catalog",
+		"The detail page of one item, with the viewer's state.")), grantedCatalogRead), reg.getCatalogItem)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}/episodes", "listCatalogItemEpisodes", "catalog",
+		"The episodes of a season item.")), grantedCatalogRead), reg.listCatalogItemEpisodes)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}/manga-files", "listCatalogItemMangaFiles", "catalog",
+		"The chapter files of a manga series, as file descriptors.")), grantedCatalogRead), reg.listCatalogItemMangaFiles)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}/versions", "listCatalogItemVersions", "catalog",
+		"The playable file versions of an item.")), grantedCatalogRead), reg.listCatalogItemVersions)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/series/{id}/seasons", "listSeriesSeasons", "catalog",
+		"The seasons of a series with the viewer's rollups.")), grantedCatalogRead), reg.listSeriesSeasons)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/series/{id}/seasons/{num}", "getSeriesSeason", "catalog",
+		"One season of a series by number.")), grantedCatalogRead), reg.getSeriesSeason)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/series/{id}/seasons/{num}/episodes", "listSeasonEpisodes", "catalog",
+		"The episodes of one season of a series by number.")), grantedCatalogRead), reg.listSeasonEpisodes)
 	registerCatalogActions(reg)
 	registerRatingsCapability(reg)
 }

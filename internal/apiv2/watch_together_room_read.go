@@ -114,7 +114,7 @@ func watchTogetherRoomSnapshotOf(row watchtogether.Snapshot) (WatchTogetherRoomS
 func registerWatchTogetherRoomRead(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodGet, Prefix+"/watch-together/rooms/{room_id}", "getWatchTogetherRoom", "realtime", "Read the room snapshot and renew existing room proof. This proof is not a session-bound socket credential."), Class: ClassProfileScoped, ServiceBacked: true}
 	op.Errors = []int{409}
-	Register(reg, op, func(ctx context.Context, in *WatchTogetherRoomReadInput) (*WatchTogetherRoomReadOutput, error) {
+	Register(reg, withOrigins(op, grantedRoomMember), func(ctx context.Context, in *WatchTogetherRoomReadInput) (*WatchTogetherRoomReadOutput, error) {
 		if reg.deps.WatchTogetherRoomRead == nil {
 			return nil, unavailable("watch together")
 		}
@@ -125,6 +125,15 @@ func registerWatchTogetherRoomRead(reg *Registry) {
 		row, token, err := reg.deps.WatchTogetherRoomRead.ReadWatchTogetherRoom(ctx, in.RoomID, user, profile, in.RoomToken)
 		if err != nil {
 			return nil, suggestionProblem(err)
+		}
+		// A member is the account and profile, so the stream attached to it
+		// may be the person's own device's; a session another app's key
+		// opened is not told another device's playback session id.
+		if grantedAppSession(claimsFrom(ctx)) {
+			// Nor the powers of the profile's seat it is refused: the
+			// host's controls and invite link, and transport control.
+			row = row.WithoutSessionPowers()
+			row.AttachedSessionID = ""
 		}
 		return watchTogetherRoomOutput(row, token)
 	})

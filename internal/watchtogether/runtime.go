@@ -252,7 +252,7 @@ func (s *Service) adoptRuntimeLocked(ctx context.Context, live *liveRoom, room R
 			lastStallAt: stored.LastStallAt,
 		}
 		if old := live.members[key]; old != nil && old.connectionID == stored.ConnectionID && stored.Connected {
-			m.connection, m.lastCommandID = old.connection, old.lastCommandID
+			m.connection, m.lastCommandID, m.otherApp = old.connection, old.lastCommandID, old.otherApp
 			if m.connection != nil {
 				m.remoteConnected = false
 				m.lastPingMS = old.lastPingMS
@@ -499,6 +499,7 @@ func (s *Service) Disconnect(reg *Registration, explicit bool) {
 		return
 	}
 	member.connection = nil
+	member.otherApp = false
 	member.remoteConnected = false
 	if live.pendingDisconnects == nil {
 		live.pendingDisconnects = make(map[string]pendingDisconnect)

@@ -79,7 +79,7 @@ func registerSubtitleAIReads(reg *Registry) {
 	list := op("/subtitles/ai/jobs", "listSubtitleAIJobs")
 	list.HouseholdProfileGate = true
 	list.Description = "Read up to 50 recent jobs for one accessible media file. This is a bounded recent-activity view, not a complete job history."
-	Register(reg, list, func(ctx context.Context, in *SubtitleAIJobsInput) (*SubtitleAIJobsOutput, error) {
+	Register(reg, withOrigins(list, grantedSubtitleRead), func(ctx context.Context, in *SubtitleAIJobsInput) (*SubtitleAIJobsOutput, error) {
 		id, p := in.MediaFileID.positive("query.media_file_id")
 		if p != nil {
 			return nil, p
@@ -101,7 +101,7 @@ func registerSubtitleAIReads(reg *Registry) {
 	})
 	job := op("/subtitles/ai/jobs/{job_id}", "getSubtitleAIJob")
 	job.HouseholdProfileGate = true
-	Register(reg, job, func(ctx context.Context, in *SubtitleAIJobInput) (*SubtitleAIJobOutput, error) {
+	Register(reg, withOrigins(job, grantedSubtitleRead), func(ctx context.Context, in *SubtitleAIJobInput) (*SubtitleAIJobOutput, error) {
 		id, idProblem := in.JobID.positive64("path.job_id")
 		if idProblem != nil {
 			return nil, validationProblem("path.job_id", "invalid", "Expected a positive job identifier.")
@@ -121,7 +121,7 @@ func registerSubtitleAIReads(reg *Registry) {
 		out.Body.Job = projectSubtitleAIJob(job)
 		return out, nil
 	})
-	Register(reg, op("/subtitles/ai/quota", "getSubtitleAIQuota"), func(ctx context.Context, _ *struct{}) (*SubtitleAIQuotaOutput, error) {
+	Register(reg, withOrigins(op("/subtitles/ai/quota", "getSubtitleAIQuota"), grantedSubtitleRead), func(ctx context.Context, _ *struct{}) (*SubtitleAIQuotaOutput, error) {
 		if reg.deps.SubtitleAIReads == nil {
 			return nil, NewProblem(TypeDependencyUnavailable, "Subtitle AI is unavailable.")
 		}

@@ -14321,7 +14321,7 @@ export interface paths {
     put?: never;
     /**
      * Delegate a current login session and original room proof for one room handshake.
-     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied when the room's host is its own account and profile: it may not host a room. As a member of another host's room it may connect, but the socket refuses its transport_request frames (play, pause, seek for everyone) with the error frame any refused request gets.
+     * @description A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied when the room's host is its own account and profile: it may not host a room. As a member of another host's room it may connect, but the socket refuses its transport_request frames (play, pause, seek for everyone) with the error frame any refused request gets, and an attach_session naming a stream its own login session did not start. A ticket does not reserve the member's seat: a connection made while another connection holds that seat receives an error frame of code forbidden and the socket closes; request a new ticket and retry shortly.
      */
     post: operations["createWatchTogetherSocketTicket"];
     delete?: never;
@@ -101958,6 +101958,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Not Acceptable */
       406: {
         headers: {
@@ -107277,6 +107286,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -117615,6 +117633,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

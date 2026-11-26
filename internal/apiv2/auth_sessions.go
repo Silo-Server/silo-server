@@ -228,6 +228,7 @@ func registerAuthSessions(reg *Registry) {
 	Register(reg, Operation{
 		Operation: list,
 		Class:     ClassAuthenticated, ServiceBacked: true,
+		Origins: grantedOwnSessionList,
 	}, func(ctx context.Context, in *LoginSessionListInput) (*LoginSessionCollectionOutput, error) {
 		return reg.listSessions(ctx, cursors, in)
 	})
@@ -237,7 +238,7 @@ func registerAuthSessions(reg *Registry) {
 		sessionReachDeleteDescription
 	// 403: another session, refused in demo mode or to a session limited to itself.
 	del.Errors = []int{http.StatusNotFound, http.StatusForbidden}
-	Register(reg, Operation{Operation: del, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true}, reg.deleteSession)
+	Register(reg, Operation{Operation: del, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true, Origins: grantedOwnSessionEnd}, reg.deleteSession)
 	setup := humaOp(http.MethodPost, Prefix+"/auth/setup", "setupServer", "system",
 		"Create the first administrator account and open its session.")
 	setup.DefaultStatus = http.StatusCreated

@@ -278,6 +278,7 @@ func registerDeviceLogin(reg *Registry) {
 	Register(reg, Operation{
 		Operation: approve, RetrySafety: RetrySafetyDomainIdentity,
 		Class: ClassAuthenticated, ServiceBacked: true, RateLimitBucket: bucketDeviceLookup,
+		Origins: grantedRefusedSignIn,
 	}, reg.approveDeviceLogin)
 	handoff := humaOp(http.MethodPost, Prefix+"/auth/device/approve-handoff", "approveDeviceHandoff", "device-login",
 		"Approve a pairing request for the caller's verified profile: a remote-playback handoff or a Jellyfin Quick Connect request.")
@@ -286,6 +287,7 @@ func registerDeviceLogin(reg *Registry) {
 	Register(reg, Operation{
 		Operation: handoff, RetrySafety: RetrySafetyDomainIdentity,
 		Class: ClassProfileScoped, ServiceBacked: true, RateLimitBucket: bucketDeviceLookup,
+		Origins: grantedRefusedSignIn,
 	}, reg.approveDeviceHandoff)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/auth/device/capability", "getDeviceLoginCapability", "device-login",
@@ -299,6 +301,7 @@ func registerDeviceLogin(reg *Registry) {
 	Register(reg, Operation{
 		Operation: deny, RetrySafety: RetrySafetyDomainIdentity,
 		Class: ClassAuthenticated, ServiceBacked: true, RateLimitBucket: bucketDeviceLookup,
+		Origins: grantedRefusedAccountSetup,
 	}, reg.denyDeviceLogin)
 	poll := humaOp(http.MethodPost, Prefix+"/auth/device/poll", "pollDeviceLogin", "device-login",
 		"Poll a pairing request from the device and collect its tokens once approved.")
@@ -433,8 +436,15 @@ func (reg *Registry) getDeviceLogin(ctx context.Context, in *GetDeviceLoginInput
 		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 			WithErrors(ProblemError{Location: "query.code", Code: codeRequired, Detail: "Either token or code is required."})
 	}
-	input := auth.DeviceLoginLookupInput{BrowserCode: in.Token, UserCode: in.Code, MarkOpened: true}
 	claims := claimsFrom(ctx)
+	// The operation is public, so the origin gate does not run: a session
+	// another app's key opened is refused here. It may neither approve nor
+	// deny a device sign-in, and with its session attached it would look up
+	// the account's Quick Connect codes and mark requests opened.
+	if grantedAppSession(claims) {
+		return nil, NewProblem(TypePermissionDenied, handlers.SessionNotAllowedDetail)
+	}
+	input := auth.DeviceLoginLookupInput{BrowserCode: in.Token, UserCode: in.Code, MarkOpened: true}
 	if claims.IsOwnLoginSession() {
 		input.AccountID = claims.UserID
 	}

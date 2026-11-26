@@ -197,7 +197,7 @@ func registerAppKeySignIn(reg *Registry) {
 	enroll.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
 	enrollOp := mainProfileOnly(Operation{Operation: enroll, RetrySafety: RetrySafetyNonRetryable,
 		ServiceBacked: true, Audited: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10})
-	Register(reg, enrollOp, reg.enrollAppKeys)
+	Register(reg, withOrigins(enrollOp, grantedRefusedSignIn), reg.enrollAppKeys)
 
 	redeem := humaOp(http.MethodPost, Prefix+"/auth/grants/redeem", "redeemAppKeyGrant", "app-keys",
 		"Enroll another app's key with a grant the person signed and open the app's login session.")

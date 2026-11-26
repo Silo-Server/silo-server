@@ -105,17 +105,14 @@ func applePushProblem(err error) error {
 }
 func registerOrderedApplePush(reg *Registry) {
 	capOp := Operation{Operation: humaOp(http.MethodGet, Prefix+"/devices/push/apple/capabilities", "getApplePushRegistrationCapabilities", "notifications", "Describe ordered Apple registration support, separately from delivery and rollout readiness."), Class: ClassProfileScoped, ServiceBacked: true}
-	Register(reg, capOp, func(ctx context.Context, _ *CapabilityInput) (*ApplePushRegistrationCapabilityOutput, error) {
+	Register(reg, withOrigins(capOp, grantedCapability), func(ctx context.Context, _ *CapabilityInput) (*ApplePushRegistrationCapabilityOutput, error) {
 		return &ApplePushRegistrationCapabilityOutput{Body: ApplePushRegistrationCapability{Capability: Capability{Allowed: new(capabilityLoginAllowed(ctx))}, RegistrationAvailable: reg.deps.OrderedApplePush != nil && reg.deps.OrderedApplePush.OrderedApplePushAvailable(), InstallationResetAvailable: reg.deps.ApplePushReset != nil && reg.deps.ApplePushReset.ApplePushResetAvailable()}}, nil
 	})
 	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/devices/push/apple", "registerApplePushDevice", "notifications", "Apply an ordered Apple installation intent; exact replay may renew display credentials without changing registration state."), Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyDomainIdentity}
 	op.Errors = []int{409}
 	op.MaxBodyBytes = 4096
 	op.Description = nativePushOtherAppRule
-	Register(reg, op, func(ctx context.Context, in *ApplePushRegistrationInput) (*ApplePushRegistrationOutput, error) {
-		if p := reg.otherDevicesProblem(ctx); p != nil {
-			return nil, p
-		}
+	Register(reg, withOrigins(op, grantedRefusedOtherDevice), func(ctx context.Context, in *ApplePushRegistrationInput) (*ApplePushRegistrationOutput, error) {
 		if reg.deps.OrderedApplePush == nil || !reg.deps.OrderedApplePush.OrderedApplePushAvailable() {
 			return nil, unavailable("ordered Apple push registration")
 		}
@@ -168,10 +165,7 @@ func registerOrderedApplePush(reg *Registry) {
 	reset.Errors = []int{http.StatusForbidden}
 	reset.MaxBodyBytes = 1024
 	reset.Description = nativePushOtherAppRule
-	Register(reg, reset, func(ctx context.Context, in *ApplePushResetInput) (*ApplePushResetOutput, error) {
-		if p := reg.otherDevicesProblem(ctx); p != nil {
-			return nil, p
-		}
+	Register(reg, withOrigins(reset, grantedRefusedOtherDevice), func(ctx context.Context, in *ApplePushResetInput) (*ApplePushResetOutput, error) {
 		if reg.deps.ApplePushReset == nil || !reg.deps.ApplePushReset.ApplePushResetAvailable() {
 			return nil, unavailable("Apple push installation reset")
 		}

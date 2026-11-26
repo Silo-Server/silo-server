@@ -45,14 +45,14 @@ func registerSubtitleCapabilities(reg *Registry) {
 	op := func(path, id string) Operation {
 		return Operation{Operation: humaOp(http.MethodGet, Prefix+path, id, "subtitles", "Read configured subtitle capabilities without starting work."), Class: ClassProfileScoped, ProfileOptional: true}
 	}
-	Register(reg, op("/subtitles/providers/status", "getSubtitleProviderStatus"), func(_ context.Context, _ *CapabilityInput) (*SubtitleProviderStatusOutput, error) {
+	Register(reg, withOrigins(op("/subtitles/providers/status", "getSubtitleProviderStatus"), grantedSubtitleRead), func(_ context.Context, _ *CapabilityInput) (*SubtitleProviderStatusOutput, error) {
 		view := handlers.SubtitleProviderStatusView{SchemaVersion: 1}
 		if reg.deps.SubtitleProviders != nil {
 			view = reg.deps.SubtitleProviders.SubtitleProviderStatus()
 		}
 		return &SubtitleProviderStatusOutput{Body: SubtitleProviderStatus{Capability: Capability{State: configuredEnabledCapabilityState(reg.deps.SubtitleProviders != nil, view.Enabled)}, SchemaVersion: view.SchemaVersion, Enabled: view.Enabled, Providers: append([]string{}, view.Providers...)}}, nil
 	})
-	Register(reg, op("/subtitles/ai/status", "getSubtitleAIStatus"), func(ctx context.Context, _ *CapabilityInput) (*SubtitleAIStatusOutput, error) {
+	Register(reg, withOrigins(op("/subtitles/ai/status", "getSubtitleAIStatus"), grantedSubtitleRead), func(ctx context.Context, _ *CapabilityInput) (*SubtitleAIStatusOutput, error) {
 		var view handlers.SubtitleAIStatusView
 		if reg.deps.SubtitleAI != nil {
 			view = reg.deps.SubtitleAI.SubtitleAIStatus(ctx)

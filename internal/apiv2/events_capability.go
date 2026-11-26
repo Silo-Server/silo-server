@@ -32,7 +32,7 @@ type EventsCapabilitiesOutput struct {
 
 func registerEventsCapability(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodGet, Prefix+"/events/capabilities", "getEventsCapabilities", "realtime", "Read realtime subscription channels and limits."), Class: ClassAuthenticated, ServiceBacked: true}
-	Register(reg, op, func(ctx context.Context, _ *CapabilityInput) (*EventsCapabilitiesOutput, error) {
+	Register(reg, withOrigins(op, grantedCapability), func(ctx context.Context, _ *CapabilityInput) (*EventsCapabilitiesOutput, error) {
 		if reg.deps.EventsCapability == nil {
 			return &EventsCapabilitiesOutput{Body: EventsCapabilities{Capability: Capability{State: StateNotConfigured}, Channels: []string{}}}, nil
 		}
