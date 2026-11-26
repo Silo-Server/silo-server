@@ -70,6 +70,8 @@ type RefreshedTokens struct {
 	AccessToken  string `json:"access_token" doc:"Bearer access token" example:"eyJhbGciOi..."`
 	RefreshToken string `json:"refresh_token" doc:"Refresh token for the next refreshSession" example:"eyJhbGciOi..."`
 	ExpiresIn    int    `json:"expires_in" doc:"Access token lifetime in seconds" example:"3600"`
+	// AccountCreatedAt is TokenPair's (tokenPairFromView).
+	AccountCreatedAt *time.Time `json:"account_created_at,omitempty" doc:"When the account was made: RFC 3339 in UTC at the stored microsecond precision, with trailing zeros of the fraction left out. Nothing rewrites it after the account is made, and a full restore brings it back exactly. Compare it as an instant, never as text. Left out of an answer to another app's key, one enrolled through a grant" example:"2026-03-14T09:26:53.589793Z"`
 }
 
 // RefreshSessionOutput is the refreshSession response.
@@ -315,7 +317,8 @@ func (reg *Registry) refreshSession(ctx context.Context, in *RefreshSessionInput
 		}
 		return nil, serviceProblem(err)
 	}
-	return &RefreshSessionOutput{Body: RefreshedTokens{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresIn: pair.ExpiresIn}}, nil
+	return &RefreshSessionOutput{Body: RefreshedTokens{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresIn: pair.ExpiresIn,
+		AccountCreatedAt: accountCreatedAt(pair.AccountCreatedAt)}}, nil
 }
 
 const loginSessionCursorSort = "-created_at,-id"

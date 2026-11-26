@@ -382,6 +382,22 @@ hour. An account gets at most one requested link every five minutes. A requested
 link replaces the account's earlier requested link, but never a live link an
 administrator issued; while one exists, requests send nothing.
 
+## The account's creation time
+
+Every answer that carries a token pair for one of the person's own sessions
+also carries `account_created_at` beside `user`: password and network
+sign-in, `completeOAuthLogin`, device sign-in polling, `refreshSession`,
+signup and setup, an accepted invitation, a completed password reset, an
+administrator's impersonation, and every sealed `signed_in` answer to one of
+the person's own device keys. It is the account's `users.created_at`: RFC 3339
+in UTC at the stored microsecond precision, with trailing zeros of the
+fraction left out (so it is not the millisecond instant other fields use).
+Nothing rewrites it after the account is made, and a full restore brings it
+back exactly. Compare it as an instant, never as text. It is absent from every
+answer to another app's key, one enrolled through a grant: its redeem, its
+sign-ins and its refreshes. `getCurrentUser` and the administrator's views do
+not carry it.
+
 ## Email addresses
 
 Every write that stores an account address (`setupServer`, `signup`,
@@ -1356,11 +1372,11 @@ operation contract.
 | `POST /auth/keys/challenge` (`createAppKeyChallenge`) | none | Body `{}`. Answers `challenge` (base64url of 32 bytes), `expires_in` (120), `server_id` and `server_time` (Unix seconds). A challenge works for one signed request within two minutes, on any API process. |
 | `POST /auth/keys/introduce` (`introduceAppKey`) | an `introduce` envelope signed by the account's person key, with `device_sig` | Enrolls the payload's `device_key` and opens a session. For an administrator's account the key is stored waiting and the sealed answer is `approval_required`. An account holds at most 10 waiting keys inside their 24 hours: one more is 409 `conflict`, after the challenge is spent. A waiting key past its 24 hours doesn't count, and a retention task later revokes it. Audited as `user.device_key_introduced` with the key's `device_key_id` and `device_key_status` (`active` or `pending`). |
 | `POST /auth/keys/sign-in` (`signInWithAppKey`) | a `sign-in` envelope signed by an enrolled device key, without `device_sig` | Opens a session. A waiting key answers `approval_required`; see below. |
-| `POST /auth/keys/enroll` (`enrollAppKeys`) | the account's own login session acting as the household's main profile (see below), and `{ "person_key", "message" }` where `message` is an `enroll` envelope signed with that person key, with `device_sig` | Registers the person key when the account has none, taking the session's provider binding; when `person_key` is already the account's person key it is reused as it is, binding unchanged. Enrolls the device key, which takes the session's provider binding, then opens a session bound to it. A different person key on the account, or a device key already enrolled on this server, is 409 `conflict`. The sealed plaintext adds `person_key_id` (the person key's `kid`); the client drops the session it called with. A malformed payload field is 422 at `body.message.payload`. Audited as `user.app_keys_enrolled` with the device key's `device_key_id`, the person key's `person_key_kid` when this call enrolled it, and `session_opened_via`, how the enrolling session was opened (`password`, `provider` or `app_key`). |
+| `POST /auth/keys/enroll` (`enrollAppKeys`) | the account's own login session acting as the household's main profile (see below), and `{ "person_key", "message" }` where `message` is an `enroll` envelope signed with that person key, with `device_sig` | Registers the person key when the account has none, taking the session's provider binding; when `person_key` is already the account's person key it is reused as it is, binding unchanged. Enrolls the device key, which takes the session's provider binding, then opens a session bound to it. A different person key on the account, or a device key already enrolled on this server, is 409 `conflict`. The sealed plaintext carries `person_key_id`, as every `signed_in` answer to the person's own device does ([Sealed reply](#app-key-sign-in)); the client drops the session it called with. A malformed payload field is 422 at `body.message.payload`. Audited as `user.app_keys_enrolled` with the device key's `device_key_id`, the person key's `person_key_kid` when this call enrolled it, and `session_opened_via`, how the enrolling session was opened (`password`, `provider` or `app_key`). |
 | `POST /auth/grants/redeem` (`redeemAppKeyGrant`) | a `grant-redeem` envelope signed by the app's own key (the grant's `app_key`), without `device_sig` | Enrolls another app's key with a grant the account's person key signed, and opens the app's session. The key is listed with `kind` `app`, `enrolled_by` `grant` and `allowed_by`. Refused for an administrator's account. See "Grants" below. Audited as `user.app_grant_redeemed` with the app key's `device_key_id`. |
 | `POST /invitations/app-code` (`createInvitationAppCode`) | none; the invitation `token` in the body | Body `{ "token", "username", "email" }`. Starts a join through the Silo app and answers `{ "code", "expires_in", "server_address" }`; see "App codes" below. |
 | `POST /auth/app-codes` (`createAppCode`) | the account's own login session acting as the household's main profile | Body `{}`. Answers `{ "code", "expires_in", "server_address" }` for "Open in Silo"; see "App codes" below. Audited as `user.app_code_issued` with `app_code_kind` `session` and `expires_at`, never the code. |
-| `POST /auth/app-codes/redeem` (`redeemAppCode`) | `{ "person_key", "message" }` where `message` is a `redeem` envelope signed with that person key, with `device_sig`, the app code in its payload | Enrolls the device key and opens its session. The person key is enrolled when the account has none; an account that already has a different person key keeps it, the device key is enrolled under the account's key, and nothing is revoked. The sealed plaintext adds `username`, `person_key_id` (the account's person key once the redeem commits) and `person_key`: `enrolled` when `person_key` is now the account's person key, `kept` when the account kept a different one, and, for a sign-in link's code only, `replaced` when `person_key` took the place of a different one. A person who has lost every other device redeems a code, then calls `PUT /auth/keys/person` from the new session as the main profile. 404 `app_code_invalid` for an unknown, used or expired code. Audited on the account as `user.app_code_redeemed` with `app_code_kind` (`join`, `session` or `sign_in_link`), the device key's `device_key_id` and the person key's `person_key_kid` when this redeem enrolled it, never the code. |
+| `POST /auth/app-codes/redeem` (`redeemAppCode`) | `{ "person_key", "message" }` where `message` is a `redeem` envelope signed with that person key, with `device_sig`, the app code in its payload | Enrolls the device key and opens its session. The person key is enrolled when the account has none; an account that already has a different person key keeps it, the device key is enrolled under the account's key, and nothing is revoked. The sealed plaintext adds `username` and `person_key` beside `person_key_id`, which names the account's person key once the redeem commits; `person_key` is `enrolled` when `person_key` is now the account's person key, `kept` when the account kept a different one, and, for a sign-in link's code only, `replaced` when `person_key` took the place of a different one. A person who has lost every other device redeems a code, then calls `PUT /auth/keys/person` from the new session as the main profile. 404 `app_code_invalid` for an unknown, used or expired code. Audited on the account as `user.app_code_redeemed` with `app_code_kind` (`join`, `session` or `sign_in_link`), the device key's `device_key_id` and the person key's `person_key_kid` when this redeem enrolled it, never the code. |
 | `GET /auth/keys/session` (`getAppKeySessionAccess`) | any login session | `{ "list", "manage", "approve", "sign_in_again" }`: what this session may do with the account's keys, and whether signing in again would help. Answers while the switch is off. |
 | `GET /auth/keys` (`listAppKeys`) | the account's own login session, opened by password, provider or the person's own device key | `person_key` (`kid`, `enrolled_at`, `enrolled_ip_address`; absent when the account has none) and `devices[]` (`id`, `kid`, `kind` `device`\|`app`, `name`, `platform`, `status` `active`\|`pending`, `enrolled_by` `introduce`\|`session`\|`app-code`\|`grant`, `allowed_by`, `enrolled_at`, `enrolled_ip_address`, `last_used_at`), newest first. `enrolled_ip_address` is the client address of the request that enrolled the key, decided as a login session's `ip_address` is, except that the unspecified address (`0.0.0.0` or `::`) the resolver answers for a client it couldn't tell is stored as none; it is an empty string when unknown, which includes every key enrolled before the server recorded it, and for a caller who is not an administrator while the server runs in demo mode. A session opened by device sign-in or by another app's key is refused this list (and the pending list), so it never sees an address. Revoked and denied keys are left out, and so is a waiting key older than 24 hours, without anyone denying or revoking it. `last_used_at` is the last time the key opened a session: a key enrolled and not used since shows it equal to `enrolled_at`, and a key waiting for approval shows `null`. |
 | `DELETE /auth/keys/devices/{id}` (`revokeAppDeviceKey`) | the account's own login session | 204. Revokes the key and ends every session it opened. A device may revoke its own key, which ends the session making the request. 404 for a key that isn't the account's. |
@@ -1460,6 +1476,34 @@ set), the shape `getServerConnections` gives it, when the API listener has a
 TLS identity; see
 [The pinned route](architecture/app-keys.md#the-pinned-route) for the rules a
 device follows with it. Refusals are not sealed.
+
+A `signed_in` plaintext to one of the person's own device keys (from
+`introduce`, `sign-in`, `enroll` and `redeemAppCode`) also carries
+`person_key_id`, read in the transaction that opens the session:
+
+- a string, the `kid` of the account's live person key;
+- `null` when the account has none: none was enrolled, an administrator revoked
+  it, or it is bound to a sign-in provider identity that is gone from the
+  account (the key list leaves such a key out too);
+- absent from a server that does not report it, and from the two answers that
+  never carry it: `approval_required` (no session opened) and every answer to
+  another app's key, one enrolled through a grant (`redeemAppKeyGrant` and that
+  key's later `sign-in`).
+
+It tells a device which person key this server holds for the account, so a
+device that knows a newer person key, or gets `null`, learns that this server
+holds an older key or none. Another app's key is not one of the person's
+devices: a key ID that changes would tell that app the person replaced their
+key, so its answers leave the member out.
+
+An answer to another app's key carries the same account object as
+`getCurrentUser` gives that session: `tokens.user.email` is the empty string
+(the person's address is not that app's to read) and
+`tokens.user.download_allowed` is false (downloads are refused to it), and
+`tokens.user.permissions` lists only permissions one of whose operations is
+open to it, which today leaves it empty; the
+name, role and the rest are the account's. It carries no
+`tokens.account_created_at`, and its refreshes carry none.
 
 **Waiting keys.** Every key an administrator's `introduce` enrolls waits for
 approval; keys from `enroll` start active. A waiting device repeats `sign-in`

@@ -28,7 +28,7 @@ func (e *keyEnv) redeemCode(t *testing.T, person testKey, code string) (*KeySign
 		return result, device, err
 	}
 	live, liveErr := e.signIn.keys.LivePersonKey(t.Context(), result.User.ID)
-	if liveErr != nil || result.PersonKeyID != live.KeyID {
+	if liveErr != nil || !result.PersonKeyReported || result.PersonKeyID != live.KeyID {
 		t.Fatalf("person_key_id = %q, want the account's person key %+v (%v)", result.PersonKeyID, live, liveErr)
 	}
 	switch sent := result.PersonKeyID == person.pub.KeyID(); result.PersonKeyStatus {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -63,10 +64,27 @@ type TokenPair struct {
 	RefreshToken string  `json:"refresh_token" doc:"Refresh token for POST /auth/refresh" example:"eyJhbGciOi..."`
 	ExpiresIn    int     `json:"expires_in" doc:"Access token lifetime in seconds" example:"3600"`
 	User         Account `json:"user" doc:"The account the tokens authenticate"`
+	// AccountCreatedAt is not an Instant: Instant truncates to
+	// milliseconds, and this value must come back exactly as stored.
+	AccountCreatedAt *time.Time `json:"account_created_at,omitempty" doc:"When the account was made: RFC 3339 in UTC at the stored microsecond precision, with trailing zeros of the fraction left out. Nothing rewrites it after the account is made, and a full restore brings it back exactly. Compare it as an instant, never as text. Left out of an answer to another app's key, one enrolled through a grant" example:"2026-03-14T09:26:53.589793Z"`
 }
 
+// tokenPairFromView is the token pair every answer carrying one gives;
+// account_created_at is set here, so no path can leave it out.
+// A sealed reply to another app's key removes it (sealAppKeyAnswer).
 func tokenPairFromView(v handlers.TokenPairView) TokenPair {
-	return TokenPair{AccessToken: v.AccessToken, RefreshToken: v.RefreshToken, ExpiresIn: v.ExpiresIn, User: accountFromView(v.User)}
+	return TokenPair{AccessToken: v.AccessToken, RefreshToken: v.RefreshToken, ExpiresIn: v.ExpiresIn, User: accountFromView(v.User),
+		AccountCreatedAt: accountCreatedAt(v.User.CreatedAt)}
+}
+
+// accountCreatedAt is account_created_at for a stored creation time, in
+// UTC; nil when there is none to give.
+func accountCreatedAt(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	utc := t.UTC()
+	return &utc
 }
 
 // DeviceLoginCapability is the device-pairing capability document.

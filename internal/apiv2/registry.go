@@ -264,6 +264,7 @@ type Registry struct {
 	mu                      sync.Mutex
 	ops                     []Declared
 	origins                 map[string]OriginDecisions
+	permissionOps           map[string][]string
 	routes                  map[routeKey]struct{}
 	publicCapabilitySchemas map[string]bool
 }
@@ -305,6 +306,7 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	}
 	handler = prepareCapabilityOperation(&op, handler, reg.capabilityPermitted(op.CapabilityFor))
 	reg.recordOrigins(op.OperationID, op.Origins)
+	reg.recordPermission(op.Permission, op.OperationID)
 	if op.Audited {
 		audited := handler
 		handler = func(ctx context.Context, in *I) (*O, error) {
