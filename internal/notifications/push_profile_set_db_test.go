@@ -39,7 +39,11 @@ func profileSetWakeSystem(t *testing.T, pool *pgxpool.Pool, repo *PushDeviceRepo
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 			t.Errorf("decode relay body: %v", err)
 		}
-		relayed <- relayedWake{path: req.URL.Path, idempotencyKey: req.Header.Get("Idempotency-Key"), body: body}
+		select {
+		case relayed <- relayedWake{path: req.URL.Path, idempotencyKey: req.Header.Get("Idempotency-Key"), body: body}:
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
 		return relayResponse(http.StatusOK, `{"request_id":"relay-request","status":"accepted"}`), nil
 	})}
 	return &System{Settings: sender.settings, pushDeviceRepo: repo, pushSender: sender, logger: slog.Default()}
@@ -408,35 +412,61 @@ func TestProfileSetWakeIsNeverClaimedDB(t *testing.T) {
 	h := wakeHarness{t: t, pool: pool}
 	arrived, gate := make(chan struct{}, 4), make(chan int)
 	node := profileSetWakeSystem(t, pool, repo, nil, nil)
-	node.pushSender.client = &http.Client{Transport: relayRoundTripFunc(func(*http.Request) (*http.Response, error) {
+	node.pushSender.client = &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		arrived <- struct{}{}
-		status := <-gate
-		return relayResponse(status, `{"request_id":"r","status":"accepted"}`), nil
+		select {
+		case status := <-gate:
+			return relayResponse(status, `{"request_id":"r","status":"accepted"}`), nil
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
 	})}
 
 	if !node.WakeProfileSetDevices(t.Context(), 7) {
 		t.Fatal("first wake answered false")
 	}
-	<-arrived // the first phone's send is in flight; the second waits behind it
+	awaitRelay(t, arrived, "the first wake's first phone") // in flight; the second waits behind it
 	h.assertNeverClaimed(repo, "in flight")
-	gate <- http.StatusServiceUnavailable
-	<-arrived
-	gate <- http.StatusServiceUnavailable
+	answerRelay(t, gate, http.StatusServiceUnavailable, "the first wake's first phone")
+	awaitRelay(t, arrived, "the first wake's second phone")
+	answerRelay(t, gate, http.StatusServiceUnavailable, "the first wake's second phone")
 	h.waitForOutcome(PushOutcomeFailed)
 	h.assertNeverClaimed(repo, "after a retryable relay failure")
+	waitForWakeEnded(t, node)
 
 	if !node.WakeProfileSetDevices(t.Context(), 7) {
 		t.Fatal("wake after the minute answered false")
 	}
-	for range 2 {
-		<-arrived
-		gate <- http.StatusOK
+	for _, phone := range []string{"first", "second"} {
+		awaitRelay(t, arrived, "the second wake's "+phone+" phone")
+		answerRelay(t, gate, http.StatusOK, "the second wake's "+phone+" phone")
 	}
 	if _, err := pool.Exec(t.Context(), `DELETE FROM push_delivery_attempts WHERE outcome = $1`, PushOutcomeFailed); err != nil {
 		t.Fatal(err)
 	}
 	h.waitForOutcome(PushOutcomeDelivered)
 	h.assertNeverClaimed(repo, "delivered")
+	waitForWakeEnded(t, node)
+}
+
+// awaitRelay waits for the stub relay to report the call named what.
+func awaitRelay(t *testing.T, arrived <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-arrived:
+	case <-time.After(30 * time.Second):
+		t.Fatalf("the relay was never called for %s", what)
+	}
+}
+
+// answerRelay lets the stub relay's waiting call, named what, answer status.
+func answerRelay(t *testing.T, gate chan<- int, status int, what string) {
+	t.Helper()
+	select {
+	case gate <- status:
+	case <-time.After(30 * time.Second):
+		t.Fatalf("no relay call was waiting to answer %s", what)
+	}
 }
 
 // A wake ends within its budget, however the relay behaves: with a relay
@@ -482,10 +512,14 @@ func TestProfileSetWakeWaitsForTheWakeInFlightDB(t *testing.T) {
 	held, release := make(chan struct{}, 1), make(chan struct{})
 	var calls atomic.Int32
 	node := profileSetWakeSystem(t, pool, repo, nil, nil)
-	node.pushSender.client = &http.Client{Transport: relayRoundTripFunc(func(*http.Request) (*http.Response, error) {
+	node.pushSender.client = &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if calls.Add(1) == 1 {
 			held <- struct{}{}
-			<-release // the first wake's send stays in flight until the test lets it go
+			select { // the first wake's send stays in flight until the test lets it go
+			case <-release:
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			}
 		}
 		return relayResponse(http.StatusOK, `{"request_id":"r","status":"accepted"}`), nil
 	})}
@@ -493,28 +527,20 @@ func TestProfileSetWakeWaitsForTheWakeInFlightDB(t *testing.T) {
 	if !node.WakeProfileSetDevices(t.Context(), 7) {
 		t.Fatal("first wake answered false")
 	}
-	<-held
+	awaitRelay(t, held, "the first wake")
 	h.pastTheMinute() // the account's limit no longer holds the next wake back
 	if node.WakeProfileSetDevices(t.Context(), 7) || h.attempts() != 1 || calls.Load() != 1 {
 		t.Fatalf("wake while one is in flight: %d rows, %d relay calls; want a false answer, 1 and 1", h.attempts(), calls.Load())
 	}
 
 	close(release)
-	deadline := time.After(30 * time.Second)
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	for node.profileSetWakeInFlight(7) {
-		select {
-		case <-deadline:
-			t.Fatal("the first wake never ended")
-		case <-poll.C:
-		}
-	}
+	waitForWakeEnded(t, node)
 	h.pastTheMinute()
 	if !node.WakeProfileSetDevices(t.Context(), 7) || h.attempts() != 2 {
 		t.Fatalf("wake after the first ended: %d rows, want 2", h.attempts())
 	}
 	waitForWakeRows(t, pool, PushOutcomeDelivered+":", PushOutcomeDelivered+":")
+	waitForWakeEnded(t, node)
 }
 
 // One wake of an account ends before the account's limit lets the next one
