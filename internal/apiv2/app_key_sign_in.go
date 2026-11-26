@@ -84,10 +84,12 @@ type appKeyReply struct {
 	DeviceID  string     `json:"device_id"`
 	AccountID ID         `json:"account_id"`
 	Tokens    *TokenPair `json:"tokens,omitempty"`
-	// PersonKeyID is the enrolled person key's ID, on enroll only.
+	// PersonKeyID is the account's person key's ID, on enroll and on an app
+	// code's redeem.
 	PersonKeyID string `json:"person_key_id,omitempty"`
-	// Username and PersonKey are the account's name and what happened to
-	// its person key (enrolled or replaced), on an app code's redeem only.
+	// Username and PersonKey are the account's name and what the redeem did
+	// with the request's person key (enrolled or kept), on an app code's
+	// redeem only.
 	Username  string `json:"username,omitempty"`
 	PersonKey string `json:"person_key,omitempty"`
 	// LocalRoute is the pinned local route, on signed_in only, when the
