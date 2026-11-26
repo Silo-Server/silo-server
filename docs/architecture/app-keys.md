@@ -1473,10 +1473,9 @@ hidden by the owner counts, and so does one whose profile keeps a name the
 owner gave it: clearing that name would otherwise bring the clash back with
 nobody sending anything. Then the household as the set leaves it is checked,
 so a rename chain applies, and an item named like a profile outside the set
-refuses the whole set. There is no unique index on names. Five writers set a
-profile's name to one the account's other profiles might hold, and each checks
-it under the account's preference-settings lock, taken before it reads the
-names: a profile create and a profile rename (inside
+refuses the whole set. There is no unique index on names. These five writers of
+a profile's name each check it under the account's preference-settings lock,
+taken before they read the names: a profile create and a profile rename (inside
 `WithPreferenceSettingsTransaction`), the person's set and the owner's clear
 of a name override (inside `WithProfileSetTransaction`), and an
 administrator's change of the account's username, which renames the main
