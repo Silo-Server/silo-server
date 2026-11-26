@@ -134,22 +134,26 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 		// planner). A declared decode entry can only narrow that claim: the
 		// web names the bit depths its codec probes accepted, so a browser
 		// that refuses H.264 High 10 is not handed a 10-bit copy.
-		// On Roku a bare claim does not cover a 10-bit H.264 source
-		// either (flatClaimCoversV3).
+		// On Roku only an entry that lists the depth covers a 10-bit H.264
+		// source (rokuNeedsListedH264DepthV3).
 		if !flatClaims {
 			return false, false
 		}
+		needsListedDepth := rokuNeedsListedH264DepthV3(source, request)
 		named := false
 		for _, capability := range request.Capabilities.VideoDecode {
 			if !strings.EqualFold(capability.Codec, source.VideoCodec) {
 				continue
 			}
 			named = true
+			if needsListedDepth && !containsIntV3(capability.BitDepths, source.BitDepth) {
+				continue
+			}
 			if videoDecodeTakesSourceV3(capability, source, false, false, false) {
 				return true, false
 			}
 		}
-		return !named && flatClaimCoversV3(source, request), false
+		return !named && !needsListedDepth, false
 	case EvidenceExactV3, EvidencePlatformAttestedV3:
 		softwareDecodeOptIn := HasFeatureV3(request.ClientFeatures, FeatureSoftwareVideoDecodeV3)
 		matchedCodec := false
@@ -181,15 +185,17 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 	}
 }
 
-// flatClaimCoversV3 reports whether a bare codec claim, with no decode entry
-// naming the codec, covers source. On Roku, "h264" means 8-bit H.264: Roku
-// players decode video only in hardware, and no Roku decoder takes High 10,
-// so a copy of a 10-bit H.264 source plays as a black screen. Players with a
-// software decoder (Apple, Android, desktop) do play High 10, so a bare claim
-// keeps covering it there.
-func flatClaimCoversV3(source SourceDescriptorV3, request StartRequestV3) bool {
-	return !strings.EqualFold(strings.TrimSpace(request.ClientPlaybackContext.Device.Platform), "roku") ||
-		!strings.EqualFold(source.VideoCodec, "h264") || source.BitDepth <= 8
+// rokuNeedsListedH264DepthV3 reports whether a declared claim covers source
+// only through a decode entry whose bit depths list the source's depth. On
+// Roku, "h264" means 8-bit H.264: Roku players decode video only in
+// hardware, and no Roku decoder takes High 10, so a copy of a 10-bit H.264
+// source plays as a black screen. Neither a bare claim nor an entry that
+// omits bit depths covers it there. Players with a software decoder (Apple,
+// Android, desktop) do play High 10, so the usual declared rules apply
+// elsewhere.
+func rokuNeedsListedH264DepthV3(source SourceDescriptorV3, request StartRequestV3) bool {
+	return strings.EqualFold(strings.TrimSpace(request.ClientPlaybackContext.Device.Platform), "roku") &&
+		strings.EqualFold(source.VideoCodec, "h264") && source.BitDepth > 8
 }
 
 // videoDecodeTakesSourceV3 reports whether one decode entry's bounds admit

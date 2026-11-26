@@ -461,8 +461,8 @@ func TestPlanPlaybackV3EvidenceTiersReachTierAppropriateRoutes(t *testing.T) {
 	}
 }
 
-// On Roku a bare declared "h264" claim means 8-bit: a High 10 source is
-// encoded unless a decode entry names 10 bits. A Roku client that sent the
+// On Roku a declared "h264" claim means 8-bit: a High 10 source is
+// encoded unless a decode entry lists 10 bits. A Roku client that sent the
 // bare claim played these files as a black screen. Elsewhere the bare claim
 // still covers High 10, which Apple and Android players decode in software.
 func TestPlanPlaybackV3DeclaredH264ClaimOnRokuCoversOnlyEightBit(t *testing.T) {
@@ -478,6 +478,7 @@ func TestPlanPlaybackV3DeclaredH264ClaimOnRokuCoversOnlyEightBit(t *testing.T) {
 	}{
 		{name: "roku, 8-bit, bare claim", platform: "roku", track: eightBit, direct: true},
 		{name: "roku, 10-bit, bare claim", platform: "roku", track: tenBit, direct: false},
+		{name: "roku, 10-bit, entry omits bit depths", platform: "roku", track: tenBit, decode: []VideoDecodeCapabilityV3{{Codec: "h264", MaxWidth: 1920}}, direct: false},
 		{name: "roku, 10-bit, entry names 10 bits", platform: "roku", track: tenBit, decode: []VideoDecodeCapabilityV3{{Codec: "h264", BitDepths: []int{8, 10}}}, direct: true},
 		{name: "tvos, 10-bit, bare claim", platform: "tvos", track: tenBit, direct: true},
 	} {
