@@ -341,7 +341,10 @@ function EditRow({
           ) : null}
         </div>
       </div>
-      {manage && (edit.kind === "override" || edit.kind === "hidden") ? (
+      {/* An override is cleared only with the etag of what the owner was
+          shown; one listed without an etag offers no Clear, rather than a
+          clear that names nothing it was confirmed on. */}
+      {manage && ((edit.kind === "override" && edit.etag) || edit.kind === "hidden") ? (
         <Button
           type="button"
           variant="outline"

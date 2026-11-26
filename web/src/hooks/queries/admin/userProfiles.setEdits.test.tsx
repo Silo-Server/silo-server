@@ -117,3 +117,30 @@ it("refetches the edits list after a stale clear, and sends the shown etag", asy
   expect(sentIfMatch).toBe('"pso1-shown"');
   await waitFor(() => expect(editReads).toBe(2));
 });
+
+// The hook the card clears through never sends an override clear without
+// the etag of a record the owner was shown: with none, or with "*", it sends
+// nothing and fails.
+it.each([[""], ["*"], [" * "]])("sends no override clear with the etag %j", async (etag) => {
+  const sent: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request
+          ? input
+          : new Request(new URL(String(input), "http://silo.test"), init);
+      sent.push(`${request.method} ${new URL(request.url).pathname}`);
+      return new Response(JSON.stringify({ edits: [] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }),
+  );
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client }, children);
+  const { result } = renderHook(() => useClearAdminUserProfileSetEdit(7), { wrapper });
+  act(() => result.current.mutate({ kind: "override", profileId: "p-kid", field: "pin", etag }));
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(sent.filter((line) => line.startsWith("PATCH"))).toEqual([]);
+});

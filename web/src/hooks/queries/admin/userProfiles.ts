@@ -200,6 +200,11 @@ function failedUnlessExplained(fallback: MessageKey) {
   };
 }
 
+/** Whether etag names a record the owner was shown: present, and not "*". */
+function isShownETag(etag: string | undefined): etag is string {
+  return Boolean(etag) && etag?.trim() !== "*";
+}
+
 /** What to clear: an override of one field, or a hidden profile. */
 export type ProfileSetClearTarget =
   | { kind: "override"; profileId: string; field: string; etag: string }
@@ -214,6 +219,12 @@ export function useClearAdminUserProfileSetEdit(userId: number) {
     networkMode: "always",
     retry: false,
     mutationFn: async (target: ProfileSetClearTarget): Promise<AdminProfileSetCleared> => {
+      // An override clear names the etag of the record the owner was shown.
+      // Without one, or with "*", it would take whatever the person's set
+      // holds now, which no confirmation said: send nothing.
+      if (target.kind === "override" && !isShownETag(target.etag)) {
+        throw new Error("an override is cleared only with the etag of the record that was shown");
+      }
       const authority = context ?? captureAdminUserAuthority();
       requireAdminUserAuthority(authority);
       if (target.kind === "hidden") {

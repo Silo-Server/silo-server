@@ -95362,7 +95362,15 @@
     },
     {
       "type": 0,
-      "value": "\u202E goes back to this server's default now, as their app asks. Changes from their app apply to it again.\u202C"
+      "value": "\u202E goes back to what \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E inherits now, as their app asks. Changes from their app apply to it again.\u202C"
     }
   ],
   "web.admin.users.detail.profiles.setEdits.clearLater": [
@@ -95696,7 +95704,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E’s phone has been told.\u202C"
+      "value": "\u202E’s phone has been asked to sync.\u202C"
     }
   ],
   "web.admin.users.detail.profiles.setEdits.noticeNextSync": [
@@ -95724,7 +95732,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E’s phone has been told.\u202C"
+      "value": "\u202E’s phone has been asked to sync.\u202C"
     }
   ],
   "web.admin.users.detail.profiles.setEdits.removedBy": [

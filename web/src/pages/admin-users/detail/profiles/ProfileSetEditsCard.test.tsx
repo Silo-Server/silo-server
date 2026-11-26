@@ -106,6 +106,7 @@ function edit(extra: Partial<AdminProfileSetEdit>): AdminProfileSetEdit {
     set_resets: false,
     clear_applies: true,
     replaced_owner: false,
+    etag: '"pso1-shown"',
     ...extra,
   } as AdminProfileSetEdit;
 }
@@ -208,6 +209,43 @@ it("says the change was updated when the server refuses a stale clear", async ()
   expect(screen.queryByRole("alertdialog")).toBeNull();
 });
 
+// An override listed without an etag can't be cleared on what the owner was
+// shown, so the card offers no Clear for it rather than send a clear that
+// names no record (or "*").
+it("offers no Clear for an override without an etag", () => {
+  mocks.edits = [
+    edit({ etag: undefined } as never),
+    edit({ field: "pin", value: "set", etag: "" } as never),
+  ];
+  render(<ProfileSetEditsCard user={user} manage />);
+  expect(screen.queryByRole("button", { name: /Clear the change/ })).toBeNull();
+  expect(mocks.cleared).toEqual([]);
+});
+
+// After a stale refusal the owner opens the refreshed record and clears
+// again: that clear names the refreshed record's etag, never "*".
+it("clears again with the refreshed record's etag after a stale refusal", async () => {
+  mocks.edits = [edit({ etag: '"pso1-old"' } as never)];
+  mocks.outcome = new V2ProblemError("clearAdminUserProfileOverride", {
+    type: "https://siloserver.org/docs/api/v2/problems/precondition_failed",
+    title: "Precondition failed",
+    status: 412,
+  } as never);
+  const view = render(<ProfileSetEditsCard user={user} manage />);
+  let dialog = await openClear(/Clear the change to Content rating limit on Kiddo/);
+  await userEvent.click(within(dialog).getByRole("button", { name: "Clear" }));
+  mocks.edits = [edit({ set_value: "R", etag: '"pso1-new"' } as never)];
+  mocks.outcome = { wake_queued: false, applied: true };
+  view.rerender(<ProfileSetEditsCard user={user} manage />);
+  dialog = await openClear(/Clear the change to Content rating limit on Kiddo/);
+  expect(within(dialog).getByText(/goes back to R, the value from their app/)).toBeInTheDocument();
+  await userEvent.click(within(dialog).getByRole("button", { name: "Clear" }));
+  expect(mocks.cleared).toEqual([
+    { kind: "override", profileId: "p-kid", field: "max_content_rating", etag: '"pso1-old"' },
+    { kind: "override", profileId: "p-kid", field: "max_content_rating", etag: '"pso1-new"' },
+  ]);
+});
+
 // A refused clear is explained, not reported as a failure.
 it("explains a name the server refused to put back", async () => {
   mocks.edits = [edit({ field: "name", value: "Kiddo", set_value: "Kid" })];
@@ -241,7 +279,7 @@ it("tells the administrator when a record was already cleared", async () => {
 });
 
 it.each([
-  [true, "Cleared. sam’s phone has been told."],
+  [true, "Cleared. sam’s phone has been asked to sync."],
   [false, "Cleared. It reaches sam’s app the next time it syncs."],
 ])("after a clear with wake_queued %s, says %s", async (woken, sentence) => {
   mocks.edits = [edit({})];
