@@ -36,17 +36,22 @@ const (
 )
 
 // profileSetWakeBudget bounds one whole wake: every phone's send, from the
-// moment the wake is queued. It is half of profileSetWakeInterval, so a wake
-// has ended before the account's limit lets the next one start, and two of
-// an account's wakes never overlap (the in-process guard, wakeInFlight,
-// holds that on one server even if the clocks disagree). Each phone's send
+// moment the wake is queued. It is half of profileSetWakeInterval. The limit
+// measures the interval from when a wake is recorded, and the wake is queued
+// up to profileSetEnqueueTimeout later, so the budget must stay under the
+// interval less that: then a wake has ended before the account's limit lets
+// the next one start, and two of an account's wakes never overlap (the
+// in-process guard, claimProfileSetWake, holds that on one server even if
+// the clocks disagree). TestProfileSetWakeBudgetIsShorterThanTheInterval
+// holds the constants to that. Each phone's send
 // gets what is left of it. One send can make up to seven relay requests
 // (renewing and replacing the relay credential, a second post without the
 // push target or after idempotency_key_reuse, recovering a rejected
 // credential, and the send again), each under pushRelayRequestTimeout, which
 // is more than the budget, so no per-phone deadline is set: the phones are
-// sent most recently seen first, and one the budget does not reach is
-// recorded failed and gets the next wake. A var so tests can shorten it.
+// sent in listProfileSetWakeDevices's order, phones that receive pushes
+// first, and one the budget does not reach is recorded failed and gets the
+// next wake. A var so tests can shorten it.
 var profileSetWakeBudget = profileSetWakeInterval / 2
 
 // A wake is sent once and never retried: the next edit or the app opening
@@ -58,16 +63,16 @@ var profileSetWakeBudget = profileSetWakeInterval / 2
 // flight, as retrying with no next_retry_at, which no claim selects since
 // NULL <= now() is never true, and the send records delivered or failed.
 
-// profileSetWakeMaxPhones caps the phones one wake reaches: the account's
-// most recently seen registrations. A wake writes one attempt and makes one
-// relay call per phone, and a person can set one off from their own
-// session, so its fan-out is bounded. A household's phones, tablets and
-// computers stay well under it.
+// profileSetWakeMaxPhones caps the phones one wake reaches. A wake writes
+// one attempt and makes one relay call per phone, and a person can set one
+// off from their own session, so its fan-out is bounded. A household's
+// phones, tablets and computers stay well under it. Which phones it reaches
+// is listProfileSetWakeDevices's order.
 const profileSetWakeMaxPhones = 20
 
 // EnqueueProfileSetWake queues a wake for the registered, enabled phones of
 // account userID on platforms whose login is live, at most
-// profileSetWakeMaxPhones of them, most recently seen first, unless the
+// profileSetWakeMaxPhones of them in listProfileSetWakeDevices's order, unless the
 // account had one queued in the last profileSetWakeInterval. queued reports
 // whether a wake is queued now or was inside that interval, sent or not;
 // sendNow lists the attempts it created, in flight, for the caller to send.
@@ -133,8 +138,7 @@ func (r *PushDeviceRepository) EnqueueProfileSetWake(ctx context.Context, userID
 		return false, nil, err
 	}
 	// A device removed since the listing got no attempt. The rest keep the
-	// listing's order, most recently seen first, which is the order a wake
-	// sends them in.
+	// listing's order, which is the order a wake sends them in.
 	rows, err := tx.Query(ctx, `SELECT `+pushAttemptColumns+` FROM push_delivery_attempts
 		WHERE id = ANY($1) ORDER BY array_position($1::text[], id)`, ids)
 	if err != nil {
@@ -153,8 +157,13 @@ func (r *PushDeviceRepository) EnqueueProfileSetWake(ctx context.Context, userID
 }
 
 // listProfileSetWakeDevices lists the phones a wake of userID reaches: its
-// enabled registrations on platforms whose login is live, the
-// profileSetWakeMaxPhones most recently seen.
+// enabled registrations on platforms whose login is live, at most
+// profileSetWakeMaxPhones. They are ordered by when a push to them was last
+// accepted, newest first and never last, then by when they last
+// registered. APNs and FCM accept a push only for a real token of the app,
+// so a registration whose push was never accepted, such as one with a
+// made-up token, cannot take the place of a phone that receives pushes.
+// last_seen_at is written when a phone registers, not when it is used.
 func listProfileSetWakeDevices(ctx context.Context, tx pgx.Tx, userID int, platforms []string) ([]PushDevice, error) {
 	rows, err := tx.Query(ctx, `SELECT `+pushDeviceColumns+`
 		FROM push_devices
@@ -164,7 +173,7 @@ func listProfileSetWakeDevices(ctx context.Context, tx pgx.Tx, userID int, platf
 		  AND push_mode = $4
 		  AND enabled
 		  AND `+pushDeviceLoginLive+`
-		ORDER BY last_seen_at DESC NULLS LAST, created_at DESC, id
+		ORDER BY last_success_at DESC NULLS LAST, last_seen_at DESC NULLS LAST, id
 		LIMIT $5`,
 		userID, platforms, PushProviderSiloRelay, PushModePrivatePush, profileSetWakeMaxPhones)
 	if err != nil {
@@ -186,12 +195,14 @@ func listProfileSetWakeDevices(ctx context.Context, tx pgx.Tx, userID int, platf
 // recordProfileSetWake records a wake of userID now, unless one was
 // recorded within profileSetWakeInterval, and reports whether it recorded
 // one. It is one statement: a second server recording at the same moment
-// waits on the account's row and then finds the new time.
+// waits on the account's row and then finds the new time. The time is the
+// statement's own (clock_timestamp), not its transaction's start, so the
+// interval is measured from when each wake is recorded.
 func recordProfileSetWake(ctx context.Context, tx pgx.Tx, userID int) (bool, error) {
 	rows, err := tx.Query(ctx, `INSERT INTO push_profile_set_wakes AS w (user_id, last_wake_at)
-		VALUES ($1, now())
+		VALUES ($1, clock_timestamp())
 		ON CONFLICT (user_id) DO UPDATE SET last_wake_at = excluded.last_wake_at
-		WHERE w.last_wake_at <= now() - $2::interval
+		WHERE w.last_wake_at <= clock_timestamp() - $2::interval
 		RETURNING w.user_id`, userID, profileSetWakeInterval)
 	if err != nil {
 		return false, fmt.Errorf("record profile set wake: %w", err)

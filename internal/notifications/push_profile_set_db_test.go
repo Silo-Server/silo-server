@@ -459,11 +459,14 @@ func TestProfileSetWakeWaitsForTheWakeInFlightDB(t *testing.T) {
 }
 
 // One wake of an account ends before the account's limit lets the next one
-// start. Regression: a budget raised past the interval, or an interval
-// lowered under the budget, would let an account's wakes overlap.
+// start. The limit measures the interval from when a wake is recorded, and
+// the wake is queued up to profileSetEnqueueTimeout later, so the budget
+// must stay under the interval less that. Regression: a budget raised, or an
+// interval or queue deadline changed, so that an account's wakes overlap.
 func TestProfileSetWakeBudgetIsShorterThanTheInterval(t *testing.T) {
-	if profileSetWakeBudget <= 0 || profileSetWakeBudget >= profileSetWakeInterval {
-		t.Fatalf("wake budget %v, want more than zero and less than the interval %v", profileSetWakeBudget, profileSetWakeInterval)
+	if limit := profileSetWakeInterval - profileSetEnqueueTimeout; profileSetWakeBudget <= 0 || profileSetWakeBudget >= limit {
+		t.Fatalf("wake budget %v, want more than zero and less than the interval %v less the queue deadline %v",
+			profileSetWakeBudget, profileSetWakeInterval, profileSetEnqueueTimeout)
 	}
 }
 
@@ -573,35 +576,85 @@ func TestProfileSetWakeSurvivesDeviceRemovalDB(t *testing.T) {
 	}
 }
 
-// A wake reaches at most profileSetWakeMaxPhones of the account's phones,
-// the most recently seen. Regression: a wake wrote one attempt and made one
-// relay call for every registration the account had, with no bound.
+// A wake reaches at most profileSetWakeMaxPhones of the account's phones:
+// those a push was most recently accepted for, then those that registered
+// most recently. Regressions: a wake with no bound on its relay calls; one
+// that chose the newest registrations, which anyone who can register
+// devices on the account could use to keep the person's phones out.
 func TestProfileSetWakeCapsPhonesDB(t *testing.T) {
-	repo, pool := loginSessionPushDB(t)
-	ctx := t.Context()
-	for i := range profileSetWakeMaxPhones + 1 {
-		registerAndroid(t, repo, fmt.Sprintf("android-%02d", i), 1, false)
+	for _, tc := range []struct {
+		name string
+		// phones registers this many phones, android-00 first; android-00
+		// has the oldest registration.
+		phones int
+		// delivered phones have had a push accepted, the first listed most
+		// recently.
+		delivered []string
+		woken     []string
+		notWoken  []string
+	}{
+		{name: "the most recently registered when none had a push accepted",
+			phones: profileSetWakeMaxPhones + 1, notWoken: []string{"android-00"}},
+		{name: "a phone with an accepted push before a never-delivered newer one",
+			phones:    profileSetWakeMaxPhones + 1,
+			delivered: deviceNames(0, profileSetWakeMaxPhones),
+			woken:     []string{"android-00"}, notWoken: []string{fmt.Sprintf("android-%02d", profileSetWakeMaxPhones)}},
+		{name: "real phones before a flood of fresh registrations",
+			phones:    3 + profileSetWakeMaxPhones,
+			delivered: deviceNames(0, 3),
+			woken:     deviceNames(0, 3)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, pool := loginSessionPushDB(t)
+			ctx := t.Context()
+			for i := range tc.phones {
+				registerAndroid(t, repo, fmt.Sprintf("android-%02d", i), 1, false)
+			}
+			if _, err := pool.Exec(ctx, `UPDATE push_devices
+				SET last_seen_at = now() - (100 - substring(device_id from 9)::int) * interval '1 minute'`); err != nil {
+				t.Fatal(err)
+			}
+			for i, device := range tc.delivered {
+				if _, err := pool.Exec(ctx, `UPDATE push_devices SET last_success_at = now() - $2 * interval '1 second'
+					WHERE device_id = $1`, device, i); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, sendNow, err := repo.EnqueueProfileSetWake(ctx, 7, []string{PushPlatformAndroid}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows, err := pool.Query(ctx, `SELECT d.device_id FROM push_delivery_attempts a
+				JOIN push_devices d ON d.id = a.push_device_id ORDER BY d.device_id`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			woken, err := pgx.CollectRows(rows, pgx.RowTo[string])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(sendNow) != profileSetWakeMaxPhones || len(woken) != profileSetWakeMaxPhones {
+				t.Fatalf("woke %d phones (%d to send), want %d", len(woken), len(sendNow), profileSetWakeMaxPhones)
+			}
+			for _, device := range tc.woken {
+				if !slices.Contains(woken, device) {
+					t.Errorf("%s not woken; woke %v", device, woken)
+				}
+			}
+			for _, device := range tc.notWoken {
+				if slices.Contains(woken, device) {
+					t.Errorf("%s woken; woke %v", device, woken)
+				}
+			}
+		})
 	}
-	// android-00 was seen longest ago.
-	if _, err := pool.Exec(ctx, `UPDATE push_devices
-		SET last_seen_at = now() - (100 - substring(device_id from 9)::int) * interval '1 minute'`); err != nil {
-		t.Fatal(err)
+}
+
+// deviceNames is android-<from> to android-<to-1>.
+func deviceNames(from, to int) []string {
+	names := make([]string, 0, to-from)
+	for i := from; i < to; i++ {
+		names = append(names, fmt.Sprintf("android-%02d", i))
 	}
-	_, sendNow, err := repo.EnqueueProfileSetWake(ctx, 7, []string{PushPlatformAndroid}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rows, err := pool.Query(ctx, `SELECT d.device_id FROM push_delivery_attempts a
-		JOIN push_devices d ON d.id = a.push_device_id ORDER BY d.device_id`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	woken, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(sendNow) != profileSetWakeMaxPhones || len(woken) != profileSetWakeMaxPhones || slices.Contains(woken, "android-00") {
-		t.Fatalf("woke %d phones (%d to send): %v; want the %d most recently seen, without android-00",
-			len(woken), len(sendNow), woken, profileSetWakeMaxPhones)
-	}
+	return names
 }
