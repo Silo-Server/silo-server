@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -31,12 +32,24 @@ const (
 	// Names a permission as data (an operation's declared permission, a
 	// list of permissions an invitation may carry, a policy simulation).
 	declaration = "names the permission as data, decides nothing for a session"
+	// Resolves the account's effective policy for another reader; what that
+	// reader decides is the one listed.
+	policyResolution = "resolves the effective policy another listed reader uses"
+	// Reads or writes permissions while a backup is restored, outside any
+	// session.
+	restore = "restores accounts from a backup, outside any session"
+	// Records the account's permissions in an audit entry.
+	auditRecord = "records the account's values in an audit entry"
+	// The filter itself: keeps for such a session only the permissions with
+	// an operation open to it.
+	sessionFilter = "the filter that keeps such a session's permissions to its own (permittedPermissions)"
 )
 
 // accountPermissionReaders is every function outside internal/auth and
 // internal/policy that resolves an account's permissions
-// (PolicyPermissions) or names one permission (PermissionMetadataCuration,
-// PermissionMarkerEdit), keyed by file and enclosing function, with why a
+// (PolicyPermissions), reads a field named Permissions, or names one
+// permission (a Permission constant of this package, or a string equal to
+// one's value), keyed by file and enclosing function, with why a
 // session another app's key opened gets nothing from it that the operation
 // table refuses. A new by-hand permission check fails the test below until it
 // is listed, which is the moment to make it answer for the session, not the
@@ -60,10 +73,26 @@ var accountPermissionReaders = map[string]string{
 	"internal/apiv2/registry.go:<package scope>":                                     declaration,
 	"internal/apiv2/registry.go:checkOperation":                                      declaration,
 	"internal/invitations/app_code.go:<package scope>":                               declaration,
+	"internal/apiv2/wire.go:<package scope>":                                         declaration,
+	"internal/routeinventory/classify.go:<package scope>":                            declaration,
+	"internal/apiv2/account.go:accountForSession":                                    sessionFilter,
+	"internal/apiv2/admin_accounts.go:createAdminAccount":                            adminView,
+	"internal/apiv2/admin_accounts.go:updateAdminAccount":                            adminView,
+	"internal/apiv2/admin_users.go:adminUserFromView":                                adminView,
+	"internal/access/groups.go:ApplyGroupPolicy":                                     policyResolution,
+	"internal/access/groups.go:WiderThan":                                            policyResolution,
+	"internal/auditmutation/mutation.go:UserValues":                                  auditRecord,
+	"internal/backup/restoreset_users.go:access":                                     restore,
+	"internal/backup/restoreset_users.go:effectivePolicyOf":                          restore,
+	"internal/backup/restoreset_users.go:readBackupAccounts":                         restore,
+	"internal/backup/restoreset_users.go:user":                                       restore,
+	"internal/backup/restoreset_users.go:validateAccountEntry":                       restore,
+	"internal/backup/users_apply.go:restoredAccount":                                 restore,
 }
 
 func TestEveryAccountPermissionReaderIsListed(t *testing.T) {
 	root := filepath.Join("..", "..")
+	names := permissionNames(t)
 	found := map[string]bool{}
 	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -80,7 +109,7 @@ func TestEveryAccountPermissionReaderIsListed(t *testing.T) {
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
-		for _, fn := range accountPermissionReadingFunctions(t, path) {
+		for _, fn := range accountPermissionReadingFunctions(t, path, names) {
 			found[rel+":"+fn] = true
 		}
 		return nil
@@ -100,18 +129,70 @@ func TestEveryAccountPermissionReaderIsListed(t *testing.T) {
 	}
 }
 
-// accountPermissionReadingFunctions returns the functions in path that call
-// PolicyPermissions or name a permission constant; one outside any function
-// is "<package scope>".
-func accountPermissionReadingFunctions(t *testing.T, path string) []string {
+// permissionVocabulary is what names a permission in source: the
+// identifiers of the Permission constants declared in this package and
+// their string values, read from the declarations so a permission added
+// later is covered the day it is added.
+type permissionVocabulary struct {
+	idents map[string]bool
+	values map[string]bool
+}
+
+func permissionNames(t *testing.T) permissionVocabulary {
+	t.Helper()
+	out := permissionVocabulary{idents: map[string]bool{"PolicyPermissions": true}, values: map[string]bool{}}
+	paths, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				value, ok := spec.(*ast.ValueSpec)
+				if typ, isIdent := value.Type.(*ast.Ident); !ok || !isIdent || typ.Name != "Permission" {
+					continue
+				}
+				for i, name := range value.Names {
+					out.idents[name.Name] = true
+					if lit, isLit := value.Values[i].(*ast.BasicLit); isLit {
+						if v, err := strconv.Unquote(lit.Value); err == nil {
+							out.values[v] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	if len(out.values) == 0 {
+		t.Fatal("found no Permission constants to look for")
+	}
+	return out
+}
+
+// accountPermissionReadingFunctions returns the functions in path that name a
+// permission (a Permission constant, or a string literal equal to one's
+// value), call PolicyPermissions, or read a field named Permissions; one
+// outside any function is "<package scope>".
+//
+// Its limits: it reads source, so it does not see a permission read in SQL
+// (a query on users.permissions), a reader reached through an interface or a
+// value passed in from elsewhere, or a field named otherwise.
+func accountPermissionReadingFunctions(t *testing.T, path string, names permissionVocabulary) []string {
 	t.Helper()
 	src, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !strings.Contains(string(src), "PolicyPermissions") && !strings.Contains(string(src), "PermissionMetadataCuration") &&
-		!strings.Contains(string(src), "PermissionMarkerEdit") {
-		return nil
 	}
 	file, err := parser.ParseFile(token.NewFileSet(), path, src, parser.SkipObjectResolution)
 	if err != nil {
@@ -120,15 +201,18 @@ func accountPermissionReadingFunctions(t *testing.T, path string) []string {
 	var out []string
 	visit := func(name string, node ast.Node) {
 		ast.Inspect(node, func(n ast.Node) bool {
-			sel, ok := n.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			switch sel.Sel.Name {
-			case "PolicyPermissions", "PermissionMetadataCuration", "PermissionMarkerEdit":
-				if !slices.Contains(out, name) {
-					out = append(out, name)
+			hit := false
+			switch x := n.(type) {
+			case *ast.SelectorExpr:
+				hit = names.idents[x.Sel.Name] || x.Sel.Name == "Permissions"
+			case *ast.BasicLit:
+				if x.Kind == token.STRING {
+					v, err := strconv.Unquote(x.Value)
+					hit = err == nil && names.values[v]
 				}
+			}
+			if hit && !slices.Contains(out, name) {
+				out = append(out, name)
 			}
 			return true
 		})
