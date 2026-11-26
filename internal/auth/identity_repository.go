@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // LinkedIdentity is one external identity linked to a Silo account: the
@@ -109,7 +111,8 @@ func listIdentitiesForUser(ctx context.Context, db dbQuerier, userID int) ([]Lin
 // rows locked here. Every transaction that writes an account's device sign-in
 // requests or login sessions and may meet a plugin uninstall locks the
 // account row, then calls this before touching those rows: revocation,
-// account delete, approving and collecting a device sign-in. An uninstall
+// account delete, approving and collecting a device sign-in. A profile
+// delete takes the same statement in pgstore (LockSignInIdentities). An uninstall
 // deletes the identities first, so it waits here, or this waits for it,
 // instead of the two deadlocking on requests and sessions. forDelete takes
 // the lock that deleting them needs. Otherwise the lock only stops an
@@ -119,14 +122,7 @@ func listIdentitiesForUser(ctx context.Context, db dbQuerier, userID int) ([]Lin
 // they already wait on the account row; account resolution's non-key update
 // of the identity after a sign-in does not.
 func lockIdentitiesBeforeSessions(ctx context.Context, db sessionExecQuerier, userID int, forDelete bool) error {
-	lock := "FOR KEY SHARE"
-	if forDelete {
-		lock = "FOR UPDATE"
-	}
-	if _, err := db.Exec(ctx, `SELECT id FROM plugin_auth_identities WHERE user_id = $1 ORDER BY id `+lock, userID); err != nil {
-		return fmt.Errorf("locking provider identities: %w", err)
-	}
-	return nil
+	return pgstore.LockSignInIdentities(ctx, db, userID, forDelete)
 }
 
 // usableIdentityCount counts links whose installation and sign-in binding

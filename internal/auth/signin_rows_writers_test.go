@@ -35,11 +35,6 @@ const (
 	newAccount = "account with no sign-in rows yet"
 	// No caller.
 	unused = "no caller"
-	// Clears several requests approved for a profile without taking the
-	// account's identities. It can deadlock with an uninstall only when two
-	// requests approved for that profile through one identity are still
-	// retained and the two lock them in opposite orders.
-	knownGap = "known gap: several requests, no identity lock"
 )
 
 // signInRowWriters is every statement outside tests that writes
@@ -102,8 +97,11 @@ var signInRowWriters = map[string]string{
 	"internal/auth/user_delete.go:Delete":              newAccount,
 	"internal/auth/session.go:RevokeAllByUser":         unused,
 	"internal/auth/session.go:RevokeAllByImpersonator": unused,
-	// Deleting a profile, and a profile set that no longer lists one.
-	"internal/userstore/pgstore/profiles.go:deleteProfileRowsTx": knownGap,
+	// Deleting a profile, and a profile set that no longer lists one: both
+	// hold the account row (lockAccountForProfileDelete, or the set's own
+	// lock) and take the identities (LockSignInIdentities) before the
+	// profile's row, whose deletion clears the requests approved for it.
+	"internal/userstore/pgstore/profiles.go:deleteProfileRowsTx": identitiesFirst,
 }
 
 // signInRowWrite matches SQL that writes the tables, allowing a schema and
