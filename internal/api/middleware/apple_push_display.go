@@ -93,6 +93,13 @@ func (am *AuthMiddleware) serveApplePushDisplaySession(w http.ResponseWriter, r 
 	// refuses an access token; the request carries the current role
 	// instead of the one the token was minted with.
 	claims.Role = authority.Role
+	// These claims carry no session kind (Claims.SessionKind), and the
+	// display chain runs no origin gate on this path: a display token is not
+	// an access token, and only a registration for Apple push mints one,
+	// which a session another app's key opened is refused. So every
+	// operation this chain serves must stay allowed for such a session
+	// (apiv2 TestDisplayTokenOperationsStayAllowed); marking one refused
+	// would not be enforced here.
 	// Same attribution RequireAuth performs, so display fetches are
 	// not anonymous in the activity and request logs.
 	if lc := activitylog.GetLogContext(r.Context()); lc != nil {

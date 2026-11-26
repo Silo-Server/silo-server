@@ -418,8 +418,15 @@ func (reg *Registry) getDeviceLogin(ctx context.Context, in *GetDeviceLoginInput
 		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 			WithErrors(ProblemError{Location: "query.code", Code: codeRequired, Detail: "Either token or code is required."})
 	}
-	input := auth.DeviceLoginLookupInput{BrowserCode: in.Token, UserCode: in.Code, MarkOpened: true}
 	claims := claimsFrom(ctx)
+	// The operation is public, so the origin gate does not run: a session
+	// another app's key opened is refused here. It may neither approve nor
+	// deny a device sign-in, and with its session attached it would look up
+	// the account's Quick Connect codes and mark requests opened.
+	if grantedAppSession(claims) {
+		return nil, NewProblem(TypePermissionDenied, handlers.SessionNotAllowedDetail)
+	}
+	input := auth.DeviceLoginLookupInput{BrowserCode: in.Token, UserCode: in.Code, MarkOpened: true}
 	if claims.IsOwnLoginSession() {
 		input.AccountID = claims.UserID
 	}

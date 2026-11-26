@@ -341,3 +341,42 @@ func TestOriginDecisionsTakeAnotherKind(t *testing.T) {
 		t.Fatal("a scratch decision without its reason was accepted")
 	}
 }
+
+// TestDeviceLoginLookupRefusesAnotherApp: the lookup is public, so the origin
+// gate does not run on it, and an attached session would let a session
+// another app's key opened look up the account's Quick Connect codes and mark
+// requests opened. The handler refuses such a session; a caller with no
+// session and the person's own session get the lookup as before. Catches the
+// handler refusal going missing on an operation no gate covers.
+func TestDeviceLoginLookupRefusesAnotherApp(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	const path = Prefix + "/auth/device?code=4821-7730"
+	p := requireProblem(t, do(t, h, http.MethodGet, path, "", bearer(grantedAppToken)), TypePermissionDenied)
+	if p.Detail != handlers.SessionNotAllowedDetail {
+		t.Fatalf("detail %q", p.Detail)
+	}
+	for name, headers := range map[string]map[string]string{"no session": nil, "password session": bearer(memberToken)} {
+		if rec := do(t, h, http.MethodGet, path, "", headers); rec.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", name, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// TestDisplayTokenOperationsStayAllowed: the Apple push display-token path
+// builds claims with no session kind and runs no origin gate, so an operation
+// served through notificationDisplayGateChain must stay allowed for a session
+// another app's key opened; a refusal marked there would not be enforced on
+// that path. Catches such an operation being marked refused, or own-only,
+// without the chain learning to enforce it.
+func TestDisplayTokenOperationsStayAllowed(t *testing.T) {
+	for _, op := range documentOperations(t) {
+		if op.ID != notificationApplePushDisplayOperation {
+			continue
+		}
+		if d := documentedDecision(t, op); d == nil || d.Verdict != VerdictAllowed {
+			t.Fatalf("%s is served on the display-token path, which enforces no origin decision; it must stay allowed, got %+v", op.ID, d)
+		}
+		return
+	}
+	t.Fatalf("%s is not in the document", notificationApplePushDisplayOperation)
+}
