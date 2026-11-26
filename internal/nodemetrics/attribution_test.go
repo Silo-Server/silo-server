@@ -339,3 +339,45 @@ func TestCPUShareWindowIgnoresDiskPassDelay(t *testing.T) {
 		}
 	}
 }
+
+// Child discovery reads the kernel's per-task children lists, which can miss a
+// live child for a pass, and takes time of its own. Neither may change what a
+// child is charged.
+func TestChildCPUShareSurvivesDiscoveryGaps(t *testing.T) {
+	h := newCPUPctHarness(t, 4)
+	var bootExtra uint64
+	h.s.bootTicks = func() (uint64, bool) { return h.uptimeTicks() + bootExtra, true }
+	listed := true
+	h.s.ffmpegPIDs = func() []int {
+		bootExtra = testUserHZ // discovery takes a second
+		if !listed {
+			return nil
+		}
+		return h.children
+	}
+	h.setProcess(1000)
+	h.children = []int{200}
+	ticks := uint64(1000)
+	h.setChild(200, 1, ticks)
+	pass := func() cpuPctView {
+		bootExtra = 0
+		ticks += 200 // 200 ticks of 2000 every window: 10%
+		h.setChild(200, 1, ticks)
+		return h.pass()
+	}
+	pass()
+	pass()
+	wantPct(t, "listed", pass().Attribution.Children.CPUPct, 10)
+
+	// Discovery misses the child for a pass, then lists it again.
+	listed = false
+	wantPct(t, "missed by discovery", pass().Attribution.Children.CPUPct, 10)
+	listed = true
+	wantPct(t, "listed again", pass().Attribution.Children.CPUPct, 10)
+
+	// A child born half a second after the window opened is credited its
+	// lifetime although discovery ends a second after the window does.
+	h.children = []int{200, 201}
+	h.setChild(201, h.uptimeTicks()+testUserHZ/2, 100)
+	wantPct(t, "born inside the window", pass().Attribution.Children.CPUPct, 15)
+}

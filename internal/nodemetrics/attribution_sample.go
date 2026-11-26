@@ -58,17 +58,45 @@ func (s *Sampler) sampleAttribution() *ResourceAttribution {
 		CgroupCPU: s.cgroupCPUDetails, CgroupMemory: s.cgroupMemoryDetails,
 		DroppedDiskRoots: s.droppedRoots,
 	}
-	// The window end is taken right before the reads it closes.
+	// The window end is taken right before the reads it closes, on both clocks:
+	// the boot clock reading is the line a later child's start time must cross
+	// to count as born inside the next window.
 	at := s.now()
+	boot, bootOK := s.bootTicks()
 	var procTicks uint64
 	var childTicks map[childKey]uint64
 	out.Process, procTicks = sampleProcess(s.procDir, os.Getpid())
 	if out.Process.CPUSeconds != nil {
-		out.Children, childTicks = sampleChildren(s.procDir, os.Getpid(), s.ffmpegPIDs())
+		out.Children, childTicks = sampleChildren(s.procDir, os.Getpid(), s.childPIDs())
 	}
-	s.attributeCPU(out, at, procTicks, childTicks)
+	s.attributeCPU(out, at, boot, bootOK, procTicks, childTicks)
 	out.Disks = s.diskDetails
 	return out
+}
+
+// childPIDs is the children to sample: the ones discovery lists, plus any
+// child in the CPU baseline that discovery missed but that still exists. The
+// kernel's children lists can miss a live child for a pass; without this its
+// window would read as idle and its return would only re-baseline.
+// sampleChildren still checks each one's parent, name and start time.
+func (s *Sampler) childPIDs() []int {
+	pids := s.ffmpegPIDs()
+	if len(s.prevChildTicks) == 0 {
+		return pids
+	}
+	listed := make(map[int]bool, len(pids))
+	for _, pid := range pids {
+		listed[pid] = true
+	}
+	for key := range s.prevChildTicks {
+		if listed[key.pid] {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(s.procDir, strconv.Itoa(key.pid))); err == nil {
+			pids = append(pids, key.pid)
+		}
+	}
+	return pids
 }
 
 // attributeCPU fills the process and child CPU shares for the window since the
@@ -79,19 +107,19 @@ func (s *Sampler) sampleAttribution() *ResourceAttribution {
 // process counter cannot be read, publishes neither share and discards every
 // baseline; the pass after it records fresh baselines and publishes nothing, so
 // no share ever spans a gap or a change of capacity.
-func (s *Sampler) attributeCPU(out *ResourceAttribution, at time.Time, procTicks uint64, children map[childKey]uint64) {
+func (s *Sampler) attributeCPU(out *ResourceAttribution, at time.Time, boot uint64, bootOK bool, procTicks uint64, children map[childKey]uint64) {
 	basis, previous := s.cpuShare, s.prevCPUShare
 	s.prevCPUShare = basis
 	elapsed := at.Sub(s.prevAttrAt)
 	if out.Process.CPUSeconds == nil || !basis.available || basis.source != previous.source || basis.capacity != previous.capacity ||
 		(!s.prevAttrAt.IsZero() && elapsed <= 0) {
-		s.prevAttrAt, s.prevProcTicks, s.prevChildTicks = time.Time{}, 0, nil
+		s.prevAttrAt, s.prevProcTicks, s.prevChildTicks, s.prevBoot, s.prevBootOK = time.Time{}, 0, nil, 0, false
 		return
 	}
 	if !s.prevAttrAt.IsZero() {
 		s.publishCPUShares(out, basis, elapsed, procTicks, children)
 	}
-	s.prevAttrAt, s.prevProcTicks = at, procTicks
+	s.prevAttrAt, s.prevProcTicks, s.prevBoot, s.prevBootOK = at, procTicks, boot, bootOK
 	// A truncated pass did not see every child, so its map is not a baseline:
 	// a child it skipped would read as new next pass. sampleChildren returns a
 	// non-nil map whenever it returns stats, so an empty one is still a baseline.
@@ -118,18 +146,17 @@ func (s *Sampler) publishCPUShares(out *ResourceAttribution, basis cpuShareBasis
 // childTickDelta totals the CPU ticks live children used in the window.
 //
 // A child in the baseline contributes its growth. A child the baseline has not
-// seen contributes its whole lifetime only when it was born inside the window;
-// an older one (a child that was unreadable for a pass, say) only becomes a
-// baseline, because its lifetime is mostly earlier windows' work. A child that
-// exited contributes nothing, so this is a lower bound.
+// seen contributes its whole lifetime only when it was born inside the window:
+// its start time is on or after the boot clock reading taken when the window
+// opened. An older one (a child that was unreadable for a pass, say) only
+// becomes a baseline, because its lifetime is mostly earlier windows' work. A
+// child that exited contributes nothing, so this is a lower bound.
 //
-// Birth is judged on the clock a start time is counted on: the kernel's boot
-// clock, read directly because lxcfs replaces /proc/uptime with a container's
-// own. A lifetime larger than the window's whole capacity cannot have been
-// earned inside it either way, so it stays a baseline.
+// Start times count on the kernel's boot clock, which is read directly because
+// lxcfs replaces /proc/uptime with a container's own. A lifetime larger than
+// the window's whole capacity cannot have been earned inside it either way, so
+// it stays a baseline.
 func (s *Sampler) childTickDelta(children map[childKey]uint64, basis cpuShareBasis, elapsed time.Duration) uint64 {
-	boot, bootOK := s.bootTicks()
-	windowTicks := elapsed.Seconds() * procfsUserHZ
 	capacityTicks := basis.capacityTicks(elapsed)
 	var total uint64
 	for key, ticks := range children {
@@ -137,7 +164,7 @@ func (s *Sampler) childTickDelta(children map[childKey]uint64, basis cpuShareBas
 			total += tickDelta(ticks, previous)
 			continue
 		}
-		if bootOK && key.start <= boot && float64(boot-key.start) <= windowTicks+1 && float64(ticks) <= capacityTicks {
+		if s.prevBootOK && key.start >= s.prevBoot && float64(ticks) <= capacityTicks {
 			total += ticks
 		}
 	}

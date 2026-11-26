@@ -131,6 +131,10 @@ type Sampler struct {
 	prevAttrAt     time.Time
 	prevProcTicks  uint64
 	prevChildTicks map[childKey]uint64
+	// prevBoot is the boot clock reading taken with prevAttrAt; a child whose
+	// start time is on or after it was born inside the current window.
+	prevBoot   uint64
+	prevBootOK bool
 	// droppedRoots is how many configured media roots the last pass left
 	// unsampled because of the maxSampledDisks cap; see noteDroppedRoots.
 	droppedRoots int
