@@ -603,6 +603,7 @@ func registerAll(reg *Registry) {
 	registerAdminAccountSettings(reg)
 	registerAdminProfileSections(reg)
 	registerAdminProfiles(reg)
+	registerAdminProfileSetEdits(reg)
 	registerAdminAccessGroups(reg)
 	registerPreferences(reg)
 	registerHome(reg)

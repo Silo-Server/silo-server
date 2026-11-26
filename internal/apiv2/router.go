@@ -473,7 +473,11 @@ type Dependencies struct {
 	AdminAppKeys AdminAppKeyService
 	// ProfileSet applies and reads profile sets; nil reports the capability
 	// not_configured.
-	ProfileSet       ProfileSetService
+	ProfileSet ProfileSetService
+	// ProfileSetEdits lists and clears the edits made on this server to an
+	// account's profiles from a set; nil leaves those admin operations not
+	// configured and the account capability profile_set_edits false.
+	ProfileSetEdits  ProfileSetEditsService
 	PolicyCapability PolicyCapabilityService
 	Branding         BrandingService
 	OverlayImages    OverlayImageService

@@ -23,7 +23,9 @@ import (
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
+	"github.com/Silo-Server/silo-server/internal/profileedits"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -104,6 +106,13 @@ type ProfileHandler struct {
 	// runs, so the profile set can say how its sign-in by bare account name
 	// will behave.
 	JellyfinCompatEnabled bool
+	// ProfileSetWaker tells an account's apps that an administrator cleared
+	// an override or a hidden profile of its set. Nil queues nothing.
+	ProfileSetWaker profileedits.Waker
+	// AdminDefaults are the administrator's setting defaults, which a
+	// profile setting with no value of its own inherits. Nil leaves the
+	// contract's.
+	AdminDefaults settingsresolve.ServerSettings
 }
 
 // NewProfileHandler creates a new ProfileHandler.
