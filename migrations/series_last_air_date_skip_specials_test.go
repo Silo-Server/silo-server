@@ -8,9 +8,9 @@ import (
 // Issue #5393: last_air_date_at counted specials, so a special that aired
 // after the finale moved a series' end date in lists past the date the item
 // endpoint reports. The upgrade recomputes it from regular episodes: a series
-// whose newest aired episode is a special falls back to its last regular one,
-// or to NULL when only specials have aired. Series without that problem, and
-// future episodes, keep their values.
+// whose newest aired episode is a special falls back to its last regular one.
+// A series with no aired regular episode keeps its newest special, and series
+// without the problem, and future episodes, keep their values.
 func TestSeriesLastAirDateSkipSpecialsMigrationPostgres(t *testing.T) {
 	tx, schema := adminMigrationFixture(t)
 	migrationExec(t, tx, `
@@ -48,7 +48,7 @@ INSERT INTO episodes VALUES
 	}
 	want := map[string]string{
 		"late-special":     "2013-09-29",
-		"only-specials":    "NULL",
+		"only-specials":    "2019-05-01",
 		"regular":          "2012-02-01",
 		"upcoming-special": "2015-06-01",
 		"undated":          "NULL",

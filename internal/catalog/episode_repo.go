@@ -56,7 +56,8 @@ const episodeColumns = `content_id, series_id, season_id, season_number, episode
 // regular episode for the series' last_air_date field. Specials (season 0) do not
 // count toward last_air_date_at: a special that aired after the finale does
 // not extend the series' run, matching the provider's last_air_date that the
-// item endpoint returns (issue #5393). They still count toward
+// item endpoint returns (issue #5393). A series with no aired regular
+// episode falls back to its newest aired special. Specials still count toward
 // next_air_date_at and the available date. Because the available value
 // depends on files, membership changes recompute it through
 // RecomputeSeriesEpisodeMembershipDenorms.
@@ -87,8 +88,11 @@ const refreshSeriesAirDatesSQL = `
 		next_air_date_at = sub.next_airing
 	FROM (
 		SELECT s.series_id,
-			MAX(e.air_date) FILTER (
-				WHERE e.air_date <= CURRENT_DATE AND e.season_number <> 0
+			COALESCE(
+				MAX(e.air_date) FILTER (
+					WHERE e.air_date <= CURRENT_DATE AND e.season_number <> 0
+				),
+				MAX(e.air_date) FILTER (WHERE e.air_date <= CURRENT_DATE)
 			) AS last_aired,
 			MAX(e.air_date) FILTER (
 				WHERE e.air_date <= CURRENT_DATE

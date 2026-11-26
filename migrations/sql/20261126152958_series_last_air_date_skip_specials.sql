@@ -1,7 +1,8 @@
 -- +goose Up
 -- last_air_date_at no longer counts specials (season 0): a special that aired
 -- after the finale moved a series' end date in lists past the provider's
--- last_air_date the item endpoint reports (issue #5393). Recompute it for
+-- last_air_date the item endpoint reports (issue #5393). A series with no
+-- aired regular episode keeps its newest aired special. Recompute it for
 -- series with an aired special, the same way refreshSeriesAirDatesSQL in
 -- internal/catalog/episode_repo.go now does. Only series whose value changes
 -- are written. next_air_date_at and latest_available_episode_air_date_at
@@ -10,8 +11,11 @@ UPDATE public.media_items mi
 SET last_air_date_at = sub.last_aired
 FROM (
     SELECT e.series_id,
-           MAX(e.air_date) FILTER (
-               WHERE e.air_date <= CURRENT_DATE AND e.season_number <> 0
+           COALESCE(
+               MAX(e.air_date) FILTER (
+                   WHERE e.air_date <= CURRENT_DATE AND e.season_number <> 0
+               ),
+               MAX(e.air_date) FILTER (WHERE e.air_date <= CURRENT_DATE)
            ) AS last_aired
     FROM public.episodes e
     WHERE e.air_date IS NOT NULL

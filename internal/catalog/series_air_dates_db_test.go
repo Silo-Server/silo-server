@@ -217,6 +217,16 @@ func TestSeriesAirDatesFollowEpisodesAndCalendarDB(t *testing.T) {
 		// A special with a file is still the newest episode a viewer can play.
 		onDisk(t, eps[0], special)
 		assertAvailable(t, seriesID, day(-1))
+
+		// A series with no aired regular episode keeps its newest special
+		// rather than falling back to its premiere date.
+		onlySpecials, _ := seedSeries(t, "only-specials")
+		ova := *special
+		ova.ContentID, ova.SeriesID = onlySpecials+"-special-1", onlySpecials
+		if err := repo.BulkUpsert(ctx, onlySpecials, []*models.Episode{&ova}); err != nil {
+			t.Fatalf("BulkUpsert only specials: %v", err)
+		}
+		assertAirDates(t, onlySpecials, day(-1), nil)
 	})
 
 	t.Run("latest available air date counts only episodes on disk", func(t *testing.T) {
