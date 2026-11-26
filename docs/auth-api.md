@@ -328,7 +328,7 @@ Every answer that carries a token pair also carries `account_created_at`
 beside `user`: password and network sign-in, `completeOAuthLogin`, device
 sign-in polling, `refreshSession`, signup and setup, an accepted invitation, a
 completed password reset, an administrator's impersonation, and every sealed
-`signed_in` app key answer. It is the account's `users.created_at`: RFC 3339
+`signed_in` answer to one of the person's own device keys. It is the account's `users.created_at`: RFC 3339
 in UTC at the stored microsecond precision, with trailing zeros of the
 fraction left out (so it is not the millisecond instant other fields use).
 Nothing rewrites it after the account is made, and a full restore brings it

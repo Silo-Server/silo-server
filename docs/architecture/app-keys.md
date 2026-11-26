@@ -431,9 +431,11 @@ never the account.** The rule has three shapes, each checked:
 - a capability read's `allowed`: the capability rule above.
 
 A permission the account holds gives such a session nothing it is refused,
-including what a handler decides from the permission itself: on-disk file
-paths and names, which a curator's own sessions see (`CanViewFilePaths`), are
-hidden from such a session as from any caller without metadata curation.
+including what a handler decides from the permission itself. File paths,
+and the file names a curator's own sessions see (`CanViewFilePaths`), are
+hidden from such a session as from any caller without metadata curation; it
+still sees the book file names every viewer sees
+([File paths and names](../catalog-api.md#file-paths-and-names)).
 `TestEveryAccountPermissionReaderIsListed` (`internal/auth`) fails on a
 function that reads an account's permissions by hand until it is listed with
 why such a session gets nothing from it.
@@ -1094,7 +1096,7 @@ the same account object in both. For such a session:
 | `tokens.user.id`, `username` | the account's |
 | `tokens.user.email` | changed: the empty string; the person's address is not that app's to read |
 | `tokens.user.role` | the account's, always `user`: a grant is refused for an administrator's account, and promoting an account revokes all its keys |
-| `tokens.user.permissions` | changed: empty (`[]`). A permission is listed only while one operation it gates is open to such a session; today only `marker_edit` and `metadata_curation` exist, and every operation they gate (catalog edits) is refused. What handlers decide from a permission themselves follows the same rule: such a session sees no file paths or names |
+| `tokens.user.permissions` | changed: empty (`[]`). A permission is listed only while one operation it gates is open to such a session; today only `marker_edit` and `metadata_curation` exist, and every operation they gate (catalog edits) is refused. What handlers decide from a permission themselves follows the same rule: such a session sees no file paths, and no file names except the book file names every viewer sees ([File paths and names](../catalog-api.md#file-paths-and-names)) |
 | `tokens.user.download_allowed` | changed: false, because every download operation is refused to such a session |
 | `tokens.user.password_change_required` | the account's flag |
 | `tokens.user.impersonation` | absent: such a session never views as another account |
