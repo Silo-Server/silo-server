@@ -39,14 +39,19 @@ func WithoutGrantedAppClientName(name string) string {
 	return name
 }
 
+// brailleBlank is U+2800, the braille pattern with no dots: a symbol by its
+// Unicode category, drawn as a blank.
+const brailleBlank = '\u2800'
+
 // clientNameKey lower-cases a name and drops what renders as nothing or as
 // separation: separators (spaces of every kind), format characters, combining
-// marks, controls and default-ignorable code points (the Hangul fillers among
-// them). Everything else, letters of any script, digits, symbols and
-// punctuation, stays as it is; no Unicode normalization is applied.
+// marks, controls, default-ignorable code points (the Hangul fillers among
+// them) and the braille blank. Everything else, letters of any script,
+// digits, symbols and punctuation, stays as it is; no Unicode normalization
+// is applied.
 func clientNameKey(name string) string {
 	return strings.Map(func(r rune) rune {
-		if unicode.In(r, unicode.Z, unicode.Cf, unicode.Mn, unicode.Me, unicode.Mc, unicode.Cc, unicode.Other_Default_Ignorable_Code_Point) {
+		if r == brailleBlank || unicode.In(r, unicode.Z, unicode.Cf, unicode.Mn, unicode.Me, unicode.Mc, unicode.Cc, unicode.Other_Default_Ignorable_Code_Point) {
 			return -1
 		}
 		return unicode.ToLower(r)

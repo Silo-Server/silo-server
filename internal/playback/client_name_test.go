@@ -35,6 +35,7 @@ func TestGrantedAppClientNameIsReservedAsStored(t *testing.T) {
 		"Granted\uffa0App":  true, // halfwidth Hangul filler
 		"Granted\u115fApp":  true, // Hangul choseong filler
 		"Granted\u1160App":  true, // Hangul jungseong filler
+		"Granted\u2800App":  true, // braille blank, a symbol drawn as a blank
 		"Gra\u0301nted App": true, // combining mark on its own code point
 		"Gran\x00ted App":   true, // NUL inside
 		"Gran\x07ted App":   true, // control character inside

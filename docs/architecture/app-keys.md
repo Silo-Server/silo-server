@@ -518,9 +518,9 @@ request proceeds as if it named no client in that header. The
 Jellyfin-compatible and Audiobookshelf-compatible listeners apply the same
 function (`playback.IsGrantedAppClientName`). It compares the name as it
 would be stored (trimmed, controls removed, cut to 128 characters), lower
-cased, with separators, format characters, combining marks and
-default-ignorable code points (the Hangul fillers among them) dropped, to the
-reserved name built the same way. Nothing else is reserved: a different
+cased, with separators, format characters, combining marks,
+default-ignorable code points (the Hangul fillers among them) and the braille
+blank (U+2800) dropped, to the reserved name built the same way. Nothing else is reserved: a different
 letter, symbol or punctuation mark is a different name, however it looks.
 The request log shows `Granted App` only for a request the origin gate named;
 any other request whose logged name is `Granted App` is logged with none.
