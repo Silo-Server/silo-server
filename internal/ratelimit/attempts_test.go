@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -103,6 +104,36 @@ func (f failingAttempts) reserve(context.Context, string, AttemptPolicy) (bool, 
 }
 
 func (f failingAttempts) reset(context.Context, string) error { return f.err }
+
+func (f failingAttempts) locked(context.Context, string, AttemptPolicy) (bool, time.Duration, error) {
+	return false, 0, f.err
+}
+
+// Locked reads the lock on both backends without spending an attempt: a
+// granted app's PIN check reads the household's count this way and must
+// never move it.
+func TestAttemptLimiterLockedReadsWithoutCounting(t *testing.T) {
+	p := AttemptPolicy{MaxAttempts: 2, Window: time.Hour}
+	mem, _ := newTestMemoryAttemptLimiter(p)
+	client := redis.NewClient(&redis.Options{Addr: miniredis.RunT(t).Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	for name, l := range map[string]*AttemptLimiter{"memory": mem, "redis": NewRedisAttemptLimiter(client, p)} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			reserveN(t, l, "k", 1)
+			for range 3 {
+				if _, locked := l.Locked(ctx, "k"); locked {
+					t.Fatal("locked after one of two attempts")
+				}
+			}
+			reserveN(t, l, "k", 1) // the reads above spent nothing
+			retry, locked := l.Locked(ctx, "k")
+			if !locked || retry <= 0 || retry > time.Hour {
+				t.Fatalf("Locked = (%v, %v), want locked for up to an hour", retry, locked)
+			}
+		})
+	}
+}
 
 func TestAttemptLimiterBackendErrorFailsOpen(t *testing.T) {
 	l := &AttemptLimiter{policy: ProfilePINPolicy, backend: failingAttempts{err: errors.New("redis down")}}

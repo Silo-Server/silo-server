@@ -1193,6 +1193,18 @@ the attempt counts like any other; clients still must not replay a check automat
 
 A locked check answers 429 `rate_limited` with `Retry-After` giving the seconds left.
 
+A login session another app's key opened (an app enrolled through a grant; see
+[app keys](architecture/app-keys.md)) has an allowance of its own. Its attempts count
+per profile and app device key under `ratelimit.GrantedAppPINPolicy`: three attempts,
+then one hour locked. The count follows the key, not the login session, so signing in
+again with the same key does not reset it. Such a session never spends the household's
+count, so its wrong guesses cannot lock the profile for the person's own devices, and
+its correct PIN does not clear the household's count. It does read that count: while
+the household's own attempts have locked the profile, it is refused with the same 429
+and the household's `Retry-After`. A correct PIN while neither count is locked clears
+the app's count. Setting or removing the profile's PIN clears only the household's
+count; the app's lock runs out on its own.
+
 Jellyfin sign-ins that use the `password#PIN` convention count against the same
 per-profile budget. A locked profile fails there the way a wrong PIN does (401
 `InvalidUsernameOrPassword`), and only the message names the lockout. PIN guesses
