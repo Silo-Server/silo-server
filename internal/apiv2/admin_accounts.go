@@ -71,6 +71,7 @@ type AdminAccountCapabilitiesOutputBody struct {
 	ProfileAvatars       bool `json:"profile_avatars" doc:"Whether listAdminUserProfiles returns each profile's avatar, avatar_url and avatar_source as listProfiles does"`
 	ProfileSections      bool `json:"profile_sections" doc:"Whether listAdminUserProfileSectionOverrides, getAdminUserProfileSectionSettings, replaceAdminUserProfileSectionOverrides and resetAdminUserProfileSectionOverrides can read and change one profile's page layout"`
 	ProfileManagement    bool `json:"profile_management" doc:"Whether getAdminUserProfile, createAdminUserProfile, updateAdminUserProfile and deleteAdminUserProfile can read and change an account's profiles, including setting or removing a profile's PIN, and whether listAdminUserProfiles reports has_pin, is_primary and is_child"`
+	ProfileSetEdits      bool `json:"profile_set_edits" doc:"Whether listAdminUserProfileSetEdits, clearAdminUserProfileOverride, clearAdminUserHiddenProfile and dismissAdminUserSettledProfileEdit can show and clear the edits made on this server to profiles from an account's app"`
 }
 
 type AdminAccountPolicyInput struct {
@@ -274,6 +275,8 @@ func registerAdminAccounts(reg *Registry) {
 		out.Body.ProfileAvatars = reg.deps.AdminAccounts != nil
 		out.Body.ProfileSections = reg.deps.AdminAccounts != nil && reg.deps.AdminProfileSections != nil
 		out.Body.ProfileManagement = reg.deps.AdminAccounts != nil && reg.deps.Profiles != nil
+		out.Body.ProfileSetEdits = reg.deps.AdminAccounts != nil && reg.deps.ProfileSetEdits != nil &&
+			reg.deps.ProfileSet != nil && reg.deps.ProfileSet.ProfileSetSupported()
 		if resets := reg.deps.PasswordResets; resets != nil {
 			caps := resets.PasswordResetCapabilities(ctx)
 			out.Body.PasswordResetLink, out.Body.PasswordResetEmail = caps.Link, caps.Email

@@ -43,6 +43,10 @@ type profileSetRun struct {
 	devices    map[string]profileDevicesRead
 	// pinOverrides is the items whose PIN the owner set, on that read.
 	pinOverrides []int
+	// only is set when the run clears an owner's override instead of
+	// applying a set: the fields it puts back, every other field left as it
+	// is (clearOverride).
+	only map[string]bool
 
 	// edits is the account's edits on this server as the set's items see
 	// them: from the unlocked read, then from the read under the
@@ -430,7 +434,7 @@ func (r *profileSetRun) removeProfile(ctx context.Context, w userstore.ProfileSe
 // A field the owner set on this server is left as it is.
 func (r *profileSetRun) updateProfile(ctx context.Context, w userstore.ProfileSetWriter, audited userstore.AuditedProfileWriter, recording bool, i int, row *userstore.ProfileSetRow) error {
 	item := r.doc.Items[i]
-	owner := func(field string) bool { return r.edits.itemOverridden(i, field) }
+	owner := func(field string) bool { return r.leaves(i, field) }
 	if row.SyncID != "" && row.SyncID != item.SyncID {
 		r.moves[row.SyncID] = item.SyncID
 	}
@@ -479,7 +483,7 @@ func (r *profileSetRun) updateProfile(ctx context.Context, w userstore.ProfileSe
 		r.pinResets = append(r.pinResets, row.ID)
 	}
 	before := input
-	applyColumnPreferences(r.contract, r.edits.withoutOverrides(r.edits.ids[i], r.settings[i]), &row.Profile, &input)
+	applyColumnPreferences(r.contract, r.itemSettings(i), &row.Profile, &input)
 	changed = changed || input != before
 	if changed {
 		if err := r.writeProfile(ctx, w, audited, recording, row, input); err != nil {
@@ -489,8 +493,37 @@ func (r *profileSetRun) updateProfile(ctx context.Context, w userstore.ProfileSe
 	if access {
 		r.signals = append(r.signals, row.ID)
 	}
+	if r.only != nil {
+		// A clear writes the field's settings and nothing of the set's own
+		// record, which already holds the set's value.
+		return r.writeSettings(ctx, w, row.ID, r.itemSettings(i))
+	}
 	awaiting := profileSetAwaitingPin(row.SyncApplied) && finalPIN == ""
 	return r.finishProfile(ctx, w, i, row.ID, awaiting)
+}
+
+// leaves reports whether the run leaves item i's field as it is: a set
+// leaves the fields the owner set; a clear applies its own fields alone.
+func (r *profileSetRun) leaves(i int, field string) bool {
+	if r.only != nil {
+		return !r.only[field]
+	}
+	return r.edits.itemOverridden(i, field)
+}
+
+// itemSettings is the settings plan item i writes: without the owner's keys
+// for a set, and only the cleared keys for a clear. applied stays whole.
+func (r *profileSetRun) itemSettings(i int) profileSetSettings {
+	plan := r.settings[i]
+	if r.only == nil {
+		return r.edits.withoutOverrides(r.edits.ids[i], plan)
+	}
+	kept := func(key string) bool { return !r.only[profileedits.FieldSettingsPrefix+key] }
+	out := plan
+	out.write = maps.Clone(plan.write)
+	maps.DeleteFunc(out.write, func(key string, _ json.RawMessage) bool { return kept(key) })
+	out.reset = slices.DeleteFunc(slices.Clone(plan.reset), kept)
+	return out
 }
 
 func (r *profileSetRun) writeProfile(ctx context.Context, w userstore.ProfileSetWriter, audited userstore.AuditedProfileWriter, recording bool, row *userstore.ProfileSetRow, input userstore.UpdateProfileInput) error {
@@ -591,7 +624,33 @@ func (r *profileSetRun) createProfile(ctx context.Context, w userstore.ProfileSe
 // the owner overrides here included, as if it had been written: it is what
 // the set asks of the profile, not what this server stores.
 func (r *profileSetRun) finishProfile(ctx context.Context, w userstore.ProfileSetWriter, i int, profileID string, awaitingPin bool) error {
-	item, plan := r.doc.Items[i], r.edits.withoutOverrides(r.edits.ids[i], r.settings[i])
+	item, plan := r.doc.Items[i], r.itemSettings(i)
+	if err := r.writeSettings(ctx, w, profileID, plan); err != nil {
+		return err
+	}
+	if _, err := w.SetSyncFields(ctx, profileID, item.SyncID, i); err != nil {
+		return err
+	}
+	var age *int
+	if item.MaxAdvisoryAge != 0 {
+		age = &item.MaxAdvisoryAge
+	}
+	record, err := json.Marshal(profileSetApplied{
+		Name: item.Name, Picture: item.Picture, PIN: item.PIN.kind, IsChild: item.IsChild,
+		MaxContentRating: item.MaxContentRating, MaxAdvisoryAge: age, RequireAdvisoryAge: item.RequireAdvisoryAge,
+		RequestsBlocked: item.RequestsBlocked, Settings: plan.applied, SettingsReset: append([]string{}, r.settings[i].reset...),
+		AwaitingPin: awaitingPin,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = w.SetSyncApplied(ctx, profileID, record)
+	return err
+}
+
+// writeSettings writes a settings plan to a profile, each key only where it
+// differs from what is stored.
+func (r *profileSetRun) writeSettings(ctx context.Context, w userstore.ProfileSetWriter, profileID string, plan profileSetSettings) error {
 	base := userstore.SettingIdentity{Scope: settingscontract.ScopeProfile, ProfileID: profileID}
 	keys := make([]string, 0, len(plan.write))
 	for key := range plan.write {
@@ -620,24 +679,7 @@ func (r *profileSetRun) finishProfile(ctx context.Context, w userstore.ProfileSe
 			r.changed = append(r.changed, profileSetSettingChange{profileID: profileID, key: key})
 		}
 	}
-	if _, err := w.SetSyncFields(ctx, profileID, item.SyncID, i); err != nil {
-		return err
-	}
-	var age *int
-	if item.MaxAdvisoryAge != 0 {
-		age = &item.MaxAdvisoryAge
-	}
-	record, err := json.Marshal(profileSetApplied{
-		Name: item.Name, Picture: item.Picture, PIN: item.PIN.kind, IsChild: item.IsChild,
-		MaxContentRating: item.MaxContentRating, MaxAdvisoryAge: age, RequireAdvisoryAge: item.RequireAdvisoryAge,
-		RequestsBlocked: item.RequestsBlocked, Settings: plan.applied, SettingsReset: append([]string{}, r.settings[i].reset...),
-		AwaitingPin: awaitingPin,
-	})
-	if err != nil {
-		return err
-	}
-	_, err = w.SetSyncApplied(ctx, profileID, record)
-	return err
+	return nil
 }
 
 // afterCommit runs what a committed set leaves to do outside its

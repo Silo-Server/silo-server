@@ -6321,6 +6321,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/users/{id}/profile-set/edits": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the edits made on this server to an account's profiles from its app.
+     * @description The owner's overrides and hidden profiles, the person's own edits their app has not merged, and settled records of the person's edits over the owner's, each with who made the last edit and when. An override is not a lock: the person may change the field here too, and their edit then replaces the owner's (unmerged, then settled). 404 not_found for an unknown account.
+     */
+    get: operations["listAdminUserProfileSetEdits"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/users/{id}/profile-set/hidden/{sync_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Let a profile the owner removed come back from the account's app.
+     * @description Clears the owner's removal, and creates nothing: the profile is not recreated here. A newer set from the person's app creates it, as a new profile with no history here, only if that set has an item with this sync_id and the household has room for another profile; otherwise the item is in the set's left_off, or not in the set at all, and nothing comes back. A newer set that has the item can still be refused as a whole (for example, its name is now another profile's on the account), and then nothing is written. If that set pairs the sync_id with a profile of the account outside the set, that profile takes the sync_id and keeps its history instead of a new profile being created. Then the server tries to wake the person's apps: wake_queued says only that this call queued a push, not that the profile returned. 404 not_found when the owner removed no profile with that sync_id. 409 conflict when the household kept changing while the clear ran: nothing was written; read the list again and retry. Only the server Owner may change the Owner's or another admin account's profiles (403 permission_denied otherwise). 501 capability_unsupported where profiles are not kept in PostgreSQL.
+     */
+    delete: operations["clearAdminUserHiddenProfile"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/users/{id}/profiles": {
     parameters: {
       query?: never;
@@ -6370,6 +6410,26 @@ export interface paths {
     patch: operations["updateAdminUserProfile"];
     trace?: never;
   };
+  "/api/v2/admin/users/{id}/profiles/{profile_id}/overrides/{field}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Clear the owner's override of one field of a profile from the account's app.
+     * @description Takes {"state": "cleared"}, the only state an override can be put in: this operation ends an override and does nothing else, and a different change to the override would be a new state added on purpose. Requires If-Match with the override's etag from listAdminUserProfileSetEdits, so the clear does what the owner was shown: a missing If-Match is 428 precondition_required, and an etag that no longer matches (the person's app sent a newer set that changes what the clear would write or whether it can, or the override was edited since) is 412 precondition_failed with the current ETag. Either way nothing is written and the override stays. The precondition exists so that a clear does what the confirmation the owner read said it would. If-Match: * is the convention's deliberate overwrite: a caller that sends it has been shown no confirmation and says outright that it takes whatever the person's set holds at that moment. First-party clients never send it; the web card always sends the etag of the record it showed. The etag is compared inside the clear's transaction, on the profile rows it has locked, so a set can't land between the check and the write. Refusals come in this order: 404 not_found when the profile has no override of the field (including one the person has since replaced), then 428 and 412, then 409 for a name. Puts the value of the person's last accepted set back at once, in one transaction, and the set applies to the field again from then on; nothing it writes counts as an edit here. A PIN the set sent as digits, or kept, can't be put back (this server never stores digits): the PIN stays as the owner set it until the person's app sends a newer set. When the set has no PIN for the profile, clearing removes the owner's PIN at once. A picture this server doesn't hold waits for its upload. For a setting the settings contract mirrors in another key, both keys' overrides are cleared. Putting back a name another profile on the account now has (compared trimmed and without case) is refused with 409 conflict, as the owner's own rename to it is, and nothing is written; the override stays. Answers a receipt: applied, whether the set's value was written now, and wake_queued, whether this call queued a push telling the person's apps after the clear committed. The clears of a hidden profile and of a settled record restore no value, so they stay unguarded DELETEs. Only the server Owner may change the Owner's or another admin account's profiles (403 permission_denied otherwise). 501 capability_unsupported where profiles are not kept in PostgreSQL.
+     */
+    patch: operations["clearAdminUserProfileOverride"];
+    trace?: never;
+  };
   "/api/v2/admin/users/{id}/profiles/{profile_id}/sections": {
     parameters: {
       query?: never;
@@ -6413,6 +6473,26 @@ export interface paths {
     put?: never;
     post?: never;
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/users/{id}/profiles/{profile_id}/settled-edits/{field}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Dismiss the settled record of the person's edit over the owner's value.
+     * @description Deletes the record only; the profile is unchanged and the person's apps are not told. 404 not_found when the field has no settled record. 409 conflict when the household kept changing while the dismissal ran: nothing was written; read the list again and retry. Only the server Owner may change the Owner's or another admin account's profiles (403 permission_denied otherwise). 501 capability_unsupported where profiles are not kept in PostgreSQL.
+     */
+    delete: operations["dismissAdminUserSettledProfileEdit"];
     options?: never;
     head?: never;
     patch?: never;
@@ -14933,6 +15013,8 @@ export interface components {
       profile_management: boolean;
       /** @description Whether listAdminUserProfileSectionOverrides, getAdminUserProfileSectionSettings, replaceAdminUserProfileSectionOverrides and resetAdminUserProfileSectionOverrides can read and change one profile's page layout */
       profile_sections: boolean;
+      /** @description Whether listAdminUserProfileSetEdits, clearAdminUserProfileOverride, clearAdminUserHiddenProfile and dismissAdminUserSettledProfileEdit can show and clear the edits made on this server to profiles from an account's app */
+      profile_set_edits: boolean;
       /** @description Whether getAdminRequestUserUsage can report an account's request quota use */
       request_usage: boolean;
       /** @description Opaque revision of this document */
@@ -22966,6 +23048,115 @@ export interface components {
       virtual_bytes?: number;
       /** Format: int64 */
       write_bytes?: number;
+    };
+    AdminProfileOverrideState: {
+      /**
+       * @description cleared: the owner's value no longer applies, and the person's set applies to the field again
+       * @example cleared
+       * @enum {string}
+       */
+      state: "cleared";
+    };
+    AdminProfileSetCleared: {
+      /**
+       * @description Whether the set's value was written now. Always false for a hidden profile: the clear creates nothing
+       * @example true
+       */
+      applied: boolean;
+      /**
+       * @description Whether this call queued a push telling the person's apps, after the clear committed. False with push off, with no phone registered, within a minute after an earlier wake of the account, while a wake for the account is in flight on this server, and when queueing the wake failed or timed out; the change then reaches the app the next time it syncs
+       * @example false
+       */
+      wake_queued: boolean;
+    };
+    AdminProfileSetEdit: {
+      /** @description Who made the last edit; absent when that is not recorded */
+      actor?: components["schemas"]["AdminProfileSetEditActor"];
+      /**
+       * Format: date-time
+       * @description When the last edit was made
+       * @example 2026-11-25T03:50:00.000Z
+       */
+      at: string;
+      /**
+       * @example owner
+       * @enum {string}
+       */
+      by: "account" | "owner";
+      /**
+       * @description For an override: clearing it puts the set's value back at once. False for a PIN the set sent as digits or kept (this server never stores digits; the owner's PIN stays until the person's app sends a newer set), for a picture this server doesn't hold, and for a field the set never carried
+       * @example true
+       */
+      clear_applies: boolean;
+      /**
+       * @description Current validator for this override; send it as If-Match when clearing it (clearAdminUserProfileOverride). It changes whenever what the clear would do changes. Present on override records only
+       * @example "pso1-mFzDq0dX7eTsc3m6SfN0Lw"
+       */
+      etag?: string;
+      /**
+       * @description An item field name or settings.<key>, as getProfileSet names it; absent for a removed profile. An open string
+       * @example max_content_rating
+       */
+      field?: string;
+      /**
+       * @description For a setting: the profile has no value of its own, and value is what it inherits
+       * @example false
+       */
+      inherited: boolean;
+      /**
+       * @description override: a field the owner set here, which the person's set leaves as it is until cleared. hidden: a profile of the set the owner removed here, which the set does not bring back until cleared. unmerged: the person's own edit here (a field, or with no field a profile they removed) that their app has not merged yet. settled: the person's edit of a field the owner had set, kept after their app merged it as the record that the owner's value no longer applies. New kinds may be added; ignore one you don't know
+       * @example override
+       * @enum {string}
+       */
+      kind: "override" | "hidden" | "unmerged" | "settled";
+      /**
+       * @description The profile on this server; absent for a removed profile
+       * @example p-kid
+       */
+      profile_id?: string;
+      /**
+       * @description The profile's name; a removed profile's name when it was removed
+       * @example Kid
+       */
+      profile_name: string;
+      /**
+       * @description For an unmerged edit: it replaced a value the owner had set
+       * @example false
+       */
+      replaced_owner: boolean;
+      /**
+       * @description For a setting: the person's set resets it, so the profile inherits
+       * @example false
+       */
+      set_resets: boolean;
+      /**
+       * @description The field's value in the person's last accepted set, as the set encodes it (pin is set, keep or clear). Absent when the server holds none, or when set_resets is true
+       * @example
+       */
+      set_value?: unknown;
+      /**
+       * Format: uuid
+       * @example 0f8fad5b-d9cb-469f-a165-70867728950e
+       */
+      sync_id: string;
+      /** @description The profile's value in force, as a set item encodes it (pin is "set" or "clear"). For a setting, what the profile resolves to, inherited included. Absent for a removed profile and for a picture whose upload this server kept no hash for */
+      value?: unknown;
+    };
+    AdminProfileSetEditActor: {
+      /**
+       * @description The account: the administrator's for an owner edit, the person's own otherwise
+       * @example 1
+       */
+      id: string;
+      /**
+       * @description Its username; absent once that account no longer exists
+       * @example admin
+       */
+      username?: string;
+    };
+    AdminProfileSetEdits: {
+      /** @description Every record, ordered by sync_id then field. Empty for an account with none, and where profiles are not kept in PostgreSQL */
+      edits: components["schemas"]["AdminProfileSetEdit"][];
     };
     AdminRateLimitAuthEndpoint: {
       /** Format: int64 */
@@ -97798,6 +97989,244 @@ export interface operations {
       };
     };
   };
+  listAdminUserProfileSetEdits: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The account */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminProfileSetEdits"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  clearAdminUserHiddenProfile: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The account */
+        id: string;
+        /** @description The removed profile's sync_id */
+        sync_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminProfileSetCleared"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   listAdminUserProfiles: {
     parameters: {
       query?: never;
@@ -98439,6 +98868,192 @@ export interface operations {
       };
     };
   };
+  clearAdminUserProfileOverride: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The resource's current ETag, or "*" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag. */
+        "If-Match": string;
+        /** @description Optional second precondition, evaluated after If-Match succeeds: "*" or any tag matching the current representation is 412 precondition_failed with the current ETag. */
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description An item field name or settings.<key> */
+        field: string;
+        /** @description The account */
+        id: string;
+        /** @description A profile of the account */
+        profile_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminProfileOverrideState"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminProfileSetCleared"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   listAdminUserProfileSectionOverrides: {
     parameters: {
       query?: {
@@ -98912,6 +99527,135 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  dismissAdminUserSettledProfileEdit: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description An item field name or settings.<key> */
+        field: string;
+        /** @description The account */
+        id: string;
+        /** @description A profile of the account */
+        profile_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };

@@ -32,6 +32,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import {
   useAdminUserProfile,
+  useAdminUserProfileSetEdits,
   useCreateAdminUserProfile,
   useDeleteAdminUserProfile,
   useUpdateAdminUserProfile,
@@ -48,6 +49,7 @@ import { cn } from "@/lib/utils";
 
 import { formatLastSeen } from "../format";
 import { DetailCard, InitialAvatar } from "../ui";
+import { ProfileSetEditsCard } from "./ProfileSetEditsCard";
 
 type Editing = { mode: "create" } | { mode: "edit"; id: string };
 
@@ -75,6 +77,11 @@ export function ProfilesTab({ user, manageable }: { user: AdminUser; manageable:
   const profiles = useAdminUserProfileActivity(user.id);
   const liveQuery = useAdminUserLiveSessions(user.id);
   const watching = new Set((liveQuery.data ?? []).map((session) => session.profile_id));
+  const setEditsServed = capabilities?.profile_set_edits === true;
+  const setEdits = useAdminUserProfileSetEdits(user.id, setEditsServed);
+  const changedHere = new Set(
+    (setEdits.data ?? []).filter((e) => e.kind === "override").map((e) => e.profile_id),
+  );
 
   const [editing, setEditing] = useState<Editing | null>(null);
   const [pinTarget, setPinTarget] = useState<AdminUserProfileActivity | null>(null);
@@ -86,7 +93,7 @@ export function ProfilesTab({ user, manageable }: { user: AdminUser; manageable:
   const atLimit = count !== undefined && limit >= 1 && count >= limit;
 
   return (
-    <>
+    <div className="space-y-4">
       <DetailCard
         title={t("web.admin.users.detail.profiles.title")}
         description={
@@ -140,6 +147,7 @@ export function ProfilesTab({ user, manageable }: { user: AdminUser; manageable:
               profile={profile}
               seed={index}
               watching={watching.has(profile.id)}
+              changedHere={changedHere.has(profile.id)}
               manage={manage}
               onEdit={() => setEditing({ mode: "edit", id: profile.id })}
               onSetPin={() => setPinTarget(profile)}
@@ -154,6 +162,8 @@ export function ProfilesTab({ user, manageable }: { user: AdminUser; manageable:
           </p>
         ) : null}
       </DetailCard>
+
+      {setEditsServed ? <ProfileSetEditsCard user={user} manage={manage} /> : null}
 
       {manage ? (
         <>
@@ -176,7 +186,7 @@ export function ProfilesTab({ user, manageable }: { user: AdminUser; manageable:
           />
         </>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -184,6 +194,7 @@ function ProfileRow({
   profile,
   seed,
   watching,
+  changedHere,
   manage,
   onEdit,
   onSetPin,
@@ -193,6 +204,8 @@ function ProfileRow({
   profile: AdminUserProfileActivity;
   seed: number;
   watching: boolean;
+  /** The administrator changed a field of this profile from the person's app. */
+  changedHere: boolean;
   manage: boolean;
   onEdit: () => void;
   onSetPin: () => void;
@@ -220,6 +233,11 @@ function ProfileRow({
           ) : null}
           {profile.has_pin ? (
             <Badge variant="outline">{t("web.admin.users.detail.profiles.badge.pin")}</Badge>
+          ) : null}
+          {changedHere ? (
+            <Badge variant="outline">
+              {t("web.admin.users.detail.profiles.badge.changedHere")}
+            </Badge>
           ) : null}
         </div>
         <div className="text-muted-foreground text-xs">

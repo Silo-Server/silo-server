@@ -213,6 +213,9 @@ func TestProfileSetFormsValidateAlike(t *testing.T) {
 				deps := appKeyDeps(&fakeAppKeys{enabled: true})
 				deps.AppKeys = &profileSetKeys{fakeAppKeys: &fakeAppKeys{enabled: true}, signed: authority}
 				deps.ProfileSet = &fakeProfileSets{}
+				if tc.stale {
+					deps.ProfileSet = &fakeProfileSets{applyErr: handlers.ErrProfileSetStale}
+				}
 				return read(t, do(t, NewHandler(deps), http.MethodPut, Prefix+"/profiles/set", body, headers))
 			}
 			session := send(string(sessionBody), map[string]string{"Authorization": "Bearer " + memberToken, profileHeader: "p-owner"})
@@ -225,6 +228,9 @@ func TestProfileSetFormsValidateAlike(t *testing.T) {
 			}
 			if !tc.ok && (session.Status != http.StatusUnprocessableEntity || len(session.Errors) == 0) {
 				t.Fatalf("a malformed set answered %+v, want 422 with errors", session)
+			}
+			if tc.wantAt != "" && (len(session.Errors) != 1 || session.Errors[0].Location != tc.wantAt || session.Errors[0].Code != tc.wantCode) {
+				t.Fatalf("errors = %+v, want one %s at %s", session.Errors, tc.wantCode, tc.wantAt)
 			}
 		})
 	}
@@ -239,6 +245,11 @@ type profileSetFormCase struct {
 	pairs     any
 	editsSeen any
 	ok        bool
+	// stale has the service answer profile_set_stale to any set that
+	// reaches it, as for a set older than the held one.
+	stale bool
+	// wantAt and wantCode, when set, are the one error the refusal carries.
+	wantAt, wantCode string
 }
 
 // profileSetFormCases are well-formed sets and one of each kind of malformed
@@ -294,6 +305,10 @@ func profileSetFormCases() []profileSetFormCase {
 		{name: "version missing", set: map[string]any{"items": []any{whole()}}},
 		{name: "two items with one sync_id", set: set(whole(), with("name", "Alex"))},
 		{name: "two items with one name", set: set(whole(), with("sync_id", "7c9e6679-7425-40de-944b-e07fc1f90ae7"))},
+		// Parsing refuses it before the version is judged, so a stale set
+		// with two items of one name is never answered profile_set_stale.
+		{name: "two items with one name, against a newer held set", set: set(whole(), with("sync_id", "7c9e6679-7425-40de-944b-e07fc1f90ae7")),
+			stale: true, wantAt: "body.set.items[1].name", wantCode: codeInvalid},
 		{name: "a pair for no item", set: set(whole()), pairs: []any{map[string]any{"sync_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "local_id": "p-owner"}}},
 		{name: "a pair without local_id", set: set(whole()), pairs: []any{map[string]any{"sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e"}}},
 		{name: "pairs not an array", set: set(whole()), pairs: "x"},
@@ -393,6 +408,11 @@ func TestGetProfileSetETag(t *testing.T) {
 	}
 	if again := do(t, h, http.MethodGet, Prefix+"/profiles/set", "", map[string]string{"Authorization": "Bearer " + memberToken, "If-None-Match": tag}); again.Code != http.StatusNotModified {
 		t.Fatalf("matching If-None-Match = %d, want 304", again.Code)
+	}
+	// A compressing intermediary rewrites the tag to its weak form; the
+	// comparison is weak, so it still matches.
+	if weak := do(t, h, http.MethodGet, Prefix+"/profiles/set", "", map[string]string{"Authorization": "Bearer " + memberToken, "If-None-Match": "W/" + tag}); weak.Code != http.StatusNotModified {
+		t.Fatalf("weak If-None-Match = %d, want 304", weak.Code)
 	}
 	if other := do(t, h, http.MethodGet, Prefix+"/profiles/set", "", map[string]string{"Authorization": "Bearer " + memberToken, "If-None-Match": `"ps1-other"`}); other.Code != http.StatusOK {
 		t.Fatalf("another If-None-Match = %d, want 200", other.Code)

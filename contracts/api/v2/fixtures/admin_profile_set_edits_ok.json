@@ -1,0 +1,95 @@
+{
+  "edits": [
+    {
+      "kind": "override",
+      "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "profile_id": "p-kid",
+      "profile_name": "Kid",
+      "field": "max_content_rating",
+      "by": "owner",
+      "actor": {
+        "id": "1",
+        "username": "admin"
+      },
+      "at": "2026-11-25T03:50:00.000Z",
+      "value": "G",
+      "inherited": false,
+      "set_value": "PG",
+      "set_resets": false,
+      "clear_applies": true,
+      "etag": "\"pso1-fixture\"",
+      "replaced_owner": false
+    },
+    {
+      "kind": "override",
+      "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "profile_id": "p-kid",
+      "profile_name": "Kid",
+      "field": "pin",
+      "by": "owner",
+      "actor": {
+        "id": "1",
+        "username": "admin"
+      },
+      "at": "2026-11-25T03:50:00.000Z",
+      "value": "set",
+      "inherited": false,
+      "set_value": "set",
+      "set_resets": false,
+      "clear_applies": false,
+      "etag": "\"pso1-fixture-pin\"",
+      "replaced_owner": false
+    },
+    {
+      "kind": "unmerged",
+      "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "profile_id": "p-kid",
+      "profile_name": "Kid",
+      "field": "settings.playback.audio_language",
+      "by": "account",
+      "actor": {
+        "id": "7",
+        "username": "sam"
+      },
+      "at": "2026-11-25T03:50:00.000Z",
+      "value": "en",
+      "inherited": true,
+      "set_resets": true,
+      "clear_applies": false,
+      "replaced_owner": true
+    },
+    {
+      "kind": "settled",
+      "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "profile_id": "p-kid",
+      "profile_name": "Kid",
+      "field": "requests_blocked",
+      "by": "account",
+      "actor": {
+        "id": "7",
+        "username": "sam"
+      },
+      "at": "2026-11-25T03:50:00.000Z",
+      "value": false,
+      "inherited": false,
+      "set_value": false,
+      "set_resets": false,
+      "clear_applies": false,
+      "replaced_owner": false
+    },
+    {
+      "kind": "hidden",
+      "sync_id": "6c9a2f2e-4f3b-4c55-9d43-1f0e2b7a8c11",
+      "profile_name": "Guest",
+      "by": "owner",
+      "actor": {
+        "id": "3"
+      },
+      "at": "2026-11-25T03:50:00.000Z",
+      "inherited": false,
+      "set_resets": false,
+      "clear_applies": false,
+      "replaced_owner": false
+    }
+  ]
+}

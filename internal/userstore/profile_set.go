@@ -101,4 +101,12 @@ type ProfileSetWriter interface {
 	// ID to the set gave it (profileedits.Move). It locks edit rows, so it
 	// runs last.
 	MoveEdits(ctx context.Context, from, to string) error
+	// ClearOwnerEdits deletes the owner's rows of fields on the profile with
+	// syncID and reports how many it deleted (profileedits.ClearOwner). It
+	// locks edit rows, so it runs last.
+	ClearOwnerEdits(ctx context.Context, syncID string, fields []string) (int64, error)
+	// DismissSettledEdit deletes the settled record of field on the profile
+	// with syncID (profileedits.DismissSettled). It locks edit rows, so it
+	// runs last.
+	DismissSettledEdit(ctx context.Context, syncID, field string) (bool, error)
 }
