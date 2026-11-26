@@ -67,6 +67,8 @@ function groupState(query: GroupQuery) {
     failed: query.isError && !query.isFetchNextPageError,
     accounts: pages.flatMap((page) => page.items),
     totals: pages[0]?.totals,
+    /** The newest count, for how many remain after the pages shown. */
+    latestTotals: pages.at(-1)?.totals,
   };
 }
 
@@ -143,7 +145,7 @@ export function LocalPasswordOffDialog({
                   })}
                   notes={[t("web.admin.settings.signIn.passwordsOff.matchExplain", { provider })]}
                   accounts={matched.accounts}
-                  total={matchedTotal}
+                  latestTotal={matched.latestTotals?.email_match ?? matchedTotal}
                   query={matchedQuery}
                 />
               ) : null}
@@ -159,7 +161,7 @@ export function LocalPasswordOffDialog({
                       : []),
                   ]}
                   accounts={unmatched.accounts}
-                  total={unmatchedTotal}
+                  latestTotal={unmatched.latestTotals?.admin_link ?? unmatchedTotal}
                   query={unmatchedQuery}
                   showReason
                 />
@@ -195,7 +197,8 @@ interface AccountGroupProps {
   heading: string;
   notes: string[];
   accounts: Account[];
-  total: number;
+  /** The group's count from the newest page loaded. */
+  latestTotal: number;
   query: GroupQuery;
   /** Says why each account isn't connected by email. */
   showReason?: boolean;
@@ -205,13 +208,15 @@ function AccountGroup({
   heading,
   notes,
   accounts,
-  total,
+  latestTotal,
   query,
   showReason = false,
 }: AccountGroupProps) {
   const t = useT();
   const id = useId();
-  const more = total - accounts.length;
+  // Accounts can change between pages, so the count can be off; whether more
+  // remain is the query's to say.
+  const more = latestTotal - accounts.length;
   return (
     <section aria-labelledby={id} className="grid gap-1.5">
       <h3 id={id} className="font-medium">
@@ -243,7 +248,7 @@ function AccountGroup({
           {t("web.admin.settings.signIn.passwordsOff.moreFailed")}
         </p>
       ) : null}
-      {more > 0 && query.hasNextPage ? (
+      {query.hasNextPage ? (
         <Button
           type="button"
           variant="ghost"
@@ -252,7 +257,9 @@ function AccountGroup({
           disabled={query.isFetchingNextPage}
           onClick={() => void query.fetchNextPage()}
         >
-          {t("web.admin.settings.signIn.passwordsOff.more", { count: more })}
+          {more > 0
+            ? t("web.admin.settings.signIn.passwordsOff.more", { count: more })
+            : t("web.admin.downloads.deviceCopies.showMore")}
         </Button>
       ) : null}
     </section>

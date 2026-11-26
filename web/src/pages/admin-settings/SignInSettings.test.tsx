@@ -1150,6 +1150,23 @@ describe("SignInSettings password sign-in", () => {
     expect(within(dialog).getByRole("button", { name: "Turn off password sign-in" })).toBeEnabled();
   });
 
+  it("keeps Show more while the read has more, even when the first count is short", async () => {
+    const user = userEvent.setup();
+    // The first page counted five; three accounts were added before the next.
+    localOff.email_match = { items: Array.from({ length: 8 }, (_, i) => account(i + 1)), total: 5 };
+    mount();
+    await user.click(passwordSwitch());
+    const dialog = await screen.findByRole("alertdialog");
+    const group = await within(dialog).findByRole("region", {
+      name: "5 accounts connect by email",
+    });
+    expect(within(group).getAllByRole("listitem")).toHaveLength(5);
+    localOff.email_match.total = 8;
+    await user.click(within(group).getByRole("button", { name: "Show more" }));
+    await waitFor(() => expect(within(group).getAllByRole("listitem")).toHaveLength(8));
+    expect(within(group).queryByRole("button", { name: /Show/ })).toBeNull();
+  });
+
   it("returns focus to the switch when the confirmation is cancelled", async () => {
     const user = userEvent.setup();
     mount();
