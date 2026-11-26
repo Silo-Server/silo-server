@@ -84,9 +84,11 @@ type appKeyReply struct {
 	DeviceID  string     `json:"device_id"`
 	AccountID ID         `json:"account_id"`
 	Tokens    *TokenPair `json:"tokens,omitempty"`
-	// PersonKeyID is the account's person key's ID, on enroll and on an app
-	// code's redeem.
-	PersonKeyID string `json:"person_key_id,omitempty"`
+	// PersonKeyID is the account's live person key's ID as a JSON string,
+	// or JSON null when it has none, on a signed_in answer to one of the
+	// person's own device keys; left out of approval_required and of a
+	// granted app's answers (personKeyIDMember).
+	PersonKeyID json.RawMessage `json:"person_key_id,omitempty"`
 	// Username and PersonKey are the account's name and what the redeem did
 	// with the request's person key (enrolled or kept), on an app code's
 	// redeem only.
@@ -105,16 +107,16 @@ const providerAnswersDescription = " A key enrolled through the server's sign-in
 // sealedRefusals lists the unsealed refusals of every signed route.
 const sealedRefusals = "Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited."
 
-// sealedReplyDescriptionSignedIn is sealedReplyDescription for a route
-// whose answer is always signed_in.
-var sealedReplyDescriptionSignedIn = sealedReplySignedIn("", "")
-
 // sealedReplyIntro and sealedReplyRouteNote are the shared pieces of a
 // sealed reply's description.
 const (
 	sealedReplyIntro     = " The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it."
 	sealedReplyRouteNote = "where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity)"
 )
+
+// personKeyIDNote states the person_key_id member of a signed_in reply to
+// one of the person's own device keys.
+const personKeyIDNote = "; person_key_id is the key ID (kid) of the account's live person key as the session opens, or null when the account has none: none was enrolled, it was revoked, or it is bound to a sign-in provider identity that is gone from the account (the key list leaves such a key out too). A device that knows a newer person key than the one named, or gets null, learns that this server holds an older person key or none. The member is absent only from a server that does not report it, and from the answers that never carry it: approval_required, and every answer to another app's key enrolled through a grant"
 
 // sealedReplySignedIn describes a signed_in sealed reply whose plaintext
 // carries extra members (each followed by ", ") before local_route, which
@@ -124,11 +126,32 @@ func sealedReplySignedIn(extra, notes string) string {
 		sealedReplyRouteNote + notes + ". " + sealedRefusals
 }
 
-const sealedReplyDescription = " The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity); for an administrator's account that needs approval it is {status: approval_required, device_id, account_id} with no tokens. " + sealedRefusals
+// personSealedReply describes a sealed reply to one of the person's own
+// device keys: signed_in carries person_key_id, then extra members, which
+// notes explain.
+func personSealedReply(extra, notes string) string {
+	return sealedReplySignedIn("person_key_id, "+extra, personKeyIDNote+notes)
+}
 
-// enrollSealedReply is enrollAppKeys' sealed answer: the signed_in
-// plaintext with the account's person key.
-var enrollSealedReply = sealedReplySignedIn("person_key_id, ", "; person_key_id is the ID of the account's person key")
+// approvalReplyNote is the approval_required plaintext.
+const approvalReplyNote = "; for an administrator's account that needs approval it is {status: approval_required, device_id, account_id}, with no tokens and no person_key_id"
+
+// grantedAppReplyNote is what a reply to another app's key leaves out.
+const grantedAppReplyNote = "; a reply to another app's key, one enrolled through a grant, has no person_key_id member and tokens.user.email is the empty string, as getCurrentUser answers that app: the app is not one of the person's devices, so it does not learn which person key the account holds (a key ID that changes would tell it the person replaced their key), nor the person's email"
+
+// introduceSealedReply is introduceAppKey's sealed answer.
+var introduceSealedReply = personSealedReply("", approvalReplyNote)
+
+// signInSealedReply is signInWithAppKey's sealed answer, also to a granted
+// app's key.
+var signInSealedReply = personSealedReply("", approvalReplyNote+grantedAppReplyNote)
+
+// grantSealedReply is redeemAppKeyGrant's sealed answer, to another app's
+// key.
+var grantSealedReply = sealedReplySignedIn("", grantedAppReplyNote)
+
+// enrollSealedReply is enrollAppKeys' sealed answer.
+var enrollSealedReply = personSealedReply("", "")
 
 // enrollPayloadLocation is where enroll's signed payload sits in its body.
 const enrollPayloadLocation = locationBody + ".message.payload"
@@ -154,7 +177,7 @@ func registerAppKeySignIn(reg *Registry) {
 
 	introduce := humaOp(http.MethodPost, Prefix+"/auth/keys/introduce", "introduceAppKey", "app-keys",
 		"Enroll this device's key with the account's person key and open a login session.")
-	introduce.Description = "The body is an introduce envelope signed with the account's person key, with device_sig from the device key in the payload. The device key is enrolled and opens the session. For an administrator's account it is stored waiting for approval, and the device repeats signInWithAppKey until it is approved. An account holds at most 10 waiting keys inside their 24 hours; an introduce that would add an eleventh is 409 conflict, after its challenge is spent. A waiting key past its 24 hours does not count, and a retention task later revokes it. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + sealedReplyDescription + providerAnswersDescription
+	introduce.Description = "The body is an introduce envelope signed with the account's person key, with device_sig from the device key in the payload. The device key is enrolled and opens the session. For an administrator's account it is stored waiting for approval, and the device repeats signInWithAppKey until it is approved. An account holds at most 10 waiting keys inside their 24 hours; an introduce that would add an eleventh is 409 conflict, after its challenge is spent. A waiting key past its 24 hours does not count, and a retention task later revokes it. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + introduceSealedReply + providerAnswersDescription
 	introduce.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
 	introduceOp := Operation{Operation: introduce, RetrySafety: RetrySafetyNonRetryable,
 		Class: ClassPublic, ServiceBacked: true, Audited: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
@@ -162,7 +185,7 @@ func registerAppKeySignIn(reg *Registry) {
 
 	signIn := humaOp(http.MethodPost, Prefix+"/auth/keys/sign-in", "signInWithAppKey", "app-keys",
 		"Open a login session with an enrolled device key.")
-	signIn.Description = "The body is a sign-in envelope signed with the device key, with no device_sig. A key waiting for an administrator's approval answers approval_required, sealed, at most once every five seconds (sooner is 429 rate_limited with Retry-After) and for 24 hours; after that, or once denied, it is 403 key_denied." + pendingRetryNote + " A key whose provider binding changed during the request also answers 429 with a one-second Retry-After: wait, get a fresh challenge and sign a new envelope. That attempt goes through every sign-in check again, so it can still be refused (for example 409 provider_sign_in_required or 503). Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + sealedReplyDescription + providerAnswersDescription
+	signIn.Description = "The body is a sign-in envelope signed with the device key, with no device_sig. A key waiting for an administrator's approval answers approval_required, sealed, at most once every five seconds (sooner is 429 rate_limited with Retry-After) and for 24 hours; after that, or once denied, it is 403 key_denied." + pendingRetryNote + " A key whose provider binding changed during the request also answers 429 with a one-second Retry-After: wait, get a fresh challenge and sign a new envelope. That attempt goes through every sign-in check again, so it can still be refused (for example 409 provider_sign_in_required or 503). Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + signInSealedReply + providerAnswersDescription
 	signIn.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
 	signInOp := Operation{Operation: signIn, RetrySafety: RetrySafetyNonRetryable,
 		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
@@ -178,7 +201,7 @@ func registerAppKeySignIn(reg *Registry) {
 
 	redeem := humaOp(http.MethodPost, Prefix+"/auth/grants/redeem", "redeemAppKeyGrant", "app-keys",
 		"Enroll another app's key with a grant the person signed and open the app's login session.")
-	redeem.Description = "The body is a grant-redeem envelope signed with the app's own key, the app_key the grant inside it names, with no device_sig. The grant is a grant envelope signed by the account's person key away from this server: good for at most five minutes, for this server_id, and once. origin must be one of the grant's origins. The app's key is enrolled as kind app, enrolled_by grant, named device_name or else the grant's app_name, and takes the provider identity of the person key that signed the grant. A session it opens cannot enroll keys, replace the person key, approve a device sign-in or revoke any key but its own. 403 app_grant_invalid is about the grant itself: it was already used, is for another server or address, does not verify by the account's live person key, or names an administrator's or disabled account. 403 app_grant_expired: the grant's own exp has passed. 401 signature_invalid: the redeemer does not hold the grant's app_key (the outer signature does not verify under it, or the envelope's kid is not that key's ID), or the grant-redeem envelope is outside its own iat and exp. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + sealedReplyDescriptionSignedIn + providerAnswersDescription
+	redeem.Description = "The body is a grant-redeem envelope signed with the app's own key, the app_key the grant inside it names, with no device_sig. The grant is a grant envelope signed by the account's person key away from this server: good for at most five minutes, for this server_id, and once. origin must be one of the grant's origins. The app's key is enrolled as kind app, enrolled_by grant, named device_name or else the grant's app_name, and takes the provider identity of the person key that signed the grant. A session it opens cannot enroll keys, replace the person key, approve a device sign-in or revoke any key but its own. 403 app_grant_invalid is about the grant itself: it was already used, is for another server or address, does not verify by the account's live person key, or names an administrator's or disabled account. 403 app_grant_expired: the grant's own exp has passed. 401 signature_invalid: the redeemer does not hold the grant's app_key (the outer signature does not verify under it, or the envelope's kid is not that key's ID), or the grant-redeem envelope is outside its own iat and exp. A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + grantSealedReply + providerAnswersDescription
 	redeem.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
 	redeemOp := Operation{Operation: redeem, RetrySafety: RetrySafetyNonRetryable,
 		Class: ClassPublic, ServiceBacked: true, Audited: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
@@ -342,9 +365,10 @@ func (reg *Registry) localRoute() *ServerLocalRoute {
 // carries the pinned local route.
 func (reg *Registry) sealAppKeyAnswer(answer *handlers.AppKeyAnswer) (*SealedReplyOutput, error) {
 	result := answer.Result
-	reply := appKeyReply{Status: result.Status, DeviceID: result.DeviceID, PersonKeyID: result.PersonKeyID}
+	reply := appKeyReply{Status: result.Status, DeviceID: result.DeviceID}
 	if result.Status == appkeys.ReplySignedIn {
 		reply.LocalRoute = reg.localRoute()
+		reply.PersonKeyID = personKeyIDMember(result)
 	}
 	if result.User != nil {
 		reply.AccountID = IDFromInt(int64(result.User.ID))
@@ -354,6 +378,9 @@ func (reg *Registry) sealAppKeyAnswer(answer *handlers.AppKeyAnswer) (*SealedRep
 	}
 	if answer.Tokens != nil {
 		tokens := tokenPairFromView(*answer.Tokens)
+		if result.GrantedApp {
+			tokens = grantedAppTokenPair(tokens)
+		}
 		reply.Tokens = &tokens
 	}
 	plaintext, _ := json.Marshal(reply)
@@ -364,6 +391,37 @@ func (reg *Registry) sealAppKeyAnswer(answer *handlers.AppKeyAnswer) (*SealedRep
 	return &SealedReplyOutput{Body: SealedReply{
 		EphemeralKey: sealed.EphemeralKey, Nonce: sealed.Nonce, Ciphertext: sealed.Ciphertext,
 	}}, nil
+}
+
+// personKeyIDMember is the person_key_id member of a signed_in answer: the
+// account's live person key's ID, null when it has none, or nothing when the
+// answer does not say (a granted app's key: the person's key ID changing
+// would tell that app the person replaced their key).
+func personKeyIDMember(result *auth.KeySignInResult) json.RawMessage {
+	if !result.PersonKeyReported {
+		return nil
+	}
+	if result.PersonKeyID == "" {
+		return json.RawMessage("null")
+	}
+	member, _ := json.Marshal(result.PersonKeyID)
+	return member
+}
+
+// grantedAppTokenPair is a token pair as an answer to another app's key
+// (one enrolled through a grant) carries it: everything such an answer
+// leaves out of the pair is left out here.
+func grantedAppTokenPair(tokens TokenPair) TokenPair {
+	tokens.User = grantedAppAccount(tokens.User)
+	return tokens
+}
+
+// grantedAppAccount is the account as a session another app's key opened
+// reads it: the person's email is not that app's to read, so it is the
+// shape's "none set". The name, role and the rest stay.
+func grantedAppAccount(account Account) Account {
+	account.Email = ""
+	return account
 }
 
 // appKeyKnownOrigins is the origins a signed origin may be on this request,

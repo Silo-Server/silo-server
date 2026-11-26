@@ -148,7 +148,7 @@ func (a *AppKeySignIn) RedeemGrant(ctx context.Context, req KeyRequest) (*KeySig
 		if err != nil {
 			return err
 		}
-		out.User, out.DeviceID, out.Status = user, key.ID, appkeys.ReplySignedIn
+		out.User, out.DeviceID, out.Status, out.GrantedApp = user, key.ID, appkeys.ReplySignedIn, true
 		out.Pair, err = a.service.openKeySessionTx(ctx, tx, user, key, chain.session(req.IP, expiry))
 		if err != nil {
 			return err
