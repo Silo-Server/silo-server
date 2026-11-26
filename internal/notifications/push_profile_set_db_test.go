@@ -324,8 +324,8 @@ func TestProfileSetWakeForARequestThatRecordedNothingDB(t *testing.T) {
 	registerForSession(t, repo, "live")
 	h := wakeHarness{t: t, pool: pool, relayed: make(chan relayedWake, 4)}
 	node := profileSetWakeSystem(t, pool, repo, nil, h.relayed)
-	clear, _ := profileedits.WithRequest(t.Context())
-	if !node.WakeProfileSetDevices(clear, 7) || h.attempts() != 2 {
+	afterClear, _ := profileedits.WithRequest(t.Context())
+	if !node.WakeProfileSetDevices(afterClear, 7) || h.attempts() != 2 {
 		t.Fatalf("wake after a clear: %d attempts, want 2 and a true answer", h.attempts())
 	}
 	h.receive(2)
