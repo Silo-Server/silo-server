@@ -19,7 +19,11 @@ func registerWatchTogetherClose(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodDelete, Prefix+"/watch-together/rooms/{room_id}", "closeWatchTogetherRoom", "realtime", "End the room as its host account and profile. Already-ended rooms return conflict; closing does not cancel already-dispatched playback."), Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	op.DefaultStatus = http.StatusNoContent
 	op.Errors = []int{409}
+	op.Description = watchTogetherHostOtherAppRule
 	Register(reg, op, func(ctx context.Context, in *WatchTogetherCloseInput) (*struct{}, error) {
+		if p := reg.otherDevicesProblem(ctx); p != nil {
+			return nil, p
+		}
 		svc := reg.deps.WatchTogetherClose
 		if svc == nil {
 			return nil, unavailable("watch together")

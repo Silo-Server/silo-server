@@ -452,6 +452,11 @@ func TestSessionAllowsDB(t *testing.T) {
 			if err := SessionMayIssueCredential(ctx, env.pool, tc.claims); !refused && err != nil || refused && !errors.Is(err, ErrSessionNotAllowed) {
 				t.Fatalf("issuing a credential: err = %v, want refused %v", err, refused)
 			}
+			// So is reaching the other devices' playback and web push: a
+			// device sign-in keeps what it has there.
+			if err := SessionMayReachOtherDevices(ctx, env.pool, tc.claims); !refused && err != nil || refused && !errors.Is(err, ErrSessionNotAllowed) {
+				t.Fatalf("reaching other devices: err = %v, want refused %v", err, refused)
+			}
 		})
 	}
 }
@@ -692,21 +697,54 @@ func TestKeySessionContinuesProviderChainDB(t *testing.T) {
 }
 
 // Becoming an admin revokes the account's app keys with its API keys, and
-// ends the sessions they opened.
+// ends the sessions they opened: a key the account enrolled from a session,
+// and one another app enrolled through a grant. Regression: nothing pinned
+// that the revocation ignores how a key was enrolled, so a filter on the
+// key's kind would let another app's key outlive the promotion.
 func TestPromotionRevokesAppKeysDB(t *testing.T) {
 	env := newKeyEnv(t, "keypromote")
 	ctx := t.Context()
-	user := env.localAccount(t, "keypromote-user", models.RoleUser)
-	_, device, enrolled := env.enroll(t, user)
-	admin := models.RoleAdmin
-	if err := NewUserRepository(env.pool).Update(ctx, user.ID, models.UpdateUserInput{Role: &admin}); err != nil {
-		t.Fatal(err)
-	}
-	if env.sessionLive(t, enrolled.Pair.SessionID, user.ID) {
-		t.Fatal("the promoted account's key session is still live")
-	}
-	if _, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: device})); !errors.Is(err, ErrKeySignatureInvalid) {
-		t.Fatalf("a key from before the promotion = %v", err)
+	for _, tc := range []struct {
+		name string
+		// key enrolls an app key on user and answers it with the session
+		// it opened.
+		key func(t *testing.T, user *models.User) (testKey, *KeySignInResult)
+	}{
+		{name: "session", key: func(t *testing.T, user *models.User) (testKey, *KeySignInResult) {
+			_, device, enrolled := env.enroll(t, user)
+			return device, enrolled
+		}},
+		{name: "grant", key: func(t *testing.T, user *models.User) (testKey, *KeySignInResult) {
+			person, _, _ := env.enroll(t, user)
+			app := newTestKey(t)
+			redeemed, err := env.redeem(t, app, env.grantEnvelope(t, person, user.ID, app, nil))
+			if err != nil {
+				t.Fatalf("redeem: %v", err)
+			}
+			var via string
+			if err := env.pool.QueryRow(ctx, `SELECT enrolled_via FROM auth_device_keys WHERE id = $1`, redeemed.DeviceID).Scan(&via); err != nil || via != models.AppKeyEnrolledGrant {
+				t.Fatalf("the redeemed key was enrolled via %q (%v)", via, err)
+			}
+			return app, redeemed
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			user := env.localAccount(t, "keypromote-"+tc.name, models.RoleUser)
+			device, enrolled := tc.key(t, user)
+			admin := models.RoleAdmin
+			if err := NewUserRepository(env.pool).Update(ctx, user.ID, models.UpdateUserInput{Role: &admin}); err != nil {
+				t.Fatal(err)
+			}
+			if !env.keyRevoked(t, enrolled.DeviceID) {
+				t.Fatal("the promoted account's key is not revoked")
+			}
+			if env.sessionLive(t, enrolled.Pair.SessionID, user.ID) {
+				t.Fatal("the promoted account's key session is still live")
+			}
+			if _, err := env.signIn.SignIn(ctx, env.request(t, message{purpose: appkeys.PurposeSignIn, signer: device})); !errors.Is(err, ErrKeySignatureInvalid) {
+				t.Fatalf("a key from before the promotion = %v", err)
+			}
+		})
 	}
 }
 

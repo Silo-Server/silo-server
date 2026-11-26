@@ -274,9 +274,13 @@ func registerProfiles(reg *Registry) {
 		Audited:        true,
 	}, reg.deleteProfile)
 
+	household := humaOp(http.MethodGet, Prefix+"/profiles/household/sessions", "listHouseholdSessions", "profiles",
+		"List the live playback sessions on the signed-in account, for a household manager.")
+	household.Description = "A login session opened by another app the person allowed (its app key was enrolled through a grant) gets only the playback sessions " +
+		"that login session started; every other entry is left out, including a stream with no recorded login session, such as one started through " +
+		"the Jellyfin-compatible or Audiobookshelf-compatible surface. A session the person's own app key opened, and one opened by device sign-in, get every entry."
 	Register(reg, Operation{
-		Operation: humaOp(http.MethodGet, Prefix+"/profiles/household/sessions", "listHouseholdSessions", "profiles",
-			"List the live playback sessions on the signed-in account, for a household manager."),
+		Operation: household,
 		// As v1 GET /profiles/household/sessions: the verified primary
 		// profile, on an admin account too; a bounded, unpaginated collection.
 		Class:           ClassProfileScoped,
@@ -466,11 +470,21 @@ func (reg *Registry) listHouseholdSessions(ctx context.Context, _ *struct{}) (*P
 	if claims == nil {
 		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
-	rows, err := reg.deps.Profiles.ListHouseholdSessions(ctx, handlers.HouseholdSessionsQuery{
+	q := handlers.HouseholdSessionsQuery{
 		UserID:          claims.UserID,
 		ActiveProfileID: profileFrom(ctx),
 		VerifyProfile:   verifyHouseholdProfile(ctx),
-	})
+	}
+	// Another app the person allowed sees only the streams its own login
+	// session started: the others belong to the person's devices.
+	reaches, p := reg.sessionReachesOtherDevices(ctx)
+	if p != nil {
+		return nil, p
+	}
+	if !reaches {
+		q.OnlyLoginSessionID = claims.SessionID
+	}
+	rows, err := reg.deps.Profiles.ListHouseholdSessions(ctx, q)
 	if err != nil {
 		return nil, profileProblem(err)
 	}

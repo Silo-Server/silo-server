@@ -223,12 +223,20 @@ func (h *PlaybackControlSocketV2) Available() bool {
 
 // Mint validates the caller's login authority and ownership of the playback
 // session and issues one single-use credential bound to both.
-func (h *PlaybackControlSocketV2) Mint(ctx context.Context, identity evt.SocketIdentity, playbackSessionID, installationID string) (string, time.Time, error) {
+//
+// mayReachOtherDevices, when set, is asked for a playback session the
+// caller's login session did not start (PlaybackCaller.MayReachOtherDevices):
+// a session another app opened must not take over the control lane of the
+// person's other devices. Its error is returned as is.
+func (h *PlaybackControlSocketV2) Mint(ctx context.Context, identity evt.SocketIdentity, playbackSessionID, installationID string, mayReachOtherDevices func(context.Context) error) (string, time.Time, error) {
 	if !h.Available() {
 		return "", time.Time{}, ErrPlaybackControlSocketUnavailable
 	}
 	validated, claims, err := h.Validate(ctx, identity)
 	if err != nil {
+		return "", time.Time{}, err
+	}
+	if err := h.refuseOtherStream(ctx, identity, playbackSessionID, mayReachOtherDevices); err != nil {
 		return "", time.Time{}, err
 	}
 	scope, ok := access.GetScope(validated)
@@ -253,6 +261,55 @@ func (h *PlaybackControlSocketV2) Mint(ctx context.Context, identity evt.SocketI
 		expiry = identity.AccessExpiresAt
 	}
 	return ticket, expiry, nil
+}
+
+// refuseOtherStream asks mayReachOtherDevices, when set, before the caller
+// takes the control lane of a stream its own login session did not start. A
+// caller the rule limits gets ErrPlaybackControlSocketUnavailable while the
+// attempt can't be read: whose stream it is is unknown, an outage rather
+// than a refusal. A caller the rule doesn't concern is unaffected either way.
+func (h *PlaybackControlSocketV2) refuseOtherStream(ctx context.Context, identity evt.SocketIdentity, playbackSessionID string, mayReachOtherDevices func(context.Context) error) error {
+	if mayReachOtherDevices == nil {
+		return nil
+	}
+	starter, readErr := h.startedBy(ctx, playbackSessionID)
+	if errors.Is(readErr, playback.ErrSessionNotFound) {
+		starter, readErr = "", nil
+	}
+	if readErr == nil && starter == identity.SessionID {
+		return nil
+	}
+	err := mayReachOtherDevices(ctx)
+	if err != nil && readErr != nil {
+		return ErrPlaybackControlSocketUnavailable
+	}
+	return err
+}
+
+// canonicalUUID reports whether s is a UUID in the form uuid prints, the only
+// form the attempt store keys by.
+func canonicalUUID(s string) bool {
+	id, err := uuid.Parse(s)
+	return err == nil && id != uuid.Nil && id.String() == s
+}
+
+// startedBy is the login session that started the playback session's
+// durable attempt: "" when none is recorded (a bridge-started session, an id
+// the store can't name), playback.ErrSessionNotFound when there is no
+// attempt, and the store's error when the read fails.
+func (h *PlaybackControlSocketV2) startedBy(ctx context.Context, playbackSessionID string) (string, error) {
+	store := h.Playback.PlanStoreV3
+	if store == nil || !canonicalUUID(playbackSessionID) {
+		return "", nil
+	}
+	attempt, err := store.GetAttemptIdentity(ctx, playbackSessionID)
+	if err != nil {
+		return "", err
+	}
+	if attempt == nil {
+		return "", nil
+	}
+	return attempt.LoginSessionID, nil
 }
 
 // missingSessionError tells a session that ended from one this replica has not

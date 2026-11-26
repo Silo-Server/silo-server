@@ -213,6 +213,14 @@ type NotificationWebhookSecretOutput struct {
 	}
 }
 
+// webPushOtherAppRule is the web push operations' description. A profile's
+// subscriptions belong to every browser it registered, and subscribing takes
+// an endpoint's registration over, so another app the person allowed may not
+// use them.
+const webPushOtherAppRule = "A login session opened by another app the person allowed (its app key was enrolled through a grant) " +
+	"is refused with 403 permission_denied before anything is read or written: the profile's subscriptions belong to every browser it registered. " +
+	"A session the person's own app key opened, and one opened by device sign-in, are not refused."
+
 func registerNotificationDestinations(reg *Registry) {
 	registerNotificationWebhookUpdate(reg)
 	registerNotificationServerChannelUpdate(reg)
@@ -312,7 +320,11 @@ func registerNotificationDestinations(reg *Registry) {
 	subscribe.RetrySafety = RetrySafetyNonRetryable
 	subscribe.MaxBodyBytes = 16384
 	subscribe.Summary = "Register or reassign a browser endpoint to the current profile. Send once; replay can replace newer intent or re-enable delivery."
+	subscribe.Description = webPushOtherAppRule
 	Register(reg, subscribe, func(ctx context.Context, in *NotificationWebPushSubscribeInput) (*NotificationWebPushSubscribeOutput, error) {
+		if p := reg.otherDevicesProblem(ctx); p != nil {
+			return nil, p
+		}
 		if reg.deps.NotificationDestinations == nil {
 			return nil, unavailable("notification destinations")
 		}
@@ -335,7 +347,11 @@ func registerNotificationDestinations(reg *Registry) {
 	unsubscribe.RetrySafety = RetrySafetyNonRetryable
 	unsubscribe.MaxBodyBytes = 4096
 	unsubscribe.Summary = "Remove the account's current registration for a browser endpoint. Send once; a retry can delete a newer registration."
+	unsubscribe.Description = webPushOtherAppRule
 	Register(reg, unsubscribe, func(ctx context.Context, in *NotificationWebPushUnsubscribeInput) (*struct{}, error) {
+		if p := reg.otherDevicesProblem(ctx); p != nil {
+			return nil, p
+		}
 		if reg.deps.NotificationDestinations == nil {
 			return nil, unavailable("notification destinations")
 		}
@@ -353,7 +369,11 @@ func registerNotificationDestinations(reg *Registry) {
 	op.DefaultStatus = http.StatusNoContent
 	op.RetrySafety = RetrySafetyNaturalIdempotent
 	op.Summary = "Remove a server subscription belonging to the current profile. Does not unsubscribe the browser or order concurrent registration intents."
+	op.Description = webPushOtherAppRule
 	Register(reg, op, func(ctx context.Context, in *NotificationWebPushDeleteInput) (*struct{}, error) {
+		if p := reg.otherDevicesProblem(ctx); p != nil {
+			return nil, p
+		}
 		if reg.deps.NotificationDestinations == nil {
 			return nil, unavailable("notification destinations")
 		}
@@ -369,7 +389,12 @@ func registerNotificationDestinations(reg *Registry) {
 
 	cursors := NewCursors(reg.deps.CursorSecret)
 
-	Register(reg, notificationOperation(http.MethodGet, "/web-push/subscriptions", listNotificationWebPushOperation), func(ctx context.Context, in *NotificationDestinationListInput) (*NotificationWebPushSubscriptionListOutput, error) {
+	listWebPush := notificationOperation(http.MethodGet, "/web-push/subscriptions", listNotificationWebPushOperation)
+	listWebPush.Description = webPushOtherAppRule
+	Register(reg, listWebPush, func(ctx context.Context, in *NotificationDestinationListInput) (*NotificationWebPushSubscriptionListOutput, error) {
+		if p := reg.otherDevicesProblem(ctx); p != nil {
+			return nil, p
+		}
 		svc := reg.deps.NotificationDestinations
 		if svc == nil {
 			return nil, unavailable("notification destinations")

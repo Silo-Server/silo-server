@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/danielgtaylor/huma/v2"
@@ -16,7 +17,8 @@ import (
 // and serves the documented plain-WebSocket control handshake.
 type PlaybackControlSocketService interface {
 	Available() bool
-	Mint(ctx context.Context, identity evt.SocketIdentity, playbackSessionID, installationID string) (string, time.Time, error)
+	// mayReachOtherDevices is as handlers.PlaybackCaller.MayReachOtherDevices.
+	Mint(ctx context.Context, identity evt.SocketIdentity, playbackSessionID, installationID string, mayReachOtherDevices func(context.Context) error) (string, time.Time, error)
 	ServeHTTP(http.ResponseWriter, *http.Request)
 }
 
@@ -94,7 +96,8 @@ func registerPlaybackControlSocket(reg *Registry) {
 			return nil, validationProblem("body.installation_id", codeInvalid, "Expected the installation identifier from capabilities.")
 		}
 
-		ticket, expiry, err := svc.Mint(ctx, identity, in.SessionID, string(in.Body.InstallationID))
+		_, mayReach := reg.otherDevicesRule(ctx)
+		ticket, expiry, err := svc.Mint(ctx, identity, in.SessionID, string(in.Body.InstallationID), mayReach)
 		if err != nil {
 			return nil, playbackControlSocketProblem(err)
 		}
@@ -132,6 +135,10 @@ func playbackControlSocketProblem(err error) *Problem {
 		return NewProblem(TypeConflict, "The session's control credential is stale; request a new ticket.")
 	case errors.Is(err, handlers.ErrPlaybackControlSocketLaneHeld):
 		return NewProblem(TypeConflict, "The control lane is held by another installation.")
+	case errors.Is(err, auth.ErrSessionNotAllowed):
+		return NewProblem(TypePermissionDenied, handlers.SessionNotAllowedDetail)
+	case errors.Is(err, auth.ErrSessionRevoked):
+		return NewProblem(TypeSessionExpired, "The login session is no longer valid.")
 	case errors.Is(err, evt.ErrSocketTicket):
 		return NewProblem(TypePermissionDenied, "Realtime authority could not be delegated.")
 	}

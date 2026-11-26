@@ -28,7 +28,11 @@ func registerWatchTogetherSourceFallback(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/watch-together/rooms/{room_id}/source-fallback", opFallbackWatchTogetherSource, "realtime", "Report a playback refusal as a connected room member. Atomically replace the shared source with a lower-ranked version of the same edition and part, preserve the anchor, and reset readiness. A stale file or selection revision returns the current snapshot without changing it."), Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	op.MaxBodyBytes = 4096
 	op.Errors = []int{409}
+	op.Description = watchTogetherMemberOtherAppRule
 	Register(reg, op, func(ctx context.Context, in *WatchTogetherSourceFallbackInput) (*WatchTogetherRoomReadOutput, error) {
+		if p := reg.otherDevicesProblem(ctx); p != nil {
+			return nil, p
+		}
 		if reg.deps.WatchTogetherSourceFallback == nil {
 			return nil, unavailable("watch together")
 		}

@@ -19,10 +19,13 @@ type fakeRoomSocket struct {
 	calls       int
 	room, proof string
 	identity    evt.SocketIdentity
+	// otherApp is what the last mint was told about the caller.
+	otherApp bool
 }
 
-func (f *fakeRoomSocket) MintRoomSocket(_ context.Context, room, proof string, identity evt.SocketIdentity) (string, time.Time, error) {
+func (f *fakeRoomSocket) MintRoomSocket(_ context.Context, room, proof string, identity evt.SocketIdentity, otherApp bool) (string, time.Time, error) {
 	f.calls++
+	f.otherApp = otherApp
 	f.room = room
 	f.proof = proof
 	f.identity = identity

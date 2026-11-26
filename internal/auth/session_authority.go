@@ -53,6 +53,13 @@ const (
 	// the session asking for it, by a route older than app keys: a personal
 	// API key, or linking a sign-in provider account.
 	ActionIssueCredential
+	// ActionReachOtherDevices: seeing or changing what the account's other
+	// devices hold, where the list has no per-device owner check of its
+	// own: the household playback list shows each device's live streams,
+	// and the profile's web push subscriptions belong to every browser the
+	// profile registered. Only a session another app opened is refused; a
+	// device sign-in keeps what it has.
+	ActionReachOtherDevices
 )
 
 // SessionOrigin is how a login session was opened.
@@ -63,7 +70,8 @@ type SessionOrigin struct {
 	// DeviceKeyID is the device key that opened the session, or "".
 	DeviceKeyID string
 	// GrantKey reports that the device key was enrolled through a grant: it
-	// belongs to another app the person allowed.
+	// belongs to another app the person allowed. A session naming a key whose
+	// row is not stored counts too, failing closed.
 	GrantKey bool
 }
 
@@ -89,7 +97,9 @@ func ReadSessionOrigin(ctx context.Context, db rowQuerier, claims *Claims) (Sess
 	if keyID != nil {
 		origin.DeviceKeyID = *keyID
 	}
-	origin.GrantKey = enrolledVia != nil && *enrolledVia == models.AppKeyEnrolledGrant
+	// A key row that is not stored counts as another app's, as in
+	// LimitedToItself: nothing stored says the key was the person's own.
+	origin.GrantKey = keyID != nil && (enrolledVia == nil || *enrolledVia == models.AppKeyEnrolledGrant)
 	return origin, nil
 }
 
@@ -108,7 +118,7 @@ func (o SessionOrigin) Allows(action SessionAction) bool {
 	if o.GrantKey {
 		return false
 	}
-	if action == ActionApproveDeviceSignIn || action == ActionIssueCredential {
+	if action == ActionApproveDeviceSignIn || action == ActionIssueCredential || action == ActionReachOtherDevices {
 		// These predate the record of how sessions are opened: every
 		// other session keeps what the operation's own rule gives it.
 		return true
@@ -126,6 +136,22 @@ func (o SessionOrigin) Allows(action SessionAction) bool {
 // rule, which already keeps out API keys and administrators acting as the
 // account.
 func SessionMayIssueCredential(ctx context.Context, db rowQuerier, claims *Claims) error {
+	return refuseGrantSession(ctx, db, claims, ActionIssueCredential)
+}
+
+// SessionMayReachOtherDevices refuses ActionReachOtherDevices to a session a
+// grant-enrolled app opened with ErrSessionNotAllowed. Every other caller,
+// a device sign-in, an API key and an administrator acting as the account
+// included, passes and keeps what the operation's own rule gives it.
+func SessionMayReachOtherDevices(ctx context.Context, db rowQuerier, claims *Claims) error {
+	return refuseGrantSession(ctx, db, claims, ActionReachOtherDevices)
+}
+
+// refuseGrantSession answers ErrSessionNotAllowed when the claims' own login
+// session may not take action, for the actions only a session another app
+// opened is refused. A caller that is not the account's own login session
+// passes.
+func refuseGrantSession(ctx context.Context, db rowQuerier, claims *Claims, action SessionAction) error {
 	if !claims.IsOwnLoginSession() {
 		return nil
 	}
@@ -133,7 +159,7 @@ func SessionMayIssueCredential(ctx context.Context, db rowQuerier, claims *Claim
 	if err != nil {
 		return err
 	}
-	if !origin.Allows(ActionIssueCredential) {
+	if !origin.Allows(action) {
 		return ErrSessionNotAllowed
 	}
 	return nil
