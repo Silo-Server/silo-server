@@ -618,7 +618,8 @@ names are worked out off the sign-in path (`auth.DemoSignIn`, refreshed in the
 background), and an attempt only compares its name's budget key with them: an attempt for
 any other name runs the same reads as without the setting. An attempt whose name matches
 re-reads the settings and the account before it skips the budget; names an earlier
-refresh found only choose which attempts re-read, and never skip the budget on their own.
+refresh found only choose which attempts re-read, and never skip the budget on their own;
+a refresh or re-read that fails holds no names until a read succeeds.
 A rename or a newly
 set email takes effect at the next refresh; until then that name keeps the ordinary
 budget.

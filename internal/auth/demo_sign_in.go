@@ -84,16 +84,19 @@ func (d *DemoSignIn) Run(ctx context.Context) {
 	}
 }
 
-// Refresh re-reads which names belong to the demo account. When it cannot
-// tell, it keeps the names it had: they only select which attempts read
-// again, and an attempt at one of them is exempted only when that read
-// succeeds and still finds the name.
+// Refresh re-reads which names belong to the demo account. When a read
+// fails it holds no names, so nothing is exempted until a read succeeds.
+// The names only select which attempts read again in any case: an attempt
+// at one of them is exempted only when that read succeeds and still finds
+// the name.
 func (d *DemoSignIn) Refresh(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, signInLookupTimeout)
 	defer cancel()
-	if keys, ok := d.accountKeys(ctx); ok {
-		d.keys.Store(&keys)
+	keys, ok := d.accountKeys(ctx)
+	if !ok {
+		keys = nil
 	}
+	d.keys.Store(&keys)
 }
 
 // exempts reports whether spend's name skips the per-name budget, for a
@@ -116,10 +119,10 @@ func (d *DemoSignIn) exempts(ctx context.Context, spend *signInSpend, providerID
 	defer cancel()
 	keys, ok := d.accountKeys(ctx)
 	if !ok {
-		return false
+		keys = nil
 	}
 	d.keys.Store(&keys)
-	return slices.Contains(keys, spend.key)
+	return ok && slices.Contains(keys, spend.key)
 }
 
 // accountKeys are the budget keys of the demo account's sign-in names, and
