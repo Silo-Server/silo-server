@@ -148721,6 +148721,12 @@
       "value": "E-mail sau nume de utilizator"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Introduceți adresa URL de bază a serverului Emby din care doriți să importați."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -148731,6 +148737,12 @@
     {
       "type": 0,
       "value": "Lăsați gol dacă contul nu are parolă"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Adresa URL a serverului Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -148881,6 +148893,12 @@
     {
       "type": 0,
       "value": "Cont Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Adresa URL a serverului"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -149174,7 +149192,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect sau server salvat"
+      "value": "Emby Connect, adresa URL a serverului sau server salvat"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

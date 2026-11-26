@@ -143297,6 +143297,12 @@
       "value": "\u200F\u202EEmail or Username\u202C"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnter the base URL for the Emby server you want to import from.\u202C"
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -143307,6 +143313,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ELeave blank if the account has none\u202C"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEmby Server URL\u202C"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -143457,6 +143469,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EPlex Account\u202C"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EServer URL\u202C"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -143782,7 +143800,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "\u200F\u202EEmby Connect or saved server\u202C"
+      "value": "\u200F\u202EEmby Connect, server URL, or saved server\u202C"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

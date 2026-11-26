@@ -136635,6 +136635,12 @@
       "value": "Sähköposti tai käyttäjänimi"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Anna sen Emby-palvelimen perus-URL, josta haluat tuoda tiedot."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -136645,6 +136651,12 @@
     {
       "type": 0,
       "value": "Jätä tyhjäksi, jos tilillä ei ole salasanaa"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby-palvelimen URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -136795,6 +136807,12 @@
     {
       "type": 0,
       "value": "Plex-tili"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Palvelimen URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -137092,7 +137110,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect tai tallennettu palvelin"
+      "value": "Emby Connect, palvelimen URL tai tallennettu palvelin"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

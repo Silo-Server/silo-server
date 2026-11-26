@@ -135951,6 +135951,12 @@
       "value": "E-mail-cím vagy felhasználónév"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Adja meg annak az Emby-szervernek az alap URL-jét, amelyről importálni szeretne."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -135961,6 +135967,12 @@
     {
       "type": 0,
       "value": "Hagyja üresen, ha a fióknak nincs jelszava"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby-szerver URL-je"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -136111,6 +136123,12 @@
     {
       "type": 0,
       "value": "Plex-fiók"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Szerver-URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -136404,7 +136422,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect vagy mentett szerver"
+      "value": "Emby Connect, szerver-URL vagy mentett szerver"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

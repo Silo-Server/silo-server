@@ -137317,6 +137317,12 @@
       "value": "E-post või kasutajanimi"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Sisestage selle Emby serveri baas-URL, kust soovite importida."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -137327,6 +137333,12 @@
     {
       "type": 0,
       "value": "Jätke tühjaks, kui kontol parooli pole"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby serveri URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -137477,6 +137489,12 @@
     {
       "type": 0,
       "value": "Plexi konto"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Serveri URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -137774,7 +137792,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect või salvestatud server"
+      "value": "Emby Connect, serveri URL või salvestatud server"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

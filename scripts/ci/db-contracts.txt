@@ -1496,6 +1496,7 @@
 ./internal/backup TestImportsReadInBatchesDB
 ./internal/historyimport TestMatchAllAgreesWithMatchDB
 ./internal/historyimport TestEnqueuePersonalRunAllowsOneActiveRunPerAccount
+./internal/historyimport TestEnqueuePersonalRunAcceptsCustomEmby
 ./internal/backup TestCollectionImportKeepsTheProfileQuotaDB
 ./internal/backup TestNewAccountNeedsItsPrimaryProfileDB
 

@@ -125955,6 +125955,12 @@
       "value": "電子郵件或使用者名稱"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "輸入要從中匯入的 Emby 伺服器基本 URL。"
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -125965,6 +125971,12 @@
     {
       "type": 0,
       "value": "如果帳號沒有密碼，請留空"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby 伺服器 URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -126115,6 +126127,12 @@
     {
       "type": 0,
       "value": "Plex 帳號"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "伺服器 URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -126412,7 +126430,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect 或已儲存的伺服器"
+      "value": "Emby Connect、伺服器 URL 或已儲存的伺服器"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

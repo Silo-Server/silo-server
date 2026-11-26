@@ -148572,6 +148572,12 @@
       "value": "E-pošta ili korisničko ime"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Unesite osnovni URL Emby poslužitelja s kojeg želite uvesti podatke."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -148582,6 +148588,12 @@
     {
       "type": 0,
       "value": "Ostavite prazno ako račun nema lozinku"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL Emby poslužitelja"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -148732,6 +148744,12 @@
     {
       "type": 0,
       "value": "Plex račun"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL poslužitelja"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -149025,7 +149043,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect ili spremljeni poslužitelj"
+      "value": "Emby Connect, URL poslužitelja ili spremljeni poslužitelj"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

@@ -135617,6 +135617,12 @@
       "value": "E-mailadres of gebruikersnaam"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Voer de basis-URL in van de Emby-server waaruit je wilt importeren."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -135627,6 +135633,12 @@
     {
       "type": 0,
       "value": "Laat leeg als het account geen wachtwoord heeft"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby-server-URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -135777,6 +135789,12 @@
     {
       "type": 0,
       "value": "Plex-account"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Server-URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -136070,7 +136088,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect of opgeslagen server"
+      "value": "Emby Connect, server-URL of opgeslagen server"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

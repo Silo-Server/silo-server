@@ -125189,6 +125189,12 @@
       "value": "이메일 또는 사용자 이름"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "기록을 가져올 Emby 서버의 기본 URL을 입력하세요."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -125199,6 +125205,12 @@
     {
       "type": 0,
       "value": "계정에 비밀번호가 없으면 비워 두세요"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby 서버 URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -125349,6 +125361,12 @@
     {
       "type": 0,
       "value": "Plex 계정"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "서버 URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -125650,7 +125668,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect 또는 저장된 서버"
+      "value": "Emby Connect, 서버 URL 또는 저장된 서버"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

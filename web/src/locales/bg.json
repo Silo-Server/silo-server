@@ -136899,6 +136899,12 @@
       "value": "Имейл или потребителско име"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Въведете основния URL адрес на сървъра Emby, от който искате да импортирате."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -136909,6 +136915,12 @@
     {
       "type": 0,
       "value": "Оставете празно, ако акаунтът няма парола"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL адрес на сървъра Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -137059,6 +137071,12 @@
     {
       "type": 0,
       "value": "Акаунт в Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL адрес на сървъра"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -137352,7 +137370,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect или запазен сървър"
+      "value": "Emby Connect, URL адрес на сървъра или запазен сървър"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [
