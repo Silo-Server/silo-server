@@ -204,6 +204,7 @@ var secretTables = []secretTable{
 	{name: "device_login_requests", handling: secretLeftOut, why: "device-code sign-ins, which name auth_sessions"},
 	{name: "auth_key_challenges", handling: secretLeftOut, why: "one-use app key sign-in challenges, which live two minutes"},
 	{name: "auth_grant_uses", handling: secretLeftOut, why: "IDs of grants another app redeemed, kept until each grant expires"},
+	{name: "auth_app_codes", handling: secretLeftOut, why: "one-time app codes, which live ten minutes"},
 	{name: "jellycompat_sessions", handling: secretLeftOut, why: "Jellyfin-protocol access tokens"},
 	{name: "jellycompat_device_profiles", handling: secretLeftOut, why: "keyed by Jellyfin-protocol access tokens"},
 	{name: "jellycompat_playback_sessions", handling: secretLeftOut, why: "Jellyfin-protocol playback sessions"},

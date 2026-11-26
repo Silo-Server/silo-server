@@ -182,7 +182,7 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (*IssueResult, error
 	if err != nil {
 		return nil, err
 	}
-	if !user.LocalPasswordLoginEnabled || user.PasswordHash == "" {
+	if !user.HasLocalPassword() {
 		return nil, auth.ErrPasswordLoginDisabled
 	}
 	if !user.Enabled {
@@ -297,7 +297,7 @@ func (s *Service) sendRequested(ctx context.Context, login string) error {
 	if err != nil {
 		return fmt.Errorf("looking up account: %w", err)
 	}
-	if !user.Enabled || !user.LocalPasswordLoginEnabled || user.PasswordHash == "" {
+	if !user.Enabled || !user.HasLocalPassword() {
 		return nil
 	}
 	if _, err := auth.ValidateEmail(user.Email); errors.Is(err, auth.ErrInvalidEmail) {

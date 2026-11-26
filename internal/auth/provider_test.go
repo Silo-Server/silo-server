@@ -42,7 +42,11 @@ func TestCheckLocalPasswordComparesOneHash(t *testing.T) {
 	local.Username, local.Email = "anna", "anna@example.test"
 	external := passwordUser(t, password)
 	external.Username, external.Email, external.LocalPasswordLoginEnabled = "marco", "marco@example.test", false
-	users := loginDirectory{local.Username: local, external.Username: external}
+	// No stored hash but local sign-in on: no code writes that state, and if
+	// one did the empty hash must not fail faster than a real comparison.
+	hashless := passwordUser(t, password)
+	hashless.Username, hashless.Email, hashless.PasswordHash = "nora", "nora@example.test", ""
+	users := loginDirectory{local.Username: local, external.Username: external, hashless.Username: hashless}
 
 	placeholder := placeholderPasswordHash()
 	if cost, err := bcrypt.Cost(placeholder); err != nil || cost != passwordHashCost {
@@ -67,6 +71,7 @@ func TestCheckLocalPasswordComparesOneHash(t *testing.T) {
 		{name: "unknown name", username: "nobody", password: password, wantHash: placeholder, wantErr: ErrInvalidCredentials},
 		{name: "unknown email", username: "nobody@example.test", password: password, wantHash: placeholder, wantErr: ErrInvalidCredentials},
 		{name: "no local password sign-in", username: external.Username, password: password, wantHash: placeholder, wantErr: ErrInvalidCredentials},
+		{name: "no stored password", username: hashless.Username, password: "", wantHash: placeholder, wantErr: ErrInvalidCredentials},
 		{name: "wrong password", username: local.Username, password: "wrong password", wantHash: []byte(local.PasswordHash), wantErr: ErrInvalidCredentials},
 		{name: "right password", username: local.Username, password: password, wantHash: []byte(local.PasswordHash), wantUser: local},
 		{name: "right password by email", username: local.Email, password: password, wantHash: []byte(local.PasswordHash), wantUser: local},

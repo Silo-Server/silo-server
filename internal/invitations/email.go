@@ -16,7 +16,8 @@ type emailContent struct {
 	HTML    string
 }
 
-// composeInvitationEmail renders the invitation message. inviterName and
+// composeInvitationEmail renders the invitation message. Its wording fits
+// every way of claiming it: a password, or the Silo app. inviterName and
 // note are admin-controlled but escaped anyway; claimURL is server-built.
 func composeInvitationEmail(brand mail.Brand, inviterName, serverName, email, claimURL, note string, expiresAt time.Time, now time.Time) emailContent {
 	inviter := strings.TrimSpace(inviterName)
@@ -38,8 +39,8 @@ func composeInvitationEmail(brand mail.Brand, inviterName, serverName, email, cl
 	if note != "" {
 		fmt.Fprintf(&text, "%q\n\n", note)
 	}
-	fmt.Fprintf(&text, "To choose a password and get started, open this link:\n\n  %s\n\n", claimURL)
-	fmt.Fprintf(&text, "You'll sign in with this email address: %s\n\n%s\n", email, fine)
+	fmt.Fprintf(&text, "To accept and get started, open this link:\n\n  %s\n\n", claimURL)
+	fmt.Fprintf(&text, "Your account will use this email address: %s\n\n%s\n", email, fine)
 
 	var body strings.Builder
 	body.WriteString(mail.EmailParagraph(
@@ -49,9 +50,9 @@ func composeInvitationEmail(brand mail.Brand, inviterName, serverName, email, cl
 			mail.EmailColorBorder + `;font:italic 400 14px/1.6 ` + mail.EmailFont +
 			`;color:` + mail.EmailColorMuted + `;">&ldquo;` + html.EscapeString(note) + `&rdquo;</p>`)
 	}
-	body.WriteString(mail.EmailButton(brand, "Set your password", claimURL))
+	body.WriteString(mail.EmailButton(brand, "Accept invitation", claimURL))
 	body.WriteString(mail.EmailFacts(
-		mail.EmailFact{Label: "Sign in with", ValueHTML: html.EscapeString(email), Mono: true},
+		mail.EmailFact{Label: "Account", ValueHTML: html.EscapeString(email), Mono: true},
 		mail.EmailFact{Label: "Link expires", ValueHTML: html.EscapeString(expiry)},
 	))
 	body.WriteString(mail.EmailLinkFallback(claimURL))
@@ -61,7 +62,7 @@ func composeInvitationEmail(brand mail.Brand, inviterName, serverName, email, cl
 		Text:    text.String(),
 		HTML: mail.RenderLayout(mail.LayoutOptions{
 			Brand:      brand,
-			Preheader:  fmt.Sprintf("Choose a password and you're in — the link expires %s.", expiry),
+			Preheader:  fmt.Sprintf("Accept and you're in — the link expires %s.", expiry),
 			Title:      "You've been invited",
 			BodyHTML:   body.String(),
 			FooterHTML: html.EscapeString(fine),

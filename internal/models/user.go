@@ -47,6 +47,15 @@ type User struct {
 	UpdatedAt  time.Time
 }
 
+// HasLocalPassword reports whether the account has a usable local password:
+// a stored hash, and local password sign-in on for the account. An account
+// with no password (password_hash NULL, local sign-in off) and an account a
+// provider manages (local sign-in off) both answer false. Whether the server
+// accepts local passwords at all is a separate setting.
+func (u *User) HasLocalPassword() bool {
+	return u.LocalPasswordLoginEnabled && u.PasswordHash != ""
+}
+
 // CreateUserInput contains the fields required to create a new user.
 //
 // Account roles. An admin account is never a member of an access group: group
@@ -61,10 +70,14 @@ const (
 // Policy pointers: nil = inherit from the access group (stored as NULL);
 // non-nil = explicit override.
 type CreateUserInput struct {
-	Email                      string // required
-	Username                   string // required
-	Password                   string // plaintext, will be bcrypt-hashed
-	PasswordChangeRequired     bool   // Password is temporary; see User.PasswordChangeRequired
+	Email    string // required
+	Username string // required
+	Password string // plaintext, will be bcrypt-hashed
+	// NoPassword creates the account with no password: password_hash NULL
+	// and local password sign-in off. Password must be empty, and
+	// LocalPasswordLoginEnabled nil or false.
+	NoPassword                 bool
+	PasswordChangeRequired     bool // Password is temporary; see User.PasswordChangeRequired
 	LocalPasswordLoginEnabled  *bool
 	Role                       string // e.g. "admin", "user"
 	Permissions                []string

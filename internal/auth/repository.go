@@ -201,15 +201,9 @@ func NewUserPermissions(input models.CreateUserInput) ([]string, error) {
 func createUser(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, input models.CreateUserInput) (*models.User, error) {
-	hash, err := passwordhash.Generate(ctx, []byte(input.Password), passwordHashCost)
+	hash, localPasswordLoginEnabled, err := newUserPassword(ctx, input)
 	if err != nil {
-		return nil, fmt.Errorf("hashing password: %w", err)
-	}
-
-	// Base columns that are always included.
-	localPasswordLoginEnabled := true
-	if input.LocalPasswordLoginEnabled != nil {
-		localPasswordLoginEnabled = *input.LocalPasswordLoginEnabled
+		return nil, err
 	}
 
 	permissions, err := NewUserPermissions(input)
@@ -226,9 +220,11 @@ func createUser(ctx context.Context, db interface {
 		"requests_allowed",
 	}
 	args := []any{
-		NormalizeEmail(input.Email),
-		NormalizeUsername(input.Username),
-		string(hash),
+		// A blank email or username is NULL: two accounts without one must
+		// not collide on the empty sign-in identifier.
+		nullIfBlank(NormalizeEmail(input.Email)),
+		nullIfBlank(NormalizeUsername(input.Username)),
+		hash,
 		localPasswordLoginEnabled,
 		input.PasswordChangeRequired,
 		input.Role,
@@ -969,7 +965,7 @@ func CreateRestoredAccountInTx(ctx context.Context, tx pgx.Tx, in RestoredAccoun
 			transcode_allowed, audio_transcode_allowed, max_profiles, download_allowed, download_transcode_allowed, requests_allowed, access_group_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 		RETURNING `+allColumns,
-		nullIfBlank(NormalizeEmail(in.Email)), nullIfBlank(NormalizeUsername(in.Username)), in.PasswordHash, in.LocalPasswordLoginEnabled, in.PasswordChangeRequired,
+		nullIfBlank(NormalizeEmail(in.Email)), nullIfBlank(NormalizeUsername(in.Username)), nullIfBlank(in.PasswordHash), in.LocalPasswordLoginEnabled, in.PasswordChangeRequired,
 		in.Enabled, in.Role, permissions, in.LibraryIDs, normalizeQualityOverride(in.MaxPlaybackQuality), in.MaxStreams, in.MaxTranscodes,
 		in.MaxRemoteStreamBitrateKbps, in.MaxLocalStreamBitrateKbps, in.TranscodeAllowed, in.AudioTranscodeAllowed, in.MaxProfiles,
 		in.DownloadAllowed, in.DownloadTranscodeAllowed, in.RequestsAllowed, group)
