@@ -423,11 +423,11 @@ still read the row.
 - who it is and which profile it acts as: the current user, the profile list,
   the profile set, verifying a profile's PIN (a wrong guess spends that
   profile's attempt budget, as from any device), and capability reads;
-- reading the catalogue, home, libraries, collections, recommendations,
+- reading the catalog, home, libraries, collections, recommendations,
   subtitles, settings and preferences;
 - starting playback and playing its own streams (including shuffles and theme
   songs);
-- the profile's own state: progress, watched, favourites, watchlist (library
+- the profile's own state: progress, watched, favorites, watchlist (library
   items), not interested, ratings, history, reading progress and notes, home
   dismissals, inbox reads and read marks;
 - the events socket; Watch Together as a member of a room the person put it
@@ -488,8 +488,8 @@ stream its ticket names, which is its own.
 - refused for now, by decision: making media requests (including watchlist
   entries for titles the library doesn't have, which may request them),
   editing subtitles every account sees, importing collections, refreshing or
-  translating the shared catalogue, changing notification preferences, and
-  catalogue edits under a delegated permission;
+  translating the shared catalog, changing notification preferences, and
+  catalog edits under a delegated permission;
 - not decided: every other operation, until someone reads it. That includes
   personal collection writes, playback and audio/subtitle preference writes,
   home row overrides, onboarding, writing a setting by key, per-user plugin
@@ -505,7 +505,7 @@ what happens to it then:
 
 | Write | What it leaves | After the key is revoked |
 | --- | --- | --- |
-| progress, watched, favourites, watchlist, not interested, ratings, history removal, reading progress, notes, home dismissals, read marks | the profile's own state | stays: it is the person's data and the point of the grant |
+| progress, watched, favorites, watchlist, not interested, ratings, history removal, reading progress, notes, home dismissals, read marks | the profile's own state | stays: it is the person's data and the point of the grant |
 | shuffles | a shuffle of the profile | stays as the profile's; an abandoned one is deleted with other abandoned shuffles |
 | progress snapshot | an immutable copy of the profile's progress | stays until its `expires_at` |
 | starting playback, theme songs, bandwidth probe | a playback attempt bound to its login session | its media, stream reference and control socket are refused once the session ends; the stream ends at its idle expiry |

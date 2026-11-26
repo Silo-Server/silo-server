@@ -102303,7 +102303,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "refused for now: catalogue edits under a delegated permission"
+            "reason": "refused for now: catalog edits under a delegated permission"
           }
         },
         "x-silo-permission": "metadata_curation",
@@ -102477,7 +102477,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "refused for now: catalogue edits under a delegated permission"
+            "reason": "refused for now: catalog edits under a delegated permission"
           }
         },
         "x-silo-permission": "metadata_curation",
@@ -102677,7 +102677,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "refused for now: catalogue edits under a delegated permission"
+            "reason": "refused for now: catalog edits under a delegated permission"
           }
         },
         "x-silo-permission": "metadata_curation",
@@ -103071,7 +103071,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "refused for now: catalogue edits under a delegated permission"
+            "reason": "refused for now: catalog edits under a delegated permission"
           }
         },
         "x-silo-permission": "metadata_curation",
@@ -103279,7 +103279,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "refused for now: catalogue edits under a delegated permission"
+            "reason": "refused for now: catalog edits under a delegated permission"
           }
         },
         "x-silo-permission": "metadata_curation",
@@ -103439,7 +103439,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "refused for now: catalogue edits under a delegated permission"
+            "reason": "refused for now: catalog edits under a delegated permission"
           }
         },
         "x-silo-permission": "metadata_curation",
@@ -103606,7 +103606,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "refused for now: catalogue edits under a delegated permission"
+            "reason": "refused for now: catalog edits under a delegated permission"
           }
         },
         "x-silo-permission": "metadata_curation",
@@ -104351,7 +104351,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "refused for now: catalogue edits under a delegated permission"
+            "reason": "refused for now: catalog edits under a delegated permission"
           }
         },
         "x-silo-permission": "metadata_curation",
@@ -165666,7 +165666,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -166018,7 +166018,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -166211,7 +166211,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -166488,7 +166488,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -166761,7 +166761,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -167086,7 +167086,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -167388,7 +167388,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -167663,7 +167663,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -167938,7 +167938,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -168227,7 +168227,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -168516,7 +168516,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -169647,7 +169647,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "refused for now: refreshing the shared catalogue"
+            "reason": "refused for now: refreshing the shared catalog"
           }
         },
         "x-silo-retry-safety": "non_retryable",
@@ -169860,7 +169860,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "refused for now: refreshing the shared catalogue"
+            "reason": "refused for now: refreshing the shared catalog"
           }
         },
         "x-silo-retry-safety": "coalescing",
@@ -170163,7 +170163,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -170362,7 +170362,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-retry-safety": "natural_idempotent",
@@ -170557,7 +170557,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -170731,7 +170731,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -170894,7 +170894,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "refused for now: refreshing the shared catalogue"
+            "reason": "refused for now: refreshing the shared catalog"
           }
         },
         "x-silo-retry-safety": "non_retryable",
@@ -171193,7 +171193,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-retry-safety": "natural_idempotent",
@@ -171697,7 +171697,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -171987,7 +171987,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -172277,7 +172277,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -172645,7 +172645,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -190501,7 +190501,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-raw-protocol": "ebook-byte-range",
@@ -190912,7 +190912,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-raw-protocol": "ebook-byte-range",
@@ -204983,7 +204983,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -205190,7 +205190,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "refused for now: catalogue edits under a delegated permission"
+            "reason": "refused for now: catalog edits under a delegated permission"
           }
         },
         "x-silo-permission": "marker_edit",
@@ -205375,7 +205375,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "refused for now: catalogue edits under a delegated permission"
+            "reason": "refused for now: catalog edits under a delegated permission"
           }
         },
         "x-silo-permission": "marker_edit",
@@ -205539,7 +205539,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true
@@ -205746,7 +205746,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "refused",
-            "reason": "refused for now: catalogue edits under a delegated permission"
+            "reason": "refused for now: catalog edits under a delegated permission"
           }
         },
         "x-silo-permission": "marker_edit",
@@ -255423,7 +255423,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "reading the catalogue"
+            "reason": "reading the catalog"
           }
         },
         "x-silo-service-backed": true

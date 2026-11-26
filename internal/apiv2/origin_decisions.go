@@ -90,7 +90,7 @@ func grantedApp(d *SessionDecision) OriginDecisions { return OriginDecisions{Gra
 const (
 	reasonWhoItIs        = "who it is and which profile it acts as"
 	reasonCapabilityRead = "a capability read: what the server offers this caller"
-	reasonCatalogRead    = "reading the catalogue"
+	reasonCatalogRead    = "reading the catalog"
 	reasonHomeRead       = "reading home"
 	reasonLibraryRead    = "reading libraries"
 	reasonCollectionRead = "reading collections"
@@ -118,9 +118,9 @@ const (
 	reasonRefusedRequests     = "refused for now: making media requests"
 	reasonRefusedSubtitleEdit = "refused for now: editing subtitles every account sees"
 	reasonRefusedImport       = "refused for now: importing collections, which keep syncing"
-	reasonRefusedRefresh      = "refused for now: refreshing the shared catalogue"
+	reasonRefusedRefresh      = "refused for now: refreshing the shared catalog"
 	reasonRefusedNotifyPrefs  = "refused for now: changing notification preferences"
-	reasonRefusedCatalogEdit  = "refused for now: catalogue edits under a delegated permission"
+	reasonRefusedCatalogEdit  = "refused for now: catalog edits under a delegated permission"
 	reasonNotDecided          = "not decided"
 )
 
