@@ -23,6 +23,8 @@ vi.mock("@/hooks/queries/account", () => ({
 
 // The Sign-in section has its own tests (AccountSignInSection.test.tsx).
 vi.mock("./AccountSignInSection", () => ({ AccountSignInSection: () => null }));
+// The Silo app sentence asks the server whether app keys are on; it has no say here.
+vi.mock("@/components/appKeys/SignsBackInNote", () => ({ SignsBackInNote: () => null }));
 
 vi.mock("sonner", () => ({
   toast: { success: (...args: unknown[]) => mocks.toastSuccess(...args) },

@@ -1,4 +1,5 @@
 import { Link, type To } from "react-router";
+import { useAppKeyCapability } from "@/hooks/queries/appKeySession";
 import { useT } from "@/i18n";
 
 /**
@@ -7,6 +8,8 @@ import { useT } from "@/i18n";
  * Silo app key, so the device signs in again by itself. The link goes to
  * the devices list where one is removed. `onNavigate` closes the dialog the
  * sentence sits in. It is a line of its own inside the text it follows.
+ * Shown only while the server signs devices in with their keys: with app key
+ * sign-in off the devices don't come back.
  */
 export function SignsBackInNote({
   to,
@@ -18,6 +21,8 @@ export function SignsBackInNote({
   className?: string;
 }) {
   const t = useT();
+  const capability = useAppKeyCapability();
+  if (capability.data?.state !== "available") return null;
   return (
     <span className={className ?? "mt-1 block"}>
       {t("web.settings.appKeys.signsBackIn", {

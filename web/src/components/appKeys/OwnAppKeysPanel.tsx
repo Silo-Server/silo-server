@@ -384,7 +384,8 @@ function DeviceLists({
           )}
         </>
       )}
-      <p className="text-muted-foreground text-xs leading-relaxed">{t(`${P}.footnote`)}</p>
+      {/* It says a signed-out device signs back in, true only while app keys are on. */}
+      {on && <p className="text-muted-foreground text-xs leading-relaxed">{t(`${P}.footnote`)}</p>}
       <AlertDialog
         open={selection !== null && !askPin}
         onOpenChange={(next) => {

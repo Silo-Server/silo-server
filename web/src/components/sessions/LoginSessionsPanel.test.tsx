@@ -27,6 +27,8 @@ const mocks = vi.hoisted(() => ({
   sessions: [] as unknown[],
 }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ clearLoginSession: mocks.clear }) }));
+// The Silo app sentence asks the server whether app keys are on; it has no say here.
+vi.mock("@/components/appKeys/SignsBackInNote", () => ({ SignsBackInNote: () => null }));
 vi.mock("@/hooks/queries/loginSessions", () => ({
   useLoginSessions: () => ({
     query: {
