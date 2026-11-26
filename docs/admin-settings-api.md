@@ -123,7 +123,9 @@ with a detail that names the accounts (the first ten, then how many more):
 While the Owner holds a live session a key opened, turning app keys off or
 demo mode on by anyone but the Owner is `403 owner_protected` (on v2,
 `permission_denied` with the same detail as other Owner refusals), and
-nothing is written.
+nothing is written. A write that brings its own transaction (a restore) is
+`409 conflict` while ownership is being moved at that moment, and can be made
+again.
 
 Turning app keys off ends every session a key opened. A device such a session
 approved has a session of its own and stays signed in: a TV signed in by

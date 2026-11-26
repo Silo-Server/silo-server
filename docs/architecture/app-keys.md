@@ -102,9 +102,17 @@ row. A path that ends or deletes several sessions locks them in id order
 first, with a separate locking read (`lockSessionsInOrder`), and writes any
 device sign-in request after the sessions, the order a session's deletion
 writes them in through its foreign key. Turning the switch off takes the
-settings lock (exclusive), every plugin installation row (share, in id
-order), then the key sessions (in id order), and no account, identity or key
-row. A sign-in reads the key's
+ownership lock (shared), the settings lock (exclusive), every plugin
+installation row (share, in id order), then the key sessions (in id order),
+and no account, identity or key row. The ownership lock comes first wherever
+it is taken: ownership then account rows (a transfer or the recovery command,
+exclusive), ownership then settings (a settings write that could turn app
+keys off or demo mode on, shared, before the settings lock), and account row
+then settings (key and password sign-in), so no path holds an account row or
+the settings lock while it waits for the ownership lock. The Owner check under
+the settings write only tries that lock: a write that brings its own
+transaction (a restore) is refused, to be made again, while a transfer holds
+it. A sign-in reads the key's
 binding without a lock, locks the installation and identity, then locks the
 key row and, when its binding changed meanwhile (a link committed in between),
 answers 429 with a one-second `Retry-After`: the key is still good, and the
@@ -915,7 +923,9 @@ problem and remedy, while an account would lose the only provider it can
 sign in with and has no password that signs in (`auth.CheckPublicURLChange`),
 and the switch checks judge the address the same write leaves. The rule
 counts a binding whose capability row is missing, while sign-in's registry
-keeps its last good provider set. An address
+keeps its last good provider set. Provider and binding writes do not take the
+settings lock, so a provider disabled between the check and the sweep is not
+seen. An address
 the environment supplies refuses admin writes, and a change to that value at
 a restart is not checked. A full
 restore lists the accounts it brings back with no way in with the same SQL
@@ -1917,15 +1927,20 @@ sweep missed that never refreshes keeps its access token until it expires
 (8 hours by default). During a rolling deploy, an API server still on the
 previous build opens key sessions without reading the switch inside its
 transaction, and its refresh does not end them; those end at the next refresh
-an updated server handles.
+an updated server handles. A server on an earlier build of this change
+also honors a device sign-in approved in advance whose approving session
+ended while it ran, takes request rows before session rows when it ends
+sessions (so it can deadlock with this build's paths that end sessions), and
+transfers ownership without the ownership lock
+([device-login.md](device-login.md)).
 
 **The Owner.** While the Owner holds a live key session, only the Owner may
 turn app keys off or demo mode on through the settings write; anyone else is
 refused `owner_protected`, as for any other change to the Owner's account
 (`auth.CheckSwitchOffActor`, decided in the write's transaction before the
 sweep, where every key path waits on the settings lock; it reads ownership
-under the ownership lock, which a transfer and the recovery command take
-before any row).
+under the ownership lock, which the write takes before the settings lock and
+a transfer and the recovery command take before any row; see "Lock order").
 
 A session another app's key opened, if one still existed, would be answered
 403 `permission_denied` by the origin gate on `createAppCode`,

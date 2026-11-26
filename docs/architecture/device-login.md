@@ -260,11 +260,32 @@ the fingerprint. Nothing on the poll changes for the TV.
 - **Rolling deploys and rollback.** A node from the release before this one
   does not know the marker: it would let a bare device code cancel a
   pre-approved request and would collect one without the provider check
-  above. Ending the approving session still withdraws its sign-ins there,
-  because the database does that. Clients create pre-approved sign-ins only after
+  above. Clients create pre-approved sign-ins only after
   `GET /api/v2/auth/device/capability` reports `preapprove`, which an older
   node never does, and an upgrade should finish before the feature is relied
   on. Rolling the migration back deletes the waiting pre-approved requests.
+- **Deploying the change that dropped the withdrawal trigger.** While a node
+  still on the build before
+  `20261126204848_drop_session_preapproval_withdrawal_trigger` runs beside
+  this one, that node honors a sign-in approved in advance whose approving
+  session ended in that window, because it collects any approved request and
+  the trigger that withdrew it is gone. Rolling that migration back withdraws
+  every request still approved in advance whose approving session has ended,
+  so the earlier build finds none to collect. The earlier build also ends
+  sessions with request rows before session rows, through the trigger, so it
+  can deadlock with this build's paths that end sessions (PostgreSQL aborts
+  one, which can be repeated); and its ownership transfer does not take the
+  ownership lock (see app-keys.md, "Lock order").
+- **Promotion.** Making the account an administrator or the Owner withdraws
+  the sign-ins it approved in advance that no device has collected, in the
+  promotion's transaction (`revokeCredentialsIssuedToNonAdmin`): one statement
+  marks them `denied`, as withdrawing one from the list does, after the
+  account's key sessions end and with the request rows locked in id order. It
+  is the one write of request rows on purpose besides the person's own
+  withdrawal, and a direct write, not a side effect of ending a session.
+  Collecting takes the account row before the request row, as promotion does,
+  so the two queue on the account row: a collect after the promotion commits
+  is refused, and one before it succeeds for the account as it was.
 
 `GET /api/v2/auth/device/capability` reports `preapprove: true`.
 
