@@ -400,39 +400,6 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 	h.tm.RestoreReconstructedClient = h.restoreReconstructedClient
 	h.tm.StreamEndsFn = func() *playback.StreamEndRecorder { return h.StreamEnds }
 	h.tm.RestoreReconstructedWatch = h.restoreReconstructedWatch
-	h.tm.OnFFmpegCrash = func(ctx context.Context, sessionID string, dead *playback.TranscodeSession) {
-		// ffmpeg crash — tear the session down; a client holding a valid stream
-		// token can reconstruct it on the next request.
-		//
-		// Compare-and-delete the dead transcode first: between ffmpeg's error exit
-		// and this teardown a reconstruct may have registered a fresh successor
-		// under the same id. CloseTranscodeSessionIf only removes (and Close()s, which
-		// reaps the shared output dir) the entry when it is still the dead session;
-		// if a successor won, it leaves the live one untouched and we must NOT tear
-		// down the reconstructed playback session that now backs it.
-		var nodeURL string
-		if s, err := h.sessionMgr.GetSession(sessionID); err == nil {
-			nodeURL = s.TranscodeNodeURL
-		}
-		if successor := h.tm.GetTranscodeSession(sessionID); successor != nil && successor != dead {
-			// A reconstruct already replaced the crashed process; the live successor
-			// and its session stand. Cheap fast-path only — the authoritative gate is
-			// the compare-and-delete result below.
-			return
-		}
-		// CloseTranscodeSessionIf is the authoritative gate: a successor may register
-		// under the same id between the pre-check above and here. We only tear down the
-		// upstream playback session when the compare-and-delete actually matched the
-		// dead transcode. When it returns false a successor owns the session — do
-		// nothing further, or finalizeSessionStopWithResult's unconditional CloseTranscodeSession
-		// would reap the live successor's output dir mid-serve.
-		if !h.tm.CloseTranscodeSessionIf(sessionID, dead, nodeURL) {
-			return
-		}
-		if err := h.stopPlaybackSessionByID(ctx, sessionID, ""); err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
-			slog.ErrorContext(ctx, "failed to stop playback after local transcode exit", "component", "api", "session", sessionID, "error", err, "playback_session_id", sessionID)
-		}
-	}
 	if reg, ok := sessionMgr.(interface {
 		RegisterReconstructed(s *playback.Session) *playback.Session
 		RegisterReconstructedWithLimits(ctx context.Context, s *playback.Session) (*playback.Session, error)

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -416,5 +419,53 @@ func TestTranscodeManifestStatesItsLength(t *testing.T) {
 	}
 	if got := rec.Header().Get("Cache-Control"); !strings.Contains(got, "no-transform") {
 		t.Fatalf("Cache-Control = %q, want no-transform so proxies keep the length", got)
+	}
+}
+
+// TestCrashedLocalTranscodeKeepsItsPlaybackSession covers #5336. When a local
+// FFmpeg exits with an error, the exit monitor drops the dead transcode but
+// keeps the playback session, so a replan finds it and the next request
+// rebuilds the transcode from the client's token.
+func TestCrashedLocalTranscodeKeepsItsPlaybackSession(t *testing.T) {
+	sessionMgr := playback.NewSessionManager(0, 0)
+	handler := newKeyedPlaybackHandler(sessionMgr)
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpegSleep(t, "30"), t.TempDir())
+	handler.JWTSecret = "test-secret"
+
+	live, err := sessionMgr.StartSession(1, "profile-1", 42, playback.PlayTranscode, true)
+	if err != nil {
+		t.Fatalf("start live session: %v", err)
+	}
+	dead := playback.NewExitedTranscodeSessionForTest(t.TempDir(), errors.New("signal: killed"))
+	handler.tm.RegisterTranscodeSession(live.ID, dead)
+	synctest.Test(t, func(t *testing.T) {
+		handler.tm.MonitorLocalTranscodeExit(live.ID, dead)
+		time.Sleep(3 * time.Second) //nolint:forbidigo // synctest advances virtual time past the monitor's two-second delay
+		synctest.Wait()
+	})
+
+	if handler.tm.GetTranscodeSession(live.ID) != nil {
+		t.Fatal("the crashed transcode is still registered")
+	}
+	if _, err := sessionMgr.GetSession(live.ID); err != nil {
+		t.Fatalf("the crash ended the playback session: %v", err)
+	}
+
+	card := playback.NewRecipeCard(1, "profile-1", 42, "", playback.TranscodeOpts{
+		SessionID: live.ID, InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		AudioTrackIndex: -1, SubtitleTrackIndex: -1,
+	})
+	rec := httptest.NewRecorder()
+	handler.HandleGetTranscodeManifest(rec, playbackTestRequest(http.MethodGet,
+		"/api/v1/playback/transcode/"+live.ID+"/master.m3u8?st="+handler.signSessionToken(card, false),
+		nil, map[string]string{"session_id": live.ID}))
+	t.Cleanup(func() {
+		if ts := handler.tm.GetTranscodeSession(live.ID); ts != nil {
+			_ = ts.Close()
+		}
+	})
+	if rec.Code != http.StatusOK || handler.tm.GetTranscodeSession(live.ID) == nil {
+		t.Fatalf("manifest after the crash = %d %s, want the transcode rebuilt", rec.Code, rec.Body.String())
 	}
 }

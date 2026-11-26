@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -268,20 +267,19 @@ func TestRestartSessionLocked_SupersededWhenReplaced(t *testing.T) {
 	}
 }
 
-// The API server tears a crashed local transcode down so the client can
-// reconstruct it. A reconstruct starts on GPU decode again and dies at the same
-// frame, so the exit monitor restarts this failure on CPU decode itself, and
-// tears the session down as before when that restart cannot start.
+// The exit monitor drops a crashed local transcode so the client can rebuild
+// it. A rebuild starts on GPU decode again and dies at the same frame, so the
+// monitor restarts this failure on CPU decode itself, and drops the transcode
+// as before when that restart cannot start.
 func TestLocalExitMonitorRestartsFilterReinitFailureOnCPUDecode(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
 		stderr         string
 		ffmpegMissing  bool
-		wantTornDown   bool
 		wantRegistered bool
 	}{
 		{name: "restart starts", wantRegistered: true},
-		{name: "restart cannot start", ffmpegMissing: true, wantTornDown: true},
+		{name: "restart cannot start", ffmpegMissing: true},
 		// FFmpeg was stopped at its AV1 decoder's first rejection (#4279).
 		{name: "AV1 decoder without a GPU", wantRegistered: true,
 			stderr: "[av1 @ 0x1] Your platform doesn't support hardware accelerated AV1 decoding.\n"},
@@ -320,23 +318,14 @@ func TestLocalExitMonitorRestartsFilterReinitFailureOnCPUDecode(t *testing.T) {
 				}
 				m := NewTranscodeManager()
 				m.RegisterTranscodeSession(sessionID, s)
-				var tornDown atomic.Bool
-				m.OnFFmpegCrash = func(_ context.Context, id string, dead *TranscodeSession) {
-					tornDown.Store(true)
-					m.CloseTranscodeSessionIf(id, dead, "")
-				}
-
 				m.MonitorLocalTranscodeExit(sessionID, s)
 				time.Sleep(3 * time.Second) //nolint:forbidigo // synctest advances virtual time past the monitor's two-second delay
 				synctest.Wait()
 
-				if got := tornDown.Load(); got != tc.wantTornDown {
-					t.Fatalf("session torn down = %v, want %v", got, tc.wantTornDown)
-				}
 				if got := m.GetTranscodeSession(sessionID) == s; got != tc.wantRegistered {
 					t.Fatalf("session still registered = %v, want %v", got, tc.wantRegistered)
 				}
-				if tc.wantTornDown {
+				if !tc.wantRegistered {
 					return
 				}
 				args, err := os.ReadFile(argsPath)
