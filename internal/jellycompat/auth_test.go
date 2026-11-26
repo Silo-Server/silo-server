@@ -179,3 +179,18 @@ func (f *fakeAPIKeyUserLoader) GetByID(_ context.Context, id int) (*models.User,
 	}
 	return nil, auth.ErrNotFound
 }
+
+// TestCompatClientIsNeverNamedAsAnotherApp: the native API records every play
+// of a session another app's key opened under playback.GrantedAppClientName,
+// so no Jellyfin client may be recorded under it, whatever it names itself;
+// any other name is kept. Catches a compat play reading as another app's in
+// the lists that show who played what.
+func TestCompatClientIsNeverNamedAsAnotherApp(t *testing.T) {
+	for client, want := range map[string]string{"Granted App": "", "granted-app": "", "Infuse": "Infuse"} {
+		r := httptest.NewRequest(http.MethodGet, "/Sessions", nil)
+		r.Header.Set("X-Emby-Authorization", `MediaBrowser Client="`+client+`", Device="TV", DeviceId="tv-1", Version="8.1"`)
+		if got := compatPlaybackClientInfo(r).Name; got != want {
+			t.Errorf("client %q recorded as %q, want %q", client, got, want)
+		}
+	}
+}

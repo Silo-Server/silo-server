@@ -71,6 +71,51 @@ func TestEveryOperationDecidesForGrantedApps(t *testing.T) {
 	}
 }
 
+// pendingWording matches a published reason or check that reads as work
+// still to do rather than a decision.
+var pendingWording = regexp.MustCompile(`(?i)\b(until|not yet|to do|to-do|todo|later|pending|not decided|undecided|tbd|next change)\b`)
+
+// forNowReasons is the closed list of refusals that wait on a policy question
+// for the project owner, each beside the question. A reason that says "for
+// now" and is not here fails TestPublishedReasonsReadAsDecisions.
+var forNowReasons = map[string]string{
+	reasonRefusedRequests:     "may another app make media requests for the profile?",
+	reasonRefusedSubtitleEdit: "may another app edit the subtitles every account sees?",
+	reasonRefusedImport:       "may another app import a collection that keeps syncing after its key is revoked?",
+	reasonRefusedRefresh:      "may another app spend the server's metadata refreshes of the shared catalog?",
+	reasonRefusedNotifyPrefs:  "may another app change what the person is notified of on every device?",
+	reasonRefusedCatalogEdit:  "may another app use a permission delegated to the account to edit the catalog?",
+}
+
+// TestPublishedReasonsReadAsDecisions: every reason and own-only check the
+// document publishes, for every kind of session judged, states a decision:
+// none reads as pending ("until", "not yet", "later", "TBD" and the like),
+// and a reason that says "for now" is one of the closed list forNowReasons
+// names, each waiting on its stated question. Catches a refusal published as
+// a to-do, and a new "for now" refusal added without naming its question.
+func TestPublishedReasonsReadAsDecisions(t *testing.T) {
+	for _, op := range documentOperations(t) {
+		kinds, _ := op.Raw[extOriginDecisions].(map[string]any)
+		for kind, v := range kinds {
+			d, _ := v.(map[string]any)
+			for _, field := range []string{"reason", "check"} {
+				text, _ := d[field].(string)
+				if m := pendingWording.FindString(text); m != "" {
+					t.Errorf("%s (%s): the %s reads as pending (%q): %q", op.ID, kind, field, m, text)
+				}
+				if _, listed := forNowReasons[text]; strings.Contains(strings.ToLower(text), "for now") && !listed {
+					t.Errorf("%s (%s): a \"for now\" %s not in forNowReasons: %q; add it beside the question it waits on", op.ID, kind, field, text)
+				}
+			}
+		}
+	}
+	for reason := range forNowReasons {
+		if !strings.Contains(strings.ToLower(reason), "for now") {
+			t.Errorf("forNowReasons lists %q, which does not say for now", reason)
+		}
+	}
+}
+
 // pathParam matches a path template parameter.
 var pathParam = regexp.MustCompile(`\{[^}]+\}`)
 
