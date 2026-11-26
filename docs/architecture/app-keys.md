@@ -1069,7 +1069,7 @@ The waker answers true when, and only when, this call queued a wake after the
 edit committed: the wake's attempts were written and committed for at least
 one phone. The answer is about the wake being queued, not delivered; it stays
 true if the send then fails or runs out of time, so a caller may say a wake
-was sent for the edit, not that a phone was reached. It answers false inside
+was queued for the edit, not that a phone was reached. It answers false inside
 the minute after another wake, while a wake for the account is still in
 flight on this server, for an edit that rolled back, and with push off or no
 phone to wake. A wake that left before the edit existed says nothing about
@@ -1104,9 +1104,11 @@ set when it opens. The relay requests stop when the 30-second budget ends,
 and that last write follows on its own five-second context, so the account's
 in-flight mark, released after that write, a panic included, is held at most
 35 seconds after the wake is queued. If that write fails or times out, the
-rows stay in flight: no claim query selects them, so nothing sends them, and
-the daily notification retention run marks them failed once they are ten
-minutes old, up to about a day later. A wake is queued up to five
+server logs it and the rows stay in flight: no claim query selects them, so
+nothing sends them, until the notification retention task marks them failed
+once they are ten minutes old. By default that task runs daily; an
+administrator can change or disable its schedule, which leaves such rows in
+flight longer. A wake is queued up to five
 seconds after its time is admitted, so it has ended within 40 seconds of
 that, before the account's limit lets another start; a test holds the budget
 plus the final write under the interval less those five seconds.
@@ -1123,8 +1125,9 @@ budget and the account's limit row keep wakes apart. The worst case for one
 account is one wake at a time on a server, each ending within 35 seconds of
 being queued. Only a process that stops mid-wake, or a last write that fails,
 leaves a row in flight. The push queue gauge leaves wake rows out,
-because no worker ever claims one, and the daily notification retention run
-marks a row that has been in flight for more than ten minutes as failed.
+because no worker ever claims one, and the notification retention task (by
+default daily; the schedule can be changed) marks a row that has been in
+flight for more than ten minutes as failed.
 Retention deletes wake rows after seven days.
 
 **Mapping.** The first item is always the main profile, which the set never

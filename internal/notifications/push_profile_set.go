@@ -413,8 +413,10 @@ func (r *PushDeviceRepository) failUnfinishedProfileSetWakes(ctx context.Context
 // so a wake holds it for at most the budget plus profileSetFinalizeTimeout
 // (35 seconds), and no goroutine outlives the wake. A process that stops
 // mid-wake, or a tail write that fails or times out, leaves rows in flight,
-// which no claim selects, the queue gauge leaves out, and the daily
-// retention run marks failed once they are profileSetWakeStale old.
+// which no claim selects and the queue gauge leaves out, until the
+// notification retention task marks them failed once they are
+// profileSetWakeStale old. That task runs daily by default; its schedule is
+// the task manager's and can be changed, which leaves such rows longer.
 func (s *System) sendProfileSetWakeDetached(ctx context.Context, userID int, attempts []PushDeliveryAttempt) {
 	ctx = context.WithoutCancel(ctx)
 	budget, cancel := context.WithTimeout(ctx, profileSetWakeBudget)
