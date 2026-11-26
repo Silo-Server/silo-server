@@ -101,6 +101,12 @@ export interface SignInLinkRedeemed {
   appCode: SessionAppCode | null;
   /** The token that sets a password once, absent when the account may not set one. */
   setPasswordToken: string | null;
+  /**
+   * Why there is no app code: an administrator's account gets the password
+   * route only, and app key sign-in may be off. Null with a code, or for a
+   * reason this page doesn't know.
+   */
+  noCodeReason: "administrator" | "app_keys_off" | null;
 }
 
 /**
@@ -121,7 +127,9 @@ export async function redeemSignInLink(token: string): Promise<SignInLinkRedeeme
     if (!setPasswordToken) {
       throw new V2TransportError("redeemSignInLink", 200, "Invalid sign-in link response");
     }
-    return { appCode: null, setPasswordToken };
+    const reason = result?.no_code_reason;
+    const noCodeReason = reason === "administrator" || reason === "app_keys_off" ? reason : null;
+    return { appCode: null, setPasswordToken, noCodeReason };
   }
   const code = checked("redeemSignInLink", {
     code: result.code,
@@ -129,7 +137,11 @@ export async function redeemSignInLink(token: string): Promise<SignInLinkRedeeme
     server_address: result.server_address ?? "",
     link_allowed: result.link_allowed,
   });
-  return { appCode: { ...code, link_allowed: false } as SessionAppCode, setPasswordToken };
+  return {
+    appCode: { ...code, link_allowed: false } as SessionAppCode,
+    setPasswordToken,
+    noCodeReason: null,
+  };
 }
 
 /** Sets the account's password with a redeemed sign-in link's token. */

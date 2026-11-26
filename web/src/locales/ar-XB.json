@@ -100724,6 +100724,18 @@
       "value": "\u200F\u202EAn admin sent you this link so you can sign in again. Continue to get a code for the Silo app, or to choose a password.\u202C"
     }
   ],
+  "web.auth.signInLink.noCodeAdministrator": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis is an administrator’s account, so this link only sets a password. Set one, sign in on this server’s site, then open the Silo app from your account settings there.\u202C"
+    }
+  ],
+  "web.auth.signInLink.noCodeAppKeysOff": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe Silo app can’t sign in on this server right now, so this link only sets a password.\u202C"
+    }
+  ],
   "web.auth.signInLink.passwordDescription": [
     {
       "type": 0,

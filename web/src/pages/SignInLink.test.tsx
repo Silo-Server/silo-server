@@ -14,6 +14,7 @@ import SignInLink from "./SignInLink";
 import policyFixture from "../../../contracts/api/v2/fixtures/get_password_policy_ok.json";
 import redeemed from "../../../contracts/api/v2/fixtures/redeem_sign_in_link_ok.json";
 import redeemedKeysOff from "../../../contracts/api/v2/fixtures/redeem_sign_in_link_keys_off.json";
+import redeemedAdministrator from "../../../contracts/api/v2/fixtures/redeem_sign_in_link_administrator.json";
 
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: null, loading: false }) }));
 vi.mock("@/components/auth/AuthBackground", () => ({ AuthBackground: () => null }));
@@ -93,13 +94,22 @@ it("sets a password with the redeem's token", async () => {
   ]);
 });
 
-// With app keys off the answer has only the set-password token: the page
-// goes straight to the password form.
-it("offers only a password while app keys are off", async () => {
-  redeem = async () => json(redeemedKeysOff);
+// With no code the page goes straight to the password form and says why:
+// an administrator's account gets the password route only, and says what
+// to do next; app key sign-in may be off.
+it.each([
+  ["app keys are off", redeemedKeysOff, "The Silo app can’t sign in on this server right now"],
+  [
+    "the account is an administrator's",
+    redeemedAdministrator,
+    "This is an administrator’s account",
+  ],
+])("offers only a password when %s", async (_case, answer, why) => {
+  redeem = async () => json(answer);
   mount();
   fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
   expect(await screen.findByLabelText("New password")).toBeTruthy();
+  expect(screen.getByText(new RegExp(why))).toBeTruthy();
   expect(screen.queryByText(redeemed.code)).toBeNull();
 });
 

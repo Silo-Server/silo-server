@@ -104,6 +104,7 @@ export default function SignInLink() {
       return (
         <SetPasswordForm
           token={redeemed.setPasswordToken}
+          noCodeReason={redeemed.noCodeReason}
           onBack={redeemed.appCode ? () => setStage({ ...stage, view: "code" }) : undefined}
           onDone={() => setStage({ kind: "passwordSet" })}
           onUnavailable={() => setStage({ kind: "unavailable" })}
@@ -153,11 +154,14 @@ export default function SignInLink() {
 /** Chooses a password with the token the redeem handed out, once. */
 function SetPasswordForm({
   token,
+  noCodeReason,
   onBack,
   onDone,
   onUnavailable,
 }: {
   token: string;
+  /** Why the link gave no code, said above the form. */
+  noCodeReason: SignInLinkRedeemed["noCodeReason"];
   onBack?: () => void;
   onDone: () => void;
   onUnavailable: () => void;
@@ -198,6 +202,13 @@ function SetPasswordForm({
       title={t("web.auth.signInLink.passwordTitle")}
       description={t("web.auth.signInLink.passwordDescription")}
     >
+      {noCodeReason && (
+        <p className="mb-4 text-sm">
+          {noCodeReason === "administrator"
+            ? t("web.auth.signInLink.noCodeAdministrator")
+            : t("web.auth.signInLink.noCodeAppKeysOff")}
+        </p>
+      )}
       {error && (
         <p role="alert" className="text-destructive mb-4 text-sm">
           {error}
