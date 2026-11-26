@@ -418,6 +418,18 @@ document. A capability read never reports as allowed an action whose
 operations are all refused to the session asking; see
 [the capability rule](api-contract.md#discovery-and-capability-detection).
 
+**What such a session reads about what it may do describes that session,
+never the account.** The rule has three shapes, each checked:
+
+- a boolean permission member (`allowed`, `*_allowed`, `can_*`): a row in
+  `capabilityMembers`, checked by `TestPermissionMembersStateTheirCase`;
+- a list of named powers (`permissions`, `*_permissions`, `*_actions`,
+  `*_capabilities`): a row in `powerListMembers`, checked by
+  `TestPowerListsStateTheirCase`. The account's `permissions` keep only the
+  permissions one of whose gated operations is open to the session
+  (`permittedPermissions`);
+- a capability read's `allowed`: the capability rule above.
+
 A refusal is enforced in the gate chain right after authentication, before
 the demo gate, the rate limiter, viewer access and the handler: 403
 `permission_denied` with the detail every key route gives a session that may
@@ -1057,7 +1069,7 @@ the same account object in both. For such a session:
 | `tokens.user.id`, `username` | the account's |
 | `tokens.user.email` | changed: the empty string; the person's address is not that app's to read |
 | `tokens.user.role` | the account's, always `user`: a grant is refused for an administrator's account, and promoting an account revokes all its keys |
-| `tokens.user.permissions` | the account's effective permissions, unchanged; today they can name only `marker_edit` and `metadata_curation`, whose catalog edits are refused to such a session |
+| `tokens.user.permissions` | changed: empty (`[]`). A permission is listed only while one operation it gates is open to such a session; today only `marker_edit` and `metadata_curation` exist, and every operation they gate (catalog edits) is refused |
 | `tokens.user.download_allowed` | changed: false, because every download operation is refused to such a session |
 | `tokens.user.password_change_required` | the account's flag |
 | `tokens.user.impersonation` | absent: such a session never views as another account |
@@ -1066,6 +1078,12 @@ the same account object in both. For such a session:
 | `status`, `device_id`, `account_id`, `local_route` | real: the app's key, the account, the server's pinned route |
 | `person_key_id` | absent |
 | `username`, `person_key` | absent: only an app code's redeem carries them |
+
+While the account holds a temporary password, such a session is restricted
+like every session of the account (403 `password_change_required` on all but
+the account read, the password capability, which answers not allowed, and
+sign-out) and is refused the change itself (403 `permission_denied`); the
+person changes the password from their own device.
 
 ## The account's creation time
 

@@ -1407,7 +1407,9 @@ key, so its answers leave the member out.
 An answer to another app's key carries the same account object as
 `getCurrentUser` gives that session: `tokens.user.email` is the empty string
 (the person's address is not that app's to read) and
-`tokens.user.download_allowed` is false (downloads are refused to it); the
+`tokens.user.download_allowed` is false (downloads are refused to it), and
+`tokens.user.permissions` lists only permissions one of whose operations is
+open to it, which today leaves it empty; the
 name, role and the rest are the account's. It carries no
 `tokens.account_created_at`, and its refreshes carry none.
 

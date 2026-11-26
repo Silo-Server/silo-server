@@ -137,7 +137,7 @@ func personSealedReply(extra, notes string) string {
 const approvalReplyNote = "; for an administrator's account that needs approval it is {status: approval_required, device_id, account_id}, with no tokens and no person_key_id"
 
 // grantedAppReplyNote is what a reply to another app's key leaves out.
-const grantedAppReplyNote = "; a reply to another app's key, one enrolled through a grant, has no person_key_id member and tokens has no account_created_at; tokens.user is the account as getCurrentUser gives that session: email the empty string and download_allowed false. The app is not one of the person's devices, so it does not learn which person key the account holds (a key ID that changes would tell it the person replaced their key), nor the person's email"
+const grantedAppReplyNote = "; a reply to another app's key, one enrolled through a grant, has no person_key_id member and tokens has no account_created_at; tokens.user is the account as getCurrentUser gives that session: email the empty string, download_allowed false and permissions empty while every operation they gate is refused to it. The app is not one of the person's devices, so it does not learn which person key the account holds (a key ID that changes would tell it the person replaced their key), nor the person's email"
 
 // introduceSealedReply is introduceAppKey's sealed answer.
 var introduceSealedReply = personSealedReply("", approvalReplyNote)
