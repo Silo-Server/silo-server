@@ -226,6 +226,12 @@ func TestProfileSetFormsValidateAlike(t *testing.T) {
 			if tc.ok != (session.Status == http.StatusOK) {
 				t.Fatalf("answer = %+v, want accepted %v", session, tc.ok)
 			}
+			if tc.wantType != (ProblemType{}) {
+				if session.Type != tc.wantType.URI() {
+					t.Fatalf("answer = %+v, want %s", session, tc.wantType.ID)
+				}
+				return
+			}
 			if !tc.ok && (session.Status != http.StatusUnprocessableEntity || len(session.Errors) == 0) {
 				t.Fatalf("a malformed set answered %+v, want 422 with errors", session)
 			}
@@ -250,6 +256,8 @@ type profileSetFormCase struct {
 	stale bool
 	// wantAt and wantCode, when set, are the one error the refusal carries.
 	wantAt, wantCode string
+	// wantType, when set, is a refusal other than validation_failed.
+	wantType ProblemType
 }
 
 // profileSetFormCases are well-formed sets and one of each kind of malformed
@@ -303,12 +311,12 @@ func profileSetFormCases() []profileSetFormCase {
 		{name: "version a fraction", set: map[string]any{"version": 1.5, "items": []any{whole()}}},
 		{name: "version a string", set: map[string]any{"version": "1", "items": []any{whole()}}},
 		{name: "version missing", set: map[string]any{"items": []any{whole()}}},
-		{name: "two items with one sync_id", set: set(whole(), with("name", "Alex"))},
-		{name: "two items with one name", set: set(whole(), with("sync_id", "7c9e6679-7425-40de-944b-e07fc1f90ae7"))},
-		// Parsing refuses it before the version is judged, so a stale set
-		// with two items of one name is never answered profile_set_stale.
+		{name: "two items with one sync_id", set: set(whole(), with("name", "Alex")), wantAt: "body.set.items[1].sync_id", wantCode: codeInvalid},
+		// Two items of one name are well formed: whether two names are the
+		// same is the server's to judge, after the version, so a stale set
+		// with such a pair is told it is stale.
 		{name: "two items with one name, against a newer held set", set: set(whole(), with("sync_id", "7c9e6679-7425-40de-944b-e07fc1f90ae7")),
-			stale: true, wantAt: "body.set.items[1].name", wantCode: codeInvalid},
+			stale: true, wantType: TypeProfileSetStale},
 		{name: "a pair for no item", set: set(whole()), pairs: []any{map[string]any{"sync_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "local_id": "p-owner"}}},
 		{name: "a pair without local_id", set: set(whole()), pairs: []any{map[string]any{"sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e"}}},
 		{name: "pairs not an array", set: set(whole()), pairs: "x"},

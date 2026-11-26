@@ -1181,10 +1181,19 @@ household is under its profile limit; the rest are reported in `left_off`.
 Profiles outside the set count toward the limit, and nothing is deleted to make
 room.
 
-**Names.** Names are unique in the set, compared trimmed and without case as
-everywhere else. The check runs on the household as the set leaves it, so a
-rename chain applies; an item named like a profile outside the set refuses the
-whole set (`name_conflict`). There is no unique index on names: the set
+**Names.** The server decides whether two names are the same: trimmed and
+compared without case, as everywhere else. A device's own list may compare
+names exactly, so it can hold `Sam` and `sam`; it does not reproduce the
+server's comparison, and goes by the answer. Every name clash is one answer, 422
+`name_conflict` at an item's name, judged after the version like any other
+refusal of a set that will write, so a stale set is told it is stale first. Two
+items of the set with one name come first, at the later item. That compares the
+names the set gives over every item, so an item left off for the limit or
+hidden by the owner counts, and so does one whose profile keeps a name the
+owner gave it: clearing that name would otherwise bring the clash back with
+nobody sending anything. Then the household as the set leaves it is checked,
+so a rename chain applies, and an item named like a profile outside the set
+refuses the whole set. There is no unique index on names: the set
 transaction holds every profile row and the account's preference lock, which
 every other profile writer takes first.
 

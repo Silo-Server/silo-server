@@ -312,14 +312,28 @@ func TestProfileSetChildCreatedWithNoLibrariesDB(t *testing.T) {
 	}
 }
 
-// TestProfileSetNamesDB: a set never leaves two profiles with one name. It
-// catches duplicates, which also make Jellyfin sign-in by name ambiguous.
+// TestProfileSetNamesDB: a set never leaves two profiles with one name, and
+// a set never names two items alike, even an item it does not apply. It
+// catches duplicates, which also make Jellyfin sign-in by name ambiguous,
+// and a set held with two items of one name, which a device that left the
+// second off would send everywhere else.
 func TestProfileSetNamesDB(t *testing.T) {
-	t.Run("two items with one name", func(t *testing.T) {
-		f := newProfileSetDBFixture(t, 5)
-		_, err := f.apply(t, setDoc(t, 1, newSetItem("Parent"), newSetItem("Sam"), newSetItem(" sam ")))
-		assertSetField(t, err, "set.items[2].name")
-	})
+	for _, tc := range []struct {
+		name  string
+		limit int
+		items []setItem
+	}{
+		{"two items with one name", 5, []setItem{newSetItem("Parent"), newSetItem("Sam"), newSetItem("Sam")}},
+		{"two items with one name once trimmed and folded", 5, []setItem{newSetItem("Parent"), newSetItem("Sam"), newSetItem(" sam ")}},
+		// The limit leaves item 2 off, so the household would hold one Sam.
+		{"two items with one name, the second left off for the limit", 2, []setItem{newSetItem("Parent"), newSetItem("Sam"), newSetItem("sam")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newProfileSetDBFixture(t, tc.limit)
+			_, err := f.apply(t, setDoc(t, 1, tc.items...))
+			assertSetNameConflict(t, err, "set.items[2].name")
+		})
+	}
 	t.Run("a rename chain", func(t *testing.T) {
 		f := newProfileSetDBFixture(t, 5)
 		a, b := newSetItem("A"), newSetItem("B")
@@ -338,6 +352,14 @@ func TestProfileSetNamesDB(t *testing.T) {
 		_, err := f.apply(t, setDoc(t, 1, newSetItem("Parent"), newSetItem("guest")))
 		assertSetField(t, err, "set.items[1].name")
 	})
+}
+
+func assertSetNameConflict(t *testing.T, err error, location string) {
+	t.Helper()
+	var fieldErr *ProfileSetFieldError
+	if !errors.As(err, &fieldErr) || fieldErr.Location != location || fieldErr.Code != "name_conflict" {
+		t.Fatalf("err = %v, want name_conflict at %s", err, location)
+	}
 }
 
 func assertSetField(t *testing.T, err error, location string) {
