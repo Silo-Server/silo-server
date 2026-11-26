@@ -258,7 +258,11 @@ children, which are never episodes. `IsFavorite=true` and an `Ids` list
 narrow both parts the same way, so `Ids` with a type filter that names
 `Episode` returns the named episodes. On such a lookup a series or season
 `ParentId` keeps only its own episodes, and a collection `ParentId` lists
-none of the named episodes.
+none of the named episodes. Without `IncludeItemTypes` or `ExcludeItemTypes`,
+a favorites request at the user root or a recursive one under a library
+`ParentId`, and an `Ids` lookup that also filters or sorts, ask for every type,
+as in Jellyfin, so they return favorite or named episodes the same way. A
+browse without a type filter, favorites or `Ids` still lists no episodes.
 
 `/Shows/{id}/Episodes` accepts numeric `Season`, `SeasonId`, `StartItemId`,
 `StartIndex`, and `Limit`. As in Jellyfin 12.1, an explicit `SeasonId` selects
