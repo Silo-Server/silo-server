@@ -48,9 +48,9 @@ func TestDemoModeAccountChanges(t *testing.T) {
 		{"end another session", http.MethodDelete, "/auth/sessions/s9", ""},
 		// A key enrolled before demo mode was turned on: revoking it ends
 		// every session it opened.
-		{"revoke device key", http.MethodDelete, "/auth/keys/devices/7", ""},
-		{"deny waiting device", http.MethodPost, "/auth/keys/pending/7/deny", "{}"},
-		{"revoke device pre-approval", http.MethodDelete, "/auth/device/preapprovals/7", ""},
+		{"revoke device key", http.MethodDelete, "/auth/keys/devices/0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", ""},
+		{"deny waiting device", http.MethodPost, "/auth/keys/pending/0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11/deny", "{}"},
+		{"revoke device pre-approval", http.MethodDelete, "/auth/device/preapprovals/6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c", ""},
 	}
 	headers := map[string]map[string]string{
 		"member": with(bearer(memberToken), "X-Profile-Id", "p-primary"),
