@@ -27,13 +27,15 @@ func (h *SignInLinkHandler) SignInLinkCapabilities(ctx context.Context) (signinl
 	return h.service.Capabilities(ctx)
 }
 
-// IssueSignInLink makes a sign-in link for an account. Who may make one is
-// who may set that account's password as an administrator: only the Owner
-// for another administrator, nobody but the Owner for the Owner, only the
-// Owner for an account of its own whose password sign-in is off, and never
-// a scoped API key for an administrator. The service applies the rules with
-// the accounts locked; this renders their refusals as an account update
-// does.
+// IssueSignInLink makes a sign-in link for an account. A scoped API key
+// never makes one: no scope names the route, so the scope gate refuses it
+// before this runs. Otherwise the rule is the one for setting that
+// account's password as an administrator: only the Owner for another
+// administrator, nobody but the Owner for the Owner, and only the Owner for
+// an account of its own whose password sign-in is off. The service applies
+// the rules with the accounts locked; this renders their refusals as an
+// account update does. The scoped-key branch below is a guard should a scope
+// ever name the route.
 func (h *SignInLinkHandler) IssueSignInLink(ctx context.Context, input signinlinks.IssueInput) (*signinlinks.IssueResult, error) {
 	input.ScopedKey = apimw.IsScopedAPIKey(ctx)
 	result, err := h.service.Issue(ctx, input)

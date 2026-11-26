@@ -37,9 +37,10 @@ var (
 	// unknown, used or expired, and one whose account is disabled: one
 	// answer for each, so a probe learns nothing.
 	ErrSignInLinkInvalid = errors.New("sign-in link unknown, used or expired")
-	// ErrSignInLinkNeedsProvider refuses a sign-in link while local password
-	// sign-in is off on the server: the link could only give the account a
-	// way in that skips the sign-in provider.
+	// ErrSignInLinkNeedsProvider refuses a sign-in link for an account that
+	// may not sign in with a local password on this server: the switch is
+	// off and the account is not break-glass (localPasswordSwitchAllows). The
+	// link could only give it a way in that skips the sign-in provider.
 	ErrSignInLinkNeedsProvider = errors.New("this server signs people in through its sign-in provider")
 	// ErrSignInLinkAccountChanged refuses a link to be emailed when the
 	// account's address changed since the caller read it.
@@ -122,8 +123,10 @@ func signInLinkPasswordInput() models.UpdateUserInput {
 }
 
 // CheckSignInLinkIssuer applies the rules for who may set the account's
-// password as an administrator (CheckOwnerUpdate on a password write, and a
-// scoped API key never on an administrator's account) to a sign-in link.
+// password as an administrator (CheckOwnerUpdate on a password write) to a
+// sign-in link. A scoped API key never reaches it: no scope names the route,
+// so the scope gate refuses every scoped key first. The scoped-key refusal
+// here is a guard should a scope ever name it.
 func CheckSignInLinkIssuer(actor OwnerActor, target *models.User, scopedKey bool) error {
 	if err := CheckOwnerUpdate(actor, target, signInLinkPasswordInput()); err != nil {
 		return err
@@ -139,8 +142,9 @@ func CheckSignInLinkIssuer(actor OwnerActor, target *models.User, scopedKey bool
 // the account are locked in id order before the settings lock, so an
 // ownership move or a promotion that commits first is judged here; the
 // Owner rules and the scoped-key rule are CheckSignInLinkIssuer's. A
-// disabled account is ErrUserDisabled and, while local password sign-in is
-// off, every account is ErrSignInLinkNeedsProvider.
+// disabled account is ErrUserDisabled, and an account that may not sign in
+// with a local password on this server (the switch is off and it is not
+// break-glass, the rule sign-in reads) is ErrSignInLinkNeedsProvider.
 func (a *AppKeySignIn) IssueSignInLink(ctx context.Context, in SignInLinkIssue) (IssuedSignInLink, error) {
 	token, hash, err := newAppCode()
 	if err != nil {
@@ -165,7 +169,7 @@ func (a *AppKeySignIn) IssueSignInLink(ctx context.Context, in SignInLinkIssue) 
 		if err := lockServerSettings(ctx, tx); err != nil {
 			return err
 		}
-		allowed, err := localPasswordLoginAllowed(ctx, tx)
+		allowed, err := localPasswordSwitchAllows(ctx, tx, target)
 		if err != nil {
 			return err
 		}
@@ -249,9 +253,9 @@ func lockSignInLinkAccounts(ctx context.Context, tx pgx.Tx, userID, issuerID int
 // when the link is redeemed, judged under its row lock in the transaction
 // that spends the link, gets the set-password token only: no app code and
 // no key. An unknown, used or expired link, and
-// one whose account is disabled, is ErrSignInLinkInvalid; while local
-// password sign-in is off it is ErrSignInLinkNeedsProvider and stays
-// unspent.
+// one whose account is disabled, is ErrSignInLinkInvalid; for an account
+// that may not sign in with a local password on this server it is
+// ErrSignInLinkNeedsProvider and stays unspent.
 func (a *AppKeySignIn) RedeemSignInLink(ctx context.Context, token string, keysOn bool) (SignInLinkRedemption, error) {
 	hash, ok := appCodeHash(token)
 	if !ok {
@@ -334,9 +338,10 @@ type spentSignInLink struct {
 
 // lockSignInLinkAccount locks the account a link or its set-password token
 // belongs to, then the settings, and answers the account as locked: a
-// disabled account's link is ErrSignInLinkInvalid, and while local password
-// sign-in is off the link is ErrSignInLinkNeedsProvider. Holding the
-// settings lock serializes the use with a change of
+// disabled account's link is ErrSignInLinkInvalid, and for an account that
+// may not sign in with a local password on this server (the switch is off
+// and it is not break-glass) the link is ErrSignInLinkNeedsProvider. Holding
+// the settings lock serializes the use with a change of
 // auth.local_password_login.
 func lockSignInLinkAccount(ctx context.Context, tx pgx.Tx, userID int) (*models.User, error) {
 	user, err := lockEnabledUser(ctx, tx, userID)
@@ -349,7 +354,7 @@ func lockSignInLinkAccount(ctx context.Context, tx pgx.Tx, userID int) (*models.
 	if err := lockServerSettings(ctx, tx); err != nil {
 		return nil, err
 	}
-	allowed, err := localPasswordLoginAllowed(ctx, tx)
+	allowed, err := localPasswordSwitchAllows(ctx, tx, user)
 	if err != nil {
 		return nil, err
 	}
@@ -431,12 +436,6 @@ func (a *AppKeySignIn) SetPasswordWithSignInLink(ctx context.Context, token, new
 	}
 	auditmutation.CommitMutation(ctx, audit)
 	return userID, nil
-}
-
-// LocalPasswordLoginAllowed reads the server-wide local password switch,
-// which a sign-in link needs.
-func (a *AppKeySignIn) LocalPasswordLoginAllowed(ctx context.Context) (bool, error) {
-	return localPasswordLoginAllowed(ctx, a.pool)
 }
 
 // redeemSignInLinkCode enrolls the keys of a sign-in link's app code on its

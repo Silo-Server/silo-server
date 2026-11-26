@@ -122,7 +122,7 @@ type AppKeyCapability struct {
 	Enroll            bool     `json:"enroll" doc:"Whether a signed-in account can enroll a person key and a device key" example:"true"`
 	AppCodes          bool     `json:"app_codes" doc:"Whether this server issues and redeems one-time app codes" example:"false"`
 	Grants            bool     `json:"grants" doc:"Whether another app can enroll its own key with a grant signed by the person key" example:"false"`
-	SignInLinks       bool     `json:"sign_in_links" doc:"Whether an administrator can make a single-use sign-in link now (createAdminUserSignInLink, redeemSignInLink): false while local password sign-in is off, where making one is refused, and while the server has no public URL to build it on" example:"true"`
+	SignInLinks       bool     `json:"sign_in_links" doc:"Whether an administrator can make single-use sign-in links on this server (createAdminUserSignInLink, redeemSignInLink): the server has a public URL to build them on. Whether one can be made for a given account is that account's: it must be allowed to sign in with a local password here (the server-wide switch on, or a break-glass account); otherwise the refusal is 409 provider_sign_in_required" example:"true"`
 	ProfileSet        bool     `json:"profile_set" doc:"Whether the account's profiles can be read and written as one versioned document" example:"false"`
 	SignatureSuites   []string `json:"signature_suites" doc:"Signature suites signed requests may use" example:"[\"ES256\"]"`
 	SealedReplySuites []string `json:"sealed_reply_suites" doc:"Suites a sealed reply may use" example:"[\"P256-HKDF-SHA256-AES256GCM\"]"`

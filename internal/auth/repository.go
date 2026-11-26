@@ -468,6 +468,14 @@ func updateUser(ctx context.Context, db interface {
 	if err != nil {
 		return err
 	}
+	// A changed address ends the account's sign-in links, which may have
+	// been emailed to the old one; compared as sign-in compares addresses.
+	emailChanging := false
+	if email != nil {
+		if err := db.QueryRow(ctx, `SELECT email IS DISTINCT FROM $2::citext FROM users WHERE id = $1`, id, *email).Scan(&emailChanging); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("reading the account's email: %w", err)
+		}
+	}
 	var permissions []string
 	if input.Permissions != nil {
 		normalized, err := NormalizePermissions(*input.Permissions)
@@ -583,9 +591,10 @@ func updateUser(ctx context.Context, db interface {
 			return err
 		}
 	}
-	// A password set by an administrator, or disabling the account, ends its
-	// sign-in links; re-enabling it never brings one back.
-	if input.Password != nil || (input.Enabled != nil && !*input.Enabled) {
+	// A password set by an administrator, a changed email address, or
+	// disabling the account ends its sign-in links; re-enabling it never
+	// brings one back.
+	if input.Password != nil || emailChanging || (input.Enabled != nil && !*input.Enabled) {
 		if err := EndSignInLinksTx(ctx, db, id); err != nil {
 			return err
 		}

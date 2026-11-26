@@ -75,10 +75,11 @@ func signInLinkSchema(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// Who may make a sign-in link, through the route: exactly who may set that
-// account's password as an administrator. Regression guard: a link lets its
-// holder in as surely as a new password, so a looser rule here would be a
-// quieter way into an account than the one that already exists.
+// Who may make a sign-in link, through the route: a scoped API key never
+// (no scope names the route); otherwise the rule for setting that account's
+// password as an administrator. Regression guard: a link lets its holder in
+// as surely as a new password, so a looser rule here would be a quieter way
+// into an account than the one that already exists.
 func TestCreateSignInLinkAuthorityDB(t *testing.T) {
 	pool := signInLinkSchema(t)
 	ctx := t.Context()
@@ -139,7 +140,10 @@ func TestCreateSignInLinkAuthorityDB(t *testing.T) {
 		{"an administrator for another administrator", adminToken, other, http.StatusForbidden, TypePermissionDenied},
 		{"an administrator for the Owner", adminToken, owner, http.StatusForbidden, TypePermissionDenied},
 		{"the Owner for themselves", ownerToken, owner, http.StatusCreated, ProblemType{}},
-		{"a scoped API key for an administrator", scoped.Key, other, http.StatusForbidden, TypePermissionDenied},
+		// No scope names the route, so the scope gate refuses any scoped key
+		// before the handler: a link is at least as strong as a password.
+		{"a scoped API key, refused by the scope gate, for an administrator", scoped.Key, other, http.StatusForbidden, TypePermissionDenied},
+		{"a scoped API key, refused by the scope gate, for an ordinary account", scoped.Key, member, http.StatusForbidden, TypePermissionDenied},
 		{"an administrator for themselves with their own password sign-in off", selfOffToken, selfOff, http.StatusForbidden, TypePermissionDenied},
 		{"an administrator for an ordinary account", adminToken, member, http.StatusCreated, ProblemType{}},
 		{"an administrator for an ordinary account its sign-in provider manages", adminToken, providerMember, http.StatusCreated, ProblemType{}},
@@ -151,11 +155,58 @@ func TestCreateSignInLinkAuthorityDB(t *testing.T) {
 			}
 			if tc.status != http.StatusCreated {
 				requireProblem(t, rec, tc.want)
+				if tc.as == scoped.Key && !strings.Contains(rec.Body.String(), "API key scopes do not permit this route") {
+					t.Fatalf("a scoped key's refusal is not the scope gate's: %s", rec.Body)
+				}
 				return
 			}
 			if !strings.HasPrefix(rec.Body.String(), `{"url":"https://silo.example.test/sign-in-link#`) {
 				t.Fatalf("answer %s: the link is not on the public URL", rec.Body)
 			}
 		})
+	}
+}
+
+// noPublicURL answers no server public URL.
+type noPublicURL struct{}
+
+func (noPublicURL) Get(context.Context, string) (string, error) { return "", nil }
+
+// A server with no public URL makes no link, as it makes no password reset
+// link: 409 capability_not_configured, and nothing is stored. Regression
+// guard: the link was built on the address the administrator's request
+// arrived on, which the person might not be able to open.
+func TestCreateSignInLinkNeedsPublicURLDB(t *testing.T) {
+	pool := signInLinkSchema(t)
+	ctx := t.Context()
+	users := auth.NewUserRepository(pool)
+	sessions := auth.NewSessionRepository(pool)
+	jwt := auth.NewJWTService("synthetic-sign-in-link-jwt-secret", time.Minute, time.Hour)
+	login := auth.NewService(auth.NewLocalProvider(users, sessions), jwt, sessions, users, nil, nil, nil)
+	deps := parityDeps(false)
+	deps.Auth = apimw.NewAuthMiddleware(jwt, sessions, auth.NewAPIKeyRepository(pool), users)
+	deps.SignInLinks = handlers.NewSignInLinkHandler(signinlinks.NewService(auth.NewAppKeySignIn(pool, login), users, nil, noPublicURL{}, nil))
+	router := NewHandler(deps)
+	const password = "a sign-in link test password"
+	admin, err := users.Create(ctx, models.CreateUserInput{Username: "admin", Email: "admin@example.test", Password: password, Role: models.RoleAdmin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, err := users.Create(ctx, models.CreateUserInput{Username: "member", Email: "member@example.test", Password: password, Role: models.RoleUser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair, _, err := login.Login(ctx, admin.Username, password, "test", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := do(t, router, http.MethodPost, fmt.Sprintf("%s/admin/users/%d/sign-in-links", Prefix, member.ID), `{}`, bearer(pair.AccessToken))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status %d, want 409: %s", rec.Code, rec.Body)
+	}
+	requireProblem(t, rec, TypeCapabilityNotConfigured)
+	var links int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM auth_sign_in_links`).Scan(&links); err != nil || links != 0 {
+		t.Fatalf("links stored = %d (%v), want none", links, err)
 	}
 }

@@ -296,6 +296,9 @@ type AdminUserView struct {
 	// BreakGlass is v2-only: the account keeps local password sign-in when
 	// the server turns it off.
 	BreakGlass bool `json:"-"`
+	// LocalPasswordAllowed is v2-only: the server lets the account sign in
+	// with a local password (the switch is on, or it is break-glass).
+	LocalPasswordAllowed bool `json:"-"`
 }
 
 // EffectivePolicyView is the resolved policy block on admin user responses.
@@ -541,11 +544,20 @@ func (h *AdminHandler) adminUserViews(ctx context.Context, users []*models.User)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve effective policy")
 	}
+	// The rule password sign-in reads, with the switch read once.
+	switchOn := true
+	if h.pool != nil {
+		if switchOn, err = auth.LocalPasswordLoginSwitch(ctx, h.pool); err != nil {
+			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to read the local password setting")
+		}
+	}
 	resp := make([]AdminUserView, 0, len(users))
 	userIDs := make([]int, 0, len(users))
 	for _, u := range users {
 		userIDs = append(userIDs, u.ID)
-		resp = append(resp, toAdminUserResponse(u, lookupGroupPolicy(policies, u)))
+		view := toAdminUserResponse(u, lookupGroupPolicy(policies, u))
+		view.LocalPasswordAllowed = auth.LocalPasswordAllowedFor(u, switchOn)
+		resp = append(resp, view)
 	}
 	lastActive, err := h.loadUserLastActiveAt(ctx, userIDs)
 	if err != nil {

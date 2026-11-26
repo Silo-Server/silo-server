@@ -393,7 +393,10 @@
 ./internal/auth TestIssueSignInLinkRejectsChangedEmailDB
 ./internal/auth TestSignInLinkCodeKeepsOwnKeyBindingDB
 ./internal/auth TestSignInLinkReplacementAuditDB
+./internal/auth TestSignInLinkLocalPasswordSwitchDB
+./internal/auth TestSignInLinkReplacementStartsUnboundDB
 ./internal/apiv2 TestCreateSignInLinkAuthorityDB
+./internal/apiv2 TestCreateSignInLinkNeedsPublicURLDB
 ./internal/auth TestIssueSessionAppCodeRefusalsDB
 ./internal/auth TestSessionKeyAccessDB
 ./internal/auth TestAdminUnlinkLocksIdentityBeforeKeysDB

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/appkeys"
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auditmutation/audittest"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -72,6 +74,11 @@ func TestEndingASignInLinkDB(t *testing.T) {
 		{"signing out every other session", func(t *testing.T, user *models.User, _ string) {
 			keep := env.loginSession(t, user, models.SessionOpenedPassword, nil)
 			inTx(t, func(tx pgx.Tx) error { return RevokeOtherSignInsInTransaction(ctx, tx, user.ID, keep.SessionID) })
+		}},
+		{"a change of the account's email address", func(t *testing.T, user *models.User, _ string) {
+			if err := users.Update(ctx, user.ID, models.UpdateUserInput{Email: new("moved-" + user.Email)}); err != nil {
+				t.Fatal(err)
+			}
 		}},
 		{"an administrator signing the account out everywhere", func(t *testing.T, user *models.User, _ string) {
 			if _, err := env.svc.sessions.RevokeAsAdmin(ctx, admin.ID, user.ID, nil); err != nil {
@@ -199,4 +206,116 @@ func TestSignInLinkReplacementAuditDB(t *testing.T) {
 		}
 	}
 	row.AssertNoSecrets(t, got.AppCode.Code, issued.Token)
+}
+
+// A link is allowed for an account exactly when it may sign in with a local
+// password on this server, by the rule password sign-in reads: the switch
+// on, or the account break-glass. With the switch off, a break-glass
+// administrator's link works the password route (no code, as for any
+// administrator) and the new password signs in; an ordinary account's or an
+// ordinary administrator's is refused at every step and stays unspent.
+// Regression guard: a link for a break-glass administrator was refused
+// though that account still signs in with a password.
+func TestSignInLinkLocalPasswordSwitchDB(t *testing.T) {
+	env := newKeyEnv(t, "signinlinkswitch")
+	ctx := t.Context()
+	off := func(t *testing.T) {
+		t.Helper()
+		env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "false")
+		t.Cleanup(func() {
+			if _, err := env.pool.Exec(context.Background(), `UPDATE server_settings SET value = 'true' WHERE key = $1`, config.AuthLocalPasswordLoginSettingKey); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+
+	t.Run("a break-glass administrator", func(t *testing.T) {
+		admin := env.localAccount(t, "linkswitch-glass", models.RoleAdmin)
+		env.exec(t, `UPDATE users SET break_glass = true WHERE id = $1`, admin.ID)
+		off(t)
+		issued, err := env.signIn.IssueSignInLink(ctx, SignInLinkIssue{UserID: admin.ID, IssuedBy: admin.ID, Delivery: "link"})
+		if err != nil {
+			t.Fatalf("make: %v", err)
+		}
+		got, err := env.signIn.RedeemSignInLink(ctx, issued.Token, true)
+		if err != nil || got.AppCode != nil || got.NoCode != NoCodeAdministrator || got.SetPasswordToken == "" {
+			t.Fatalf("redeem = %+v, %v", got, err)
+		}
+		if _, err := env.signIn.SetPasswordWithSignInLink(ctx, got.SetPasswordToken, "break glass chosen"); err != nil {
+			t.Fatalf("set-password: %v", err)
+		}
+		if _, user, err := env.svc.Login(ctx, admin.Username, "break glass chosen", "test", ""); err != nil || user.ID != admin.ID {
+			t.Fatalf("sign-in with the new password: %v", err)
+		}
+	})
+
+	for _, role := range []string{models.RoleUser, models.RoleAdmin} {
+		t.Run("an ordinary "+role, func(t *testing.T) {
+			user := env.localAccount(t, "linkswitch-"+role, role)
+			issued := env.issueLink(t, user)
+			off(t)
+			if _, err := env.signIn.IssueSignInLink(ctx, SignInLinkIssue{UserID: user.ID, IssuedBy: user.ID}); !errors.Is(err, ErrSignInLinkNeedsProvider) {
+				t.Fatalf("make: %v", err)
+			}
+			if _, err := env.signIn.RedeemSignInLink(ctx, issued.Token, true); !errors.Is(err, ErrSignInLinkNeedsProvider) {
+				t.Fatalf("redeem: %v", err)
+			}
+			var spent bool
+			if err := env.pool.QueryRow(ctx, `SELECT redeemed_at IS NOT NULL FROM auth_sign_in_links WHERE user_id = $1`, user.ID).Scan(&spent); err != nil || spent {
+				t.Fatalf("link spent = %v (%v), want unspent", spent, err)
+			}
+		})
+	}
+
+	t.Run("an ordinary account's set-password", func(t *testing.T) {
+		user := env.localAccount(t, "linkswitch-pw", models.RoleUser)
+		got := env.linkCode(t, user)
+		off(t)
+		if _, err := env.signIn.SetPasswordWithSignInLink(ctx, got.SetPasswordToken, "never accepted"); !errors.Is(err, ErrSignInLinkNeedsProvider) {
+			t.Fatalf("set-password: %v", err)
+		}
+	})
+}
+
+// A link's code that brings a different person key on an account whose own
+// person key is provider-bound: the new person key and the new device key
+// start unbound, and the old person key is revoked.
+func TestSignInLinkReplacementStartsUnboundDB(t *testing.T) {
+	env := newKeyEnv(t, "signinlinkunbound")
+	ctx := t.Context()
+	old, device := newTestKey(t), newTestKey(t)
+	claims := env.loginSession(t, env.user, models.SessionOpenedProvider, &env.identityID)
+	if _, err := env.signIn.Enroll(ctx, KeyEnrollRequest{
+		KeyRequest: env.request(t, message{purpose: appkeys.PurposeEnroll, signer: old, device: &device}),
+		PersonKey:  old.pub, Claims: claims,
+	}); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	oldRow, err := env.signIn.keys.LivePersonKey(ctx, env.user.ID)
+	if err != nil || !oldRow.ProviderBound {
+		t.Fatalf("old person key = %+v, %v; want provider-bound", oldRow, err)
+	}
+	issued, err := env.signIn.IssueSignInLink(ctx, SignInLinkIssue{UserID: env.user.ID, Delivery: "link"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := env.signIn.RedeemSignInLink(ctx, issued.Token, true)
+	if err != nil || got.AppCode == nil {
+		t.Fatalf("link redeem = %+v, %v", got, err)
+	}
+	person := newTestKey(t)
+	result, newDevice, err := env.redeemCode(t, person, got.AppCode.Code)
+	if err != nil || result.PersonKeyStatus != PersonKeyReplaced {
+		t.Fatalf("redeem = %+v, %v", result, err)
+	}
+	live, err := env.signIn.keys.LivePersonKey(ctx, env.user.ID)
+	if err != nil || live.KeyID != person.pub.KeyID() || live.ProviderBound || live.IdentityID != nil {
+		t.Fatalf("new person key = %+v, %v; want unbound", live, err)
+	}
+	if key := env.deviceKeyRow(t, newDevice); key.ProviderBound || key.IdentityID != nil {
+		t.Fatalf("new device key = %+v, want unbound", key)
+	}
+	if !env.personKeyRevoked(t, oldRow.ID) {
+		t.Fatal("the old person key is still live")
+	}
 }
