@@ -7780,7 +7780,7 @@ export interface paths {
     put?: never;
     /**
      * Trade a sign-in link for an app code and a set-password token.
-     * @description The sign-in link page calls this when the person presses Continue, never on load: the link works once. In one transaction the link is spent and an app code of its own kind is made for the account; of two redemptions exactly one succeeds. The code enrolls a person key and a device key at redeemAppCode, neither bound to a sign-in provider; the person key replaces a different one the account holds (person_key replaced in the sealed answer), which is revoked with the devices it introduced that wait for approval, while devices already enrolled keep their keys. For an account that is an administrator's at the moment of redeeming (judged under the account lock in the transaction that spends the link, so an account demoted since the link was made gets a code) the answer has only set_password_token and no_code_reason administrator, and no key is enrolled: the person sets a password, signs in on this server's site, and opens the app from there with createAppCode. While auth.app_key_sign_in is off, or the server is in demo mode, the answer has only set_password_token and no_code_reason app_keys_off. An unknown, used or expired link, and one whose account is disabled, is 404 not_found. While local password sign-in is off it is 409 provider_sign_in_required and the link stays unspent. Spends the per-address password_reset rate-limit budget. Audited as user.sign_in_link_redeemed. The response is no-store.
+     * @description The sign-in link page calls this when the person presses Continue, never on load: the link works once. The answer has one of two shapes: code, expires_in, server_address and link_allowed (false) together, with set_password_token when the account may set a password; or set_password_token and no_code_reason alone. In one transaction the link is spent and an app code of its own kind is made for the account; of two redemptions exactly one succeeds. The code enrolls a person key and a device key at redeemAppCode, neither bound to a sign-in provider; the person key replaces a different one the account holds (person_key replaced in the sealed answer), which is revoked with the devices it introduced that wait for approval, while devices already enrolled keep their keys. For an account that is an administrator's at the moment of redeeming (judged under the account lock in the transaction that spends the link, so an account demoted since the link was made gets a code) the answer has only set_password_token and no_code_reason administrator, and no key is enrolled: the person sets a password, signs in on this server's site, and opens the app from there with createAppCode. While auth.app_key_sign_in is off, or the server is in demo mode, the answer has only set_password_token and no_code_reason app_keys_off. An unknown, used or expired link, and one whose account is disabled, is 404 not_found. While local password sign-in is off it is 409 provider_sign_in_required and the link stays unspent. Spends the per-address password_reset rate-limit budget. Audited as user.sign_in_link_redeemed. The response is no-store.
      */
     post: operations["redeemSignInLink"];
     delete?: never;
@@ -15079,9 +15079,9 @@ export interface components {
       request_usage: boolean;
       /** @description Opaque revision of this document */
       revision: string;
-      /** @description Whether createAdminUserSignInLink can email the link: a mail server is configured */
+      /** @description Whether createAdminUserSignInLink can also email the link: sign_in_links, and a mail server is configured */
       sign_in_link_email: boolean;
-      /** @description Whether createAdminUserSignInLink can make a sign-in link */
+      /** @description Whether createAdminUserSignInLink can make a sign-in link now: the server's public URL is set and local password sign-in is on */
       sign_in_links: boolean;
       /**
        * @description Support and configuration state, not health
@@ -26133,7 +26133,7 @@ export interface components {
        */
       sign_in: boolean;
       /**
-       * @description Whether an administrator can send a single-use sign-in link (createAdminUserSignInLink, redeemSignInLink)
+       * @description Whether an administrator can make a single-use sign-in link now (createAdminUserSignInLink, redeemSignInLink): false while local password sign-in is off, where making one is refused, and while the server has no public URL to build it on
        * @example true
        */
       sign_in_links: boolean;
