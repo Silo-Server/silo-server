@@ -32,6 +32,7 @@ type reachDB struct {
 	suffix  string
 	users   map[int]*models.User
 	claims  map[string]*auth.Claims
+	deps    Dependencies
 	handler http.Handler
 }
 
@@ -64,6 +65,7 @@ func newReachDBIn(t *testing.T, demo bool) *reachDB {
 	deps := parityDeps(demo)
 	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{d.claims}, sessions, fakeAPIKeys{}, fakeUsers{d.users})
 	deps.Sessions = handlers.NewAuthHandler(svc, jwt, nil)
+	d.deps = deps
 	d.handler = newTestHandler(t, deps)
 	return d
 }

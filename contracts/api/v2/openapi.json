@@ -226986,7 +226986,7 @@
     },
     "/api/v2/profiles/{id}/verify-pin": {
       "post": {
-        "description": "Wrong PINs are counted per profile, Jellyfin password#PIN sign-ins included. Redis shares the count across server nodes; without Redis, each process counts its own attempts. Up to five attempts are allowed; the fifth wrong one locks the profile for five minutes, during which every check, even with the right PIN, is refused with 429 rate_limited and a Retry-After header giving the seconds left. A correct PIN while not locked clears the count, and an unlocked count expires five minutes after its first attempt. Each check affects the count and must not be automatically retried.",
+        "description": "Wrong PINs are counted per profile, Jellyfin password#PIN sign-ins included. Redis shares the count across server nodes; without Redis, each process counts its own attempts. Up to five attempts are allowed; the fifth wrong one locks the profile for five minutes, during which every check, even with the right PIN, is refused with 429 rate_limited and a Retry-After header giving the seconds left. A correct PIN while not locked clears the count, and an unlocked count expires five minutes after its first attempt. Each check affects the count and must not be automatically retried. A login session opened by another app the person allowed (its app key was enrolled through a grant) counts its attempts apart, per profile and app key, so signing in again with the same key does not reset them: three attempts, then one hour locked, answered with the same 429 rate_limited and Retry-After. Its attempts never count toward the profile's own count, so they cannot lock the profile for anyone else, but it is refused while that count is locked.",
         "operationId": "verifyProfilePIN",
         "parameters": [
           {
@@ -227181,7 +227181,7 @@
         "x-silo-origin-decisions": {
           "granted_app": {
             "verdict": "allowed",
-            "reason": "acting as a PIN-protected profile; a following change counts such a session's attempts separately"
+            "reason": "acting as a PIN-protected profile; its attempts count under its own allowance per profile and app key (GrantedAppPINPolicy) and never spend the household's"
           }
         },
         "x-silo-retry-safety": "non_retryable",
