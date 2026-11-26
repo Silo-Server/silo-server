@@ -121,3 +121,63 @@ func TestProcessWebhookPlayedInSameSecondAsUnplayedDB(t *testing.T) {
 		})
 	}
 }
+
+// A delivery whose body or parsed fields carry a NUL byte still gets its
+// delivery-log row. Postgres text and jsonb refuse 0x00, so the stored row
+// shows U+FFFD where the NUL was.
+func TestCreateEventLogKeepsDeliveriesWithNULBytesDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	cipher, err := secret.New([]byte("synthetic-webhook-sync-test-key-material"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(NewRepository(pool, cipher), historyimport.NewRepository(pool, cipher), pgstore.NewPostgresProvider(pool))
+
+	suffix := uuid.NewString()
+	var userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, "webhook-sync-nul-"+suffix).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, userID) })
+	connectionID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO webhook_sync_connections(id,user_id,provider,webhook_secret) VALUES($1,$2,$3,$4)`, connectionID, userID, ProviderJellyfin, suffix); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.CreateEventLog(ctx, WebhookEventLog{
+		ConnectionID: connectionID,
+		RequestID:    "req\x00id",
+		HTTPStatus:   400,
+		Outcome:      OutcomeRejected,
+		Summary:      "Rejected\x00delivery",
+		ErrorMessage: "invalid\x00payload",
+		BodyExcerpt:  "{\"a\":\"\x00\"",
+		Attrs:        map[string]any{"event_kind": "Odd\x00Type", "user\x00agent": "curl"},
+	}); err != nil {
+		t.Fatalf("create event log with NUL bytes: %v", err)
+	}
+
+	logs, _, err := svc.ListEventLogsPage(ctx, userID, connectionID, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("delivery log has %d rows, want 1", len(logs))
+	}
+	got := logs[0]
+	if got.RequestID != "req�id" || got.Summary != "Rejected�delivery" || got.ErrorMessage != "invalid�payload" || got.BodyExcerpt != "{\"a\":\"�\"" {
+		t.Errorf("stored text fields = %q, %q, %q, %q", got.RequestID, got.Summary, got.ErrorMessage, got.BodyExcerpt)
+	}
+	if got.Attrs["event_kind"] != "Odd�Type" || got.Attrs["user�agent"] != "curl" {
+		t.Errorf("stored attrs = %#v", got.Attrs)
+	}
+}
