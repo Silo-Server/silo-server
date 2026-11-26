@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { Link, useLocation } from "react-router";
 import { ChevronDown, HelpCircle, LogOut, Monitor, Smartphone, Tv } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { useT } from "@/i18n";
 import { loginSessionDevice, sessionActive, sessionLastSeen } from "@/lib/loginSessionDevice";
 import type { LoginSession } from "@/hooks/queries/loginSessions";
+import { deviceAnchor } from "@/components/appKeys/devicePaths";
 
 // Lets a button label wrap inside the card at narrow widths and large text sizes.
 const WRAPPING_BUTTON = "h-auto min-h-8 max-w-full py-1 text-start wrap-anywhere whitespace-normal";
@@ -21,6 +23,7 @@ export function LoginSessionRow({
   const t = useT();
   const [expanded, setExpanded] = useState(false);
   const detailsId = useId();
+  const location = useLocation();
   const device = loginSessionDevice(session);
   const Icon =
     device.kind === "tv"
@@ -61,6 +64,22 @@ export function LoginSessionRow({
               ),
             })}
           </p>
+          {session.device_key_id && (
+            // Signing this session out doesn't stop it: the link goes to the
+            // device in the Silo app devices list on the same page.
+            <p className="mt-1 text-xs">
+              <Link
+                to={{
+                  pathname: location.pathname,
+                  search: location.search,
+                  hash: deviceAnchor(session.device_key_id),
+                }}
+                className="text-muted-foreground hover:text-foreground underline underline-offset-4"
+              >
+                {t("web.settings.sessions.row.signsBackIn")}
+              </Link>
+            </p>
+          )}
         </div>
         <div className="ms-auto flex max-w-full min-w-0 flex-wrap items-center gap-1">
           {onSignOut && (

@@ -15,6 +15,8 @@ import {
   usePasswordPolicy,
 } from "@/hooks/queries/account";
 import { useT } from "@/i18n";
+import { SignsBackInNote } from "@/components/appKeys/SignsBackInNote";
+import { ownDevicesPath } from "@/components/appKeys/devicePaths";
 import {
   newPasswordPolicyProblem,
   newPasswordRuleHint,
@@ -183,6 +185,7 @@ export default function AccountSettings() {
                     className="text-muted-foreground text-xs"
                   >
                     {t("web.settings.account.password.signOutOthersDescription")}
+                    <SignsBackInNote to={ownDevicesPath()} />
                   </p>
                 </div>
               </div>

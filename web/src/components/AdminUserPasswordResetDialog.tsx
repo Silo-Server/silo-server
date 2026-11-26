@@ -3,6 +3,8 @@ import { ChoiceOption } from "@/components/ChoiceOption";
 import { ArrowRight, Copy } from "lucide-react";
 import { Link } from "react-router";
 import { toast } from "sonner";
+import { SignsBackInNote } from "@/components/appKeys/SignsBackInNote";
+import { adminDevicesPath } from "@/components/appKeys/devicePaths";
 import type { ProfileRequestContextSnapshot } from "@/api/client";
 import type { AdminUser } from "@/api/types";
 import { getAdminUser, type AdminPasswordReset } from "@/api/v2/adminUsers";
@@ -191,6 +193,7 @@ export function AdminUserPasswordResetDialog({
           </DialogTitle>
           <DialogDescription>
             {t("web.admin.users.passwordResetDialog.description")}
+            <SignsBackInNote to={adminDevicesPath(user.id)} onNavigate={onClose} />
           </DialogDescription>
         </DialogHeader>
 

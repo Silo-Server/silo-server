@@ -21,6 +21,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { loginSessionDevice } from "@/lib/loginSessionDevice";
 import { useT } from "@/i18n";
 import { LoginSessionRow } from "./LoginSessionRow";
+import { SignsBackInNote } from "@/components/appKeys/SignsBackInNote";
+import { adminDevicesPath, deviceAnchor, ownDevicesPath } from "@/components/appKeys/devicePaths";
 
 type Selection = { kind: "one"; session: LoginSession } | { kind: "all" };
 
@@ -48,6 +50,13 @@ export function LoginSessionsPanel({
   const others = sessions.filter((row) => !row.current);
   const adminRows =
     current && !sessions.some((row) => row.id === current.id) ? [current, ...sessions] : sessions;
+  const devicesPath = (anchor?: string) =>
+    adminUser ? adminDevicesPath(adminUser.id, anchor) : ownDevicesPath(anchor);
+  // Signing out everywhere, or one session a Silo app key opened, leaves the
+  // key: the device signs in again by itself.
+  const signsBackIn =
+    selection?.kind === "all" ||
+    (selection && !selection.session.current && selection.session.device_key_id);
 
   function open(next: Selection) {
     returnFocus.current =
@@ -241,6 +250,7 @@ export function LoginSessionsPanel({
                 </Link>
               ),
             })}
+        <SignsBackInNote to={devicesPath()} />
       </p>
       <AlertDialog
         open={Boolean(selection)}
@@ -288,6 +298,18 @@ export function LoginSessionsPanel({
                         username: adminUser.username,
                       })
                     : t("web.settings.sessions.confirm.clientDescription")}
+              {signsBackIn && (
+                <>
+                  <SignsBackInNote
+                    to={devicesPath(
+                      selection?.kind === "one" && selection.session.device_key_id
+                        ? deviceAnchor(selection.session.device_key_id)
+                        : undefined,
+                    )}
+                    onNavigate={() => setSelection(null)}
+                  />
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <p className="text-muted-foreground text-xs">{t("web.settings.sessions.confirm.note")}</p>

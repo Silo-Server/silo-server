@@ -18,6 +18,7 @@ import { v2ErrorText } from "@/api/v2/request";
 import { useAdminAppKeys, type AdminAppDeviceKey } from "@/hooks/queries/admin/appKeys";
 import { useAppKeyCapability } from "@/hooks/queries/appKeys";
 import { AppKeyRow, PreapprovalRow, type DevicePreapproval } from "@/components/appKeys/AppKeyRow";
+import { useScrollToDevice } from "@/components/appKeys/useScrollToDevice";
 import { formatDateTime } from "@/lib/datetime";
 import { TOUCH_TARGETS } from "@/lib/touchTargets";
 import { useT } from "@/i18n";
@@ -53,6 +54,8 @@ export function AdminAppKeysPanel({
     user.id,
   );
   const capability = useAppKeyCapability().data?.state;
+  // Links from signing out, a password reset or a session row land here.
+  useScrollToDevice(!keys.isPending);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [error, setError] = useState("");
   const heading = useRef<HTMLHeadingElement>(null);
