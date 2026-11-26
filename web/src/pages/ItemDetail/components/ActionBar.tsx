@@ -1380,7 +1380,7 @@ export default function ActionBar({
           past narrow viewports, clipping the whole info column. */}
       {hasStreamControls && (
         <div className="detail-stream-actions flex min-w-0 flex-wrap items-center gap-2">
-          {versions && hasMultipleVersions && selectedVersion && onSelectVersion && (
+          {versions && selectedVersion && onSelectVersion && (
             <VersionDropdown
               versions={versions}
               playbackVariants={playbackVariants}

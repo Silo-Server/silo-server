@@ -46,6 +46,10 @@ function VersionDropdown({
   );
 
   const showEditionDropdown = editionOptions.length > 1;
+  // A film's only edition has nothing to pick, but its name still tells the
+  // viewer which cut this is; an unnamed one says nothing worth showing.
+  const onlyNamedEdition =
+    editionOptions.length === 1 && editionOptions[0]?.id ? editionOptions[0] : null;
 
   const selectedEdition = resolveSelectedEditionOption(editionOptions, selectedVersion);
   const activeVersions = selectedEdition?.versions ?? sorted;
@@ -53,12 +57,25 @@ function VersionDropdown({
     selectedVersion ?? selectedEdition?.defaultVersion ?? activeVersions[0] ?? null;
   const showVersionDropdown = activeVersions.length > 1;
 
-  if (!showEditionDropdown && !showVersionDropdown) {
+  if (!showEditionDropdown && !onlyNamedEdition && !showVersionDropdown) {
     return null;
   }
 
   return (
     <>
+      {onlyNamedEdition ? (
+        <div className="glass-subtle text-foreground inline-flex h-8 max-w-full min-w-0 shrink items-center gap-1.5 rounded-full px-3 text-xs font-medium whitespace-nowrap">
+          <Layers3 className="size-3.5 shrink-0" />
+          {t("web.detail.versions.editionButton")}
+          <span
+            title={onlyNamedEdition.label}
+            className="text-muted-foreground max-w-44 truncate text-[0.6875rem] font-normal sm:max-w-64"
+          >
+            {onlyNamedEdition.label}
+          </span>
+        </div>
+      ) : null}
+
       {showEditionDropdown && selectedEdition ? (
         <DetailPopover
           open={editionOpen}
