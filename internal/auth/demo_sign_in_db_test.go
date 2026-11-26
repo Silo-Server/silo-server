@@ -244,45 +244,56 @@ func TestDemoSignInFailsClosedDB(t *testing.T) {
 	// read before.
 	for _, tc := range []struct {
 		name string
-		cold func(t *testing.T) *DemoSignIn
+		// cold returns the DemoSignIn and the settings reader it reads.
+		cold func(t *testing.T) (*DemoSignIn, *countedSettings)
 	}{
-		{"every settings read fails", func(t *testing.T) *DemoSignIn {
+		{"every settings read fails", func(t *testing.T) (*DemoSignIn, *countedSettings) {
 			// It read demo mode on and the account named, then the store
 			// failed.
 			failing := &countedSettings{store: poolSettings{env}}
 			cold := NewDemoSignIn(f.users, failing)
 			cold.Refresh(t.Context())
 			failing.fail.Store(true)
-			return cold
+			return cold, failing
 		}},
-		{"the settings unreadable with no earlier value", func(*testing.T) *DemoSignIn {
+		{"the settings unreadable with no earlier value", func(*testing.T) (*DemoSignIn, *countedSettings) {
 			// A process that has never read the settings, holding the names
 			// another refresh found.
 			unread := &countedSettings{store: poolSettings{env}}
 			unread.fail.Store(true)
-			return NewDemoSignIn(f.users, unread)
+			return NewDemoSignIn(f.users, unread), unread
 		}},
-		{"only the account read fails", func(t *testing.T) *DemoSignIn {
+		{"only the account read fails", func(t *testing.T) (*DemoSignIn, *countedSettings) {
 			closed, err := pgxpool.New(ctx, os.Getenv("SILO_TEST_DATABASE_URL"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			closed.Close()
-			return NewDemoSignIn(NewUserRepository(closed), f.settings)
+			return NewDemoSignIn(NewUserRepository(closed), f.settings), f.settings
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			visitor := env.localAccount(t, "demo-"+strings.ReplaceAll(tc.name, " ", "-"), models.RoleUser)
 			f.name(t, demomode.OnValue, demoID(visitor))
-			cold := tc.cold(t)
-			if known := cold.keys.Load(); known == nil || len(*known) == 0 {
-				cold.keys.Store(f.demo.keys.Load())
+			cold, reader := tc.cold(t)
+			candidates := cold.keys.Load()
+			if candidates == nil || len(*candidates) == 0 {
+				candidates = f.demo.keys.Load()
 			}
 			for _, l := range f.listeners {
 				f.reset()
-				signIn := func(name, password string) error { return l.signIn(cold, name, password) }
+				// A failed read clears the names, so they are put back before
+				// every attempt: each one reaches the failed read.
+				signIn := func(name, password string) error {
+					cold.keys.Store(candidates)
+					return l.signIn(cold, name, password)
+				}
+				before := reader.reads.Load()
 				if throttled, err := throttledAfterFailure(t, signIn, visitor.Username); !throttled {
 					t.Fatalf("%s: %v, want the per-name budget's refusal", l.name, err)
+				}
+				if reader.reads.Load() == before {
+					t.Fatalf("%s: no attempt reached the demo settings read", l.name)
 				}
 			}
 			// The same names with working reads are exempt, so the refusal
@@ -330,6 +341,50 @@ func TestDemoSignInFailsClosedDB(t *testing.T) {
 			t.Fatalf("%v, want the per-name budget's refusal", err)
 		}
 	})
+}
+
+// TestDemoSignInCanceledAttemptDB: an attempt whose request ends while it
+// reads the demo settings is not exempted and leaves the names every other
+// attempt relies on in place, while a read that fails for another reason
+// clears them. Catches a visitor who drops the connection mid-sign-in
+// switching the exemption off for everyone.
+func TestDemoSignInCanceledAttemptDB(t *testing.T) {
+	f := newDemoSignInFixture(t)
+	ctx := t.Context()
+	visitor := f.env.localAccount(t, "demo-canceled", models.RoleUser)
+	f.name(t, demomode.OnValue, demoID(visitor))
+	spend := f.newSvc(f.demo).newSignInSpend(ctx, visitor.Username, "")
+	if !spend.folded {
+		t.Fatal("the name was not folded by the database")
+	}
+	held := func(d *DemoSignIn) bool {
+		known := d.keys.Load()
+		return known != nil && slices.Contains(*known, spend.key)
+	}
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if f.demo.exempts(canceled, spend, "") {
+		t.Fatal("an attempt whose request ended was exempted")
+	}
+	if !held(f.demo) {
+		t.Fatal("an attempt whose request ended cleared the demo account's names")
+	}
+	for _, l := range f.listeners {
+		f.reset()
+		signIn := func(name, password string) error { return l.signIn(f.demo, name, password) }
+		if _, err := throttledAfterFailure(t, signIn, visitor.Username); err != nil {
+			t.Fatalf("%s after a canceled attempt: %v, want a sign-in", l.name, err)
+		}
+	}
+
+	failing := &countedSettings{store: poolSettings{f.env}}
+	cold := NewDemoSignIn(f.users, failing)
+	cold.Refresh(ctx)
+	failing.fail.Store(true)
+	if cold.exempts(ctx, spend, "") || held(cold) {
+		t.Fatal("a read that failed with the request still live kept the names")
+	}
 }
 
 // TestDemoSignInGuardsDB: each guard that keeps the exemption to the demo

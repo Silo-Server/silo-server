@@ -329,6 +329,7 @@
 ./internal/auth TestExternalSignInDemoModeDB
 ./internal/auth TestDemoSignInNameBudgetDB
 ./internal/auth TestDemoSignInFailsClosedDB
+./internal/auth TestDemoSignInCanceledAttemptDB
 ./internal/auth TestDemoSignInGuardsDB
 ./internal/auth TestCheckDemoAccountSettingDB
 ./internal/auth TestExternalAccountCannotPreemptInitialSetupDB
