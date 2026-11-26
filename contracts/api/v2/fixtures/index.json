@@ -5158,6 +5158,27 @@
       "body_file": "create_admin_user_identity_ok.json"
     },
     {
+      "name": "create_admin_user_sign_in_link_ok",
+      "operation_id": "createAdminUserSignInLink",
+      "scenario": "An administrator makes a sign-in link for a person who lost every device, to copy and send themselves.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/users/2/sign-in-links",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"send_email\":false}"
+      },
+      "expected_status": 201,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminSignInLink",
+      "body_file": "create_admin_user_sign_in_link_ok.json"
+    },
+    {
       "name": "create_app_code_ok",
       "operation_id": "createAppCode",
       "scenario": "Open in Silo from a signed-in browser acting as the household's main profile.",
@@ -7130,7 +7151,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"686475112d924935f7eb5684de280110b3f1b178a65b4f2ffbbe6fac3ca4d033\""
+        "ETag": "\"e2e01de15cdba2013d76201b10bd996441f7cf79d72118a646f55f8be3f3c6db\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AppKeyCapability",
@@ -14856,6 +14877,60 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "redeem_app_key_grant_invalid.json"
+    },
+    {
+      "name": "redeem_sign_in_link_keys_off",
+      "operation_id": "redeemSignInLink",
+      "scenario": "The same while the server has app key sign-in off: only the set-password token.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/sign-in-links/redeem",
+        "body": "{\"token\":\"keys-off-token\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/SignInLinkRedeemed",
+      "body_file": "redeem_sign_in_link_keys_off.json"
+    },
+    {
+      "name": "redeem_sign_in_link_not_found",
+      "operation_id": "redeemSignInLink",
+      "scenario": "A link that is unknown, used or expired: the page asks the person to get a new one from the server's owner.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/sign-in-links/redeem",
+        "body": "{\"token\":\"used-token\"}"
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "redeem_sign_in_link_not_found.json"
+    },
+    {
+      "name": "redeem_sign_in_link_ok",
+      "operation_id": "redeemSignInLink",
+      "scenario": "The link page, after Continue: an app code to type into the Silo app, never put in a link, and a set-password token.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/sign-in-links/redeem",
+        "body": "{\"token\":\"link-token\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/SignInLinkRedeemed",
+      "body_file": "redeem_sign_in_link_ok.json"
     },
     {
       "name": "refresh_catalog_item_trailers_ok",

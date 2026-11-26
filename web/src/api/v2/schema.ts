@@ -6719,6 +6719,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/users/{user_id}/sign-in-links": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Make a single-use sign-in link for an account, for a person who lost every device.
+     * @description Answers the link to give the person, and emails it to the account's address with send_email. The link's page trades it once for an app code the Silo app redeems (redeemSignInLink) and, while local password sign-in is on, a token that sets a password. A new link replaces the account's earlier links. Who may make one is who may set that account's password as an administrator (updateAdminUser with password): any administrator for an ordinary account, only the server Owner for another administrator or the Owner, only the Owner for an account of their own whose password sign-in is off, and never a scoped API key for an administrator (403 permission_denied). A disabled account is 409 conflict. With send_email, an account with no email address is 409 conflict and a server without mail 409 capability_not_configured, before any link is made. While local password sign-in is off the answer is 409 provider_sign_in_required: the person signs in with the provider on the server's site and uses createAppCode instead. Keys a link's code enrolls start active, also on an administrator's account. Audited as user.sign_in_link_created with the delivery and expiry, never the token. The response is no-store.
+     */
+    post: operations["createAdminUserSignInLink"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/users/capabilities": {
     parameters: {
       query?: never;
@@ -7743,6 +7763,46 @@ export interface paths {
     put?: never;
     /** Create the first administrator account and open its session. */
     post: operations["setupServer"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/sign-in-links/redeem": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Trade a sign-in link for an app code and a set-password token.
+     * @description The sign-in link page calls this when the person presses Continue, never on load: the link works once. In one transaction the link is spent and an app code of its own kind is made for the account; of two redemptions exactly one succeeds. The code enrolls a person key and a device key at redeemAppCode, neither bound to a sign-in provider; the person key replaces a different one the account holds (person_key replaced in the sealed answer), which is revoked with the devices it introduced that wait for approval, while devices already enrolled keep their keys. While auth.app_key_sign_in is off, or the server is in demo mode, the answer has only set_password_token. An unknown, used or expired link, and one whose account is disabled, is 404 not_found. While local password sign-in is off it is 409 provider_sign_in_required and the link stays unspent. Spends the per-address password_reset rate-limit budget. Audited as user.sign_in_link_redeemed. The response is no-store.
+     */
+    post: operations["redeemSignInLink"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/sign-in-links/set-password": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Set the account's password with a redeemed sign-in link's token.
+     * @description The password passes the rules a password reset's completion checks (422 at body.new_password, and the token is not spent). It sets the password, turns the account's local password sign-in on, and signs the account out everywhere as a password reset does; its app keys stay, and devices signed in with them sign back in. It signs nobody in: sign in with the new password next. An unknown, used or expired token is 404 not_found; while local password sign-in is off, 409 provider_sign_in_required. Spends the per-address password_reset rate-limit budget. Audited as user.sign_in_link_password_set. Answers 204.
+     */
+    post: operations["setSignInLinkPassword"];
     delete?: never;
     options?: never;
     head?: never;
@@ -15019,6 +15079,10 @@ export interface components {
       request_usage: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      /** @description Whether createAdminUserSignInLink can email the link: a mail server is configured */
+      sign_in_link_email: boolean;
+      /** @description Whether createAdminUserSignInLink can make a sign-in link */
+      sign_in_links: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -24308,6 +24372,32 @@ export interface components {
       restart_required?: boolean;
       value: string;
     };
+    AdminSignInLink: {
+      /**
+       * @description With send_email: sent, or failed_or_unknown when the mail server did not confirm delivery (the link is live; send it another way). Without: not_requested
+       * @example not_requested
+       * @enum {string}
+       */
+      delivery_status: "sent" | "failed_or_unknown" | "not_requested";
+      /**
+       * Format: date-time
+       * @description When the link stops working, 24 hours after it was made
+       */
+      expires_at: string;
+      /**
+       * Format: uri
+       * @description The link: the server address, /sign-in-link, and the token in the fragment, which browsers never send to the server. A bearer credential for the account until it is redeemed or expires; give it only to the person
+       * @example https://media.example.com/sign-in-link#8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA
+       */
+      url: string;
+    };
+    AdminSignInLinkInputBody: {
+      /**
+       * @description Also email the link to the account's address. The link is returned either way
+       * @example false
+       */
+      send_email?: boolean;
+    };
     AdminSplitAmbiguousHistory: {
       profile_id: string;
       /**
@@ -26043,8 +26133,8 @@ export interface components {
        */
       sign_in: boolean;
       /**
-       * @description Whether an administrator can send a single-use sign-in link
-       * @example false
+       * @description Whether an administrator can send a single-use sign-in link (createAdminUserSignInLink, redeemSignInLink)
+       * @example true
        */
       sign_in_links: boolean;
       /**
@@ -38470,6 +38560,47 @@ export interface components {
       id: string;
       /** @enum {string} */
       kind: "library" | "series" | "season" | "library_collection" | "user_collection";
+    };
+    SignInLinkRedeemed: {
+      /**
+       * @description An app code for the account, for the Silo app to redeem (redeemAppCode). A session code: it signs the Silo app in to an existing account, so it is never put in a link. Absent while auth.app_key_sign_in is off
+       * @example 8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA
+       */
+      code?: string;
+      /**
+       * Format: int64
+       * @description Seconds the code stays good. Present with code
+       * @example 600
+       */
+      expires_in?: number;
+      /**
+       * @description Present with code, and always false: show the server address and the code as text to type in the app, and never build a link or anything a device could open from them
+       * @example false
+       */
+      link_allowed?: boolean;
+      /**
+       * @description The server address the app connects to, as createAppCode answers it. Present with code
+       * @example https://media.example.com
+       */
+      server_address?: string;
+      /**
+       * @description For setSignInLinkPassword, when the account may set a password: local password sign-in is on for this server. Lives an hour, never past the link's own expiry, and works once
+       * @example Zt1Wq3m0sP2Kc8vY5dQhX7nB4rJ6eL9aF0uG2iT1oMw
+       */
+      set_password_token?: string;
+    };
+    SignInLinkRedeemInputBody: {
+      /** @description The token from the sign-in link's fragment */
+      token: string;
+    };
+    SignInLinkSetPasswordInputBody: {
+      /**
+       * @description The new password
+       * @example margin fossil quench hollow
+       */
+      new_password: string;
+      /** @description set_password_token from redeemSignInLink */
+      token: string;
     };
     SignupInputBody: {
       /**
@@ -101302,6 +101433,155 @@ export interface operations {
       };
     };
   };
+  createAdminUserSignInLink: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminSignInLinkInputBody"];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminSignInLink"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getAdminAccountCapabilities: {
     parameters: {
       query?: never;
@@ -107556,6 +107836,250 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  redeemSignInLink: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SignInLinkRedeemInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SignInLinkRedeemed"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  setSignInLinkPassword: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SignInLinkSetPasswordInputBody"];
+      };
+    };
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };
