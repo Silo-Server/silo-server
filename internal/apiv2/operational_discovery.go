@@ -56,7 +56,7 @@ type ImageCapabilitiesOutput struct {
 }
 
 func registerOperationalDiscovery(reg *Registry) {
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/compat/connect-info", "getCompatConnectInfo", "compat", "Connection information for compatibility clients."), Class: ClassAuthenticated, ServiceBacked: true},
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/compat/connect-info", "getCompatConnectInfo", "compat", "Connection information for compatibility clients."), Class: ClassAuthenticated, ServiceBacked: true, Origins: grantedRefusedAccountSetup},
 		func(ctx context.Context, _ *struct{}) (*CompatConnectInfoOutput, error) {
 			if reg.deps.CompatConnectInfo == nil {
 				return nil, NewProblem(TypeDependencyUnavailable, "Compatibility connection information is not configured.")
@@ -64,7 +64,7 @@ func registerOperationalDiscovery(reg *Registry) {
 			v := reg.deps.CompatConnectInfo.GetConnectInfo(ctx)
 			return &CompatConnectInfoOutput{Body: CompatConnectInfoResponse{Jellyfin: v.Jellyfin, Account: CompatConnectAccountInfo(v.Account)}}, nil
 		})
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/images/capabilities", "getImageCapabilities", "images", "Available image sizes and their pixel widths."), Class: ClassProfileScoped, ProfileOptional: true},
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/images/capabilities", "getImageCapabilities", "images", "Available image sizes and their pixel widths."), Class: ClassProfileScoped, ProfileOptional: true, Origins: grantedCapability},
 		func(context.Context, *CapabilityInput) (*ImageCapabilitiesOutput, error) {
 			view := handlers.GetImagesCapability(reg.deps.ArtworkBackend)
 			widths := make(map[string]ImageSizeWidths, len(view.Widths))

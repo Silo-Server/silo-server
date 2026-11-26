@@ -52,7 +52,7 @@ type WatchTogetherPickerOutput struct {
 func registerWatchTogetherPicker(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodGet, Prefix+"/watch-together/rooms/{room_id}/picker", "getWatchTogetherRoomPicker", "realtime", "Read the rows the room picker leads with: what connected members are watching together and the union of their watchlists, resolved to cards the caller may see. Connected members across API servers are included."), Class: ClassProfileScoped, ServiceBacked: true}
 	op.Errors = []int{409}
-	Register(reg, op, func(ctx context.Context, in *WatchTogetherPickerInput) (*WatchTogetherPickerOutput, error) {
+	Register(reg, withOrigins(op, grantedRoomMember), func(ctx context.Context, in *WatchTogetherPickerInput) (*WatchTogetherPickerOutput, error) {
 		svc := reg.deps.WatchTogetherPicker
 		if svc == nil {
 			return nil, unavailable("watch together")

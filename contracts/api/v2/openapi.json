@@ -66136,6 +66136,12 @@
           "account"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the account's sign-in, credential and plugin setup is not a player's"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -66289,6 +66295,12 @@
         ],
         "x-silo-class": "authenticated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -66467,6 +66479,12 @@
         ],
         "x-silo-class": "authenticated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -66645,6 +66663,12 @@
         ],
         "x-silo-class": "authenticated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -66824,6 +66848,12 @@
         ],
         "x-silo-class": "authenticated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -66995,6 +67025,12 @@
         ],
         "x-silo-class": "authenticated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -67157,6 +67193,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -67256,6 +67298,12 @@
           "account"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "who it is; the account's email is left out for such a session"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -67442,6 +67490,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes the account"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -67641,8 +67695,17 @@
         "tags": [
           "account"
         ],
+        "x-silo-capability-for": [
+          "changePassword"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -102457,6 +102520,12 @@
         ],
         "x-silo-class": "permission_gated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: catalog edits under a delegated permission"
+          }
+        },
         "x-silo-permission": "metadata_curation",
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
@@ -102625,6 +102694,12 @@
           "admin-catalog"
         ],
         "x-silo-class": "permission_gated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: catalog edits under a delegated permission"
+          }
+        },
         "x-silo-permission": "metadata_curation",
         "x-silo-service-backed": true
       }
@@ -102819,6 +102894,12 @@
         ],
         "x-silo-class": "permission_gated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: catalog edits under a delegated permission"
+          }
+        },
         "x-silo-permission": "metadata_curation",
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
@@ -103207,6 +103288,12 @@
         ],
         "x-silo-class": "permission_gated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: catalog edits under a delegated permission"
+          }
+        },
         "x-silo-permission": "metadata_curation",
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
@@ -103409,6 +103496,12 @@
         ],
         "x-silo-class": "permission_gated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: catalog edits under a delegated permission"
+          }
+        },
         "x-silo-permission": "metadata_curation",
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
@@ -103563,6 +103656,12 @@
           "admin-catalog"
         ],
         "x-silo-class": "permission_gated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: catalog edits under a delegated permission"
+          }
+        },
         "x-silo-permission": "metadata_curation",
         "x-silo-service-backed": true
       }
@@ -103724,6 +103823,12 @@
         ],
         "x-silo-class": "permission_gated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: catalog edits under a delegated permission"
+          }
+        },
         "x-silo-permission": "metadata_curation",
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
@@ -104463,6 +104568,12 @@
         ],
         "x-silo-class": "permission_gated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: catalog edits under a delegated permission"
+          }
+        },
         "x-silo-permission": "metadata_curation",
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
@@ -106239,6 +106350,12 @@
           "admin-tasks"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: library and administration jobs are not a player's"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -154643,6 +154760,12 @@
           "api-keys"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-service-backed": true
       },
       "post": {
@@ -154835,6 +154958,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -154872,6 +155001,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "406": {
             "content": {
@@ -154934,6 +155073,12 @@
           "api-keys"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the account's sign-in, credential and plugin setup is not a player's"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -155086,6 +155231,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -155400,6 +155551,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a player's own state for the profile it acts as"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -155556,6 +155713,12 @@
           "preferences"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading settings and preferences"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -155745,6 +155908,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a player's own state for the profile it acts as"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -155955,6 +156124,12 @@
           "app-keys"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -156497,6 +156672,12 @@
           "device-login"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
@@ -156702,6 +156883,12 @@
           "device-login"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
@@ -157138,6 +157325,12 @@
           "device-login"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the account's sign-in, credential and plugin setup is not a player's"
+          }
+        },
         "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
@@ -157432,6 +157625,12 @@
           "device-login"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -157562,6 +157761,12 @@
         ],
         "x-silo-class": "authenticated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -157757,6 +157962,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -158336,6 +158547,12 @@
           "auth"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: such a session is never a View as user session"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -158446,6 +158663,12 @@
           "app-keys"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -158860,6 +159083,13 @@
         ],
         "x-silo-class": "authenticated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "its own session and its own key",
+            "check": "RevokeOwnDeviceKey: only the device key that opened the session"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -159107,6 +159337,12 @@
           "app-keys"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -159427,6 +159663,12 @@
           "app-keys"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -159627,6 +159869,12 @@
           "app-keys"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -159797,6 +160045,12 @@
         ],
         "x-silo-class": "authenticated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -159991,6 +160245,12 @@
           "app-keys"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes how the account signs in, or reads or hands out its other credentials"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -160142,6 +160402,12 @@
           "app-keys"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "its own session and its own key"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -160646,6 +160912,12 @@
           "auth"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "its own session and its own key"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -161929,6 +162201,12 @@
           "auth"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the account's sign-in, credential and plugin setup is not a player's"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -162029,6 +162307,12 @@
           "auth"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "its own session and its own key"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -162296,6 +162580,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "406": {
             "content": {
               "application/problem+json": {
@@ -162357,6 +162651,13 @@
           "auth"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "its own session and its own key",
+            "check": "SessionLimitedToItself: every other session's item is redacted to its id"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -162513,8 +162814,18 @@
         "tags": [
           "auth"
         ],
+        "x-silo-capability-for": [
+          "listSessions",
+          "deleteSession"
+        ],
         "x-silo-class": "authenticated",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -162643,6 +162954,13 @@
           "auth"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "its own session and its own key",
+            "check": "SessionLimitedToItself in deleteSession: only the login session making the request"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -163881,6 +164199,12 @@
           "home"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading home"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -164080,8 +164404,21 @@
         "tags": [
           "downloads"
         ],
+        "x-silo-capability-for": [
+          "createDownloads",
+          "listDownloads",
+          "createDirectDownloadLink",
+          "getDirectDownload",
+          "createDownloadSubscription"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -164281,8 +164618,19 @@
         "tags": [
           "ebooks"
         ],
+        "x-silo-capability-for": [
+          "readEbookFile",
+          "saveEbookProgress",
+          "createEbookAnnotation"
+        ],
         "x-silo-class": "profile_scoped",
-        "x-silo-conditional": true
+        "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        }
       }
     },
     "/api/v2/capabilities/metadata-ai": {
@@ -164481,8 +164829,17 @@
         "tags": [
           "catalog"
         ],
+        "x-silo-capability-for": [
+          "translateCatalogItemDescription"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -164682,8 +165039,18 @@
         "tags": [
           "not-interested"
         ],
+        "x-silo-capability-for": [
+          "markNotInterested",
+          "listNotInterested"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -165016,8 +165383,18 @@
         "tags": [
           "favorites"
         ],
+        "x-silo-capability-for": [
+          "addFavorite",
+          "addToWatchlist"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -165217,8 +165594,18 @@
         "tags": [
           "profiles"
         ],
+        "x-silo-capability-for": [
+          "exportProfile",
+          "importProfile"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -165418,8 +165805,17 @@
         "tags": [
           "catalog"
         ],
+        "x-silo-capability-for": [
+          "setRating"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -165619,8 +166015,21 @@
         "tags": [
           "profiles"
         ],
+        "x-silo-capability-for": [
+          "allowTitle",
+          "disallowTitle",
+          "allowCollectionTitles",
+          "listTitleAllowanceProfiles",
+          "listAllowedTitles"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -165820,8 +166229,17 @@
         "tags": [
           "catalog"
         ],
+        "x-silo-capability-for": [
+          "refreshCatalogItemTrailers"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -166376,6 +166794,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -166722,6 +167146,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -166909,6 +167339,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -167180,6 +167616,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -167447,6 +167889,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -167766,6 +168214,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -168062,6 +168516,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -168331,6 +168791,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -168600,6 +169066,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -168883,6 +169355,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -169166,6 +169644,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -169945,6 +170429,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "starting playback and playing its own streams"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -170103,6 +170593,12 @@
           "profiles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: it is about the account's other profiles"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -170279,6 +170775,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: refreshing the shared catalog"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -170486,6 +170988,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: writes shared catalog data"
+          }
+        },
         "x-silo-retry-safety": "coalescing",
         "x-silo-service-backed": true
       }
@@ -170783,6 +171291,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -170976,6 +171490,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -171165,6 +171685,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -171333,6 +171859,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog; reading a person can queue that person's metadata refresh when one is due"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -171490,6 +172022,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: refreshing the shared catalog"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -171783,6 +172321,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -171993,8 +172537,18 @@
         "tags": [
           "catalog"
         ],
+        "x-silo-capability-for": [
+          "queryCatalogItems",
+          "listCatalogItems"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -172275,6 +172829,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -172559,6 +173119,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -172843,6 +173409,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -173042,8 +173614,17 @@
         "tags": [
           "catalog"
         ],
+        "x-silo-capability-for": [
+          "createThemeSongPlayback"
+        ],
         "x-silo-class": "profile_scoped",
-        "x-silo-conditional": true
+        "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        }
       }
     },
     "/api/v2/catalog/works/{work_id}": {
@@ -173199,6 +173780,12 @@
           "catalog"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -173355,6 +173942,12 @@
           "collections"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading collections"
+          }
+        },
         "x-silo-service-backed": true
       },
       "post": {
@@ -173555,6 +174148,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -173755,8 +174354,19 @@
         "tags": [
           "collections"
         ],
+        "x-silo-capability-for": [
+          "listCollections",
+          "getCollection",
+          "createCollection"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -173959,6 +174569,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -174120,6 +174736,12 @@
           "collections"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading collections"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -174366,6 +174988,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -174574,6 +175202,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
@@ -174761,6 +175395,12 @@
           "collections"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading collections"
+          }
+        },
         "x-silo-service-backed": true
       },
       "patch": {
@@ -175021,6 +175661,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -175214,6 +175860,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: importing collections, which keep syncing"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -175373,6 +176025,12 @@
           "collections"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading collections"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -175516,6 +176174,12 @@
           "collections"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading collections"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -175708,6 +176372,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: importing collections, which keep syncing"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -175901,6 +176571,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: importing collections, which keep syncing"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -176062,6 +176738,12 @@
           "collections"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading collections"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -176298,6 +176980,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -176483,6 +177171,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading collections"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -176627,6 +177321,12 @@
           "collections"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading collections"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -176793,6 +177493,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
@@ -176976,6 +177682,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -177120,6 +177832,12 @@
           "collections"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading collections"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -177317,6 +178035,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
@@ -177494,6 +178218,12 @@
           "collections"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading collections"
+          }
+        },
         "x-silo-service-backed": true
       },
       "patch": {
@@ -177754,6 +178484,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -177918,6 +178654,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -178101,6 +178843,12 @@
           "collections"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading collections"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -178279,6 +179027,12 @@
           "collections"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading collections"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -178529,6 +179283,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -178695,6 +179455,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
@@ -178899,6 +179665,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -179113,6 +179885,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -179286,6 +180064,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -179323,6 +180107,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "406": {
             "content": {
@@ -179385,6 +180179,12 @@
           "compat"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the account's sign-in, credential and plugin setup is not a player's"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -179574,6 +180374,12 @@
           "devices"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -179792,6 +180598,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "reaches the person's other devices"
+          }
+        },
         "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
@@ -179992,8 +180804,18 @@
         "tags": [
           "notifications"
         ],
+        "x-silo-capability-for": [
+          "registerApplePushDevice",
+          "resetApplePushInstallation"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -180191,6 +181013,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "reaches the person's other devices"
+          }
+        },
         "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
@@ -180521,6 +181349,12 @@
           "devices"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
@@ -180735,6 +181569,12 @@
           "devices"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -180896,6 +181736,12 @@
           "devices"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -181063,8 +181909,21 @@
         "tags": [
           "diagnostics"
         ],
+        "x-silo-capability-for": [
+          "uploadDiagnosticsReport",
+          "createDiagnosticsUpload",
+          "putDiagnosticsUploadChunk",
+          "completeDiagnosticsUpload",
+          "abortDiagnosticsUpload"
+        ],
         "x-silo-class": "authenticated",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -181259,6 +182118,12 @@
         ],
         "x-silo-class": "authenticated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: a diagnostics upload spends a per-account quota"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -181435,6 +182300,12 @@
         ],
         "x-silo-class": "authenticated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: a diagnostics upload spends a per-account quota"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -181558,6 +182429,12 @@
         ],
         "x-silo-class": "authenticated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: a diagnostics upload spends a per-account quota"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -181750,6 +182627,12 @@
         ],
         "x-silo-class": "authenticated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: a diagnostics upload spends a per-account quota"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -181925,6 +182808,12 @@
         ],
         "x-silo-class": "authenticated",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: a diagnostics upload spends a per-account quota"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -182508,6 +183397,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-raw-protocol": "download-bytes",
         "x-silo-raw-reason": "Original downloads retain streaming, HEAD, range and optional proxy redirect semantics without JSON buffering or a persistent download record.",
         "x-silo-service-backed": true
@@ -182792,6 +183687,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-raw-protocol": "download-bytes",
         "x-silo-raw-reason": "Original downloads retain streaming, HEAD, range and optional proxy redirect semantics without JSON buffering or a persistent download record.",
         "x-silo-service-backed": true
@@ -183386,6 +184287,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-raw-protocol": "download-bytes",
         "x-silo-raw-reason": "Original downloads retain streaming, HEAD, range and optional proxy redirect semantics without JSON buffering or a persistent download record.",
         "x-silo-service-backed": true
@@ -183680,6 +184587,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-raw-protocol": "download-bytes",
         "x-silo-raw-reason": "Original downloads retain streaming, HEAD, range and optional proxy redirect semantics without JSON buffering or a persistent download record.",
         "x-silo-service-backed": true
@@ -183865,6 +184778,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -184332,6 +185251,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-service-backed": true
       },
       "post": {
@@ -184578,6 +185503,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -184761,6 +185692,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -184941,6 +185878,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-service-backed": true
       },
       "post": {
@@ -185162,6 +186105,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -185387,6 +186336,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -185590,6 +186545,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -185763,6 +186724,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-service-backed": true
       },
       "patch": {
@@ -186022,6 +186989,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -186177,6 +187150,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -186388,6 +187367,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
@@ -186611,6 +187596,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-raw-protocol": "managed-download-artwork",
         "x-silo-raw-reason": "Offline media and assets are binary streams; file routes preserve HTTP range, conditional and optional proxy semantics.",
         "x-silo-service-backed": true
@@ -187097,6 +188088,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-raw-protocol": "managed-download-file",
         "x-silo-raw-reason": "Offline media and assets are binary streams; file routes preserve HTTP range, conditional and optional proxy semantics.",
         "x-silo-service-backed": true
@@ -187521,6 +188518,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-raw-protocol": "managed-download-file",
         "x-silo-raw-reason": "Offline media and assets are binary streams; file routes preserve HTTP range, conditional and optional proxy semantics.",
         "x-silo-service-backed": true
@@ -188059,6 +189062,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-raw-protocol": "managed-download-file",
         "x-silo-raw-reason": "Offline media and assets are binary streams; file routes preserve HTTP range, conditional and optional proxy semantics.",
         "x-silo-service-backed": true
@@ -188528,6 +189537,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-raw-protocol": "managed-download-file",
         "x-silo-raw-reason": "Offline media and assets are binary streams; file routes preserve HTTP range, conditional and optional proxy semantics.",
         "x-silo-service-backed": true
@@ -188712,6 +189727,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -188896,6 +189917,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -189205,6 +190232,12 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-raw-protocol": "managed-download-subtitle",
         "x-silo-raw-reason": "Offline media and assets are binary streams; file routes preserve HTTP range, conditional and optional proxy semantics.",
         "x-silo-service-backed": true
@@ -189381,6 +190414,12 @@
           "ebooks"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-service-backed": true
       },
       "post": {
@@ -189598,6 +190637,12 @@
           "ebooks"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "unique_constraint",
         "x-silo-service-backed": true
       }
@@ -189800,6 +190845,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -190055,6 +191106,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -190605,6 +191662,12 @@
           "ebooks"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-raw-protocol": "ebook-byte-range",
         "x-silo-raw-reason": "Ebook files and conversion results are streamed bytes with range and HEAD semantics.",
         "x-silo-service-backed": true
@@ -191010,6 +192073,12 @@
           "ebooks"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-raw-protocol": "ebook-byte-range",
         "x-silo-raw-reason": "Ebook files and conversion results are streamed bytes with range and HEAD semantics.",
         "x-silo-service-backed": true
@@ -191171,6 +192240,12 @@
           "ebooks"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -191368,6 +192443,12 @@
           "ebooks"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
@@ -191533,6 +192614,12 @@
           "ebooks"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading settings and preferences"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -191782,6 +192869,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a player's own state for the profile it acts as"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -191939,8 +193032,17 @@
         "tags": [
           "realtime"
         ],
+        "x-silo-capability-for": [
+          "createEventsSocketTicket"
+        ],
         "x-silo-class": "authenticated",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -192194,6 +193296,12 @@
           "realtime"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the events socket carries the profile's own changes"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -192467,6 +193575,12 @@
           "favorites"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -192617,6 +193731,12 @@
           "favorites"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -192773,6 +193893,12 @@
           "favorites"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -192921,6 +194047,12 @@
           "favorites"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -193079,6 +194211,12 @@
           "favorites"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -193351,6 +194489,12 @@
           "history"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -193507,8 +194651,21 @@
         "tags": [
           "history-imports"
         ],
+        "x-silo-capability-for": [
+          "createHistoryImportRun",
+          "createPlexPin",
+          "loginEmbyConnect",
+          "listHistoryImportRuns",
+          "listHistoryImportSources"
+        ],
         "x-silo-class": "authenticated",
-        "x-silo-conditional": true
+        "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        }
       }
     },
     "/api/v2/history-imports/emby-connect/login": {
@@ -193691,6 +194848,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -193875,6 +195038,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -194019,6 +195188,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -194192,6 +195367,12 @@
           "history-imports"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: reads the person's links to external accounts"
+          }
+        },
         "x-silo-service-backed": true
       },
       "post": {
@@ -194398,6 +195579,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -194617,6 +195804,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: reads the person's links to external accounts"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -194759,6 +195952,12 @@
           "history-imports"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: reads the person's links to external accounts"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -194935,6 +196134,12 @@
           "history"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -195135,8 +196340,18 @@
         "tags": [
           "home"
         ],
+        "x-silo-capability-for": [
+          "listHomeSections",
+          "getHomeLayout"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -195304,6 +196519,12 @@
           "home"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -195510,6 +196731,12 @@
           "home"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -195798,6 +197025,12 @@
           "home"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading home"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -196068,6 +197301,12 @@
           "home"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading home"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -196352,6 +197591,12 @@
           "home"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading home"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -196551,7 +197796,13 @@
           "images"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-conditional": true
+        "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        }
       }
     },
     "/api/v2/invitations/accept": {
@@ -202760,6 +204011,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: library and administration jobs are not a player's"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -203104,6 +204361,12 @@
           "preferences"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading settings and preferences"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -203255,6 +204518,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a player's own state for the profile it acts as"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -203445,6 +204714,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a player's own state for the profile it acts as"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -203603,6 +204878,12 @@
           "libraries"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading libraries"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -203799,6 +205080,12 @@
           "libraries"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading libraries"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -203968,6 +205255,12 @@
           "libraries"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading libraries"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -204252,6 +205545,12 @@
           "libraries"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading libraries"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -204534,6 +205833,12 @@
           "libraries"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading libraries"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -204691,6 +205996,12 @@
           "libraries"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading libraries"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -204847,6 +206158,12 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -205048,6 +206365,12 @@
           "playback"
         ],
         "x-silo-class": "permission_gated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: catalog edits under a delegated permission"
+          }
+        },
         "x-silo-permission": "marker_edit",
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
@@ -205227,6 +206550,12 @@
           "playback"
         ],
         "x-silo-class": "permission_gated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: catalog edits under a delegated permission"
+          }
+        },
         "x-silo-permission": "marker_edit",
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
@@ -205385,6 +206714,12 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -205586,6 +206921,12 @@
           "playback"
         ],
         "x-silo-class": "permission_gated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: catalog edits under a delegated permission"
+          }
+        },
         "x-silo-permission": "marker_edit",
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
@@ -205746,6 +207087,12 @@
         ],
         "x-silo-class": "authenticated",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -206018,6 +207365,12 @@
           "not-interested"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -206168,6 +207521,12 @@
           "not-interested"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -206324,6 +207683,12 @@
           "not-interested"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -206472,6 +207837,12 @@
           "not-interested"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -206654,6 +208025,12 @@
           "notifications"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own inbox: reading it and marking it read"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -206853,8 +208230,18 @@
         "tags": [
           "notifications"
         ],
+        "x-silo-capability-for": [
+          "listNotifications",
+          "markNotificationRead"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -206992,6 +208379,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -207135,6 +208528,12 @@
           "notifications"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: reads the person's email address or Discord link"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -207317,6 +208716,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: changing notification preferences"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -207527,6 +208932,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -207671,6 +209082,12 @@
           "notifications"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: reads the person's email address or Discord link"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -207853,6 +209270,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: changing notification preferences"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -207998,6 +209421,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
@@ -208191,6 +209620,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "durable_dispatch",
         "x-silo-service-backed": true
       }
@@ -208391,8 +209826,17 @@
         "tags": [
           "notifications"
         ],
+        "x-silo-capability-for": [
+          "requestNotificationEmailVerification"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -208920,6 +210364,12 @@
           "notifications"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the account's sign-in, credential and plugin setup is not a player's"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -209088,6 +210538,12 @@
           "notifications"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-service-backed": true
       },
       "post": {
@@ -209277,6 +210733,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -209469,6 +210931,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -209724,6 +211192,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -209883,6 +211357,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -210027,6 +211507,12 @@
           "notifications"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading settings and preferences"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -210209,6 +211695,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: changing notification preferences"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -210366,6 +211858,12 @@
           "notifications"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own inbox: reading it and marking it read"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -210584,6 +212082,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "reaches the person's other devices"
+          }
+        },
         "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
@@ -210784,8 +212288,18 @@
         "tags": [
           "notifications"
         ],
+        "x-silo-capability-for": [
+          "registerPushDevice",
+          "unregisterPushDevice"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -210965,6 +212479,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "reaches the person's other devices"
+          }
+        },
         "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
@@ -211290,6 +212810,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own inbox: reading it and marking it read"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -211616,6 +213142,12 @@
           "notifications"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own inbox: reading it and marking it read"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -211801,6 +213333,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: muting a series changes what the person is told on every device"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -211987,6 +213525,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: muting a series changes what the person is told on every device"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -212140,6 +213684,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: muting a series changes what the person is told on every device"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -212291,6 +213841,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: muting a series changes what the person is told on every device"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -212460,6 +214016,12 @@
           "notifications"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own inbox: reading it and marking it read"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -212603,6 +214165,12 @@
           "notifications"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own inbox: reading it and marking it read"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -212772,6 +214340,12 @@
           "notifications"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "reaches the person's other devices"
+          }
+        },
         "x-silo-service-backed": true
       },
       "post": {
@@ -212955,6 +214529,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "reaches the person's other devices"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -213102,6 +214682,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "reaches the person's other devices"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -213281,6 +214867,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "reaches the person's other devices"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -213450,6 +215042,12 @@
           "notifications"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-service-backed": true
       },
       "post": {
@@ -213632,6 +215230,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -213824,6 +215428,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -214069,6 +215679,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -214229,6 +215845,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -214388,6 +216010,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -214546,6 +216174,12 @@
           "notifications"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own inbox: reading it and marking it read"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -214697,6 +216331,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own inbox: reading it and marking it read"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -214897,8 +216537,19 @@
         "tags": [
           "onboarding"
         ],
+        "x-silo-capability-for": [
+          "getOnboardingFlow",
+          "getOnboardingState",
+          "updateOnboardingProgress"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -215056,6 +216707,12 @@
           "onboarding"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: onboarding is set up from the person's own apps"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -215304,6 +216961,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: onboarding is set up from the person's own apps"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -215501,6 +217164,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: onboarding is set up from the person's own apps"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -216717,6 +218386,12 @@
           "playback"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "starting playback and playing its own streams"
+          }
+        },
         "x-silo-raw-protocol": "bandwidth-probe",
         "x-silo-raw-reason": "A throughput measurement needs an unbuffered, uncompressible byte stream the client can time and abandon mid-transfer."
       }
@@ -216902,6 +218577,12 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -217102,8 +218783,17 @@
         "tags": [
           "playback"
         ],
+        "x-silo-capability-for": [
+          "startPlayback"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -217262,6 +218952,12 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -217408,6 +219104,12 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -217717,6 +219419,13 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "mayActOnAttempt in ReportRouteEventV2: only an attempt its own login session started"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -217917,8 +219626,17 @@
         "tags": [
           "playback"
         ],
+        "x-silo-capability-for": [
+          "createPlaybackControlSocketTicket"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -218271,6 +219989,13 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "refuseOtherStream on the control ticket: only a stream its own login session started"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -218614,6 +220339,12 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "starting playback and playing its own streams"
+          }
+        },
         "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
@@ -218835,6 +220566,13 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "grantedAppStreamError on the media routes: only the media of a stream its own login session started"
+          }
+        },
         "x-silo-raw-protocol": "hls",
         "x-silo-raw-reason": "Token-authorized media retains native byte, range, HEAD and HLS semantics without JSON buffering.",
         "x-silo-service-backed": true
@@ -219046,6 +220784,13 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "grantedAppStreamError on the media routes: only the media of a stream its own login session started"
+          }
+        },
         "x-silo-raw-protocol": "hls",
         "x-silo-raw-reason": "Token-authorized media retains native byte, range, HEAD and HLS semantics without JSON buffering.",
         "x-silo-service-backed": true
@@ -219419,6 +221164,13 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "grantedAppStreamError on the media routes: only the media of a stream its own login session started"
+          }
+        },
         "x-silo-raw-protocol": "hls",
         "x-silo-raw-reason": "Token-authorized media retains native byte, range, HEAD and HLS semantics without JSON buffering.",
         "x-silo-service-backed": true
@@ -219753,6 +221505,13 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "mayActOnAttempt / refuseOtherStream: only a stream its own login session started"
+          }
+        },
         "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
@@ -220086,6 +221845,13 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "mayActOnAttempt / refuseOtherStream: only a stream its own login session started"
+          }
+        },
         "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
@@ -220419,6 +222185,13 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "mayActOnAttempt / refuseOtherStream: only a stream its own login session started"
+          }
+        },
         "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
@@ -220753,6 +222526,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -220926,6 +222705,12 @@
           "profiles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: exports the profile's whole data at once"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -221123,6 +222908,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes the household's profiles, PINs or limits"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -221293,6 +223084,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
@@ -221467,6 +223264,12 @@
           "profile_sections"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading home"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -221674,6 +223477,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the profile's own, but it changes what the person's other devices show"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -221850,6 +223659,12 @@
           "profile_sections"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading home"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -221992,7 +223807,13 @@
         "tags": [
           "profile_sections"
         ],
-        "x-silo-class": "profile_scoped"
+        "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading home"
+          }
+        }
       }
     },
     "/api/v2/profile/sections/settings": {
@@ -222167,6 +223988,12 @@
           "profile_sections"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading home"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -222309,6 +224136,12 @@
           "profiles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "who it is and which profile it acts as"
+          }
+        },
         "x-silo-service-backed": true
       },
       "post": {
@@ -222508,6 +224341,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes the household's profiles, PINs or limits"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -222652,6 +224491,13 @@
           "profiles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "sessionReachesOtherDevices in listHouseholdSessions: only the streams its own login session started"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -222860,6 +224706,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused: the profile set is read and sent only by a session that may manage the account's keys"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -223199,6 +225051,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes the household's profiles, PINs or limits"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
@@ -223405,6 +225263,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes the household's profiles, PINs or limits"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -223563,6 +225427,12 @@
           "profiles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: it is about the account's other profiles"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -223728,6 +225598,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes the household's profiles, PINs or limits"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -223892,6 +225768,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes the household's profiles, PINs or limits"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -224179,6 +226061,12 @@
           "profiles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: it is about the account's other profiles"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -224377,6 +226265,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes the household's profiles, PINs or limits"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -224543,6 +226437,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes the household's profiles, PINs or limits"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -224707,6 +226607,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes the household's profiles, PINs or limits"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -224858,6 +226764,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes the household's profiles, PINs or limits"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
@@ -225062,6 +226974,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "changes the household's profiles, PINs or limits"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -225260,6 +227178,12 @@
           "profiles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "acting as a PIN-protected profile; a following change counts such a session's attempts separately"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -225465,6 +227389,12 @@
           "progress"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -225664,8 +227594,18 @@
         "tags": [
           "progress"
         ],
+        "x-silo-capability-for": [
+          "syncProgress",
+          "listProgress"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -225816,6 +227756,12 @@
           "progress"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -225990,6 +227936,12 @@
           "ratings"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -226140,6 +228092,12 @@
           "ratings"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
@@ -226296,6 +228254,12 @@
           "ratings"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -226484,6 +228448,12 @@
           "ratings"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -226758,6 +228728,12 @@
           "recommendations"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading recommendations"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -227000,6 +228976,12 @@
           "recommendations"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading recommendations"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -227259,6 +229241,12 @@
           "recommendations"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading recommendations"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -227518,6 +229506,12 @@
           "recommendations"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading recommendations"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -227793,6 +229787,12 @@
           "recommendations"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading recommendations"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -228068,6 +230068,12 @@
           "recommendations"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading recommendations"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -228362,6 +230368,12 @@
           "recommendations"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading recommendations"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -228621,6 +230633,12 @@
           "recommendations"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading recommendations"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -228894,6 +230912,12 @@
           "recommendations"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading recommendations"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -229037,6 +231061,12 @@
           "recommendations"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading recommendations"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -229221,6 +231251,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: not yet read for whether it touches the profile's own state only"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -229494,6 +231530,12 @@
           "recommendations"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading recommendations"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -229753,6 +231795,12 @@
           "recommendations"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading recommendations"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -230068,6 +232116,12 @@
           "recommendations"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading recommendations"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -230262,6 +232316,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: making media requests"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -230448,6 +232508,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -230601,6 +232667,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -230821,6 +232893,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -231023,6 +233101,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -231225,6 +233309,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -231378,6 +233468,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -231531,6 +233627,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -231714,6 +233816,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -231867,6 +233975,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -232057,6 +234171,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -232226,6 +234346,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -232411,6 +234537,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -232625,6 +234757,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -232828,6 +234966,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -233039,6 +235183,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -233200,6 +235350,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
@@ -233367,6 +235523,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -233575,6 +235737,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: media requests, and finding titles to request, stay with the person's own apps"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -234296,6 +236464,12 @@
           "home"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading home"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -234452,6 +236626,12 @@
           "home"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading home"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -234593,7 +236773,13 @@
         "tags": [
           "home"
         ],
-        "x-silo-class": "profile_scoped"
+        "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading home"
+          }
+        }
       }
     },
     "/api/v2/settings/contract": {
@@ -234754,7 +236940,13 @@
         "tags": [
           "settings"
         ],
-        "x-silo-class": "profile_scoped"
+        "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading settings and preferences"
+          }
+        }
       }
     },
     "/api/v2/settings/contract/capabilities": {
@@ -234952,8 +237144,17 @@
         "tags": [
           "settings"
         ],
+        "x-silo-capability-for": [
+          "getSettingsContract"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -235131,6 +237332,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -235354,6 +237561,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "until the server knows the session's own device"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -235504,6 +237717,12 @@
           "settings"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading settings and preferences"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -235646,6 +237865,12 @@
           "settings"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: a plugin's per-user values may hold tokens for other services, and a plugin acting on what an app wrote is the plugin proxy's problem again"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -235802,6 +238027,12 @@
           "settings"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: a plugin's per-user values may hold tokens for other services, and a plugin acting on what an app wrote is the plugin proxy's problem again"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -235997,6 +238228,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: a plugin's per-user values may hold tokens for other services, and a plugin acting on what an app wrote is the plugin proxy's problem again"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -236180,6 +238417,12 @@
           "settings"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading settings and preferences"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -236480,6 +238723,12 @@
           "settings"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading settings and preferences"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -236771,6 +239020,12 @@
           "settings"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading settings and preferences"
+          }
+        },
         "x-silo-service-backed": true
       },
       "post": {
@@ -237010,6 +239265,12 @@
           "settings"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading settings and preferences"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -237205,6 +239466,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: some setting keys and scopes reach beyond the profile, and none has been read for that yet"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -237494,6 +239761,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: some setting keys and scopes reach beyond the profile, and none has been read for that yet"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -237787,6 +240060,12 @@
           "settings"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading settings and preferences"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -238120,6 +240399,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: some setting keys and scopes reach beyond the profile, and none has been read for that yet"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -238420,6 +240705,12 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "playing a shuffle of the profile's; a shuffle's id is random and not listed"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -238620,8 +240911,17 @@
         "tags": [
           "playback"
         ],
+        "x-silo-capability-for": [
+          "createShuffle"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -238768,6 +241068,12 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "playing a shuffle of the profile's; a shuffle's id is random and not listed"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -239029,6 +241335,12 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "playing a shuffle of the profile's; a shuffle's id is random and not listed"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -239331,6 +241643,12 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "playing a shuffle of the profile's; a shuffle's id is random and not listed"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -239634,6 +241952,12 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "playing a shuffle of the profile's; a shuffle's id is random and not listed"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -240223,6 +242547,13 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "grantedAppStreamError on the media routes: only the media of a stream its own login session started"
+          }
+        },
         "x-silo-raw-protocol": "media-bytes",
         "x-silo-raw-reason": "Token-authorized media retains native byte, range, HEAD and HLS semantics without JSON buffering.",
         "x-silo-service-backed": true
@@ -240513,6 +242844,13 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "grantedAppStreamError on the media routes: only the media of a stream its own login session started"
+          }
+        },
         "x-silo-raw-protocol": "media-bytes",
         "x-silo-raw-reason": "Token-authorized media retains native byte, range, HEAD and HLS semantics without JSON buffering.",
         "x-silo-service-backed": true
@@ -240795,6 +243133,13 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "grantedAppStreamError on the media routes: only the media of a stream its own login session started"
+          }
+        },
         "x-silo-raw-protocol": "subtitle-sidecar",
         "x-silo-raw-reason": "Token-authorized sidecar text and bitmap bytes are streamed as extracted.",
         "x-silo-service-backed": true
@@ -241045,6 +243390,13 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "grantedAppStreamError on the media routes: only the media of a stream its own login session started"
+          }
+        },
         "x-silo-raw-protocol": "subtitle-sidecar",
         "x-silo-raw-reason": "Token-authorized sidecar text and bitmap bytes are streamed as extracted.",
         "x-silo-service-backed": true
@@ -241271,6 +243623,13 @@
           "playback"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "starting playback and playing its own streams",
+            "check": "grantedAppStreamError on the media routes: only the media of a stream its own login session started"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -241422,6 +243781,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a player's own state for the profile it acts as"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -241578,6 +243943,12 @@
           "preferences"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading settings and preferences"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -241767,6 +244138,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a player's own state for the profile it acts as"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -241926,6 +244303,12 @@
           "subtitles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading subtitles"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -242082,6 +244465,12 @@
           "subtitles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading subtitles"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -242233,6 +244622,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: editing subtitles every account sees"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -242376,6 +244771,12 @@
           "subtitles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading subtitles"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -242574,8 +244975,18 @@
         "tags": [
           "subtitles"
         ],
+        "x-silo-capability-for": [
+          "createSubtitleAIJob",
+          "cancelSubtitleAIJob"
+        ],
         "x-silo-class": "profile_scoped",
-        "x-silo-conditional": true
+        "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading subtitles"
+          }
+        }
       }
     },
     "/api/v2/subtitles/ai/translate": {
@@ -242759,6 +245170,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: editing subtitles every account sees"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -242951,6 +245368,12 @@
           "subtitles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading subtitles"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent"
       }
     },
@@ -243134,6 +245557,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: editing subtitles every account sees"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -243333,8 +245762,18 @@
         "tags": [
           "subtitles"
         ],
+        "x-silo-capability-for": [
+          "searchSubtitles",
+          "downloadSubtitle"
+        ],
         "x-silo-class": "profile_scoped",
-        "x-silo-conditional": true
+        "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading subtitles"
+          }
+        }
       }
     },
     "/api/v2/subtitles/search": {
@@ -243516,6 +245955,12 @@
           "subtitles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: a provider search spends the server's allowance with its subtitle providers"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -243714,6 +246159,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: editing subtitles every account sees"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -243925,6 +246376,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading subtitles"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -244089,6 +246546,12 @@
           "subtitles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading subtitles"
+          }
+        },
         "x-silo-service-backed": true
       },
       "post": {
@@ -244246,6 +246709,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: editing subtitles every account sees"
+          }
+        },
         "x-silo-retry-safety": "coalescing",
         "x-silo-service-backed": true
       }
@@ -244500,6 +246969,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: editing subtitles every account sees"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -244699,8 +247174,20 @@
         "tags": [
           "subtitles"
         ],
+        "x-silo-capability-for": [
+          "startSubtitleSync",
+          "syncStoredSubtitle",
+          "setSubtitleTiming",
+          "setStoredSubtitleTiming"
+        ],
         "x-silo-class": "profile_scoped",
-        "x-silo-conditional": true
+        "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading subtitles"
+          }
+        }
       }
     },
     "/api/v2/subtitles/upload": {
@@ -244904,6 +247391,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: editing subtitles every account sees"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -245061,6 +247554,12 @@
           "subtitles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading subtitles"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -245218,6 +247717,12 @@
           "subtitles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading subtitles"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -245393,6 +247898,12 @@
           "subtitles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading subtitles"
+          }
+        },
         "x-silo-service-backed": true
       },
       "post": {
@@ -245560,6 +248071,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: editing subtitles every account sees"
+          }
+        },
         "x-silo-retry-safety": "coalescing",
         "x-silo-service-backed": true
       }
@@ -245824,6 +248341,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused for now: editing subtitles every account sees"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -246008,6 +248531,12 @@
           "progress"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -246215,8 +248744,18 @@
         "tags": [
           "progress"
         ],
+        "x-silo-capability-for": [
+          "createProgressBootstrapSnapshot",
+          "getProgressBootstrapSnapshot"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -246429,6 +248968,12 @@
           "progress"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the account has two progress snapshot slots, which the app could hold"
+          }
+        },
         "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
@@ -246621,6 +249166,12 @@
           "progress"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: the account has two progress snapshot slots, which the app could hold"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -246779,6 +249330,12 @@
         ],
         "x-silo-class": "authenticated",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -247362,6 +249919,12 @@
           "libraries"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading libraries"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -247560,8 +250123,17 @@
         "tags": [
           "libraries"
         ],
+        "x-silo-capability-for": [
+          "listUserLibraries"
+        ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -247715,6 +250287,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: reads the person's links to external accounts"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -247919,6 +250497,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -248084,6 +250668,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -248300,6 +250890,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -248458,6 +251054,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
@@ -248620,6 +251222,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: reads the person's links to external accounts"
+          }
+        },
         "x-silo-service-backed": true
       },
       "patch": {
@@ -248876,6 +251484,12 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -249047,6 +251661,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: reads the person's links to external accounts"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -249211,6 +251831,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -249389,6 +252015,12 @@
           "requests"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "refused by decision: reads the person's links to external accounts"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -249545,8 +252177,18 @@
         "tags": [
           "realtime"
         ],
+        "x-silo-capability-for": [
+          "joinWatchTogetherRoom",
+          "createWatchTogetherRoom"
+        ],
         "x-silo-class": "authenticated",
         "x-silo-conditional": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "a capability read: what the server offers this caller"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -249741,6 +252383,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "joining a room by its code, as a member"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -249937,6 +252585,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "acts as a room's host or changes what other members play"
+          }
+        },
         "x-silo-retry-safety": "unique_constraint",
         "x-silo-service-backed": true
       }
@@ -250094,6 +252748,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "acts as a room's host or changes what other members play"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -250262,6 +252922,12 @@
           "realtime"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "as a member of a room the person put it in"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -250478,6 +253144,12 @@
           "realtime"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "as a member of a room the person put it in"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -250655,6 +253327,12 @@
           "realtime"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "as a member of a room the person put it in"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -250818,6 +253496,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "acts as a room's host or changes what other members play"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -250982,6 +253666,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "acts as a room's host or changes what other members play"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -251186,6 +253876,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "acts as a room's host or changes what other members play"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -251390,6 +254086,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "acts as a room's host or changes what other members play"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -251594,6 +254296,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "acts as a room's host or changes what other members play"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -251806,6 +254514,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "acts as a room's host or changes what other members play"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -252010,6 +254724,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "acts as a room's host or changes what other members play"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -252195,6 +254915,12 @@
           "realtime"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "as a member of a room the person put it in"
+          }
+        },
         "x-silo-service-backed": true
       },
       "post": {
@@ -252403,6 +255129,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "as a member of a room the person put it in"
+          }
+        },
         "x-silo-retry-safety": "unique_constraint",
         "x-silo-service-backed": true
       }
@@ -252615,6 +255347,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "acts as a room's host or changes what other members play"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -252788,6 +255526,13 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "as a member of a room the person put it in",
+            "check": "DeleteOwnSuggestion: only suggestions of the account and profile it acts as, which includes those the person's own devices made as that profile (a suggester is stored as account and profile, not as the session)"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -252960,6 +255705,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "as a member of a room the person put it in"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -253130,6 +255881,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "as a member of a room the person put it in"
+          }
+        },
         "x-silo-retry-safety": "unique_constraint",
         "x-silo-service-backed": true
       }
@@ -253247,7 +256004,7 @@
     },
     "/api/v2/watch-together/rooms/{room_id}/ws-ticket": {
       "post": {
-        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied when the room's host is its own account and profile: it may not host a room. As a member of another host's room it may connect, but the socket refuses its transport_request frames (play, pause, seek for everyone) with the error frame any refused request gets.",
+        "description": "A login session opened by another app the person allowed (its app key was enrolled through a grant) is refused with 403 permission_denied when the room's host is its own account and profile: it may not host a room. As a member of another host's room it may connect, but the socket refuses its transport_request frames (play, pause, seek for everyone) with the error frame any refused request gets, and an attach_session naming a stream its own login session did not start. A ticket does not reserve the member's seat: a connection made while another connection holds that seat receives an error frame of code forbidden and the socket closes; request a new ticket and retry shortly.",
         "operationId": "createWatchTogetherSocketTicket",
         "parameters": [
           {
@@ -253413,6 +256170,13 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "own_only",
+            "reason": "as a member of a room the person put it in",
+            "check": "ConnectOtherApp: only a member's seat no other connection holds, never the host's controls"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -253710,6 +256474,12 @@
           "watch"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -253894,6 +256664,12 @@
           "watch"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "reading the catalog"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -254044,6 +256820,12 @@
           "watch"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
@@ -254193,6 +256975,12 @@
           "watch"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -254466,6 +257254,12 @@
           "watchlist"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -254649,6 +257443,12 @@
           "watchlist"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -254828,6 +257628,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own watchlist; for such a session no media request is made, followed or withdrawn"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
@@ -255013,6 +257819,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own watchlist; for such a session no media request is made, followed or withdrawn"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -255164,6 +257976,12 @@
           "watchlist"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
@@ -255320,6 +258138,12 @@
           "watchlist"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -255468,6 +258292,12 @@
           "watchlist"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -255626,6 +258456,12 @@
           "watchlist"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "allowed",
+            "reason": "the profile's own state, which the person allowed the app to keep"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -255937,6 +258773,12 @@
           "webhook-sync"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-service-backed": true
       },
       "post": {
@@ -256129,6 +258971,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -256286,6 +259134,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       },
@@ -256488,6 +259342,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -256676,6 +259536,12 @@
           "webhook-sync"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-service-backed": true
       }
     },
@@ -256838,6 +259704,12 @@
           "webhook-sync"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-service-backed": true
       },
       "put": {
@@ -257039,6 +259911,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -257203,6 +260081,12 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-origin-decisions": {
+          "granted_app": {
+            "verdict": "refused",
+            "reason": "leaves something behind that outlives the app's key"
+          }
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }

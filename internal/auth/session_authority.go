@@ -53,13 +53,6 @@ const (
 	// the session asking for it, by a route older than app keys: a personal
 	// API key, or linking a sign-in provider account.
 	ActionIssueCredential
-	// ActionReachOtherDevices: seeing or changing what the account's other
-	// devices hold, where the list has no per-device owner check of its
-	// own: the household playback list shows each device's live streams,
-	// and the profile's web push subscriptions belong to every browser the
-	// profile registered. Only a session another app opened is refused; a
-	// device sign-in keeps what it has.
-	ActionReachOtherDevices
 )
 
 // SessionOrigin is how a login session was opened.
@@ -118,7 +111,7 @@ func (o SessionOrigin) Allows(action SessionAction) bool {
 	if o.GrantKey {
 		return false
 	}
-	if action == ActionApproveDeviceSignIn || action == ActionIssueCredential || action == ActionReachOtherDevices {
+	if action == ActionApproveDeviceSignIn || action == ActionIssueCredential {
 		// These predate the record of how sessions are opened: every
 		// other session keeps what the operation's own rule gives it.
 		return true
@@ -137,14 +130,6 @@ func (o SessionOrigin) Allows(action SessionAction) bool {
 // account.
 func SessionMayIssueCredential(ctx context.Context, db rowQuerier, claims *Claims) error {
 	return refuseGrantSession(ctx, db, claims, ActionIssueCredential)
-}
-
-// SessionMayReachOtherDevices refuses ActionReachOtherDevices to a session a
-// grant-enrolled app opened with ErrSessionNotAllowed. Every other caller,
-// a device sign-in, an API key and an administrator acting as the account
-// included, passes and keeps what the operation's own rule gives it.
-func SessionMayReachOtherDevices(ctx context.Context, db rowQuerier, claims *Claims) error {
-	return refuseGrantSession(ctx, db, claims, ActionReachOtherDevices)
 }
 
 // refuseGrantSession answers ErrSessionNotAllowed when the claims' own login

@@ -23,7 +23,7 @@ func registerWatchTogetherJoin(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/watch-together/join", "joinWatchTogetherRoom", "realtime", "Resolve an active room by invite token or code and issue account/profile room proof. Connected membership is established separately by the room socket."), Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	op.MaxBodyBytes = 8192
 	op.Errors = []int{409}
-	Register(reg, op, func(ctx context.Context, in *WatchTogetherJoinInput) (*WatchTogetherRoomReadOutput, error) {
+	Register(reg, withOrigins(op, grantedRoomJoin), func(ctx context.Context, in *WatchTogetherJoinInput) (*WatchTogetherRoomReadOutput, error) {
 		if reg.deps.WatchTogetherJoin == nil {
 			return nil, unavailable("watch together")
 		}
@@ -41,6 +41,15 @@ func registerWatchTogetherJoin(reg *Registry) {
 				return nil, NewProblem(TypeValidationFailed, "Room code or invite token is required.")
 			}
 			return nil, suggestionProblem(err)
+		}
+		// A member is the account and profile, so the stream attached to it
+		// may be the person's own device's; a session another app's key
+		// opened is not told another device's playback session id.
+		if grantedAppSession(claimsFrom(ctx)) {
+			// Nor the powers of the profile's seat it is refused: the
+			// host's controls and invite link, and transport control.
+			row = row.WithoutSessionPowers()
+			row.AttachedSessionID = ""
 		}
 		return watchTogetherRoomOutput(row, token)
 	})

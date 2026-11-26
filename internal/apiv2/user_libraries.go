@@ -45,13 +45,13 @@ func registerUserLibraries(reg *Registry) {
 	operation := func(path, id string) Operation {
 		return Operation{Operation: humaOp(http.MethodGet, Prefix+path, id, "libraries", "Discover enabled libraries visible to the account or selected household profile."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}
 	}
-	Register(reg, operation("/user/libraries/capabilities", "getUserLibraryCapabilities"), func(_ context.Context, _ *CapabilityInput) (*UserLibraryCapabilitiesOutput, error) {
+	Register(reg, withOrigins(operation("/user/libraries/capabilities", "getUserLibraryCapabilities"), grantedCapability), func(_ context.Context, _ *CapabilityInput) (*UserLibraryCapabilitiesOutput, error) {
 		out := new(UserLibraryCapabilitiesOutput)
 		out.Body.Available = reg.deps.UserLibraries != nil
 		out.Body.SupportsIncludeHidden = out.Body.Available
 		return out, nil
 	})
-	Register(reg, operation("/user/libraries", "listUserLibraries"), func(ctx context.Context, in *UserLibraryListInput) (*UserLibraryListOutput, error) {
+	Register(reg, withOrigins(operation("/user/libraries", "listUserLibraries"), grantedLibraryRead), func(ctx context.Context, in *UserLibraryListInput) (*UserLibraryListOutput, error) {
 		if reg.deps.UserLibraries == nil {
 			return nil, unavailable("user libraries")
 		}

@@ -36,7 +36,7 @@ func registerCatalogSearchCapabilities(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodGet, Prefix+"/catalog/search/capabilities", "getCatalogSearchCapabilities", "catalog", "Search continuation provider, result window, and session lifetime."), Class: ClassProfileScoped, ServiceBacked: true}
 	// A search index result window this build cannot page is 501 capability_unsupported.
 	op.Errors = append(op.Errors, http.StatusNotImplemented)
-	Register(reg, op,
+	Register(reg, withOrigins(op, grantedCapability),
 		func(ctx context.Context, _ *CapabilityInput) (*CatalogSearchCapabilitiesOutput, error) {
 			service, ok := reg.deps.CatalogBrowse.(interface {
 				SearchContinuationCapabilities(context.Context) (catalogpkg.SearchContinuationCapabilities, error)

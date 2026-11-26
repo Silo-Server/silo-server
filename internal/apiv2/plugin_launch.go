@@ -48,7 +48,7 @@ func registerPluginLaunch(reg *Registry) {
 	// An API key or any credential without a login session cannot launch a
 	// plugin: the cookie delegates a session, so there must be one.
 	op.Errors = []int{http.StatusForbidden}
-	Register(reg, Operation{Operation: op, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}, func(ctx context.Context, _ *struct{}) (*PluginLaunchOutput, error) {
+	Register(reg, Operation{Operation: op, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent, Origins: grantedRefusedAccountSetup}, func(ctx context.Context, _ *struct{}) (*PluginLaunchOutput, error) {
 		if reg.deps.PluginLaunch == nil {
 			return nil, unavailable("plugin launch")
 		}

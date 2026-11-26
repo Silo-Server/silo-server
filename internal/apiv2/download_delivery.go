@@ -105,7 +105,7 @@ func registerDownloadDelivery(reg *Registry) {
 		if route.observe && reg.deps.ObserveDownloadDelivery != nil {
 			handler = reg.deps.ObserveDownloadDelivery(route.method, Prefix+route.path, handler)
 		}
-		RegisterRaw(reg, RawOperation{Operation: Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true}, Protocol: "managed-download-" + route.kind, Reason: "Offline media and assets are binary streams; file routes preserve HTTP range, conditional and optional proxy semantics."}, handler)
+		RegisterRaw(reg, RawOperation{Operation: Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedOwnDevice}, Protocol: "managed-download-" + route.kind, Reason: "Offline media and assets are binary streams; file routes preserve HTTP range, conditional and optional proxy semantics."}, handler)
 	}
 }
 func (reg *Registry) serveDownloadDelivery(w http.ResponseWriter, r *http.Request, kind string, proxy bool) {

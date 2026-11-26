@@ -72,11 +72,11 @@ func registerAdminCatalogTranslation(reg *Registry) {
 	}
 	start := op(http.MethodPost, "", "translateAdminItemMetadata", "Persist or reuse an active translation job for an authorized item.")
 	start.DefaultStatus = http.StatusAccepted
-	Register(reg, start, reg.translateAdminItemMetadata)
-	Register(reg, op(http.MethodGet, "/jobs", "listAdminMetadataTranslationJobs", "Read the latest 50 translation jobs for an authorized item."), reg.listAdminMetadataTranslationJobs)
+	Register(reg, withOrigins(start, grantedRefusedCatalogEdit), reg.translateAdminItemMetadata)
+	Register(reg, withOrigins(op(http.MethodGet, "/jobs", "listAdminMetadataTranslationJobs", "Read the latest 50 translation jobs for an authorized item."), grantedRefusedCatalogEdit), reg.listAdminMetadataTranslationJobs)
 	cancel := op(http.MethodPost, "/jobs/{job_id}/cancel", "cancelAdminMetadataTranslation", "Request cancellation only for a job belonging to the authorized item.")
 	cancel.DefaultStatus = http.StatusNoContent
-	Register(reg, cancel, reg.cancelAdminMetadataTranslation)
+	Register(reg, withOrigins(cancel, grantedRefusedCatalogEdit), reg.cancelAdminMetadataTranslation)
 
 	libraryOp := func(method, suffix, id, summary string) Operation {
 		o := Operation{Operation: humaOp(method, Prefix+"/admin/libraries/{library_id}/metadata-translation"+suffix, id, "admin-catalog", summary), Class: ClassActingAdmin, ServiceBacked: true, DemoRestricted: isMutatingMethod(method)}

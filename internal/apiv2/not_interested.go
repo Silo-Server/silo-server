@@ -84,21 +84,21 @@ const opListNotInterested = "listNotInterested"
 func registerNotInterested(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/not-interested", "getNotInterestedCapability", "not-interested",
-		"Whether the acting profile can mark movies and series Not interested.")), reg.getNotInterestedCapability)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/not-interested", opListNotInterested, "not-interested",
-		"List the movies and series the acting profile marked Not interested as catalog cards, newest mark first; items the viewer may not see are omitted.")),
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/not-interested", "getNotInterestedCapability", "not-interested",
+		"Whether the acting profile can mark movies and series Not interested.")), grantedCapability), reg.getNotInterestedCapability)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/not-interested", opListNotInterested, "not-interested",
+		"List the movies and series the acting profile marked Not interested as catalog cards, newest mark first; items the viewer may not see are omitted.")), grantedProfileState),
 		func(ctx context.Context, in *NotInterestedListInput) (*NotInterestedCollectionOutput, error) {
 			return reg.listNotInterested(ctx, cursors, in)
 		})
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/not-interested/{item_id}", "getNotInterested", "not-interested",
-		"Answer whether the acting profile marked the item Not interested: the mark, or 404 when it did not (or the viewer may not see the item).")),
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/not-interested/{item_id}", "getNotInterested", "not-interested",
+		"Answer whether the acting profile marked the item Not interested: the mark, or 404 when it did not (or the viewer may not see the item).")), grantedProfileState),
 		reg.getNotInterested)
-	Register(reg, viewerNoContentMutation(humaOp(http.MethodPut, Prefix+"/not-interested/{item_id}", "markNotInterested", "not-interested",
-		"Mark a movie or series Not interested for the acting profile: its recommendation and discovery rows leave it out and rank similar titles lower, after a rebuild that starts within seconds. Library browsing, search, item detail, playback, favorites and the watchlist are unchanged. Episodes and seasons are refused with 422; mark the series. Marking a marked title succeeds and changes nothing.")),
+	Register(reg, withOrigins(viewerNoContentMutation(humaOp(http.MethodPut, Prefix+"/not-interested/{item_id}", "markNotInterested", "not-interested",
+		"Mark a movie or series Not interested for the acting profile: its recommendation and discovery rows leave it out and rank similar titles lower, after a rebuild that starts within seconds. Library browsing, search, item detail, playback, favorites and the watchlist are unchanged. Episodes and seasons are refused with 422; mark the series. Marking a marked title succeeds and changes nothing.")), grantedProfileState),
 		reg.markNotInterested)
-	Register(reg, viewerNoContentMutation(humaOp(http.MethodDelete, Prefix+"/not-interested/{item_id}", "unmarkNotInterested", "not-interested",
-		"Clear the acting profile's Not interested mark on the item. An absent mark succeeds and changes nothing.")),
+	Register(reg, withOrigins(viewerNoContentMutation(humaOp(http.MethodDelete, Prefix+"/not-interested/{item_id}", "unmarkNotInterested", "not-interested",
+		"Clear the acting profile's Not interested mark on the item. An absent mark succeeds and changes nothing.")), grantedProfileState),
 		reg.unmarkNotInterested)
 }
 

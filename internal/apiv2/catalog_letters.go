@@ -70,7 +70,7 @@ func registerCatalogLetters(reg *Registry) {
 	operation.RetrySafety = RetrySafetyNaturalIdempotent
 	// A user store that cannot run the query is 501 capability_unsupported.
 	operation.Errors = append(operation.Errors, http.StatusNotImplemented)
-	Register(reg, operation, reg.queryCatalogLetters)
+	Register(reg, withOrigins(operation, grantedCatalogRead), reg.queryCatalogLetters)
 }
 
 func (reg *Registry) queryCatalogLetters(ctx context.Context, in *CatalogLettersInput) (*CatalogLettersOutput, error) {

@@ -112,10 +112,10 @@ type DownloadManifestPageOutput struct{ Body DownloadManifestPage }
 func registerDownloadManifests(reg *Registry) {
 	read := Operation{Operation: humaOp(http.MethodGet, Prefix+"/downloads/{id}/manifest", "getDownloadManifest", "downloads", "Fetch a complete offline manifest bounded to one MiB."), Class: ClassProfileScoped, ServiceBacked: true}
 	read.Errors = []int{409, 413}
-	Register(reg, read, reg.getDownloadManifest)
+	Register(reg, withOrigins(read, grantedRefusedOwnDevice), reg.getDownloadManifest)
 	cursors := NewCursors(reg.deps.CursorSecret)
 	page := Operation{Operation: humaOp(http.MethodGet, Prefix+"/downloads/batches/{batch_id}/manifests", "listDownloadBatchManifests", "downloads", "Page complete manifests with explicit skipped results; skipped rows still advance the cursor."), Class: ClassProfileScoped, ServiceBacked: true}
-	Register(reg, page, func(ctx context.Context, in *DownloadManifestPageInput) (*DownloadManifestPageOutput, error) {
+	Register(reg, withOrigins(page, grantedRefusedOwnDevice), func(ctx context.Context, in *DownloadManifestPageInput) (*DownloadManifestPageOutput, error) {
 		return reg.listDownloadBatchManifests(ctx, cursors, in)
 	})
 }

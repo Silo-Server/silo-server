@@ -23,10 +23,7 @@ func registerWatchTogetherSelectionMode(reg *Registry) {
 	op.MaxBodyBytes = 1024
 	op.Errors = []int{409}
 	op.Description = watchTogetherHostOtherAppRule
-	Register(reg, op, func(ctx context.Context, in *WatchTogetherSelectionModeInput) (*WatchTogetherRoomReadOutput, error) {
-		if p := reg.otherDevicesProblem(ctx); p != nil {
-			return nil, p
-		}
+	Register(reg, withOrigins(op, grantedRefusedRoomHost), func(ctx context.Context, in *WatchTogetherSelectionModeInput) (*WatchTogetherRoomReadOutput, error) {
 		if reg.deps.WatchTogetherSelectionMode == nil {
 			return nil, unavailable("watch together")
 		}

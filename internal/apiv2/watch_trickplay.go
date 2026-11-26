@@ -54,6 +54,7 @@ func registerWatchTrickplay(reg *Registry) {
 		ProfileOptional:      true,
 		HouseholdProfileGate: true,
 		ServiceBacked:        true,
+		Origins:              grantedCatalogRead,
 	}, reg.getWatchTrickplay)
 }
 

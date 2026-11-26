@@ -315,29 +315,19 @@ var demoAccountDomains = map[string]bool{"account": true, "api-keys": true, "app
 // operation a non-administrator can call is added without deciding its
 // demo-mode behavior: restrict it, or list it above with the reason.
 func TestDemoModeCoversAccountOperations(t *testing.T) {
-	doc := generatedDocument(t)
 	seen := map[string]bool{}
-	for _, item := range doc["paths"].(map[string]any) {
-		for method, raw := range item.(map[string]any) {
-			op, ok := raw.(map[string]any)
-			if !ok || !isMutatingMethod(strings.ToUpper(method)) {
-				continue
-			}
-			class, _ := op[extClass].(string)
-			tags, _ := op["tags"].([]any)
-			if Class(class) == ClassPublic || Class(class) == ClassActingAdmin || len(tags) != 1 || !demoAccountDomains[tags[0].(string)] {
-				continue
-			}
-			id, _ := op["operationId"].(string)
-			seen[id] = true
-			restricted, _ := op[extDemoRestricted].(bool)
-			_, allowed := demoAllowedAccountOperations[id]
-			switch {
-			case restricted && allowed:
-				t.Errorf("%s is demo restricted but listed as allowed", id)
-			case !restricted && !allowed:
-				t.Errorf("%s changes the account but neither declares DemoRestricted nor is listed in demoAllowedAccountOperations", id)
-			}
+	for _, op := range documentOperations(t) {
+		if !isMutatingMethod(op.Method) || op.Class == ClassPublic || op.Class == ClassActingAdmin || !demoAccountDomains[op.Tag] {
+			continue
+		}
+		seen[op.ID] = true
+		restricted, _ := op.Raw[extDemoRestricted].(bool)
+		_, allowed := demoAllowedAccountOperations[op.ID]
+		switch {
+		case restricted && allowed:
+			t.Errorf("%s is demo restricted but listed as allowed", op.ID)
+		case !restricted && !allowed:
+			t.Errorf("%s changes the account but neither declares DemoRestricted nor is listed in demoAllowedAccountOperations", op.ID)
 		}
 	}
 	for id := range demoAllowedAccountOperations {
@@ -345,4 +335,44 @@ func TestDemoModeCoversAccountOperations(t *testing.T) {
 			t.Errorf("allowance %s matches no account operation; remove it", id)
 		}
 	}
+}
+
+// documentOperation is one operation of the generated document, with the
+// declarations the coverage tests judge.
+type documentOperation struct {
+	Method, Path, ID, Tag string
+	Class                 Class
+	// Raw is the operation object as the document has it.
+	Raw map[string]any
+}
+
+// documentOperations walks the generated document: every operation, sorted
+// by path then method, so a coverage test reads the declarations the
+// registry published rather than the structs it was given.
+func documentOperations(t *testing.T) []documentOperation {
+	t.Helper()
+	var out []documentOperation
+	for path, item := range generatedDocument(t)["paths"].(map[string]any) {
+		for method, raw := range item.(map[string]any) {
+			op, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			class, _ := op[extClass].(string)
+			id, _ := op["operationId"].(string)
+			tags, _ := op["tags"].([]any)
+			tag := ""
+			if len(tags) == 1 {
+				tag, _ = tags[0].(string)
+			}
+			out = append(out, documentOperation{Method: strings.ToUpper(method), Path: path, ID: id, Tag: tag, Class: Class(class), Raw: op})
+		}
+	}
+	slices.SortFunc(out, func(a, b documentOperation) int {
+		if c := strings.Compare(a.Path, b.Path); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Method, b.Method)
+	})
+	return out
 }

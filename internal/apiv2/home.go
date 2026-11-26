@@ -255,43 +255,43 @@ const (
 )
 
 func registerHome(reg *Registry) {
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/calendar", opGetCalendar, "home",
-		"Upcoming and recent airings and releases in a window of the viewer's local days, grouped by day.")), reg.getCalendar)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/calendar", opGetCalendar, "home",
+		"Upcoming and recent airings and releases in a window of the viewer's local days, grouped by day.")), grantedHomeRead), reg.getCalendar)
 
 	dismiss := humaOp(http.MethodPut, Prefix+"/home/dismissals/{surface}/{item_id}", opDismissHomeItem, "home",
 		"Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal. Dismissing an episode or series drops the whole show: every card of it leaves both rows until the profile watches it again or the dismissal is undone. Watch provider connections with dropped-show sync on, for providers that support it, send the drop to the provider.")
 	dismiss.DefaultStatus = http.StatusNoContent
 	dismissOp := viewerOperation(dismiss)
 	dismissOp.RetrySafety = RetrySafetyNaturalIdempotent
-	Register(reg, dismissOp, reg.dismissHomeItem)
+	Register(reg, withOrigins(dismissOp, grantedProfileState), reg.dismissHomeItem)
 
 	undismiss := humaOp(http.MethodDelete, Prefix+"/home/dismissals/{surface}/{item_id}", opUndismissHomeItem, "home",
 		"Show a dismissed card again; an item that was not dismissed is left as is. For an episode or series this undrops the show.")
 	undismiss.DefaultStatus = http.StatusNoContent
 	undismissOp := viewerOperation(undismiss)
 	undismissOp.RetrySafety = RetrySafetyNaturalIdempotent
-	Register(reg, undismissOp, reg.undismissHomeItem)
+	Register(reg, withOrigins(undismissOp, grantedProfileState), reg.undismissHomeItem)
 
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/capabilities", opGetHomeCapabilities, "home",
-		"The home page features this server supports, such as the cards of the first sections on getHomeLayout.")), reg.getHomeCapabilities)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/layout", opGetHomeLayout, "home",
-		"The home page's section layout for the acting profile; include_items also answers the cards of the first sections.")), reg.getHomeLayout)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/sections", opListHomeSections, "home",
-		"The home page's sections that have cards for the acting profile, with those cards.")), reg.listHomeSections)
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/sections/{id}/items", opGetHomeSectionItems, "home",
-		"One section of the home page with its cards.")), reg.getHomeSectionItems)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/home/capabilities", opGetHomeCapabilities, "home",
+		"The home page features this server supports, such as the cards of the first sections on getHomeLayout.")), grantedCapability), reg.getHomeCapabilities)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/home/layout", opGetHomeLayout, "home",
+		"The home page's section layout for the acting profile; include_items also answers the cards of the first sections.")), grantedHomeRead), reg.getHomeLayout)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/home/sections", opListHomeSections, "home",
+		"The home page's sections that have cards for the acting profile, with those cards.")), grantedHomeRead), reg.listHomeSections)
+	Register(reg, withOrigins(viewerOperation(humaOp(http.MethodGet, Prefix+"/home/sections/{id}/items", opGetHomeSectionItems, "home",
+		"One section of the home page with its cards.")), grantedHomeRead), reg.getHomeSectionItems)
 	// The recipe gallery is profile scoped without a required header, as
 	// v1 GET /sections/recipes: the routes run viewer access but no
 	// RequireProfile, so an account-scoped caller reads the static gallery.
 	gallery := func(op huma.Operation) Operation {
 		return Operation{Operation: op, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}
 	}
-	Register(reg, gallery(humaOp(http.MethodGet, Prefix+"/sections/recipes", opListSectionRecipes, "home",
-		"The section recipe gallery: every visible recipe with its presets, grouped by category.")), reg.listSectionRecipes)
-	Register(reg, gallery(humaOp(http.MethodGet, Prefix+"/sections/recipes/{type}/candidates", opListSectionRecipeCandidates, "home",
-		"The values a parameterized recipe offers for its parameter.")), reg.listSectionRecipeCandidates)
+	Register(reg, withOrigins(gallery(humaOp(http.MethodGet, Prefix+"/sections/recipes", opListSectionRecipes, "home",
+		"The section recipe gallery: every visible recipe with its presets, grouped by category.")), grantedHomeRead), reg.listSectionRecipes)
+	Register(reg, withOrigins(gallery(humaOp(http.MethodGet, Prefix+"/sections/recipes/{type}/candidates", opListSectionRecipeCandidates, "home",
+		"The values a parameterized recipe offers for its parameter.")), grantedHomeRead), reg.listSectionRecipeCandidates)
 	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/sections/seasonal-themes", opListSeasonalThemes, "home",
-		"The holidays a Seasonal Picks row can follow, with the curated vibes each offers."), Class: ClassProfileScoped, ProfileOptional: true}, reg.listSeasonalThemes)
+		"The holidays a Seasonal Picks row can follow, with the curated vibes each offers."), Class: ClassProfileScoped, ProfileOptional: true, Origins: grantedHomeRead}, reg.listSeasonalThemes)
 }
 
 func (reg *Registry) recipes() (RecipeService, *Problem) {

@@ -69,7 +69,7 @@ func registerSubtitleUploads(reg *Registry) {
 	upload.HouseholdProfileGate = true
 	upload.RetrySafety = RetrySafetyNonRetryable
 	upload.Description = "Store a user subtitle file. Send once: content deduplication does not provide durable replay across a later deletion or metadata edit."
-	Register(reg, upload, func(ctx context.Context, in *SubtitleUploadInput) (*SubtitleDownloadOutput, error) {
+	Register(reg, withOrigins(upload, grantedRefusedSubtitleEdit), func(ctx context.Context, in *SubtitleUploadInput) (*SubtitleDownloadOutput, error) {
 		form := in.RawBody.Data()
 		if form == nil {
 			return nil, NewProblem(TypeValidationFailed, "Supply a subtitle form.")
@@ -119,7 +119,7 @@ func registerSubtitleUploads(reg *Registry) {
 		defer release()
 		next(ctx)
 	}}
-	Register(reg, detect, func(_ context.Context, in *SubtitleDetectInput) (*SubtitleDetectOutput, error) {
+	Register(reg, withOrigins(detect, grantedSubtitleRead), func(_ context.Context, in *SubtitleDetectInput) (*SubtitleDetectOutput, error) {
 		form := in.RawBody.Data()
 		if form == nil {
 			return nil, NewProblem(TypeValidationFailed, "Supply a subtitle form.")

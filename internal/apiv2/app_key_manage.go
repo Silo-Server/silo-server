@@ -70,7 +70,7 @@ func registerAppKeyManagement(reg *Registry) {
 	list := humaOp(http.MethodGet, Prefix+"/auth/keys", "listAppKeys", "app-keys", "List the signed-in account's app keys.")
 	list.Description = pendingSessionRule + " The list names every device the person signed in, so a TV's or another app's session can't read it. Answers while auth.app_key_sign_in is off, so keys can still be reviewed and revoked."
 	list.Errors = []int{http.StatusForbidden}
-	Register(reg, Operation{Operation: list, Class: ClassAuthenticated, ServiceBacked: true}, reg.listAppKeys)
+	Register(reg, Operation{Operation: list, Class: ClassAuthenticated, ServiceBacked: true, Origins: grantedRefusedSignIn}, reg.listAppKeys)
 
 	revoke := humaOp(http.MethodDelete, Prefix+"/auth/keys/devices/{id}", "revokeAppDeviceKey", "app-keys",
 		"Revoke one of the signed-in account's device keys and end the sessions it opened.")
@@ -79,13 +79,13 @@ func registerAppKeyManagement(reg *Registry) {
 	revoke.Errors = []int{http.StatusForbidden, http.StatusNotFound}
 	// A demo's visitors share one account: revoking a key ends every session
 	// it opened, as ending another visitor's session does.
-	Register(reg, Operation{Operation: revoke, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, DemoRestricted: true}, reg.revokeAppDeviceKey)
+	Register(reg, Operation{Operation: revoke, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, DemoRestricted: true, Origins: grantedOwnKeyRevoke}, reg.revokeAppDeviceKey)
 
 	replace := humaOp(http.MethodPut, Prefix+"/auth/keys/person", "replacePersonKey", "app-keys",
 		"Replace the signed-in account's person key.")
 	replace.Description = ownKeySessionRule + " A session opened by device sign-in or by another app's key is refused too. The old person key is revoked: new devices need the new one, and devices already enrolled keep their own keys. A device the old key introduced that is still waiting for approval is denied with it. Sending the current key again changes nothing; a public key enrolled anywhere else on this server is 409 conflict. 409 capability_disabled while auth.app_key_sign_in is off." + mainProfileRule
 	replace.Errors = []int{http.StatusForbidden, http.StatusConflict}
-	Register(reg, mainProfileOnly(Operation{Operation: replace, RetrySafety: RetrySafetyNaturalIdempotent, ServiceBacked: true, Audited: true}), reg.replacePersonKey)
+	Register(reg, withOrigins(mainProfileOnly(Operation{Operation: replace, RetrySafety: RetrySafetyNaturalIdempotent, ServiceBacked: true, Audited: true}), grantedRefusedSignIn), reg.replacePersonKey)
 }
 
 func (reg *Registry) listAppKeys(ctx context.Context, _ *struct{}) (*AppKeyListOutput, error) {

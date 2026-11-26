@@ -183,3 +183,165 @@ func TestOtherAppDoesNotTakeASeatOnAnotherServerPG(t *testing.T) {
 		t.Fatalf("the device lost its seat on the other server: %v", err)
 	}
 }
+
+// TestOtherAppStartsWithNoAttachedStream: a member is its account and
+// profile, so a stream the person's own device attached stays on the member
+// after that device leaves its seat, and a session another app opened taking
+// the free seat would be shown that device's playback session id in its
+// snapshot. Such a connection starts with no attached stream; an ordinary
+// reconnection keeps it. Catches another device's id reaching such a session
+// through the room snapshot.
+func TestOtherAppStartsWithNoAttachedStream(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		otherApp bool
+		want     string
+	}{{"another app", true, ""}, {"the person's own device", false, "phone-stream"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			repo := &stubRepo{room: baseRoom(now)}
+			s := newServiceForTest(now, repo, nil, nil, nil)
+			t.Cleanup(s.Close)
+			if _, _, err := s.Connect(t.Context(), repo.room.ID, 8, "guest", new(replacementConn)); err != nil {
+				t.Fatal(err)
+			}
+			// The device attached a stream, then its seat came free.
+			s.mu.Lock()
+			member := s.rooms[repo.room.ID].members[buildMemberKey(8, "guest")]
+			member.sessionID, member.connection, member.remoteConnected = "phone-stream", nil, false
+			s.mu.Unlock()
+			connect := s.Connect
+			if tc.otherApp {
+				connect = s.ConnectOtherApp
+			}
+			_, snapshot, err := connect(t.Context(), repo.room.ID, 8, "guest", new(replacementConn))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if snapshot.AttachedSessionID != tc.want {
+				t.Fatalf("attached session %q, want %q", snapshot.AttachedSessionID, tc.want)
+			}
+		})
+	}
+}
+
+// TestOtherAppSnapshotsNameNoRefusedPower: a member is its account and
+// profile, so a session another app opened connected as the host's profile,
+// or as a guest while the room lets guests play and pause, would be told it
+// may manage the room (with the host's invite link) or control transport,
+// which the socket and the gate refuse it. Its snapshots, the one connect
+// returns and the ones broadcast to it, name none of those powers; the
+// role still names the profile's seat. The person's own connection keeps
+// them. Catches such a session being offered controls it cannot use.
+func TestOtherAppSnapshotsNameNoRefusedPower(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		otherApp      bool
+		manage, steer bool
+	}{{"another app", true, false, false}, {"the person's own device", false, true, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			room := baseRoom(now)
+			room.GuestControlPolicy = GuestControlPolicyGuestPlayPause
+			repo := &stubRepo{room: room}
+			s := newServiceForTest(now, repo, nil, nil, nil)
+			t.Cleanup(s.Close)
+			connect := s.Connect
+			if tc.otherApp {
+				connect = s.ConnectOtherApp
+			}
+			_, snapshot, err := connect(t.Context(), repo.room.ID, 7, "host", new(replacementConn))
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.mu.Lock()
+			live := s.rooms[repo.room.ID]
+			broadcast := personalizeSnapshot(s.buildSnapshotLocked(live, 0, ""), live.room, live.members[buildMemberKey(7, "host")])
+			s.mu.Unlock()
+			for name, got := range map[string]Snapshot{"connect": snapshot, "broadcast": broadcast} {
+				if got.SelfCanManageRoom != tc.manage || got.SelfCanControlTransport != tc.steer || (got.InvitePath != "") != tc.manage {
+					t.Fatalf("%s: manage %v, control %v, invite %q", name, got.SelfCanManageRoom, got.SelfCanControlTransport, got.InvitePath)
+				}
+				if got.SelfRole != MemberRoleHost {
+					t.Fatalf("%s: role %q, want the seat's host", name, got.SelfRole)
+				}
+			}
+		})
+	}
+}
+
+// TestOtherAppMarkFollowsTheConnection: the mark that strips the room powers
+// belongs to the app's connection, never to the seat it took. While the app
+// holds the host profile's socket, and after it disconnects, the person's own
+// device asking for the room (the read and join both use Snapshot) is told
+// the host's powers and invite path. Frames on the app's connection stay
+// stripped, also after another API server's runtime state is adopted. Catches
+// the strip keyed by who holds the seat instead of who is asking.
+func TestOtherAppMarkFollowsTheConnection(t *testing.T) {
+	now := time.Now()
+	repo := &stubRepo{room: baseRoom(now)}
+	s := newServiceForTest(now, repo, nil, nil, nil)
+	t.Cleanup(s.Close)
+	ownDevice := func(when string) {
+		t.Helper()
+		got, err := s.Snapshot(t.Context(), repo.room.ID, 7, "host")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !got.SelfCanManageRoom || !got.SelfCanControlTransport || got.InvitePath == "" {
+			t.Fatalf("own device %s: manage %v, control %v, invite %q", when, got.SelfCanManageRoom, got.SelfCanControlTransport, got.InvitePath)
+		}
+	}
+	frame := func(when string, powers bool) {
+		t.Helper()
+		s.mu.Lock()
+		live := s.rooms[repo.room.ID]
+		got := personalizeSnapshot(s.buildSnapshotLocked(live, 0, ""), live.room, live.members[buildMemberKey(7, "host")])
+		s.mu.Unlock()
+		if got.SelfCanManageRoom != powers || got.SelfCanControlTransport != powers || (got.InvitePath != "") != powers {
+			t.Fatalf("frame %s: manage %v, control %v, invite %q", when, got.SelfCanManageRoom, got.SelfCanControlTransport, got.InvitePath)
+		}
+	}
+	appFrame := func(when string) { t.Helper(); frame(when, false) }
+
+	// While the person's device holds the seat the app cannot take it
+	// (TestOtherAppDoesNotTakeAConnectedSeat), and the device's frames keep
+	// the host's powers.
+	device, _, err := s.Connect(t.Context(), repo.room.ID, 7, "host", new(replacementConn))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ConnectOtherApp(t.Context(), repo.room.ID, 7, "host", new(replacementConn)); !errors.Is(err, ErrMemberAlreadyConnected) {
+		t.Fatalf("app took the device's seat: %v", err)
+	}
+	frame("on the device's connection", true)
+	ownDevice("with its socket connected")
+	s.Disconnect(device, false)
+
+	reg, _, err := s.ConnectOtherApp(t.Context(), repo.room.ID, 7, "host", new(replacementConn))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownDevice("while the app holds the seat")
+	appFrame("after connecting")
+
+	s.mu.Lock()
+	live := s.rooms[repo.room.ID]
+	s.adoptRuntimeLocked(t.Context(), live, live.room, s.runtimeLocked(live))
+	s.mu.Unlock()
+	appFrame("after a runtime adoption")
+
+	s.Disconnect(reg, false)
+	ownDevice("after the app disconnected, without reconnecting")
+
+	// The device's socket coming back is told the powers in the snapshot
+	// connect returns and in its frames.
+	_, back, err := s.Connect(t.Context(), repo.room.ID, 7, "host", new(replacementConn))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !back.SelfCanManageRoom || !back.SelfCanControlTransport || back.InvitePath == "" {
+		t.Fatalf("device reconnect snapshot: %+v", back)
+	}
+	frame("on the device's returning connection", true)
+}

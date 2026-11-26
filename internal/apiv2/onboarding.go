@@ -70,13 +70,13 @@ func registerOnboarding(reg *Registry) {
 	op := func(method, path, id string) Operation {
 		return Operation{Operation: humaOp(method, Prefix+"/onboarding"+path, id, "onboarding", "Read or advance the active profile's onboarding tour."), Class: ClassProfileScoped, ServiceBacked: true}
 	}
-	Register(reg, op(http.MethodGet, "/capabilities", "getOnboardingCapabilities"), func(_ context.Context, _ *CapabilityInput) (*OnboardingCapabilitiesOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "/capabilities", "getOnboardingCapabilities"), grantedCapability), func(_ context.Context, _ *CapabilityInput) (*OnboardingCapabilitiesOutput, error) {
 		out := new(OnboardingCapabilitiesOutput)
 		out.Body.Available = reg.deps.Onboarding != nil
 		out.Body.RevisionGuarded = true
 		return out, nil
 	})
-	Register(reg, op(http.MethodGet, "/flow", "getOnboardingFlow"), func(ctx context.Context, in *OnboardingFlowInput) (*OnboardingFlowOutput, error) {
+	Register(reg, withOrigins(op(http.MethodGet, "/flow", "getOnboardingFlow"), grantedRefusedOnboarding), func(ctx context.Context, in *OnboardingFlowInput) (*OnboardingFlowOutput, error) {
 		if reg.deps.Onboarding == nil {
 			return nil, unavailable("onboarding")
 		}
@@ -88,7 +88,7 @@ func registerOnboarding(reg *Registry) {
 	})
 	read := op(http.MethodGet, "/state", "getOnboardingState")
 	read.Conditional = true
-	Register(reg, read, func(ctx context.Context, in *OnboardingStateInput) (*OnboardingStateOutput, error) {
+	Register(reg, withOrigins(read, grantedRefusedOnboarding), func(ctx context.Context, in *OnboardingStateInput) (*OnboardingStateOutput, error) {
 		if reg.deps.Onboarding == nil {
 			return nil, unavailable("onboarding")
 		}
@@ -110,7 +110,7 @@ func registerOnboarding(reg *Registry) {
 	write.RetrySafety = RetrySafetyNonRetryable
 	write.DemoRestricted = true
 	write.Errors = []int{http.StatusConflict}
-	Register(reg, write, func(ctx context.Context, in *OnboardingProgressInput) (*OnboardingStateOutput, error) {
+	Register(reg, withOrigins(write, grantedRefusedOnboarding), func(ctx context.Context, in *OnboardingProgressInput) (*OnboardingStateOutput, error) {
 		svc := reg.deps.Onboarding
 		if svc == nil {
 			return nil, unavailable("onboarding")

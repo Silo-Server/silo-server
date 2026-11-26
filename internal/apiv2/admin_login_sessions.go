@@ -35,7 +35,7 @@ type LoginSessionCapabilities struct {
 }
 
 func registerLoginSessionCapabilities(reg *Registry) {
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/auth/sessions/capabilities", "getLoginSessionCapabilities", "auth", "Discover login-session listing, activity tracking and revocation support."), Class: ClassAuthenticated, ServiceBacked: true}, func(ctx context.Context, _ *CapabilityInput) (*LoginSessionCapabilitiesOutput, error) {
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/auth/sessions/capabilities", "getLoginSessionCapabilities", "auth", "Discover login-session listing, activity tracking and revocation support."), Class: ClassAuthenticated, ServiceBacked: true, Origins: grantedCapability}, func(ctx context.Context, _ *CapabilityInput) (*LoginSessionCapabilitiesOutput, error) {
 		available := reg.deps.Sessions != nil
 		state := StateUnsupported
 		if available {

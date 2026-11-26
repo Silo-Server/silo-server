@@ -207,3 +207,16 @@ type SuggestionStore interface {
 	AddVote(ctx context.Context, suggestionID string, voterUserID int, voterProfileID string) error
 	RemoveVote(ctx context.Context, suggestionID string, voterUserID int, voterProfileID string) error
 }
+
+// WithoutSessionPowers is the snapshot for a session another app's key
+// opened: a member is the account and profile, so the snapshot can describe
+// the powers of that profile's seat (the host's controls, the guest
+// play/pause policy, the host's invite link), which such a session is refused
+// on the socket and at the gate. It names none of them. SelfRole stays: it
+// names the profile's seat, not what this session may do.
+func (s Snapshot) WithoutSessionPowers() Snapshot {
+	s.SelfCanControlTransport = false
+	s.SelfCanManageRoom = false
+	s.InvitePath = ""
+	return s
+}

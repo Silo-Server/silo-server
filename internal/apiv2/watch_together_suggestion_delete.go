@@ -20,7 +20,7 @@ func registerWatchTogetherSuggestionDelete(reg *Registry) {
 	op.Errors = []int{409}
 	op.Description = "A login session opened by another app the person allowed (its app key was enrolled through a grant) deletes only a suggestion its account and profile made; " +
 		"it does not get the host's power to delete any suggestion, so another one is 403 permission_denied."
-	Register(reg, op, func(ctx context.Context, in *WatchTogetherSuggestionVoteInput) (*struct{}, error) {
+	Register(reg, withOrigins(op, grantedOwnSuggestion), func(ctx context.Context, in *WatchTogetherSuggestionVoteInput) (*struct{}, error) {
 		svc := reg.deps.WatchTogetherSuggestionDelete
 		if svc == nil {
 			return nil, unavailable("watch together")

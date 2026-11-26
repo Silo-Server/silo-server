@@ -169,6 +169,7 @@ func registerServerIdentity(reg *Registry) {
 		Operation: humaOp(http.MethodGet, Prefix+"/system/connections", "getServerConnections", "system",
 			"List the addresses this deployment offers to clients: the configured public URL and each installed network access provider with its overlay origin when connected on the API host. available whenever the server identity is readable; a missing public URL is an absent endpoint, never a manufactured one. Node backend addresses, enrollment URLs and admin status are not included."),
 		Class: ClassAuthenticated, ServiceBacked: true,
+		Origins: grantedCapability,
 	}, reg.getServerConnections)
 }
 

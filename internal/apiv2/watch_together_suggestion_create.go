@@ -36,7 +36,7 @@ func registerWatchTogetherSuggestionCreate(reg *Registry) {
 	op.DefaultStatus = http.StatusCreated
 	op.MaxBodyBytes = watchtogether.MaxSuggestionCreateBodyBytes
 	op.Errors = []int{409}
-	Register(reg, op, func(ctx context.Context, in *WatchTogetherSuggestionCreateInput) (*WatchTogetherSuggestionCreateOutput, error) {
+	Register(reg, withOrigins(op, grantedRoomMember), func(ctx context.Context, in *WatchTogetherSuggestionCreateInput) (*WatchTogetherSuggestionCreateOutput, error) {
 		svc := reg.deps.WatchTogetherSuggestionCreate
 		if svc == nil {
 			return nil, unavailable("suggestion creation")

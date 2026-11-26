@@ -392,7 +392,7 @@ func registerRequests(reg *Registry) {
 	// The service refuses media that is already in the library or already
 	// has an active request (409) and a requester over quota (429).
 	create.Errors = []int{http.StatusConflict, http.StatusTooManyRequests}
-	Register(reg, Operation{Operation: create, Class: ClassProfileScoped, DemoRestricted: isMutatingMethod(create.Method), ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, reg.createRequest)
+	Register(reg, Operation{Operation: create, Class: ClassProfileScoped, DemoRestricted: isMutatingMethod(create.Method), ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, Origins: grantedRefusedRequests}, reg.createRequest)
 
 	listMine := humaOp(http.MethodGet, Prefix+"/requests/mine", opListMyRequests, requestsTag,
 		"List the account's media requests, newest first.")
@@ -400,6 +400,7 @@ func registerRequests(reg *Registry) {
 	Register(reg, Operation{
 		Operation: listMine,
 		Class:     ClassProfileScoped, ServiceBacked: true,
+		Origins: grantedRefusedRequestFlow,
 	}, func(ctx context.Context, in *MediaRequestListInput) (*MediaRequestCollectionOutput, error) {
 		return reg.listMyRequests(ctx, cursors, in)
 	})
@@ -407,27 +408,27 @@ func registerRequests(reg *Registry) {
 	search := humaOp(http.MethodGet, Prefix+"/requests/search", opSearchRequestMedia, requestsTag,
 		"Search the request provider for movies and series.")
 	search.Errors = []int{http.StatusConflict}
-	Register(reg, Operation{Operation: search, Class: ClassProfileScoped, ServiceBacked: true}, reg.searchRequestMedia)
+	Register(reg, Operation{Operation: search, Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedRequestFlow}, reg.searchRequestMedia)
 
 	detail := humaOp(http.MethodGet, Prefix+"/requests/detail/{media_type}/{tmdb_id}", opGetRequestMediaDetail, requestsTag,
 		"Get a movie's or series' detail document with its availability and request state.")
 	detail.Errors = []int{http.StatusConflict}
-	Register(reg, Operation{Operation: detail, Class: ClassProfileScoped, ServiceBacked: true}, reg.getRequestMediaDetail)
+	Register(reg, Operation{Operation: detail, Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedRequestFlow}, reg.getRequestMediaDetail)
 
 	sections := humaOp(http.MethodGet, Prefix+"/requests/discover", opListDiscoverSections, requestsTag,
 		"List the Discover page's rows in the admin's order, with each title row's first page.")
 	sections.Errors = []int{http.StatusConflict}
-	Register(reg, Operation{Operation: sections, Class: ClassProfileScoped, ServiceBacked: true}, reg.listDiscoverSections)
+	Register(reg, Operation{Operation: sections, Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedRequestFlow}, reg.listDiscoverSections)
 
 	section := humaOp(http.MethodGet, Prefix+"/requests/discover/{section}", opGetDiscoverSection, requestsTag,
 		"Get one page of a built-in discovery row; getDiscoverRow serves every row.")
 	section.Errors = []int{http.StatusNotFound, http.StatusConflict}
-	Register(reg, Operation{Operation: section, Class: ClassProfileScoped, ServiceBacked: true}, reg.getDiscoverSection)
+	Register(reg, Operation{Operation: section, Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedRequestFlow}, reg.getDiscoverSection)
 
 	row := humaOp(http.MethodGet, Prefix+"/requests/discover/rows/{row_id}", opGetDiscoverRow, requestsTag,
 		"Get one page of a Discover title row, for its see all page.")
 	row.Errors = []int{http.StatusNotFound, http.StatusConflict}
-	Register(reg, Operation{Operation: row, Class: ClassProfileScoped, ServiceBacked: true}, reg.getDiscoverRow)
+	Register(reg, Operation{Operation: row, Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedRequestFlow}, reg.getDiscoverRow)
 
 	for _, brand := range []struct{ id, segment, summary string }{
 		{opListDiscoverGenres, "genres", "List the browsable genres."},
@@ -437,7 +438,7 @@ func registerRequests(reg *Registry) {
 		op := humaOp(http.MethodGet, Prefix+"/requests/discover/"+brand.segment, brand.id, requestsTag, brand.summary)
 		op.Errors = []int{http.StatusConflict}
 		id := brand.id
-		Register(reg, Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true},
+		Register(reg, Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedRequestFlow},
 			func(ctx context.Context, _ *struct{}) (*DiscoverBrandCollectionOutput, error) {
 				return reg.listDiscoverBrands(ctx, id)
 			})
@@ -446,12 +447,12 @@ func registerRequests(reg *Registry) {
 	genre := humaOp(http.MethodGet, Prefix+"/requests/discover/browse/genre/{slug}", opBrowseDiscoverGenre, requestsTag,
 		"Browse a genre's movies or series.")
 	genre.Errors = []int{http.StatusConflict}
-	Register(reg, Operation{Operation: genre, Class: ClassProfileScoped, ServiceBacked: true}, reg.browseDiscoverGenre)
+	Register(reg, Operation{Operation: genre, Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedRequestFlow}, reg.browseDiscoverGenre)
 
 	network := humaOp(http.MethodGet, Prefix+"/requests/discover/browse/network/{slug}", opBrowseDiscoverNetwork, requestsTag,
 		"Browse a network's series.")
 	network.Errors = []int{http.StatusConflict}
-	Register(reg, Operation{Operation: network, Class: ClassProfileScoped, ServiceBacked: true},
+	Register(reg, Operation{Operation: network, Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedRequestFlow},
 		func(ctx context.Context, in *DiscoverBrowseInput) (*DiscoverBrowsePageOutput, error) {
 			return reg.browseDiscoverBrand(ctx, in, func(svc MediaRequestService, viewer mediarequests.Viewer) (*mediarequests.DiscoverBrowseResponse, error) {
 				return svc.BrowseNetwork(ctx, viewer, in.Slug, in.Sort, in.Page)
@@ -461,7 +462,7 @@ func registerRequests(reg *Registry) {
 	studio := humaOp(http.MethodGet, Prefix+"/requests/discover/browse/studio/{slug}", opBrowseDiscoverStudio, requestsTag,
 		"Browse a studio's movies.")
 	studio.Errors = []int{http.StatusConflict}
-	Register(reg, Operation{Operation: studio, Class: ClassProfileScoped, ServiceBacked: true},
+	Register(reg, Operation{Operation: studio, Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedRequestFlow},
 		func(ctx context.Context, in *DiscoverBrowseInput) (*DiscoverBrowsePageOutput, error) {
 			return reg.browseDiscoverBrand(ctx, in, func(svc MediaRequestService, viewer mediarequests.Viewer) (*mediarequests.DiscoverBrowseResponse, error) {
 				return svc.BrowseStudio(ctx, viewer, in.Slug, in.Sort, in.Page)
@@ -474,18 +475,18 @@ func registerRequests(reg *Registry) {
 		"Get notified when a title that already has an active request becomes available.")
 	// 409 when the title has no active request (request it instead).
 	follow.Errors = []int{http.StatusNotFound, http.StatusConflict}
-	Register(reg, Operation{Operation: follow, Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}, reg.followRequestMedia)
+	Register(reg, Operation{Operation: follow, Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent, Origins: grantedRefusedRequestFlow}, reg.followRequestMedia)
 
 	unfollow := humaOp(http.MethodDelete, Prefix+"/requests/follows/{media_type}/{tmdb_id}", opUnfollowRequestMedia, requestsTag,
 		"Stop following a title.")
 	unfollow.DefaultStatus = http.StatusNoContent
-	Register(reg, Operation{Operation: unfollow, Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}, reg.unfollowRequestMedia)
+	Register(reg, Operation{Operation: unfollow, Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent, Origins: grantedRefusedRequestFlow}, reg.unfollowRequestMedia)
 
 	get := humaOp(http.MethodGet, Prefix+"/requests/{id}", opGetRequest, requestsTag,
 		"Get one of the account's media requests.")
 	get.Description = "A profile the household manager blocked from requests gets 403 for a request another profile made, unless it acts as an admin."
 	get.Errors = []int{http.StatusConflict}
-	Register(reg, Operation{Operation: get, Class: ClassProfileScoped, ServiceBacked: true}, reg.getRequest)
+	Register(reg, Operation{Operation: get, Class: ClassProfileScoped, ServiceBacked: true, Origins: grantedRefusedRequestFlow}, reg.getRequest)
 }
 
 // MediaRequestCollectionOutput is the listMyRequests response.

@@ -203,6 +203,7 @@ func registerProfileSections(reg *Registry) {
 			"List the acting profile's saved section overrides for one page."),
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
+		Origins:       grantedHomeRead,
 	}, reg.listProfileSectionOverrides)
 
 	replace := humaOp(http.MethodPut, Prefix+"/profile/sections", "replaceProfileSectionOverrides", "profile_sections",
@@ -217,6 +218,7 @@ func registerProfileSections(reg *Registry) {
 		DemoRestricted: isMutatingMethod(replace.Method),
 		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
+		Origins:        grantedRefusedOtherDevicesShow,
 	}, reg.replaceProfileSectionOverrides)
 
 	Register(reg, Operation{
@@ -226,6 +228,7 @@ func registerProfileSections(reg *Registry) {
 		DemoRestricted: true,
 		RetrySafety:    RetrySafetyNonRetryable,
 		ServiceBacked:  true,
+		Origins:        grantedRefusedOtherDevicesShow,
 	}, reg.resetProfileSectionOverrides)
 
 	Register(reg, Operation{
@@ -233,6 +236,7 @@ func registerProfileSections(reg *Registry) {
 			"Get one page's sections as the acting profile sees them, with its overrides applied."),
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
+		Origins:       grantedHomeRead,
 	}, reg.getProfileSectionSettings)
 
 	Register(reg, Operation{
@@ -240,12 +244,14 @@ func registerProfileSections(reg *Registry) {
 			"Get one page's pre-override server section baseline for home layout export and import."),
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
+		Origins:       grantedHomeRead,
 	}, reg.getProfileSectionBaseline)
 
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/profile/sections/flags", "getProfileSectionFlags", "profile_sections",
 			"Get what this server lets profiles do to their pages."),
-		Class: ClassProfileScoped,
+		Class:   ClassProfileScoped,
+		Origins: grantedHomeRead,
 	}, reg.getProfileSectionFlags)
 }
 

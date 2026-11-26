@@ -141,3 +141,31 @@ func TestContentHandlerRefusesOffOriginRedirects(t *testing.T) {
 		t.Fatalf("two Location spellings: status = %d, Location = %q; want 502 and none", rec.Code, rec.Header().Get("Location"))
 	}
 }
+
+// TestContentHandlerResolvesEveryRequest: the content handler asks its access
+// resolver for every page and asset request before the proxy runs, so the
+// resolver's answer for a session another app's key opened (no session)
+// holds on every plugin-content route. Catches a path through the handler
+// that dispatches without asking.
+func TestContentHandlerResolvesEveryRequest(t *testing.T) {
+	service := &contentTestService{access: "public", file: t.TempDir() + "/asset.txt"}
+	proxy := NewHTTPProxy(service, profileTestInstallationStore{})
+	routes, assets := 0, 0
+	h := NewContentHandler(proxy,
+		func(*http.Request) ContentAccess { routes++; return ContentAccess{} },
+		func(*http.Request) ContentAccess { assets++; return ContentAccess{} })
+	for _, tc := range []struct {
+		method, path string
+		counter      *int
+	}{
+		{http.MethodPost, ContentPrefix + "/plugins/1/page", &routes},
+		{http.MethodGet, ContentPrefix + "/plugins/1/", &routes},
+		{http.MethodGet, ContentPrefix + "/plugin-assets/1/asset.txt", &assets},
+	} {
+		before := *tc.counter
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(tc.method, tc.path, nil))
+		if *tc.counter != before+1 {
+			t.Errorf("%s %s dispatched without resolving access", tc.method, tc.path)
+		}
+	}
+}

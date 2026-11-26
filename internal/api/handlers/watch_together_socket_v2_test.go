@@ -367,10 +367,10 @@ func TestRoomSocketV2KeepsAnotherAppFromHosting(t *testing.T) {
 		t.Fatalf("another app as a member: err = %v, credential %+v", err, h.Tickets.(*roomSocketFakeTickets).credential)
 	}
 	play := []byte(`{"type":"transport_request","action":"play"}`)
-	if err := h.Room.handleRoomClientMessage(t.Context(), nil, nil, 7, "profile", true, play); !errors.Is(err, errOtherAppTransport) {
+	if err := h.Room.handleRoomClientMessage(t.Context(), nil, nil, 7, "profile", roomCaller{otherApp: true}, play); !errors.Is(err, errOtherAppTransport) {
 		t.Fatalf("another app's transport request: err = %v", err)
 	}
-	if err := h.Room.handleRoomClientMessage(t.Context(), nil, nil, 7, "profile", false, play); errors.Is(err, errOtherAppTransport) {
+	if err := h.Room.handleRoomClientMessage(t.Context(), nil, nil, 7, "profile", roomCaller{}, play); errors.Is(err, errOtherAppTransport) {
 		t.Fatal("an ordinary member's transport request was refused as another app's")
 	}
 }
@@ -421,5 +421,101 @@ func TestRoomSocketV2CarriesTheOtherAppMarkToTheConnection(t *testing.T) {
 		if refused := message == errOtherAppTransport.Error(); refused != otherApp {
 			t.Fatalf("another app %v: transport answered %q", otherApp, message)
 		}
+	}
+}
+
+// TestRoomSocketV2OtherAppSeatHeld: while a member's seat is held, a session
+// another app opened for the same account and profile is refused with an
+// error frame of code forbidden whose message says the seat is still held
+// and to try again: the holder may be the app's own connection that dropped
+// without closing, so it must not claim another device holds it. Catches the
+// refusal going back to naming another device, or changing the code a
+// client acts on.
+func TestRoomSocketV2OtherAppSeatHeld(t *testing.T) {
+	h, _, _ := roomSocketHandler(t)
+	server := roomSocketServer(t, h)
+	dial := func(otherApp bool) *websocket.Conn {
+		t.Helper()
+		proof, _, err := h.Room.TokenService.Mint(watchtogether.RoomTokenClaims{RoomID: "room", UserID: 7, ProfileID: "profile"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "user", ProfileID: "profile", AccessExpiresAt: time.Now().Add(time.Minute)}
+		ticket, _, err := h.MintRoomSocket(t.Context(), "room", proof, identity, otherApp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dialer := websocket.Dialer{Subprotocols: []string{watchtogether.RoomSocketProtocol, eventsTicketProtocolPrefix + ticket}}
+		conn, resp, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+"/rooms/room/ws", http.Header{"Origin": []string{server.URL}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		t.Cleanup(func() { _ = conn.Close() })
+		return conn
+	}
+	holder := dial(false)
+	// The holder's first frame says it is connected, so its seat is held.
+	_ = holder.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := holder.ReadMessage(); err != nil {
+		t.Fatal(err)
+	}
+	app := dial(true)
+	_ = app.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, body, err := app.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var frame map[string]string
+	if err := json.Unmarshal(body, &frame); err != nil {
+		t.Fatal(err)
+	}
+	if frame["type"] != "error" || frame["code"] != "forbidden" || frame["message"] != "This profile's place in the room is still held by another connection; try again shortly" {
+		t.Fatalf("frame = %s", body)
+	}
+}
+
+// TestRoomSocketV2AnotherAppAttachesOnlyItsOwnStream: an attach frame names
+// a playback session; one of the same account and profile is accepted from
+// any member, so a session another app's key opened could attach the
+// person's own device's stream as its member state. Such a connection
+// attaches only a stream its own login session started (by the attempt row);
+// another login session's stream, an unknown one, and any attach while the
+// lookup is unwired are refused. Other connections are not asked. Catches the
+// attach going back to account-and-profile only for such a session.
+func TestRoomSocketV2AnotherAppAttachesOnlyItsOwnStream(t *testing.T) {
+	h, _, _ := roomSocketHandler(t)
+	started := map[string]string{"phone-stream": "login-phone", "app-stream": "login-app"}
+	asked := 0
+	h.Room.StreamLoginSession = func(_ context.Context, id string) (string, error) {
+		asked++
+		if s, ok := started[id]; ok {
+			return s, nil
+		}
+		return "", errors.New("no attempt")
+	}
+	attach := func(caller roomCaller, id string) error {
+		t.Helper()
+		return h.Room.handleRoomClientMessage(t.Context(), nil, nil, 7, "profile", caller, []byte(`{"type":"attach_session","session_id":"`+id+`"}`))
+	}
+	app := roomCaller{otherApp: true, loginSessionID: "login-app"}
+	for _, id := range []string{"phone-stream", "unknown-stream"} {
+		if err := attach(app, id); !errors.Is(err, errOtherAppAttach) {
+			t.Fatalf("another app attaching %s: err = %v", id, err)
+		}
+	}
+	if err := attach(app, "app-stream"); errors.Is(err, errOtherAppAttach) {
+		t.Fatal("another app refused its own stream")
+	}
+	before := asked
+	if err := attach(roomCaller{loginSessionID: "login-phone"}, "phone-stream"); errors.Is(err, errOtherAppAttach) {
+		t.Fatal("the person's own connection refused")
+	}
+	if asked != before {
+		t.Fatal("the person's own connection was asked about its stream")
+	}
+	h.Room.StreamLoginSession = nil
+	if err := attach(app, "app-stream"); !errors.Is(err, errOtherAppAttach) {
+		t.Fatalf("unwired lookup: err = %v", err)
 	}
 }
