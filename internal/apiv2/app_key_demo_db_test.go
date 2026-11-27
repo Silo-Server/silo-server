@@ -148,9 +148,8 @@ func listCount(t *testing.T, h http.Handler, path, token string) (int, string) {
 // the demo server and an ordinary account with demo mode off still get every
 // row, that a setting that can't be read refuses rather than serve the rows,
 // that another app's session and an administrator acting as the account are
-// refused before the setting is read, and
-// that a visitor's actions on those rows answer the same for a real row and
-// an unknown id.
+// refused before the setting is read, and that a visitor's actions on those
+// rows answer the same for a real row and an unknown id.
 func TestDemoVisitorKeyListsDB(t *testing.T) {
 	demo := &demoSwitch{}
 	d := newKeyRoutesDB(t, func(deps *Dependencies) { deps.DemoSettings = demo })
@@ -236,41 +235,44 @@ func TestDemoVisitorKeyListsDB(t *testing.T) {
 		}
 	})
 
-	// A visitor learns nothing of a row it can't list from acting on it: a
-	// row of the account and an unknown id get the same answer, and the row
-	// stays.
-	t.Run("actions on rows a visitor can't list", func(t *testing.T) {
-		unknown := uuid.NewString()
-		for _, tc := range []struct {
-			name, method, format, body string
-			status                     int
-			problem                    ProblemType
-			known                      string
-		}{
-			{"revoke device key", http.MethodDelete, "/auth/keys/devices/%s", "", http.StatusForbidden, TypePermissionDenied, visitorRows.active},
-			{"deny waiting device", http.MethodPost, "/auth/keys/pending/%s/deny", "{}", http.StatusForbidden, TypePermissionDenied, visitorRows.pending},
-			{"approve waiting device", http.MethodPost, "/auth/keys/pending/%s/approve", "{}", http.StatusConflict, TypeCapabilityDisabled, visitorRows.pending},
-			{"withdraw approval", http.MethodDelete, "/auth/device/preapprovals/%s", "", http.StatusForbidden, TypePermissionDenied, visitorRows.preapproval},
-		} {
-			var answers []string
-			for _, id := range []string{tc.known, unknown} {
-				rec := do(t, d.handler, tc.method, Prefix+strings.Replace(tc.format, "%s", id, 1), tc.body, bearer("tok-phone"))
-				p := requireProblem(t, rec, tc.problem)
-				if rec.Code != tc.status {
-					t.Fatalf("%s %s: status %d", tc.name, id, rec.Code)
-				}
-				answers = append(answers, p.Detail)
+	t.Run("actions on rows a visitor can't list", func(t *testing.T) { requireOpaqueRowActions(t, d, visitorRows) })
+}
+
+// requireOpaqueRowActions: a visitor learns nothing of a row it can't list
+// from acting on it. A row of the account and an unknown id get the same
+// answer, and the row stays.
+func requireOpaqueRowActions(t *testing.T, d *keyRoutesDB, visitorRows demoKeyRows) {
+	t.Helper()
+	unknown := uuid.NewString()
+	for _, tc := range []struct {
+		name, method, format, body string
+		status                     int
+		problem                    ProblemType
+		known                      string
+	}{
+		{"revoke device key", http.MethodDelete, "/auth/keys/devices/%s", "", http.StatusForbidden, TypePermissionDenied, visitorRows.active},
+		{"deny waiting device", http.MethodPost, "/auth/keys/pending/%s/deny", "{}", http.StatusForbidden, TypePermissionDenied, visitorRows.pending},
+		{"approve waiting device", http.MethodPost, "/auth/keys/pending/%s/approve", "{}", http.StatusConflict, TypeCapabilityDisabled, visitorRows.pending},
+		{"withdraw approval", http.MethodDelete, "/auth/device/preapprovals/%s", "", http.StatusForbidden, TypePermissionDenied, visitorRows.preapproval},
+	} {
+		var answers []string
+		for _, id := range []string{tc.known, unknown} {
+			rec := do(t, d.handler, tc.method, Prefix+strings.Replace(tc.format, "%s", id, 1), tc.body, bearer("tok-phone"))
+			p := requireProblem(t, rec, tc.problem)
+			if rec.Code != tc.status {
+				t.Fatalf("%s %s: status %d", tc.name, id, rec.Code)
 			}
-			if answers[0] != answers[1] {
-				t.Fatalf("%s: a real row answers %q, an unknown id %q", tc.name, answers[0], answers[1])
-			}
+			answers = append(answers, p.Detail)
 		}
-		var status string
-		if err := d.pool.QueryRow(t.Context(), `SELECT status FROM auth_device_keys WHERE id = $1`, visitorRows.pending).Scan(&status); err != nil || status != models.DeviceKeyStatusPending {
-			t.Fatalf("waiting key = %q (%v), want still pending", status, err)
+		if answers[0] != answers[1] {
+			t.Fatalf("%s: a real row answers %q, an unknown id %q", tc.name, answers[0], answers[1])
 		}
-		if err := d.pool.QueryRow(t.Context(), `SELECT status FROM device_login_requests WHERE id = $1`, visitorRows.preapproval).Scan(&status); err != nil || status != auth.DeviceLoginStatusApproved {
-			t.Fatalf("approval = %q (%v), want still approved", status, err)
-		}
-	})
+	}
+	var status string
+	if err := d.pool.QueryRow(t.Context(), `SELECT status FROM auth_device_keys WHERE id = $1`, visitorRows.pending).Scan(&status); err != nil || status != models.DeviceKeyStatusPending {
+		t.Fatalf("waiting key = %q (%v), want still pending", status, err)
+	}
+	if err := d.pool.QueryRow(t.Context(), `SELECT status FROM device_login_requests WHERE id = $1`, visitorRows.preapproval).Scan(&status); err != nil || status != auth.DeviceLoginStatusApproved {
+		t.Fatalf("approval = %q (%v), want still approved", status, err)
+	}
 }
