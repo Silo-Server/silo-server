@@ -390,6 +390,12 @@ func TestSaveCustomSeasonsDB(t *testing.T) {
 	if err != nil || layout.Seasons[0].Poster.Path != "series/x/poster/original.ab.webp" {
 		t.Fatalf("stored poster = %+v (%v), want the upload's stored path", layout.Seasons, err)
 	}
+	// The artwork GC and storage sweep keep an upload the arrangement holds,
+	// although no season row shows it.
+	held, err := referencedArtworkPaths(ctx, pool, []string{"series/x/poster/original.ab.webp"})
+	if _, ok := held["series/x/poster/original.ab.webp"]; err != nil || !ok {
+		t.Fatalf("referenced artwork = %v (%v), want the arranged season's upload", held, err)
+	}
 
 	// Switching back to the arrangement keeps the provider its episode keys
 	// belong to: another provider's keys would match none of its slots.

@@ -476,7 +476,7 @@ func (s *MetadataService) customSeasonUploads(ctx context.Context, seriesID stri
 		return uploads, nil
 	}
 	rows, err := s.dbPool.Query(ctx, `
-		SELECT source, path, thumbhash FROM series_custom_season_uploads WHERE series_id = $1`, seriesID)
+		SELECT source, path, thumbhash FROM series_custom_season_uploads WHERE series_id = $1 AND path <> ''`, seriesID)
 	if err != nil {
 		return nil, fmt.Errorf("loading uploaded season posters: %w", err)
 	}
