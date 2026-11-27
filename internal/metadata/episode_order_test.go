@@ -3,6 +3,8 @@ package metadata
 import (
 	"reflect"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func intRef(v int) *int { return &v }
@@ -176,5 +178,37 @@ func TestAssignProviderNumbers(t *testing.T) {
 	}
 	if laidOut[2].SeasonNumber != 1 || laidOut[2].EpisodeNumber != 3 {
 		t.Fatalf("absolute numbering = S%dE%d, want S1E3", laidOut[2].SeasonNumber, laidOut[2].EpisodeNumber)
+	}
+}
+
+// A bare number (Show - 045.mkv) is the 45th episode counted through the
+// provider's default order once an admin chose the show's order; without one
+// it is read only where per-season and absolute numbering agree, season 1.
+func TestUnseasonedAbsoluteNumbers(t *testing.T) {
+	ep := func(id string, season, number int, provider ...int) *models.Episode {
+		e := &models.Episode{ContentID: id, SeasonNumber: season, EpisodeNumber: number, TvdbID: "t" + id, MetadataSource: "provider", Title: "Title " + id}
+		if len(provider) == 2 {
+			e.ProviderSeasonNumber, e.ProviderEpisodeNumber = &provider[0], &provider[1]
+		}
+		return e
+	}
+	// One absolute season shown; the provider's default order has two
+	// seasons of two episodes, and a special.
+	episodes := []*models.Episode{
+		ep("a", 1, 1, 1, 1), ep("b", 1, 2, 1, 2), ep("c", 1, 3, 2, 1), ep("d", 1, 4, 2, 2), ep("sp", 0, 1),
+	}
+	counted := newUnseasonedEpisodeIndex(episodes, true)
+	for number, want := range map[int]string{1: "a", 3: "c", 4: "d"} {
+		got, ok := counted.resolve(number, "")
+		if !ok || got.ContentID != want {
+			t.Fatalf("absolute %d = %v, %v; want %s", number, got, ok, want)
+		}
+	}
+	if _, ok := counted.resolve(5, ""); ok {
+		t.Fatal("absolute 5 resolved past the last episode")
+	}
+	perSeason := newUnseasonedEpisodeIndex([]*models.Episode{ep("x", 1, 1), ep("y", 2, 1)}, false)
+	if _, ok := perSeason.resolve(3, ""); ok {
+		t.Fatal("without a chosen order, a number past season 1 must not resolve")
 	}
 }

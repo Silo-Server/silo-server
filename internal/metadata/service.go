@@ -7160,7 +7160,13 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 		if err != nil {
 			return fmt.Errorf("loading episodes for unseasoned file matching: %w", err)
 		}
-		unseasonedEpisodes = newUnseasonedEpisodeIndex(seriesEpisodes)
+		// A series whose order an admin chose reads bare numbers through
+		// the whole order; others only where both readings agree.
+		order, err := s.seriesEpisodeOrder(ctx, seriesID)
+		if err != nil {
+			return err
+		}
+		unseasonedEpisodes = newUnseasonedEpisodeIndex(seriesEpisodes, order.Override)
 	}
 
 	episodesByAirDate := map[string][]*models.Episode{}

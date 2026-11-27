@@ -127,6 +127,8 @@ type episodeOrderSettings struct {
 	Layout    string
 	// Custom is the arrangement of a custom layout.
 	Custom *customLayout
+	// Override is true when an admin chose the series' order.
+	Override bool
 }
 
 // orderingFor is the ordering to request from the provider slug.
@@ -161,6 +163,7 @@ func (s *MetadataService) seriesEpisodeOrder(ctx context.Context, contentID stri
 	if err != nil {
 		return settings, fmt.Errorf("loading the series episode order: %w", err)
 	}
+	settings.Override = true
 	if override.Provider != "" {
 		settings.Provider, settings.OrderID = override.Provider, override.OrderID
 	}
