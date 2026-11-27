@@ -35,10 +35,12 @@ const (
 	newAccount = "account with no sign-in rows yet"
 	// No caller.
 	unused = "no caller"
-	// Works across accounts: the settings lock, every installation row
-	// (share, in id order), then the sessions in id order. An uninstall waits
-	// at its installation or the writer waits there holding no session row.
-	installationsFirst = "settings lock, every installation (share), then sessions in id order"
+	// Works across accounts: every installation row (share, in id order),
+	// the settings lock, then the sessions in id order. An uninstall waits at
+	// its installation or the writer waits there holding no session row, and
+	// a plugin write (installation, then settings lock) meets it at the
+	// installation, not the settings lock.
+	installationsFirst = "every installation (share), settings lock, then sessions in id order"
 )
 
 // signInRowWriters is every statement outside tests that writes
