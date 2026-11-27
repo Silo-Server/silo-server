@@ -506,16 +506,55 @@ function Arranger({
         className="flex max-w-[min(1760px,calc(100vw-3rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(1760px,calc(100vw-3rem))] md:h-[min(calc(100dvh-3rem),1080px)]"
         showCloseButton
       >
-        <DialogHeader className="border-border/10 shrink-0 gap-1 border-b px-5 py-4 pe-12 text-start">
-          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
-            <DialogTitle className="text-[0.9375rem] font-semibold">
-              {t("web.item.arrangeSeasons.title")}
-            </DialogTitle>
-            <span className="bg-muted/50 text-muted-foreground rounded px-2 py-0.5 text-[0.6875rem]">
-              {title}
-            </span>
+        <DialogHeader className="border-border/10 shrink-0 flex-col gap-3 border-b px-5 py-4 pe-12 text-start sm:flex-row sm:items-center">
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+              <DialogTitle className="text-[0.9375rem] font-semibold">
+                {t("web.item.arrangeSeasons.title")}
+              </DialogTitle>
+              <span className="bg-muted/50 text-muted-foreground rounded px-2 py-0.5 text-[0.6875rem]">
+                {title}
+              </span>
+            </div>
+            <DialogDescription className="text-muted-foreground text-xs">
+              {summary}
+            </DialogDescription>
           </div>
-          <DialogDescription className="text-muted-foreground text-xs">{summary}</DialogDescription>
+          <div className="shrink-0">
+            <Select
+              value=""
+              onValueChange={(value) => {
+                const picked = JSON.parse(value) as { provider: string; order_id: string };
+                // Files keep the naming they have: an empty file order meant
+                // the provider being replaced.
+                const files = data.choice.file_order || data.structure_provider;
+                onStartOver({
+                  provider: picked.provider,
+                  order_id: picked.order_id,
+                  file_order: files === picked.provider ? "" : files,
+                  layout: "custom",
+                });
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-auto sm:min-w-[240px]">
+                <RotateCcw className="size-3.5" aria-hidden="true" />
+                <SelectValue placeholder={t("web.item.arrangeSeasons.startOver")} />
+              </SelectTrigger>
+              {/* Below the trigger and as wide as the longest order name, so a
+                long TMDB episode group name is not cut off. */}
+              <SelectContent
+                position="popper"
+                align="end"
+                className="w-max max-w-[min(36rem,calc(100vw-2rem))]"
+              >
+                {startOverOptions.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </DialogHeader>
 
         <DndContext
@@ -745,33 +784,6 @@ function Arranger({
         </DndContext>
 
         <div className="border-border/10 flex shrink-0 flex-col gap-3 border-t px-5 py-3.5 sm:flex-row sm:items-center">
-          <Select
-            value=""
-            onValueChange={(value) => {
-              const picked = JSON.parse(value) as { provider: string; order_id: string };
-              // Files keep the naming they have: an empty file order meant
-              // the provider being replaced.
-              const files = data.choice.file_order || data.structure_provider;
-              onStartOver({
-                provider: picked.provider,
-                order_id: picked.order_id,
-                file_order: files === picked.provider ? "" : files,
-                layout: "custom",
-              });
-            }}
-          >
-            <SelectTrigger className="w-full sm:w-auto sm:max-w-[420px] sm:min-w-[220px]">
-              <RotateCcw className="size-3.5" aria-hidden="true" />
-              <SelectValue placeholder={t("web.item.arrangeSeasons.startOver")} />
-            </SelectTrigger>
-            <SelectContent>
-              {startOverOptions.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           <div className="text-muted-foreground flex min-w-0 flex-1 items-start gap-2 text-xs leading-relaxed">
             <History className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
             <span>{t("web.item.arrangeSeasons.footer")}</span>
