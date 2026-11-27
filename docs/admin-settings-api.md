@@ -107,7 +107,7 @@ LDAP provider people can sign in with is on it is
 `server.public_url` set, so clearing `server.public_url` while password
 sign-in is off and that provider is the only one is refused the same way.
 
-Two more refusals keep every account a way in, both `409 last_sign_in_method`
+Three more refusals keep every account a way in, all `409 last_sign_in_method`
 with a detail that names the accounts (the first ten, then how many more):
 
 - Turning `auth.local_password_login` off while an enabled account would
@@ -119,6 +119,10 @@ with a detail that names the accounts (the first ten, then how many more):
   password stops working and its key would be its only way in. The detail
   names linking a provider account for each, and giving a password only to a
   break-glass administrator it names, the one kind a password signs in then.
+  These are the accounts in the `blocking` group of
+  `listAdminLocalPasswordOffAccounts`, read from the same query; the accounts
+  that only lose password sign-in, in its other two groups, do not stop the
+  write.
 - Turning app keys off (`auth.app_key_sign_in` off, or `demo.enabled` on) while
   any enabled account signs in only with its keys. Otherwise the write ends
   every login session a key opened, in the same transaction.

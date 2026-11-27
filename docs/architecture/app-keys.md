@@ -93,10 +93,14 @@ fails like any other revoked session's. Revoking every key of an account does
 the same for each of its device keys.
 
 **Lock order.** Key rows are written only by application transactions, and
-always in one order: the account row (`lockUser`), the settings lock (shared;
-`lockChain`, see [The switch](#the-switch)), the plugin installation (share)
-and the provider identity a key is bound to (`keySignInPolicy`), the person
-key, the device keys, then the login sessions those keys opened. No database
+always in one order: the account row (`lockUser`); for a key bound to a
+provider identity, its plugin installation (share) and identity
+(`lockKeyIdentity`); the settings lock (shared; `lockChain`, see
+[The switch](#the-switch)); the person key, the device keys, then the login
+sessions those keys opened. The installation comes before the settings lock
+because a plugin write that guards sign-in takes its installation row and
+then the settings lock; nothing holds the settings lock while it waits for an
+installation row. No database
 trigger or cascade writes to a key row. Ending a session writes only its
 row. A path that ends or deletes several sessions locks them in id order
 first, with a separate locking read (`lockSessionsInOrder`), and writes any
@@ -105,9 +109,11 @@ writes them in through its foreign key. An ender that also ends sign-in
 links (`EndSignInLinksTx`) deletes the link and link-code rows last, after
 the session and request rows; every path takes them after the account's
 row. Turning the switch off takes the
-ownership lock (shared), the settings lock (exclusive), every plugin
-installation row (share, in id order), then the key sessions (in id order),
-and no account, identity or key row. The ownership lock comes first wherever
+ownership lock (shared), every plugin installation row (share, in id order;
+`auth.LockSwitchWrite`), the settings lock (exclusive), then the key sessions
+(in id order), and no account, identity or key row. A refresh that ends a key
+session the sweep missed takes the installation rows before the settings lock
+too. The ownership lock comes first wherever
 it is taken: ownership then account rows (a transfer or the recovery command,
 exclusive), ownership then settings (a settings write that could turn app
 keys off or demo mode on, shared, before the settings lock), and account row
@@ -1043,6 +1049,40 @@ same list to the settings page:
   only a break-glass administrator off. An account with a password and only
   local keys is left with no way in, as an account with only a password always
   has been, and is not listed.
+
+For local passwords going off one query (`localPasswordOffAffectedSQL`)
+answers both outcomes: the accounts above, which block the write and are
+named in its refusal, and the accounts that only lose password sign-in (a
+password that signs in today, not break-glass, no identity at a provider that
+can sign people in), which the write is allowed to leave without it and
+`listAdminLocalPasswordOffAccounts` warns about. That list's `blocking` group
+is the first kind, read from the same query, so the confirmation page and the
+refusal never disagree. On a server whose accounts hold no app keys nobody
+blocks, and the warned accounts are the ones listed before app keys existed.
+
+What each write does to each kind of account, while a break-glass
+administrator and a provider people can use exist (otherwise turning local
+passwords off is refused for that reason first). Refused means the write is
+refused naming the account (`last_sign_in_method`); warned means it is
+allowed and the confirmation lists the account as losing password sign-in;
+blank means unaffected. `TestAccountsAtRiskDB` runs every row.
+
+| Account | App keys off | Local passwords off | Public URL removed |
+|---|---|---|---|
+| A password only | | warned | |
+| A password and a local key | | warned | |
+| A password and a key bound to a provider that signs people in | | | |
+| A password and a key bound to a provider that does not (network, or OAuth with no public URL) | | refused | |
+| Keys only, local | refused | refused | |
+| Keys only, bound to a provider that signs people in | | | |
+| Keys only, bound to a provider that does not | refused | refused | |
+| A provider account only (directory) | | | |
+| An OAuth provider account only, with a public URL | | | refused |
+| An OAuth identity and a local key, with a public URL | | | refused |
+| An administrator with a password and a key | | warned | |
+| Break-glass, with a password | | | |
+| Break-glass, no password, a local key, local passwords already off | refused | refused | |
+| Disabled | | | |
 
 The facts are SQL fragments in `internal/auth` (`sign_in_risk.go`), each tied
 to the Go check it mirrors: a usable password is `HasLocalPassword`; a usable
