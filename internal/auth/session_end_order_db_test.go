@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -343,12 +344,17 @@ func TestCollectReadsApproverAtStatementClockDB(t *testing.T) {
 		poll *DeviceLoginPollResult
 		err  error
 	}
+	holder := backendPID(t, hold)
 	collected := make(chan polled, 1)
+	returned := make(chan error, 1)
 	go func() {
 		poll, err := svc.Poll(deadline, created.DeviceCode, secret)
 		collected <- polled{poll, err}
+		returned <- fmt.Errorf("collect: %+v, %w", poll, err)
 	}()
-	waitForLockWaiters(t, pool, 1)
+	// The collect itself waits on the account row: a waiter elsewhere in the
+	// database does not count.
+	waitForPartyBehind(t, pool, []int32{holder}, nil, returned)
 	if _, err := pool.Exec(ctx, `UPDATE auth_sessions SET expires_at = clock_timestamp() WHERE id = $1`,
 		ClaimsFromContext(approver).SessionID); err != nil {
 		t.Fatal(err)
@@ -476,6 +482,8 @@ func raceOnAccountRow(t *testing.T, pool *pgxpool.Pool, id int, first, second fu
 	defer cancel()
 	var results [2]chan error
 	returned := make(chan error, 2)
+	ahead := []int32{backendPID(t, hold)}
+	var parties []int32
 	for i, party := range []func(context.Context) error{first, second} {
 		results[i] = make(chan error, 1)
 		go func() {
@@ -483,10 +491,52 @@ func raceOnAccountRow(t *testing.T, pool *pgxpool.Pool, id int, first, second fu
 			results[i] <- err
 			returned <- fmt.Errorf("party %d: %w", i+1, err)
 		}()
-		waitForLockWaitersWhile(t, pool, i+1, returned)
+		// Each party waits behind the holder or a party queued before it.
+		pid := waitForPartyBehind(t, pool, ahead, parties, returned)
+		parties = append(parties, pid)
+		ahead = append(ahead, pid)
 	}
 	if err := hold.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
 	return [2]error{<-results[0], <-results[1]}
+}
+
+// backendPID answers the database backend serving tx.
+func backendPID(t *testing.T, tx pgx.Tx) int32 {
+	t.Helper()
+	var pid int32
+	if err := tx.QueryRow(t.Context(), `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	return pid
+}
+
+// waitForPartyBehind waits until a backend other than known waits on a lock
+// one of ahead holds or waits for first (pg_blocking_pids), and answers its
+// pid: the party just started, not some other waiter in the database. A party
+// that answers on returned first fails the test at once.
+func waitForPartyBehind(t *testing.T, pool *pgxpool.Pool, ahead, known []int32, returned <-chan error) int32 {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		var pid int32
+		err := pool.QueryRow(t.Context(), `SELECT pid FROM pg_stat_activity
+			WHERE datname = current_database() AND pg_blocking_pids(pid) && $1::int[] AND NOT (pid = ANY($2::int[]))
+			LIMIT 1`, ahead, append([]int32{}, known...)).Scan(&pid)
+		if err == nil {
+			return pid
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatal(err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no party waited behind %v", ahead)
+		}
+		select {
+		case err := <-returned:
+			t.Fatalf("a party returned before it waited: %v", err)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
