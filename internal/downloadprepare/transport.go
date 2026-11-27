@@ -245,6 +245,18 @@ func (r Request) PreparedTracksRequested() bool {
 	return r.TrackRecipeVersion != "" || r.PreparedTracks != nil
 }
 
+// JobKind classes the preparation by the work it does, the way the node runs
+// it: a prepared track layout encodes every audio track it cannot copy,
+// whatever the top-level audio target says. The API server reserves under this
+// kind and the node counts it, so the two must agree.
+func (r Request) JobKind() nodepool.JobKind {
+	kind := nodepool.CodecJobKind(r.TargetCodecVideo, r.TargetCodecAudio)
+	if r.PreparedTracks == nil || kind == nodepool.JobKindVideoTranscode {
+		return kind
+	}
+	return nodepool.StreamJobKind(false, !r.PreparedTracks.AllAudioCopied())
+}
+
 // ValidPreparedTracks reports whether a requested layout is complete and uses
 // the stream-layout version this build executes.
 func (r Request) ValidPreparedTracks() bool {

@@ -717,12 +717,14 @@ the length of a stream, while a remux that copies every stream costs a little
 disk and network. Balancing the job total alone can leave one node's GPU
 saturated with encodes while another runs only remuxes, so transcode selection
 balances each kind on its own. Playback, trickplay and prepared-download
-placements name the kind of job they start, and among eligible transcode nodes the one with the fewest effective jobs **of
-that kind** wins. Effective means the node's last reported count plus jobs this
-API server placed there since that report. Nodes level on the kind are separated
-by their effective job total, then by the shared-GPU tie-breaker. The soft
-affinity that keeps a session on its current node compares the kind's count: a
-session moves only to a node with at least two fewer jobs of its kind.
+placements name the kind of job they start, and among eligible transcode nodes
+the one with the fewest effective jobs **of that kind** wins. Effective means
+the node's last reported count plus jobs this API server placed there since that
+report. Nodes level on the kind are separated by their effective job total.
+Playback placements then apply the shared-GPU tie-breaker; trickplay and
+prepared-download reservations have none. The soft affinity that keeps a
+playback session on its current node compares the kind's count: a session moves
+only to a node with at least two fewer jobs of its kind.
 
 The job total still decides `max_jobs`. Kind balancing changes which node
 takes work, never how much work a node may take.
@@ -730,8 +732,10 @@ takes work, never how much work a node may take.
 When any eligible candidate has no stored `active_jobs_by_kind`, that placement
 uses the job total for every candidate. A node that cannot say must not look
 idle next to nodes that can. That happens during a rolling upgrade from a build
-that predates the field, and while a node's sample is over the 32 KiB limit
-and dropped (the "node resource sample too large to store" warning).
+that predates the field. A sample over the 32 KiB limit (the "node resource
+sample too large to store" warning) is dropped except for
+`active_jobs_by_kind`, so `last_stats` holds only that field until the sample
+fits again, and balancing continues.
 
 ### Scratch admission
 
@@ -755,7 +759,8 @@ The exclusion is soft in two directions:
 Each transition into pressure is logged once per node (`component=nodepool`,
 "scratch volume nearly full"), not once per session start.
 
-Nothing else routes on `last_stats`, and the guard applies to playback and
+Apart from `active_jobs_by_kind` (see "Job kind balancing" above), nothing else
+routes on `last_stats`, and the guard applies to playback and
 local-egress transcode selection only — not to proxy selection, and not to the
 non-streaming transcode reservations used by prepared downloads.
 

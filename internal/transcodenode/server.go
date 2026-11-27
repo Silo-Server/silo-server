@@ -1180,7 +1180,7 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 
 	jobCtx, cancelJob := sourceContext(r.Context(), source)
 	defer cancelJob()
-	prepareKind := nodepool.CodecJobKind(req.TargetCodecVideo, req.TargetCodecAudio)
+	prepareKind := req.JobKind()
 	s.countJob(slot, prepareKind)
 	defer s.endJob(prepareKind)
 	if s.tracker != nil {

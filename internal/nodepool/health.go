@@ -99,8 +99,9 @@ const maxHealthResponseBytes = 256 << 10
 
 // maxLastStatsBytes bounds the resource blob that is persisted and served.
 //
-// Past this, the stats are dropped and the health verdict is kept: whether a
-// node is alive routes streams, while its dashboard numbers do not, and an
+// Past this, the stats are dropped and the health verdict and the job
+// breakdown are kept: whether a node is alive and how many jobs of each kind it
+// runs route streams, while its dashboard numbers do not, and an
 // oversized blob would otherwise be rewritten into a jsonb column every sweep
 // and echoed to every admin listing nodes.
 const maxLastStatsBytes = 32 << 10
@@ -253,6 +254,23 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 		slog.WarnContext(ctx, "node resource sample too large to store", "component", "nodepool",
 			"id", n.ID, "name", n.Name, "url", n.URL,
 			"bytes", len(encoded), "limit_bytes", maxLastStatsBytes)
+		return routingStatsOnly(jobsByKind)
+	}
+	return encoded
+}
+
+// routingStatsOnly keeps the part of an oversized sample that routes work: the
+// job breakdown is a few dozen bytes, and dropping it with the dashboard
+// numbers would return every placement this node is eligible for to total
+// jobs. nil when there is none, or when it is itself too large.
+func routingStatsOnly(jobsByKind json.RawMessage) []byte {
+	if jobsByKind == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(struct {
+		ActiveJobsByKind json.RawMessage `json:"active_jobs_by_kind"`
+	}{jobsByKind})
+	if err != nil || len(encoded) > maxLastStatsBytes {
 		return nil
 	}
 	return encoded

@@ -295,7 +295,7 @@ func (p *NodeAwarePreparer) reserveNode(ctx context.Context, artifactID string, 
 	workID := "download-prepare-" + artifactID
 	// Classed by the work it does, as the node counts it: a download that
 	// re-encodes video competes with playback encodes for the same GPU.
-	downloadJobKind := nodepool.CodecJobKind(request.TargetCodecVideo, request.TargetCodecAudio)
+	downloadJobKind := request.JobKind()
 	selector, selective := p.planner.(eligibleTranscodeWorkPlanner)
 	switch {
 	case request.ToneMapRequested() || request.StereoDownmixBoostRequested() || request.PreparedTracksRequested():

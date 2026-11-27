@@ -3,6 +3,7 @@ package nodepool
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -97,5 +98,24 @@ func TestCheckNodeStoresJobsByKindForSelection(t *testing.T) {
 	jobs, ok := reportedJobsByKind(&Node{LastStats: lastStats})
 	if !ok || jobs[JobKindVideoTranscode] != 2 || jobs[JobKindRemux] != 0 {
 		t.Fatalf("stored breakdown = %v (ok %v), want video_transcode 2 from %s", jobs, ok, lastStats)
+	}
+}
+
+// An oversized resource sample is dropped, but the breakdown routes work: losing
+// it with the sample would return every placement this node is eligible for to
+// total jobs, and the busiest node is the one whose sample grows largest.
+func TestCheckNodeKeepsJobsByKindWhenTheSampleIsTooLarge(t *testing.T) {
+	padding := strings.Repeat("x", maxLastStatsBytes)
+	url := newStatsHealthNode(t, `{"status":"ok","active_jobs":2,
+		"active_jobs_by_kind":{"video_transcode":2,"remux":0},
+		"system":{"cpu_pct":41,"junk":"`+padding+`"}}`)
+
+	_, _, _, _, lastStats, _ := CheckNode(context.Background(), &Node{URL: url})
+	if len(lastStats) > maxLastStatsBytes || strings.Contains(string(lastStats), "junk") {
+		t.Fatalf("stored the oversized sample (%d bytes)", len(lastStats))
+	}
+	jobs, ok := reportedJobsByKind(&Node{LastStats: lastStats})
+	if !ok || jobs[JobKindVideoTranscode] != 2 {
+		t.Fatalf("stored breakdown = %v (ok %v), want video_transcode 2", jobs, ok)
 	}
 }
