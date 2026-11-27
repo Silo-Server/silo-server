@@ -31,9 +31,6 @@ type sameAccountServer struct {
 	store    blobstore.Store
 	root     string
 	validate ValidateOptions
-	// lastRestore is when the last restore ran. A swap names its databases
-	// by the second, so each restore runs at least a second after the last.
-	lastRestore *time.Time
 }
 
 // newSameAccountServer creates a deployment with a migrated database of its
@@ -57,7 +54,7 @@ func newSameAccountServer(t *testing.T, tools Tools) sameAccountServer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sameAccountServer{url: liveURL, tools: tools, store: store, root: root, lastRestore: new(time.Time),
+	return sameAccountServer{url: liveURL, tools: tools, store: store, root: root,
 		validate: ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKeyOf(t, master), BinaryMigrations: versions}}
 }
 
@@ -110,20 +107,11 @@ func (s sameAccountServer) restoreWith(t *testing.T, src *Source, validate Valid
 	err = RestoreSwap(ctx, src, PGLoader{Tools: s.tools}, ctl, SwapOptions{
 		LiveURL: s.url, DatabaseOnly: true, Validate: validate, WorkDir: t.TempDir(), JournalKey: s.validate.ManifestKey, Out: &out,
 		Journaled: func(stamp string) { previous = "silo_before_restore_" + stamp },
-		Now: func() time.Time {
-			next := s.lastRestore.Add(time.Second)
-			if now := time.Now(); now.After(next) {
-				next = now
-			}
-			*s.lastRestore = next
-			return next
-		},
 	})
 	if err != nil {
 		t.Fatalf("full restore: %v\n%s", err, out.String())
 	}
-	// The swap keeps the replaced database under a name of the second it
-	// ran; the test is done with it.
+	// The swap keeps the replaced database. The test is done with it.
 	if err := ctl.Drop(ctx, previous); err != nil {
 		t.Fatal(err)
 	}

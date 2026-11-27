@@ -568,6 +568,8 @@ GET /api/v2/audio-prefs/{series_id}	non-media
 PUT /api/v2/audio-prefs/{series_id}	non-media
 POST /api/v2/auth/app-codes	non-media
 POST /api/v2/auth/app-codes/redeem	non-media
+POST /api/v2/auth/demo	non-media
+GET /api/v2/auth/demo/capability	non-media
 GET /api/v2/auth/device	non-media
 POST /api/v2/auth/device/approve	non-media
 POST /api/v2/auth/device/approve-handoff	non-media
@@ -1690,6 +1692,8 @@ GET /api/v2/audio-prefs/{series_id}	non-media
 PUT /api/v2/audio-prefs/{series_id}	non-media
 POST /api/v2/auth/app-codes	non-media
 POST /api/v2/auth/app-codes/redeem	non-media
+POST /api/v2/auth/demo	non-media
+GET /api/v2/auth/demo/capability	non-media
 GET /api/v2/auth/device	non-media
 POST /api/v2/auth/device/approve	non-media
 POST /api/v2/auth/device/approve-handoff	non-media

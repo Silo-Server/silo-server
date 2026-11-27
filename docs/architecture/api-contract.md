@@ -1296,6 +1296,9 @@ contract is:
   object naming every job kind with its count, which the API server stores in the node's
   `last_stats` and balances placements on; additive to the frozen shape. See
   [admin-api.md](../admin-api.md#job-kind-balancing).
+  Revision (2026-11-26, with process CPU percent): the optional `attribution` object, the same
+  type `GET /api/v2/admin/system/resources` returns, gains `process.cpu_pct` and
+  `children.cpu_pct`; both are additive and omitted when not measured.
 
 Probe traffic is excluded from request and activity logging. Consumers stay where they are:
 container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `dev/compose.yml`), orchestrator

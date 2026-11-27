@@ -158,7 +158,8 @@ func sanitizedMatchHintProviderIDs(hints *MatchHints) *MatchHints {
 const (
 	automaticMatchAcceptanceFloor = 55
 	// automaticMatchLoneCandidateScore is the score a single candidate needs
-	// when nothing else, such as a matching year, corroborates it.
+	// when nothing else, such as a matching year or, for a movie, an exact
+	// title (loneExactTitleMovie), corroborates it.
 	automaticMatchLoneCandidateScore = 70
 	// automaticMatchTieWindow is how close two scores must be to count as a
 	// tie; the best candidate needs this lead to win outright.
@@ -946,7 +947,8 @@ func selectInitialMatch(hints *MatchHints, candidates []MatchCandidate, provider
 			// providers, which candidatesAreSingleDistinctShow already verified) is
 			// strong independent corroboration — it stands in for a missing hint year
 			// (folders without a "(YYYY)"). A lone single-source no-year result is NOT
-			// accepted here and stays subject to the single-candidate >=70 gate.
+			// accepted here; a dated exact-title movie is handled by loneExactTitleMovie
+			// below, and every other lone candidate stays subject to the >=70 gate.
 			multiSourceCorroborated := hints.Year == 0 && distinctSourceCount(topGroup) >= 2
 			// An exact normalized-title match on a sole distinct show is strong
 			// corroboration on its own, even when the folder year is off by a year
@@ -969,6 +971,11 @@ func selectInitialMatch(hints *MatchHints, candidates []MatchCandidate, provider
 		}
 	}
 	if len(scoredCandidates) == 1 {
+		if loneExactTitleMovie(hints, best.candidate) {
+			winner := best.candidate
+			winner.MatchReasons = append(slices.Clone(winner.MatchReasons), "sole_exact_title")
+			return &winner, true, candidateRejection{}
+		}
 		if best.score < automaticMatchLoneCandidateScore {
 			return nil, false, candidateRejection{rule: MatchRejectionLoneCandidate, requiredScore: automaticMatchLoneCandidateScore}
 		}
@@ -981,6 +988,37 @@ func selectInitialMatch(hints *MatchHints, candidates []MatchCandidate, provider
 		return nil, false, candidateRejection{rule: MatchRejectionAmbiguous}
 	}
 	return &best.candidate, true, candidateRejection{}
+}
+
+// loneExactTitleMovie reports whether the only candidate for a movie folder
+// without a year is a dated provider film with the folder's exact title. A
+// provider's title search is fuzzy, so a single result that carries the exact
+// title is as strong as an exact title that beats weaker results by the tie
+// window, which is already accepted at the same score. Series are left to
+// episode validation.
+func loneExactTitleMovie(hints *MatchHints, candidate MatchCandidate) bool {
+	if hints == nil || hints.Year != 0 || !isMovieTypeAlias(strings.ToLower(strings.TrimSpace(hints.Type))) {
+		return false
+	}
+	if candidate.Year == 0 || !candidateTypeMatchesHint(hints.Type, candidate.ContentType) ||
+		providerIDRichness(candidate.ProviderIDs) == 0 || candidateCorroboratingSourceCount(candidate) == 0 {
+		return false
+	}
+	return loneExactCandidateTitleMatch(hints.Title, candidate)
+}
+
+// loneExactCandidateTitleMatch reports whether hintTitle matches one of the
+// candidate's titles exactly after stripping only bracketed provider year
+// decorations ("(2014)", "[2014]"). Bare trailing years ("Fantasia 2000",
+// "AEW Worlds End 2023") stay part of the title so an undated folder cannot
+// match a year-suffixed sequel or edition.
+func loneExactCandidateTitleMatch(hintTitle string, candidate MatchCandidate) bool {
+	for _, title := range candidateTitles(candidate) {
+		if inferTitleSimilarity(hintTitle, stripCandidateYearSuffix(title, candidate.Year, true), 0) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // trustedIDWinner picks the highest-scored candidate that carries the trusted
@@ -1281,6 +1319,10 @@ func inferTitleSimilarity(left, right string, year int) float64 {
 }
 
 func normalizeCandidateTitleForYear(title string, year int) string {
+	return stripCandidateYearSuffix(title, year, false)
+}
+
+func stripCandidateYearSuffix(title string, year int, bracketedOnly bool) string {
 	normalized := normalizeCandidateTitle(title)
 	if normalized == "" || year == 0 {
 		return normalized
@@ -1294,9 +1336,17 @@ func normalizeCandidateTitleForYear(title string, year int) string {
 	// year to the title string itself ("24 stjerners julikalender (DK) (2026)").
 	// The scanner strips "(YYYY)" from the folder name into a separate year, so
 	// without this the two sides can never compare equal. Only the known year is
-	// stripped, so an unrelated trailing number stays part of the title.
+	// stripped, so an unrelated trailing number stays part of the title. When
+	// bracketedOnly is true, bare trailing years stay part of the title too.
 	last := fields[len(fields)-1]
-	if last != yearText && trimYearDecoration(last) != yearText {
+	trimmed := trimYearDecoration(last)
+	if bracketedOnly {
+		if trimmed == last || trimmed != yearText {
+			return normalized
+		}
+		return strings.Join(fields[:len(fields)-1], " ")
+	}
+	if last != yearText && trimmed != yearText {
 		return normalized
 	}
 	return strings.Join(fields[:len(fields)-1], " ")

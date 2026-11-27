@@ -15,9 +15,20 @@ func compactAlternateMatchIdentities(hints *MatchHints) []MatchIdentityHint {
 	seen := map[string]struct{}{
 		matchIdentityComparisonKey(hints.Title, hints.Year): {},
 	}
+	// An explicit movie year is a hard constraint unless the alternate is the
+	// numeric-title hypothesis that absorbs hints.Year back into the title.
+	preserveMovieYear := hints.Year != 0 && isMovieTypeAlias(strings.ToLower(strings.TrimSpace(hints.Type)))
+	hintYearSuffix := ""
+	if preserveMovieYear {
+		hintYearSuffix = " " + strconv.Itoa(hints.Year)
+	}
 	out := make([]MatchIdentityHint, 0, min(len(hints.AlternateIdentities), maxProviderIdentityFallbacks))
 	for _, alternate := range hints.AlternateIdentities {
 		alternate.Title = strings.Join(strings.Fields(strings.TrimSpace(alternate.Title)), " ")
+		isNumericTitleForHintYear := alternate.Source == numericTitleHintSource && strings.HasSuffix(alternate.Title, hintYearSuffix)
+		if preserveMovieYear && alternate.Year == 0 && !isNumericTitleForHintYear {
+			alternate.Year = hints.Year
+		}
 		key := matchIdentityComparisonKey(alternate.Title, alternate.Year)
 		if alternate.Title == "" || key == "" {
 			continue

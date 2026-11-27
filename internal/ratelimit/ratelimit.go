@@ -102,6 +102,7 @@ func DefaultConfig() Config {
 		IPBurst:        120,
 		AuthEndpoints: map[string]AuthEndpointConfig{
 			"login":           {RequestsPerMinute: 20, Burst: 10},
+			"demo_login":      {RequestsPerMinute: 20, Burst: 10},
 			"signup":          {RequestsPerMinute: 10, Burst: 6},
 			"setup":           {RequestsPerMinute: 10, Burst: 6},
 			"password_change": {RequestsPerMinute: 10, Burst: 5},
