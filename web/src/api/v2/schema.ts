@@ -16591,12 +16591,17 @@ export interface components {
     AdminChildStats: {
       /**
        * Format: double
+       * @description CPU of live owned FFmpeg children over the last sample window, on the same scale and capacity as system.cpu_pct. A lower bound: a child's last partial window and a child that starts and exits between two samples are missed. Omitted when the window was not measured, including a truncated pass.
+       */
+      cpu_pct?: number;
+      /**
+       * Format: double
        * @description Summed lifetime CPU seconds of currently live owned child processes. Decreases when a child exits; do not diff as a monotonic counter.
        */
       cpu_seconds: number;
       /**
        * Format: int64
-       * @description Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, trickplay, thumbnails, probes); may count shared pages more than once.
+       * @description Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, media analysis, trickplay and chapter thumbnails); may count shared pages more than once.
        */
       resident_bytes: number;
       /**
@@ -22555,6 +22560,11 @@ export interface components {
     AdminProcessStats: {
       /**
        * Format: double
+       * @description This process's CPU over the last sample window, on the same scale and capacity as system.cpu_pct. Omitted when the window was not measured; a measured idle process is 0.
+       */
+      cpu_pct?: number;
+      /**
+       * Format: double
        * @description Cumulative CPU time consumed by this Silo process in seconds (user + system).
        */
       cpu_seconds?: number;
@@ -23415,6 +23425,8 @@ export interface components {
       cgroup_resources: boolean;
       /** @description Responses include attribution.instance_id and per-metric scope and source metadata. */
       instance_attribution: boolean;
+      /** @description Responses may include attribution.process.cpu_pct and attribution.children.cpu_pct. */
+      process_cpu_percent: boolean;
       /** @description Responses may include attribution.process and attribution.children. */
       process_resources: boolean;
       /** @description Opaque revision of this document */

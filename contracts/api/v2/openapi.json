@@ -6616,13 +6616,20 @@
       "AdminChildStats": {
         "additionalProperties": false,
         "properties": {
+          "cpu_pct": {
+            "description": "CPU of live owned FFmpeg children over the last sample window, on the same scale and capacity as system.cpu_pct. A lower bound: a child's last partial window and a child that starts and exits between two samples are missed. Omitted when the window was not measured, including a truncated pass.",
+            "format": "double",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
           "cpu_seconds": {
             "description": "Summed lifetime CPU seconds of currently live owned child processes. Decreases when a child exits; do not diff as a monotonic counter.",
             "format": "double",
             "type": "number"
           },
           "resident_bytes": {
-            "description": "Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, trickplay, thumbnails, probes); may count shared pages more than once.",
+            "description": "Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, media analysis, trickplay and chapter thumbnails); may count shared pages more than once.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
@@ -21635,6 +21642,13 @@
       "AdminProcessStats": {
         "additionalProperties": false,
         "properties": {
+          "cpu_pct": {
+            "description": "This process's CPU over the last sample window, on the same scale and capacity as system.cpu_pct. Omitted when the window was not measured; a measured idle process is 0.",
+            "format": "double",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
           "cpu_seconds": {
             "description": "Cumulative CPU time consumed by this Silo process in seconds (user + system).",
             "format": "double",
@@ -23715,6 +23729,10 @@
             "description": "Responses include attribution.instance_id and per-metric scope and source metadata.",
             "type": "boolean"
           },
+          "process_cpu_percent": {
+            "description": "Responses may include attribution.process.cpu_pct and attribution.children.cpu_pct.",
+            "type": "boolean"
+          },
           "process_resources": {
             "description": "Responses may include attribution.process and attribution.children.",
             "type": "boolean"
@@ -23743,6 +23761,7 @@
           "process_resources",
           "cgroup_resources",
           "sample_freshness",
+          "process_cpu_percent",
           "revision",
           "state",
           "allowed"
@@ -259114,6 +259133,10 @@
       "nodemetrics_ChildStats": {
         "additionalProperties": false,
         "properties": {
+          "cpu_pct": {
+            "format": "double",
+            "type": "number"
+          },
           "cpu_seconds": {
             "format": "double",
             "type": "number"
@@ -259250,6 +259273,10 @@
       "nodemetrics_ProcessStats": {
         "additionalProperties": false,
         "properties": {
+          "cpu_pct": {
+            "format": "double",
+            "type": "number"
+          },
           "cpu_seconds": {
             "format": "double",
             "type": "number"

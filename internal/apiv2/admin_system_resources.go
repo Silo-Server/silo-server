@@ -34,6 +34,7 @@ type AdminProcessStats struct {
 	ResidentBytes *uint64  `json:"resident_bytes,omitempty" doc:"Resident set size (RSS) of this Silo server process alone in bytes; excludes FFmpeg children and separate database/cache processes."`
 	VirtualBytes  *uint64  `json:"virtual_bytes,omitempty" doc:"Virtual memory size of this Silo process in bytes."`
 	CPUSeconds    *float64 `json:"cpu_seconds,omitempty" doc:"Cumulative CPU time consumed by this Silo process in seconds (user + system)."`
+	CPUPct        *float64 `json:"cpu_pct,omitempty" minimum:"0" maximum:"100" doc:"This process's CPU over the last sample window, on the same scale and capacity as system.cpu_pct. Omitted when the window was not measured; a measured idle process is 0."`
 	Threads       *uint64  `json:"threads,omitempty" doc:"OS thread count of this Silo process."`
 	OpenFDs       *uint64  `json:"open_fds,omitempty" doc:"Open file descriptors held by this Silo process."`
 	MaxFDs        *uint64  `json:"max_fds,omitempty" doc:"Soft file-descriptor limit (RLIMIT_NOFILE) of this Silo process."`
@@ -72,17 +73,19 @@ type AdminCgroupMemoryStats struct {
 	PressureFullPct *float64 `json:"pressure_full_pct,omitempty" doc:"Linux PSI memory full avg10 percentage (10-second average)."`
 }
 
-// AdminChildStats is a bounded point-in-time view of owned FFmpeg processes. CPU and
-// RSS are sums of live processes; CPU can decrease when a child exits. RSS can
-// count shared pages more than once. Short-lived work requires owner lifecycle
-// counters and is deliberately not represented as a cumulative total here.
+// AdminChildStats is a bounded point-in-time view of owned FFmpeg processes. CPU
+// seconds and RSS are sums of live processes; CPU seconds can decrease when a
+// child exits. RSS can count shared pages more than once. Short-lived work
+// requires owner lifecycle counters and is deliberately not represented as a
+// cumulative total here.
 type AdminChildStats struct {
-	Workload      string  `json:"workload" doc:"Owned child workload sampled (for example ffmpeg); new values may appear."`
-	Sampled       int     `json:"sampled" doc:"Live owned child processes successfully read in this sample."`
-	Unavailable   int     `json:"unavailable" doc:"Live owned child processes whose /proc entries could not be read."`
-	Truncated     bool    `json:"truncated" doc:"True when more live owned child processes existed than the per-sample cap (256)."`
-	ResidentBytes uint64  `json:"resident_bytes" doc:"Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, trickplay, thumbnails, probes); may count shared pages more than once."`
-	CPUSeconds    float64 `json:"cpu_seconds" doc:"Summed lifetime CPU seconds of currently live owned child processes. Decreases when a child exits; do not diff as a monotonic counter."`
+	Workload      string   `json:"workload" doc:"Owned child workload sampled (for example ffmpeg); new values may appear."`
+	Sampled       int      `json:"sampled" doc:"Live owned child processes successfully read in this sample."`
+	Unavailable   int      `json:"unavailable" doc:"Live owned child processes whose /proc entries could not be read."`
+	Truncated     bool     `json:"truncated" doc:"True when more live owned child processes existed than the per-sample cap (256)."`
+	ResidentBytes uint64   `json:"resident_bytes" doc:"Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, media analysis, trickplay and chapter thumbnails); may count shared pages more than once."`
+	CPUSeconds    float64  `json:"cpu_seconds" doc:"Summed lifetime CPU seconds of currently live owned child processes. Decreases when a child exits; do not diff as a monotonic counter."`
+	CPUPct        *float64 `json:"cpu_pct,omitempty" minimum:"0" maximum:"100" doc:"CPU of live owned FFmpeg children over the last sample window, on the same scale and capacity as system.cpu_pct. A lower bound: a child's last partial window and a child that starts and exits between two samples are missed. Omitted when the window was not measured, including a truncated pass."`
 }
 
 // AdminDiskDetails extends operational snapshots without adding fields to the frozen

@@ -331,10 +331,10 @@ transport.
 | Measurement | Population and limits |
 | --- | --- |
 | Go heap/runtime | This Go runtime; excludes FFmpeg, plugins and native allocations such as libvips. |
-| Process CPU/RSS/FDs/threads | This process. RSS and Go memory cannot be subtracted to measure native allocation exactly. |
+| Process CPU/RSS/FDs/threads | This process. RSS and Go memory cannot be subtracted to measure native allocation exactly. `cpu_pct` is CPU over the sample window against the same capacity as `system.cpu_pct`. |
 | Linux process I/O | Kernel process counters can include I/O of children already waited for. These overlap child lifecycle/cgroup accounting. |
 | Cgroup CPU/memory | All members of the reported leaf or visible ancestor. Memory includes cache and native/child allocations; ancestor limits outside the namespace are unavailable. |
-| Live owned children | Bounded FFmpeg sampling, validated by PID/start time. CPU is a changing sum of live lifetime totals, not a counter. RSS can count shared pages repeatedly. |
+| Live owned children | Bounded FFmpeg sampling, validated by PID/start time. CPU seconds are a changing sum of live lifetime totals, not a counter. `cpu_pct` sums per-child growth over the window on the `system.cpu_pct` scale, crediting a newly seen child's lifetime only when it started inside the window; it misses an exiting child's last partial window, a child that starts and exits between two samples, the first window of a child that starts while children are being listed, and a window in which a child could not be read. Only processes whose name contains `ffmpeg` count, not `ffprobe`. RSS can count shared pages repeatedly. |
 | Completed children | Existing process owner's Wait/ProcessState CPU and peak RSS. Peaks are distributions, not concurrent usage. Short-lived processes are counted here. |
 | Host/network/GPU | Scope and source accompany samples. Whole-device/host readings include unrelated tenants and must not be summed per container. |
 | Filesystem | Sampled capacity and inode use per bounded role. Check availability and freshness before using a value. |

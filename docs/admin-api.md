@@ -1303,9 +1303,9 @@ paths themselves appear only here, behind admin auth. A scoped API key receives
 the same document without disk `path` values.
 
 `GET /api/v2/admin/system/resources/capabilities` advertises
-`instance_attribution`, `process_resources`, `cgroup_resources`, and
-`sample_freshness`, with the common capability `state`, `allowed`, `revision`,
-ETag and conditional request conventions. `state` is `not_configured` without a
+`instance_attribution`, `process_resources`, `cgroup_resources`,
+`sample_freshness`, and `process_cpu_percent`, with the common capability
+`state`, `allowed`, `revision`, ETag and conditional request conventions. `state` is `not_configured` without a
 sampler and `unsupported` on a non-Linux host. Support does not guarantee each
 operating system source is readable.
 
@@ -1316,12 +1316,32 @@ The `attribution` object contains:
 | `instance_id` | Random identifier for this sampler lifetime; identifies which process answered through a load balancer without exposing a hostname. |
 | `sample_interval_seconds`, `sample_duration_seconds` | Sampling cadence and duration of the last completed pass. |
 | `cpu`, `memory`, `load`, `network` | Scope, source and availability of each corresponding `system` reading. Scopes include `host`, `virtualized_host`, `cgroup`, and `network_namespace`. |
-| `process` | Silo process RSS, virtual memory, CPU seconds, threads, open FD count/limit, last-GC live Go heap, runtime memory reservation and goroutine count. Linux storage I/O byte counters include waited-for children. Unreadable values are omitted. |
+| `process` | Silo process RSS, virtual memory, CPU seconds, CPU percent (`cpu_pct`, below), threads, open FD count/limit, last-GC live Go heap, runtime memory reservation and goroutine count. Linux storage I/O byte counters include waited-for children. Unreadable values are omitted. |
 | `cgroup_cpu` | Usage, capacity in cores, throttling, bandwidth periods and CPU pressure at the selected visible cgroup level. A tighter cpuset can set the reported capacity. |
 | `cgroup_memory` | Raw charge, concrete limit, working set, swap, limit/OOM events and memory pressure. Usage and limit are read from the same visible level. |
-| `children` | Bounded snapshot of live owned FFmpeg children. Reports partial/unavailable and truncated sampling explicitly. CPU totals can decrease when children exit; RSS can count shared pages more than once. |
+| `children` | Bounded snapshot of live owned FFmpeg children. Reports partial/unavailable and truncated sampling explicitly. `cpu_seconds` can decrease when children exit; RSS can count shared pages more than once. `cpu_pct` is described below. |
 | `disks` | Inode counts keyed by the disk role, with the matching disk's freshness. Omitted when there are none. |
 | `dropped_disk_roots` | Number of configured roots beyond the bounded disk sampling set. |
+
+`process.cpu_pct` and `children.cpu_pct` are the CPU the Silo process and its
+live FFmpeg children used over the last sample window, on the same 0–100 scale
+and against the same capacity as `system.cpu_pct`, so a monitor can chart them
+beside it: the host's CPUs when nothing caps Silo, or the cgroup quota in
+`cgroup_cpu` when one binds. Children are the processes whose name contains `ffmpeg` that Silo
+started directly (transcodes, remuxes, media analysis, trickplay and chapter
+thumbnails), not only playback; `ffprobe` runs are not counted. Each value is
+rounded to 0.01. Omitted means the window was not
+measured: the first two passes after start, a pass where `system.cpu_pct` or the
+process's own counters were unavailable, a change in what `system.cpu_pct` is
+measured against, the pass after any of those, and for children a truncated
+pass and the one after it. A measured idle process reports `0`. `children.cpu_pct`
+is a lower bound: a child's last partial window before it exits, a child that
+starts and exits between two samples, the first window of a child that starts
+while children are being listed, and the window in which a child could not be
+read are not counted. The cumulative `silo_subprocess_cpu_seconds_total`
+Prometheus counter, per workload, covers completed children. Proxy and transcode nodes
+on a build with this field report it in their attribution in
+`GET /api/v2/admin/nodes/summary`; a node on an older build leaves it out.
 
 Cgroup `scope` is `leaf` or `ancestor`; an ancestor's counters include sibling
 workloads. Limits outside the process's cgroup namespace cannot be observed.
