@@ -159,8 +159,8 @@ func TestRecomputeSharedMarkerAttributionClearsWhenNoSegmentsRemain(t *testing.T
 
 func floatPtr(v float64) *float64 { return &v }
 
-func TestMarkerUpdateDropsCreditsOutsideCreditsWindow(t *testing.T) {
-	// A 40-minute episode, whose credits window opens at 32:30, from a
+func TestMarkerUpdatePlacesCreditsOccurrences(t *testing.T) {
+	// A 40-minute episode, whose end-credits window opens at 32:30, from a
 	// provider that copied its intro into the credits.
 	for _, tc := range []struct {
 		name        string
@@ -168,6 +168,20 @@ func TestMarkerUpdateDropsCreditsOutsideCreditsWindow(t *testing.T) {
 		wantCredits []models.MarkerSegment
 	}{
 		{
+			// Every range the update carried is out of bounds: the provider's
+			// stored credits are withdrawn, rather than left carrying the bounds
+			// of a range that cannot be stored.
+			name: "every range out of bounds",
+			update: MarkerUpdate{
+				Segments: []models.MarkerSegment{
+					{Kind: models.MarkerSegmentIntro, StartSeconds: 94, EndSeconds: 114},
+					{Kind: models.MarkerSegmentCredits, StartSeconds: 2352, EndSeconds: 2402},
+				},
+				MarkersSource: models.MarkerSourceOnline,
+			},
+		},
+		{
+			// A single misplaced range is a withdrawal: nothing is placeable.
 			name: "singular bounds",
 			update: MarkerUpdate{
 				IntroStart: floatPtr(94), IntroEnd: floatPtr(114),
@@ -176,6 +190,9 @@ func TestMarkerUpdateDropsCreditsOutsideCreditsWindow(t *testing.T) {
 			},
 		},
 		{
+			// One placeable occurrence keeps every occurrence the provider
+			// reported; the singular names the end credits (the last one),
+			// not the earliest.
 			name: "ranges",
 			update: MarkerUpdate{
 				Segments: []models.MarkerSegment{
@@ -186,7 +203,11 @@ func TestMarkerUpdateDropsCreditsOutsideCreditsWindow(t *testing.T) {
 				},
 				MarkersSource: models.MarkerSourceOnline,
 			},
-			wantCredits: []models.MarkerSegment{{Kind: models.MarkerSegmentCredits, StartSeconds: 2300, EndSeconds: 2400}},
+			wantCredits: []models.MarkerSegment{
+				{Kind: models.MarkerSegmentCredits, StartSeconds: 94, EndSeconds: 112},
+				{Kind: models.MarkerSegmentCredits, StartSeconds: 1300, EndSeconds: 1400},
+				{Kind: models.MarkerSegmentCredits, StartSeconds: 2300, EndSeconds: 2400},
+			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -206,11 +227,17 @@ func TestMarkerUpdateDropsCreditsOutsideCreditsWindow(t *testing.T) {
 				}
 				return
 			}
-			if !applied.credits || len(state.credits.ranges) != len(tc.wantCredits) || state.credits.ranges[0] != tc.wantCredits[0] {
+			if !applied.credits || len(state.credits.ranges) != len(tc.wantCredits) {
 				t.Fatalf("credits ranges = %v, want %v", state.credits.ranges, tc.wantCredits)
 			}
-			if state.credits.start == nil || *state.credits.start != tc.wantCredits[0].StartSeconds {
-				t.Fatalf("credits start = %v, want %v", state.credits.start, tc.wantCredits[0].StartSeconds)
+			for i := range tc.wantCredits {
+				if state.credits.ranges[i] != tc.wantCredits[i] {
+					t.Fatalf("credits ranges = %v, want %v", state.credits.ranges, tc.wantCredits)
+				}
+			}
+			endCredits := tc.wantCredits[len(tc.wantCredits)-1]
+			if state.credits.start == nil || *state.credits.start != endCredits.StartSeconds {
+				t.Fatalf("credits start = %v, want the end credits %v", state.credits.start, endCredits.StartSeconds)
 			}
 		})
 	}

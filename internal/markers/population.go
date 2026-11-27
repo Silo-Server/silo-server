@@ -478,9 +478,11 @@ func (s *PopulationService) recordFetchFailure(ctx context.Context, provider Pro
 
 // Selection settings can change while a request is in flight. Apply current
 // priorities to the fetched/cached responses without invalidating those caches.
-// Credits that cannot belong to file are dropped before providers compete, so
-// one provider's misplaced credits never hide another's; the intro check waits
-// for the merged intro, in ApplyResult and the repository write.
+// A provider's credits are dropped before providers compete only when none of
+// its occurrences is placeable, so one provider's misplaced credits never hide
+// another's while a provider that reports the end credits keeps every
+// occurrence beside it. The intro check waits for the merged intro, in
+// ApplyResult and the repository write.
 func (s *PopulationService) selectResults(file *models.MediaFile, results []providerResult) Result {
 	entries := make(map[string]fetchEntry)
 	for _, entry := range s.opts.Registry.fetchEntries() {
@@ -497,14 +499,36 @@ func (s *PopulationService) selectResults(file *models.MediaFile, results []prov
 	return mergeProviderResults(current)
 }
 
+// withoutMisplacedCredits drops a provider's credits markers only when none of
+// its occurrences could belong to the file. A provider that reports at least
+// one placeable occurrence keeps every occurrence it reported, because a file
+// can carry an early credits block beside the end credits (and a movie a
+// post-credits scene). Dropping the whole set when none is placeable still
+// stops one provider's misplaced credits from competing; KeepPlaced decides
+// which occurrences are placeable here (the end-credits occurrence is chosen
+// later, in ApplyResult and the repository write, once the merged intro is
+// known), and the intro check itself waits for that merged intro.
 func withoutMisplacedCredits(file *models.MediaFile, found []Marker) []Marker {
 	limits := CreditsLimitsForFile(file)
 	duration := 0.0
 	if file != nil {
 		duration = float64(file.Duration)
 	}
+	ranged := false
+	credits := make([]models.MarkerSegment, 0, len(found))
+	for _, m := range found {
+		if m.Kind != MarkerKindCredits || m.Absent {
+			continue
+		}
+		ranged = true
+		credits = append(credits, models.MarkerSegment{Kind: models.MarkerSegmentCredits,
+			StartSeconds: m.Start.Seconds(), EndSeconds: m.End.Seconds()})
+	}
+	if !ranged || len(limits.KeepPlaced(credits, duration, nil)) > 0 {
+		return found
+	}
 	return slices.DeleteFunc(slices.Clone(found), func(m Marker) bool {
-		return m.Kind == MarkerKindCredits && !m.Absent && limits.CheckCreditsPlacement(m.Start.Seconds(), m.End.Seconds(), duration, nil) != nil
+		return m.Kind == MarkerKindCredits && !m.Absent
 	})
 }
 

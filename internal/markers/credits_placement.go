@@ -107,6 +107,33 @@ func (l CreditsLimits) EndCreditsStart(segments []models.MarkerSegment, duration
 	return start
 }
 
+// EndCreditsOccurrence returns the occurrence the end-credits selection names,
+// for callers that need its bounds rather than its start: the singular per-kind
+// projection and Jellyfin's Outro both describe one occurrence, and it has to be
+// the one reaching the end of the file.
+//
+// It selects the greatest start among the occurrences that pass
+// CheckCreditsPlacement, so the placement rule stays the write path's: an
+// occurrence inside the tail window but starting before the intro ends, or one
+// that is too short or too long, is not placeable here either, and a set with no
+// placeable occurrence is still a withdrawal. Wherever placement allows an
+// occurrence the window alone would, this agrees with EndCreditsStart, which is
+// the window-only answer the watched threshold needs.
+func (l CreditsLimits) EndCreditsOccurrence(segments []models.MarkerSegment, duration float64, introEnd *float64) *models.MarkerSegment {
+	var end *models.MarkerSegment
+	for i := range segments {
+		if l.CheckCreditsPlacement(segments[i].StartSeconds, segments[i].EndSeconds, duration, introEnd) != nil {
+			continue
+		}
+		// Compare starts rather than trusting the slice order: callers hand the
+		// occurrences over unsorted, and the end credits are the LATE one.
+		if end == nil || segments[i].StartSeconds > end.StartSeconds {
+			end = &segments[i]
+		}
+	}
+	return end
+}
+
 // KeepPlaced returns the credits in ranges that pass CheckCreditsPlacement.
 func (l CreditsLimits) KeepPlaced(ranges []models.MarkerSegment, duration float64, introEnd *float64) []models.MarkerSegment {
 	kept := make([]models.MarkerSegment, 0, len(ranges))

@@ -1095,7 +1095,16 @@ func applySegmentRanges(
 		}
 	}
 	sort.SliceStable(ranges, func(i, j int) bool { return ranges[i].StartSeconds < ranges[j].StartSeconds })
-	incoming := markers.SegmentPayload{Start: &ranges[0].StartSeconds, End: &ranges[0].EndSeconds, Ranges: ranges,
+	// The singular bounds are the compatibility projection onto one occurrence.
+	// Credits project onto the end credits, which placedCredits has already
+	// resolved into the patch bounds, because that occurrence drives the
+	// end-of-file affordance. Every other kind keeps the first occurrence,
+	// which is what those columns have always named.
+	segStart, segEnd := &ranges[0].StartSeconds, &ranges[0].EndSeconds
+	if segmentName == models.MarkerSegmentCredits && patchStart != nil && patchEnd != nil {
+		segStart, segEnd = patchStart, patchEnd
+	}
+	incoming := markers.SegmentPayload{Start: segStart, End: segEnd, Ranges: ranges,
 		Source: source, Provider: provider, Confidence: confidence, Algorithm: algorithm}
 	if !markers.CanWriteMarkerUpdate(existingSegmentPayload(*state, legacySharedSource), incoming) {
 		return false, nil
@@ -1624,14 +1633,35 @@ func applyMarkerMutation(update *MarkerUpdate, clearFlags markerSegmentFlags, st
 	return changed, nil
 }
 
-// placedCredits drops the credits in an update that fail the placement every
-// marker source shares (markers.CheckCreditsPlacement), from its ranges and
-// from its singular bounds. Dropping them before the write lets a refresh that
-// returns only misplaced credits clear the provider's stored ones like any
-// other withdrawn range.
+// placedCredits applies the shared credits placement rule to an update. When
+// the update carries ranges, it keeps every occurrence as long as at least one
+// is placeable, and points the singular bounds at the end credits (the
+// occurrence the shared end-credits window selects,
+// markers.CreditsLimits.EndCreditsOccurrence); a single occurrence keeps its
+// previous behavior. An update whose credits are all outside the end-credits
+// window is a withdrawal, not a set of ranges, so a refresh that returns only
+// misplaced credits clears the provider's stored ones like any other withdrawn
+// range. A singular-only update (no ranges), as a manual set is, keeps its
+// placement check.
 func placedCredits(state *markerMutationState, start, end *float64, ranges []models.MarkerSegment) (*float64, *float64, []models.MarkerSegment) {
 	limits := markers.CreditsLimitsForFile(&state.file)
-	kept := limits.KeepPlaced(ranges, state.duration, state.intro.end)
+	// An occurrence that runs past the file is dropped here: the update is
+	// rejected as a whole for one out-of-bounds range, and it must not take the
+	// occurrences that do belong to the file with it. An update that carried
+	// ranges and lost them all is a withdrawal, not the singular bounds of the
+	// ranges that were dropped.
+	carriedRanges := len(ranges) > 0
+	ranges = markers.InBoundsRanges(ranges, state.duration)
+	if carriedRanges && len(ranges) == 0 {
+		return nil, nil, nil
+	}
+	if len(ranges) > 0 {
+		endCredits := limits.EndCreditsOccurrence(ranges, state.duration, state.intro.end)
+		if endCredits == nil {
+			return nil, nil, nil
+		}
+		return &endCredits.StartSeconds, &endCredits.EndSeconds, ranges
+	}
 	if start != nil || end != nil {
 		s, e := state.credits.start, state.credits.end
 		if start != nil {
@@ -1644,7 +1674,7 @@ func placedCredits(state *markerMutationState, start, end *float64, ranges []mod
 			start, end = nil, nil
 		}
 	}
-	return start, end, kept
+	return start, end, ranges
 }
 
 func writeMarkerMutationState(

@@ -970,6 +970,14 @@ func buildMediaSegmentDTOs(itemUUID string, version *catalog.FileVersion) []medi
 		return nil
 	}
 	ranges := version.EffectiveMarkerSegments()
+	// Jellyfin hangs its next-episode affordance on the single Outro segment,
+	// so a file with an early credits block beside the end credits (or a movie
+	// with a post-credits scene) must expose only the end credits. With two
+	// Outro segments a Jellyfin client would hang the affordance on the wrong
+	// one. Jellyfin has no credits type, so the other credits occurrences are
+	// omitted from this compatibility payload; the native API still serves
+	// every occurrence through marker_segments.
+	creditsIndex := endCreditsIndex(ranges, version.Credits, version.Duration)
 	segments := make([]mediaSegmentDTO, 0, len(ranges))
 	occurrences := map[string]int{}
 	kinds := map[string]string{
@@ -978,9 +986,12 @@ func buildMediaSegmentDTOs(itemUUID string, version *catalog.FileVersion) []medi
 		models.MarkerSegmentRecap:   "Recap",
 		models.MarkerSegmentPreview: "Preview",
 	}
-	for _, marker := range ranges {
+	for i, marker := range ranges {
 		kind := kinds[marker.Kind]
 		if kind == "" {
+			continue
+		}
+		if marker.Kind == models.MarkerSegmentCredits && i != creditsIndex {
 			continue
 		}
 		identity := kind
@@ -997,6 +1008,39 @@ func buildMediaSegmentDTOs(itemUUID string, version *catalog.FileVersion) []medi
 		})
 	}
 	return segments
+}
+
+// endCreditsIndex returns the index in ranges of the credits occurrence that
+// drives the Outro affordance. The singular credits bounds are the end credits,
+// the occurrence the credits placement window resolved, so the occurrence
+// matching them wins; that keeps this layer from ranking occurrences on its own
+// and publishing a range the rest of the pipeline would not call the end
+// credits. Failing a match (a row stored before the window chose the
+// occurrence, or a file with no stored singular) the last credits occurrence by
+// start stands in, skipping any that run past the file: an Outro starting after
+// playback ends never fires. It returns -1 when the version has no credits.
+func endCreditsIndex(ranges []models.MarkerSegment, singular *catalog.Marker, duration int) int {
+	index := -1
+	for i, marker := range ranges {
+		if marker.Kind != models.MarkerSegmentCredits {
+			continue
+		}
+		// The affordance needs a start inside the file, and the end-credits
+		// selection counts only a start below the duration, so a range starting
+		// at or past the end is not one. The end may run a little past the
+		// recorded duration, which is the ordinary rounding of a range that
+		// reaches the end of the file.
+		if duration > 0 && marker.StartSeconds >= float64(duration) {
+			continue
+		}
+		if singular != nil && marker.StartSeconds == singular.Start && marker.EndSeconds == singular.End {
+			return i
+		}
+		if index < 0 || marker.StartSeconds > ranges[index].StartSeconds {
+			index = i
+		}
+	}
+	return index
 }
 
 // mediaSegmentIDNamespace is the fixed UUIDv5 namespace under which segment
