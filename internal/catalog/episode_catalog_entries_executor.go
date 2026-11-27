@@ -61,8 +61,8 @@ type episodeCatalogUserStatePlan struct {
 // the entry-scan level so both queries stay aligned with hydration.
 //
 // It returns the positions in whereParts of the two parent-series checks (the
-// series is in libraryID, and it is a series), which episodeCatalogPageWhere
-// fences for pages and seeks.
+// series is in libraryID, and it is a series), which episodeCatalogFencedWhere
+// fences for short pages and seeks.
 func applyEpisodeCatalogAccessFilter(libraryID int, access AccessFilter, whereParts *[]string, args *[]any, argIdx *int) (parentChecks []int) {
 	if len(access.DisabledLibraryIDs) > 0 {
 		*whereParts = append(*whereParts,
@@ -91,8 +91,16 @@ func applyEpisodeCatalogAccessFilter(libraryID int, access AccessFilter, wherePa
 	return parentChecks
 }
 
-// episodeCatalogPageWhere renders whereParts for a page or a seek, with the
-// parent-series checks at parentChecks fenced by OFFSET 0.
+// episodeCatalogFencedRowLimit is the most entries a page or seek may read, in
+// sort order, and still use the fenced WHERE. A fenced read probes both parent
+// checks for every entry it passes, so its cost grows with the offset; up to
+// this many entries that stays within milliseconds. A deeper read keeps the
+// unfenced WHERE, which the planner answers with hash joins once it expects to
+// read that far.
+const episodeCatalogFencedRowLimit = 1000
+
+// episodeCatalogFencedWhere renders whereParts for a short page or seek, with
+// the parent-series checks at parentChecks fenced by OFFSET 0.
 //
 // Unfenced, PostgreSQL pulls both checks up into semi-joins and costs them as
 // independent filters, although nearly every entry in the library passes both.
@@ -102,10 +110,10 @@ func applyEpisodeCatalogAccessFilter(libraryID int, access AccessFilter, wherePa
 // milliseconds into one of seconds. Fenced, each check is a per-row probe on
 // the rows the walk reaches.
 //
-// The total keeps the unfenced form: counting every entry of a large library
-// needs the hash joins the fence rules out, and runs several times slower
-// fenced.
-func episodeCatalogPageWhere(whereParts []string, parentChecks []int) string {
+// The total, and any read past episodeCatalogFencedRowLimit, keeps the
+// unfenced form: reading most of a large library needs the hash joins the
+// fence rules out, and runs several times slower fenced.
+func episodeCatalogFencedWhere(whereParts []string, parentChecks []int) string {
 	parts := slices.Clone(whereParts)
 	for _, i := range parentChecks {
 		parts[i] = strings.TrimSuffix(parts[i], ")") + " OFFSET 0)"
@@ -122,15 +130,24 @@ type episodeCatalogQuery struct {
 	withCTEs string
 	from     string
 	sortJoin string
-	// where is the total's WHERE; pageWhere is the same filter for pages and
-	// seeks, rendered by episodeCatalogPageWhere.
-	where     string
-	pageWhere string
-	orderBy   string
-	args      []any
+	// where is the unfenced WHERE; fencedWhere is the same filter rendered by
+	// episodeCatalogFencedWhere. readWhere picks between them.
+	where       string
+	fencedWhere string
+	orderBy     string
+	args        []any
 	// requiresFullPageGate sends a short page to the general query; see
 	// episodeCatalogUserStatePlan.
 	requiresFullPageGate bool
+}
+
+// readWhere returns the WHERE for a page or seek that reads up to rows entries
+// in sort order.
+func (q episodeCatalogQuery) readWhere(rows int) string {
+	if rows <= episodeCatalogFencedRowLimit {
+		return q.fencedWhere
+	}
+	return q.where
 }
 
 // usesEpisodeCatalogQueries reports whether the executor may answer from
@@ -196,7 +213,7 @@ func (e *QueryExecutor) episodeCatalogSeek(ctx context.Context, def QueryDefinit
 		withClause = "WITH " + q.withCTEs + "\n"
 	}
 	args := append(append([]any{}, q.args...), offset)
-	sql := fmt.Sprintf("%sSELECT ece.episode_id %s%s %s %s LIMIT 1 OFFSET $%d", withClause, q.from, q.sortJoin, q.pageWhere, q.orderBy, len(args))
+	sql := fmt.Sprintf("%sSELECT ece.episode_id %s%s %s %s LIMIT 1 OFFSET $%d", withClause, q.from, q.sortJoin, q.readWhere(offset+1), q.orderBy, len(args))
 	var episodeID string
 	if err := e.Pool.QueryRow(ctx, sql, args...).Scan(&episodeID); err != nil {
 		if episodeCatalogEntriesUnavailable(err) {
@@ -287,7 +304,7 @@ func (e *QueryExecutor) episodeCatalogUserStateQuery(
 		from:                 episodeCatalogUserStateFromClause(plan),
 		sortJoin:             episodeCatalogEntrySortJoin(plan.sortField),
 		where:                "WHERE " + strings.Join(whereParts, " AND "),
-		pageWhere:            episodeCatalogPageWhere(whereParts, parentChecks),
+		fencedWhere:          episodeCatalogFencedWhere(whereParts, parentChecks),
 		orderBy:              orderBy,
 		args:                 args,
 		requiresFullPageGate: plan.requiresFullPageGate,
@@ -347,12 +364,12 @@ func (e *QueryExecutor) episodeCatalogEntriesQuery(def QueryDefinition, access A
 		return episodeCatalogQuery{}, false, nil
 	}
 	return episodeCatalogQuery{
-		from:      "FROM episode_catalog_entries ece",
-		sortJoin:  episodeCatalogEntrySortJoin(def.Sort.Field),
-		where:     "WHERE " + strings.Join(whereParts, " AND "),
-		pageWhere: episodeCatalogPageWhere(whereParts, parentChecks),
-		orderBy:   orderBy,
-		args:      args,
+		from:        "FROM episode_catalog_entries ece",
+		sortJoin:    episodeCatalogEntrySortJoin(def.Sort.Field),
+		where:       "WHERE " + strings.Join(whereParts, " AND "),
+		fencedWhere: episodeCatalogFencedWhere(whereParts, parentChecks),
+		orderBy:     orderBy,
+		args:        args,
 	}, true, nil
 }
 
@@ -445,7 +462,7 @@ func (e *QueryExecutor) episodeCatalogPreviewPage(
 		withClause,
 		q.from,
 		q.sortJoin,
-		q.pageWhere,
+		q.readWhere(offset+pageLimit),
 		q.orderBy,
 		limitArgIdx,
 		offsetClause,
