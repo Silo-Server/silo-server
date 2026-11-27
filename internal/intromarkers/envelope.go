@@ -69,18 +69,6 @@ func (e envelope) normalized() envelope {
 // len is the number of frames.
 func (e envelope) len() int { return len(e.v) }
 
-// seconds is the duration the envelope covers.
-func (e envelope) seconds() float64 { return float64(len(e.v)) * e.hop }
-
-// dbAt returns the raw level at a time, and whether the envelope covers it.
-func (e envelope) dbAt(seconds float64) (float64, bool) {
-	index := int(math.Round(seconds / e.hop))
-	if index < 0 || index >= len(e.db) {
-		return 0, false
-	}
-	return e.db[index], true
-}
-
 // levelMatchConfig tunes how two envelopes are compared. The values follow the
 // reference engine's rules, whose aligner measured them on lossy encodes of
 // one recording, and are re-tuned here for a 10 ms loudness trace instead of

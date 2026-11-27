@@ -18,7 +18,7 @@ import (
 // edges are only as sharp as that window and have to be corrected by fixed
 // leads, and two files of the same studio logo match as readily as two files
 // of the same theme. The speech band's loudness (mediasample's Speech output,
-// 200 to 3400 Hz, one level per 10 ms) keeps a recognisable shape for the same
+// 200 to 3400 Hz, one level per 10 ms) keeps a recognizable shape for the same
 // recording under lossy re-encoding, and its resolution is fine enough to
 // place an edge within a few frames. Credits keep their Chromaprint tail pass,
 // which shares one decode with the video keyframes.

@@ -227,35 +227,6 @@ func (e envelope) medianBetween(from, to float64) (float64, bool) {
 	return values[len(values)/2], true
 }
 
-// staysAbove reports whether every frame in a time range is at or above level.
-func (e envelope) staysAbove(from, to float64, level float64) bool {
-	first, last, ok := e.indexRange(from, to)
-	if !ok {
-		return false
-	}
-	for i := first; i <= last; i++ {
-		if e.db[i] < level {
-			return false
-		}
-	}
-	return true
-}
-
-// staysBelow reports whether the frames from a time onwards, for hold frames,
-// stay under level.
-func (e envelope) staysBelow(from float64, hold int, level float64) bool {
-	index := int(math.Round(from / e.hop))
-	if index < 0 || index >= len(e.db) {
-		return false
-	}
-	for i := index; i < len(e.db) && i < index+hold; i++ {
-		if e.db[i] >= level {
-			return false
-		}
-	}
-	return true
-}
-
 // sustainedBelow reports whether every frame from a time to another stays
 // under level. A range that runs past the envelope ends at its last frame.
 func (e envelope) sustainedBelow(from, to, level float64) bool {

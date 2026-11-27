@@ -29,10 +29,6 @@ const (
 	// crosses. Beyond it the tail pass saw nothing, and the black before it
 	// may belong to the story.
 	creditsLeadGapSeconds = 12.0
-	// creditsLeadStoryEndSeconds is how far before a credits start a story
-	// keyframe may lie and still count as the cut before them. The walk does
-	// not need this distance; it names the case the rule is written for.
-	creditsLeadStoryEndSeconds = 0.0
 )
 
 // creditsLeadIn returns where a credits run that starts at its first text

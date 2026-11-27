@@ -23,7 +23,7 @@ func confirmSpans(t *testing.T, segments map[int]Segment, shared map[int][]uint3
 		candidates[fileID] = Candidate{FileID: fileID, EpisodeID: string(rune('a' + fileID)), DurationSeconds: 3000}
 	}
 	return decideSpanConfirmations(shared, segments, candidates, func(left, right int) matchProfile {
-		return spanProfile(DefaultConfig("ffmpeg"), math.Max(segments[left].End-segments[left].Start, segments[right].End-segments[right].Start))
+		return spanProfile(math.Max(segments[left].End-segments[left].Start, segments[right].End-segments[right].Start))
 	})
 }
 

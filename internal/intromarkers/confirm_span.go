@@ -72,8 +72,7 @@ func spanWindow(candidate Candidate, segment Segment) fingerprintWindow {
 
 // spanProfile is the pair comparison for confirming a span: short runs count,
 // and the chapter snap is off, because the span is what is being checked.
-func spanProfile(cfg Config, longest float64) matchProfile {
-	cfg = cfg.normalized()
+func spanProfile(longest float64) matchProfile {
 	return matchProfile{
 		MinSeconds:             spanMatchMinimumSeconds,
 		MaxSeconds:             longest + 2*spanMarginSeconds + 10,
@@ -112,7 +111,7 @@ func (a *Analyzer) confirmLevelSegments(ctx context.Context, candidates []Candid
 		return segments
 	}
 	out := decideSpanConfirmations(spans, segments, byID, func(left, right int) matchProfile {
-		return spanProfile(a.config, math.Max(segments[left].End-segments[left].Start, segments[right].End-segments[right].Start))
+		return spanProfile(math.Max(segments[left].End-segments[left].Start, segments[right].End-segments[right].Start))
 	})
 	if out == nil {
 		return segments

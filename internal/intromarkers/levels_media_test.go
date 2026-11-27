@@ -15,7 +15,7 @@ import (
 //
 // The episodes are generated with ffmpeg's own sources, so the test needs no
 // fixture in the repository: the same studio logo and the same theme at a
-// different offset in each episode, dialogue around them from three different
+// different offset in each episode, dialog around them from three different
 // noise seeds, and a tail of black with text after the story. It is skipped
 // without ffmpeg, and with -short.
 func TestLevelsFindTheIntroInGeneratedEpisodes(t *testing.T) {
@@ -50,10 +50,10 @@ func TestLevelsFindTheIntroInGeneratedEpisodes(t *testing.T) {
 		episode := i + 1
 		coldOpen := buildPart(t, dir, fmt.Sprintf("cold%d", episode),
 			fmt.Sprintf("color=c=0x402818:s=160x90:d=%d,noise=alls=30:allf=t", cold),
-			fmt.Sprintf("anoisesrc=r=44100:d=%d:amplitude=0.05:colour=brown:seed=%d", cold, 100+episode))
+			fmt.Sprintf("anoisesrc=r=44100:d=%d:amplitude=0.05:color=brown:seed=%d", cold, 100+episode))
 		story := buildPart(t, dir, fmt.Sprintf("story%d", episode),
 			fmt.Sprintf("color=c=0x285030:s=160x90:d=%d,noise=alls=18:allf=t+%d", storySeconds[i], episode),
-			fmt.Sprintf("anoisesrc=r=44100:d=%d:amplitude=0.04:colour=pink:seed=%d", storySeconds[i], 200+episode))
+			fmt.Sprintf("anoisesrc=r=44100:d=%d:amplitude=0.04:color=pink:seed=%d", storySeconds[i], 200+episode))
 		path := filepath.Join(dir, fmt.Sprintf("Show.S01E0%d.mkv", episode))
 		concatParts(t, path, logo, coldOpen, theme, story)
 		duration := probeTestDuration(t, path)

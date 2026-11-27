@@ -11,7 +11,7 @@ import (
 // Synthetic loudness traces for the envelope comparator's tests.
 //
 // A trace is built from parts in the band's own terms: digital silence, a
-// music cue with a recognisable shape, and dialogue-like chatter from a noise
+// music cue with a recognizable shape, and dialog-like chatter from a noise
 // source. The same cue reused across episodes with a little jitter stands in
 // for one recording heard through two lossy encodes, which is what a season
 // comparison has to match.
@@ -44,7 +44,7 @@ func (b *traceBuilder) musicJittered(seed int64, seconds float64, jitterDB float
 	return b
 }
 
-// dialogue appends chatter from a noise source: loud bursts and short pauses,
+// dialog appends chatter from a noise source: loud bursts and short pauses,
 // unlike any cue.
 func (b *traceBuilder) dialog(seed int64, seconds float64) *traceBuilder {
 	b.levels = append(b.levels, cueLevels(seed, seconds, true)...)
@@ -93,7 +93,7 @@ func cueLevels(seed int64, seconds float64, chatter bool) []byte {
 			level = base + 12*pulse + 8*melody
 		} else {
 			// Chatter has no shape two seeds share: a random walk with
-			// pauses, so two episodes' dialogue correlates no better than
+			// pauses, so two episodes' dialog correlates no better than
 			// chance at any offset.
 			if rng.Float64() < 0.15 {
 				level = base - 30

@@ -185,7 +185,7 @@ func collectLevelStretches(ordered []levelsInput, envelopes []envelope, cfg Conf
 			ClippedEnd:  partnerEnd >= rightWindow.End-levelEdgeMarginSeconds,
 		})
 	}
-	comparable := func(i, j int) bool {
+	episodesDiffer := func(i, j int) bool {
 		a, b := ordered[i].Candidate.EpisodeID, ordered[j].Candidate.EpisodeID
 		return a != "" && b != "" && a != b
 	}
@@ -219,7 +219,7 @@ func collectLevelStretches(ordered []levelsInput, envelopes []envelope, cfg Conf
 	for i := range ordered {
 		neighbors := map[string]struct{}{}
 		for j := i + 1; j < len(ordered); j++ {
-			if !comparable(i, j) {
+			if !episodesDiffer(i, j) {
 				continue
 			}
 			if !within(neighbors, compareNeighborEpisodes, ordered[j].Candidate.EpisodeID) {
@@ -251,7 +251,7 @@ func collectLevelStretches(ordered []levelsInput, envelopes []envelope, cfg Conf
 					continue
 				}
 				for j := groups[h][0]; j < groups[h][1]; j++ {
-					if !comparable(i, j) {
+					if !episodesDiffer(i, j) {
 						continue
 					}
 					if !within(extra, levelWideSearchEpisodes, ordered[j].Candidate.EpisodeID) {
