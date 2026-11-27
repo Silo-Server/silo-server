@@ -247,3 +247,21 @@ func TestHealthCountsARunningStartOnce(t *testing.T) {
 			health.ActiveJobs, health.ActiveJobsByKind)
 	}
 }
+
+// A drained node reports no jobs. Work admitted after the drain completes,
+// such as a start a draining node is about to refuse, would otherwise show a
+// drained node with a job.
+func TestDrainedHealthReportsNoJobs(t *testing.T) {
+	s := newTestServer(t)
+	s.shutdownDrain.Store(true)
+	slot, ok := s.admitJob(nodepool.JobKindVideoTranscode)
+	if !ok {
+		t.Fatal("admission refused")
+	}
+	defer slot.release()
+	health := healthStatusOf(t, s)
+	if health.Status != HealthStatusDrained || health.ActiveJobs != 0 || health.ActiveJobsByKind[nodepool.JobKindVideoTranscode] != 0 {
+		t.Fatalf("health: status %q, active_jobs %d, by kind %v; want drained with no jobs",
+			health.Status, health.ActiveJobs, health.ActiveJobsByKind)
+	}
+}

@@ -1443,10 +1443,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		redacted := usage.RedactPath()
 		artifacts = &redacted
 	}
-	activeJobs, activeJobsByKind := s.reportedJobs()
+	status := s.healthStatus()
+	activeJobs, activeJobsByKind := s.reportedJobs(status == HealthStatusDrained)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(HealthResponse{
-		Status:             s.healthStatus(),
+		Status:             status,
 		ActiveJobs:         activeJobs,
 		ActiveJobsByKind:   activeJobsByKind,
 		CapabilitiesHash:   s.storedCapabilityHash(),
