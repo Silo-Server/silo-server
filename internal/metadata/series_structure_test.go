@@ -265,3 +265,21 @@ func TestMergeSeriesStructure_BridgesTheRunsAtEitherEnd(t *testing.T) {
 		}
 	}
 }
+
+// A bridged episode fills empty fields, but never the structure provider's
+// numbers: season 0 (specials) is a number, not an empty field. One Piece's
+// "Dream 9" special is TVDB S0E39 and TMDB S15E?; it must stay S0E39.
+func TestMergeSeriesStructure_BridgeKeepsTheStructureNumbers(t *testing.T) {
+	tvdb := providerStructure{slug: "tvdb", episodes: []EpisodeResult{
+		{SeasonNumber: 0, EpisodeNumber: 39, AirDate: "2013-04-07", ProviderIDs: map[string]string{"tvdb": "4543896"}},
+	}}
+	tmdb := providerStructure{slug: "tmdb", episodes: []EpisodeResult{
+		{SeasonNumber: 15, EpisodeNumber: 99, AirDate: "2013-04-07", Overview: "Crossover.", ProviderIDs: map[string]string{"tmdb": "1154317"}},
+	}}
+
+	_, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
+
+	if len(episodes) != 1 || episodes[0].SeasonNumber != 0 || episodes[0].EpisodeNumber != 39 || episodes[0].Overview != "Crossover." {
+		t.Fatalf("episodes = %+v, want TVDB's S0E39 with TMDB's overview", episodes)
+	}
+}

@@ -55,7 +55,11 @@ func mergeSeriesStructure(providers []providerStructure, preferred, language str
 			continue
 		}
 		for j, target := range bridgeEpisodes(structureEpisodes, p.episodes) {
+			// The structure provider's numbers stand: a fill-empty merge
+			// would take season 0 (specials) for an empty field.
+			season, number, contentID := target.SeasonNumber, target.EpisodeNumber, target.ContentID
 			mergeEpisodeInto(target, p.episodes[j], language)
+			target.SeasonNumber, target.EpisodeNumber, target.ContentID = season, number, contentID
 			lendProviderIDs(target, p.episodes[j].ProviderIDs)
 		}
 	}
