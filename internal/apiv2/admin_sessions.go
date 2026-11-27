@@ -28,7 +28,7 @@ type AdminSessionEgressService interface {
 type AdminPlaybackSessionEgress struct {
 	Bytes      int64   `json:"bytes" minimum:"0" doc:"Bytes Silo has sent to the viewer for this playback session so far, summed across every API server and proxy node; hops between Silo's own nodes are not counted"`
 	MeasuredAt Instant `json:"measured_at" doc:"When the newest of the counting servers took its count, on that server's clock; the same on every API server for the same reports. Servers report about once a second and their clocks can differ slightly, so rates over short intervals jitter. Divide a change in bytes by the change in this, not by the time between polls"`
-	Series     string  `json:"series" doc:"Opaque token naming the set of servers that make up bytes. Compare bytes only within one series: when it changes, start a new baseline. Within a series, ignore an observation whose measured_at is not newer than the baseline's, and start a new baseline when bytes falls at a newer measured_at"`
+	Series     string  `json:"series" doc:"Opaque token naming the set of servers that make up bytes. Ignore an observation whose measured_at is not newer than the baseline's, whatever its series. Otherwise start a new baseline when series differs from the baseline's or bytes fell, and compare bytes only within one series"`
 }
 
 // AdminPlaybackSession is an observation, not a sequenced control receipt.
@@ -106,7 +106,7 @@ type AdminPlaybackSession struct {
 	RoutingEgressNodeName    string                                  `json:"routing_egress_node_name,omitempty"`
 	Subtitle                 NullableObject[PlaybackSessionSubtitle] `json:"subtitle" doc:"The subtitle the session's current plan delivers, following each replan (a subtitle switch the client reports, a recovery); null when it shows none, for a session planned before the server recorded it, and for Jellyfin-protocol and Audiobookshelf sessions. A client that turns an already delivered sidecar on or off without a replan is not seen."`
 	LifecycleSeq             *int64                                  `json:"lifecycle_seq,omitempty" doc:"Sequence number of the session's last lifecycle transition (start, pause, resume) on the sessions channel. A row and a session.* event with the same number carry the same is_paused; the higher number is the newer. Absent for a session that started before the server recorded lifecycle transitions."`
-	Egress                   *AdminPlaybackSessionEgress             `json:"egress,omitempty" doc:"Viewer egress of the session, only when the list was read with include_egress=true. Absent when it is unknown: stream telemetry is off, its merged view is not built, its last refresh failed, the session's routes exceeded the telemetry route cap, telemetry has no record of the session, or a proxy node served the session while telemetry is not shared between servers. Never present in session.* events."`
+	Egress                   *AdminPlaybackSessionEgress             `json:"egress,omitempty" doc:"Viewer egress of the session, only when the list was read with include_egress=true. Absent when it is unknown: stream telemetry is off, its merged view is not built, its last refresh failed, the session's routes exceeded the telemetry route cap, a counting server's clock runs ahead of this server's beyond the telemetry tolerance, telemetry has no record of the session, or a proxy node served the session while telemetry is not shared between servers. Never present in session.* events."`
 }
 
 // directStreamPlayMethod is the native bucket for copied video with converted
@@ -368,9 +368,10 @@ func registerAdminPlaybackSessions(reg *Registry) {
 // addAdminSessionEgress fills egress on the rows the merged telemetry view can
 // vouch for. Egress is omitted, never zero, when the count is unknown: no view
 // yet, a failed refresh (the cache serves the last good view, whose counters a
-// client would diff against newer ones), a session whose routes were capped, a
-// session telemetry has no record of, or, when telemetry is local to this
-// process, a session a proxy node served, whose bytes the view cannot see.
+// client would diff against newer ones), a session whose routes were capped or
+// whose counting server's clock runs ahead, a session telemetry has no record
+// of, or, when telemetry is local to this process, a session a proxy node
+// served, whose bytes the view cannot see.
 //
 // A stale or missing publisher does not blank the list: it drops out of each
 // session it served, which changes that session's series. A view served stale

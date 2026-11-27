@@ -2691,13 +2691,18 @@ With `egress: true` in the capabilities, the detailed list accepts
 Silo has sent to the viewer for that playback session so far. Send
 `include_egress` only after the capabilities report `egress`: v2 rejects query
 parameters a server does not declare. During a rolling upgrade an older server
-answers `include_egress` with a 422 validation failure; read the capabilities
-again and drop the parameter. `egress: true` means stream telemetry is enabled on
-the server; the web Activity views do not request it.
+answers `include_egress` with a 422 validation failure. Behind a load balancer
+the capabilities can come from an upgraded server and the list from one that is
+not, so after a 422 leave the parameter off for a few minutes before trying it
+again rather than following the capabilities straight back into the same
+failure. `egress: true` means stream telemetry is enabled on the server; the web
+Activity views do not request it.
 
-- `bytes` sums what every API server and proxy node sent the viewer. A hop
-  between Silo's own nodes, such as a transcode node feeding the API server, is
-  not counted, so a transcoded session counts once.
+- `bytes` sums what every API server and proxy node reporting stream telemetry
+  sent the viewer. A hop between Silo's own nodes, such as a transcode node
+  feeding the API server, is not counted, so a transcoded session counts once. A
+  proxy node with stream telemetry turned off contributes nothing, so its
+  sessions count only what an API server sent them, such as playlists.
 - `measured_at` is when the newest of the servers counting the session took its
   count, on that server's clock. Every API server answers the same instant for
   the same reports. Servers report about once a second and their clocks can
@@ -2708,8 +2713,9 @@ the server; the web Activity views do not request it.
 
 A row omits `egress` when the count is unknown: stream telemetry is off, its
 merged view is not built yet, the last refresh of that view failed, the session
-used more routes than telemetry tracks per session, or telemetry has no record of
-the session. Omission is not zero. A server that stops reporting leaves the count
+used more routes than telemetry tracks per session, a server counting it reports
+a capture time further ahead of the answering API server's clock than telemetry
+tolerates, or telemetry has no record of the session. Omission is not zero. A server that stops reporting leaves the count
 of each session it served, which changes that session's `series`; other sessions
 keep theirs. When a server records more observations than its telemetry cap
 allows, the excess is not attributed to a session, and `bytes` undercounts without
@@ -2724,12 +2730,14 @@ To chart bandwidth, poll the list and keep, per session, the last observation yo
 accepted as its baseline:
 
 1. Ignore an observation whose `measured_at` is not newer than the baseline's. A
-   load balancer can send a poll to an API server whose view is older; that
-   observation is neither counted nor a new baseline.
+   load balancer can send a poll to an API server whose view is older, even one
+   from before the last `series` change; that observation is neither counted nor
+   a new baseline.
 2. When `series` differs from the baseline's, or `bytes` fell, make the
    observation the new baseline and count nothing for that interval. `bytes` can
-   restart, for example after a pause long enough for telemetry to forget the
-   session.
+   restart within a series after the session is idle long enough for telemetry
+   to forget it (five minutes by default). A client that polls less often than
+   that can miss the restart and undercount the interval.
 3. Otherwise the session sent `Δbytes` over `Δmeasured_at`; the observation
    becomes the baseline.
 

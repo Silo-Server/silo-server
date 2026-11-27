@@ -81,7 +81,13 @@ type GlobalSessionView struct {
 	// of which can move ViewerBytesAccepted by a publisher's whole count, so a
 	// client diffs bytes only within one series. It is empty when no publisher
 	// has a viewer edge.
-	ViewerBytesSeries           string
+	ViewerBytesSeries string
+	// ViewerBytesClockAhead is set when one of those publishers captured its
+	// snapshot further ahead of this view's clock than Freshness allows, so
+	// ViewerBytesMeasuredAt comes from a clock running ahead. A client that
+	// took it as a baseline would discard every later observation until the
+	// other servers' clocks caught up with it.
+	ViewerBytesClockAhead       bool
 	RelayBytesAccepted          int64
 	BytesDegraded               bool
 	LastByteAccepted            time.Time
@@ -190,12 +196,16 @@ func (r *Registry) GlobalView(ctx context.Context) (GlobalMonitoringView, error)
 type publisherContribution struct {
 	ref      PublisherRef
 	snapshot Snapshot
+	// clockAhead is set when the snapshot's capture time is ahead of the
+	// view's clock by more than Freshness.
+	clockAhead bool
 }
 
 type sessionContribution struct {
 	ref        PublisherRef
 	epoch      int64
 	capturedAt time.Time
+	clockAhead bool
 	view       SessionView
 }
 
@@ -274,7 +284,7 @@ func BuildGlobalView(set PublisherSet, at time.Time, params ViewParams) GlobalMo
 			status.State = PublisherDegraded
 		}
 		view.Publishers = append(view.Publishers, status)
-		contributions = append(contributions, publisherContribution{ref: ref, snapshot: snapshot})
+		contributions = append(contributions, publisherContribution{ref: ref, snapshot: snapshot, clockAhead: capturedAge < -params.Freshness})
 	}
 	sort.Slice(view.MissingPublishers, func(i, j int) bool { return refLess(view.MissingPublishers[i], view.MissingPublishers[j]) })
 	if len(view.MissingPublishers) > 0 {
@@ -318,7 +328,8 @@ func mergeContributions(view *GlobalMonitoringView, contributions []publisherCon
 		view.Truncated = view.Truncated || contribution.snapshot.Truncated
 		for _, session := range contribution.snapshot.Sessions {
 			bySession[session.SessionID] = append(bySession[session.SessionID], sessionContribution{ref: contribution.ref,
-				epoch: contribution.snapshot.PublisherEpoch, capturedAt: contribution.snapshot.CapturedAt, view: session})
+				epoch: contribution.snapshot.PublisherEpoch, capturedAt: contribution.snapshot.CapturedAt,
+				clockAhead: contribution.clockAhead, view: session})
 		}
 		for _, transfer := range contribution.snapshot.Transfers {
 			view.Transfers = append(view.Transfers, GlobalTransferView{TransferView: cloneTransfer(transfer), Publisher: contribution.ref})
@@ -392,6 +403,7 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 			if contribution.capturedAt.After(result.ViewerBytesMeasuredAt) {
 				result.ViewerBytesMeasuredAt = contribution.capturedAt
 			}
+			result.ViewerBytesClockAhead = result.ViewerBytesClockAhead || contribution.clockAhead
 			if session.Subject.Kind != "" && session.Subject.ID != "" {
 				key := string(session.Subject.Kind) + "\x00" + session.Subject.ID
 				subjectValues[key] = append(subjectValues[key], ref)

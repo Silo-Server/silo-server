@@ -21583,7 +21583,7 @@ export interface components {
       device_platform?: string;
       /** @description Whole-session method: direct, remux, direct_stream (copied video, converted audio) or transcode; absent when unknown */
       effective_play_method?: string;
-      /** @description Viewer egress of the session, only when the list was read with include_egress=true. Absent when it is unknown: stream telemetry is off, its merged view is not built, its last refresh failed, the session's routes exceeded the telemetry route cap, telemetry has no record of the session, or a proxy node served the session while telemetry is not shared between servers. Never present in session.* events. */
+      /** @description Viewer egress of the session, only when the list was read with include_egress=true. Absent when it is unknown: stream telemetry is off, its merged view is not built, its last refresh failed, the session's routes exceeded the telemetry route cap, a counting server's clock runs ahead of this server's beyond the telemetry tolerance, telemetry has no record of the session, or a proxy node served the session while telemetry is not shared between servers. Never present in session.* events. */
       egress?: components["schemas"]["AdminPlaybackSessionEgress"];
       /**
        * Format: int64
@@ -21803,7 +21803,7 @@ export interface components {
        * @description When the newest of the counting servers took its count, on that server's clock; the same on every API server for the same reports. Servers report about once a second and their clocks can differ slightly, so rates over short intervals jitter. Divide a change in bytes by the change in this, not by the time between polls
        */
       measured_at: string;
-      /** @description Opaque token naming the set of servers that make up bytes. Compare bytes only within one series: when it changes, start a new baseline. Within a series, ignore an observation whose measured_at is not newer than the baseline's, and start a new baseline when bytes falls at a newer measured_at */
+      /** @description Opaque token naming the set of servers that make up bytes. Ignore an observation whose measured_at is not newer than the baseline's, whatever its series. Otherwise start a new baseline when series differs from the baseline's or bytes fell, and compare bytes only within one series */
       series: string;
     };
     AdminPlaybackSessionMessageInputBody: {

@@ -184,6 +184,10 @@ func TestAdminSessionsEgressOmittedWhenUnknown(t *testing.T) {
 		{name: "local telemetry, API-served", query: "?include_egress=true", egress: mergedSessionEgress(false, viewerEdge("api-1", egressFixtureAt, "a", 1000)), wantReads: 1, wantBytes: 1000},
 		{name: "local telemetry, node-served", query: "?include_egress=true", egress: mergedSessionEgress(false, viewerEdge("api-1", egressFixtureAt, "a", 1000)), nodeServed: "a", wantReads: 1},
 		{name: "shared telemetry, node-served", query: "?include_egress=true", egress: mergedSessionEgress(true, viewerEdge("proxy-1", egressFixtureAt, "a", 1000)), nodeServed: "a", wantReads: 1, wantBytes: 1000},
+		// A server whose clock runs ahead would give measured_at a time that
+		// later observations from the other servers can't pass.
+		{name: "counting clock ahead", query: "?include_egress=true", egress: mergedSessionEgress(true,
+			viewerEdge("api-1", egressFixtureAt, "a", 1000), viewerEdge("proxy-1", egressFixtureAt.Add(2*time.Minute), "a", 200)), wantReads: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deps := pilotDeps(nil, nil)

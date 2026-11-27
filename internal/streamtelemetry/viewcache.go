@@ -80,8 +80,10 @@ type SessionEgress struct {
 	Bytes      int64
 	MeasuredAt time.Time
 	Series     string
-	// Degraded is the session's BytesDegraded: a route cap dropped some of
-	// its routes, so Bytes may be low.
+	// Degraded is set when the count can't be used: a route cap dropped some
+	// of the session's routes (BytesDegraded), so Bytes may be low, or a
+	// counting publisher's clock runs ahead (ViewerBytesClockAhead), so
+	// MeasuredAt can't be compared with later observations.
 	Degraded bool
 }
 
@@ -143,7 +145,7 @@ func (v GlobalMonitoringView) Egress() EgressView {
 			continue
 		}
 		out.Sessions[session.SessionID] = SessionEgress{Bytes: session.ViewerBytesAccepted, MeasuredAt: session.ViewerBytesMeasuredAt,
-			Series: session.ViewerBytesSeries, Degraded: session.BytesDegraded}
+			Series: session.ViewerBytesSeries, Degraded: session.BytesDegraded || session.ViewerBytesClockAhead}
 	}
 	return out
 }
@@ -156,9 +158,9 @@ func (v GlobalMonitoringView) Egress() EgressView {
 //
 // The reader that starts a rebuild, and any reader with no view at all, waits
 // for it up to its own ctx; a reader that gives up gets the older view, stale,
-// or an unavailable status when there is none, and the rebuild carries on. Other readers take the cached view, stale,
-// rather than queueing behind a rebuild that may take hundreds of
-// milliseconds.
+// or an unavailable status when there is none, and the rebuild carries on.
+// Other readers take the cached view, stale, rather than queueing behind a
+// rebuild that may take hundreds of milliseconds.
 func (c *ViewCache) read(ctx context.Context, failureCooldown bool, project func()) ViewCacheStatus {
 	if c == nil || c.registry == nil || !c.registry.Enabled() {
 		return ViewCacheStatus{}
@@ -209,13 +211,7 @@ func (c *ViewCache) startBuildLocked(ctx context.Context) {
 	buildCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), viewBuildTimeout)
 	go func() {
 		defer cancel()
-		view, err := c.build(buildCtx)
-		var egress EgressView
-		if err == nil {
-			view = view.clone()
-			egress = view.Egress()
-			egress.Distributed = c.registry.Distributed()
-		}
+		view, egress, took, err := c.build(buildCtx)
 
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -230,6 +226,7 @@ func (c *ViewCache) startBuildLocked(ctx context.Context) {
 			c.refreshes++
 			c.view = view
 			c.egress = egress
+			c.status.BuildTook = took
 			c.status.Available = true
 			c.status.RefreshedAt = now()
 			c.status.Refreshes = c.refreshes
@@ -240,24 +237,29 @@ func (c *ViewCache) startBuildLocked(ctx context.Context) {
 	}()
 }
 
-func (c *ViewCache) build(ctx context.Context) (view GlobalMonitoringView, err error) {
+// build gathers a new view and its egress projection. took is the gather's
+// duration, which the caller installs with the view so a reader never sees one
+// build's timing beside another build's view.
+func (c *ViewCache) build(ctx context.Context) (view GlobalMonitoringView, egress EgressView, took time.Duration, err error) {
 	// The rebuild runs on its own goroutine, where a panic would take the
 	// process down and leave building set; record it as a failed refresh.
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			c.logger.ErrorContext(ctx, "stream telemetry view rebuild panicked", "panic", recovered)
-			view, err = GlobalMonitoringView{}, fmt.Errorf("stream telemetry view rebuild panicked: %v", recovered)
+			view, egress, took = GlobalMonitoringView{}, EgressView{}, 0
+			err = fmt.Errorf("stream telemetry view rebuild panicked: %v", recovered)
 		}
 	}()
 	start := now()
 	view, err = c.registry.GlobalView(ctx)
 	if err != nil {
-		return GlobalMonitoringView{}, err
+		return GlobalMonitoringView{}, EgressView{}, 0, err
 	}
-	c.mu.Lock()
-	c.status.BuildTook = now().Sub(start)
-	c.mu.Unlock()
-	return view, nil
+	took = now().Sub(start)
+	view = view.clone()
+	egress = view.Egress()
+	egress.Distributed = c.registry.Distributed()
+	return view, egress, took, nil
 }
 
 // snapshotLocked must be called with c.mu held. It runs project only when a
