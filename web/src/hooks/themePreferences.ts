@@ -3,6 +3,18 @@ import { useOptionalAuth } from "@/hooks/useAuth";
 export type TextScale = "default" | "large" | "x-large";
 export type TextWeight = "default" | "strong";
 
+/**
+ * How much each text scale enlarges the root font size: the
+ * --ui-text-scale-factor html[data-text-scale] sets in app.css. A width media
+ * query's rem doesn't follow it, so a breakpoint meant for rem-sized content
+ * is multiplied by it.
+ */
+export const TEXT_SCALE_FACTOR: Record<TextScale, number> = {
+  default: 1,
+  large: 1.125,
+  "x-large": 1.25,
+};
+
 export interface AppearanceAuth {
   loading: boolean;
   user: { id: number } | null;
