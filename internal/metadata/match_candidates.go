@@ -1014,28 +1014,11 @@ func loneExactTitleMovie(hints *MatchHints, candidate MatchCandidate) bool {
 // match a year-suffixed sequel or edition.
 func loneExactCandidateTitleMatch(hintTitle string, candidate MatchCandidate) bool {
 	for _, title := range candidateTitles(candidate) {
-		if inferTitleSimilarity(hintTitle, stripBracketedCandidateYear(title, candidate.Year), 0) == 1 {
+		if inferTitleSimilarity(hintTitle, stripCandidateYearSuffix(title, candidate.Year, true), 0) == 1 {
 			return true
 		}
 	}
 	return false
-}
-
-func stripBracketedCandidateYear(title string, year int) string {
-	normalized := normalizeCandidateTitle(title)
-	if normalized == "" || year == 0 {
-		return normalized
-	}
-	fields := strings.Fields(normalized)
-	if len(fields) <= 1 {
-		return normalized
-	}
-	last := fields[len(fields)-1]
-	trimmed := trimYearDecoration(last)
-	if trimmed != last && trimmed == strconv.Itoa(year) {
-		return strings.Join(fields[:len(fields)-1], " ")
-	}
-	return normalized
 }
 
 // trustedIDWinner picks the highest-scored candidate that carries the trusted
@@ -1336,6 +1319,10 @@ func inferTitleSimilarity(left, right string, year int) float64 {
 }
 
 func normalizeCandidateTitleForYear(title string, year int) string {
+	return stripCandidateYearSuffix(title, year, false)
+}
+
+func stripCandidateYearSuffix(title string, year int, bracketedOnly bool) string {
 	normalized := normalizeCandidateTitle(title)
 	if normalized == "" || year == 0 {
 		return normalized
@@ -1349,9 +1336,17 @@ func normalizeCandidateTitleForYear(title string, year int) string {
 	// year to the title string itself ("24 stjerners julikalender (DK) (2026)").
 	// The scanner strips "(YYYY)" from the folder name into a separate year, so
 	// without this the two sides can never compare equal. Only the known year is
-	// stripped, so an unrelated trailing number stays part of the title.
+	// stripped, so an unrelated trailing number stays part of the title. When
+	// bracketedOnly is true, bare trailing years stay part of the title too.
 	last := fields[len(fields)-1]
-	if last != yearText && trimYearDecoration(last) != yearText {
+	trimmed := trimYearDecoration(last)
+	if bracketedOnly {
+		if trimmed == last || trimmed != yearText {
+			return normalized
+		}
+		return strings.Join(fields[:len(fields)-1], " ")
+	}
+	if last != yearText && trimmed != yearText {
 		return normalized
 	}
 	return strings.Join(fields[:len(fields)-1], " ")

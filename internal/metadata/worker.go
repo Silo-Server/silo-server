@@ -428,8 +428,10 @@ func queuedMatchIdentityAlternates(file *models.MediaFile, skeleton *skeletonRes
 		stem := naming.ParseInferMovieStem(base, skeleton.Title, skeleton.Year)
 		add(stem.Title, stem.Year, "filename")
 		// A loose title ending in a number (Blade Runner 2049) parses that
-		// number as a year. Keep the complete, undated title as a fallback.
+		// number as a year. Keep the complete, undated title as a fallback only
+		// when that trailing number was not contradicted by a different folder year.
 		if year := strconv.Itoa(stem.Year); stem.Year != 0 && stem.Remainder == "" &&
+			(skeleton.Year == 0 || skeleton.Year == stem.Year) &&
 			!strings.Contains(base, "("+year+")") && !strings.Contains(base, "["+year+"]") {
 			add(stem.Title+" "+year, 0, numericTitleHintSource)
 		}

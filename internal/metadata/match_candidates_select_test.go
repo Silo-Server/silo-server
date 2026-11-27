@@ -3,8 +3,12 @@ package metadata
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
 const (
@@ -457,104 +461,127 @@ func (p *loneNoYearTestProvider) GetMetadata(_ context.Context, req MetadataRequ
 	return p.details, nil
 }
 
-func TestInitialMatchPipeline_LoneNoYearMovieGuards(t *testing.T) {
+type loneNoYearPipelineCase struct {
+	name        string
+	hints       *MatchHints
+	providers   []Provider
+	wantUpdated bool
+	wantOutcome MatchOutcome
+}
+
+func runLoneNoYearPipelineCases(t *testing.T, cases []loneNoYearPipelineCase) {
+	t.Helper()
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			harness := newTestHarness()
+			result, err := harness.service.ProcessWithProviders(context.Background(), ProcessRequest{
+				Mode: ModeInitialMatch, Hints: tt.hints,
+			}, tt.providers)
+			if err != nil {
+				t.Fatalf("ProcessWithProviders() error = %v", err)
+			}
+			if gotUpdated := result != nil && result.Updated; gotUpdated != tt.wantUpdated {
+				t.Fatalf("Updated = %v, want %v (result=%#v)", gotUpdated, tt.wantUpdated, result)
+			}
+			if tt.wantOutcome != "" && (result == nil || result.Decision == nil || result.Decision.Outcome != tt.wantOutcome) {
+				t.Fatalf("decision = %#v, want outcome %q", result, tt.wantOutcome)
+			}
+		})
+	}
+}
+
+func loneMovieProvider(slug, matchTitle string, matchYear int, resultTitle string, resultYear int, id string) *loneNoYearTestProvider {
+	return &loneNoYearTestProvider{
+		slug: slug,
+		search: func(q SearchQuery) ([]SearchResult, error) {
+			if (matchTitle != "" && q.Title != matchTitle) || (matchYear >= 0 && q.Year != matchYear) {
+				return nil, nil
+			}
+			return []SearchResult{{Name: resultTitle, Year: resultYear, Provider: slug, ProviderIDs: map[string]string{slug: id}}}, nil
+		},
+		details: &MetadataResult{HasMetadata: true, Title: resultTitle, Year: resultYear, ProviderIDs: map[string]string{slug: id}},
+	}
+}
+
+func TestInitialMatchPipeline_LoneNoYearMovieAlternateGuards(t *testing.T) {
 	t.Parallel()
 
-	t.Run("dated movie rejects yearless filename alternate", func(t *testing.T) {
-		t.Parallel()
-		harness := newTestHarness()
-		oldFilm := SearchResult{
-			Name: "Remake", Year: 1995, Provider: testTMDBProvider,
-			ProviderIDs: map[string]string{testTMDBProvider: "995"},
-		}
-		provider := &loneNoYearTestProvider{
-			slug: testTMDBProvider,
-			search: func(q SearchQuery) ([]SearchResult, error) {
-				if q.Title == "Remake" {
-					return []SearchResult{oldFilm}, nil
-				}
-				return nil, nil
-			},
-			details: &MetadataResult{HasMetadata: true, Title: "Remake", Year: 1995, ProviderIDs: map[string]string{testTMDBProvider: "995"}},
-		}
-		result, err := harness.service.ProcessWithProviders(context.Background(), ProcessRequest{
-			Mode: ModeInitialMatch,
-			Hints: &MatchHints{
+	bladeRunnerAlternates := queuedMatchIdentityAlternates(
+		&models.MediaFile{FilePath: "/movies/Blade Runner (1982)/Blade Runner 2049.mkv"},
+		&skeletonResult{Title: "Blade Runner", Year: 1982, Type: anchoredItemTypeMovie, ObservedRootPath: "/movies/Blade Runner (1982)"},
+		"/movies",
+	)
+	runLoneNoYearPipelineCases(t, []loneNoYearPipelineCase{
+		{
+			name: "dated movie rejects yearless filename alternate",
+			hints: &MatchHints{
 				Title: "Remake", Year: 2026, Type: anchoredItemTypeMovie,
 				AlternateIdentities: []MatchIdentityHint{{Title: "Remake", Year: 0, Source: "filename"}},
 			},
-		}, []Provider{provider})
-		if err != nil {
-			t.Fatalf("ProcessWithProviders() error = %v", err)
-		}
-		if result != nil && result.Updated {
-			t.Fatalf("dated movie matched out-of-year film via yearless alternate: %#v", result)
-		}
-	})
-
-	t.Run("numeric title alternate still matches undated movie", func(t *testing.T) {
-		t.Parallel()
-		harness := newTestHarness()
-		provider := &loneNoYearTestProvider{
-			slug: testTMDBProvider,
-			search: func(q SearchQuery) ([]SearchResult, error) {
-				if q.Title == "Blade Runner 2049" && q.Year == 0 {
-					return []SearchResult{{
-						Name: "Blade Runner 2049", Year: 2017, Provider: testTMDBProvider,
-						ProviderIDs: map[string]string{testTMDBProvider: "335984"},
-					}}, nil
-				}
-				return nil, nil
-			},
-			details: &MetadataResult{HasMetadata: true, Title: "Blade Runner 2049", Year: 2017, ProviderIDs: map[string]string{testTMDBProvider: "335984"}},
-		}
-		result, err := harness.service.ProcessWithProviders(context.Background(), ProcessRequest{
-			Mode: ModeInitialMatch,
-			Hints: &MatchHints{
+			providers: []Provider{loneMovieProvider(testTMDBProvider, "Remake", -1, "Remake", 1995, "995")},
+		},
+		{
+			name: "numeric title alternate still matches undated movie",
+			hints: &MatchHints{
 				Title: "Blade Runner", Year: 2049, Type: anchoredItemTypeMovie,
 				AlternateIdentities: []MatchIdentityHint{{Title: "Blade Runner 2049", Year: 0, Source: "numeric_title"}},
 			},
-		}, []Provider{provider})
-		if err != nil {
-			t.Fatalf("ProcessWithProviders() error = %v", err)
-		}
-		if result == nil || !result.Updated || result.Decision == nil || result.Decision.Outcome != MatchOutcomeMatched {
-			t.Fatalf("result = %#v, want matched numeric title", result)
-		}
+			providers:   []Provider{loneMovieProvider(testTMDBProvider, "Blade Runner 2049", 0, "Blade Runner 2049", 2017, "335984")},
+			wantUpdated: true,
+			wantOutcome: MatchOutcomeMatched,
+		},
+		{
+			name: "folder year blocks mismatched numeric title alternate",
+			hints: &MatchHints{
+				Title: "Blade Runner", Year: 1982, Type: anchoredItemTypeMovie,
+				AlternateIdentities: bladeRunnerAlternates,
+			},
+			providers: []Provider{loneMovieProvider(testTMDBProvider, "Blade Runner 2049", 0, "Blade Runner 2049", 2017, "335984")},
+		},
 	})
+}
 
-	t.Run("transient error on another remote provider blocks lone match", func(t *testing.T) {
-		t.Parallel()
-		harness := newTestHarness()
-		failing := &loneNoYearTestProvider{
+func TestInitialMatchPipeline_LoneNoYearMovieProviderErrorGuards(t *testing.T) {
+	t.Parallel()
+
+	failingProvider := func(matchTitle string, err error) *loneNoYearTestProvider {
+		return &loneNoYearTestProvider{
 			slug: testTMDBProvider,
-			search: func(SearchQuery) ([]SearchResult, error) {
-				return nil, errors.New("provider returned HTTP 503")
+			search: func(q SearchQuery) ([]SearchResult, error) {
+				if matchTitle != "" && q.Title != matchTitle {
+					return nil, nil
+				}
+				return nil, err
 			},
 		}
-		surviving := &loneNoYearTestProvider{
-			slug: testTVDBProvider,
-			search: func(SearchQuery) ([]SearchResult, error) {
-				return []SearchResult{{
-					Name: "Dune", Year: 1984, Provider: testTVDBProvider,
-					ProviderIDs: map[string]string{testTVDBProvider: "1984"},
-				}}, nil
+	}
+	dune1984 := loneMovieProvider(testTVDBProvider, "", -1, "Dune", 1984, "1984")
+	runLoneNoYearPipelineCases(t, []loneNoYearPipelineCase{
+		{
+			name:        "transient error on another remote provider blocks lone match",
+			hints:       &MatchHints{Title: "Dune", Type: anchoredItemTypeMovie},
+			providers:   []Provider{failingProvider("", errors.New("provider returned HTTP 503")), dune1984},
+			wantOutcome: MatchOutcomeProviderTransient,
+		},
+		{
+			name:        "unhealthy restarting remote provider blocks lone match",
+			hints:       &MatchHints{Title: "Dune", Type: anchoredItemTypeMovie},
+			providers:   []Provider{failingProvider("", fmt.Errorf("%w: resident plugin installation 1 is backoff", pluginhost.ErrPluginUnhealthy)), dune1984},
+			wantOutcome: MatchOutcomeProviderTransient,
+		},
+		{
+			name: "primary transient error carries into alternate lone match",
+			hints: &MatchHints{
+				Title: "Dune", Type: anchoredItemTypeMovie,
+				AlternateIdentities: []MatchIdentityHint{{Title: "Dune Alternate", Year: 0, Source: "filename"}},
 			},
-			details: &MetadataResult{HasMetadata: true, Title: "Dune", Year: 1984, ProviderIDs: map[string]string{testTVDBProvider: "1984"}},
-		}
-		result, err := harness.service.ProcessWithProviders(context.Background(), ProcessRequest{
-			Mode:  ModeInitialMatch,
-			Hints: &MatchHints{Title: "Dune", Type: anchoredItemTypeMovie},
-		}, []Provider{failing, surviving})
-		if err != nil {
-			t.Fatalf("ProcessWithProviders() error = %v", err)
-		}
-		if result != nil && result.Updated {
-			t.Fatalf("partial remote search persisted a lone match: %#v", result)
-		}
-		if result == nil || result.Decision == nil || result.Decision.Outcome != MatchOutcomeProviderTransient {
-			t.Fatalf("decision = %#v, want provider_transient", result)
-		}
+			providers: []Provider{
+				failingProvider("Dune", errors.New("provider returned HTTP 503")),
+				loneMovieProvider(testTVDBProvider, "Dune Alternate", -1, "Dune Alternate", 1984, "1984"),
+			},
+			wantOutcome: MatchOutcomeProviderTransient,
+		},
 	})
 }
 

@@ -27,6 +27,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata/showstatus"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
+	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -1808,12 +1809,13 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				alternateQuery.Title = alternate.Title
 				alternateQuery.Year = alternate.Year
 				alternateResults, alternateRemoteTransientErr := searchProviders(alternateQuery)
+				remoteTransientErr = remoteTransientErr || alternateRemoteTransientErr
 				alternateCandidates := NormalizeCandidatesForLanguage(alternateResults, contentType, alternateQuery.Language)
 				if len(alternateCandidates) == 0 {
 					continue
 				}
 				aliasAttempts = append(aliasAttempts, aliasAttempt{&alternateHints, alternateCandidates})
-				alternateWinner, alternateMatched := trySelection(&alternateHints, alternateCandidates, alternateRemoteTransientErr)
+				alternateWinner, alternateMatched := trySelection(&alternateHints, alternateCandidates, remoteTransientErr)
 				if len(candidates) == 0 || alternateMatched || bestCandidateScore(&alternateHints, alternateCandidates) > bestCandidateScore(effectiveHints, candidates) {
 					candidates = alternateCandidates
 					effectiveHints = &alternateHints
@@ -2561,6 +2563,9 @@ func hasTransientMatchError(errs []error) bool {
 	for _, err := range errs {
 		if err == nil || errors.Is(err, ErrLocalMetadataUnavailable) {
 			continue // classified above, not by its message
+		}
+		if errors.Is(err, pluginhost.ErrPluginUnhealthy) {
+			return true
 		}
 		switch status.Code(err) {
 		case codes.DeadlineExceeded, codes.ResourceExhausted, codes.Aborted, codes.Unavailable:
