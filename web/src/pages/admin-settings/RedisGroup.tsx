@@ -10,7 +10,13 @@ import { useT } from "@/i18n";
 
 import { FieldGroup } from "./FieldGroup";
 import { SettingField } from "./SettingField";
-import { REDIS_KEYS, keepSavedRedisUrl, stageRedisUrl, type StagedRedisDb } from "./redisDraft";
+import {
+  REDIS_KEYS,
+  keepSavedRedisUrl,
+  stageRedisDb,
+  stageRedisUrl,
+  type StagedRedisDb,
+} from "./redisDraft";
 
 /**
  * How the page stages the connection URL. The page freezes both while a save
@@ -157,7 +163,7 @@ export function RedisGroup({
             description={t("web.admin.settings.redis.db.description")}
             value={form.getValue("redis.db")}
             onChange={(v) => {
-              if (!secrets.disabled) form.setValue("redis.db", v);
+              if (!secrets.disabled) stageRedisDb(form, v, stagedDb);
             }}
             disabled={secrets.disabled}
             restartRequired={restartKeys.has("redis.db")}

@@ -5,7 +5,7 @@ export const REDIS_KEYS = ["redis.url", "redis.db"];
 /** The part of a settings form the Redis fields stage their edits through. */
 type RedisDraft = Pick<
   ReturnType<typeof useSettingsForm>,
-  "getValue" | "getPersistedValue" | "setValue" | "resetValue"
+  "getValue" | "getPersistedValue" | "setValue" | "resetValue" | "isDirty"
 >;
 
 /**
@@ -30,13 +30,27 @@ export interface StagedRedisDb {
 export function stageRedisUrl(draft: RedisDraft, url: string, staged: StagedRedisDb) {
   draft.setValue("redis.url", url);
   const shown = draft.getValue("redis.db");
-  // The URL edit claims the number only when it is the saved one, or one an
-  // earlier keystroke of this edit already claimed: a number the admin
-  // changed first stays theirs, so taking the URL back leaves it staged.
-  const claimed = staged.current !== null && shown === staged.current;
-  const adminEdited = !claimed && shown !== draft.getPersistedValue("redis.db");
-  staged.current = shown === "" || adminEdited ? null : shown;
+  // The URL edit claims the number only when nothing has staged it (it is the
+  // saved one), or an earlier keystroke of this edit claimed it: a number the
+  // admin staged first stays theirs, even once the settings report it as
+  // saved, so taking the URL back leaves it staged.
+  const claimed =
+    (staged.current !== null && shown === staged.current) || !draft.isDirty("redis.db");
+  staged.current = shown === "" || !claimed ? null : shown;
   if (shown !== "") draft.setValue("redis.db", shown, { stage: true });
+}
+
+/**
+ * Stages the admin's edit of the Database number. The number is theirs from
+ * then on: taking back a URL edit no longer withdraws it.
+ */
+export function stageRedisDb(
+  draft: Pick<RedisDraft, "setValue">,
+  value: string,
+  staged: StagedRedisDb,
+) {
+  draft.setValue("redis.db", value);
+  staged.current = null;
 }
 
 /**

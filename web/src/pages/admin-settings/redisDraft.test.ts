@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { keepSavedRedisUrl, stageRedisUrl, type StagedRedisDb } from "./redisDraft";
+import { keepSavedRedisUrl, stageRedisDb, stageRedisUrl, type StagedRedisDb } from "./redisDraft";
 
 /** A settings form's draft: staged values over a snapshot the test can move. */
 function fakeDraft(persisted: Record<string, string>) {
@@ -17,6 +17,7 @@ function fakeDraft(persisted: Record<string, string>) {
     resetValue: (key: string) => {
       staged.delete(key);
     },
+    isDirty: (key: string) => staged.has(key),
   };
 }
 
@@ -69,5 +70,33 @@ describe("keepSavedRedisUrl", () => {
     keepSavedRedisUrl(draft, stagedDb);
 
     expect([...draft.staged.entries()]).toEqual([["redis.db", "5"]]);
+  });
+
+  // The admin's number was staged before the URL and the settings then
+  // reported it as saved: it is still theirs (#4834 review).
+  it("keeps a number the admin staged before the URL once it is reported saved", () => {
+    const draft = fakeDraft({ "redis.url": "redis://saved:6379", "redis.db": "2" });
+    const stagedDb: StagedRedisDb = { current: null };
+
+    stageRedisDb(draft, "5", stagedDb);
+    draft.persisted["redis.db"] = "5";
+    stageRedisUrl(draft, "redis://other:6379", stagedDb);
+    draft.persisted["redis.db"] = "3";
+    keepSavedRedisUrl(draft, stagedDb);
+
+    expect([...draft.staged.entries()]).toEqual([["redis.db", "5"]]);
+  });
+
+  it("keeps a number the admin set back to the one the URL claimed", () => {
+    const draft = fakeDraft({ "redis.url": "redis://saved:6379", "redis.db": "2" });
+    const stagedDb: StagedRedisDb = { current: null };
+
+    stageRedisUrl(draft, "redis://other:6379", stagedDb);
+    stageRedisDb(draft, "5", stagedDb);
+    draft.persisted["redis.db"] = "3";
+    stageRedisDb(draft, "2", stagedDb);
+    keepSavedRedisUrl(draft, stagedDb);
+
+    expect([...draft.staged.entries()]).toEqual([["redis.db", "2"]]);
   });
 });

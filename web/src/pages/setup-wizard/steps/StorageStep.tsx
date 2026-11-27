@@ -17,6 +17,7 @@ import { useT, type MessageKey, type Translate } from "@/i18n";
 import {
   REDIS_KEYS,
   keepSavedRedisUrl,
+  stageRedisDb,
   stageRedisUrl,
   type StagedRedisDb,
 } from "@/pages/admin-settings/redisDraft";
@@ -614,7 +615,7 @@ export function StorageStep() {
               type="number"
               description={t("web.setup.storage.redisDbDescription")}
               value={form.getValue("redis.db")}
-              onChange={(v) => form.setValue("redis.db", v)}
+              onChange={(v) => stageRedisDb(form, v, stagedRedisDb)}
               managedByEnv={form.envVar("redis.db")}
             />
             <ConnectionCheckAction
