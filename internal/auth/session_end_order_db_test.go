@@ -512,9 +512,11 @@ func backendPID(t *testing.T, tx pgx.Tx) int32 {
 	return pid
 }
 
-// waitForPartyBehind waits until a backend other than known waits on a lock
-// one of ahead holds or waits for first (pg_blocking_pids), and answers its
-// pid: the party just started, not some other waiter in the database. A party
+// waitForPartyBehind waits until a backend of this test's pool (its
+// application_name) other than known waits on a lock one of ahead holds or
+// waits for first (pg_blocking_pids), and answers its pid: the party just
+// started, not another test's backend waiting on a lock the holder also
+// holds, such as a shared advisory lock. A party
 // that answers on returned first fails the test at once.
 func waitForPartyBehind(t *testing.T, pool *pgxpool.Pool, ahead, known []int32, returned <-chan error) int32 {
 	t.Helper()
@@ -522,7 +524,8 @@ func waitForPartyBehind(t *testing.T, pool *pgxpool.Pool, ahead, known []int32, 
 	for {
 		var pid int32
 		err := pool.QueryRow(t.Context(), `SELECT pid FROM pg_stat_activity
-			WHERE datname = current_database() AND pg_blocking_pids(pid) && $1::int[] AND NOT (pid = ANY($2::int[]))
+			WHERE datname = current_database() AND application_name = current_setting('application_name')
+				AND pg_blocking_pids(pid) && $1::int[] AND NOT (pid = ANY($2::int[]))
 			LIMIT 1`, ahead, append([]int32{}, known...)).Scan(&pid)
 		if err == nil {
 			return pid

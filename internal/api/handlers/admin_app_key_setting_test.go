@@ -64,6 +64,9 @@ func newSwitchWriteFixture(t *testing.T) *switchWriteFixture {
 	}
 	// Room for a staged test's blocker, parties and poll on a 4-CPU runner.
 	poolConfig.MaxConns = 16
+	// A name of this test's own, so a staged wait counts only this test's
+	// backends, never another test's waiting on a shared advisory lock.
+	poolConfig.ConnConfig.RuntimeParams["application_name"] = "silo-test-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	pool, err := pgxpool.NewWithConfig(t.Context(), poolConfig)
 	if err != nil {
 		t.Fatal(err)

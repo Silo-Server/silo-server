@@ -32,6 +32,9 @@ func deviceLoginTestService(t *testing.T) (*DeviceLoginService, *pgxpool.Pool, i
 	}
 	// Room for a staged test's blocker, parties and poll on a 4-CPU runner.
 	poolConfig.MaxConns = 16
+	// A name of this test's own, so a staged wait counts only this test's
+	// backends, never another test's waiting on a shared advisory lock.
+	poolConfig.ConnConfig.RuntimeParams["application_name"] = fmt.Sprintf("silo-test-%d", time.Now().UnixNano())
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		t.Fatalf("connect test database: %v", err)

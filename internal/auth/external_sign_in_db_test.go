@@ -48,6 +48,9 @@ func newExternalSignInEnv(t *testing.T) *externalSignInEnv {
 	// the default size (the larger of 4 and the CPU count) would park a party
 	// in the pool on a 4-CPU runner, where Postgres never sees it wait.
 	poolConfig.MaxConns = 16
+	// A name of this test's own, so a staged wait counts only this test's
+	// backends, never another test's waiting on a shared advisory lock.
+	poolConfig.ConnConfig.RuntimeParams["application_name"] = fmt.Sprintf("silo-test-%d", time.Now().UnixNano())
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		t.Fatalf("connect test database: %v", err)

@@ -256,8 +256,9 @@ func TestLocalPasswordsOffJudgesTheStateLeftDB(t *testing.T) {
 	}
 }
 
-// blockedBy waits until a backend of this database waits on a lock the
-// backend holder holds, and answers its pid; a party that answers on
+// blockedBy waits until a backend of the fixture's pool (its
+// application_name, so never another test's) waits on a lock the backend
+// holder holds, and answers its pid; a party that answers on
 // returned first fails the test at once with its answer.
 func (f *switchWriteFixture) blockedBy(t *testing.T, holder uint32, returned <-chan error) uint32 {
 	t.Helper()
@@ -265,7 +266,8 @@ func (f *switchWriteFixture) blockedBy(t *testing.T, holder uint32, returned <-c
 	for {
 		var pid uint32
 		err := f.pool.QueryRow(t.Context(), `SELECT pid FROM pg_stat_activity
-			WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid)) LIMIT 1`, holder).Scan(&pid)
+			WHERE datname = current_database() AND application_name = current_setting('application_name')
+				AND $1 = ANY(pg_blocking_pids(pid)) LIMIT 1`, holder).Scan(&pid)
 		if err == nil {
 			return pid
 		}
