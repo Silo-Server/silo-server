@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
 import { V2ProblemError, v2ErrorText } from "@/api/v2/request";
@@ -36,6 +36,9 @@ export default function AccountSettings() {
   const [formError, setFormError] = useState<string | null>(null);
   // The field a refusal before sending is about, until that field changes.
   const [invalidField, setInvalidField] = useState<"new" | "confirm" | null>(null);
+  // The new password as typed now. The fields stay editable while a change is
+  // pending, so a refusal marks the field only if it still holds what was sent.
+  const typedNewPassword = useRef("");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -70,6 +73,7 @@ export default function AccountSettings() {
       });
       setCurrentPassword("");
       setNewPassword("");
+      typedNewPassword.current = "";
       setConfirmPassword("");
       setSignOutOtherSessions(false);
       toast.success(
@@ -85,7 +89,12 @@ export default function AccountSettings() {
           ? passwordErrorMessage(error, failed)
           : v2ErrorText(error, failed),
       );
-      if (refusedPasswordMember(error, "new_password")) setInvalidField("new");
+      if (
+        refusedPasswordMember(error, "new_password") &&
+        typedNewPassword.current === newPassword
+      ) {
+        setInvalidField("new");
+      }
     }
   }
 
@@ -146,6 +155,7 @@ export default function AccountSettings() {
                 value={newPassword}
                 onChange={(event) => {
                   setNewPassword(event.target.value);
+                  typedNewPassword.current = event.target.value;
                   // A mismatch can be corrected here too.
                   setInvalidField(null);
                 }}

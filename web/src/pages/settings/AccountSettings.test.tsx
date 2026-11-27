@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -174,6 +174,40 @@ describe("AccountSettings", () => {
     mocks.mutateAsync.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await submit();
     expect(screen.getByRole("alert")).toHaveTextContent("Failed to change password.");
+  });
+
+  it("leaves a password edited while the change was pending unmarked by its refusal", async () => {
+    const user = userEvent.setup();
+    let refuse: (reason: unknown) => void = () => {};
+    mocks.mutateAsync.mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        refuse = reject;
+      }),
+    );
+    render(<AccountSettings />);
+    const newPassword = screen.getByLabelText("New password");
+    await user.type(screen.getByLabelText("Current password"), "old password");
+    await user.type(newPassword, "new password");
+    await user.type(screen.getByLabelText("Confirm new password"), "new password");
+    await user.click(screen.getByRole("button", { name: "Change password" }));
+
+    await user.type(newPassword, "!");
+    const refused = v2Problem(
+      422,
+      "validation_failed",
+      "The request did not pass validation; see errors.",
+    );
+    refused.problem.errors = [
+      {
+        location: "body.new_password",
+        code: "invalid",
+        detail: "Include at least one capital letter.",
+      },
+    ];
+    await act(async () => refuse(refused));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Include at least one capital letter.");
+    expect(newPassword).not.toHaveAttribute("aria-invalid");
   });
 
   it("does not render the form when the server denies the capability", () => {
