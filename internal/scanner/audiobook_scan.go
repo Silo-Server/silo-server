@@ -1643,9 +1643,9 @@ const (
 // so manual edits to fields not driven by the file (e.g., poster_path
 // set by the metadata enricher) survive.
 //
-// Tags own the title. Year, genres and studios belong to the tags only
-// while the book has no provider match; once matched, the provider owns
-// them and the tags only fill a field that is still empty, so a rescan
+// Tags own the title. Year, release date, genres and studios belong to the
+// tags only while the book has no provider match; once matched, the provider
+// owns them and the tags only fill a field that is still empty, so a rescan
 // cannot mix a second source into a matched book.
 //
 // Audiobook titles are stripped of trailing narrator/edition suffixes
@@ -1685,7 +1685,7 @@ func applyBookToMediaItem(item *models.MediaItem, book *parsedAudiobook, provide
 	if len(book.Genres) > 0 && !slices.Contains(item.LockedFields, lockedFieldGenres) && (!providerMatched || len(item.Genres) == 0) {
 		item.Genres = mergeUniqueStrings(item.Genres, book.Genres)
 	}
-	if rd := normalizeReleaseDateForSQL(book.ReleaseDate); rd != "" && !releaseDatesLocked && (item.ReleaseDate == nil || *item.ReleaseDate == "") {
+	if rd := normalizeReleaseDateForSQL(book.ReleaseDate); rd != "" && !releaseDatesLocked && (!providerMatched || item.ReleaseDate == nil || *item.ReleaseDate == "") {
 		item.ReleaseDate = &rd
 	}
 	if book.Language != "" && item.OriginalLanguage == "" {
