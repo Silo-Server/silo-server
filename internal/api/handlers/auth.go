@@ -157,6 +157,31 @@ type NetworkSignInInput struct {
 	IP             string
 }
 
+// DemoLoginInput is a public demo sign-in as the transport received it.
+type DemoLoginInput struct {
+	DeviceName string
+	IP         string
+}
+
+// DemoLogin opens a demo-scoped login session for the configured public demo
+// account when demo mode is enabled. v2 demoLogin calls it; a failure is an
+// *APIError.
+func (h *AuthHandler) DemoLogin(ctx context.Context, in DemoLoginInput) (TokenPairView, error) {
+	pair, user, err := h.service.DemoLogin(ctx, in.DeviceName, in.IP)
+	if err != nil {
+		if errors.Is(err, auth.ErrDemoLoginDisabled) {
+			return TokenPairView{}, apiError(http.StatusForbidden, "demo_login_disabled", "Demo login is not available on this server")
+		}
+		return TokenPairView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	}
+	return TokenPairView{
+		AccessToken:  pair.AccessToken,
+		RefreshToken: pair.RefreshToken,
+		ExpiresIn:    pair.ExpiresIn,
+		User:         buildUserResponse(user, effectiveAccountPolicy(ctx, user, h.accessGroups), nil, nil),
+	}, nil
+}
+
 // NetworkSignIn signs in the overlay peer of the request through a network
 // identity provider (auth.Service.NetworkSignIn) and opens a login session.
 // v2 signInWithNetworkIdentity calls it; a failure is an *APIError.

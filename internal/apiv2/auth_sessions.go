@@ -330,6 +330,9 @@ func (reg *Registry) listSessions(ctx context.Context, cursors *Cursors, in *Log
 	if claims == nil {
 		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
+	if claims.IsDemo() {
+		return reg.ownLoginSessionPage(ctx, claims, in)
+	}
 	scope := CursorScope{
 		OperationID: opListSessions,
 		Security:    strconv.Itoa(claims.UserID),

@@ -83,12 +83,13 @@ type Router struct {
 // Request describes one theme authorization. File is already selected under
 // the viewer's current access filter.
 type Request struct {
-	File       themesongs.File
-	Delivery   themesongs.Delivery
-	Conversion themesongs.Conversion
-	UserID     int
-	ProfileID  string
-	AccessPath netaccess.Path
+	File              themesongs.File
+	Delivery          themesongs.Delivery
+	Conversion        themesongs.Conversion
+	UserID            int
+	ProfileID         string
+	DemoAuthSessionID string
+	AccessPath        netaccess.Path
 	// ExpiresAt bounds the worker token; see themesongs.Expiry.
 	ExpiresAt time.Time
 	// SeekSeconds starts a conversion part way in. Original bytes seek with
@@ -262,6 +263,7 @@ func (r *Router) publish(ctx context.Context, id, secret string, req Request, de
 		}
 	}
 	claims := card.ToClaims()
+	claims.DemoAuthSessionID = req.DemoAuthSessionID
 	// ToClaims keeps the source channel count only for the versioned surround
 	// downmix recipe; the other audio targets are spelled out for every
 	// conversion so every executor encodes the same output.

@@ -797,6 +797,7 @@ export const v2Operations = {
   "POST /api/v2/admin/users/{id}/profiles": "createAdminUserProfile",
   "POST /api/v2/admin/users/{id}/transfer-ownership": "transferAdminUserOwnership",
   "POST /api/v2/api-keys": "createPersonalAPIKey",
+  "POST /api/v2/auth/demo": "demoLogin",
   "POST /api/v2/auth/device/approve": "approveDeviceLogin",
   "POST /api/v2/auth/device/approve-handoff": "approveDeviceHandoff",
   "POST /api/v2/auth/device/cancel": "cancelDeviceLogin",

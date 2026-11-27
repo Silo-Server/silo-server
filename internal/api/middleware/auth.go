@@ -205,6 +205,8 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			} else if authority.Role != claims.Role {
 				writeUnauthorized(w, "The account's role changed; refresh the access token", ReasonTokenRefreshRequired)
 				return
+			} else if authority.IsDemo() {
+				authority.Narrow(claims)
 			}
 			am.sessionLastSeen.Touch(claims.SessionID)
 		}
@@ -273,6 +275,8 @@ func (am *AuthMiddleware) sessionClaims(r *http.Request) *auth.Claims {
 		authority.Narrow(claims)
 	} else if authority.Role != claims.Role {
 		return nil
+	} else if authority.IsDemo() {
+		authority.Narrow(claims)
 	}
 	am.sessionLastSeen.Touch(claims.SessionID)
 	return claims

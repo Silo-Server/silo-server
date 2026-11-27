@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/demomode"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/google/uuid"
@@ -45,7 +46,14 @@ var (
 	// ErrSignupSessionStart reports a signup whose account was created but
 	// whose sign-in failed: repeating the signup cannot succeed.
 	ErrSignupSessionStart = errors.New("account created but login failed")
+	// ErrDemoLoginDisabled is returned when public demo login is turned off,
+	// unconfigured, or points to an ineligible account.
+	ErrDemoLoginDisabled = errors.New("demo login is not enabled")
 )
+
+// demoSessionAbsoluteLifetime is the hard upper bound on a public demo login
+// session: refreshes never extend a demo session past this window.
+const demoSessionAbsoluteLifetime = 24 * time.Hour
 
 // SessionCheckRetryAfterSeconds is the Retry-After of every answer to a
 // session or credential check that failed in the store (the v1 and v2 auth
@@ -206,6 +214,87 @@ func (s *Service) Login(ctx context.Context, username, password, deviceName, ip 
 		s.trustSignInSource(ctx, user)
 	}
 	return pair, user, err
+}
+
+// DemoLogin opens a temporary, demo-scoped login session for the configured
+// public demo account when demo mode is enabled. It fails closed whenever demo
+// mode is off, unconfigured, or points at a missing, disabled, administrator,
+// or temporary-password account. The account row is locked in the session
+// creation transaction so role promotion, disabling, or renaming serializes
+// with issuance.
+func (s *Service) DemoLogin(ctx context.Context, deviceName, ip string) (*TokenPair, *models.User, error) {
+	if s.settings == nil || s.users == nil || s.sessions == nil {
+		return nil, nil, ErrDemoLoginDisabled
+	}
+	username, enabled, err := demomode.DemoAccount(ctx, s.settings)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading demo login settings: %w", err)
+	}
+	if !enabled {
+		return nil, nil, ErrDemoLoginDisabled
+	}
+	candidate, err := s.users.GetByUsername(ctx, username)
+	if err != nil {
+		if IsNotFound(err) {
+			return nil, nil, ErrDemoLoginDisabled
+		}
+		return nil, nil, fmt.Errorf("looking up demo account: %w", err)
+	}
+	var pair *TokenPair
+	var user *models.User
+	err = pgx.BeginFunc(ctx, s.sessions.pool, func(tx pgx.Tx) error {
+		locked, lockErr := lockUser(ctx, tx, candidate.ID)
+		if lockErr != nil {
+			if IsNotFound(lockErr) {
+				return ErrDemoLoginDisabled
+			}
+			return fmt.Errorf("locking demo account: %w", lockErr)
+		}
+		liveUsername, liveEnabled, settingErr := demomode.DemoAccount(ctx, s.settings)
+		if settingErr != nil {
+			return fmt.Errorf("re-checking demo login settings: %w", settingErr)
+		}
+		if !liveEnabled || !locked.Enabled || locked.Role == models.RoleAdmin ||
+			locked.PasswordChangeRequired || !strings.EqualFold(locked.Username, liveUsername) {
+			return ErrDemoLoginDisabled
+		}
+		now := time.Now()
+		absExp := now.Add(demoSessionAbsoluteLifetime)
+		exp := now.Add(s.jwt.RefreshExpiry())
+		if absExp.Before(exp) {
+			exp = absExp
+		}
+		sessionID := uuid.New().String()
+		session := models.AuthSession{
+			ID:                sessionID,
+			UserID:            locked.ID,
+			DeviceName:        deviceName,
+			IPAddress:         ip,
+			ExpiresAt:         exp,
+			Purpose:           models.SessionPurposeDemo,
+			AbsoluteExpiresAt: &absExp,
+		}
+		if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
+			return fmt.Errorf("creating demo session: %w", err)
+		}
+		generated, err := s.generateTokenPair(Claims{
+			UserID:         locked.ID,
+			Role:           locked.Role,
+			SessionID:      sessionID,
+			SessionPurpose: models.SessionPurposeDemo,
+			SessionEndsAt:  absExp,
+		})
+		if err != nil {
+			return err
+		}
+		pair = generated
+		user = locked
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return pair, user, nil
 }
 
 // CompatLogin is Login for sign-in surfaces that cannot run the forced
@@ -1340,14 +1429,19 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	}
 	if session.IsRemotePlayback() {
 		refreshed = remotePlaybackClaims(refreshed, session)
+	} else if session.IsDemo() {
+		refreshed.SessionPurpose = models.SessionPurposeDemo
+		if session.AbsoluteExpiresAt != nil {
+			refreshed.SessionEndsAt = *session.AbsoluteExpiresAt
+		}
 	}
 	pair, err := s.generateTokenPair(refreshed)
-	if err == nil && session.ImpersonatorUserID == nil && !session.IsRemotePlayback() {
+	if err == nil && session.ImpersonatorUserID == nil && !session.IsRemotePlayback() && !session.IsDemo() {
 		// A device that keeps its session refreshed shows where the account
 		// signs in from, so a new device there is not locked out with
 		// strangers while someone else spends the name's attempt budget. An
-		// impersonating administrator and a device handed one playback
-		// session are elsewhere.
+		// impersonating administrator, a device handed one playback session,
+		// and a public demo visitor are elsewhere.
 		s.trustSignInSource(ctx, user)
 	}
 	return pair, err
@@ -1386,6 +1480,9 @@ func (s *Service) checkSessionStanding(ctx context.Context, sessionID string) (*
 		// handoff that names no profile or no end.
 		return nil, ErrSessionRevoked
 	}
+	if session.IsDemo() && session.AbsoluteExpiresAt == nil {
+		return nil, ErrSessionRevoked
+	}
 
 	user, err := s.users.GetByID(ctx, session.UserID)
 	if err != nil {
@@ -1396,6 +1493,18 @@ func (s *Service) checkSessionStanding(ctx context.Context, sessionID string) (*
 	}
 	if !user.Enabled {
 		return nil, ErrSessionRevoked
+	}
+	if session.IsDemo() {
+		if user.Role == models.RoleAdmin || user.PasswordChangeRequired {
+			return nil, ErrSessionRevoked
+		}
+		demoUsername, enabled, err := demomode.DemoAccount(ctx, s.settings)
+		if err != nil {
+			return nil, sessionCheckUnavailable("checking demo mode", err)
+		}
+		if !enabled || !strings.EqualFold(user.Username, demoUsername) {
+			return nil, ErrSessionRevoked
+		}
 	}
 	if err := s.validateImpersonator(ctx, session.ImpersonatorUserID); err != nil {
 		if errors.Is(err, ErrSessionRevoked) {
@@ -1475,14 +1584,18 @@ func (s *Service) RenewPluginAccess(ctx context.Context, claims *Claims, ttl tim
 	if session.ExpiresAt.Before(ends) {
 		ends = session.ExpiresAt
 	}
-	return s.jwt.generateToken(Claims{
+	pluginClaims := Claims{
 		UserID:             user.ID,
 		Role:               user.Role,
 		SessionID:          session.ID,
 		ProfileID:          claims.ProfileID,
 		ProfilePINRevision: claims.ProfilePINRevision,
 		SessionEndsAt:      ends,
-	}, TokenTypePluginAccess, ttl)
+	}
+	if session.IsDemo() {
+		pluginClaims.SessionPurpose = models.SessionPurposeDemo
+	}
+	return s.jwt.generateToken(pluginClaims, TokenTypePluginAccess, ttl)
 }
 
 func (s *Service) validateImpersonator(ctx context.Context, impersonatorUserID *int) error {

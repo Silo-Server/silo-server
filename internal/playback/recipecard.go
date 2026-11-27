@@ -26,6 +26,7 @@ type RecipeCard struct {
 	UserID               int       `json:"user_id"`
 	ProfileID            string    `json:"profile_id"`
 	MediaFileID          int       `json:"media_file_id"`
+	DemoAuthSessionID    string    `json:"demo_auth_session_id,omitempty"`
 	TranscodeNodeURL     string    `json:"transcode_node_url,omitempty"`
 	TranscodeTransportID string    `json:"transcode_transport_id,omitempty"`
 	OriginalStartedAt    time.Time `json:"original_started_at,omitempty"`
@@ -509,6 +510,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		UserID:                        c.UserID,
 		ProfileID:                     c.ProfileID,
 		MediaFileID:                   c.MediaFileID,
+		DemoAuthSessionID:             c.DemoAuthSessionID,
 		OriginalStartedAtUnixNano: func() int64 {
 			if c.OriginalStartedAt.IsZero() {
 				return 0
@@ -636,6 +638,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		UserID:                        c.UserID,
 		ProfileID:                     c.ProfileID,
 		MediaFileID:                   c.MediaFileID,
+		DemoAuthSessionID:             c.DemoAuthSessionID,
 		TranscodeNodeURL:              c.TranscodeNode,
 		TranscodeTransportID:          c.TranscodeTransportID,
 		RoutingNetworkProvider:        c.RoutingNetworkProvider,

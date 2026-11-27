@@ -426,7 +426,7 @@ func linkIdentityTx(ctx context.Context, tx pgx.Tx, user *models.User, installat
 		// The provider now answers for the account, so its open sessions are
 		// re-checked with the provider like sessions opened through it.
 		if _, err := tx.Exec(ctx, `UPDATE auth_sessions SET identity_id = $1, provider_since = COALESCE(provider_since, created_at)
-			WHERE user_id = $2 AND identity_id IS NULL AND impersonator_user_id IS NULL
+			WHERE user_id = $2 AND identity_id IS NULL AND impersonator_user_id IS NULL AND purpose <> 'demo'
 				AND revoked_at IS NULL AND expires_at > NOW()`, linked.ID, user.ID); err != nil {
 			return nil, fmt.Errorf("attaching sessions to the identity: %w", err)
 		}

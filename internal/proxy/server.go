@@ -27,6 +27,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/bandwidthprobe"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
@@ -600,7 +601,10 @@ func (s *Server) requireBearer(next http.Handler) http.Handler {
 	})
 }
 
-// verifyToken extracts and validates the stream token from the URL.
+// verifyToken extracts and validates the stream token from the URL. When the
+// token was minted for a public demo session, it also re-checks that the demo
+// login session is still active so disabling or retargeting demo mode stops
+// pre-minted proxy media URLs immediately.
 func (s *Server) verifyToken(w http.ResponseWriter, r *http.Request) *streamtoken.Claims {
 	cfg := s.watcher.Config()
 	tokenStr := chi.URLParam(r, "token")
@@ -609,7 +613,34 @@ func (s *Server) verifyToken(w http.ResponseWriter, r *http.Request) *streamtoke
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return nil
 	}
+	if !s.verifyDemoLoginSession(w, r, claims) {
+		return nil
+	}
 	return claims
+}
+
+func (s *Server) verifyDemoLoginSession(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims) bool {
+	if claims.DemoAuthSessionID == "" {
+		return true
+	}
+	if s.loginSessions == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	_, valid, err := s.loginSessions.ActiveSession(r.Context(), claims.DemoAuthSessionID, claims.UserID)
+	if err != nil {
+		if r.Context().Err() == nil {
+			slog.WarnContext(r.Context(), "demo login session check failed", "component", "proxy", "error", logredact.SanitizeText(err.Error()), "playback_session_id", claims.SessionID)
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(auth.SessionCheckRetryAfterSeconds))
+		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		return false
+	}
+	if !valid {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	return true
 }
 
 func (s *Server) verifyPlaybackToken(w http.ResponseWriter, r *http.Request) *streamtoken.Claims {

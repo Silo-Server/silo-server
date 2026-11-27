@@ -641,9 +641,9 @@ func endImpersonationsInvolving(ctx context.Context, db interface {
 }
 
 // revokeCredentialsIssuedToNonAdmin deletes the API keys and reset links of
-// an account being made an admin or the Owner. Other admins may have minted
-// them and kept them; afterwards they would carry authority that only the
-// Owner grants.
+// an account being made an admin or the Owner, and revokes any public demo
+// sessions opened for it. Other admins may have minted keys or links and kept
+// them, and a public demo session must never gain admin authority.
 func revokeCredentialsIssuedToNonAdmin(ctx context.Context, db interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }, id int) error {
@@ -652,6 +652,9 @@ func revokeCredentialsIssuedToNonAdmin(ctx context.Context, db interface {
 	}
 	if _, err := db.Exec(ctx, `DELETE FROM password_reset_tokens WHERE user_id = $1`, id); err != nil {
 		return fmt.Errorf("deleting the promoted account's reset links: %w", err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE auth_sessions SET revoked_at = NOW() WHERE user_id = $1 AND purpose = $2 AND identity_id IS NULL AND revoked_at IS NULL`, id, models.SessionPurposeDemo); err != nil {
+		return fmt.Errorf("revoking the promoted account's demo sessions: %w", err)
 	}
 	return nil
 }

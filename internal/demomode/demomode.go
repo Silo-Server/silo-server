@@ -6,6 +6,7 @@ package demomode
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 )
 
@@ -13,9 +14,39 @@ import (
 // whose visitors share one account that is not an administrator.
 const SettingKey = "demo.enabled"
 
+// UsernameKey is the server setting naming the non-administrator account
+// that public demo login signs visitors into when demo mode is enabled.
+const UsernameKey = "demo.username"
+
 // OnValue is the only stored value that turns demo mode on. Every reader
 // compares the raw stored value with it, untrimmed.
 const OnValue = "true"
+
+// DemoAccount reads whether public demo login is enabled and which account
+// username it targets. Unlike Setting.Get, callers that issue or refresh demo
+// sessions should pass a direct settings store so toggling or retargeting demo
+// mode takes effect immediately without remembered fallback values.
+func DemoAccount(ctx context.Context, store Reader) (username string, enabled bool, err error) {
+	if store == nil {
+		return "", false, nil
+	}
+	rawEnabled, err := store.Get(ctx, SettingKey)
+	if err != nil {
+		return "", false, err
+	}
+	if rawEnabled != OnValue {
+		return "", false, nil
+	}
+	rawUsername, err := store.Get(ctx, UsernameKey)
+	if err != nil {
+		return "", false, err
+	}
+	username = strings.TrimSpace(rawUsername)
+	if username == "" {
+		return "", false, nil
+	}
+	return username, true, nil
+}
 
 // Reader reads one server setting.
 type Reader interface {

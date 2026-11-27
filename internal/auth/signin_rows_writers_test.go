@@ -83,9 +83,10 @@ var signInRowWriters = map[string]string{
 
 	// Inserts a new identity, which no uninstall can see yet, and gives it
 	// to the account's sessions that had none.
-	"internal/auth/account_resolution.go:linkIdentityTx":     noIdentityRows,
-	"internal/auth/owner.go:moveOwnership":                   noIdentityRows,
-	"internal/auth/repository.go:endImpersonationsInvolving": noIdentityRows,
+	"internal/auth/account_resolution.go:linkIdentityTx":            noIdentityRows,
+	"internal/auth/owner.go:moveOwnership":                          noIdentityRows,
+	"internal/auth/repository.go:endImpersonationsInvolving":        noIdentityRows,
+	"internal/auth/repository.go:revokeCredentialsIssuedToNonAdmin": noIdentityRows,
 
 	"internal/auth/session.go:DeleteExpired":      neverWaits,
 	"internal/auth/device_login.go:DeleteExpired": neverWaits,

@@ -41,6 +41,14 @@ type NetworkSignInInput struct {
 	Body    struct{}
 }
 
+// DemoLoginInput opens a public demo session. The body is an empty JSON object
+// so cross-site form posts fail the media-type check.
+type DemoLoginInput struct {
+	SignInDeviceHeaders
+	RawBody []byte
+	Body    struct{}
+}
+
 // networkSignInPath is the signInWithNetworkIdentity path of an
 // installation, below the server base.
 func networkSignInPath(installationID int) string {
@@ -77,6 +85,10 @@ type CompleteOAuthLoginOutput struct {
 // limit bucket of the login operation.
 const loginDomain = "login"
 
+// demoLoginBucket is the dedicated per-IP rate-limit bucket for public demo
+// sign-ins so demo traffic does not starve password sign-ins.
+const demoLoginBucket = "demo_login"
+
 func registerAuth(reg *Registry) {
 	end := humaOp(http.MethodPost, Prefix+"/auth/impersonation/end", "endImpersonation", "auth",
 		"Return an impersonating session to the administrator who started it.")
@@ -101,6 +113,15 @@ func registerAuth(reg *Registry) {
 		RetrySafety: RetrySafetyNonRetryable,
 		Class:       ClassPublic, ServiceBacked: true, RateLimitBucket: loginDomain,
 	}, reg.login)
+	demo := humaOp(http.MethodPost, Prefix+"/auth/demo", "demoLogin", "auth",
+		"Sign in as the configured public demo account when demo mode is enabled.")
+	demo.Description = "Opens a temporary 24-hour demo-scoped session for the non-administrator account configured in demo.username while demo.enabled is true. Send an empty JSON object as the body. Returns 403 demo_login_disabled when demo mode is off or no eligible non-administrator demo account is configured, and 429 rate_limited when the demo_login rate limit is exceeded."
+	demo.Errors = []int{http.StatusForbidden, http.StatusTooManyRequests}
+	Register(reg, Operation{
+		Operation:   demo,
+		RetrySafety: RetrySafetyNonRetryable,
+		Class:       ClassPublic, ServiceBacked: true, RateLimitBucket: demoLoginBucket,
+	}, reg.demoLogin)
 	complete := humaOp(http.MethodPost, Prefix+"/auth/oauth/complete", "completeOAuthLogin", "auth",
 		"Redeem the one-time code an OAuth callback issued for the token pair.")
 	complete.Description = "A code is valid for 60 seconds and redeems once. The login session opens at redemption, so a code that is never redeemed leaves no session. Redeeming a used code again revokes the session its redemption opened. A native code needs the code_verifier of its S256 challenge. A web code takes none and redeems only in the browser the callback answered, which holds the silo_oauth_complete cookie, so a code passed to another browser cannot sign that browser in."
@@ -145,6 +166,24 @@ func (reg *Registry) login(ctx context.Context, in *LoginInput) (*LoginOutput, e
 	view, err := reg.deps.Sessions.Login(withClientDevice(ctx), input)
 	if err != nil {
 		return nil, loginProblem(err)
+	}
+	return &LoginOutput{Body: tokenPairFromView(view)}, nil
+}
+
+func (reg *Registry) demoLogin(ctx context.Context, in *DemoLoginInput) (*LoginOutput, error) {
+	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
+		return nil, p
+	}
+	if reg.deps.Sessions == nil {
+		return nil, unavailable(loginDomain)
+	}
+	input := handlers.DemoLoginInput{IP: clientip.FromContext(ctx)}
+	if r := requestFrom(ctx); r != nil {
+		input.DeviceName = r.UserAgent()
+	}
+	view, err := reg.deps.Sessions.DemoLogin(withClientDevice(ctx), input)
+	if err != nil {
+		return nil, serviceProblem(err)
 	}
 	return &LoginOutput{Body: tokenPairFromView(view)}, nil
 }

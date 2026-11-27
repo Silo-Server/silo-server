@@ -943,6 +943,7 @@ func identityRecipeCard(s *playback.Session) playback.RecipeCard {
 	card.RoutingEgressNodeID = s.RoutingEgressNodeID
 	card.TranscodeNodeURL = s.TranscodeNodeURL
 	card.TranscodeTransportID = s.TranscodeTransportID
+	card.DemoAuthSessionID = s.DemoAuthSessionID
 	return card
 }
 

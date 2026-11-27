@@ -1287,6 +1287,7 @@ var externalSignInProblemTypes = map[string]ProblemType{
 	TypeProviderUnavailable.ID:     TypeProviderUnavailable,
 	TypeAlreadyLinked.ID:           TypeAlreadyLinked,
 	TypeNetworkIdentityRequired.ID: TypeNetworkIdentityRequired,
+	TypeDemoLoginDisabled.ID:       TypeDemoLoginDisabled,
 }
 
 // OAuthService is the slice of *auth.OAuthHandler the OAuth operations use:
@@ -1341,6 +1342,9 @@ type SessionService interface {
 	// NetworkSignIn signs in the overlay peer of the request through a
 	// network identity provider.
 	NetworkSignIn(ctx context.Context, in handlers.NetworkSignInInput) (handlers.TokenPairView, error)
+	// DemoLogin opens a demo-scoped login session for the configured public
+	// demo account when demo mode is enabled.
+	DemoLogin(ctx context.Context, in handlers.DemoLoginInput) (handlers.TokenPairView, error)
 }
 
 // DeviceLoginService is the slice of *handlers.AuthHandler the device-pairing

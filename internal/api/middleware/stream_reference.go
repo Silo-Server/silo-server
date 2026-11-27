@@ -134,6 +134,9 @@ func (am *AuthMiddleware) RequireStreamReferenceAuth(next http.Handler) http.Han
 			ProfileID: reference.ProfileID,
 			TokenType: auth.TokenTypeStreamReference,
 		}
+		if authority.IsDemo() {
+			authority.Narrow(claims)
+		}
 		if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 			uid := claims.UserID
 			lc.UserID = &uid
