@@ -641,6 +641,12 @@
       "value": "เซสชันของคุณหมดอายุแล้ว โปรดลงชื่อเข้าใช้อีกครั้ง"
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "ขณะที่การลงชื่อเข้าใช้ด้วยรหัสผ่านปิดอยู่ ต้องมีผู้ให้บริการลงชื่อเข้าใช้ที่ผู้ใช้ใช้ได้เปิดอยู่ OpenID Connect ยังต้องใช้ URL สาธารณะของเซิร์ฟเวอร์ด้วย"
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -72939,6 +72945,20 @@
       "value": "เปิดผู้ให้บริการลงชื่อเข้าใช้ก่อน หากปิดการลงชื่อเข้าใช้ด้วยรหัสผ่านและไม่ได้เปิดผู้ให้บริการใด จะมีเพียงผู้ดูแลระบบฉุกเฉินเท่านั้นที่ลงชื่อเข้าใช้ได้"
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "ตั้งค่า URL สาธารณะของเซิร์ฟเวอร์ก่อน "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ลงชื่อเข้าใช้ให้ใครไม่ได้หากไม่มี URL นี้ ดังนั้นเมื่อปิดการลงชื่อเข้าใช้ด้วยรหัสผ่าน จะมีเพียงผู้ดูแลระบบสำหรับกรณีฉุกเฉินเท่านั้นที่ลงชื่อเข้าใช้ได้"
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -73029,6 +73049,205 @@
       "value": "อนุญาตให้ผู้ใช้สร้างคีย์ API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "ปิดการลงชื่อเข้าใช้ด้วยรหัสผ่าน"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "ผู้ดูแลระบบสำหรับกรณีฉุกเฉินเท่านั้นที่จะลงชื่อเข้าใช้ด้วยรหัสผ่านได้ ผู้ใช้อื่นทั้งหมดจะลงชื่อเข้าใช้ด้วย "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " สร้างบัญชีเมื่อลงชื่อเข้าใช้ครั้งแรก ดังนั้นหากผู้ใช้รายใดในกลุ่มนี้ลงชื่อเข้าใช้ด้วย "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " ก่อนที่คุณจะลิงก์ ผู้ใช้นั้นจะได้บัญชีใหม่ที่แยกต่างหาก"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "ลิงก์แต่ละบัญชีกับบัญชี "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " จากหน้าของบัญชีนั้นในหน้าผู้ใช้"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " บัญชีลงชื่อเข้าใช้ไม่ได้จนกว่าผู้ดูแลระบบจะลิงก์"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบไม่ได้ว่าการดำเนินการนี้มีผลกับบัญชีใดบ้าง คุณยังปิดได้อยู่"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "กำลังตรวจสอบว่าใครลงชื่อเข้าใช้ด้วยรหัสผ่าน…"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "เมื่อ "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " ยืนยันอีเมลใดในกลุ่มนี้ระหว่างลงชื่อเข้าใช้ Silo จะเชื่อมต่อผู้ใช้นั้นกับบัญชีของตน"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " บัญชีเชื่อมต่อด้วยอีเมล"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดงอีก "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " รายการ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "โหลดบัญชีเพิ่มเติมไม่ได้ โปรดลองอีกครั้ง"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "ทุกบัญชียังลงชื่อเข้าใช้ได้หลังจากนี้"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "ผู้ดูแลระบบ"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "การจับคู่อีเมลปิดอยู่"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "ไม่มีอีเมล"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "การดำเนินการนี้ไม่ได้ทำให้ใครออกจากระบบ ผู้ที่ลงชื่อเข้าใช้อยู่แล้วจะยังคงลงชื่อเข้าใช้อยู่ คีย์ API ของผู้ใช้ยังใช้งานได้ และยังอนุมัติอุปกรณ์ใหม่ได้ หากต้องการให้ผู้ใช้รายใดออกจากระบบ ให้สิ้นสุดเซสชันของผู้ใช้นั้นจากหน้าของผู้ใช้ใน "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "ผู้ใช้"
+        }
+      ]
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "ปิดการลงชื่อเข้าใช้ด้วยรหัสผ่านใช่ไหม"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "ดูบัญชีทั้งหมดในหน้าผู้ใช้"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -73071,6 +73290,24 @@
     {
       "type": 0,
       "value": " ไม่ได้"
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "การลงชื่อเข้าใช้ด้วยรหัสผ่านปิดอยู่ ทุกคนยกเว้นผู้ดูแลระบบสำหรับกรณีฉุกเฉินจึงลงชื่อเข้าใช้ด้วย "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " โปรดเปิดการลงชื่อเข้าใช้ด้วยรหัสผ่านอีกครั้งก่อน แล้วจึงปิด "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -125792,6 +126029,12 @@
       "value": "อีเมลหรือชื่อผู้ใช้"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "ป้อน URL หลักของเซิร์ฟเวอร์ Emby ที่ต้องการนำเข้าข้อมูล"
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -125802,6 +126045,12 @@
     {
       "type": 0,
       "value": "เว้นว่างไว้หากบัญชีไม่มีรหัสผ่าน"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL เซิร์ฟเวอร์ Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -125952,6 +126201,12 @@
     {
       "type": 0,
       "value": "บัญชี Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL เซิร์ฟเวอร์"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -126249,7 +126504,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect หรือเซิร์ฟเวอร์ที่บันทึกไว้"
+      "value": "Emby Connect URL เซิร์ฟเวอร์ หรือเซิร์ฟเวอร์ที่บันทึกไว้"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

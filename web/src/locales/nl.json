@@ -641,6 +641,12 @@
       "value": "Je sessie is verlopen. Log opnieuw in."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Als inloggen met een wachtwoord uit staat, moet er een inlogprovider aan blijven die mensen kunnen gebruiken. OpenID Connect heeft ook de openbare URL van de server nodig."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -78775,6 +78781,20 @@
       "value": "Zet eerst een provider voor inloggen aan. Met inloggen met wachtwoord uit en geen provider aan, kunnen alleen break-glass-admins inloggen."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Stel eerst de openbare URL van de server in. Zonder die URL kan "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " niemand laten inloggen, dus als inloggen met een wachtwoord uit staat, kunnen alleen break-glass-beheerders nog inloggen."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -78865,6 +78885,242 @@
       "value": "Gebruikers API-sleutels laten maken"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Inloggen met wachtwoord uitschakelen"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Alleen break-glass-beheerders loggen nog in met een wachtwoord. Alle anderen loggen in met "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " maakt accounts aan bij de eerste keer inloggen. Als een van deze personen daarmee inlogt voordat je die persoon koppelt, krijgt die een nieuw, apart account."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Koppel elk account aan een "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "-account via de pagina ervan in Gebruikers."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " account kan pas inloggen als een beheerder het koppelt"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " accounts kunnen pas inloggen als een beheerder ze koppelt"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Kan niet controleren welke accounts dit betreft. Je kunt het toch uitschakelen."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Controleren wie met een wachtwoord inlogt"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Als "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " bij het inloggen een van deze e-mailadressen bevestigt, koppelt Silo die persoon aan het bijbehorende account."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " account wordt gekoppeld via e-mail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " accounts worden gekoppeld via e-mail"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nog "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tonen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Nog "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tonen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Kan niet meer accounts laden. Probeer het opnieuw."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Elk account kan hierna nog steeds inloggen."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Beheerder"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Koppelen via e-mail staat uit"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Geen e-mail"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Hiermee wordt niemand uitgelogd. Wie al is ingelogd, blijft ingelogd, API-sleutels blijven werken en die personen kunnen nog steeds nieuwe apparaten goedkeuren. Om iemand uit te loggen, beëindig je diens sessies via de pagina van die persoon in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Gebruikers"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Inloggen met wachtwoord uitschakelen?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Alle accounts bekijken in Gebruikers"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -78907,6 +79163,28 @@
     {
       "type": 0,
       "value": " niet wijzigen."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Inloggen met een wachtwoord staat uit, dus iedereen behalve break-glass-beheerders logt in via "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Schakel eerst inloggen met een wachtwoord weer in en schakel daarna "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " uit."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -135339,6 +135617,12 @@
       "value": "E-mailadres of gebruikersnaam"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Voer de basis-URL in van de Emby-server waaruit je wilt importeren."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -135349,6 +135633,12 @@
     {
       "type": 0,
       "value": "Laat leeg als het account geen wachtwoord heeft"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby-server-URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -135499,6 +135789,12 @@
     {
       "type": 0,
       "value": "Plex-account"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Server-URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -135792,7 +136088,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect of opgeslagen server"
+      "value": "Emby Connect, server-URL of opgeslagen server"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

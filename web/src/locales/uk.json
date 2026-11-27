@@ -641,6 +641,12 @@
       "value": "Ваш сеанс завершився. Увійдіть знову."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Поки вхід за паролем вимкнено, має залишатися ввімкненим постачальник входу, яким можуть користуватися люди. Для OpenID Connect також потрібна публічна URL-адреса сервера."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -93760,6 +93766,20 @@
       "value": "Спершу ввімкніть постачальника входу. Якщо вхід за паролем вимкнено й жодного постачальника не ввімкнено, увійти змогли б лише адміністратори аварійного доступу."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Спочатку вкажіть публічну URL-адресу сервера. Без неї "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " не може забезпечити вхід жодному користувачу, тож якщо вхід за паролем вимкнено, увійти змогли б лише адміністратори з аварійним доступом."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -93850,6 +93870,300 @@
       "value": "Дозволити користувачам створювати ключі API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Вимкнути вхід за паролем"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Лише адміністратори з аварійним доступом входитимуть за паролем. Усі інші входитимуть через "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " створює облікові записи під час першого входу, тож якщо хтось із цих людей увійде через нього до того, як ви прив’яжете обліковий запис, буде створено новий, окремий обліковий запис."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Прив’яжіть кожен із них до облікового запису "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " на його сторінці в розділі «Користувачі»."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " обліковий запис не зможе ввійти, доки адміністратор його не прив’яже"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " облікові записи не зможуть увійти, доки адміністратор їх не прив’яже"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " облікових записів не зможуть увійти, доки адміністратор їх не прив’яже"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " облікового запису не зможуть увійти, доки адміністратор їх не прив’яже"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Не вдалося перевірити, яких облікових записів це стосується. Ви все одно можете вимкнути вхід за паролем."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Перевірка того, хто входить за паролем"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Коли "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " підтверджує одну з цих електронних адрес під час входу, Silo під’єднує цю людину до її облікового запису."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " обліковий запис буде під’єднано за електронною адресою"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " облікові записи буде під’єднано за електронною адресою"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " облікових записів буде під’єднано за електронною адресою"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " облікового запису буде під’єднано за електронною адресою"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показати ще "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показати ще "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показати ще "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показати ще "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Не вдалося завантажити більше облікових записів. Спробуйте ще раз."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Після цього всі облікові записи й далі зможуть входити."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Адміністратор"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Зіставлення за електронною адресою вимкнено"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Немає електронної адреси"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Це нікого не виводить із системи. Ті, хто вже ввійшов, залишаться в системі, їхні API-ключі й далі працюватимуть, і вони все ще зможуть схвалювати нові пристрої. Щоб вивести когось із системи, завершіть сеанси на сторінці цієї людини в розділі «"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Користувачі"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "»."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Вимкнути вхід за паролем?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Переглянути всі облікові записи в розділі «Користувачі»"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -93884,6 +94198,28 @@
     {
       "type": 0,
       "value": "Не вдалося змінити "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Вхід за паролем вимкнено, тому всі, крім адміністраторів з аварійним доступом, входять через "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Спочатку знову ввімкніть вхід за паролем, а потім вимкніть "
     },
     {
       "type": 1,
@@ -160081,6 +160417,12 @@
       "value": "Ел. пошта або ім’я користувача"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Введіть базову URL-адресу сервера Emby, з якого потрібно імпортувати."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -160091,6 +160433,12 @@
     {
       "type": 0,
       "value": "Залиште порожнім, якщо обліковий запис не має пароля"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL-адреса сервера Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -160241,6 +160589,12 @@
     {
       "type": 0,
       "value": "Обліковий запис Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL-адреса сервера"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -160534,7 +160888,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect або збережений сервер"
+      "value": "Emby Connect, URL-адреса сервера або збережений сервер"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

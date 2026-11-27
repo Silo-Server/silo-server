@@ -285,7 +285,7 @@ func toPlexServerPublicList(servers []PlexServer) []PlexServerPublic {
 
 func (s *Service) CreateRun(ctx context.Context, userID int, input CreateRunInput) (*Run, error) {
 	if input.ProfileID == "" {
-		return nil, fmt.Errorf("profile_id is required")
+		return nil, fmt.Errorf("%w: profile_id is required", ErrInvalidInput)
 	}
 
 	exists, err := s.repo.ProfileExistsForUser(ctx, userID, input.ProfileID)
@@ -881,18 +881,20 @@ func (s *Service) CreateSource(ctx context.Context, input CreateSourceInput) (*S
 }
 
 func resolveConnectionMode(input CreateRunInput) (string, error) {
-	if input.ServerURL != "" {
-		return "", fmt.Errorf("direct server_url imports are no longer supported")
+	var modes []string
+	if input.ConnectSessionID != "" {
+		modes = append(modes, ConnectionModeConnect)
 	}
-	hasConnect := input.ConnectSessionID != ""
-	hasSource := input.SourceID > 0
-	if hasConnect == hasSource {
-		return "", fmt.Errorf("exactly one of connect_session_id or source_id is required")
+	if input.SourceID > 0 {
+		modes = append(modes, ConnectionModePredefined)
 	}
-	if hasConnect {
-		return ConnectionModeConnect, nil
+	if strings.TrimSpace(input.ServerURL) != "" {
+		modes = append(modes, ConnectionModeCustom)
 	}
-	return ConnectionModePredefined, nil
+	if len(modes) != 1 {
+		return "", fmt.Errorf("%w: choose one Emby connection method: Emby Connect, a server URL, or a saved server", ErrInvalidInput)
+	}
+	return modes[0], nil
 }
 
 func recordTitle(record Record) string {

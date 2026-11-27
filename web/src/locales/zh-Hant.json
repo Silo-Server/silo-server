@@ -641,6 +641,12 @@
       "value": "你的工作階段已過期。請重新登入。"
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "密碼登入關閉時，必須保留至少一個大家可用的登入提供者。OpenID Connect 也需要伺服器的公開網址。"
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -72641,6 +72647,20 @@
       "value": "請先開啟登入提供者。若關閉密碼登入且沒有開啟任何提供者，就只有緊急存取管理員能登入。"
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "請先設定伺服器的公開網址。沒有公開網址，"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 就無法讓任何人登入，因此關閉密碼登入後，只有緊急存取管理員能登入。"
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -72731,6 +72751,205 @@
       "value": "允許使用者建立 API 金鑰"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "關閉密碼登入"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "只有緊急存取管理員能以密碼登入。其他人都會使用 "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " 登入。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " 會在首次登入時建立帳號，因此如果這些人在你連結前就使用它登入，會取得另一個獨立的新帳號。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "請在使用者中開啟各帳號的頁面，將其連結至 "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " 帳號。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " 個帳號需由管理員連結後才能登入"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "無法檢查此操作會影響哪些帳號。你仍可將其關閉。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "正在檢查誰以密碼登入"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "當 "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " 在登入時確認其中一個電子郵件地址，Silo 就會將該使用者連結至其帳號。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " 個帳號將透過電子郵件連結"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "再顯示 "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " 個"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "無法載入更多帳號。請再試一次。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "完成後，所有帳號仍可登入。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "管理員"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "電子郵件比對已關閉"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "無電子郵件"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "此操作不會登出任何人。已登入的人會保持登入，其 API 金鑰仍可使用，也仍可核准新裝置。若要登出某人，請在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "使用者"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中開啟對方的頁面，結束其工作階段。"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "要關閉密碼登入嗎？"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "在使用者中查看所有帳號"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -72765,6 +72984,28 @@
     {
       "type": 0,
       "value": "無法變更 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "密碼登入已關閉，因此除了緊急存取管理員以外，所有人都透過 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 登入。請先重新開啟密碼登入，再關閉 "
     },
     {
       "type": 1,
@@ -125714,6 +125955,12 @@
       "value": "電子郵件或使用者名稱"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "輸入要從中匯入的 Emby 伺服器基本 URL。"
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -125724,6 +125971,12 @@
     {
       "type": 0,
       "value": "如果帳號沒有密碼，請留空"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby 伺服器 URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -125874,6 +126127,12 @@
     {
       "type": 0,
       "value": "Plex 帳號"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "伺服器 URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -126171,7 +126430,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect 或已儲存的伺服器"
+      "value": "Emby Connect、伺服器 URL 或已儲存的伺服器"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

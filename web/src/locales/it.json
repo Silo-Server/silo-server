@@ -641,6 +641,12 @@
       "value": "La sessione è scaduta. Accedi di nuovo."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Con l’accesso con password disattivato, deve restare attivo un provider di accesso utilizzabile dalle persone. OpenID Connect richiede anche l’URL pubblico del server."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -86266,6 +86272,20 @@
       "value": "Attiva prima un provider di accesso. Con l’accesso con password disattivato e nessun provider attivo, potrebbero accedere solo gli admin di emergenza."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Imposta prima l’URL pubblico del server. Senza di esso "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " non può far accedere nessuno, quindi con l’accesso con password disattivato potrebbero accedere solo gli admin di emergenza."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -86356,6 +86376,271 @@
       "value": "Consenti agli utenti di creare chiavi API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Disattiva l’accesso con password"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Solo gli admin di emergenza accederanno con una password. Tutte le altre persone accederanno con "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " crea gli account al primo accesso: se una di queste persone accede con questo provider prima che tu la colleghi, riceve un account nuovo e separato."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Collega ciascuno a un account "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " dalla sua pagina in Utenti."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " account non può accedere finché un admin non lo collega"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " di account non possono accedere finché un admin non li collega"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " account non possono accedere finché un admin non li collega"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Impossibile verificare quali account sono interessati. Puoi comunque disattivarlo."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Verifica di chi accede con una password"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Quando "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " conferma una di queste email all’accesso, Silo collega quella persona al suo account."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " account si collega tramite email"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " di account si collegano tramite email"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " account si collegano tramite email"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostra "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " altro"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostra altri "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostra altri "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Impossibile caricare altri account. Riprova."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Dopo questa modifica, tutti gli account potranno ancora accedere."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Admin"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Corrispondenza email disattivata"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Nessuna email"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Questa operazione non disconnette nessuno. Chi ha già effettuato l’accesso resta connesso, le sue chiavi API continuano a funzionare e può ancora approvare nuovi dispositivi. Per disconnettere qualcuno, termina le sue sessioni dalla sua pagina in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Utenti"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Disattivare l’accesso con password?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Vedi tutti gli account in Utenti"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -86390,6 +86675,28 @@
     {
       "type": 0,
       "value": "Impossibile modificare "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "L’accesso con password è disattivato, quindi tutti tranne gli admin di emergenza accedono con "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Riattiva prima l’accesso con password, poi disattiva "
     },
     {
       "type": 1,
@@ -147796,6 +148103,12 @@
       "value": "Email o nome utente"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Inserisci l’URL di base del server Emby da cui vuoi importare."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -147806,6 +148119,12 @@
     {
       "type": 0,
       "value": "Lascia vuoto se l’account non ha una password"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL del server Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -147956,6 +148275,12 @@
     {
       "type": 0,
       "value": "Account Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL del server"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -148249,7 +148574,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect o server salvato"
+      "value": "Emby Connect, URL del server o server salvato"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

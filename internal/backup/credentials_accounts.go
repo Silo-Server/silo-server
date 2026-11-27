@@ -115,7 +115,7 @@ func (l PGLoader) AdvanceAccountIDs(ctx context.Context, dbURL, liveURL string) 
 	}
 	conn, err = pgx.Connect(ctx, dbURL)
 	if err != nil {
-		return err
+		return fmt.Errorf("connecting to the restored database: %w", err)
 	}
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 	return pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {

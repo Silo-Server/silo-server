@@ -641,6 +641,12 @@
       "value": "\u200F\u202EYour session expired. Sign in again.\u202C"
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWhile password sign-in is off, a sign-in provider people can use has to stay on. OpenID Connect also needs the server's public URL.\u202C"
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -83263,6 +83269,20 @@
       "value": "\u200F\u202ETurn on a sign-in provider first. With password sign-in off and no provider on, only break-glass admins could sign in.\u202C"
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESet the server's public URL first. \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E can't sign anyone in without it, so with password sign-in off only break-glass admins could sign in.\u202C"
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -83353,6 +83373,262 @@
       "value": "\u200F\u202ELet users create API keys\u202C"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETurn off password sign-in\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOnly break-glass admins will sign in with a password. Everyone else signs in with \u202C"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "\u202E creates accounts at first sign-in, so if one of these people signs in with it before you link them, they get a new, separate account.\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELink each one to a \u202C"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "\u202E account from its page in Users.\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E account can't sign in until an admin links it\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E accounts can't sign in until an admin links them\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn't check which accounts this affects. You can still turn it off.\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChecking who signs in with a password\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWhen \u202C"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "\u202E confirms one of these emails at sign-in, Silo connects that person to their account.\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E account connects by email\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E accounts connect by email\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EShow \u202C"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E more\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EShow \u202C"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E more\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn't load more accounts. Try again.\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEvery account can still sign in after this.\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdmin\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEmail matching is off\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo email\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis doesn't sign anyone out. People who are already signed in stay signed in, their API keys keep working, and they can still approve new devices. To sign someone out, end their sessions from their page in \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202EUsers\u202C"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETurn off password sign-in?\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESee every account in Users\u202C"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -83395,6 +83671,28 @@
     {
       "type": 0,
       "value": "\u202E.\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPassword sign-in is off, so \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E is how everyone except break-glass admins signs in. Turn password sign-in back on first, then turn \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E off.\u202C"
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -142999,6 +143297,12 @@
       "value": "\u200F\u202EEmail or Username\u202C"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnter the base URL for the Emby server you want to import from.\u202C"
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -143009,6 +143313,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ELeave blank if the account has none\u202C"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEmby Server URL\u202C"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -143159,6 +143469,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EPlex Account\u202C"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EServer URL\u202C"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -143484,7 +143800,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "\u200F\u202EEmby Connect or saved server\u202C"
+      "value": "\u200F\u202EEmby Connect, server URL, or saved server\u202C"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [
