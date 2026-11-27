@@ -300,7 +300,8 @@ func TestAppKeysOffJudgedOnTheBatchLocalSettingDB(t *testing.T) {
 // or not it names a switch key (which runs it in a transaction taken before
 // the write) and whether or not its values are valid: the precondition is
 // checked first, as it always was. Each invalid value is shown invalid with
-// no precondition.
+// no precondition, and each valid one is saved with a current one, as a
+// batch and as a single setting.
 func TestStaleSettingsWriteAnswersPreconditionFirstDB(t *testing.T) {
 	f := newSwitchWriteFixture(t)
 	ctx := t.Context()
@@ -308,6 +309,7 @@ func TestStaleSettingsWriteAnswersPreconditionFirstDB(t *testing.T) {
 	stale := func(AdminSettingsSnapshot) error {
 		return &APIError{Status: http.StatusPreconditionFailed, Code: "precondition_failed", Message: "stale"}
 	}
+	fresh := func(AdminSettingsSnapshot) error { return nil }
 	status := func(err error) int {
 		if apiErr, ok := errors.AsType[*APIError](err); ok {
 			return apiErr.Status
@@ -334,6 +336,15 @@ func TestStaleSettingsWriteAnswersPreconditionFirstDB(t *testing.T) {
 			}
 			if _, err := h.UpdateAdminSetting(ctx, tc.key, tc.value, stale); status(err) != http.StatusPreconditionFailed {
 				t.Fatalf("stale single setting: %v, want 412", err)
+			}
+			if tc.valid {
+				// The same write with a current precondition succeeds.
+				if _, err := h.UpdateAdminSettings(ctx, map[string]string{tc.key: tc.value}, fresh); err != nil {
+					t.Fatalf("fresh batch: %v, want it saved", err)
+				}
+				if _, err := h.UpdateAdminSetting(ctx, tc.key, tc.value, fresh); err != nil {
+					t.Fatalf("fresh single setting: %v, want it saved", err)
+				}
 			}
 		})
 	}
