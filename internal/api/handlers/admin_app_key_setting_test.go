@@ -175,14 +175,20 @@ func TestAppKeySwitchWriteEndsKeySessionsDB(t *testing.T) {
 		write    func() error
 		// status is the refusal's, or 0 for a write that succeeds.
 		status int
+		// stored is the switch key a successful write stores and its value;
+		// the other switch key stays unset (each case starts with neither).
+		stored [2]string
 	}{
 		{name: "batch refused with a keys-only account", keysOnly: true, status: 409,
 			write: func() error { return saveAdminSetting(t, h, config.AuthAppKeySignInSettingKey, "false", false) }},
 		{name: "single key refused with a keys-only account", keysOnly: true, status: 409,
 			write: func() error { return saveAdminSetting(t, h, config.AuthAppKeySignInSettingKey, "false", true) }},
-		{name: "batch", write: func() error { return saveAdminSetting(t, h, config.AuthAppKeySignInSettingKey, "false", false) }},
-		{name: "single key", write: func() error { return saveAdminSetting(t, h, config.AuthAppKeySignInSettingKey, "false", true) }},
-		{name: "demo mode on", write: func() error { return saveAdminSetting(t, h, demomode.SettingKey, demomode.OnValue, true) }},
+		{name: "batch", stored: [2]string{config.AuthAppKeySignInSettingKey, "false"},
+			write: func() error { return saveAdminSetting(t, h, config.AuthAppKeySignInSettingKey, "false", false) }},
+		{name: "single key", stored: [2]string{config.AuthAppKeySignInSettingKey, "false"},
+			write: func() error { return saveAdminSetting(t, h, config.AuthAppKeySignInSettingKey, "false", true) }},
+		{name: "demo mode on", stored: [2]string{demomode.SettingKey, demomode.OnValue},
+			write: func() error { return saveAdminSetting(t, h, demomode.SettingKey, demomode.OnValue, true) }},
 		// The backup check runs after the sweep and refuses S3 without a
 		// bucket: the transaction rolls the sweep back.
 		{name: "write refused after the sweep", status: 400, write: func() error {
@@ -219,9 +225,7 @@ func TestAppKeySwitchWriteEndsKeySessionsDB(t *testing.T) {
 			if f.live(t, own) || f.live(t, app) {
 				t.Errorf("key sessions live after the switch went off: own %v, granted app %v", f.live(t, own), f.live(t, app))
 			}
-			if !appKeySwitchOffStored(t, f.pool) {
-				t.Error("the write ended the key sessions but did not store the switch off")
-			}
+			requireSwitchStored(t, f.pool, tc.stored[0], tc.stored[1])
 			if !f.live(t, password) || !f.live(t, deviceSignIn) {
 				t.Errorf("other sessions ended: password %v, device sign-in %v", f.live(t, password), f.live(t, deviceSignIn))
 			}
@@ -353,20 +357,19 @@ func TestStaleSettingsWriteAnswersPreconditionFirstDB(t *testing.T) {
 	}
 }
 
-// appKeySwitchOffStored reports whether the stored settings turn the app key
-// switch off: auth.app_key_sign_in false, or demo mode on.
-func appKeySwitchOffStored(t *testing.T, pool *pgxpool.Pool) bool {
+// requireSwitchStored checks that a successful switch-off stored key with
+// value and left the other switch key unset, as the case began.
+func requireSwitchStored(t *testing.T, pool *pgxpool.Pool, key, value string) {
 	t.Helper()
-	values := map[string]string{}
-	for _, key := range []string{config.AuthAppKeySignInSettingKey, demomode.SettingKey} {
-		if v := storedSettingValue(t, pool, key); v != nil {
-			values[key] = *v
+	for _, k := range []string{config.AuthAppKeySignInSettingKey, demomode.SettingKey} {
+		got := storedSettingValue(t, pool, k)
+		switch {
+		case k == key && (got == nil || *got != value):
+			t.Errorf("%s stored %v, want %q", k, got, value)
+		case k != key && got != nil:
+			t.Errorf("%s stored %q, want it left unset", k, *got)
 		}
 	}
-	if _, ok := values[config.AuthAppKeySignInSettingKey]; !ok {
-		values[config.AuthAppKeySignInSettingKey] = "true"
-	}
-	return !appKeySwitch(values)
 }
 
 // A guarded write of a switch key takes no second connection while it holds
