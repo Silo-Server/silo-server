@@ -18,6 +18,8 @@ import CastCarousel from "@/components/CastCarousel";
 import { buildCrewGroups } from "@/components/castCrewGroups";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import EpisodeOrderDialog, { EpisodeOrderSummary } from "@/components/EpisodeOrderDialog";
+import ArrangeSeasonsDialog from "@/components/ArrangeSeasonsDialog";
+import type { EpisodeOrderChoice } from "@/hooks/queries/episodeOrder";
 import MatchItemDialog from "@/components/MatchItemDialog";
 import SplitItemDialog from "@/components/SplitItemDialog";
 import PageBack from "@/components/PageBack";
@@ -91,6 +93,7 @@ export default function SeriesContent({
   const [matchOpen, setMatchOpen] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
   const [orderOpen, setOrderOpen] = useState(false);
+  const [arrange, setArrange] = useState<{ startFrom: EpisodeOrderChoice | null } | null>(null);
   const [requestSeasonsOpen, setRequestSeasonsOpen] = useState(false);
   const tmdbID = Number(item.tmdb_id) || 0;
   const canRequestSeasons = useMissingSeasonsRequestable(Boolean(currentProfile?.id) && tmdbID > 0);
@@ -246,6 +249,9 @@ export default function SeriesContent({
                 onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
                 onSplitItem={canCurateMetadata ? () => setSplitOpen(true) : undefined}
                 onEpisodeOrder={canCurateMetadata ? () => setOrderOpen(true) : undefined}
+                onArrangeSeasons={
+                  canCurateMetadata ? () => setArrange({ startFrom: null }) : undefined
+                }
                 onRequestSeasons={canRequestSeasons ? () => setRequestSeasonsOpen(true) : undefined}
                 onShuffle={
                   episodeCount > 1
@@ -338,6 +344,16 @@ export default function SeriesContent({
               title={title}
               open={orderOpen}
               onOpenChange={setOrderOpen}
+              onArrangeSeasons={(startFrom) => setArrange({ startFrom })}
+            />
+          )}
+          {canCurateMetadata && (
+            <ArrangeSeasonsDialog
+              contentId={item.content_id}
+              title={title}
+              open={arrange !== null}
+              startFrom={arrange?.startFrom ?? null}
+              onOpenChange={(next) => !next && setArrange(null)}
             />
           )}
           {canCurateMetadata && (

@@ -199,6 +199,7 @@ export const v2Operations = {
   "GET /api/v2/admin/invite-codes": "listAdminInviteCodes",
   "GET /api/v2/admin/invite-codes/capabilities": "getAdminInviteCodeCapabilities",
   "GET /api/v2/admin/ips": "listAdminIPUsers",
+  "GET /api/v2/admin/items/{id}/custom-seasons": "getAdminCustomSeasons",
   "GET /api/v2/admin/items/{id}/episode-order": "getAdminEpisodeOrder",
   "GET /api/v2/admin/items/{id}/files": "listAdminItemFiles",
   "GET /api/v2/admin/items/{id}/images": "listAdminItemImages",
@@ -955,6 +956,7 @@ export const v2Operations = {
   "PUT /api/v2/admin/history-imports/mappings/{id}": "updateAdminHistoryImportMapping",
   "PUT /api/v2/admin/history-imports/sources/{id}/token": "setAdminHistoryImportToken",
   "PUT /api/v2/admin/invite-codes/{id}": "updateAdminInviteCode",
+  "PUT /api/v2/admin/items/{id}/custom-seasons": "setAdminCustomSeasons",
   "PUT /api/v2/admin/items/{id}/episode-order": "setAdminEpisodeOrder",
   "PUT /api/v2/admin/libraries/{library_id}/collection-groups/order":
     "reorderAdminCollectionGroups",

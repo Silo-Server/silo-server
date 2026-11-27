@@ -261,6 +261,8 @@ var householdGateExemptOperations = map[string]string{
 	"getAdminEpisodeOrder":             exemptAdminCuration,
 	"previewAdminEpisodeOrder":         exemptAdminCuration,
 	"setAdminEpisodeOrder":             exemptAdminCuration,
+	"getAdminCustomSeasons":            exemptAdminCuration,
+	"setAdminCustomSeasons":            exemptAdminCuration,
 	"searchAdminItemMatches":           exemptAdminCuration,
 	"translateAdminItemMetadata":       exemptAdminCuration,
 	"updateAdminItemMetadata":          exemptAdminCuration,

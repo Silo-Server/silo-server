@@ -7587,6 +7587,93 @@
         },
         "type": "object"
       },
+      "AdminCustomSeasons": {
+        "additionalProperties": false,
+        "properties": {
+          "choice": {
+            "$ref": "#/components/schemas/EpisodeOrderChoice",
+            "description": "The base order; layout is custom"
+          },
+          "revision": {
+            "description": "Send back on save",
+            "examples": [
+              4
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "saved": {
+            "description": "False when the series has no arrangement yet and this one starts from the base order",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "seasons": {
+            "description": "Regular seasons in order, then Specials",
+            "items": {
+              "$ref": "#/components/schemas/CustomSeasonsSeason"
+            },
+            "type": "array"
+          },
+          "structure_provider": {
+            "description": "Provider that numbered the base order; empty when no provider has episodes for the series",
+            "examples": [
+              "tvdb"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "saved",
+          "revision",
+          "choice",
+          "structure_provider",
+          "seasons"
+        ],
+        "type": "object"
+      },
+      "AdminCustomSeasonsSaveInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "file_order": {
+            "description": "The order the file names follow",
+            "pattern": "^(?:tvdb|tmdb)?$",
+            "type": "string"
+          },
+          "order_id": {
+            "description": "One of the provider's orders; empty is its default",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "provider": {
+            "description": "The base order's provider; empty follows the library",
+            "pattern": "^(?:tvdb|tmdb)?$",
+            "type": "string"
+          },
+          "revision": {
+            "description": "The revision the arrangement was based on; a different stored revision answers 409",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "seasons": {
+            "items": {
+              "$ref": "#/components/schemas/Item"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "provider",
+          "order_id",
+          "file_order",
+          "seasons"
+        ],
+        "type": "object"
+      },
       "AdminDashboardCapabilities": {
         "additionalProperties": false,
         "properties": {
@@ -11314,10 +11401,11 @@
             "type": "string"
           },
           "layout": {
-            "description": "seasons keeps the order's seasons; absolute numbers every regular episode in one season, specials apart",
+            "description": "seasons keeps the order's seasons; absolute numbers every regular episode in one season, specials apart; custom uses the seasons arranged with setAdminCustomSeasons (a save answers 422 before there are any)",
             "enum": [
               "seasons",
-              "absolute"
+              "absolute",
+              "custom"
             ],
             "examples": [
               "seasons"
@@ -35637,6 +35725,124 @@
         },
         "type": "object"
       },
+      "CustomSeasonsEpisode": {
+        "additionalProperties": false,
+        "properties": {
+          "air_date": {
+            "examples": [
+              "1997-07-27"
+            ],
+            "type": "string"
+          },
+          "file": {
+            "description": "Name of the file the episode links to; absent when none",
+            "examples": [
+              "Stargate SG-1 - S01E01.mkv"
+            ],
+            "type": "string"
+          },
+          "key": {
+            "description": "Identifies the episode across refreshes; send it back in its season's episodes",
+            "examples": [
+              "tvdb:85173"
+            ],
+            "type": "string"
+          },
+          "placed_automatically": {
+            "description": "The saved arrangement did not place this episode (it is new since); it went to the end of the last season",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "provider_episode": {
+            "description": "Episode number in the base order",
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "provider_season": {
+            "description": "Season in the base order",
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "examples": [
+              "Children of the Gods"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "provider_season",
+          "provider_episode",
+          "placed_automatically"
+        ],
+        "type": "object"
+      },
+      "CustomSeasonsSeason": {
+        "additionalProperties": false,
+        "properties": {
+          "episodes": {
+            "description": "In order",
+            "items": {
+              "$ref": "#/components/schemas/CustomSeasonsEpisode"
+            },
+            "type": "array"
+          },
+          "number": {
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "overview": {
+            "description": "The admin's description; empty shows provider_overview",
+            "examples": [
+              ""
+            ],
+            "maxLength": 20000,
+            "type": "string"
+          },
+          "provider_overview": {
+            "description": "Description of the base order's season with this number",
+            "type": "string"
+          },
+          "provider_title": {
+            "description": "Title of the base order's season with this number",
+            "examples": [
+              "Season 1"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "The admin's title; empty shows provider_title",
+            "examples": [
+              ""
+            ],
+            "maxLength": 500,
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "title",
+          "overview",
+          "provider_title",
+          "provider_overview",
+          "episodes"
+        ],
+        "type": "object"
+      },
       "DecideDeviceLoginInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -39847,10 +40053,11 @@
             "type": "string"
           },
           "layout": {
-            "description": "seasons keeps the order's seasons; absolute numbers every regular episode in one season, specials apart",
+            "description": "seasons keeps the order's seasons; absolute numbers every regular episode in one season, specials apart; custom uses the seasons arranged with setAdminCustomSeasons (a save answers 422 before there are any)",
             "enum": [
               "seasons",
-              "absolute"
+              "absolute",
+              "custom"
             ],
             "examples": [
               "seasons"
@@ -42412,6 +42619,42 @@
           "expires_at",
           "show_tour",
           "acceptance_available"
+        ],
+        "type": "object"
+      },
+      "Item": {
+        "additionalProperties": false,
+        "properties": {
+          "episodes": {
+            "description": "Episode keys in order",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10000,
+            "type": "array"
+          },
+          "number": {
+            "description": "Regular seasons are numbered 1 to N without gaps; 0 holds the specials",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "overview": {
+            "description": "Empty shows the base order's description for this number",
+            "maxLength": 20000,
+            "type": "string"
+          },
+          "title": {
+            "description": "Empty shows the base order's title for this number",
+            "maxLength": 500,
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "title",
+          "overview",
+          "episodes"
         ],
         "type": "object"
       },
@@ -100963,6 +101206,395 @@
           "admin-users"
         ],
         "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/items/{id}/custom-seasons": {
+      "get": {
+        "operationId": "getAdminCustomSeasons",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Start from the seasons of the order given by provider, order_id and file_order instead of the stored arrangement",
+            "explode": false,
+            "in": "query",
+            "name": "start_over",
+            "schema": {
+              "description": "Start from the seasons of the order given by provider, order_id and file_order instead of the stored arrangement",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "With start_over: the base order's provider; empty follows the library",
+            "explode": false,
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "description": "With start_over: the base order's provider; empty follows the library",
+              "pattern": "^(?:tvdb|tmdb)?$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "With start_over: one of the provider's orders; empty is its default",
+            "explode": false,
+            "in": "query",
+            "name": "order_id",
+            "schema": {
+              "description": "With start_over: one of the provider's orders; empty is its default",
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "description": "With start_over: the order the file names follow",
+            "explode": false,
+            "in": "query",
+            "name": "file_order",
+            "schema": {
+              "description": "With start_over: the order the file names follow",
+              "pattern": "^(?:tvdb|tmdb)?$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCustomSeasons"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read a series' arranged seasons, or a starting arrangement from an episode order.",
+        "tags": [
+          "admin-catalog"
+        ],
+        "x-silo-class": "permission_gated",
+        "x-silo-permission": "metadata_curation",
+        "x-silo-service-backed": true
+      },
+      "put": {
+        "operationId": "setAdminCustomSeasons",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminCustomSeasonsSaveInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminEpisodeOrderSaved"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Save a series' arranged seasons, switch it to them and queue the refresh that renumbers it.",
+        "tags": [
+          "admin-catalog"
+        ],
+        "x-silo-class": "permission_gated",
+        "x-silo-demo-restricted": true,
+        "x-silo-permission": "metadata_curation",
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },

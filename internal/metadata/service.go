@@ -2404,8 +2404,11 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			if assignFileNumbers(allEpisodes, structureSlug, episodeOrder.FileOrder, structures.list) {
 				ctx = withEpisodeFileNumbers(ctx)
 			}
-			if episodeOrder.Layout == episodeLayoutAbsolute {
+			switch {
+			case episodeOrder.Layout == episodeLayoutAbsolute:
 				allSeasons, allEpisodes = applyAbsoluteLayout(allSeasons, allEpisodes)
+			case episodeOrder.Layout == episodeLayoutCustom && episodeOrder.Custom != nil:
+				allSeasons, allEpisodes = applyCustomLayout(allSeasons, allEpisodes, structureSlug, *episodeOrder.Custom)
 			}
 		}
 	}

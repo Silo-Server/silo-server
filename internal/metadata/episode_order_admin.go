@@ -37,8 +37,8 @@ func (o EpisodeOrderSettings) Validate() error {
 		return fmt.Errorf("%w: provider must be tvdb, tmdb or empty", ErrEpisodeOrderInvalid)
 	case !provider(o.FileOrder):
 		return fmt.Errorf("%w: file_order must be tvdb, tmdb or empty", ErrEpisodeOrderInvalid)
-	case o.Layout != episodeLayoutSeasons && o.Layout != episodeLayoutAbsolute:
-		return fmt.Errorf("%w: layout must be seasons or absolute", ErrEpisodeOrderInvalid)
+	case o.Layout != episodeLayoutSeasons && o.Layout != episodeLayoutAbsolute && o.Layout != episodeLayoutCustom:
+		return fmt.Errorf("%w: layout must be seasons, absolute or custom", ErrEpisodeOrderInvalid)
 	case o.OrderID != "" && o.Provider == "":
 		return fmt.Errorf("%w: order_id needs a provider", ErrEpisodeOrderInvalid)
 	case len(o.OrderID) > 200:
@@ -216,6 +216,15 @@ func (s *MetadataService) SaveEpisodeOrder(ctx context.Context, seriesID string,
 	if item.Type != "series" {
 		return 0, ErrEpisodeOrderNotSeries
 	}
+	if settings.Layout == episodeLayoutCustom {
+		// Seasons are arranged in the arranger (SaveCustomSeasons); this
+		// switches back to an arrangement already stored.
+		if _, ok, err := loadCustomLayout(ctx, s.dbPool, seriesID); err != nil {
+			return 0, err
+		} else if !ok {
+			return 0, fmt.Errorf("%w: arrange the seasons first", ErrEpisodeOrderInvalid)
+		}
+	}
 	orderName := s.episodeOrderName(ctx, seriesID, settings)
 	var saved int64
 	err = pgx.BeginFunc(ctx, s.dbPool, func(tx pgx.Tx) error {
@@ -301,8 +310,20 @@ func (s *MetadataService) PreviewEpisodeOrder(ctx context.Context, seriesID stri
 			})
 		}
 		assignFileNumbers(episodes, structureSlug, order.FileOrder, structures.list)
-		if order.Layout == episodeLayoutAbsolute {
+		switch order.Layout {
+		case episodeLayoutAbsolute:
 			seasons, episodes = applyAbsoluteLayout(seasons, episodes)
+		case episodeLayoutCustom:
+			layout, ok := customLayout{}, false
+			if s.dbPool != nil {
+				if layout, ok, err = loadCustomLayout(ctx, s.dbPool, seriesID); err != nil {
+					return preview, err
+				}
+			}
+			if !ok {
+				layout = startingLayout(seasons, episodes, structureSlug)
+			}
+			seasons, episodes = applyCustomLayout(seasons, episodes, structureSlug, layout)
 		}
 	}
 

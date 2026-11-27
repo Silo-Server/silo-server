@@ -518,6 +518,7 @@
 ./internal/metadata TestApplyEpisodeMergesDB
 ./internal/metadata TestApplyEpisodeRenumberTakenIDDB
 ./internal/metadata TestRelinkSeriesFilesDB
+./internal/metadata TestSaveCustomSeasonsDB
 
 # The process that discovers local artwork copies it, other drains wait out the
 # discovery hold, and a server without the library mount leaves local jobs to

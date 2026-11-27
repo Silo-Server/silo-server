@@ -63,3 +63,29 @@ func TestSetAdminEpisodeOrderConflict(t *testing.T) {
 		t.Fatalf("service got %+v revision %v", orders.saved, orders.revision)
 	}
 }
+
+type fakeAdminCustomSeasons struct{}
+
+func (fakeAdminCustomSeasons) CustomSeasons(context.Context, string, *metadata.EpisodeOrderSettings) (metadata.CustomSeasons, error) {
+	return metadata.CustomSeasons{
+		Saved: true, Revision: 4, StructureProvider: "tvdb",
+		Settings: metadata.EpisodeOrderSettings{Provider: "tvdb", Layout: "custom"},
+		Seasons: []metadata.CustomSeasonsSeason{
+			{Number: 1, Title: "Arc one", ProviderTitle: "Season 1", Episodes: []metadata.CustomSeasonsEpisode{
+				{Key: "tvdb:85173", Title: "Children of the Gods", ProviderSeason: 1, ProviderEpisode: 1, File: "Stargate SG-1 - S01E01.mkv"},
+			}},
+			{Number: 0, ProviderTitle: "Specials", Episodes: []metadata.CustomSeasonsEpisode{}},
+		},
+	}, nil
+}
+
+func (fakeAdminCustomSeasons) SaveCustomSeasons(context.Context, string, metadata.CustomSeasonsSave, *int64, int) (int64, error) {
+	return 5, nil
+}
+
+func adminCustomSeasonsFixtureCases() []fixtureCase {
+	return []fixtureCase{
+		{name: "admin_custom_seasons_read", operationID: "getAdminCustomSeasons", method: "GET", path: Prefix + "/admin/items/item-1/custom-seasons", headers: bearer(memberToken), status: 200, schema: "#/components/schemas/AdminCustomSeasons", assertHeaders: []string{"Content-Type"}, scenario: "A curator reads the arranged seasons with each episode's key and file."},
+		{name: "admin_custom_seasons_saved", operationID: "setAdminCustomSeasons", method: "PUT", path: Prefix + "/admin/items/item-1/custom-seasons", body: `{"provider":"tvdb","order_id":"","file_order":"","revision":4,"seasons":[{"number":1,"title":"Arc one","overview":"","episodes":["tvdb:85173"]},{"number":0,"title":"","overview":"","episodes":[]}]}`, headers: bearer(memberToken), status: 200, schema: "#/components/schemas/AdminEpisodeOrderSaved", assertHeaders: []string{"Content-Type"}, scenario: "Saving stores the arrangement and queues the refresh that renumbers the series."},
+	}
+}

@@ -111965,6 +111965,12 @@
       "value": "profiles"
     }
   ],
+  "web.detail.actions.arrangeSeasons": [
+    {
+      "type": 0,
+      "value": "Arrange seasons"
+    }
+  ],
   "web.detail.actions.browseSeries": [
     {
       "type": 0,
@@ -123434,6 +123440,615 @@
       "value": "Pick what you love"
     }
   ],
+  "web.item.arrangeSeasons.addSeason": [
+    {
+      "type": 0,
+      "value": "Add season"
+    }
+  ],
+  "web.item.arrangeSeasons.clear": [
+    {
+      "type": 0,
+      "value": "Clear"
+    }
+  ],
+  "web.item.arrangeSeasons.custom": [
+    {
+      "type": 0,
+      "value": "Custom"
+    }
+  ],
+  "web.item.arrangeSeasons.delete": [
+    {
+      "type": 0,
+      "value": "Delete season"
+    }
+  ],
+  "web.item.arrangeSeasons.deleteBody": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Its episode moves"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Its "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " episodes move"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " to "
+    },
+    {
+      "type": 1,
+      "value": "heir"
+    },
+    {
+      "type": 0,
+      "value": ". Nothing is deleted from disk."
+    }
+  ],
+  "web.item.arrangeSeasons.deleteConfirm": [
+    {
+      "type": 0,
+      "value": "Delete season"
+    }
+  ],
+  "web.item.arrangeSeasons.deleteTitle": [
+    {
+      "type": 0,
+      "value": "Delete "
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.item.arrangeSeasons.descriptionLabel": [
+    {
+      "type": 0,
+      "value": "Description"
+    }
+  ],
+  "web.item.arrangeSeasons.descriptionPlaceholder": [
+    {
+      "type": 0,
+      "value": "Write a description for this season"
+    }
+  ],
+  "web.item.arrangeSeasons.discard": [
+    {
+      "type": 0,
+      "value": "Discard"
+    }
+  ],
+  "web.item.arrangeSeasons.discardBody": [
+    {
+      "type": 0,
+      "value": "The seasons stay as they were when you opened this."
+    }
+  ],
+  "web.item.arrangeSeasons.discardTitle": [
+    {
+      "type": 0,
+      "value": "Discard your changes?"
+    }
+  ],
+  "web.item.arrangeSeasons.drag": [
+    {
+      "type": 0,
+      "value": "Drag "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.item.arrangeSeasons.dragMany": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " episodes"
+    }
+  ],
+  "web.item.arrangeSeasons.dragTip": [
+    {
+      "type": 0,
+      "value": "Tip: drag a selected row onto a season"
+    }
+  ],
+  "web.item.arrangeSeasons.empty": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": " is empty. Viewers won't see it until it holds an episode."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": " are empty. Viewers won't see them until they hold an episode."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.item.arrangeSeasons.episodeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " episode"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " episodes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.item.arrangeSeasons.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't load the seasons. Check that the metadata providers are reachable."
+    }
+  ],
+  "web.item.arrangeSeasons.footer": [
+    {
+      "type": 0,
+      "value": "Watch history stays with each episode. Files on disk are never renamed or moved."
+    }
+  ],
+  "web.item.arrangeSeasons.from": [
+    {
+      "type": 0,
+      "value": "Episodes from "
+    },
+    {
+      "type": 1,
+      "value": "order"
+    }
+  ],
+  "web.item.arrangeSeasons.fromProvider": [
+    {
+      "type": 0,
+      "value": "From "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " season "
+    },
+    {
+      "type": 1,
+      "value": "number"
+    }
+  ],
+  "web.item.arrangeSeasons.keepEditing": [
+    {
+      "type": 0,
+      "value": "Keep editing"
+    }
+  ],
+  "web.item.arrangeSeasons.metaNote": [
+    {
+      "type": 0,
+      "value": "Season details come from "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " by season number. Move this season and it takes the details of its new number; a custom title or description stays with it. Change the poster on the season's page after saving."
+    }
+  ],
+  "web.item.arrangeSeasons.moveTo": [
+    {
+      "type": 0,
+      "value": "Move to…"
+    }
+  ],
+  "web.item.arrangeSeasons.moved": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Moved "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " episode to "
+            },
+            {
+              "type": 1,
+              "value": "season"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Moved "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " episodes to "
+            },
+            {
+              "type": 1,
+              "value": "season"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.item.arrangeSeasons.newSeason": [
+    {
+      "type": 0,
+      "value": "New season"
+    }
+  ],
+  "web.item.arrangeSeasons.noEpisodes": [
+    {
+      "type": 0,
+      "value": "No episodes yet. Select episodes in another season and move them here, or drag them onto this season."
+    }
+  ],
+  "web.item.arrangeSeasons.noFile": [
+    {
+      "type": 0,
+      "value": "No file"
+    }
+  ],
+  "web.item.arrangeSeasons.none": [
+    {
+      "type": 0,
+      "value": "None"
+    }
+  ],
+  "web.item.arrangeSeasons.placedAutomatically": [
+    {
+      "type": 0,
+      "value": "Placed automatically"
+    }
+  ],
+  "web.item.arrangeSeasons.rename": [
+    {
+      "type": 0,
+      "value": "Rename season"
+    }
+  ],
+  "web.item.arrangeSeasons.save": [
+    {
+      "type": 0,
+      "value": "Save seasons"
+    }
+  ],
+  "web.item.arrangeSeasons.saved": [
+    {
+      "type": 0,
+      "value": "Saved "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " season"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " seasons"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " for "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.item.arrangeSeasons.savedBody": [
+    {
+      "type": 0,
+      "value": "Silo is renumbering the episodes. Watch history moves with each episode."
+    }
+  ],
+  "web.item.arrangeSeasons.season": [
+    {
+      "type": 0,
+      "value": "Season "
+    },
+    {
+      "type": 1,
+      "value": "number"
+    }
+  ],
+  "web.item.arrangeSeasons.seasonCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " season"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " seasons"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.item.arrangeSeasons.seasonTitled": [
+    {
+      "type": 0,
+      "value": "Season "
+    },
+    {
+      "type": 1,
+      "value": "number"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.item.arrangeSeasons.seasons": [
+    {
+      "type": 0,
+      "value": "Seasons"
+    }
+  ],
+  "web.item.arrangeSeasons.seasonsHint": [
+    {
+      "type": 0,
+      "value": "Drag to reorder · drop episodes here"
+    }
+  ],
+  "web.item.arrangeSeasons.select": [
+    {
+      "type": 0,
+      "value": "Select "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.item.arrangeSeasons.selected": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " selected"
+    }
+  ],
+  "web.item.arrangeSeasons.specials": [
+    {
+      "type": 0,
+      "value": "Specials"
+    }
+  ],
+  "web.item.arrangeSeasons.specialsMeta": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " episode"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " episodes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " · season 0"
+    }
+  ],
+  "web.item.arrangeSeasons.splitHere": [
+    {
+      "type": 0,
+      "value": "New season from here"
+    }
+  ],
+  "web.item.arrangeSeasons.splitTitle": [
+    {
+      "type": 0,
+      "value": "Start a new season with this episode"
+    }
+  ],
+  "web.item.arrangeSeasons.startOver": [
+    {
+      "type": 0,
+      "value": "Start over from…"
+    }
+  ],
+  "web.item.arrangeSeasons.startOverOption": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "order"
+    }
+  ],
+  "web.item.arrangeSeasons.title": [
+    {
+      "type": 0,
+      "value": "Arrange seasons"
+    }
+  ],
+  "web.item.arrangeSeasons.titleLabel": [
+    {
+      "type": 0,
+      "value": "Title"
+    }
+  ],
+  "web.item.arrangeSeasons.useProvider": [
+    {
+      "type": 0,
+      "value": "Use "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "'s"
+    }
+  ],
   "web.item.card.addedAgo": [
     {
       "type": 0,
@@ -124080,6 +124695,12 @@
       "value": "Apply order"
     }
   ],
+  "web.item.episodeOrder.arrange": [
+    {
+      "type": 0,
+      "value": "Arrange seasons"
+    }
+  ],
   "web.item.episodeOrder.change": [
     {
       "type": 0,
@@ -124232,6 +124853,18 @@
     {
       "type": 0,
       "value": "One season, episodes numbered from 1 in this order. Specials stay separate."
+    }
+  ],
+  "web.item.episodeOrder.layout.custom": [
+    {
+      "type": 0,
+      "value": "Custom seasons"
+    }
+  ],
+  "web.item.episodeOrder.layout.customBody": [
+    {
+      "type": 0,
+      "value": "Start from this order, then add, remove, rename and fill seasons yourself."
     }
   ],
   "web.item.episodeOrder.layout.label": [
@@ -124764,6 +125397,16 @@
     {
       "type": 0,
       "value": " · Absolute"
+    }
+  ],
+  "web.item.episodeOrder.summaryCustom": [
+    {
+      "type": 1,
+      "value": "order"
+    },
+    {
+      "type": 0,
+      "value": " · Custom seasons"
     }
   ],
   "web.item.episodeOrder.summaryFiles": [

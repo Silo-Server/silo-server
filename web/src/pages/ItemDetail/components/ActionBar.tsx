@@ -31,6 +31,7 @@ import {
   MoreVertical,
   Play,
   RefreshCw,
+  LayoutList,
   ListOrdered,
   Scissors,
   RotateCcw,
@@ -257,6 +258,7 @@ export interface ActionBarProps {
   onMatchItem?: () => void;
   onSplitItem?: () => void;
   onEpisodeOrder?: () => void;
+  onArrangeSeasons?: () => void;
   onShowMediaInfo?: () => void;
   isAdmin?: boolean;
   canCurateMetadata?: boolean;
@@ -357,6 +359,7 @@ export default function ActionBar({
   onMatchItem,
   onSplitItem,
   onEpisodeOrder,
+  onArrangeSeasons,
   onShowMediaInfo,
   isAdmin = false,
   canCurateMetadata = false,
@@ -988,6 +991,16 @@ export default function ActionBar({
         >
           <ListOrdered className="size-4" />
           {t("web.detail.actions.episodeOrder")}
+        </DetailOverflowMenuItem>
+      ),
+      canCurateMetadata && onArrangeSeasons && (
+        <DetailOverflowMenuItem
+          key="arrange-seasons"
+          closeMenu={closeOverflowMenu}
+          onAction={onArrangeSeasons}
+        >
+          <LayoutList className="size-4" />
+          {t("web.detail.actions.arrangeSeasons")}
         </DetailOverflowMenuItem>
       ),
     ],

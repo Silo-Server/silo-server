@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -124,6 +125,8 @@ type episodeOrderSettings struct {
 	// empty means the structure provider.
 	FileOrder string
 	Layout    string
+	// Custom is the arrangement of a custom layout.
+	Custom *customLayout
 }
 
 // orderingFor is the ordering to request from the provider slug.
@@ -164,6 +167,17 @@ func (s *MetadataService) seriesEpisodeOrder(ctx context.Context, contentID stri
 	settings.FileOrder = override.FileOrder
 	if override.Layout != "" {
 		settings.Layout = override.Layout
+	}
+	if settings.Layout == episodeLayoutCustom {
+		layout, ok, err := loadCustomLayout(ctx, s.dbPool, contentID)
+		if err != nil {
+			return settings, err
+		}
+		if ok {
+			settings.Custom = &layout
+		} else {
+			settings.Layout = episodeLayoutSeasons
+		}
 	}
 	return settings, nil
 }
@@ -226,4 +240,110 @@ func (s *MetadataService) storeEpisodeFileNumbers(ctx context.Context, seriesID 
 	return pgx.BeginFunc(ctx, s.dbPool, func(tx pgx.Tx) error {
 		return writeEpisodeFileNumbers(ctx, tx, seriesID, targets)
 	})
+}
+
+// episodeLayoutCustom places episodes in admin-arranged seasons
+// (series_custom_seasons, series_custom_episode_slots).
+const episodeLayoutCustom = "custom"
+
+// customSeason is one admin-arranged season. Empty Title and Overview take
+// the provider season with the same number's.
+type customSeason struct {
+	Number   int
+	Title    string
+	Overview string
+}
+
+// customLayout is a series' arranged seasons and where each episode sits,
+// keyed by "<provider>:<provider episode id>" of the structure provider.
+type customLayout struct {
+	Seasons []customSeason
+	Slots   map[string]episodeSlot
+}
+
+// customEpisodeKey identifies an episode across refreshes: its structure
+// provider's episode ID.
+func customEpisodeKey(ep EpisodeResult, structureSlug string) string {
+	if id := ep.ProviderIDs[structureSlug]; id != "" {
+		return structureSlug + ":" + id
+	}
+	return ""
+}
+
+// applyCustomLayout numbers the episodes as the layout places them. An
+// episode the layout does not place (new since it was saved) goes after the
+// last episode of the last custom season, or of Specials for a special, in
+// the order's sequence. Each custom season takes the admin's title and
+// overview, else those of the order's season with the same number, and that
+// season's artwork and air date.
+func applyCustomLayout(seasons []SeasonResult, episodes []EpisodeResult, structureSlug string, layout customLayout) ([]SeasonResult, []EpisodeResult) {
+	out := make([]EpisodeResult, len(episodes))
+	copy(out, episodes)
+	lastSeason := 1
+	for _, season := range layout.Seasons {
+		lastSeason = max(lastSeason, season.Number)
+	}
+	next := map[int]int{}
+	for _, slot := range layout.Slots {
+		next[slot.season] = max(next[slot.season], slot.episode)
+	}
+	order := make([]int, len(out))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		x, y := out[order[a]], out[order[b]]
+		if (x.SeasonNumber == 0) != (y.SeasonNumber == 0) {
+			return y.SeasonNumber == 0
+		}
+		if x.SeasonNumber != y.SeasonNumber {
+			return x.SeasonNumber < y.SeasonNumber
+		}
+		return x.EpisodeNumber < y.EpisodeNumber
+	})
+	for _, i := range order {
+		ep := &out[i]
+		if slot, ok := layout.Slots[customEpisodeKey(*ep, structureSlug)]; ok {
+			ep.SeasonNumber, ep.EpisodeNumber = slot.season, slot.episode
+			continue
+		}
+		season := lastSeason
+		if ep.SeasonNumber == 0 {
+			season = 0
+		}
+		next[season]++
+		ep.SeasonNumber, ep.EpisodeNumber = season, next[season]
+	}
+
+	provider := make(map[int]SeasonResult, len(seasons))
+	for _, season := range seasons {
+		provider[season.SeasonNumber] = season
+	}
+	arranged := make([]SeasonResult, 0, len(layout.Seasons)+1)
+	if specials, ok := provider[0]; ok {
+		arranged = append(arranged, specials)
+	}
+	numbers := map[int]customSeason{}
+	for _, season := range layout.Seasons {
+		numbers[season.Number] = season
+	}
+	if len(numbers) == 0 {
+		numbers[1] = customSeason{Number: 1}
+	}
+	for _, custom := range numbers {
+		season := provider[custom.Number]
+		season.SeasonNumber = custom.Number
+		if custom.Title != "" {
+			season.Title = custom.Title
+		}
+		if strings.TrimSpace(season.Title) == "" {
+			season.Title = fallbackSeasonTitle(custom.Number)
+		}
+		if custom.Overview != "" {
+			season.Overview = custom.Overview
+		}
+		arranged = append(arranged, season)
+	}
+	sort.Slice(arranged, func(i, j int) bool { return arranged[i].SeasonNumber < arranged[j].SeasonNumber })
+	return arranged, out
 }

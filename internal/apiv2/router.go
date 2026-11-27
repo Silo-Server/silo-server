@@ -207,6 +207,7 @@ type Dependencies struct {
 	EbookProgress                  EbookProgressService
 	AdminItemMetadata              AdminItemMetadataService
 	AdminEpisodeOrders             AdminEpisodeOrderService
+	AdminCustomSeasons             AdminCustomSeasonsService
 	AdminMetadataTranslation       AdminMetadataTranslationService
 	AdminPeople                    AdminPeopleService
 	AdminDiagnosticDownloads       AdminDiagnosticDownloadService

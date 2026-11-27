@@ -63,3 +63,53 @@ export function useSaveEpisodeOrder(contentId: string) {
     },
   });
 }
+
+export type CustomSeasons = V2Result<"GET /api/v2/admin/items/{id}/custom-seasons">;
+export type CustomSeason = CustomSeasons["seasons"][number];
+export type CustomSeasonEpisode = CustomSeason["episodes"][number];
+type CustomSeasonsSave = V2Body<"PUT /api/v2/admin/items/{id}/custom-seasons">;
+
+/**
+ * A series' arranged seasons. With `startFrom`, a fresh arrangement from that
+ * order's seasons instead of the stored one.
+ */
+export function useCustomSeasons(
+  contentId: string,
+  enabled: boolean,
+  startFrom: EpisodeOrderChoice | null,
+) {
+  return useQuery({
+    queryKey: ["custom-seasons", contentId, startFrom] as const,
+    queryFn: ({ signal }) =>
+      v2("GET /api/v2/admin/items/{id}/custom-seasons", {
+        path: { id: contentId },
+        query: startFrom
+          ? {
+              start_over: true,
+              provider: startFrom.provider,
+              order_id: startFrom.order_id,
+              file_order: startFrom.file_order,
+            }
+          : {},
+        signal,
+        timeoutMs: 60_000,
+      }),
+    enabled,
+    staleTime: Infinity,
+    gcTime: 0,
+    retry: false,
+  });
+}
+
+export function useSaveCustomSeasons(contentId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: (body: CustomSeasonsSave) =>
+      v2("PUT /api/v2/admin/items/{id}/custom-seasons", { path: { id: contentId }, body }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["episode-order", contentId] });
+      void queryClient.invalidateQueries({ queryKey: ["custom-seasons", contentId] });
+    },
+  });
+}

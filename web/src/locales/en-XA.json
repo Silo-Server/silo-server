@@ -121585,6 +121585,12 @@
       "value": "~~~~~⟧"
     }
   ],
+  "web.detail.actions.arrangeSeasons": [
+    {
+      "type": 0,
+      "value": "⟦Åŕŕåñĝé šéåšöñš~~~~~~⟧"
+    }
+  ],
   "web.detail.actions.browseSeries": [
     {
       "type": 0,
@@ -134154,6 +134160,699 @@
       "value": "⟦Þîçķ ŵĥåţ ýöû ļöṽé~~~~~~~~⟧"
     }
   ],
+  "web.item.arrangeSeasons.addSeason": [
+    {
+      "type": 0,
+      "value": "⟦Åđđ šéåšöñ~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.clear": [
+    {
+      "type": 0,
+      "value": "⟦Çļéåŕ~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.custom": [
+    {
+      "type": 0,
+      "value": "⟦Çûšţöɱ~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.delete": [
+    {
+      "type": 0,
+      "value": "⟦Đéļéţé šéåšöñ~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.deleteBody": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Îţš éþîšöđé ɱöṽéš"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Îţš "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđéš ɱöṽé"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " ţö "
+    },
+    {
+      "type": 1,
+      "value": "heir"
+    },
+    {
+      "type": 0,
+      "value": ". Ñöţĥîñĝ îš đéļéţéđ ƒŕöɱ đîšķ.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.deleteConfirm": [
+    {
+      "type": 0,
+      "value": "⟦Đéļéţé šéåšöñ~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.deleteTitle": [
+    {
+      "type": 0,
+      "value": "⟦Đéļéţé "
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": "?~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.descriptionLabel": [
+    {
+      "type": 0,
+      "value": "⟦Đéšçŕîþţîöñ~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.descriptionPlaceholder": [
+    {
+      "type": 0,
+      "value": "⟦Ŵŕîţé å đéšçŕîþţîöñ ƒöŕ ţĥîš šéåšöñ~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.discard": [
+    {
+      "type": 0,
+      "value": "⟦Đîšçåŕđ~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.discardBody": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé šéåšöñš šţåý åš ţĥéý ŵéŕé ŵĥéñ ýöû öþéñéđ ţĥîš.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.discardTitle": [
+    {
+      "type": 0,
+      "value": "⟦Đîšçåŕđ ýöûŕ çĥåñĝéš?~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.drag": [
+    {
+      "type": 0,
+      "value": "⟦Đŕåĝ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.dragMany": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " éþîšöđéš~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.dragTip": [
+    {
+      "type": 0,
+      "value": "⟦Ţîþ: đŕåĝ å šéļéçţéđ ŕöŵ öñţö å šéåšöñ~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.empty": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": " îš éɱþţý. Ṽîéŵéŕš ŵöñ'ţ šéé îţ ûñţîļ îţ ĥöļđš åñ éþîšöđé.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": " åŕé éɱþţý. Ṽîéŵéŕš ŵöñ'ţ šéé ţĥéɱ ûñţîļ ţĥéý ĥöļđ åñ éþîšöđé.~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.item.arrangeSeasons.episodeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđé~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđéš~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.item.arrangeSeasons.failed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ'ţ ļöåđ ţĥé šéåšöñš. Çĥéçķ ţĥåţ ţĥé ɱéţåđåţå þŕöṽîđéŕš åŕé ŕéåçĥåƀļé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.footer": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåţçĥ ĥîšţöŕý šţåýš ŵîţĥ éåçĥ éþîšöđé. Ƒîļéš öñ đîšķ åŕé ñéṽéŕ ŕéñåɱéđ öŕ ɱöṽéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.from": [
+    {
+      "type": 0,
+      "value": "⟦Éþîšöđéš ƒŕöɱ "
+    },
+    {
+      "type": 1,
+      "value": "order"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.fromProvider": [
+    {
+      "type": 0,
+      "value": "⟦Ƒŕöɱ "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " šéåšöñ "
+    },
+    {
+      "type": 1,
+      "value": "number"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.keepEditing": [
+    {
+      "type": 0,
+      "value": "⟦Ķééþ éđîţîñĝ~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.metaNote": [
+    {
+      "type": 0,
+      "value": "⟦Šéåšöñ đéţåîļš çöɱé ƒŕöɱ "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " ƀý šéåšöñ ñûɱƀéŕ. Ṁöṽé ţĥîš šéåšöñ åñđ îţ ţåķéš ţĥé đéţåîļš öƒ îţš ñéŵ ñûɱƀéŕ; å çûšţöɱ ţîţļé öŕ đéšçŕîþţîöñ šţåýš ŵîţĥ îţ. Çĥåñĝé ţĥé þöšţéŕ öñ ţĥé šéåšöñ'š þåĝé åƒţéŕ šåṽîñĝ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.moveTo": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽé ţö…~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.moved": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ṁöṽéđ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđé ţö "
+            },
+            {
+              "type": 1,
+              "value": "season"
+            },
+            {
+              "type": 0,
+              "value": "~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ṁöṽéđ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđéš ţö "
+            },
+            {
+              "type": 1,
+              "value": "season"
+            },
+            {
+              "type": 0,
+              "value": "~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.item.arrangeSeasons.newSeason": [
+    {
+      "type": 0,
+      "value": "⟦Ñéŵ šéåšöñ~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.noEpisodes": [
+    {
+      "type": 0,
+      "value": "⟦Ñö éþîšöđéš ýéţ. Šéļéçţ éþîšöđéš îñ åñöţĥéŕ šéåšöñ åñđ ɱöṽé ţĥéɱ ĥéŕé, öŕ đŕåĝ ţĥéɱ öñţö ţĥîš šéåšöñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.noFile": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ƒîļé~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.none": [
+    {
+      "type": 0,
+      "value": "⟦Ñöñé~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.placedAutomatically": [
+    {
+      "type": 0,
+      "value": "⟦Þļåçéđ åûţöɱåţîçåļļý~~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.rename": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéñåɱé šéåšöñ~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.save": [
+    {
+      "type": 0,
+      "value": "⟦Šåṽé šéåšöñš~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.saved": [
+    {
+      "type": 0,
+      "value": "⟦Šåṽéđ "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " šéåšöñ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " šéåšöñš"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " ƒöŕ "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.savedBody": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö îš ŕéñûɱƀéŕîñĝ ţĥé éþîšöđéš. Ŵåţçĥ ĥîšţöŕý ɱöṽéš ŵîţĥ éåçĥ éþîšöđé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.season": [
+    {
+      "type": 0,
+      "value": "⟦Šéåšöñ "
+    },
+    {
+      "type": 1,
+      "value": "number"
+    },
+    {
+      "type": 0,
+      "value": "~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.seasonCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " šéåšöñ~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " šéåšöñš~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.item.arrangeSeasons.seasonTitled": [
+    {
+      "type": 0,
+      "value": "⟦Šéåšöñ "
+    },
+    {
+      "type": 1,
+      "value": "number"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.seasons": [
+    {
+      "type": 0,
+      "value": "⟦Šéåšöñš~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.seasonsHint": [
+    {
+      "type": 0,
+      "value": "⟦Đŕåĝ ţö ŕéöŕđéŕ · đŕöþ éþîšöđéš ĥéŕé~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.select": [
+    {
+      "type": 0,
+      "value": "⟦Šéļéçţ "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.selected": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " šéļéçţéđ~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.specials": [
+    {
+      "type": 0,
+      "value": "⟦Šþéçîåļš~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.specialsMeta": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđé"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđéš"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " · šéåšöñ 0~~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.splitHere": [
+    {
+      "type": 0,
+      "value": "⟦Ñéŵ šéåšöñ ƒŕöɱ ĥéŕé~~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.splitTitle": [
+    {
+      "type": 0,
+      "value": "⟦Šţåŕţ å ñéŵ šéåšöñ ŵîţĥ ţĥîš éþîšöđé~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.startOver": [
+    {
+      "type": 0,
+      "value": "⟦Šţåŕţ öṽéŕ ƒŕöɱ…~~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.startOverOption": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "order"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.title": [
+    {
+      "type": 0,
+      "value": "⟦Åŕŕåñĝé šéåšöñš~~~~~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.titleLabel": [
+    {
+      "type": 0,
+      "value": "⟦Ţîţļé~~⟧"
+    }
+  ],
+  "web.item.arrangeSeasons.useProvider": [
+    {
+      "type": 0,
+      "value": "⟦Ûšé "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "'š~~~⟧"
+    }
+  ],
   "web.item.card.addedAgo": [
     {
       "type": 0,
@@ -134848,6 +135547,12 @@
       "value": "⟦Åþþļý öŕđéŕ~~~~~⟧"
     }
   ],
+  "web.item.episodeOrder.arrange": [
+    {
+      "type": 0,
+      "value": "⟦Åŕŕåñĝé šéåšöñš~~~~~~⟧"
+    }
+  ],
   "web.item.episodeOrder.change": [
     {
       "type": 0,
@@ -135008,6 +135713,18 @@
     {
       "type": 0,
       "value": "⟦Öñé šéåšöñ, éþîšöđéš ñûɱƀéŕéđ ƒŕöɱ 1 îñ ţĥîš öŕđéŕ. Šþéçîåļš šţåý šéþåŕåţé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.layout.custom": [
+    {
+      "type": 0,
+      "value": "⟦Çûšţöɱ šéåšöñš~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.layout.customBody": [
+    {
+      "type": 0,
+      "value": "⟦Šţåŕţ ƒŕöɱ ţĥîš öŕđéŕ, ţĥéñ åđđ, ŕéɱöṽé, ŕéñåɱé åñđ ƒîļļ šéåšöñš ýöûŕšéļƒ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.item.episodeOrder.layout.label": [
@@ -135628,6 +136345,20 @@
     {
       "type": 0,
       "value": " · Åƀšöļûţé~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.summaryCustom": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "order"
+    },
+    {
+      "type": 0,
+      "value": " · Çûšţöɱ šéåšöñš~~~~~~~⟧"
     }
   ],
   "web.item.episodeOrder.summaryFiles": [

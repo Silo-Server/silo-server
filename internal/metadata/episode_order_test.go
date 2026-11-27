@@ -106,3 +106,53 @@ func TestAssignFileNumbers(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyCustomLayout(t *testing.T) {
+	ep := func(season, number int, id, title string) EpisodeResult {
+		return EpisodeResult{SeasonNumber: season, EpisodeNumber: number, Title: title, ProviderIDs: map[string]string{"tvdb": id}}
+	}
+	seasons := []SeasonResult{
+		{SeasonNumber: 0, Title: "Specials"},
+		{SeasonNumber: 1, Title: "The Substitute", Overview: "Ichigo gets his powers.", PosterPath: "/s1.jpg"},
+		{SeasonNumber: 2, Title: "The Entry", PosterPath: "/s2.jpg"},
+	}
+	episodes := []EpisodeResult{
+		ep(1, 1, "a", "A"), ep(1, 2, "b", "B"), ep(2, 1, "c", "C"), ep(2, 2, "d", "D"), ep(0, 1, "x", "Special"),
+	}
+	layout := customLayout{
+		Seasons: []customSeason{
+			{Number: 1, Title: "Arc one"},
+			{Number: 2, Overview: "My words."},
+		},
+		// c moves into season 1; d is new to the layout (aired after it was
+		// saved), so it lands after the last custom season's episodes.
+		Slots: map[string]episodeSlot{
+			"tvdb:a": {1, 1}, "tvdb:c": {1, 2}, "tvdb:b": {2, 1}, "tvdb:x": {0, 1},
+		},
+	}
+	gotSeasons, gotEpisodes := applyCustomLayout(seasons, episodes, "tvdb", layout)
+
+	where := map[string]slotOf{}
+	for _, e := range gotEpisodes {
+		where[e.Title] = slotOf{e.SeasonNumber, e.EpisodeNumber}
+	}
+	wantWhere := map[string]slotOf{"A": {1, 1}, "C": {1, 2}, "B": {2, 1}, "D": {2, 2}, "Special": {0, 1}}
+	if !reflect.DeepEqual(where, wantWhere) {
+		t.Fatalf("episodes at %v, want %v", where, wantWhere)
+	}
+	byNumber := map[int]SeasonResult{}
+	for _, s := range gotSeasons {
+		byNumber[s.SeasonNumber] = s
+	}
+	// Season 1 takes the admin's title and season 1's provider overview and
+	// poster; season 2 keeps its provider title and takes the admin's text.
+	if s := byNumber[1]; s.Title != "Arc one" || s.Overview != "Ichigo gets his powers." || s.PosterPath != "/s1.jpg" {
+		t.Fatalf("season 1 = %+v", s)
+	}
+	if s := byNumber[2]; s.Title != "The Entry" || s.Overview != "My words." || s.PosterPath != "/s2.jpg" {
+		t.Fatalf("season 2 = %+v", s)
+	}
+	if _, ok := byNumber[0]; !ok || len(gotSeasons) != 3 {
+		t.Fatalf("seasons = %+v, want specials and two custom seasons", gotSeasons)
+	}
+}

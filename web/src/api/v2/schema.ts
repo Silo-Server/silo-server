@@ -2626,6 +2626,24 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/items/{id}/custom-seasons": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read a series' arranged seasons, or a starting arrangement from an episode order. */
+    get: operations["getAdminCustomSeasons"];
+    /** Save a series' arranged seasons, switch it to them and queue the refresh that renumbers it. */
+    put: operations["setAdminCustomSeasons"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/items/{id}/episode-order": {
     parameters: {
       query?: never;
@@ -17159,6 +17177,42 @@ export interface components {
       title?: string;
       visibility?: string;
     };
+    AdminCustomSeasons: {
+      /** @description The base order; layout is custom */
+      choice: components["schemas"]["EpisodeOrderChoice"];
+      /**
+       * Format: int64
+       * @description Send back on save
+       * @example 4
+       */
+      revision: number;
+      /**
+       * @description False when the series has no arrangement yet and this one starts from the base order
+       * @example true
+       */
+      saved: boolean;
+      /** @description Regular seasons in order, then Specials */
+      seasons: components["schemas"]["CustomSeasonsSeason"][];
+      /**
+       * @description Provider that numbered the base order; empty when no provider has episodes for the series
+       * @example tvdb
+       */
+      structure_provider: string;
+    };
+    AdminCustomSeasonsSaveInputBody: {
+      /** @description The order the file names follow */
+      file_order: string;
+      /** @description One of the provider's orders; empty is its default */
+      order_id: string;
+      /** @description The base order's provider; empty follows the library */
+      provider: string;
+      /**
+       * Format: int64
+       * @description The revision the arrangement was based on; a different stored revision answers 409
+       */
+      revision?: number;
+      seasons: components["schemas"]["Item"][];
+    };
     AdminDashboardCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
@@ -18794,11 +18848,11 @@ export interface components {
        */
       file_order: string;
       /**
-       * @description seasons keeps the order's seasons; absolute numbers every regular episode in one season, specials apart
+       * @description seasons keeps the order's seasons; absolute numbers every regular episode in one season, specials apart; custom uses the seasons arranged with setAdminCustomSeasons (a save answers 422 before there are any)
        * @example seasons
        * @enum {string}
        */
-      layout: "seasons" | "absolute";
+      layout: "seasons" | "absolute" | "custom";
       /**
        * @description One of the provider's orders (the id of an EpisodeOrderOption); empty is its default order. Needs a provider
        * @example 5e2b0c1bfe5ee0001a5d5b58
@@ -28322,6 +28376,65 @@ export interface components {
       /** @description Stored artwork reference (storage key, plugin path, or URL), not a fetchable URL; not validated as a URI */
       poster_url?: string;
     };
+    CustomSeasonsEpisode: {
+      /** @example 1997-07-27 */
+      air_date?: string;
+      /**
+       * @description Name of the file the episode links to; absent when none
+       * @example Stargate SG-1 - S01E01.mkv
+       */
+      file?: string;
+      /**
+       * @description Identifies the episode across refreshes; send it back in its season's episodes
+       * @example tvdb:85173
+       */
+      key: string;
+      /**
+       * @description The saved arrangement did not place this episode (it is new since); it went to the end of the last season
+       * @example false
+       */
+      placed_automatically: boolean;
+      /**
+       * Format: int64
+       * @description Episode number in the base order
+       * @example 1
+       */
+      provider_episode: number;
+      /**
+       * Format: int64
+       * @description Season in the base order
+       * @example 1
+       */
+      provider_season: number;
+      /** @example Children of the Gods */
+      title: string;
+    };
+    CustomSeasonsSeason: {
+      /** @description In order */
+      episodes: components["schemas"]["CustomSeasonsEpisode"][];
+      /**
+       * Format: int64
+       * @example 1
+       */
+      number: number;
+      /**
+       * @description The admin's description; empty shows provider_overview
+       * @example
+       */
+      overview: string;
+      /** @description Description of the base order's season with this number */
+      provider_overview: string;
+      /**
+       * @description Title of the base order's season with this number
+       * @example Season 1
+       */
+      provider_title: string;
+      /**
+       * @description The admin's title; empty shows provider_title
+       * @example
+       */
+      title: string;
+    };
     DecideDeviceLoginInputBody: {
       /**
        * @description User code the person typed
@@ -30025,11 +30138,11 @@ export interface components {
        */
       file_order: string;
       /**
-       * @description seasons keeps the order's seasons; absolute numbers every regular episode in one season, specials apart
+       * @description seasons keeps the order's seasons; absolute numbers every regular episode in one season, specials apart; custom uses the seasons arranged with setAdminCustomSeasons (a save answers 422 before there are any)
        * @example seasons
        * @enum {string}
        */
-      layout: "seasons" | "absolute";
+      layout: "seasons" | "absolute" | "custom";
       /**
        * @description One of the provider's orders (the id of an EpisodeOrderOption); empty is its default order. Needs a provider
        * @example 5e2b0c1bfe5ee0001a5d5b58
@@ -31192,6 +31305,19 @@ export interface components {
       note: string;
       server_name: string;
       show_tour: boolean;
+    };
+    Item: {
+      /** @description Episode keys in order */
+      episodes: string[];
+      /**
+       * Format: int64
+       * @description Regular seasons are numbered 1 to N without gaps; 0 holds the specials
+       */
+      number: number;
+      /** @description Empty shows the base order's description for this number */
+      overview: string;
+      /** @description Empty shows the base order's title for this number */
+      title: string;
     };
     ItemExtraInfo: {
       content_id: string;
@@ -65096,6 +65222,262 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminCustomSeasons: {
+    parameters: {
+      query?: {
+        /** @description With start_over: the order the file names follow */
+        file_order?: string;
+        /** @description With start_over: one of the provider's orders; empty is its default */
+        order_id?: string;
+        /** @description With start_over: the base order's provider; empty follows the library */
+        provider?: string;
+        /** @description Start from the seasons of the order given by provider, order_id and file_order instead of the stored arrangement */
+        start_over?: boolean;
+      };
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminCustomSeasons"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  setAdminCustomSeasons: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminCustomSeasonsSaveInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminEpisodeOrderSaved"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
         headers: {
           [name: string]: unknown;
         };

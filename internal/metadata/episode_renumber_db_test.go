@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -420,5 +421,67 @@ func TestRelinkSeriesFilesDB(t *testing.T) {
 	var left int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM episodes WHERE content_id = $1`, placeholder).Scan(&left); err != nil || left != 0 {
 		t.Fatalf("placeholder rows left = %d (%v), want 0", left, err)
+	}
+}
+
+// An arrangement saves as the series' custom layout and reads back as stored:
+// seasons with the admin's titles, episodes at the positions given. A save
+// based on an older revision is refused, so a second admin's arrangement is
+// not overwritten unseen; regular seasons must run 1…N.
+func TestSaveCustomSeasonsDB(t *testing.T) {
+	pool := chainBuiltinTestPool(t)
+	ctx := t.Context()
+	items := catalog.NewItemRepository(pool)
+	svc := &MetadataService{itemRepo: items, dbPool: pool}
+
+	nonce := time.Now().UnixNano() % 100_000_000
+	tvdb := fmt.Sprintf("%d", 650_000_000+nonce)
+	series := "series-tvdb-" + tvdb
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, series)
+	})
+	if err := items.Upsert(ctx, &models.MediaItem{
+		ContentID: series, Type: "series", Title: "Arranged show", Status: "matched", TvdbID: tvdb,
+		DefaultMetadataLanguage: "en",
+		Studios:                 []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	save := CustomSeasonsSave{
+		Settings: EpisodeOrderSettings{Provider: "tvdb"},
+		Seasons: []CustomSeasonsSeason{
+			{Number: 1, Title: "Arc one", Episodes: []CustomSeasonsEpisode{{Key: "tvdb:c"}, {Key: "tvdb:a"}}},
+			{Number: 2, Overview: "Mine", Episodes: []CustomSeasonsEpisode{{Key: "tvdb:b"}}},
+			{Number: 0, Episodes: []CustomSeasonsEpisode{{Key: "tvdb:x"}}},
+		},
+	}
+	zero := int64(0)
+	revision, err := svc.SaveCustomSeasons(ctx, series, save, &zero, 0)
+	if err != nil {
+		t.Fatalf("SaveCustomSeasons = %v", err)
+	}
+	layout, ok, err := loadCustomLayout(ctx, pool, series)
+	if err != nil || !ok {
+		t.Fatalf("loadCustomLayout = %v, %v", ok, err)
+	}
+	wantSlots := map[string]episodeSlot{"tvdb:c": {1, 1}, "tvdb:a": {1, 2}, "tvdb:b": {2, 1}, "tvdb:x": {0, 1}}
+	if fmt.Sprint(layout.Slots) != fmt.Sprint(wantSlots) {
+		t.Fatalf("slots = %v, want %v", layout.Slots, wantSlots)
+	}
+	if want := []customSeason{{Number: 1, Title: "Arc one"}, {Number: 2, Overview: "Mine"}}; fmt.Sprint(layout.Seasons) != fmt.Sprint(want) {
+		t.Fatalf("seasons = %+v, want %+v", layout.Seasons, want)
+	}
+	order, err := svc.seriesEpisodeOrder(ctx, series)
+	if err != nil || order.Layout != episodeLayoutCustom || order.Custom == nil || order.Provider != "tvdb" {
+		t.Fatalf("seriesEpisodeOrder = %+v, %v; want the custom layout", order, err)
+	}
+
+	if _, err := svc.SaveCustomSeasons(ctx, series, save, &zero, 0); !errors.Is(err, ErrEpisodeOrderConflict) {
+		t.Fatalf("save on a stale revision = %v, want ErrEpisodeOrderConflict", err)
+	}
+	gap := save
+	gap.Seasons = []CustomSeasonsSeason{{Number: 1}, {Number: 3}}
+	if _, err := svc.SaveCustomSeasons(ctx, series, gap, &revision, 0); !errors.Is(err, ErrEpisodeOrderInvalid) {
+		t.Fatalf("save with a season gap = %v, want ErrEpisodeOrderInvalid", err)
 	}
 }

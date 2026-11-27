@@ -45,7 +45,7 @@ import { cn } from "@/lib/utils";
 
 type Provider = "tvdb" | "tmdb";
 type Source = "library" | Provider;
-type Layout = "seasons" | "absolute";
+type Layout = "seasons" | "absolute" | "custom";
 
 interface Draft {
   source: Source;
@@ -90,7 +90,7 @@ function draftOf(state: EpisodeOrderState): Draft {
     source,
     orderId: choice.order_id,
     files: choice.file_order ? asProvider(choice.file_order) : structure,
-    layout: choice.layout === "absolute" ? "absolute" : "seasons",
+    layout: choice.layout === "absolute" || choice.layout === "custom" ? choice.layout : "seasons",
   };
 }
 
@@ -109,11 +109,17 @@ export default function EpisodeOrderDialog({
   title,
   open,
   onOpenChange,
+  onArrangeSeasons,
 }: {
   contentId: string;
   title: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * Opens the season arranger: from the stored arrangement (null), or
+   * starting over from the order the dialog shows.
+   */
+  onArrangeSeasons: (startFrom: EpisodeOrderChoice | null) => void;
 }) {
   const t = useT();
   const stateQuery = useEpisodeOrder(contentId, open, true);
@@ -209,10 +215,29 @@ export default function EpisodeOrderDialog({
             <Button variant="ghost" onClick={() => changeOpen(false)}>
               {t("common.cancel")}
             </Button>
-            <Button disabled={!changed || save.isPending} onClick={apply}>
-              {save.isPending && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
-              {t("web.item.episodeOrder.apply")}
-            </Button>
+            {draft?.layout === "custom" ? (
+              <Button
+                onClick={() => {
+                  if (!choice || !savedChoice) return;
+                  // The stored arrangement fits only the order it was made
+                  // from; another order starts over from its seasons.
+                  const sameBase =
+                    savedChoice.layout === "custom" &&
+                    savedChoice.provider === choice.provider &&
+                    savedChoice.order_id === choice.order_id &&
+                    savedChoice.file_order === choice.file_order;
+                  changeOpen(false);
+                  onArrangeSeasons(sameBase ? null : choice);
+                }}
+              >
+                {t("web.item.episodeOrder.arrange")}
+              </Button>
+            ) : (
+              <Button disabled={!changed || save.isPending} onClick={apply}>
+                {save.isPending && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
+                {t("web.item.episodeOrder.apply")}
+              </Button>
+            )}
           </div>
         </div>
       </DialogContent>
@@ -439,6 +464,16 @@ function Settings({
             onSelect={() => update({ layout: "absolute" })}
           >
             {t("web.item.episodeOrder.layout.absoluteBody")}
+          </ChoiceOption>
+          <ChoiceOption
+            name="episode-order-layout"
+            value="custom"
+            selected={draft.layout === "custom"}
+            disabled={false}
+            title={t("web.item.episodeOrder.layout.custom")}
+            onSelect={() => update({ layout: "custom" })}
+          >
+            {t("web.item.episodeOrder.layout.customBody")}
           </ChoiceOption>
         </div>
       </section>
@@ -764,6 +799,8 @@ export function EpisodeOrderSummary({
   }`;
   if (choice.layout === "absolute")
     summary = t("web.item.episodeOrder.summaryAbsolute", { order: summary });
+  if (choice.layout === "custom")
+    summary = t("web.item.episodeOrder.summaryCustom", { order: summary });
   if (choice.file_order && choice.file_order !== provider)
     summary = t("web.item.episodeOrder.summaryFiles", {
       order: summary,

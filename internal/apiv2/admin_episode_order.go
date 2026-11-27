@@ -24,7 +24,7 @@ type EpisodeOrderChoice struct {
 	Provider  string `json:"provider" pattern:"^(?:tvdb|tmdb)?$" doc:"Provider whose order the series follows; empty follows its library" example:"tmdb"`
 	OrderID   string `json:"order_id" maxLength:"200" doc:"One of the provider's orders (the id of an EpisodeOrderOption); empty is its default order. Needs a provider" example:"5e2b0c1bfe5ee0001a5d5b58"`
 	FileOrder string `json:"file_order" pattern:"^(?:tvdb|tmdb)?$" doc:"Provider whose default order the file names follow (S02E05 is that order's season 2, episode 5); empty means the series' provider" example:"tvdb"`
-	Layout    string `json:"layout" enum:"seasons,absolute" doc:"seasons keeps the order's seasons; absolute numbers every regular episode in one season, specials apart" example:"seasons"`
+	Layout    string `json:"layout" enum:"seasons,absolute,custom" doc:"seasons keeps the order's seasons; absolute numbers every regular episode in one season, specials apart; custom uses the seasons arranged with setAdminCustomSeasons (a save answers 422 before there are any)" example:"seasons"`
 }
 
 // EpisodeOrderOption is one of a provider's episode orders for a series.
@@ -229,6 +229,134 @@ func (reg *Registry) setAdminEpisodeOrder(ctx context.Context, in *AdminEpisodeO
 	out := AdminEpisodeOrderSaved{Revision: revision}
 	// The order is saved; a refresh that cannot be queued now applies with
 	// the series' next refresh.
+	if reg.deps.AdminItemMetadata != nil {
+		if job, err := reg.deps.AdminItemMetadata.CreateItemMetadataRefresh(ctx, in.ID, adminjob.ItemRefreshModeQuick, claims.UserID); err == nil {
+			out.JobID = job.ID
+		}
+	}
+	return &AdminEpisodeOrderSaveOutput{Body: out}, nil
+}
+
+// AdminCustomSeasonsService reads and saves a series' arranged seasons.
+type AdminCustomSeasonsService interface {
+	CustomSeasons(ctx context.Context, seriesID string, base *metadata.EpisodeOrderSettings) (metadata.CustomSeasons, error)
+	SaveCustomSeasons(ctx context.Context, seriesID string, save metadata.CustomSeasonsSave, revision *int64, userID int) (int64, error)
+}
+
+// CustomSeasonsEpisode is one episode in the season arranger.
+type CustomSeasonsEpisode struct {
+	Key                 string `json:"key" doc:"Identifies the episode across refreshes; send it back in its season's episodes" example:"tvdb:85173"`
+	Title               string `json:"title" example:"Children of the Gods"`
+	ProviderSeason      int    `json:"provider_season" doc:"Season in the base order" example:"1"`
+	ProviderEpisode     int    `json:"provider_episode" doc:"Episode number in the base order" example:"1"`
+	AirDate             string `json:"air_date,omitempty" example:"1997-07-27"`
+	File                string `json:"file,omitempty" doc:"Name of the file the episode links to; absent when none" example:"Stargate SG-1 - S01E01.mkv"`
+	PlacedAutomatically bool   `json:"placed_automatically" doc:"The saved arrangement did not place this episode (it is new since); it went to the end of the last season" example:"false"`
+}
+
+// CustomSeasonsSeason is one season in the arranger; number 0 is Specials.
+type CustomSeasonsSeason struct {
+	Number           int                    `json:"number" minimum:"0" example:"1"`
+	Title            string                 `json:"title" maxLength:"500" doc:"The admin's title; empty shows provider_title" example:""`
+	Overview         string                 `json:"overview" maxLength:"20000" doc:"The admin's description; empty shows provider_overview" example:""`
+	ProviderTitle    string                 `json:"provider_title" doc:"Title of the base order's season with this number" example:"Season 1"`
+	ProviderOverview string                 `json:"provider_overview" doc:"Description of the base order's season with this number"`
+	Episodes         []CustomSeasonsEpisode `json:"episodes" doc:"In order"`
+}
+
+// AdminCustomSeasons is a series' arranged seasons, or a starting point taken
+// from its base order.
+type AdminCustomSeasons struct {
+	Saved             bool                  `json:"saved" doc:"False when the series has no arrangement yet and this one starts from the base order" example:"true"`
+	Revision          int64                 `json:"revision" doc:"Send back on save" example:"4"`
+	Choice            EpisodeOrderChoice    `json:"choice" doc:"The base order; layout is custom"`
+	StructureProvider string                `json:"structure_provider" doc:"Provider that numbered the base order; empty when no provider has episodes for the series" example:"tvdb"`
+	Seasons           []CustomSeasonsSeason `json:"seasons" doc:"Regular seasons in order, then Specials"`
+}
+
+type AdminCustomSeasonsInput struct {
+	ID        string `path:"id" minLength:"1" maxLength:"512"`
+	StartOver bool   `query:"start_over" doc:"Start from the seasons of the order given by provider, order_id and file_order instead of the stored arrangement"`
+	Provider  string `query:"provider" pattern:"^(?:tvdb|tmdb)?$" doc:"With start_over: the base order's provider; empty follows the library"`
+	OrderID   string `query:"order_id" maxLength:"200" doc:"With start_over: one of the provider's orders; empty is its default"`
+	FileOrder string `query:"file_order" pattern:"^(?:tvdb|tmdb)?$" doc:"With start_over: the order the file names follow"`
+}
+type AdminCustomSeasonsOutput struct{ Body AdminCustomSeasons }
+type AdminCustomSeasonsSaveInput struct {
+	ID   string `path:"id" minLength:"1" maxLength:"512"`
+	Body struct {
+		Provider  string `json:"provider" pattern:"^(?:tvdb|tmdb)?$" doc:"The base order's provider; empty follows the library"`
+		OrderID   string `json:"order_id" maxLength:"200" doc:"One of the provider's orders; empty is its default"`
+		FileOrder string `json:"file_order" pattern:"^(?:tvdb|tmdb)?$" doc:"The order the file names follow"`
+		Revision  *int64 `json:"revision,omitempty" nullable:"false" minimum:"0" doc:"The revision the arrangement was based on; a different stored revision answers 409"`
+		Seasons   []struct {
+			Number   int      `json:"number" minimum:"0" doc:"Regular seasons are numbered 1 to N without gaps; 0 holds the specials"`
+			Title    string   `json:"title" maxLength:"500" doc:"Empty shows the base order's title for this number"`
+			Overview string   `json:"overview" maxLength:"20000" doc:"Empty shows the base order's description for this number"`
+			Episodes []string `json:"episodes" maxItems:"10000" doc:"Episode keys in order"`
+		} `json:"seasons" minItems:"1" maxItems:"500"`
+	}
+}
+
+func registerAdminCustomSeasons(reg *Registry) {
+	op := func(method, id, summary string) Operation {
+		return Operation{Operation: humaOp(method, Prefix+"/admin/items/{id}/custom-seasons", id, "admin-catalog", summary), Class: ClassPermissionGated, Permission: policy.PermissionMetadataCuration, ServiceBacked: true, DemoRestricted: method == http.MethodPut, RetrySafety: RetrySafetyNonRetryable}
+	}
+	get := op(http.MethodGet, "getAdminCustomSeasons", "Read a series' arranged seasons, or a starting arrangement from an episode order.")
+	get.RetrySafety = ""
+	Register(reg, get, reg.getAdminCustomSeasons)
+	Register(reg, op(http.MethodPut, "setAdminCustomSeasons", "Save a series' arranged seasons, switch it to them and queue the refresh that renumbers it."), reg.setAdminCustomSeasons)
+}
+
+func (reg *Registry) getAdminCustomSeasons(ctx context.Context, in *AdminCustomSeasonsInput) (*AdminCustomSeasonsOutput, error) {
+	if reg.deps.AdminCustomSeasons == nil {
+		return nil, unavailable("custom seasons")
+	}
+	var base *metadata.EpisodeOrderSettings
+	if in.StartOver {
+		base = &metadata.EpisodeOrderSettings{Provider: in.Provider, OrderID: in.OrderID, FileOrder: in.FileOrder, Layout: "custom"}
+	}
+	custom, err := reg.deps.AdminCustomSeasons.CustomSeasons(ctx, in.ID, base)
+	if err != nil {
+		return nil, episodeOrderProblem(err)
+	}
+	out := AdminCustomSeasons{
+		Saved: custom.Saved, Revision: custom.Revision, StructureProvider: custom.StructureProvider,
+		Choice:  EpisodeOrderChoice{Provider: custom.Settings.Provider, OrderID: custom.Settings.OrderID, FileOrder: custom.Settings.FileOrder, Layout: "custom"},
+		Seasons: make([]CustomSeasonsSeason, 0, len(custom.Seasons)),
+	}
+	for _, s := range custom.Seasons {
+		season := CustomSeasonsSeason{Number: s.Number, Title: s.Title, Overview: s.Overview, ProviderTitle: s.ProviderTitle, ProviderOverview: s.ProviderOverview,
+			Episodes: make([]CustomSeasonsEpisode, 0, len(s.Episodes))}
+		for _, e := range s.Episodes {
+			season.Episodes = append(season.Episodes, CustomSeasonsEpisode{Key: e.Key, Title: e.Title, ProviderSeason: e.ProviderSeason, ProviderEpisode: e.ProviderEpisode,
+				AirDate: e.AirDate, File: e.File, PlacedAutomatically: e.PlacedAutomatically})
+		}
+		out.Seasons = append(out.Seasons, season)
+	}
+	return &AdminCustomSeasonsOutput{Body: out}, nil
+}
+
+func (reg *Registry) setAdminCustomSeasons(ctx context.Context, in *AdminCustomSeasonsSaveInput) (*AdminEpisodeOrderSaveOutput, error) {
+	if reg.deps.AdminCustomSeasons == nil {
+		return nil, unavailable("custom seasons")
+	}
+	save := metadata.CustomSeasonsSave{
+		Settings: metadata.EpisodeOrderSettings{Provider: in.Body.Provider, OrderID: in.Body.OrderID, FileOrder: in.Body.FileOrder, Layout: "custom"},
+	}
+	for _, s := range in.Body.Seasons {
+		season := metadata.CustomSeasonsSeason{Number: s.Number, Title: s.Title, Overview: s.Overview}
+		for _, key := range s.Episodes {
+			season.Episodes = append(season.Episodes, metadata.CustomSeasonsEpisode{Key: key})
+		}
+		save.Seasons = append(save.Seasons, season)
+	}
+	claims := claimsFrom(ctx)
+	revision, err := reg.deps.AdminCustomSeasons.SaveCustomSeasons(ctx, in.ID, save, in.Body.Revision, claims.UserID)
+	if err != nil {
+		return nil, episodeOrderProblem(err)
+	}
+	out := AdminEpisodeOrderSaved{Revision: revision}
 	if reg.deps.AdminItemMetadata != nil {
 		if job, err := reg.deps.AdminItemMetadata.CreateItemMetadataRefresh(ctx, in.ID, adminjob.ItemRefreshModeQuick, claims.UserID); err == nil {
 			out.JobID = job.ID
