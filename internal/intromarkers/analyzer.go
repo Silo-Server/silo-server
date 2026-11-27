@@ -1456,10 +1456,15 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		return summary, err
 	}
 	if distinctLevelEpisodeCount(inputs) < 2 {
-		if a.withdrawIntrosOfAnUncomparableGroup(ctx, group, opts, inputs, counts, &summary) {
-			state.LastError = "too few loudness envelopes; a withdrawal failed"
-		}
+		withdrawalFailed := a.withdrawIntrosOfAnUncomparableGroup(ctx, group, opts, inputs, counts, &summary)
 		settle(seasonStatusNotFound)
+		if withdrawalFailed {
+			// A withdrawal that failed leaves the intro stored, and a group
+			// settled now would be skipped with it: leave the group failed so
+			// the next run tries the withdrawal again.
+			state.Status = seasonStatusFailed
+			state.LastError = "too few loudness envelopes; an intro withdrawal failed"
+		}
 		summary.GroupsNotFound++
 		if !opts.persistState {
 			return summary, nil

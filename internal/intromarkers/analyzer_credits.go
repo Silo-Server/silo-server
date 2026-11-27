@@ -267,7 +267,7 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 	// A file's own dialog says where its credits begin; the cues are read
 	// only for the files a segment was placed on, so a season without
 	// credits costs no demux.
-	placements = a.applyCreditsCueHints(ctx, placements, limits)
+	placements, cueRetry := a.applyCreditsCueHints(ctx, placements, limits)
 	for _, placement := range placements {
 		segment, candidate := placement.segment, placement.candidate
 		found++
@@ -300,6 +300,12 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 		state.LastError = fmt.Sprintf("credits marker write failed for %d file(s)", failed)
 		return summary, persist(seasonStatusFailed)
 	}
+	if cueRetry {
+		// A cue read that failed is not a file without dialog: the markers are
+		// written, but the group is left retryable so the hint is applied.
+		state.LastError = "credits subtitle cue read failed; the start may be inside the story"
+		return summary, persist(seasonStatusPartial)
+	}
 	return summary, persist(seasonStatusComplete)
 }
 
@@ -312,9 +318,11 @@ type creditsPlacement struct {
 // applyCreditsCueHints moves a placed credits start to where the file's
 // dialog stopped, when its cues say so, and drops a segment the hint leaves
 // outside the placement every marker source shares.
-func (a *Analyzer) applyCreditsCueHints(ctx context.Context, placements []creditsPlacement, limits creditsLimits) []creditsPlacement {
+// applyCreditsCueHints bounds placed credits with the file's own dialog, and
+// reports whether a cue read failed for a reason a later run should retry.
+func (a *Analyzer) applyCreditsCueHints(ctx context.Context, placements []creditsPlacement, limits creditsLimits) ([]creditsPlacement, bool) {
 	if a.cues == nil || len(placements) == 0 {
-		return placements
+		return placements, false
 	}
 	candidates := make([]Candidate, 0, len(placements))
 	for _, placement := range placements {
@@ -323,10 +331,7 @@ func (a *Analyzer) applyCreditsCueHints(ctx context.Context, placements []credit
 	cues, retry, err := a.ensureIntroCues(ctx, candidates)
 	if err != nil {
 		a.logger.WarnContext(ctx, "credits subtitle cue hints unavailable", "error", err)
-		return placements
-	}
-	if retry {
-		a.logger.WarnContext(ctx, "credits subtitle cue hints were read for some files only; a later run retries them")
+		return placements, false
 	}
 	out := placements[:0]
 	for _, placement := range placements {
@@ -343,7 +348,7 @@ func (a *Analyzer) applyCreditsCueHints(ctx context.Context, placements []credit
 		placement.segment = segment
 		out = append(out, placement)
 	}
-	return out
+	return out, retry
 }
 
 // countPreviews measures the next-episode preview after each file's credits
