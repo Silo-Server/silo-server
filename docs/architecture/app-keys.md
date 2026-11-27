@@ -1004,9 +1004,11 @@ and resending invitations stays refused while local passwords are off.
 
 ### Keys are never the only way in
 
-Every account keeps a way to sign in that is not its app keys: a password, or
-a sign-in provider account. Two switches could break that, and both refuse a
-change that would, with `last_sign_in_method` and a detail naming the
+An account can have app keys as its only credential (an app-code join makes
+one), so this is a rule for the settings changes below, not a fact about every
+account: none of them may leave an account with no way in, or with keys as
+its only way in, where it had a password or a sign-in provider account that
+worked. Both switches refuse a change that would, with `last_sign_in_method` and a detail naming the
 accounts (`auth.AccountsAtRiskError`). One query decides who is at risk
 (`auth.AccountsAtRisk`), and `GET /admin/sign-in/accounts-at-risk` serves the
 same list to the settings page:
@@ -1017,11 +1019,16 @@ same list to the settings page:
   it gets a password or a provider account. The list doesn't depend on the
   switch, so while app keys are already off it names the accounts that still
   have no way in.
-- **Local passwords going off**: an enabled account that holds a working key
-  and has no usable password and no provider identity. Afterwards its keys
-  would be its only way in (a break-glass admin) or it would have none, and a
-  password would not sign it in either, so only linking a provider takes it off
-  the list.
+- **Local passwords going off**: an enabled account that afterwards has no
+  password that signs in (only a break-glass administrator's does) and no
+  provider identity it can sign in with, and either holds a working key and no
+  usable password, or keeps a key that still works then (a provider-bound key,
+  or a break-glass administrator's), which would be its only way in. So an
+  account with a password and a provider-bound key is listed too. Linking a
+  provider account takes any account off the list; giving a password takes
+  only a break-glass administrator off. An account with a password and only
+  local keys is left with no way in, as an account with only a password always
+  has been, and is not listed.
 
 The facts are SQL fragments in `internal/auth` (`sign_in_risk.go`), each tied
 to the Go check it mirrors: a usable password is `HasLocalPassword`; a usable
@@ -1209,6 +1216,29 @@ whose password sign-in it refuses anyway. A break-glass administrator, who
 still signs in with a password while the switch is off, gets a link with the
 password route only, as any administrator does. The account view reads the
 rule with one read of the switch and one query for the page's accounts.
+
+### Promotion
+
+Nothing an account set going while it was ordinary may produce a session or
+a key once it is an administrator's. Promotion to administrator or the
+Owner, and a move of ownership to the account, end all of it in the
+promotion's transaction (`revokeCredentialsIssuedToNonAdmin`), because other
+administrators may have minted some of it and kept it, and an administrator's
+app keys need the administrator's own approval:
+
+- API keys;
+- password reset links;
+- sign-in links, with their app codes and set-password tokens;
+- app keys (the person key, device keys, devices still waiting for
+  approval) and the sessions they opened;
+- device sign-in approvals, made in advance or at the moment, that no device
+  has collected;
+- unredeemed app codes of every kind.
+
+Order: the key sessions, then the request rows, then the link and code rows.
+When adding a new kind of pending credential (something an account can set
+going that later signs someone in or enrolls a key), add it to this list and
+to that function.
 
 ### Sessions that can't manage keys
 
@@ -1530,12 +1560,10 @@ TLS connection covers all of it.
   that is still waiting for approval is refused with it (`denied`): replacing
   the key is how a person cuts off a copy of it, and a waiting device may be
   the copy's work. That device is introduced again with the new key.
-- **A provider refusing the person** (`applyAnswer`), **an email match taking
-  over the account** (`account_resolution.go`), **a promotion to admin or a
-  move of ownership** (`revokeCredentialsIssuedToNonAdmin`) revoke every key of
-  the account and end their sessions, in the same transaction, as they delete
-  the account's API keys. A promoted account's keys never had an admin's
-  approval.
+- **A provider refusing the person** (`applyAnswer`) and **an email match
+  taking over the account** (`account_resolution.go`) revoke every key of the
+  account and end their sessions, in the same transaction, as they delete the
+  account's API keys.
 - **A password reset, "sign out everywhere" and a password change** end
   sessions as before and keep keys: the device signs in again with its key. The
   devices list is where a key is revoked. The web app says so, in one sentence
@@ -2164,9 +2192,10 @@ the switch-off, waiting on the lock, ends its session. The key paths take the
 lock in shared mode: they only read the settings under it, and none asks for
 it in exclusive mode later in the same transaction (an app code's join takes
 it exclusive before `lockChain`, and a transaction's shared request on a lock
-it already holds exclusive is granted at once). Two key paths therefore don't
-wait for each other, and none can hold it shared while waiting to take it
-exclusive, the pattern that would deadlock two of them.
+it already holds exclusive is granted at once). Two key paths that take it
+shared therefore don't wait for each other on it (a join holding it exclusive
+is waited for, as any writer is), and none can hold it shared while waiting to
+take it exclusive, the pattern that would deadlock two of them.
 
 The sweep ends key sessions in one order (`endKeySessionsTx`): every plugin
 installation row (share), then the sessions in id order. Ending a session
@@ -2174,8 +2203,9 @@ writes only its row: a device sign-in the session approved in advance stops
 being honored because collection reads the session's state, not because a
 trigger rewrites the request (a migration dropped the trigger that did; no
 row was rewritten). A schema check (`TestNoUnlistedSideWritesDB`) fails on
-any trigger or foreign-key action that writes another table on a write to
-sessions, device sign-ins or keys, unless it is listed with its reason.
+any trigger, rule or foreign-key action that writes another table on a write
+to sessions, device sign-ins, keys or sign-in links, or writes one of those on
+a write to another table, unless it is listed with its reason.
 Staged tests run, each in both orders and without a deadlock: logout against
 the sweep; deleting an account against a logout and against the sweep; the
 sweep against ending all of an account's sessions (as a password reset and
@@ -2188,7 +2218,8 @@ committed before the collect reads it.
 
 A key session can survive the sweep only in a database written or put back
 by hand (`auth.app_key_sign_in` or `demo.enabled` stored without the
-settings write). Such a session is ended at its next renewal
+settings write), or when an API server still on the previous build opens it
+during a rolling deploy. Such a session is ended at its next renewal
 (`checkSessionStanding`, which `Service.Refresh` and plugin access renewal
 share): the renewal reads the switch without a lock and, only when that
 says off, takes the settings lock (shared), reads it again, ends the session

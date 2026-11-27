@@ -106,10 +106,14 @@ sign in with a password is `409 break_glass_required`.
 Two more refusals keep every account a way in, both `409 last_sign_in_method`
 with a detail that names the accounts (the first ten, then how many more):
 
-- Turning `auth.local_password_login` off while any enabled account holds Silo
-  app keys and has no usable password and no sign-in provider account. Its keys
-  would be its only way in afterwards, or it would have none. The detail names
-  linking a provider account for each, and giving a password only to a
+- Turning `auth.local_password_login` off while an enabled account would
+  afterwards have no password that signs in (only a break-glass
+  administrator's does) and no usable sign-in provider account, and holds Silo
+  app keys and no usable password, or keeps a key that still works then (one
+  bound to a sign-in provider, or a break-glass administrator's). An account
+  with a password and a provider-bound key is refused this way too: its
+  password stops working and its key would be its only way in. The detail
+  names linking a provider account for each, and giving a password only to a
   break-glass administrator it names, the one kind a password signs in then.
 - Turning app keys off (`auth.app_key_sign_in` off, or `demo.enabled` on) while
   any enabled account signs in only with its keys. Otherwise the write ends
@@ -124,8 +128,9 @@ While the Owner holds a live session a key opened, turning app keys off or
 demo mode on by anyone but the Owner is `403 owner_protected` (on v2,
 `permission_denied` with the same detail as other Owner refusals), and
 nothing is written. A write that brings its own transaction (a restore) is
-`409 conflict` while ownership is being moved at that moment, and can be made
-again.
+refused while ownership is being moved at that moment: on its own it is
+`409 conflict`, to be saved again, and a restore's settings item fails with a
+message to restore them again once the move has finished.
 
 Turning app keys off ends every session a key opened. A device such a session
 approved has a session of its own and stays signed in: a TV signed in by

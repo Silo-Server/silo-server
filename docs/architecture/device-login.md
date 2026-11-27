@@ -276,16 +276,24 @@ the fingerprint. Nothing on the poll changes for the TV.
   can deadlock with this build's paths that end sessions (PostgreSQL aborts
   one, which can be repeated); and its ownership transfer does not take the
   ownership lock (see app-keys.md, "Lock order").
-- **Promotion.** Making the account an administrator or the Owner withdraws
-  the sign-ins it approved in advance that no device has collected, in the
-  promotion's transaction (`revokeCredentialsIssuedToNonAdmin`): one statement
-  marks them `denied`, as withdrawing one from the list does, after the
-  account's key sessions end and with the request rows locked in id order. It
-  is the one write of request rows on purpose besides the person's own
-  withdrawal, and a direct write, not a side effect of ending a session.
-  Collecting takes the account row before the request row, as promotion does,
-  so the two queue on the account row: a collect after the promotion commits
-  is refused, and one before it succeeds for the account as it was.
+- **Promotion and the other account events.** These withdraw every uncollected
+  approval of the account on purpose, in advance or at the moment, through
+  one function (`withdrawDeviceSignInApprovalsInTransaction`), after the
+  account's sessions and with the request rows locked in id order:
+  - signing out everywhere or out of every other session, which a password
+    reset, a password change, an administrator setting the password,
+    disabling or deleting the account, and the sign-in policy changes that
+    revoke sign-ins all do (`revokeSignInsInTransaction`);
+  - an administrator signing the account out everywhere (`RevokeAsAdmin`);
+  - promotion to administrator or the Owner, and a move of ownership
+    (`revokeCredentialsIssuedToNonAdmin`; see "Promotion" in
+    [app-keys.md](app-keys.md#promotion)).
+
+  A sign-in provider refusing an identity withdraws the approvals made
+  through that identity, and the person denies or revokes one at a time.
+  Ending a single session writes no request row. Collecting takes the account
+  row before the request row, as each of these does, so a collect after one
+  commits is refused, and one before it succeeds for the account as it was.
 
 `GET /api/v2/auth/device/capability` reports `preapprove: true`.
 

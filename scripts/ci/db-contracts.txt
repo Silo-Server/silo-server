@@ -423,7 +423,10 @@
 ./internal/auth TestCollectRacingTheApproversRevokeDB
 ./internal/auth TestNoUnlistedSideWritesDB
 ./internal/auth TestOwnershipTransferSignInAndSwitchOffDB
-./internal/auth TestPromotionWithdrawsPreapprovalsDB
+./internal/auth TestPromotionWithdrawsApprovalsDB
+./internal/auth TestCollectReadsApproverAtStatementClockDB
+./internal/auth TestPromotionEndsSessionAppCodesDB
+./internal/api/handlers TestStaleSettingsWriteAnswersPreconditionFirstDB
 ./internal/auth TestSessionEndersLockInIDOrderDB
 ./internal/auth TestSignInLinkCodeRedeemAgainstSweepDB
 ./internal/auth TestSwitchOffAfterRenewalReadDB
