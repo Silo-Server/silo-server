@@ -12,12 +12,12 @@ func season(offsets ...float64) []levelsInput {
 	for i, offset := range offsets {
 		b := &traceBuilder{}
 		if offset > 0 {
-			b.dialogue(int64(10+i), offset)
+			b.dialog(int64(10+i), offset)
 		}
 		b.musicJittered(99, 25, 0.6)
 		rest := 1400 - b.seconds()
 		if rest > 0 {
-			b.dialogue(int64(20+i), rest)
+			b.dialog(int64(20+i), rest)
 		}
 		inputs = append(inputs, syntheticEpisode{
 			fileID:   i + 1,
@@ -58,11 +58,11 @@ func TestCompareLevelsPrefersTheHeadOpeningOverALaterReprise(t *testing.T) {
 	var inputs []levelsInput
 	for i := 1; i <= 4; i++ {
 		b := &traceBuilder{}
-		b.dialogue(int64(30+i), 20)
+		b.dialog(int64(30+i), 20)
 		b.musicJittered(99, 25, 0.6)
-		b.dialogue(int64(40+i), 800)
+		b.dialog(int64(40+i), 800)
 		b.musicJittered(99, 40, 0.6)
-		b.dialogue(int64(50+i), 1400-b.seconds())
+		b.dialog(int64(50+i), 1400-b.seconds())
 		inputs = append(inputs, syntheticEpisode{
 			fileID: i, episode: string(rune('a' + i)), duration: 1400, levels: b.build(),
 		}.input())
@@ -83,7 +83,7 @@ func TestCompareLevelsDoesNotStartAtAStudioLogo(t *testing.T) {
 		b.musicJittered(7, 4, 0.4)
 		b.silence(1.2)
 		b.musicJittered(99, 22, 0.6)
-		b.dialogue(int64(60+i), 1400-b.seconds())
+		b.dialog(int64(60+i), 1400-b.seconds())
 		inputs = append(inputs, syntheticEpisode{
 			fileID: i, episode: string(rune('a' + i)), duration: 1400, levels: b.build(),
 		}.input())
@@ -104,7 +104,7 @@ func TestCompareLevelsNeedsAgreementFromOtherEpisodes(t *testing.T) {
 	// Episode 4's opening is its own; no other episode carries it.
 	b := &traceBuilder{}
 	b.musicJittered(77, 20, 0.5)
-	b.dialogue(41, 1380)
+	b.dialog(41, 1380)
 	own := syntheticEpisode{fileID: 4, episode: "d", duration: 1400, levels: b.build()}
 
 	inputs := season(15, 15, 15)
@@ -141,9 +141,9 @@ func TestCompareLevelsWideSearchFindsADistantPartner(t *testing.T) {
 			seed = 99
 		}
 		b := &traceBuilder{}
-		b.dialogue(int64(200+i), 30)
+		b.dialog(int64(200+i), 30)
 		b.musicJittered(seed, 20, 0.5)
-		b.dialogue(int64(300+i), 1400-b.seconds())
+		b.dialog(int64(300+i), 1400-b.seconds())
 		inputs = append(inputs, syntheticEpisode{
 			fileID: i, episode: string(rune('a' + i)), duration: 1400, levels: b.build(),
 		}.input())
@@ -172,7 +172,7 @@ func TestCompareLevelsRefusesAnOpeningCutOffByTheWindow(t *testing.T) {
 	var inputs []levelsInput
 	for i := 1; i <= 4; i++ {
 		b := &traceBuilder{}
-		b.dialogue(int64(400+i), 300)
+		b.dialog(int64(400+i), 300)
 		b.musicJittered(99, 60, 0.5)
 		if b.seconds() < 360 {
 			b.musicJittered(99, 360-b.seconds(), 0.5)

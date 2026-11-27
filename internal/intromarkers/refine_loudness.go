@@ -22,7 +22,7 @@ const (
 	introStartSearchForwardSeconds = 1.5
 	// introStartMinimumLiftDB is how much louder the opening must be than
 	// the quiet point before it for that point to mark the start. A cold
-	// open's dialogue runs into the theme without a break, so without the
+	// open's dialog runs into the theme without a break, so without the
 	// lift the matched start stands.
 	introStartMinimumLiftDB = 4.0
 	// introStartLiftHoldSeconds is how long the level may stay low after its
@@ -116,7 +116,7 @@ func refineLevelEdges(env envelope, windowStart, start, end float64) (float64, f
 // refineLevelStart puts the start where the opening's sound begins: the frame
 // at which the level lifts out of the quiet stretch before it. A boundary the
 // trace does not show an onset for stays where the match put it, as on a cold
-// open whose dialogue runs into the theme.
+// open whose dialog runs into the theme.
 func refineLevelStart(env envelope, windowStart, start float64) float64 {
 	if env.len() == 0 {
 		return start

@@ -306,7 +306,7 @@ func candidateLevelOffsets(x, y envelope, cfg levelMatchConfig) []int {
 
 	// Peaks within one window of a kept one describe the same alignment and
 	// would only repeat the same run.
-	neighbourhood := window * factor
+	neighborhood := window * factor
 	offsets := make([]int, 0, cfg.Offsets)
 	for _, p := range peaks {
 		if len(offsets) >= cfg.Offsets {
@@ -314,7 +314,7 @@ func candidateLevelOffsets(x, y envelope, cfg levelMatchConfig) []int {
 		}
 		duplicate := false
 		for _, kept := range offsets {
-			if absInt(p.offset-kept) < neighbourhood {
+			if absInt(p.offset-kept) < neighborhood {
 				duplicate = true
 				break
 			}

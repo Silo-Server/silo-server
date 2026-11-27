@@ -31,7 +31,7 @@ func (l *levelTrace) envelope() envelope {
 }
 
 func TestRefineLevelStartMovesToTheMusicOnset(t *testing.T) {
-	// Quiet dialogue, a beat of silence, then the theme. A matcher's edge
+	// Quiet dialog, a beat of silence, then the theme. A matcher's edge
 	// lands a window early; the trace puts it on the onset.
 	trace := (&levelTrace{}).hold(20, 30).hold(1.6, 6).hold(20, 55).hold(20, 30)
 	start, end := refineLevelEdges(trace.envelope(), 0, 20.8, 41.4)
@@ -44,7 +44,7 @@ func TestRefineLevelStartMovesToTheMusicOnset(t *testing.T) {
 }
 
 func TestRefineLevelStartKeepsAnEdgeWithNoQuietBefore(t *testing.T) {
-	// A cold open's dialogue runs into the theme without a break, so there is
+	// A cold open's dialog runs into the theme without a break, so there is
 	// no onset to find and the matched start stands.
 	trace := (&levelTrace{}).hold(20, 52).hold(20, 55).hold(20, 52)
 	start, _ := refineLevelEdges(trace.envelope(), 0, 20, 40)
@@ -70,14 +70,14 @@ func TestZeroStartLimitOnlySnapsTheFilesFirstFrames(t *testing.T) {
 	cfg := DefaultConfig("ffmpeg")
 	ep := syntheticEpisode{
 		fileID: 1, episode: "a", duration: 1400,
-		levels: (&traceBuilder{}).dialogue(1, 1.2).music(11, 30).dialogue(2, 300).build(),
+		levels: (&traceBuilder{}).dialog(1, 1.2).music(11, 30).dialog(2, 300).build(),
 	}
 	segment := refineIntroSegment(ep.input(), Segment{Start: 1.2, End: 31.2, Algorithm: LevelAlgorithm, Confidence: 0.9}, cfg)
 	if segment.Start < 1 {
 		t.Fatalf("start snapped to %.2f, want 1.20", segment.Start)
 	}
 
-	ep.levels = (&traceBuilder{}).music(11, 30).dialogue(2, 300).build()
+	ep.levels = (&traceBuilder{}).music(11, 30).dialog(2, 300).build()
 	segment = refineIntroSegment(ep.input(), Segment{Start: 0, End: 30, Algorithm: LevelAlgorithm, Confidence: 0.9}, cfg)
 	if segment.Start != 0 {
 		t.Fatalf("start at the beginning of the file became %.2f", segment.Start)

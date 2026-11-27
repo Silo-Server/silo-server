@@ -18,9 +18,9 @@ func envelopeOfTrace(levels []byte) envelope {
 func TestSharedRunsFindsOneCueAtItsOffset(t *testing.T) {
 	theme := cueLevels(11, 20, false)
 	x := &traceBuilder{}
-	x.dialogue(1, 12).music(11, 20).dialogue(2, 30)
+	x.dialog(1, 12).music(11, 20).dialog(2, 30)
 	y := &traceBuilder{}
-	y.dialogue(3, 35).musicJittered(11, 20, 1.0).dialogue(4, 12)
+	y.dialog(3, 35).musicJittered(11, 20, 1.0).dialog(4, 12)
 
 	pairs := sharedRuns(envelopeOfTrace(x.build()), envelopeOfTrace(y.build()), defaultLevelMatchConfig())
 	if len(pairs) == 0 {
@@ -49,9 +49,9 @@ func TestSharedRunsDoesNotBridgeALogoIntoTheTheme(t *testing.T) {
 	// theme. Bridging the two would make the intro start at zero, which is
 	// the fault this comparison exists to fix.
 	x := &traceBuilder{}
-	x.music(5, 4).silence(1.2).music(11, 25).dialogue(9, 20)
+	x.music(5, 4).silence(1.2).music(11, 25).dialog(9, 20)
 	y := &traceBuilder{}
-	y.musicJittered(5, 4, 0.5).silence(1.5).musicJittered(11, 25, 0.8).dialogue(10, 20)
+	y.musicJittered(5, 4, 0.5).silence(1.5).musicJittered(11, 25, 0.8).dialog(10, 20)
 
 	pairs := sharedRuns(envelopeOfTrace(x.build()), envelopeOfTrace(y.build()), defaultLevelMatchConfig())
 	for _, pair := range pairs {
@@ -76,9 +76,9 @@ func TestSharedRunsDoesNotBridgeALogoIntoTheTheme(t *testing.T) {
 
 func TestSharedRunsIgnoresUnrelatedAudio(t *testing.T) {
 	x := &traceBuilder{}
-	x.dialogue(21, 40).music(22, 20)
+	x.dialog(21, 40).music(22, 20)
 	y := &traceBuilder{}
-	y.dialogue(31, 30).music(32, 25)
+	y.dialog(31, 30).music(32, 25)
 
 	if pairs := sharedRuns(envelopeOfTrace(x.build()), envelopeOfTrace(y.build()), defaultLevelMatchConfig()); len(pairs) != 0 {
 		t.Fatalf("unrelated traces matched: %+v", pairs)

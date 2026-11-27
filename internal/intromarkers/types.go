@@ -27,7 +27,11 @@ const (
 	// LevelAlgorithm is the loudness-envelope season comparison that
 	// replaced Chromaprint for intros. It outranks Chromaprint so
 	// re-analysis overwrites what that path wrote.
-	LevelAlgorithm         = "envelope:v1"
+	LevelAlgorithm = "envelope:v1"
+	// SpanConfirmedAlgorithm is an envelope intro whose span a season
+	// partner's Chromaprint fingerprint confirmed, and whose edges that
+	// confirmation tightened.
+	SpanConfirmedAlgorithm = "envelope:confirmed:v1"
 	ChromaprintFormat      = "chromaprint:raw:uint32le"
 	DefaultPointHopSeconds = 0.123
 

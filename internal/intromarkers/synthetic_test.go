@@ -46,7 +46,7 @@ func (b *traceBuilder) musicJittered(seed int64, seconds float64, jitterDB float
 
 // dialogue appends chatter from a noise source: loud bursts and short pauses,
 // unlike any cue.
-func (b *traceBuilder) dialogue(seed int64, seconds float64) *traceBuilder {
+func (b *traceBuilder) dialog(seed int64, seconds float64) *traceBuilder {
 	b.levels = append(b.levels, cueLevels(seed, seconds, true)...)
 	return b
 }

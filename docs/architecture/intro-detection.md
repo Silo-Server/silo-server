@@ -414,17 +414,52 @@ semantic, a setting and a web control, and a library should be measured on the
 result before that lands. The jingle half of the reference rule needs the
 tail fingerprints compared pairwise, which the credits path does not do yet.
 
-### Subtitle hints (not used yet)
+### Subtitle cues
 
-A subtitle track's cue times are the other cheap hint of the same kind: dialogue
-stops where credits begin and is absent through an opening, so the last cue
-before the end bounds the credits' start and the cue-free stretch bounds the
-intro. Silo cannot use it today: a stored track carries its language, codec and
-flags, not its cue times, and the tail pass decodes audio rather than text
-subtitle streams. Using it needs a cues artifact (`internal/subtitles.ParseCues`
-over an embedded track, or a sidecar file) keyed like the envelopes, and it is
-the next step after this change. The reference engine uses on-screen text
-reading for the same reason and finds credits that matching misses.
+A file's subtitle cues are the other source of the same kind of hint, and two
+readings of them are used:
+
+- **The recap cue.** A cue saying "Previously On", "Last Time On", "The Story So
+  Far" or "Recap" marks the recap, from that cue to the end of the run its
+  following cues form. An intro does not start inside it: a match that reaches
+  into the recap starts where the recap ends, as with a recap chapter.
+- **Where the dialogue stops.** Credits carry no dialogue, so the last cue that
+  ends just before or inside a placed credits start is where the credits
+  begin: the start moves to it. A translator's card ("Subtitles by …") inside
+  the segment is part of the credits, and no start moves past it.
+
+The cues come from the file's own text track: the first English track, else the
+first text track that is not forced, demuxed with FFmpeg and parsed by
+`internal/subtitles.ParseCues`. They are cached as an `intro_cues` artifact and
+read only for the files a marker was placed on, so a season that finds nothing
+costs no demux. Image subtitles (PGS, VobSub) carry no text and are skipped.
+
+The same reading is deliberately not used to move an intro's start. The
+Chromaprint path tried it (`chromaprint:dialogue:v4`) and moved the start a
+median 13 to 15 seconds later, agreeing with TheIntroDB and Plex far less
+often, because most cues in an opening are its own lyrics or a title-sequence
+narration. Only the recap text is used, which is what it says it is.
+
+### Chromaprint confirmation
+
+The envelope comparison finds and places an opening; a Chromaprint fingerprint
+of the placed span confirms it. Two files whose spans are one recording match
+point for point, which is what the envelope's season agreement cannot prove on
+its own.
+
+For every file with a placed intro, a fingerprint of the span plus two seconds
+either side is cached as an `intro_span_fingerprint` artifact. The spans of a
+season are compared pairwise with the same pair matcher the credits path uses,
+and a run of at least six seconds covering a third of the span confirms it:
+
+- a confirmed span's edges tighten onto the shared audio and its identifier
+  becomes `envelope:confirmed:v1`, rated as the envelope rated it;
+- a span no partner confirms loses 0.10 confidence, or is dropped when at least
+  half the season's placed spans did confirm each other — the season's other
+  files prove the comparison works, so this one most likely matched a shared
+  sound-alike;
+- a season where nothing confirmed anything is left exactly as the envelope
+  placed it, since a missing fingerprint is not evidence against a span.
 
 ### Tail pass
 

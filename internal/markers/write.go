@@ -237,6 +237,8 @@ func scannerAlgorithmPriority(algorithm string) int {
 	// The loudness-envelope comparison replaced Chromaprint for intros, so
 	// its identifier outranks every Chromaprint one: re-analysis can then
 	// overwrite what the old path wrote.
+	case "envelope:confirmed:v1":
+		return 24
 	case "envelope:v1":
 		return 23
 	case "chromaprint:dialogue:v4": //nolint:misspell // Persisted algorithm identifier.

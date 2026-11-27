@@ -86,138 +86,20 @@ type levelStretch struct {
 func CompareLevels(inputs []levelsInput, cfg Config) map[int]Segment {
 	cfg = cfg.normalized()
 	ordered := append([]levelsInput(nil), inputs...)
-	sort.SliceStable(ordered, func(i, j int) bool {
-		a, b := ordered[i].Candidate, ordered[j].Candidate
-		if a.SeasonNumber != b.SeasonNumber {
-			return a.SeasonNumber < b.SeasonNumber
-		}
-		if a.EpisodeNumber != b.EpisodeNumber {
-			return a.EpisodeNumber < b.EpisodeNumber
-		}
-		return a.FileID < b.FileID
-	})
+	sortLevelInputs(ordered)
 	envelopes := make([]envelope, len(ordered))
 	for i, input := range ordered {
 		envelopes[i] = envelopeOf(input)
 	}
 
-	stretches := map[int]map[string][]levelStretch{}
-	record := func(i, j int, pair levelPair) {
-		left, right := ordered[i], ordered[j]
-		leftWindow := levelsWindow(left.Candidate, cfg)
-		rightWindow := levelsWindow(right.Candidate, cfg)
-		byPartner := stretches[left.Candidate.FileID]
-		if byPartner == nil {
-			byPartner = map[string][]levelStretch{}
-			stretches[left.Candidate.FileID] = byPartner
-		}
-		byPartner[right.Candidate.EpisodeID] = append(byPartner[right.Candidate.EpisodeID], levelStretch{
-			Start:       pair.Start,
-			End:         pair.End,
-			Partner:     right.Candidate.EpisodeID,
-			Correlation: pair.Correlation,
-			ClippedEnd:  pair.End >= leftWindow.End-levelEdgeMarginSeconds,
-		})
-		byPartner = stretches[right.Candidate.FileID]
-		if byPartner == nil {
-			byPartner = map[string][]levelStretch{}
-			stretches[right.Candidate.FileID] = byPartner
-		}
-		byPartner[left.Candidate.EpisodeID] = append(byPartner[left.Candidate.EpisodeID], levelStretch{
-			Start:       pair.PartnerStart,
-			End:         pair.PartnerStart + (pair.End - pair.Start),
-			Partner:     left.Candidate.EpisodeID,
-			Correlation: pair.Correlation,
-			ClippedEnd:  pair.PartnerStart+(pair.End-pair.Start) >= rightWindow.End-levelEdgeMarginSeconds,
-		})
-	}
-
-	matchCfg := defaultLevelMatchConfig()
-	comparable := func(i, j int) bool {
-		a, b := ordered[i].Candidate.EpisodeID, ordered[j].Candidate.EpisodeID
-		return a != "" && b != "" && a != b
-	}
-	compared := map[[2]int]struct{}{}
-	compare := func(i, j int) {
-		if i > j {
-			i, j = j, i
-		}
-		key := [2]int{i, j}
-		if _, done := compared[key]; done {
-			return
-		}
-		compared[key] = struct{}{}
-		for _, pair := range sharedRuns(envelopes[i], envelopes[j], matchCfg) {
-			record(i, j, pair)
-		}
-	}
-	// Counted in episodes, not files, so every version of an episode in
-	// reach is compared but they share one place, as the Chromaprint path
-	// does.
-	within := func(episodes map[string]struct{}, limit int, episode string) bool {
-		if _, seen := episodes[episode]; seen {
-			return true
-		}
-		if len(episodes) == limit {
-			return false
-		}
-		episodes[episode] = struct{}{}
-		return true
-	}
-	for i := range ordered {
-		neighbors := map[string]struct{}{}
-		for j := i + 1; j < len(ordered); j++ {
-			if !comparable(i, j) {
-				continue
-			}
-			if !within(neighbors, compareNeighborEpisodes, ordered[j].Candidate.EpisodeID) {
-				break
-			}
-			compare(i, j)
-		}
-	}
-
-	// A file its neighbors found nothing for may share its opening with
-	// episodes further away, such as a season whose opener repeats at the
-	// end. The search walks episodes outward from the file's own.
-	groups := episodeGroups(levelsEpisodeOrder(ordered))
-	groupOf := make([]int, len(ordered))
-	for g, group := range groups {
-		for i := group[0]; i < group[1]; i++ {
-			groupOf[i] = g
-		}
-	}
-	for i := range ordered {
-		// A file whose neighbors gave it no qualifying span gets the wider
-		// search; one stretch that no partner confirms is not enough.
-		if _, ok := bestLevelCluster(stretches[ordered[i].Candidate.FileID], ordered[i].Candidate, cfg); ok {
-			continue
-		}
-		extra := map[string]struct{}{}
-		g := groupOf[i]
-		for distance := 1; distance < len(groups) && len(extra) < levelWideSearchEpisodes; distance++ {
-			for _, h := range [2]int{g - distance, g + distance} {
-				if h < 0 || h >= len(groups) {
-					continue
-				}
-				for j := groups[h][0]; j < groups[h][1]; j++ {
-					if !comparable(i, j) {
-						continue
-					}
-					if !within(extra, levelWideSearchEpisodes, ordered[j].Candidate.EpisodeID) {
-						continue
-					}
-					compare(i, j)
-				}
-			}
-		}
-	}
-
-	episodeOf := make(map[int]string, len(inputs))
 	candidateOf := make(map[int]Candidate, len(inputs))
 	for _, input := range inputs {
-		episodeOf[input.Candidate.FileID] = input.Candidate.EpisodeID
 		candidateOf[input.Candidate.FileID] = input.Candidate
+	}
+	stretches := collectLevelStretches(ordered, envelopes, cfg)
+	episodeOf := make(map[int]string, len(inputs))
+	for _, input := range inputs {
+		episodeOf[input.Candidate.FileID] = input.Candidate.EpisodeID
 	}
 	chosen := make(map[int]levelStretch, len(stretches))
 	durations := make([]episodeDuration, 0, len(stretches))
@@ -264,6 +146,134 @@ func CompareLevels(inputs []levelsInput, cfg Config) map[int]Segment {
 		segments[input.Candidate.FileID] = segment
 	}
 	return segments
+}
+
+// sortLevelInputs orders inputs by season, episode and file, as the
+// Chromaprint path ordered fingerprint inputs.
+func sortLevelInputs(ordered []levelsInput) {
+	sort.SliceStable(ordered, func(i, j int) bool {
+		a, b := ordered[i].Candidate, ordered[j].Candidate
+		if a.SeasonNumber != b.SeasonNumber {
+			return a.SeasonNumber < b.SeasonNumber
+		}
+		if a.EpisodeNumber != b.EpisodeNumber {
+			return a.EpisodeNumber < b.EpisodeNumber
+		}
+		return a.FileID < b.FileID
+	})
+}
+
+// collectLevelStretches compares the season's envelopes and returns, per file,
+// the stretches its partners share with it.
+func collectLevelStretches(ordered []levelsInput, envelopes []envelope, cfg Config) map[int]map[string][]levelStretch {
+	stretches := map[int]map[string][]levelStretch{}
+	record := func(i, j int, pair levelPair) {
+		left, right := ordered[i], ordered[j]
+		leftWindow := levelsWindow(left.Candidate, cfg)
+		rightWindow := levelsWindow(right.Candidate, cfg)
+		addLevelStretch(stretches, left.Candidate.FileID, right.Candidate.EpisodeID, levelStretch{
+			Start:       pair.Start,
+			End:         pair.End,
+			Correlation: pair.Correlation,
+			ClippedEnd:  pair.End >= leftWindow.End-levelEdgeMarginSeconds,
+		})
+		partnerEnd := pair.PartnerStart + (pair.End - pair.Start)
+		addLevelStretch(stretches, right.Candidate.FileID, left.Candidate.EpisodeID, levelStretch{
+			Start:       pair.PartnerStart,
+			End:         partnerEnd,
+			Correlation: pair.Correlation,
+			ClippedEnd:  partnerEnd >= rightWindow.End-levelEdgeMarginSeconds,
+		})
+	}
+	comparable := func(i, j int) bool {
+		a, b := ordered[i].Candidate.EpisodeID, ordered[j].Candidate.EpisodeID
+		return a != "" && b != "" && a != b
+	}
+	compared := map[[2]int]struct{}{}
+	compare := func(i, j int) {
+		if i > j {
+			i, j = j, i
+		}
+		key := [2]int{i, j}
+		if _, done := compared[key]; done {
+			return
+		}
+		compared[key] = struct{}{}
+		for _, pair := range sharedRuns(envelopes[i], envelopes[j], defaultLevelMatchConfig()) {
+			record(i, j, pair)
+		}
+	}
+	// Counted in episodes, not files, so every version of an episode in
+	// reach is compared but they share one place, as the Chromaprint path
+	// does.
+	within := func(episodes map[string]struct{}, limit int, episode string) bool {
+		if _, seen := episodes[episode]; seen {
+			return true
+		}
+		if len(episodes) == limit {
+			return false
+		}
+		episodes[episode] = struct{}{}
+		return true
+	}
+	for i := range ordered {
+		neighbors := map[string]struct{}{}
+		for j := i + 1; j < len(ordered); j++ {
+			if !comparable(i, j) {
+				continue
+			}
+			if !within(neighbors, compareNeighborEpisodes, ordered[j].Candidate.EpisodeID) {
+				break
+			}
+			compare(i, j)
+		}
+	}
+
+	// A file whose neighbors gave it no qualifying span gets the wider
+	// search; one stretch that no partner confirms is not enough. The search
+	// walks episodes outward from the file's own.
+	groups := episodeGroups(levelsEpisodeOrder(ordered))
+	groupOf := make([]int, len(ordered))
+	for g, group := range groups {
+		for i := group[0]; i < group[1]; i++ {
+			groupOf[i] = g
+		}
+	}
+	for i := range ordered {
+		if _, ok := bestLevelCluster(stretches[ordered[i].Candidate.FileID], ordered[i].Candidate, cfg); ok {
+			continue
+		}
+		extra := map[string]struct{}{}
+		g := groupOf[i]
+		for distance := 1; distance < len(groups) && len(extra) < levelWideSearchEpisodes; distance++ {
+			for _, h := range [2]int{g - distance, g + distance} {
+				if h < 0 || h >= len(groups) {
+					continue
+				}
+				for j := groups[h][0]; j < groups[h][1]; j++ {
+					if !comparable(i, j) {
+						continue
+					}
+					if !within(extra, levelWideSearchEpisodes, ordered[j].Candidate.EpisodeID) {
+						continue
+					}
+					compare(i, j)
+				}
+			}
+		}
+	}
+	return stretches
+}
+
+// addLevelStretch records one file's side of a pair result.
+func addLevelStretch(stretches map[int]map[string][]levelStretch, fileID int, partner string, stretch levelStretch) {
+	stretch.Partner = partner
+	byPartner := stretches[fileID]
+	if byPartner == nil {
+		byPartner = map[string][]levelStretch{}
+		stretches[fileID] = byPartner
+	}
+	byPartner[partner] = append(byPartner[partner], stretch)
 }
 
 // levelsEpisodeOrder adapts levels inputs to the episode grouping helper,

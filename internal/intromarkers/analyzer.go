@@ -23,6 +23,9 @@ type Analyzer struct {
 	refiner   boundaryRefiner
 	config    Config
 	logger    *slog.Logger
+	// cues reads subtitle cues for the files a hint can act on. Nil leaves
+	// markers to audio, picture and chapters.
+	cues CueSource
 	// tailSampler runs credits tail passes. Nil leaves credits to chapters
 	// and audio.
 	tailSampler creditsTailSampler
@@ -71,6 +74,12 @@ type Analyzer struct {
 // entry concurrently, and several seasons run at once, so without a cap the
 // nightly run could take the whole pool and starve API requests.
 const maxConcurrentFingerprintLookups = 4
+
+// SetCueSource sets where subtitle cues come from. Without one, no marker
+// reads a file's subtitles.
+func (a *Analyzer) SetCueSource(cues CueSource) {
+	a.cues = cues
+}
 
 // WithPlaybackPriority marks analysis a viewer is waiting on, letting it use
 // the ffmpeg slot reserved for playback and run ffmpeg at normal process
@@ -1458,10 +1467,89 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		return summary, nil
 	}
 
+	segments := a.refineIntroSegments(ctx, group.Candidates, inputs)
+	writeFailures := a.writeIntroSegments(ctx, group, opts, inputs, segments, counts, &summary)
+
+	status := seasonStatusComplete
+	if len(segments) == 0 {
+		status = seasonStatusNotFound
+		summary.GroupsNotFound++
+	}
+	if opts.persistState {
+		settle(status)
+		// A settled group is skipped until its inputs change, so a failed
+		// write leaves it failed, to be analyzed again by the next run.
+		if writeFailures > 0 {
+			state.Status = seasonStatusFailed
+			state.LastError = fmt.Sprintf("%d intro marker write(s) failed", writeFailures)
+		}
+		state.MarkersWritten = summary.SeasonMarkersWritten
+		if err := a.repo.UpsertSeasonState(ctx, state, analysisHash); err != nil {
+			return summary, err
+		}
+	}
+	return summary, nil
+}
+
+// refineIntroSegments compares the season's envelopes and bounds the result
+// with the evidence the comparison cannot see: the fingerprints of the placed
+// spans, and the cues of the files that got one.
+func (a *Analyzer) refineIntroSegments(ctx context.Context, candidates []Candidate, inputs []levelsInput) map[int]Segment {
 	segments := CompareLevels(inputs, a.config)
-	// Only a comparison over every file of the season group may withdraw an
-	// intro: a file whose extraction failed, or one held out because another
-	// source marked it, could be the partner that confirms it.
+	segments = a.confirmLevelSegments(ctx, candidates, segments)
+	return a.applyIntroCueHints(ctx, candidates, inputs, segments)
+}
+
+// applyIntroCueHints bounds the placed intros with what their files' subtitle
+// cues say: an intro does not start inside the recap a cue announces. Cues are
+// read for the files that got a segment, so a season without a detected intro
+// costs no demux. A file with no text track, or a cue read that fails, leaves
+// its segment as the audio comparison placed it.
+func (a *Analyzer) applyIntroCueHints(ctx context.Context, candidates []Candidate, inputs []levelsInput, segments map[int]Segment) map[int]Segment {
+	if a.cues == nil || len(segments) == 0 {
+		return segments
+	}
+	wanted := make([]Candidate, 0, len(segments))
+	for _, candidate := range candidates {
+		if _, ok := segments[candidate.FileID]; ok {
+			wanted = append(wanted, candidate)
+		}
+	}
+	if len(wanted) == 0 {
+		return segments
+	}
+	cues, err := a.ensureIntroCues(ctx, wanted)
+	if err != nil {
+		a.logger.WarnContext(ctx, "subtitle cue hints unavailable", "error", err)
+		return segments
+	}
+	byID := make(map[int]levelsInput, len(inputs))
+	for _, input := range inputs {
+		byID[input.Candidate.FileID] = input
+	}
+	for fileID, segment := range segments {
+		fileCues, ok := cues[fileID]
+		if !ok {
+			continue
+		}
+		input, ok := byID[fileID]
+		if !ok {
+			continue
+		}
+		refined := applyIntroCueHints(input.Candidate, segment, fileCues)
+		if refined.End > refined.Start {
+			segments[fileID] = refined
+		}
+	}
+	return segments
+}
+
+// writeIntroSegments writes the intros a comparison placed and withdraws those
+// a complete comparison no longer finds, and returns how many writes failed.
+// Only a comparison over every file of the season group may withdraw an intro:
+// a file whose extraction failed, or one held out because another source marked
+// it, could be the partner that confirms it.
+func (a *Analyzer) writeIntroSegments(ctx context.Context, group candidateGroup, opts analyzeGroupOptions, inputs []levelsInput, segments map[int]Segment, counts levelsCounts, summary *RunSummary) int {
 	complete := counts.failed == 0 && counts.deferred == 0 && !group.HeldOut
 	writeFailures := 0
 	for _, input := range inputs {
@@ -1471,7 +1559,7 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		}
 		segment, found := segments[candidate.FileID]
 		if !found {
-			if complete && a.withdrawSeasonIntro(ctx, candidate, &summary) != nil {
+			if complete && a.withdrawSeasonIntro(ctx, candidate, summary) != nil {
 				writeFailures++
 			}
 			continue
@@ -1498,26 +1586,7 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 			summary.SeasonMarkersWritten++
 		}
 	}
-
-	status := seasonStatusComplete
-	if len(segments) == 0 {
-		status = seasonStatusNotFound
-		summary.GroupsNotFound++
-	}
-	if opts.persistState {
-		settle(status)
-		// A settled group is skipped until its inputs change, so a failed
-		// write leaves it failed, to be analyzed again by the next run.
-		if writeFailures > 0 {
-			state.Status = seasonStatusFailed
-			state.LastError = fmt.Sprintf("%d intro marker write(s) failed", writeFailures)
-		}
-		state.MarkersWritten = summary.SeasonMarkersWritten
-		if err := a.repo.UpsertSeasonState(ctx, state, analysisHash); err != nil {
-			return summary, err
-		}
-	}
-	return summary, nil
+	return writeFailures
 }
 
 // groupInputSignature is the signature of what an intro analysis of group

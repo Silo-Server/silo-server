@@ -17,7 +17,7 @@ import (
 //
 // Subtitle tracks are the other source of the same kind of hint, and they are
 // not used yet: a stored track carries its language and codec, not its cue
-// times, so a hint from dialogue needs a cues artifact first. See
+// times, so a hint from dialog needs a cues artifact first. See
 // docs/architecture/intro-detection.md.
 
 var (

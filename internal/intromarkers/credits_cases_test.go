@@ -26,7 +26,7 @@ func loadCreditsCases(t *testing.T) []creditsCase {
 	if err != nil {
 		t.Fatalf("opening the credits corpus: %v", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var (
 		cases    []creditsCase

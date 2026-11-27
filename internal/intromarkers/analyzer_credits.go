@@ -236,6 +236,9 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 	// placed holds the credits each file got, which bound the previews
 	// measured after them.
 	placed := map[int]Segment{}
+	// placements holds the segments before they are written, so cues can move
+	// them first.
+	var placements []creditsPlacement
 	for _, candidate := range targets {
 		if err := ctx.Err(); err != nil {
 			return summary, err
@@ -259,6 +262,14 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 			}
 			continue
 		}
+		placements = append(placements, creditsPlacement{candidate: candidate, segment: segment})
+	}
+	// A file's own dialog says where its credits begin; the cues are read
+	// only for the files a segment was placed on, so a season without
+	// credits costs no demux.
+	placements = a.applyCreditsCueHints(ctx, placements, limits)
+	for _, placement := range placements {
+		segment, candidate := placement.segment, placement.candidate
 		found++
 		placed[candidate.FileID] = segment
 		if !a.patchCredits(ctx, candidate, segment, &summary) {
@@ -290,6 +301,46 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 		return summary, persist(seasonStatusFailed)
 	}
 	return summary, persist(seasonStatusComplete)
+}
+
+// creditsPlacement is one file's credits result before it is written.
+type creditsPlacement struct {
+	candidate Candidate
+	segment   Segment
+}
+
+// applyCreditsCueHints moves a placed credits start to where the file's
+// dialog stopped, when its cues say so, and drops a segment the hint leaves
+// outside the placement every marker source shares.
+func (a *Analyzer) applyCreditsCueHints(ctx context.Context, placements []creditsPlacement, limits creditsLimits) []creditsPlacement {
+	if a.cues == nil || len(placements) == 0 {
+		return placements
+	}
+	candidates := make([]Candidate, 0, len(placements))
+	for _, placement := range placements {
+		candidates = append(candidates, placement.candidate)
+	}
+	cues, err := a.ensureIntroCues(ctx, candidates)
+	if err != nil {
+		a.logger.WarnContext(ctx, "credits subtitle cue hints unavailable", "error", err)
+		return placements
+	}
+	out := placements[:0]
+	for _, placement := range placements {
+		fileCues, ok := cues[placement.candidate.FileID]
+		if !ok {
+			out = append(out, placement)
+			continue
+		}
+		segment := applyCreditCueHint(placement.segment, fileCues)
+		if !creditsCueHintBounded(segment, placement.candidate.DurationSeconds) ||
+			limits.CheckCreditsPlacement(segment.Start, segment.End, placement.candidate.DurationSeconds, placement.candidate.IntroEnd) != nil {
+			continue
+		}
+		placement.segment = segment
+		out = append(out, placement)
+	}
+	return out
 }
 
 // countPreviews measures the next-episode preview after each file's credits
