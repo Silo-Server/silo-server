@@ -3,9 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -80,52 +78,24 @@ func TestPromotionEndsSessionAppCodesDB(t *testing.T) {
 	for _, promoteFirst := range []bool{true, false} {
 		t.Run(map[bool]string{true: "promotion first", false: "redeem first"}[promoteFirst], func(t *testing.T) {
 			c := issue(t, map[bool]string{true: "promotecode-race-p", false: "promotecode-race-r"}[promoteFirst])
-			hold, err := env.pool.Begin(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = hold.Rollback(context.Background()) })
-			if _, err := hold.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, c.user.ID); err != nil {
-				t.Fatal(err)
-			}
-			deadline, cancel := context.WithTimeout(ctx, 15*time.Second)
-			defer cancel()
-			promoted, redeemed := make(chan error, 1), make(chan error, 1)
-			returned := make(chan error, 2)
-			startPromote := func() {
-				go func() {
-					err := promote(deadline, c.user.ID)
-					promoted <- err
-					returned <- fmt.Errorf("promotion: %v", err)
-				}()
-			}
-			startRedeem := func() {
-				go func() {
-					err := redeem(deadline, c)
-					redeemed <- err
-					returned <- fmt.Errorf("redeem: %v", err)
-				}()
-			}
-			first, second := startRedeem, startPromote
+			promoteIt := func(ctx context.Context) error { return promote(ctx, c.user.ID) }
+			redeemIt := func(ctx context.Context) error { return redeem(ctx, c) }
+			var promoted, redeemed error
 			if promoteFirst {
-				first, second = startPromote, startRedeem
+				errs := raceOnAccountRow(t, env.pool, c.user.ID, promoteIt, redeemIt)
+				promoted, redeemed = errs[0], errs[1]
+			} else {
+				errs := raceOnAccountRow(t, env.pool, c.user.ID, redeemIt, promoteIt)
+				redeemed, promoted = errs[0], errs[1]
 			}
-			first()
-			waitForLockWaitersWhile(t, env.pool, 1, returned)
-			second()
-			waitForLockWaitersWhile(t, env.pool, 2, returned)
-			if err := hold.Rollback(ctx); err != nil {
-				t.Fatal(err)
+			if promoted != nil {
+				t.Fatalf("promotion: %v", promoted)
 			}
-			if err := <-promoted; err != nil {
-				t.Fatalf("promotion: %v", err)
-			}
-			err = <-redeemed
 			switch {
-			case promoteFirst && !errors.Is(err, ErrAppCodeInvalid):
-				t.Fatalf("redeem after the promotion committed = %v, want ErrAppCodeInvalid", err)
-			case !promoteFirst && err != nil:
-				t.Fatalf("redeem before the promotion = %v, want it enrolled", err)
+			case promoteFirst && !errors.Is(redeemed, ErrAppCodeInvalid):
+				t.Fatalf("redeem after the promotion committed = %v, want ErrAppCodeInvalid", redeemed)
+			case !promoteFirst && redeemed != nil:
+				t.Fatalf("redeem before the promotion = %v, want it enrolled", redeemed)
 			}
 			requireNoKeys(t, c.user.ID)
 		})

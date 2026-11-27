@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -387,6 +388,10 @@ func TestPromotionWithdrawsApprovalsDB(t *testing.T) {
 		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, id) })
 		return id
 	}
+	type polled struct {
+		poll *DeviceLoginPollResult
+		err  error
+	}
 	approvals := []struct {
 		name    string
 		approve func(t *testing.T, id int, label string) (code, secret string)
@@ -427,53 +432,18 @@ func TestPromotionWithdrawsApprovalsDB(t *testing.T) {
 					order := map[bool]string{true: " race-promote", false: " race-collect"}[promoteFirst]
 					id := account(kind.name + order)
 					code, secret := kind.approve(t, id, kind.name+order+" racing")
-					hold, err := pool.Begin(ctx)
-					if err != nil {
-						t.Fatal(err)
+					var got polled
+					collect := func(ctx context.Context) error {
+						got.poll, got.err = svc.Poll(ctx, code, secret)
+						return got.err
 					}
-					t.Cleanup(func() { _ = hold.Rollback(context.Background()) })
-					if _, err := hold.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, id); err != nil {
-						t.Fatal(err)
-					}
-					deadline, cancel := context.WithTimeout(ctx, 15*time.Second)
-					defer cancel()
-					type polled struct {
-						poll *DeviceLoginPollResult
-						err  error
-					}
-					promoted, collected := make(chan error, 1), make(chan polled, 1)
-					returned := make(chan error, 2)
-					startPromote := func() {
-						go func() {
-							err := promote(deadline, id)
-							promoted <- err
-							returned <- fmt.Errorf("promotion: %v", err)
-						}()
-					}
-					startCollect := func() {
-						go func() {
-							poll, err := svc.Poll(deadline, code, secret)
-							collected <- polled{poll, err}
-							returned <- fmt.Errorf("collect: %+v, %v", poll, err)
-						}()
-					}
-					first, second := startCollect, startPromote
+					promoteIt := func(ctx context.Context) error { return promote(ctx, id) }
+					first, second := collect, promoteIt
 					if promoteFirst {
-						first, second = startPromote, startCollect
+						first, second = promoteIt, collect
 					}
-					first()
-					waitForLockWaitersWhile(t, pool, 1, returned)
-					second()
-					waitForLockWaitersWhile(t, pool, 2, returned)
-					if err := hold.Rollback(ctx); err != nil {
-						t.Fatal(err)
-					}
-					if err := <-promoted; err != nil {
-						t.Fatalf("promotion: %v", err)
-					}
-					got := <-collected
-					if got.err != nil {
-						t.Fatalf("collect: %v", got.err)
+					if errs := raceOnAccountRow(t, pool, id, first, second); errs[0] != nil || errs[1] != nil {
+						t.Fatalf("collect or promotion failed: %v", errs)
 					}
 					if promoteFirst && (got.poll.TokenPair != nil || got.poll.Status != DeviceLoginStatusDenied) {
 						t.Fatalf("collect after the promotion committed = %+v; want denied with no session", got.poll)
@@ -485,4 +455,38 @@ func TestPromotionWithdrawsApprovalsDB(t *testing.T) {
 			}
 		})
 	}
+}
+
+// raceOnAccountRow holds account id's row, starts first and waits until it
+// waits on a lock, starts second and waits until both do, then releases the
+// row and answers their errors in that order. A party that returns before it
+// waits fails the test at once.
+func raceOnAccountRow(t *testing.T, pool *pgxpool.Pool, id int, first, second func(context.Context) error) [2]error {
+	t.Helper()
+	ctx := t.Context()
+	hold, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = hold.Rollback(context.Background()) })
+	if _, err := hold.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, id); err != nil {
+		t.Fatal(err)
+	}
+	deadline, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	var results [2]chan error
+	returned := make(chan error, 2)
+	for i, party := range []func(context.Context) error{first, second} {
+		results[i] = make(chan error, 1)
+		go func() {
+			err := party(deadline)
+			results[i] <- err
+			returned <- fmt.Errorf("party %d: %w", i+1, err)
+		}()
+		waitForLockWaitersWhile(t, pool, i+1, returned)
+	}
+	if err := hold.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return [2]error{<-results[0], <-results[1]}
 }
