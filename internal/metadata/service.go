@@ -6089,10 +6089,12 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 	// Posters uploaded for arranged seasons, by source: a season that drops
 	// one goes back to the provider's poster.
 	customUploads := map[string]bool{}
-	if uploads, err := s.customSeasonUploads(ctx, seriesID); err != nil {
-		slog.WarnContext(ctx, "metadata: loading uploaded season posters failed", "component", "metadata",
-			"series_id", seriesID, "error", err)
-	} else {
+	if s.dbPool != nil {
+		uploads, err := customSeasonUploads(ctx, s.dbPool, seriesID)
+		if err != nil {
+			slog.WarnContext(ctx, "metadata: loading uploaded season posters failed", "component", "metadata",
+				"series_id", seriesID, "error", err)
+		}
 		for source := range uploads {
 			customUploads[source] = true
 		}

@@ -49,6 +49,12 @@ CREATE TABLE public.series_custom_season_uploads (
     PRIMARY KEY (series_id, source)
 );
 
+-- The artwork GC and storage sweep look uploaded posters up by path.
+CREATE INDEX idx_series_custom_seasons_poster_path
+    ON public.series_custom_seasons (poster_path) WHERE poster_path <> '';
+CREATE INDEX idx_series_custom_season_uploads_path
+    ON public.series_custom_season_uploads (path) WHERE path <> '';
+
 -- +goose Down
 DROP TABLE IF EXISTS public.series_custom_season_uploads;
 ALTER TABLE public.series_episode_orders

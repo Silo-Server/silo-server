@@ -348,14 +348,16 @@ func (s *MetadataService) SaveCustomSeasons(ctx context.Context, seriesID string
 	if _, err := s.requireSeries(ctx, seriesID); err != nil {
 		return 0, err
 	}
-	if err := s.resolveCustomSeasonPosters(ctx, seriesID, save.Seasons); err != nil {
-		return 0, err
-	}
 	orderName := s.episodeOrderName(ctx, seriesID, save.Settings)
 	var saved int64
 	err := pgx.BeginFunc(ctx, s.dbPool, func(tx pgx.Tx) error {
 		var err error
 		if saved, err = storeSeriesOrder(ctx, tx, seriesID, save.Settings, orderName, revision, userID); err != nil {
+			return err
+		}
+		// Under the series row lock storeSeriesOrder took, so a refresh's
+		// pruneCustomSeasonUploads cannot drop an upload this save names.
+		if err := resolveCustomSeasonPosters(ctx, tx, seriesID, save.Seasons); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `
@@ -367,7 +369,7 @@ func (s *MetadataService) SaveCustomSeasons(ctx context.Context, seriesID string
 		return replaceCustomLayout(ctx, tx, seriesID, save.Seasons)
 	})
 	if err != nil {
-		if errors.Is(err, ErrEpisodeOrderConflict) {
+		if errors.Is(err, ErrEpisodeOrderConflict) || errors.Is(err, ErrEpisodeOrderInvalid) {
 			return 0, err
 		}
 		return 0, fmt.Errorf("saving custom seasons: %w", err)
@@ -449,8 +451,8 @@ func (s *MetadataService) UploadCustomSeasonPoster(ctx context.Context, seriesID
 
 // resolveCustomSeasonPosters fills each season's poster from the series'
 // uploads by its source; a source the series has no upload for is refused.
-func (s *MetadataService) resolveCustomSeasonPosters(ctx context.Context, seriesID string, seasons []CustomSeasonsSeason) error {
-	uploads, err := s.customSeasonUploads(ctx, seriesID)
+func resolveCustomSeasonPosters(ctx context.Context, q customSeasonUploadsQuerier, seriesID string, seasons []CustomSeasonsSeason) error {
+	uploads, err := customSeasonUploads(ctx, q, seriesID)
 	if err != nil {
 		return err
 	}
@@ -479,12 +481,21 @@ func (s *MetadataService) pruneCustomSeasonUploads(ctx context.Context, seriesID
 	if s == nil || s.dbPool == nil {
 		return
 	}
-	if _, err := s.dbPool.Exec(ctx, `
-		DELETE FROM series_custom_season_uploads u
-		WHERE u.series_id = $1 AND u.uploaded_at < now() - interval '1 day'
-		  AND NOT EXISTS (SELECT 1 FROM series_custom_seasons c WHERE c.series_id = u.series_id AND c.poster_source = u.source)
-		  AND NOT EXISTS (SELECT 1 FROM seasons s WHERE s.series_id = u.series_id AND s.poster_source_path = u.source)`,
-		seriesID); err != nil {
+	// The series row lock orders this after a save that is naming one of
+	// these uploads (SaveCustomSeasons resolves its posters under the lock).
+	err := pgx.BeginFunc(ctx, s.dbPool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM media_items WHERE content_id = $1 FOR UPDATE`, seriesID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `
+			DELETE FROM series_custom_season_uploads u
+			WHERE u.series_id = $1 AND u.uploaded_at < now() - interval '1 day'
+			  AND NOT EXISTS (SELECT 1 FROM series_custom_seasons c WHERE c.series_id = u.series_id AND c.poster_source = u.source)
+			  AND NOT EXISTS (SELECT 1 FROM seasons s WHERE s.series_id = u.series_id AND s.poster_source_path = u.source)`,
+			seriesID)
+		return err
+	})
+	if err != nil {
 		slog.WarnContext(ctx, "metadata: pruning uploaded season posters failed", "component", "metadata",
 			"series_id", seriesID, "error", err)
 	}
@@ -492,12 +503,14 @@ func (s *MetadataService) pruneCustomSeasonUploads(ctx context.Context, seriesID
 
 // customSeasonUploads lists the posters uploaded for the series' arranged
 // seasons, by source.
-func (s *MetadataService) customSeasonUploads(ctx context.Context, seriesID string) (map[string]CustomSeasonPoster, error) {
+// customSeasonUploadsQuerier is a pool or a transaction.
+type customSeasonUploadsQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+func customSeasonUploads(ctx context.Context, q customSeasonUploadsQuerier, seriesID string) (map[string]CustomSeasonPoster, error) {
 	uploads := map[string]CustomSeasonPoster{}
-	if s == nil || s.dbPool == nil {
-		return uploads, nil
-	}
-	rows, err := s.dbPool.Query(ctx, `
+	rows, err := q.Query(ctx, `
 		SELECT source, path, thumbhash FROM series_custom_season_uploads WHERE series_id = $1 AND path <> ''`, seriesID)
 	if err != nil {
 		return nil, fmt.Errorf("loading uploaded season posters: %w", err)
