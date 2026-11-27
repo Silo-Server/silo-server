@@ -11,6 +11,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalog/reattribute"
 	"github.com/Silo-Server/silo-server/internal/contentid"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/naming"
 )
 
 // existingEpisode is a stored episode row as the renumber planner sees it.
@@ -21,6 +23,9 @@ type existingEpisode struct {
 	// IDs holds the row's provider episode IDs by provider key (tvdb, tmdb,
 	// imdb); empty values are absent.
 	IDs map[string]string
+	// Fallback marks a placeholder the scanner made for a file no order
+	// placed.
+	Fallback bool
 }
 
 // episodeMove gives a stored row new numbers.
@@ -60,7 +65,9 @@ var renumberIDKeys = []string{"tvdb", "tmdb", "imdb"}
 // provider ID with a target is a duplicate of that target's row (an earlier
 // numbering left it) and merges into it. Any other row nobody claims that
 // sits on a target's numbers is parked after the last episode of its season:
-// it may hold files or watch history, so it is never dropped here.
+// it may hold files or watch history, so it is never dropped here. A scanner
+// placeholder there stands in for the episode at its numbers, so it merges
+// into the row that moves there instead.
 //
 // Moves come back as the claimed rows' moves, ordered by their current
 // numbers, then the parked rows', in the same order.
@@ -160,9 +167,11 @@ func planEpisodeRenumber(existing []existingEpisode, targets []EpisodeResult, st
 
 	var moves []episodeMove
 	targetSlots := make(map[episodeSlot]bool, len(targets))
+	targetAt := make(map[episodeSlot]int, len(targets))
 	lastEpisode := make(map[int]int)
-	for _, target := range targets {
+	for t, target := range targets {
 		targetSlots[episodeSlot{target.SeasonNumber, target.EpisodeNumber}] = true
+		targetAt[episodeSlot{target.SeasonNumber, target.EpisodeNumber}] = t
 		lastEpisode[target.SeasonNumber] = max(lastEpisode[target.SeasonNumber], target.EpisodeNumber)
 	}
 	for i, row := range existing {
@@ -192,6 +201,12 @@ func planEpisodeRenumber(existing []existingEpisode, targets []EpisodeResult, st
 		}
 		if !targetSlots[episodeSlot{row.Season, row.Episode}] {
 			continue
+		}
+		if t, ok := targetAt[episodeSlot{row.Season, row.Episode}]; ok && row.Fallback {
+			if into, claimed := claimOf[t]; claimed {
+				merges = append(merges, episodeMerge{From: row.ContentID, Into: existing[into].ContentID})
+				continue
+			}
 		}
 		lastEpisode[row.Season]++
 		parked = append(parked, episodeMove{
@@ -348,7 +363,8 @@ func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID s
 		return fmt.Errorf("renumber: lock series %s: %w", seriesID, err)
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT content_id, season_number, episode_number, tvdb_id, tmdb_id, imdb_id
+		SELECT content_id, season_number, episode_number, tvdb_id, tmdb_id, imdb_id,
+		       metadata_source = 'scanner_fallback'
 		FROM episodes WHERE series_id = $1`, seriesID)
 	if err != nil {
 		return fmt.Errorf("renumber: list episodes of %s: %w", seriesID, err)
@@ -357,7 +373,7 @@ func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID s
 	for rows.Next() {
 		var row existingEpisode
 		var tvdb, tmdb, imdb string
-		if err := rows.Scan(&row.ContentID, &row.Season, &row.Episode, &tvdb, &tmdb, &imdb); err != nil {
+		if err := rows.Scan(&row.ContentID, &row.Season, &row.Episode, &tvdb, &tmdb, &imdb, &row.Fallback); err != nil {
 			rows.Close()
 			return fmt.Errorf("renumber: scan episode: %w", err)
 		}
@@ -369,9 +385,6 @@ func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID s
 		return fmt.Errorf("renumber: list episodes of %s: %w", seriesID, err)
 	}
 	plan := planEpisodeRenumber(existing, targets, structureKey)
-	if len(plan.Moves) == 0 && len(plan.Merges) == 0 {
-		return nil
-	}
 	// Duplicates go first: a moving row may need the composed ID a duplicate
 	// still holds, and state merged into a row then moves with it.
 	if err := applyEpisodeMerges(ctx, tx, seriesID, plan.Merges); err != nil {
@@ -380,11 +393,22 @@ func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID s
 	if err := applyEpisodeRenumber(ctx, tx, seriesID, plan.Moves); err != nil {
 		return err
 	}
+	// Moved rows took their files along; files named by number go back to
+	// the episode their names give. This also runs when nothing moved, so a
+	// refresh repairs links an earlier order left behind.
+	relinked, retired, err := s.relinkSeriesFiles(ctx, tx, seriesID)
+	if err != nil {
+		return err
+	}
+	if len(plan.Moves) == 0 && len(plan.Merges) == 0 && relinked == 0 {
+		return nil
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("renumber: commit: %w", err)
 	}
 	slog.InfoContext(ctx, "metadata: renumbered episodes", "component", "metadata",
-		"series_id", seriesID, "provider", structureKey, "moved", len(plan.Moves), "merged", len(plan.Merges))
+		"series_id", seriesID, "provider", structureKey, "moved", len(plan.Moves), "merged", len(plan.Merges),
+		"files_relinked", relinked, "fallbacks_retired", retired)
 	return nil
 }
 
@@ -437,4 +461,206 @@ func applyEpisodeMerges(ctx context.Context, tx pgx.Tx, seriesID string, merges 
 		return fmt.Errorf("renumber merge: %w", err)
 	}
 	return catalog.RecomputeSeriesEpisodeMembershipDenorms(ctx, tx, []string{seriesID})
+}
+
+// seriesFileLink is a present file of a series with the numbers its name
+// gives (Numbered when the name has a season and an episode number).
+type seriesFileLink struct {
+	ID        int
+	Path      string
+	FolderID  int
+	EpisodeID string
+	Season    int
+	Episode   int
+	Numbered  bool
+}
+
+// fileRelink moves a file's link From one episode row To another; an empty
+// To clears the link.
+type fileRelink struct {
+	FileID          int
+	From, To        string
+	Season, Episode int
+}
+
+// planFileRelinks points every number-named file at the row its numbers name
+// in rows (slot → content ID). A renumber moves rows with their links, but a
+// file named S02E01 is season 2 episode 1 of the order its name follows,
+// whatever row carried it before. Files linked by air date or title keep
+// their row. A file with no row at its numbers is unlinked, unless it sits on
+// a fallback placeholder (its own episode until an order places it). A
+// fallback row whose files all moved to one real episode merges into it.
+func planFileRelinks(files []seriesFileLink, rows map[episodeSlot]string, fallback map[string]bool) ([]fileRelink, []episodeMerge) {
+	var relinks []fileRelink
+	kept := make(map[string]bool)
+	movedTo := make(map[string]map[string]bool)
+	for _, file := range files {
+		if !file.Numbered {
+			if file.EpisodeID != "" {
+				kept[file.EpisodeID] = true
+			}
+			continue
+		}
+		to, ok := rows[episodeSlot{file.Season, file.Episode}]
+		if !ok && fallback[file.EpisodeID] {
+			to = file.EpisodeID
+		}
+		if to == file.EpisodeID {
+			if to != "" {
+				kept[to] = true
+			}
+			continue
+		}
+		relinks = append(relinks, fileRelink{FileID: file.ID, From: file.EpisodeID, To: to, Season: file.Season, Episode: file.Episode})
+		if fallback[file.EpisodeID] {
+			if movedTo[file.EpisodeID] == nil {
+				movedTo[file.EpisodeID] = make(map[string]bool)
+			}
+			movedTo[file.EpisodeID][to] = true
+		}
+	}
+	var merges []episodeMerge
+	for from, targets := range movedTo {
+		if kept[from] || len(targets) != 1 {
+			continue
+		}
+		for into := range targets {
+			if into != "" && !fallback[into] {
+				merges = append(merges, episodeMerge{From: from, Into: into})
+			}
+		}
+	}
+	sort.Slice(merges, func(i, j int) bool { return merges[i].From < merges[j].From })
+	return relinks, merges
+}
+
+// applyFileRelinks moves each file's link as planned inside tx and keeps the
+// episode library memberships in step: the new episode joins the file's
+// library, the old one leaves it when no other present file serves it there.
+// A cleared link keeps the file's own numbers so the next link pass finds or
+// creates its episode.
+func applyFileRelinks(ctx context.Context, tx pgx.Tx, seriesID string, relinks []fileRelink) error {
+	if len(relinks) == 0 {
+		return nil
+	}
+	var oldIDs []string
+	for _, relink := range relinks {
+		var to any
+		if relink.To != "" {
+			to = relink.To
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE media_files SET episode_id = $2, season_number = $3, episode_number = $4, updated_at = now()
+			WHERE id = $1 AND content_id = $5`,
+			relink.FileID, to, relink.Season, relink.Episode, seriesID); err != nil {
+			return fmt.Errorf("relink file %d: %w", relink.FileID, err)
+		}
+		if relink.To != "" {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at, first_seen_scan_run_id)
+				SELECT episode_id, media_folder_id, created_at, first_seen_scan_run_id
+				FROM media_files WHERE id = $1 AND missing_since IS NULL
+				ON CONFLICT (episode_id, media_folder_id) DO NOTHING`, relink.FileID); err != nil {
+				return fmt.Errorf("relink file %d: library membership: %w", relink.FileID, err)
+			}
+		}
+		if relink.From != "" {
+			oldIDs = append(oldIDs, relink.From)
+		}
+	}
+	if len(oldIDs) > 0 {
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM episode_libraries el
+			WHERE el.episode_id IN `+catalog.SpanReachSQL("$1::text[]")+`
+			  AND `+catalog.NoServingEpisodeFileSQL, oldIDs); err != nil {
+			return fmt.Errorf("relink files: drop stale library memberships: %w", err)
+		}
+	}
+	if _, err := catalog.InsertSpannedEpisodeMemberships(ctx, tx, "mf.content_id = $1", seriesID); err != nil {
+		return err
+	}
+	return catalog.RecomputeSeriesEpisodeMembershipDenorms(ctx, tx, []string{seriesID})
+}
+
+// loadSeriesFileLinks reads the series' present files inside tx with the
+// numbers their names give.
+func (s *MetadataService) loadSeriesFileLinks(ctx context.Context, tx pgx.Tx, seriesID string) ([]seriesFileLink, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT id, file_path, media_folder_id, COALESCE(episode_id, '')
+		FROM media_files
+		WHERE content_id = $1 AND missing_since IS NULL AND extra_id IS NULL
+		ORDER BY id`, seriesID)
+	if err != nil {
+		return nil, fmt.Errorf("relink: list files of %s: %w", seriesID, err)
+	}
+	var files []*models.MediaFile
+	for rows.Next() {
+		file := &models.MediaFile{}
+		if err := rows.Scan(&file.ID, &file.FilePath, &file.MediaFolderID, &file.EpisodeID); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("relink: scan file: %w", err)
+		}
+		files = append(files, file)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("relink: list files of %s: %w", seriesID, err)
+	}
+	rootsByFolder, err := s.configuredNamingRootsForFiles(ctx, files)
+	if err != nil {
+		return nil, err
+	}
+	links := make([]seriesFileLink, 0, len(files))
+	for _, file := range files {
+		link := seriesFileLink{ID: file.ID, Path: file.FilePath, FolderID: file.MediaFolderID, EpisodeID: file.EpisodeID}
+		if hints := naming.ParseFilename(file.FilePath, "series", rootsByFolder[file.MediaFolderID]...); hints != nil &&
+			hints.SeasonKnown && hints.EpisodeNum > 0 && hints.AirDate == "" {
+			link.Season, link.Episode, link.Numbered = hints.SeasonNum, hints.EpisodeNum, true
+		}
+		links = append(links, link)
+	}
+	return links, nil
+}
+
+// relinkSeriesFiles points the series' number-named files at the episodes
+// their names give and retires emptied fallback rows (planFileRelinks),
+// inside tx, after the rows took their new numbers.
+func (s *MetadataService) relinkSeriesFiles(ctx context.Context, tx pgx.Tx, seriesID string) (int, int, error) {
+	files, err := s.loadSeriesFileLinks(ctx, tx, seriesID)
+	if err != nil || len(files) == 0 {
+		return 0, 0, err
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT content_id, season_number, episode_number, metadata_source = 'scanner_fallback'
+		FROM episodes WHERE series_id = $1`, seriesID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("relink: list episodes of %s: %w", seriesID, err)
+	}
+	slots := make(map[episodeSlot]string)
+	fallback := make(map[string]bool)
+	for rows.Next() {
+		var id string
+		var slot episodeSlot
+		var isFallback bool
+		if err := rows.Scan(&id, &slot.season, &slot.episode, &isFallback); err != nil {
+			rows.Close()
+			return 0, 0, fmt.Errorf("relink: scan episode: %w", err)
+		}
+		slots[slot] = id
+		if isFallback {
+			fallback[id] = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, 0, fmt.Errorf("relink: list episodes of %s: %w", seriesID, err)
+	}
+	relinks, merges := planFileRelinks(files, slots, fallback)
+	if err := applyFileRelinks(ctx, tx, seriesID, relinks); err != nil {
+		return 0, 0, err
+	}
+	if err := applyEpisodeMerges(ctx, tx, seriesID, merges); err != nil {
+		return 0, 0, err
+	}
+	return len(relinks), len(merges), nil
 }

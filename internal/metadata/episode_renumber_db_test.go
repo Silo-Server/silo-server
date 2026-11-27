@@ -303,3 +303,122 @@ func TestApplyEpisodeRenumberTakenIDDB(t *testing.T) {
 		t.Fatalf("progress on %s = %d (%v), want 300", moved, position, err)
 	}
 }
+
+// After an order change and back, S02E01.mkv rode its row to S17E1 and a
+// placeholder row held S03E22.mkv. Relinking puts each file on the episode
+// its name gives, moves library membership with it, and retires the emptied
+// placeholder into the real episode with its watch progress.
+func TestRelinkSeriesFilesDB(t *testing.T) {
+	pool := chainBuiltinTestPool(t)
+	ctx := t.Context()
+	items := catalog.NewItemRepository(pool)
+	episodes := catalog.NewEpisodeRepository(pool)
+	svc := &MetadataService{folderRepo: catalog.NewFolderRepository(pool)}
+
+	nonce := time.Now().UnixNano() % 100_000_000
+	tvdb := fmt.Sprintf("%d", 640_000_000+nonce)
+	series := "series-tvdb-" + tvdb
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, series)
+	})
+	if err := items.Upsert(ctx, &models.MediaItem{
+		ContentID: series, Type: "series", Title: "Bleach", Status: "matched", TvdbID: tvdb,
+		DefaultMetadataLanguage: "en",
+		Studios:                 []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s2e1, _ := contentid.ForEpisode(series, 2, 1)
+	s17e1, _ := contentid.ForEpisode(series, 17, 1)
+	s3e22, _ := contentid.ForEpisode(series, 3, 22)
+	placeholder, _ := contentid.ForEpisode(series, 3, 42)
+	for _, e := range []struct {
+		id, source     string
+		season, number int
+	}{{s2e1, "provider", 2, 1}, {s17e1, "provider", 17, 1}, {s3e22, "provider", 3, 22}, {placeholder, "scanner_fallback", 3, 42}} {
+		if err := episodes.Upsert(ctx, &models.Episode{
+			ContentID: e.id, SeriesID: series, SeasonNumber: e.season, EpisodeNumber: e.number,
+			Title: "E", DefaultMetadataLanguage: "en", MetadataSource: e.source,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	folder := insertTestFolder(t, pool, "series")
+	fileOn := func(name, episodeID string, season, number int) int {
+		t.Helper()
+		var id int
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO media_files (media_folder_id, file_path, file_size, content_id, episode_id, season_number, episode_number)
+			VALUES ($1, $2, 1, $3, $4, $5, $6) RETURNING id`,
+			folder, fmt.Sprintf("/tv/Bleach-%d/%s", nonce, name), series, episodeID, season, number).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO episode_libraries (episode_id, media_folder_id) VALUES ($1, $2)
+			ON CONFLICT DO NOTHING`, episodeID, folder); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_files WHERE id = $1`, id) })
+		return id
+	}
+	rode := fileOn("Season 02/Bleach - S02E01.mkv", s17e1, 17, 1)
+	parked := fileOn("Season 03/Bleach - S03E22.mkv", placeholder, 3, 42)
+
+	var userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
+		fmt.Sprintf("relink-user-%d", nonce)).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM user_watch_progress WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(bg, `DELETE FROM users WHERE id = $1`, userID)
+	})
+	profileID := fmt.Sprintf("00000000-0000-4000-8000-%012d", nonce)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, updated_at)
+		VALUES ($1, $2, $3, 300, 1440, now())`, userID, profileID, placeholder); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	relinked, retired, err := svc.relinkSeriesFiles(ctx, tx, series)
+	if err != nil {
+		t.Fatalf("relinkSeriesFiles = %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if relinked != 2 || retired != 1 {
+		t.Fatalf("relinked %d, retired %d; want 2, 1", relinked, retired)
+	}
+	for _, want := range []struct {
+		file    int
+		episode string
+	}{{rode, s2e1}, {parked, s3e22}} {
+		var got string
+		if err := pool.QueryRow(ctx, `SELECT episode_id FROM media_files WHERE id = $1`, want.file).Scan(&got); err != nil || got != want.episode {
+			t.Fatalf("file %d on %q (%v), want %s", want.file, got, err, want.episode)
+		}
+	}
+	var members []string
+	if err := pool.QueryRow(ctx, `SELECT array_agg(episode_id ORDER BY episode_id) FROM episode_libraries WHERE media_folder_id = $1`,
+		folder).Scan(&members); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{s2e1, s3e22}; fmt.Sprint(members) != fmt.Sprint(want) {
+		t.Fatalf("library members = %v, want %v", members, want)
+	}
+	var position int
+	if err := pool.QueryRow(ctx, `SELECT position_seconds FROM user_watch_progress WHERE user_id = $1 AND media_item_id = $2`,
+		userID, s3e22).Scan(&position); err != nil || position != 300 {
+		t.Fatalf("placeholder progress on %s = %d (%v), want 300", s3e22, position, err)
+	}
+	var left int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM episodes WHERE content_id = $1`, placeholder).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("placeholder rows left = %d (%v), want 0", left, err)
+	}
+}

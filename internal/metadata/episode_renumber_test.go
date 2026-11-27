@@ -71,6 +71,22 @@ func TestPlanEpisodeRenumber(t *testing.T) {
 			},
 		},
 		{
+			// A placeholder the scanner made for S03E01.mkv while no order had
+			// that episode stands in for the episode at those numbers. When an
+			// order brings that episode back, the placeholder merges into it
+			// (files and watch state) instead of being parked.
+			name: "fallback row in a moving row's way merges into it",
+			existing: []existingEpisode{
+				{ContentID: "fb", Season: 3, Episode: 1, Fallback: true},
+				{ContentID: "c", Season: 17, Episode: 1, IDs: map[string]string{"tvdb": "t3"}},
+			},
+			targets: []EpisodeResult{renumberTarget(3, 1, map[string]string{"tvdb": "t3"})},
+			want: []episodeMove{
+				{ContentID: "c", FromSeason: 17, FromEpisode: 1, ToSeason: 3, ToEpisode: 1},
+			},
+			merges: []episodeMerge{{From: "fb", Into: "c"}},
+		},
+		{
 			// Bleach after the blend: TVDB's S2E1 row and the old TMDB-numbered
 			// S1E21 row are the same episode, as the bridged TMDB ID shows. The
 			// TVDB row stays; the duplicate merges into it.
@@ -89,6 +105,70 @@ func TestPlanEpisodeRenumber(t *testing.T) {
 			got := planEpisodeRenumber(tc.existing, tc.targets, "tvdb")
 			if !reflect.DeepEqual(got.Moves, tc.want) || !reflect.DeepEqual(got.Merges, tc.merges) {
 				t.Fatalf("planEpisodeRenumber =\n%+v\nwant moves\n%+v\nmerges\n%+v", got, tc.want, tc.merges)
+			}
+		})
+	}
+}
+
+func TestPlanFileRelinks(t *testing.T) {
+	rows := map[episodeSlot]string{{1, 1}: "s1e1", {2, 1}: "s2e1", {17, 1}: "s17e1"}
+	fallback := map[string]bool{"fb-s3e22": true}
+	cases := []struct {
+		name    string
+		files   []seriesFileLink
+		relinks []fileRelink
+		merges  []episodeMerge
+	}{
+		{
+			// A renumber carried the row S02E01.mkv was linked to off to S17:
+			// the file goes back to the episode its name says.
+			name:    "file follows its name, not its old row",
+			files:   []seriesFileLink{{ID: 1, EpisodeID: "s17e1", Season: 2, Episode: 1, Numbered: true}},
+			relinks: []fileRelink{{FileID: 1, From: "s17e1", To: "s2e1", Season: 2, Episode: 1}},
+		},
+		{
+			name:  "file already on its episode stays",
+			files: []seriesFileLink{{ID: 1, EpisodeID: "s1e1", Season: 1, Episode: 1, Numbered: true}},
+		},
+		{
+			// Air-date and bare-number links were made by identity, not by the
+			// numbers in the name, so a moving row keeps them.
+			name:  "file linked by air date is left alone",
+			files: []seriesFileLink{{ID: 1, EpisodeID: "s17e1"}},
+		},
+		{
+			// No episode has the file's numbers yet: the link is cleared so the
+			// next link pass creates or finds the row.
+			name:    "file whose numbers no episode has is unlinked",
+			files:   []seriesFileLink{{ID: 1, EpisodeID: "s17e1", Season: 9, Episode: 9, Numbered: true}},
+			relinks: []fileRelink{{FileID: 1, From: "s17e1", To: "", Season: 9, Episode: 9}},
+		},
+		{
+			// A placeholder made for a file no order placed is retired once its
+			// only file reaches a real episode: its watch state merges there.
+			name:    "emptied fallback row merges into the file's episode",
+			files:   []seriesFileLink{{ID: 1, EpisodeID: "fb-s3e22", Season: 2, Episode: 1, Numbered: true}},
+			relinks: []fileRelink{{FileID: 1, From: "fb-s3e22", To: "s2e1", Season: 2, Episode: 1}},
+			merges:  []episodeMerge{{From: "fb-s3e22", Into: "s2e1"}},
+		},
+		{
+			// A placeholder is the file's episode while no order has one; a
+			// renumber that parked it does not unlink its file.
+			name: "fallback row that keeps a file stays",
+			files: []seriesFileLink{
+				{ID: 1, EpisodeID: "fb-s3e22", Season: 2, Episode: 1, Numbered: true},
+				{ID: 2, EpisodeID: "fb-s3e22", Season: 3, Episode: 22, Numbered: true},
+			},
+			relinks: []fileRelink{
+				{FileID: 1, From: "fb-s3e22", To: "s2e1", Season: 2, Episode: 1},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			relinks, merges := planFileRelinks(tc.files, rows, fallback)
+			if !reflect.DeepEqual(relinks, tc.relinks) || !reflect.DeepEqual(merges, tc.merges) {
+				t.Fatalf("planFileRelinks =\n%+v\n%+v\nwant\n%+v\n%+v", relinks, merges, tc.relinks, tc.merges)
 			}
 		})
 	}
