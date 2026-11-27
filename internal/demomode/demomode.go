@@ -14,38 +14,32 @@ import (
 // whose visitors share one account that is not an administrator.
 const SettingKey = "demo.enabled"
 
-// UsernameKey is the server setting naming the non-administrator account
-// that public demo login signs visitors into when demo mode is enabled.
+// UsernameKey is the server setting naming the account, not an
+// administrator, that public demo sign-in (POST /api/v2/auth/demo) signs
+// visitors in to. Like SettingKey it is set only by the operator of a public
+// demo; on any other server it is unset and demo sign-in is refused.
 const UsernameKey = "demo.username"
 
 // OnValue is the only stored value that turns demo mode on. Every reader
 // compares the raw stored value with it, untrimmed.
 const OnValue = "true"
 
-// DemoAccount reads whether public demo login is enabled and which account
-// username it targets. Unlike Setting.Get, callers that issue or refresh demo
-// sessions should pass a direct settings store so toggling or retargeting demo
-// mode takes effect immediately without remembered fallback values.
-func DemoAccount(ctx context.Context, store Reader) (username string, enabled bool, err error) {
+// DemoAccount reads whether demo mode is on and, while it is, which account
+// public demo sign-in uses: demo.username, trimmed, or "" when it is not set.
+// A failed read is returned, never guessed.
+func DemoAccount(ctx context.Context, store Reader) (username string, on bool, err error) {
 	if store == nil {
 		return "", false, nil
 	}
-	rawEnabled, err := store.Get(ctx, SettingKey)
-	if err != nil {
+	enabled, err := store.Get(ctx, SettingKey)
+	if err != nil || enabled != OnValue {
 		return "", false, err
 	}
-	if rawEnabled != OnValue {
-		return "", false, nil
-	}
-	rawUsername, err := store.Get(ctx, UsernameKey)
+	username, err = store.Get(ctx, UsernameKey)
 	if err != nil {
-		return "", false, err
+		return "", true, err
 	}
-	username = strings.TrimSpace(rawUsername)
-	if username == "" {
-		return "", false, nil
-	}
-	return username, true, nil
+	return strings.TrimSpace(username), true, nil
 }
 
 // Reader reads one server setting.

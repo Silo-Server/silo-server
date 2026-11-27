@@ -10,11 +10,6 @@ const (
 	// session bound to one profile, with no admin or account-management
 	// powers, that ends at AbsoluteExpiresAt.
 	SessionPurposeRemotePlayback = "remote_playback"
-	// SessionPurposeDemo is a public demo sign-in: a temporary non-admin
-	// session for the configured demo account that is restricted to itself,
-	// ends at AbsoluteExpiresAt, and stops working as soon as demo mode is
-	// turned off, retargeted, or the account is promoted or disabled.
-	SessionPurposeDemo = "demo"
 )
 
 // AuthSession represents a row in the auth_sessions table.
@@ -51,8 +46,8 @@ type AuthSession struct {
 	// (auth_sessions.via_device_sign_in). Written once at creation;
 	// auth.LimitedToItself reads the stored value.
 	ViaDeviceSignIn bool
-	// Purpose is SessionPurposeAccount, SessionPurposeRemotePlayback or
-	// SessionPurposeDemo; empty is read as an account session.
+	// Purpose is SessionPurposeAccount or SessionPurposeRemotePlayback; empty
+	// is read as an account session.
 	Purpose string
 	// BoundProfileID is the only profile a remote-playback session may act
 	// as; empty for an account session.
@@ -65,9 +60,4 @@ type AuthSession struct {
 // IsRemotePlayback reports whether the session is a remote-playback handoff.
 func (s *AuthSession) IsRemotePlayback() bool {
 	return s != nil && s.Purpose == SessionPurposeRemotePlayback
-}
-
-// IsDemo reports whether the session was opened through public demo login.
-func (s *AuthSession) IsDemo() bool {
-	return s != nil && s.Purpose == SessionPurposeDemo
 }

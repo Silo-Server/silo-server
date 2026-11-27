@@ -1193,6 +1193,26 @@ setting, sign-out takes the demo path. An expired access token revokes nothing.
 `account`, `api-keys`, `auth`, `device-login`, `notifications` or `profiles` that a
 non-administrator can call is neither demo-restricted nor listed, with its reason, as allowed.
 
+### Demo sign-in
+
+A public demo can also let a visitor in without typing the shared account's password, which
+is how a TV app offers "Try the demo". Only the operator of a public demo sets this up: the
+`demo.username` server setting names the shared account, which must exist, be enabled, not
+be an administrator and hold no temporary password. Neither setting is in the admin
+settings, so no other server offers demo sign-in.
+
+- `GET /api/v2/auth/demo/capability` (`getDemoLoginCapability`, public) answers `available`
+  only while `demo.enabled` is on and `demo.username` is set, `not_configured` while demo
+  mode is on without a demo account, and `disabled` otherwise, including when the settings
+  can't be read. It does not check the named account; sign-in does.
+- `POST /api/v2/auth/demo` (`demoLogin`, public, empty JSON object body) answers the login
+  token pair. The session it opens is the one the account's password opens: demo mode
+  restricts it exactly as described above, and turning demo mode off does not end it. A server that
+  is not a public demo answers `409 capability_disabled`, and a demo whose account can't
+  be signed in to answers `409 capability_not_configured`. It has its own per-address rate
+  limit (`demo_login`), so demo visitors do not spend the address's password sign-in
+  attempts.
+
 ## Policy discovery
 
 `GET /api/v2/policy/capability` reports `enabled`, `editor_available`,

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
-	"github.com/Silo-Server/silo-server/internal/demomode"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -311,11 +309,11 @@ type SessionAuthority struct {
 	// Role is the account's current role, or "user" for a remote-playback
 	// session whatever the account's role is.
 	Role string
-	// Purpose is the session's purpose (models.SessionPurposeAccount,
-	// models.SessionPurposeRemotePlayback or models.SessionPurposeDemo).
+	// Purpose is the session's purpose (models.SessionPurposeAccount or
+	// models.SessionPurposeRemotePlayback).
 	Purpose string
 	// BoundProfileID is the only profile a remote-playback session may act
-	// as; empty for an ordinary sign-in or demo session.
+	// as; empty for an ordinary sign-in.
 	BoundProfileID string
 }
 
@@ -324,27 +322,17 @@ func (a SessionAuthority) IsRemotePlayback() bool {
 	return a.Purpose == models.SessionPurposeRemotePlayback
 }
 
-// IsDemo reports whether the session was opened through public demo login.
-func (a SessionAuthority) IsDemo() bool {
-	return a.Purpose == models.SessionPurposeDemo
-}
-
 // Narrow applies the session's authority to claims read from one of its
 // tokens. A remote-playback session acts as its bound profile with the
-// account role "user", whatever its token says; a demo session carries the
-// demo session purpose from its row.
+// account role "user", whatever its token says: tokens an older release
+// issued before the session was bound say nothing about it.
 func (a SessionAuthority) Narrow(claims *Claims) {
-	if claims == nil {
+	if claims == nil || !a.IsRemotePlayback() {
 		return
 	}
-	switch {
-	case a.IsRemotePlayback():
-		claims.Role = models.RoleUser
-		claims.SessionPurpose = models.SessionPurposeRemotePlayback
-		claims.ProfileID = a.BoundProfileID
-	case a.IsDemo():
-		claims.SessionPurpose = models.SessionPurposeDemo
-	}
+	claims.Role = models.RoleUser
+	claims.SessionPurpose = models.SessionPurposeRemotePlayback
+	claims.ProfileID = a.BoundProfileID
 }
 
 // ActiveSession reports whether a session of account userID is active, as
@@ -356,21 +344,13 @@ func (a SessionAuthority) Narrow(claims *Claims) {
 // pairing one account with another account's session authenticates nobody.
 // For an impersonation session the account is the one being viewed as.
 // active is false, with no error, for a missing, revoked or expired session,
-// a session of another account, a remote-playback session that names no
-// profile, and a demo session whose account is disabled, promoted to admin,
-// holding a temporary password, or no longer the active configured demo
-// account.
+// a session of another account, and a remote-playback session that names no
+// profile.
 func (r *SessionRepository) ActiveSession(ctx context.Context, id string, userID int) (authority SessionAuthority, active bool, err error) {
-	query := `SELECT u.role, u.username, u.enabled, u.password_change_required, s.purpose, COALESCE(s.bound_profile_id, ''),
-		CASE WHEN s.purpose = $3 THEN COALESCE((SELECT value FROM server_settings WHERE key = $4), '') ELSE '' END,
-		CASE WHEN s.purpose = $3 THEN COALESCE((SELECT value FROM server_settings WHERE key = $5), '') ELSE '' END
-		FROM auth_sessions s
+	query := `SELECT u.role, s.purpose, COALESCE(s.bound_profile_id, '') FROM auth_sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.id = $1 AND s.user_id = $2 AND s.revoked_at IS NULL AND s.expires_at > NOW()`
-	var username, demoEnabled, demoUsername string
-	var userEnabled, passwordChangeRequired bool
-	err = r.pool.QueryRow(ctx, query, id, userID, models.SessionPurposeDemo, demomode.SettingKey, demomode.UsernameKey).
-		Scan(&authority.Role, &username, &userEnabled, &passwordChangeRequired, &authority.Purpose, &authority.BoundProfileID, &demoEnabled, &demoUsername)
+	err = r.pool.QueryRow(ctx, query, id, userID).Scan(&authority.Role, &authority.Purpose, &authority.BoundProfileID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SessionAuthority{}, false, nil
 	}
@@ -382,13 +362,6 @@ func (r *SessionRepository) ActiveSession(ctx context.Context, id string, userID
 			return SessionAuthority{}, false, nil
 		}
 		authority.Role = models.RoleUser
-	}
-	if authority.IsDemo() {
-		demoUsername = strings.TrimSpace(demoUsername)
-		if !userEnabled || passwordChangeRequired || authority.Role == models.RoleAdmin ||
-			demoEnabled != demomode.OnValue || demoUsername == "" || !strings.EqualFold(username, demoUsername) {
-			return SessionAuthority{}, false, nil
-		}
 	}
 	return authority, true, nil
 }

@@ -100,26 +100,6 @@ func (reg *Registry) limitedLoginSessionPage(ctx context.Context, cursors *Curso
 	return out, nil
 }
 
-// ownLoginSessionPage is listSessions for a public demo login session.
-// Visitors share one account, so a demo session sees only its own live
-// session and never learns the IDs or count of other visitors' sessions.
-func (reg *Registry) ownLoginSessionPage(ctx context.Context, claims *auth.Claims, in *LoginSessionListInput) (*LoginSessionCollectionOutput, error) {
-	if in.Cursor != "" {
-		return nil, NewProblem(TypeInvalidCursor, "The cursor is malformed, tampered with, or belongs to a different query.")
-	}
-	current, err := reg.deps.Sessions.CurrentLoginSession(ctx, claims.UserID, claims.SessionID)
-	if err != nil {
-		return nil, serviceProblem(err)
-	}
-	if current == nil {
-		return nil, NewProblem(TypeSessionExpired, "This login session has ended.")
-	}
-	own := loginSessionView(current, claims.SessionID)
-	out := &LoginSessionCollectionOutput{Body: LoginSessionCollection{Collection: Paginated([]LoginSession{own}, "")}}
-	out.Body.CurrentSession.Value = &own
-	return out, nil
-}
-
 // demoVisitorListing reports whether listSessions answers the caller with
 // limitedLoginSessionPage because demo mode restricts it. Demo visitors share
 // one account, so its other sessions are other visitors': each sees them as a

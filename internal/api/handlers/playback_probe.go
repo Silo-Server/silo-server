@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
@@ -46,11 +45,7 @@ func (h *PlaybackHandler) PlaybackProbeRedirect(ctx context.Context, user int, s
 		}
 		return "", nil
 	}
-	probeClaims := streamtoken.Claims{PlayMethod: streamtoken.PlayMethodBandwidthProbe, UserID: user}
-	if authClaims := apimw.GetClaims(ctx); authClaims != nil && authClaims.IsDemo() {
-		probeClaims.DemoAuthSessionID = authClaims.SessionID
-	}
-	token, err := streamtoken.Sign(probeClaims, h.JWTSecret, 2*time.Minute)
+	token, err := streamtoken.Sign(streamtoken.Claims{PlayMethod: streamtoken.PlayMethodBandwidthProbe, UserID: user}, h.JWTSecret, 2*time.Minute)
 	if err != nil {
 		return "", err
 	}

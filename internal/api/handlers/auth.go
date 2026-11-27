@@ -163,15 +163,17 @@ type DemoLoginInput struct {
 	IP         string
 }
 
-// DemoLogin opens a demo-scoped login session for the configured public demo
-// account when demo mode is enabled. v2 demoLogin calls it; a failure is an
-// *APIError.
+// DemoLogin signs a visitor in to the public demo account
+// (auth.Service.DemoLogin). v2 demoLogin calls it. auth.ErrDemoLoginDisabled
+// and auth.ErrDemoLoginNotConfigured are returned as they are, for the caller
+// to answer with the capability state; any other failure is an *APIError.
 func (h *AuthHandler) DemoLogin(ctx context.Context, in DemoLoginInput) (TokenPairView, error) {
 	pair, user, err := h.service.DemoLogin(ctx, in.DeviceName, in.IP)
+	if errors.Is(err, auth.ErrDemoLoginDisabled) || errors.Is(err, auth.ErrDemoLoginNotConfigured) {
+		return TokenPairView{}, err
+	}
 	if err != nil {
-		if errors.Is(err, auth.ErrDemoLoginDisabled) {
-			return TokenPairView{}, apiError(http.StatusForbidden, "demo_login_disabled", "Demo login is not available on this server")
-		}
+		slog.ErrorContext(ctx, "demo sign-in failed", "component", "auth", "error", err)
 		return TokenPairView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
 	return TokenPairView{

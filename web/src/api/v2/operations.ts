@@ -334,6 +334,7 @@ export const v2Operations = {
   "GET /api/v2/api-keys/scopes": "getPersonalAPIKeyScopes",
   "GET /api/v2/artwork/{key}": "getArtwork",
   "GET /api/v2/audio-prefs/{series_id}": "getAudioPreference",
+  "GET /api/v2/auth/demo/capability": "getDemoLoginCapability",
   "GET /api/v2/auth/device": "getDeviceLogin",
   "GET /api/v2/auth/device/capability": "getDeviceLoginCapability",
   "GET /api/v2/auth/external-sign-in/capabilities": "getExternalSignInCapabilities",

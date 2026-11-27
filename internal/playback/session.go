@@ -57,9 +57,6 @@ type Session struct {
 	// token; a session rebuilt from the API's server-side recovery card gets the
 	// flag back from that card (RecipeCard.RequireMediaAuthorization).
 	RequireMediaAuthorization bool
-	// DemoAuthSessionID is the auth_sessions.id when the playback session was
-	// opened by a public demo login session; empty for ordinary sessions.
-	DemoAuthSessionID string
 
 	TranscodeNodeURL     string // URL of assigned transcode node (empty = local/integrated)
 	TranscodeTransportID string // remote node process identity; empty means session ID
@@ -611,28 +608,6 @@ func (m *SessionManager) StartSessionWithFiles(
 	return m.StartSessionWithFilesContext(context.Background(), userID, profileID, effectiveFileID, requestedFileID, method, transcodeAudio)
 }
 
-type demoAuthSessionIDContextKey struct{}
-
-// WithDemoAuthSessionID attaches a public demo login session ID to ctx so
-// playback sessions started from that request carry it into signed stream
-// tokens for proxy-side revocation enforcement.
-func WithDemoAuthSessionID(ctx context.Context, sessionID string) context.Context {
-	if sessionID == "" {
-		return ctx
-	}
-	return context.WithValue(ctx, demoAuthSessionIDContextKey{}, sessionID)
-}
-
-// DemoAuthSessionIDFromContext returns the demo login session ID attached to
-// ctx, or empty when the caller is not a public demo session.
-func DemoAuthSessionIDFromContext(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-	id, _ := ctx.Value(demoAuthSessionIDContextKey{}).(string)
-	return id
-}
-
 // StartSessionWithFilesContext creates a new playback session after checking
 // concurrency limits with request-scoped limit lookup.
 func (m *SessionManager) StartSessionWithFilesContext(
@@ -752,7 +727,6 @@ func newSession(
 		DeviceID:               clientInfo.DeviceID,
 		DevicePlatform:         clientInfo.DevicePlatform,
 		IsJellyfinCompat:       clientInfo.IsCompat,
-		DemoAuthSessionID:      DemoAuthSessionIDFromContext(ctx),
 		StartedAt:              now,
 		UpdatedAt:              now,
 		LastActivityAt:         now,

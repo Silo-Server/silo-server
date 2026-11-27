@@ -104,11 +104,6 @@ type Claims struct {
 	UserID      int    `json:"uid,omitempty"`
 	ProfileID   string `json:"pid,omitempty"`
 	MediaFileID int    `json:"mfid,omitempty"`
-	// DemoAuthSessionID is the auth_sessions.id of a public demo login session
-	// that minted this token; empty for ordinary sessions. Proxy token routes
-	// verify it against the live session store so disabling or retargeting demo
-	// mode immediately stops pre-minted proxy media URLs too.
-	DemoAuthSessionID string `json:"dsid,omitempty"`
 	// OriginalStartedAtUnixNano is decoded directly into int64 by golang-jwt,
 	// preserving nanosecond precision. A future map[string]any decode path must
 	// not pass this through float64, which cannot represent this magnitude exactly.

@@ -245,13 +245,8 @@ func demoMode(ctx context.Context, settings apimw.DemoSettingsReader) (bool, err
 // setting, and then callers refuse the mutation and answer capabilities
 // with the restricted value.
 func demoRestricted(ctx context.Context, settings apimw.DemoSettingsReader) (bool, error) {
-	if claims := claimsFrom(ctx); claims != nil {
-		if claims.IsDemo() {
-			return true, nil
-		}
-		if claims.Role == models.RoleAdmin {
-			return false, nil
-		}
+	if claims := claimsFrom(ctx); claims != nil && claims.Role == models.RoleAdmin {
+		return false, nil
 	}
 	demo, err := demoMode(ctx, settings)
 	if err != nil {

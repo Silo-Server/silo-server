@@ -49,13 +49,9 @@ func (h *ThemeSongsHandler) Authorize(ctx context.Context, identity themesongs.I
 		return themesongs.Authorization{}, err
 	}
 	if h.Router != nil {
-		demoSessionID := ""
-		if claims := apimw.GetClaims(ctx); claims != nil && claims.IsDemo() {
-			demoSessionID = claims.SessionID
-		}
 		result, err := h.Router.Resolve(ctx, themedelivery.Request{
 			File: file, Delivery: delivery, Conversion: themesongs.ConversionFor(file),
-			UserID: identity.UserID, ProfileID: identity.ProfileID, DemoAuthSessionID: demoSessionID,
+			UserID: identity.UserID, ProfileID: identity.ProfileID,
 			AccessPath: netaccess.PathFromContext(ctx), ExpiresAt: expires,
 		})
 		if err != nil {

@@ -42,12 +42,10 @@ type Claims struct {
 	// zero on every other token type.
 	FileID int `json:"file_id,omitempty"`
 	// SessionPurpose is models.SessionPurposeRemotePlayback on the tokens of
-	// a remote-playback handoff session (whose ProfileID is the bound
-	// profile), or models.SessionPurposeDemo on the tokens of a public demo
-	// sign-in; empty for an ordinary sign-in. The session row is the
-	// authority: RequireAuth sets the restricted fields from it, so a token
-	// issued before the session was bound (by an older release) is restricted
-	// the same way.
+	// a remote-playback handoff session, whose ProfileID is the bound
+	// profile; empty for an ordinary sign-in. The session row is the
+	// authority: RequireAuth sets both from it, so a token issued before the
+	// session was bound (by an older release) is restricted the same way.
 	SessionPurpose string `json:"session_purpose,omitempty"`
 	// SessionEndsAt, when set, caps the expiry of tokens generated from
 	// these claims at the session's absolute end. Never serialized.
@@ -93,13 +91,12 @@ const DirectDownloadLinkTTL = 5 * time.Minute
 
 // IsOwnLoginSession reports whether the claims come from the account's own
 // login session: not an API key, not a sessionless token, not an
-// impersonation session, not a remote-playback handoff, and not a public demo
-// session. Operations that act for the person themselves (approving a device,
-// linking or unlinking a sign-in, provider logout, handing over ownership)
-// admit only these.
+// impersonation session and not a remote-playback handoff. Operations that
+// act for the person themselves (approving a device, linking or unlinking a
+// sign-in, provider logout, handing over ownership) admit only these.
 func (c *Claims) IsOwnLoginSession() bool {
 	return c != nil && c.TokenType != TokenTypeAPIKey && c.SessionID != "" && c.ImpersonatorUserID == nil &&
-		!c.IsRemotePlayback() && !c.IsDemo()
+		!c.IsRemotePlayback()
 }
 
 // SkipsProfilePIN reports whether the credential may act as a PIN-locked
@@ -114,11 +111,6 @@ func (c *Claims) SkipsProfilePIN() bool {
 // handoff session.
 func (c *Claims) IsRemotePlayback() bool {
 	return c != nil && c.SessionPurpose == models.SessionPurposeRemotePlayback
-}
-
-// IsDemo reports whether the claims belong to a public demo login session.
-func (c *Claims) IsDemo() bool {
-	return c != nil && c.SessionPurpose == models.SessionPurposeDemo
 }
 
 const PluginAccessCookieName = "silo_plugin_access"

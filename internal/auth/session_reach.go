@@ -43,21 +43,17 @@ func LimitedToItself(viaDeviceSignIn *bool, devicePlatform string) bool {
 }
 
 // limitedToItself applies LimitedToItself to the stored session. A session
-// that is no longer stored, or a public demo login session, is limited: it
-// fails closed.
+// that is no longer stored is limited: it fails closed.
 func (r *SessionRepository) limitedToItself(ctx context.Context, sessionID string) (bool, error) {
 	var via *bool
-	var platform, purpose string
-	err := r.pool.QueryRow(ctx, `SELECT via_device_sign_in, COALESCE(device_platform, ''), purpose
-		FROM auth_sessions WHERE id = $1`, sessionID).Scan(&via, &platform, &purpose)
+	var platform string
+	err := r.pool.QueryRow(ctx, `SELECT via_device_sign_in, COALESCE(device_platform, '')
+		FROM auth_sessions WHERE id = $1`, sessionID).Scan(&via, &platform)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return true, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("reading session reach: %w", err)
-	}
-	if purpose == models.SessionPurposeDemo {
-		return true, nil
 	}
 	return LimitedToItself(via, platform), nil
 }

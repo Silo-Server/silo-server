@@ -2406,9 +2406,6 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 	}
 	mode := withNativeDeliveryFeaturesV3(headerAuthenticatedMediaV3(req.ClientFeatures), req)
 	ctx := playback.WithClientInfo(r.Context(), clientInfo)
-	if claims := apimw.GetClaims(r.Context()); claims != nil && claims.IsDemo() {
-		ctx = playback.WithDemoAuthSessionID(ctx, claims.SessionID)
-	}
 	session, err := h.sessionMgr.StartSessionWithFilesContext(ctx, userID, profileID, effectiveFile.ID, requestedFile.ID, result.PlayMethod, result.TranscodeAudio)
 	if err != nil {
 		return playback.DecisionResponseV3{}, sessionStartErrorV3(err)
@@ -4453,7 +4450,6 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	}
 	url := fmt.Sprintf("/playback/transcode/%s/master.m3u8", session.ID)
 	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, "", ts.RecipeOpts())
-	card.DemoAuthSessionID = session.DemoAuthSessionID
 	card.OriginalStartedAt = session.StartedAt
 	card.StreamLocation = session.StreamLocation
 	card.RoutingNetworkProvider = new(netaccess.PathFromContext(r.Context()).Provider)
@@ -4703,7 +4699,6 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		confirmedToneMapMode = nodeResp.ToneMapMode
 	}
 	card := remoteTranscodeRecipeCardV3(session, file, node.URL, transportID, req, nodeResp, toneMapFilter)
-	card.DemoAuthSessionID = session.DemoAuthSessionID
 	card.RoutingWorkload = string(routingWorkloadV3(result))
 	card.RoutingNetworkProvider = new(netaccess.PathFromContext(r.Context()).Provider)
 	card.RoutingExecutionNodeID = node.ID
