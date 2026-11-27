@@ -177,6 +177,12 @@ func sortLevelInputs(ordered []levelsInput) {
 
 // collectLevelStretches compares the season's envelopes and returns, per file,
 // the stretches its partners share with it.
+// levelAdjacentOffsetToleranceSeconds is how far two runs of one pair may
+// differ in alignment before they are at different offsets: a run measured one
+// frame off the other is the same correspondence, one measured a window off is
+// not.
+const levelAdjacentOffsetToleranceSeconds = 0.5
+
 // levelAdjacentMergeSeconds is the gap within which two shared runs of one pair
 // are one recording. A pair's runs break where a few windows dip under the
 // correlation gate — one encode's quiet passage against another's — and those
@@ -188,12 +194,10 @@ const levelAdjacentMergeSeconds = 2.5
 const levelAdjacentDropDB = 12.0
 
 // mergeAdjacentPairs joins the runs of one pair that a dip in correlation split
-// in two, keeping the length-weighted mean of their correlations. The test is
-// the sound in the gap, not its length alone: two runs of one recording are
-// separated by a passage that is still sounding, only less similar, while a
-// studio logo and the theme after it are separated by silence — so a logo stays
-// its own recording however short the gap. Runs further apart than
-// levelAdjacentMergeSeconds stay apart too.
+// in two, keeping the length-weighted mean of their correlations. Three things
+// keep runs apart: a gap longer than levelAdjacentMergeSeconds, silence in the
+// gap (a studio logo and the theme after it are two recordings, however short
+// the gap between them), and a different alignment between the two traces.
 func mergeAdjacentPairs(env envelope, pairs []levelPair) []levelPair {
 	if len(pairs) < 2 {
 		return pairs
@@ -202,7 +206,10 @@ func mergeAdjacentPairs(env envelope, pairs []levelPair) []levelPair {
 	current := pairs[0]
 	weight := current.End - current.Start
 	for _, pair := range pairs[1:] {
-		if pair.Start-current.End > levelAdjacentMergeSeconds || silenceBetween(env, current, pair) {
+		// Two runs found at different alignments are not one stretch: merging
+		// them would report a partner span that does not cover the second run.
+		sameOffset := math.Abs((pair.PartnerStart-pair.Start)-(current.PartnerStart-current.Start)) <= levelAdjacentOffsetToleranceSeconds
+		if pair.Start-current.End > levelAdjacentMergeSeconds || !sameOffset || silenceBetween(env, current, pair) {
 			merged = append(merged, current)
 			current, weight = pair, pair.End-pair.Start
 			continue

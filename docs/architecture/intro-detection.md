@@ -383,9 +383,9 @@ whose own pairs score 0.82, and unmerged it was lost), the supporting
 correlation gate is 0.72 rather than 0.80 for the same reason, and an opening
 may not start more than 110 seconds after the point the season's other episodes
 start theirs — episode two's reused theme sits 121 seconds later than the
-season's intros. The envelope costs about 2.5 times the decode time of the
-fingerprint (levels 2–8 s per episode against 1–2 s here), which is the price of
-an edge that lands within a frame.
+season's intros. Measuring levels costs about as much as fingerprinting
+(0.9–1.4 s per episode against 1.1–2.1 s here), so the sharper edge is not paid
+for in decode time.
 
 ## Where credits start
 

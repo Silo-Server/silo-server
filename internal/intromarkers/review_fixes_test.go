@@ -182,3 +182,25 @@ func TestSinglePartnerIsHeldToThePairingGate(t *testing.T) {
 		t.Fatal("one partner at 0.92 was rejected; a clear pairing is still an intro")
 	}
 }
+
+func TestMergeAdjacentPairsKeepsDifferentAlignmentsApart(t *testing.T) {
+	// Two runs ten seconds apart at the same alignment are one stretch split
+	// by a quiet passage; two runs at different alignments are two
+	// correspondences, and merging them would report a partner span that does
+	// not cover the second.
+	env := newEnvelope([]float64{60, 60, 60, 60, 50, 60, 60, 60, 60, 60, 60, 60}, LevelsHopSeconds)
+	same := []levelPair{
+		{Start: 10, End: 20, PartnerStart: 30, Correlation: 0.9},
+		{Start: 20.5, End: 30, PartnerStart: 40.5, Correlation: 0.9},
+	}
+	if merged := mergeAdjacentPairs(env, same); len(merged) != 1 {
+		t.Fatalf("one alignment split by a dip became %d runs, want 1", len(merged))
+	}
+	shifted := []levelPair{
+		{Start: 10, End: 20, PartnerStart: 30, Correlation: 0.9},
+		{Start: 20.5, End: 30, PartnerStart: 60, Correlation: 0.9},
+	}
+	if merged := mergeAdjacentPairs(env, shifted); len(merged) != 2 {
+		t.Fatalf("two alignments became %d runs, want 2", len(merged))
+	}
+}

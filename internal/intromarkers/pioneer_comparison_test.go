@@ -30,11 +30,9 @@ func TestPioneerComparison(t *testing.T) {
 	}
 	reference := map[int][2]float64{3: {270.02, 299.17}, 4: {280.41, 299.98}, 5: {187.56, 220.89}, 6: {232.98, 266.60}}
 	candidates := pioneerCandidates(t, dir)
-	ffmpeg := os.Getenv("FFMPEG_PATH")
-	if ffmpeg == "" {
-		ffmpeg = "/usr/local/bin/ffmpeg"
-	}
-	cfg := DefaultConfig(ffmpeg)
+	// An empty path is what DefaultConfig turns into "ffmpeg" on PATH, so a
+	// run needs nothing but PIONEER_DIR unless its ffmpeg is elsewhere.
+	cfg := DefaultConfig(os.Getenv("FFMPEG_PATH"))
 	ctx := context.Background()
 
 	t.Run("envelope", func(t *testing.T) {
