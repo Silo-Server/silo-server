@@ -81,6 +81,13 @@ export function newPasswordHint(policy: PasswordPolicy): string {
   return rules ? `${length} ${rules}` : length;
 }
 
+/** Whether a refused password write names this request body member, as
+ * the server names the new password it refused, so a form can mark that
+ * field. Reads the same first field error passwordErrorMessage shows. */
+export function refusedPasswordMember(err: unknown, member: string): boolean {
+  return err instanceof V2ProblemError && err.problem.errors?.[0]?.location === `body.${member}`;
+}
+
 /** A readable message for a failed password write: a validation problem's
  * first field detail rather than its generic summary. */
 export function passwordErrorMessage(err: unknown, fallback: string): string {

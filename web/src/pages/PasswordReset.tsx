@@ -19,6 +19,7 @@ import {
   newPasswordFieldProblem,
   passwordErrorMessage,
   newPasswordHint,
+  refusedPasswordMember,
   type NewPasswordField,
 } from "@/lib/newPassword";
 import { Button } from "@/components/ui/button";
@@ -198,6 +199,7 @@ function ResetForm({ token }: { token: string }) {
       // committed, so the link is reloaded before another attempt.
       if (err instanceof V2ProblemError && err.problemType === "validation_failed") {
         setError(passwordErrorMessage(err, t("web.auth.passwordReset.setFailed")));
+        if (refusedPasswordMember(err, "password")) setInvalidField("password");
       } else if (err instanceof V2ProblemError && err.status === 404) {
         setLookup({ pending: false, unavailable: true });
       } else {
@@ -240,7 +242,8 @@ function ResetForm({ token }: { token: string }) {
             value={password}
             onChange={(e) => {
               setPassword(e.target.value);
-              if (invalidField === "password") setInvalidField(null);
+              // A mismatch can be corrected here too.
+              setInvalidField(null);
             }}
             aria-invalid={invalidField === "password" ? true : undefined}
             aria-describedby={invalidField === "password" ? "reset-password-error" : undefined}

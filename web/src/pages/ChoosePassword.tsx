@@ -10,6 +10,7 @@ import {
   newPasswordFieldProblem,
   passwordErrorMessage,
   newPasswordHint,
+  refusedPasswordMember,
   type NewPasswordField,
 } from "@/lib/newPassword";
 import { Button } from "@/components/ui/button";
@@ -88,6 +89,7 @@ export default function ChoosePassword() {
       await changePassword.mutateAsync({ current_password: current, new_password: password });
     } catch (err) {
       setError(passwordErrorMessage(err, t("web.auth.choosePassword.changeFailed")));
+      if (refusedPasswordMember(err, "new_password")) setInvalidField("password");
       busy.current = false;
       return;
     }
@@ -164,7 +166,8 @@ export default function ChoosePassword() {
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
-                  if (invalidField === "password") setInvalidField(null);
+                  // A mismatch can be corrected here too.
+                  setInvalidField(null);
                 }}
                 aria-invalid={invalidField === "password" ? true : undefined}
                 aria-describedby={invalidField === "password" ? "choose-password-error" : undefined}

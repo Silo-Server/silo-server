@@ -19,6 +19,7 @@ import {
   newPasswordPolicyProblem,
   newPasswordRuleHint,
   passwordErrorMessage,
+  refusedPasswordMember,
 } from "@/lib/newPassword";
 import { AccountSignInSection } from "./AccountSignInSection";
 
@@ -84,6 +85,7 @@ export default function AccountSettings() {
           ? passwordErrorMessage(error, failed)
           : v2ErrorText(error, failed),
       );
+      if (refusedPasswordMember(error, "new_password")) setInvalidField("new");
     }
   }
 
@@ -144,7 +146,8 @@ export default function AccountSettings() {
                 value={newPassword}
                 onChange={(event) => {
                   setNewPassword(event.target.value);
-                  if (invalidField === "new") setInvalidField(null);
+                  // A mismatch can be corrected here too.
+                  setInvalidField(null);
                 }}
                 aria-invalid={invalidField === "new" ? true : undefined}
                 aria-describedby={

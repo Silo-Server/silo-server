@@ -129,6 +129,9 @@ describe("AccountSettings", () => {
     await user.click(screen.getByRole("button", { name: "Change password" }));
     expect(confirmation).toHaveAttribute("aria-invalid", "true");
     expect(confirmation).toHaveAccessibleDescription("New passwords do not match.");
+    // Correcting the mismatch from the new password clears it too.
+    await user.type(newPassword, "y");
+    expect(confirmation).not.toHaveAttribute("aria-invalid");
     expect(mocks.mutateAsync).not.toHaveBeenCalled();
   });
 
@@ -162,6 +165,11 @@ describe("AccountSettings", () => {
     mocks.mutateAsync.mockRejectedValueOnce(refused);
     await submit();
     expect(screen.getByRole("alert")).toHaveTextContent("Include at least one capital letter.");
+    // The server named the new password, so that field is marked.
+    expect(screen.getByLabelText("New password")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("New password")).toHaveAccessibleDescription(
+      /Include at least one capital letter\.$/,
+    );
 
     mocks.mutateAsync.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await submit();
