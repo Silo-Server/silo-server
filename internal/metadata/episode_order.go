@@ -269,35 +269,42 @@ func writeEpisodeFileNumbers(ctx context.Context, tx pgx.Tx, seriesID, structure
 		seriesID, seasons, numbers, fileSeasons, fileNumbers, providerSeasons, providerNumbers, structureSlug); err != nil {
 		return fmt.Errorf("writing episode file numbers of %s: %w", seriesID, err)
 	}
+	if structureSlug == "" {
+		return nil
+	}
+	// Mark which rows the structure provider listed (episodesOfCurrentNumbering).
+	if _, err := tx.Exec(ctx, `
+		UPDATE episodes e SET unlisted = NOT EXISTS (
+			SELECT 1 FROM unnest($2::int[], $3::int[]) AS v(s, n)
+			WHERE v.s = e.season_number AND v.n = e.episode_number)
+		WHERE e.series_id = $1 AND e.unlisted IS DISTINCT FROM NOT EXISTS (
+			SELECT 1 FROM unnest($2::int[], $3::int[]) AS v(s, n)
+			WHERE v.s = e.season_number AND v.n = e.episode_number)`,
+		seriesID, seasons, numbers); err != nil {
+		return fmt.Errorf("marking the unlisted episodes of %s: %w", seriesID, err)
+	}
 	return nil
 }
 
-// episodesOfCurrentNumbering drops the episodes another provider numbered
-// (provider_numbering) when the series' chosen provider numbered any:
-// rows a renumber parked because that provider does not list them, which
-// would otherwise shift every later bare episode number. Rows without a
-// numbering, such as ones a refresh created without file numbers, stay.
-func (s *MetadataService) episodesOfCurrentNumbering(ctx context.Context, seriesID, provider string, episodes []*models.Episode) ([]*models.Episode, error) {
-	if provider == "" {
-		return episodes, nil
-	}
-	rows, err := s.dbPool.Query(ctx, `
-		SELECT content_id FROM episodes
-		WHERE series_id = $1 AND provider_numbering IS NOT NULL AND provider_numbering <> $2
-		  AND EXISTS (SELECT 1 FROM episodes WHERE series_id = $1 AND provider_numbering = $2)`, seriesID, provider)
+// episodesOfCurrentNumbering drops the episodes the structure provider did
+// not list in its last full refresh (episodes.unlisted): rows a renumber
+// parked because the chosen order lacks them, which would otherwise shift
+// every later bare episode number.
+func (s *MetadataService) episodesOfCurrentNumbering(ctx context.Context, seriesID string, episodes []*models.Episode) ([]*models.Episode, error) {
+	rows, err := s.dbPool.Query(ctx, `SELECT content_id FROM episodes WHERE series_id = $1 AND unlisted`, seriesID)
 	if err != nil {
-		return nil, fmt.Errorf("loading the episodes another provider numbered in %s: %w", seriesID, err)
+		return nil, fmt.Errorf("loading the unlisted episodes of %s: %w", seriesID, err)
 	}
-	other, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	unlisted, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil {
-		return nil, fmt.Errorf("loading the episodes another provider numbered in %s: %w", seriesID, err)
+		return nil, fmt.Errorf("loading the unlisted episodes of %s: %w", seriesID, err)
 	}
-	if len(other) == 0 {
+	if len(unlisted) == 0 {
 		return episodes, nil
 	}
 	kept := make([]*models.Episode, 0, len(episodes))
 	for _, episode := range episodes {
-		if episode != nil && !slices.Contains(other, episode.ContentID) {
+		if episode != nil && !slices.Contains(unlisted, episode.ContentID) {
 			kept = append(kept, episode)
 		}
 	}

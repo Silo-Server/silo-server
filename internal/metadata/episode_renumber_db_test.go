@@ -404,9 +404,10 @@ func TestSaveCustomSeasonsDB(t *testing.T) {
 	}
 }
 
-// A bare number counts through the episodes the chosen provider numbered: a
-// row another provider numbered (parked by a renumber) must not shift every
-// later file by one, while a row no refresh numbered yet still counts.
+// A bare number counts through the episodes the structure provider listed in
+// its last full refresh: a row a renumber parked because the chosen order
+// lacks it, from the same provider or another, must not shift every later
+// file by one, while a row no refresh has numbered yet still counts.
 func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 	pool := chainBuiltinTestPool(t)
 	ctx := t.Context()
@@ -415,7 +416,8 @@ func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 
 	series, tvdb, _ := insertRenumberTestSeries(t, pool, 660_000_000, "Absolute show")
 	var all []*models.Episode
-	for number := 1; number <= 4; number++ {
+	add := func(number int) {
+		t.Helper()
 		id, ok := contentid.ForEpisode(series, 1, number)
 		if !ok {
 			t.Fatal("content id did not compose")
@@ -442,9 +444,9 @@ func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	current := func(provider string) string {
+	current := func() string {
 		t.Helper()
-		kept, err := svc.episodesOfCurrentNumbering(ctx, series, provider, all)
+		kept, err := svc.episodesOfCurrentNumbering(ctx, series, all)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -456,15 +458,22 @@ func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 		return fmt.Sprint(numbers)
 	}
 
-	// TMDB numbered 1-3; episode 4 is new and unnumbered.
-	write("tmdb", 1, 2, 3)
-	if got := current("tvdb"); got != "[1 2 3 4]" {
-		t.Fatalf("before TVDB numbered any = %v, want every episode", got)
+	for number := 1; number <= 3; number++ {
+		add(number)
 	}
-	// TVDB numbers 1 and 3; episode 2 keeps TMDB's numbering and drops out.
-	write("tvdb", 1, 3)
-	if got := current("tvdb"); got != "[1 3 4]" {
-		t.Fatalf("after TVDB numbered two = %v, want [1 3 4]", got)
+	write("tmdb", 1, 2, 3)
+	write("tvdb", 1, 3) // another provider lacks episode 2
+	if got := current(); got != "[1 3]" {
+		t.Fatalf("after TVDB listed two = %v, want [1 3]", got)
+	}
+	write("tvdb", 1, 2, 3)
+	write("tvdb", 2, 3) // another order of the same provider lacks episode 1
+	if got := current(); got != "[2 3]" {
+		t.Fatalf("after a TVDB order listed two = %v, want [2 3]", got)
+	}
+	add(4) // stored by a refresh that wrote no file numbers
+	if got := current(); got != "[2 3 4]" {
+		t.Fatalf("with an episode no refresh numbered = %v, want [2 3 4]", got)
 	}
 }
 
