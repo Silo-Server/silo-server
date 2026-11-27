@@ -30,7 +30,12 @@ export interface StagedRedisDb {
 export function stageRedisUrl(draft: RedisDraft, url: string, staged: StagedRedisDb) {
   draft.setValue("redis.url", url);
   const shown = draft.getValue("redis.db");
-  staged.current = shown === "" ? null : shown;
+  // The URL edit claims the number only when it is the saved one, or one an
+  // earlier keystroke of this edit already claimed: a number the admin
+  // changed first stays theirs, so taking the URL back leaves it staged.
+  const claimed = staged.current !== null && shown === staged.current;
+  const adminEdited = !claimed && shown !== draft.getPersistedValue("redis.db");
+  staged.current = shown === "" || adminEdited ? null : shown;
   if (shown !== "") draft.setValue("redis.db", shown, { stage: true });
 }
 

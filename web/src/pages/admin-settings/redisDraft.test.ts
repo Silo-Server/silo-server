@@ -35,6 +35,30 @@ describe("keepSavedRedisUrl", () => {
     expect([...draft.staged.keys()]).toEqual([]);
   });
 
+  it("keeps a number the admin typed before the URL", () => {
+    const draft = fakeDraft({ "redis.url": "redis://saved:6379", "redis.db": "2" });
+    const stagedDb: StagedRedisDb = { current: null };
+
+    draft.setValue("redis.db", "5");
+    stageRedisUrl(draft, "redis://o", stagedDb);
+    stageRedisUrl(draft, "redis://other:6379", stagedDb);
+    keepSavedRedisUrl(draft, stagedDb);
+
+    expect([...draft.staged.entries()]).toEqual([["redis.db", "5"]]);
+  });
+
+  it("keeps claiming its number on each keystroke after the snapshot moved", () => {
+    const draft = fakeDraft({ "redis.url": "redis://saved:6379", "redis.db": "2" });
+    const stagedDb: StagedRedisDb = { current: null };
+
+    stageRedisUrl(draft, "redis://o", stagedDb);
+    draft.persisted["redis.db"] = "3";
+    stageRedisUrl(draft, "redis://other:6379", stagedDb);
+    keepSavedRedisUrl(draft, stagedDb);
+
+    expect([...draft.staged.keys()]).toEqual([]);
+  });
+
   it("keeps a number the admin typed after the URL", () => {
     const draft = fakeDraft({ "redis.url": "redis://saved:6379", "redis.db": "2" });
     const stagedDb: StagedRedisDb = { current: null };
