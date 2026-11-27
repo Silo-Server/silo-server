@@ -397,7 +397,13 @@ func (r *PushDeviceRepository) FinalizePushAttempt(ctx context.Context, claimed 
 	if err != nil {
 		return nil, fmt.Errorf("finalize push attempt: %w", err)
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	defer func() {
+		// Bounded: a stalled connection must not hold the sender after its
+		// context is canceled.
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		_ = tx.Rollback(rollbackCtx)
+	}()
 	rows, err := tx.Query(ctx, `
 		UPDATE push_delivery_attempts
 		SET outcome = $2,
