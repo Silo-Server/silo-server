@@ -9,6 +9,15 @@ type RedisDraft = Pick<
 >;
 
 /**
+ * The Database number a URL edit staged, or null. Each form keeps one (a
+ * ref) for as long as it lives, so taking back the URL can tell that number
+ * from one the admin typed after the settings snapshot has moved.
+ */
+export interface StagedRedisDb {
+  current: string | null;
+}
+
+/**
  * Stages an edit of the Redis connection URL and keeps the Database number
  * field true to what the save stores. The field shows the number in use,
  * which is the one in the saved URL while no `redis.db` is saved, so a new URL
@@ -18,20 +27,23 @@ type RedisDraft = Pick<
  * server stores no number without a URL, and the number stays on screen for a
  * URL typed after it.
  */
-export function stageRedisUrl(draft: RedisDraft, url: string) {
+export function stageRedisUrl(draft: RedisDraft, url: string, staged: StagedRedisDb) {
   draft.setValue("redis.url", url);
   const shown = draft.getValue("redis.db");
+  staged.current = shown === "" ? null : shown;
   if (shown !== "") draft.setValue("redis.db", shown, { stage: true });
 }
 
 /**
  * Withdraws a staged edit of the Redis connection URL, and with it a number
- * that was staged only to go with that edit. A number the admin changed stays
- * staged.
+ * that was staged only to go with that edit, even when the settings have
+ * since reported another number. A number the admin changed stays staged.
  */
-export function keepSavedRedisUrl(draft: RedisDraft) {
+export function keepSavedRedisUrl(draft: RedisDraft, staged: StagedRedisDb) {
   draft.resetValue("redis.url");
-  if (draft.getValue("redis.db") === draft.getPersistedValue("redis.db")) {
+  const shown = draft.getValue("redis.db");
+  if (shown === staged.current || shown === draft.getPersistedValue("redis.db")) {
     draft.resetValue("redis.db");
   }
+  staged.current = null;
 }

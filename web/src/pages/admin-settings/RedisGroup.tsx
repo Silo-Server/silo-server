@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { ConnectionCheckResponse } from "@/api/types";
 import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction";
@@ -10,7 +10,7 @@ import { useT } from "@/i18n";
 
 import { FieldGroup } from "./FieldGroup";
 import { SettingField } from "./SettingField";
-import { REDIS_KEYS, keepSavedRedisUrl, stageRedisUrl } from "./redisDraft";
+import { REDIS_KEYS, keepSavedRedisUrl, stageRedisUrl, type StagedRedisDb } from "./redisDraft";
 
 /**
  * How the page stages the connection URL. The page freezes both while a save
@@ -45,6 +45,7 @@ export function RedisGroup({
   const urlEnv = form.envVar("redis.url");
   const configured = form.sensitiveConfigured.includes("redis.url");
   const [enabledOverride, setEnabledOverride] = useState<boolean | null>(null);
+  const stagedDb = useRef<StagedRedisDb["current"]>(null);
   // Saving or discarding clears the toggle override so it follows the stored
   // URL again. Running out of unsaved changes is not the same: erasing what
   // was typed into a field with nothing saved takes back its edit while the
@@ -122,7 +123,7 @@ export function RedisGroup({
             return;
           }
           setEnabledOverride(false);
-          stageRedisUrl(form, "");
+          stageRedisUrl(form, "", stagedDb);
         }}
         disabled={secrets.disabled}
         restartRequired={restartKeys.has("redis.url")}
@@ -138,8 +139,8 @@ export function RedisGroup({
             label={t("web.admin.settings.redis.url.label")}
             value={redisUrl}
             configured={configured}
-            onKeep={() => keepSavedRedisUrl(urlDraft)}
-            onChange={(v) => stageRedisUrl(urlDraft, v)}
+            onKeep={() => keepSavedRedisUrl(urlDraft, stagedDb)}
+            onChange={(v) => stageRedisUrl(urlDraft, v, stagedDb)}
             hint={REDIS_URL_EXAMPLE}
             disabled={secrets.disabled}
             restartRequired={restartKeys.has("redis.url")}

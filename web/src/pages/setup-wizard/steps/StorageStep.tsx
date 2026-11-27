@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 
 import {
@@ -14,7 +14,12 @@ import { settingsRestartPending } from "@/hooks/admin/useSettingsHealth";
 import { useMounted } from "@/hooks/useMounted";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useT, type MessageKey, type Translate } from "@/i18n";
-import { REDIS_KEYS, keepSavedRedisUrl, stageRedisUrl } from "@/pages/admin-settings/redisDraft";
+import {
+  REDIS_KEYS,
+  keepSavedRedisUrl,
+  stageRedisUrl,
+  type StagedRedisDb,
+} from "@/pages/admin-settings/redisDraft";
 import {
   SettingField,
   SettingFieldRow,
@@ -373,6 +378,7 @@ function S3Fields({
 export function StorageStep() {
   const t = useT();
   const form = useSettingsForm({ keys: useMemo(() => ALL_KEYS, []) });
+  const stagedRedisDb = useRef<StagedRedisDb["current"]>(null);
   const serverStatus = useAdminServerStatus();
   const restart = useRequestServerRestart();
   const [restartPhase, setRestartPhase] = useState<RestartPhase>("idle");
@@ -599,8 +605,8 @@ export function StorageStep() {
               hint="redis://localhost:6379"
               value={form.getValue("redis.url")}
               configured={redisSaved}
-              onChange={(v) => stageRedisUrl(form, v)}
-              onKeep={() => keepSavedRedisUrl(form)}
+              onChange={(v) => stageRedisUrl(form, v, stagedRedisDb)}
+              onKeep={() => keepSavedRedisUrl(form, stagedRedisDb)}
               managedByEnv={form.envVar("redis.url")}
             />
             <SettingField
