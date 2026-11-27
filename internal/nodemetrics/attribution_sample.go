@@ -107,11 +107,12 @@ func (s *Sampler) childPIDs() []int {
 		if listed[key.pid] {
 			continue
 		}
-		// Only the same lifetime: a PID the kernel handed to another process
-		// since would otherwise be counted as an unreadable child, and could
-		// push a full listing over the cap.
+		// Only the same lifetime, still an owned FFmpeg: a PID the kernel
+		// handed to another process, or a child that renamed itself, would
+		// otherwise be counted as an unreadable child, and could push a full
+		// listing over the cap.
 		if p, err := fs.Proc(key.pid); err == nil {
-			if stat, err := p.Stat(); err == nil && stat.Starttime == key.start {
+			if stat, err := p.Stat(); err == nil && stat.Starttime == key.start && ownedFFmpeg(stat, os.Getpid()) {
 				pids = append(pids, key.pid)
 			}
 		}
@@ -292,7 +293,7 @@ func sampleChildren(procDir string, parent int, pids []int) (*ChildStats, map[ch
 			continue
 		}
 		before, err := p.Stat()
-		if err != nil || before.PPID != parent || !strings.Contains(strings.ToLower(before.Comm), "ffmpeg") {
+		if err != nil || !ownedFFmpeg(before, parent) {
 			out.Unavailable++
 			continue
 		}
@@ -309,6 +310,11 @@ func sampleChildren(procDir string, parent int, pids []int) (*ChildStats, map[ch
 		ticks[childKey{pid: pid, start: after.Starttime}] = uint64(after.UTime) + uint64(after.STime)
 	}
 	return out, ticks
+}
+
+// ownedFFmpeg reports whether stat is an FFmpeg process parent started.
+func ownedFFmpeg(stat procfs.ProcStat, parent int) bool {
+	return stat.PPID == parent && strings.Contains(strings.ToLower(stat.Comm), "ffmpeg")
 }
 
 func sampleCgroupCPU(binding, leaf cgroupCPUPath, quota float64, usageNS int64) *CgroupCPUStats {

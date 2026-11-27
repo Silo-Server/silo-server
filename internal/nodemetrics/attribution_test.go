@@ -130,7 +130,22 @@ type cpuPctHarness struct {
 	cores    int
 	idle     uint64 // host idle jiffies, advanced by a full window each pass
 	uptime   uint64 // seconds since boot
-	children []int
+	children []int  // fixture child IDs; childPID gives each one's PID
+}
+
+// fakeChildPIDBase lifts fixture child PIDs above Linux's PID_MAX_LIMIT, so a
+// fake child can never share a /proc entry with this test process.
+const fakeChildPIDBase = 1 << 22
+
+func childPID(id int) int { return fakeChildPIDBase + id }
+
+// listed is the PIDs child discovery reports: h.children's.
+func (h *cpuPctHarness) listed() []int {
+	pids := make([]int, len(h.children))
+	for i, id := range h.children {
+		pids[i] = childPID(id)
+	}
+	return pids
 }
 
 func newCPUPctHarness(t *testing.T, cores int) *cpuPctHarness {
@@ -138,7 +153,7 @@ func newCPUPctHarness(t *testing.T, cores int) *cpuPctHarness {
 	h.tree.write("loadavg", "0 0 0 0/0 0\n")
 	h.tree.write("meminfo", "MemTotal: 1024 kB\nMemAvailable: 512 kB\n")
 	h.tree.write("net/dev", "")
-	h.s = newTestSampler(t, h.tree, h.clock, Options{FFmpegChildren: func() []int { return h.children }})
+	h.s = newTestSampler(t, h.tree, h.clock, Options{FFmpegChildren: h.listed})
 	h.s.bootTicks = func() (uint64, bool) { return h.uptimeTicks(), true }
 	return h
 }
@@ -149,12 +164,13 @@ func (h *cpuPctHarness) setProcess(ticks uint64) {
 	h.tree.write(fmt.Sprintf("%d/stat", h.pid), procStatTicksFixture(h.pid, 1, "silo", 1, ticks-ticks/4, ticks/4))
 }
 
-func (h *cpuPctHarness) setChild(pid int, start, ticks uint64) {
+func (h *cpuPctHarness) setChild(id int, start, ticks uint64) {
+	pid := childPID(id)
 	h.tree.write(fmt.Sprintf("%d/stat", pid), procStatTicksFixture(pid, h.pid, "ffmpeg", start, ticks-ticks/4, ticks/4))
 }
 
-func (h *cpuPctHarness) removeChild(pid int) {
-	if err := os.RemoveAll(filepath.Join(h.tree.root, strconv.Itoa(pid))); err != nil {
+func (h *cpuPctHarness) removeChild(id int) {
+	if err := os.RemoveAll(filepath.Join(h.tree.root, strconv.Itoa(childPID(id)))); err != nil {
 		h.t.Fatal(err)
 	}
 }
@@ -176,6 +192,10 @@ func (h *cpuPctHarness) pass() cpuPctView {
 	raw, err := json.Marshal(h.s.Snapshot())
 	if err != nil {
 		h.t.Fatal(err)
+	}
+	// An unmeasured share leaves its key out; null would decode the same.
+	if strings.Contains(string(raw), `"cpu_pct":null`) {
+		h.t.Fatalf("an unmeasured share is sent as null: %s", raw)
 	}
 	var view cpuPctView
 	if err := json.Unmarshal(raw, &view); err != nil {
@@ -371,7 +391,7 @@ func TestChildCPUShareSurvivesDiscoveryGaps(t *testing.T) {
 		if !listed {
 			return nil
 		}
-		return h.children
+		return h.listed()
 	}
 	h.setProcess(1000)
 	h.children = []int{200}
@@ -403,7 +423,8 @@ func TestChildCPUShareSurvivesDiscoveryGaps(t *testing.T) {
 	// A child that started in the opening reading's own tick may have started
 	// before it, so it becomes a baseline too.
 	h.children = []int{200, 201, 203}
-	h.setChild(203, h.uptimeTicks()+testUserHZ, 40)
+	start203 := h.uptimeTicks() + testUserHZ
+	h.setChild(203, start203, 40)
 	wantPct(t, "born in the opening tick", pass().Attribution.Children.CPUPct, 10)
 
 	// A child born after the window closed is not charged to that window; it
@@ -416,9 +437,17 @@ func TestChildCPUShareSurvivesDiscoveryGaps(t *testing.T) {
 	// the baseline child, so it is not read as an unreadable one.
 	h.children = []int{200}
 	h.removeChild(201)
-	h.tree.write("202/stat", procStatTicksFixture(202, h.pid, "ffprobe", h.uptimeTicks()+testUserHZ, 1, 0))
+	h.tree.write(fmt.Sprintf("%d/stat", childPID(202)), procStatTicksFixture(childPID(202), h.pid, "ffprobe", h.uptimeTicks()+testUserHZ, 1, 0))
 	if a := pass(); a.Attribution.Children.Unavailable != 0 {
 		t.Fatalf("reused PID counted as %d unavailable children", a.Attribution.Children.Unavailable)
+	}
+
+	// Baseline child 203 renames itself, keeping its lifetime, and discovery
+	// no longer lists it. It is no longer an FFmpeg child, so it is not read
+	// as an unreadable one either.
+	h.tree.write(fmt.Sprintf("%d/stat", childPID(203)), procStatTicksFixture(childPID(203), h.pid, "worker", start203, 40, 0))
+	if a := pass(); a.Attribution.Children.Unavailable != 0 {
+		t.Fatalf("renamed child counted as %d unavailable children", a.Attribution.Children.Unavailable)
 	}
 }
 
@@ -435,7 +464,7 @@ func TestChildCPUShareWindowIgnoresDiscoveryDelay(t *testing.T) {
 		h.clock.advance(pending)
 		pending = 0
 		h.setChild(200, 1, uint64(h.clock.now().Sub(start).Seconds()*50))
-		return h.children
+		return h.listed()
 	}
 	h.setProcess(1000)
 	for i := range delays {
@@ -463,8 +492,8 @@ func TestGPUBusyWindowIgnoresEarlierPassDelay(t *testing.T) {
 		h.clock.advance(pending)
 		pending = 0
 		busyNS := h.clock.now().Sub(start).Nanoseconds() / 2
-		h.tree.write("200/fdinfo/5", fmt.Sprintf("drm-pdev:\t0000:00:02.0\ndrm-client-id:\t7\ndrm-engine-video:\t%d ns\n", busyNS))
-		return h.children
+		h.tree.write(fmt.Sprintf("%d/fdinfo/5", childPID(200)), fmt.Sprintf("drm-pdev:\t0000:00:02.0\ndrm-client-id:\t7\ndrm-engine-video:\t%d ns\n", busyNS))
+		return h.listed()
 	}
 	h.setProcess(1000)
 	for i := range delays {
