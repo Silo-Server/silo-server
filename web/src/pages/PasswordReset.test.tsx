@@ -175,3 +175,24 @@ it("asks a signed-in visitor to sign out before using the link", async () => {
   expect(auth.logout).toHaveBeenCalled();
   expect(fetchMock).not.toHaveBeenCalled();
 });
+
+it("ties a refused password to the field it is about until that field changes", async () => {
+  mount();
+  await fill("short");
+  send();
+  const password = await screen.findByLabelText("New password");
+  await screen.findByText("Use at least 8 characters.");
+  expect(password).toHaveAttribute("aria-invalid", "true");
+  expect(password).toHaveAccessibleDescription("Use at least 8 characters.");
+
+  fireEvent.change(password, { target: { value: "shorter" } });
+  expect(password).not.toHaveAttribute("aria-invalid");
+
+  await fill("new-password", "different-password");
+  send();
+  await screen.findByText("Passwords do not match.");
+  const confirmation = screen.getByLabelText("Confirm new password");
+  expect(confirmation).toHaveAttribute("aria-invalid", "true");
+  expect(confirmation).toHaveAccessibleDescription("Passwords do not match.");
+  expect(password).not.toHaveAttribute("aria-invalid");
+});

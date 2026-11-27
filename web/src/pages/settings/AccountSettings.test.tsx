@@ -110,6 +110,28 @@ describe("AccountSettings", () => {
     expect(mocks.mutateAsync).not.toHaveBeenCalled();
   });
 
+  it("ties a refused password to the field it is about until that field changes", async () => {
+    const user = userEvent.setup();
+    render(<AccountSettings />);
+    const newPassword = screen.getByLabelText("New password");
+    const confirmation = screen.getByLabelText("Confirm new password");
+
+    await user.type(screen.getByLabelText("Current password"), "old password");
+    await user.type(newPassword, "short");
+    await user.type(confirmation, "short");
+    await user.click(screen.getByRole("button", { name: "Change password" }));
+
+    expect(newPassword).toHaveAttribute("aria-invalid", "true");
+    expect(newPassword).toHaveAccessibleDescription(/Use at least 8 characters\.$/);
+    await user.type(newPassword, "x");
+    expect(newPassword).not.toHaveAttribute("aria-invalid");
+
+    await user.click(screen.getByRole("button", { name: "Change password" }));
+    expect(confirmation).toHaveAttribute("aria-invalid", "true");
+    expect(confirmation).toHaveAccessibleDescription("New passwords do not match.");
+    expect(mocks.mutateAsync).not.toHaveBeenCalled();
+  });
+
   it("shows the server's refusal, and its own message when the server never answered", async () => {
     const user = userEvent.setup();
     render(<AccountSettings />);
