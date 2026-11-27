@@ -9,6 +9,10 @@
  * were made. Different keys stay independent.
  */
 
+import { onlineManager } from "@tanstack/react-query";
+
+import { SettingWriteOfflineError } from "@/hooks/queries/settingWriteOffline";
+
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 
 export type TrackPreferenceDimension = "audio" | "subtitle";
@@ -30,11 +34,17 @@ function writeKey(profileId: string, dimension: TrackPreferenceDimension, target
 /**
  * Runs `write` after every earlier write for the same profile, target, and
  * dimension has settled. A failed earlier write does not cancel later ones.
+ *
+ * A choice made offline is refused at once (SettingWriteOfflineError) rather
+ * than queued: an earlier request can stay pending until the browser
+ * reconnects, and the choice would then go out and replace a newer one made in
+ * another browser. Every caller enters here, the player's included.
  */
 export function runTrackPreferenceWrite<T>(
   target: { profileId: string; dimension: TrackPreferenceDimension; targetId: string },
   write: () => Promise<T>,
 ): Promise<T> {
+  if (!onlineManager.isOnline()) return Promise.reject(new SettingWriteOfflineError());
   const key = writeKey(target.profileId, target.dimension, target.targetId);
   const result = (pending.get(key) ?? Promise.resolve()).then(write);
   const settled = result.then(
