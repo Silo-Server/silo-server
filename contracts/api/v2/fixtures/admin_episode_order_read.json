@@ -8,6 +8,7 @@
     "file_order": "",
     "layout": "seasons"
   },
+  "order_name": "DVD Order",
   "providers": [
     {
       "provider": "tvdb",

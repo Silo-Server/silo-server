@@ -17,6 +17,7 @@ import { RequestSeasonsDialog } from "@/components/RequestSeasonsDialog";
 import CastCarousel from "@/components/CastCarousel";
 import { buildCrewGroups } from "@/components/castCrewGroups";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
+import EpisodeOrderDialog, { EpisodeOrderSummary } from "@/components/EpisodeOrderDialog";
 import MatchItemDialog from "@/components/MatchItemDialog";
 import SplitItemDialog from "@/components/SplitItemDialog";
 import PageBack from "@/components/PageBack";
@@ -89,6 +90,7 @@ export default function SeriesContent({
   const [editOpen, setEditOpen] = useState(false);
   const [matchOpen, setMatchOpen] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
+  const [orderOpen, setOrderOpen] = useState(false);
   const [requestSeasonsOpen, setRequestSeasonsOpen] = useState(false);
   const tmdbID = Number(item.tmdb_id) || 0;
   const canRequestSeasons = useMissingSeasonsRequestable(Boolean(currentProfile?.id) && tmdbID > 0);
@@ -243,6 +245,7 @@ export default function SeriesContent({
                 onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
                 onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
                 onSplitItem={canCurateMetadata ? () => setSplitOpen(true) : undefined}
+                onEpisodeOrder={canCurateMetadata ? () => setOrderOpen(true) : undefined}
                 onRequestSeasons={canRequestSeasons ? () => setRequestSeasonsOpen(true) : undefined}
                 onShuffle={
                   episodeCount > 1
@@ -302,6 +305,14 @@ export default function SeriesContent({
               ) : (
                 <SeasonCarousel seasons={seasons} libraryId={libraryId} />
               )}
+              {canCurateMetadata && !seasonsLoading && (
+                <div className="mt-4">
+                  <EpisodeOrderSummary
+                    contentId={item.content_id}
+                    onChange={() => setOrderOpen(true)}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -318,6 +329,15 @@ export default function SeriesContent({
               open={matchOpen}
               onOpenChange={setMatchOpen}
               onReplaced={followReplacedItem}
+            />
+          )}
+          {canCurateMetadata && (
+            <EpisodeOrderDialog
+              key={`episode-order-${item.content_id}`}
+              contentId={item.content_id}
+              title={title}
+              open={orderOpen}
+              onOpenChange={setOrderOpen}
             />
           )}
           {canCurateMetadata && (

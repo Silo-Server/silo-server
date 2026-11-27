@@ -11,6 +11,9 @@ CREATE TABLE public.series_episode_orders (
         REFERENCES public.media_items (content_id) ON DELETE CASCADE ON UPDATE CASCADE,
     provider text NOT NULL DEFAULT '' CHECK (provider IN ('', 'tvdb', 'tmdb')),
     order_id text NOT NULL DEFAULT '',
+    -- The order's name when it was chosen, for showing the choice without
+    -- asking the provider.
+    order_name text NOT NULL DEFAULT '',
     file_order text NOT NULL DEFAULT '' CHECK (file_order IN ('', 'tvdb', 'tmdb')),
     layout text NOT NULL DEFAULT 'seasons' CHECK (layout IN ('seasons', 'absolute', 'custom')),
     revision bigint NOT NULL DEFAULT 1,

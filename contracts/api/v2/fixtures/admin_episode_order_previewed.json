@@ -6,7 +6,8 @@
       "number": 1,
       "title": "Season 1",
       "episode_count": 22,
-      "file_count": 20
+      "file_count": 20,
+      "episodes": []
     }
   ],
   "file_count": 21,

@@ -18731,6 +18731,11 @@ export interface components {
        * @example tvdb
        */
       library_provider: string;
+      /**
+       * @description Name of choice.order_id as the provider gave it when the choice was saved; empty for the default order
+       * @example DVD Order
+       */
+      order_name: string;
       /** @description The series' remote episode providers, in chain order */
       providers: components["schemas"]["EpisodeOrderProvider"][];
       /**
@@ -30080,12 +30085,40 @@ export interface components {
        */
       season_count: number;
     };
+    EpisodeOrderPreviewEpisode: {
+      /**
+       * @description Name of the file the episode would link to; absent when none
+       * @example Stargate SG-1 - S01E05.mkv
+       */
+      file?: string;
+      /**
+       * Format: int64
+       * @description Episode number a file name gives it in the file order; 0 when that order lacks it
+       * @example 5
+       */
+      file_episode: number;
+      /**
+       * Format: int64
+       * @description Season a file name gives the episode in the file order; 0 when that order lacks it
+       * @example 1
+       */
+      file_season: number;
+      /**
+       * Format: int64
+       * @example 5
+       */
+      number: number;
+      /** @example The Broca Divide */
+      title: string;
+    };
     EpisodeOrderPreviewSeason: {
       /**
        * Format: int64
        * @example 22
        */
       episode_count: number;
+      /** @description The season's episodes in order */
+      episodes: components["schemas"]["EpisodeOrderPreviewEpisode"][];
       /**
        * Format: int64
        * @description Files the season would hold
@@ -65110,7 +65143,10 @@ export interface operations {
   };
   getAdminEpisodeOrder: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description List each provider's orders; false skips asking the providers and answers empty orders lists */
+        orders?: boolean;
+      };
       header?: {
         /** @description Optional. When present, it must name a profile of the authenticated account. */
         "X-Profile-Id"?: string;

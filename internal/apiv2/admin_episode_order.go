@@ -14,7 +14,7 @@ import (
 // AdminEpisodeOrderService reads, previews and saves a series' episode order
 // (metadata.MetadataService).
 type AdminEpisodeOrderService interface {
-	EpisodeOrderState(ctx context.Context, seriesID string) (metadata.EpisodeOrderState, error)
+	EpisodeOrderState(ctx context.Context, seriesID string, withOrders bool) (metadata.EpisodeOrderState, error)
 	PreviewEpisodeOrder(ctx context.Context, seriesID string, settings metadata.EpisodeOrderSettings) (metadata.EpisodeOrderPreview, error)
 	SaveEpisodeOrder(ctx context.Context, seriesID string, settings metadata.EpisodeOrderSettings, revision *int64, userID int) (int64, error)
 }
@@ -52,15 +52,26 @@ type AdminEpisodeOrder struct {
 	LibraryProvider string                 `json:"library_provider" doc:"Provider the series follows without its own choice: its library's episode_order_provider, else the first remote provider of the episode chain" example:"tvdb"`
 	Revision        int64                  `json:"revision" doc:"Send back on save to refuse a save over a newer one; 0 while inherited" example:"0"`
 	Choice          EpisodeOrderChoice     `json:"choice"`
+	OrderName       string                 `json:"order_name" doc:"Name of choice.order_id as the provider gave it when the choice was saved; empty for the default order" example:"DVD Order"`
 	Providers       []EpisodeOrderProvider `json:"providers" doc:"The series' remote episode providers, in chain order"`
 }
 
 // EpisodeOrderPreviewSeason is one season of a previewed order.
 type EpisodeOrderPreviewSeason struct {
-	Number       int    `json:"number" doc:"0 is Specials" example:"1"`
-	Title        string `json:"title" example:"Season 1"`
-	EpisodeCount int    `json:"episode_count" example:"22"`
-	FileCount    int    `json:"file_count" doc:"Files the season would hold" example:"20"`
+	Number       int                          `json:"number" doc:"0 is Specials" example:"1"`
+	Title        string                       `json:"title" example:"Season 1"`
+	EpisodeCount int                          `json:"episode_count" example:"22"`
+	FileCount    int                          `json:"file_count" doc:"Files the season would hold" example:"20"`
+	Episodes     []EpisodeOrderPreviewEpisode `json:"episodes" doc:"The season's episodes in order"`
+}
+
+// EpisodeOrderPreviewEpisode is one episode of a previewed season.
+type EpisodeOrderPreviewEpisode struct {
+	Number      int    `json:"number" example:"5"`
+	Title       string `json:"title" example:"The Broca Divide"`
+	File        string `json:"file,omitempty" doc:"Name of the file the episode would link to; absent when none" example:"Stargate SG-1 - S01E05.mkv"`
+	FileSeason  int    `json:"file_season" doc:"Season a file name gives the episode in the file order; 0 when that order lacks it" example:"1"`
+	FileEpisode int    `json:"file_episode" doc:"Episode number a file name gives it in the file order; 0 when that order lacks it" example:"5"`
 }
 
 // AdminEpisodeOrderPreview is what the series would look like under a choice.
@@ -88,7 +99,8 @@ type AdminEpisodeOrderSaved struct {
 }
 
 type AdminEpisodeOrderInput struct {
-	ID string `path:"id" minLength:"1" maxLength:"512"`
+	ID     string `path:"id" minLength:"1" maxLength:"512"`
+	Orders bool   `query:"orders" default:"true" doc:"List each provider's orders; false skips asking the providers and answers empty orders lists"`
 }
 type AdminEpisodeOrderOutput struct{ Body AdminEpisodeOrder }
 type AdminEpisodeOrderPreviewInput struct {
@@ -146,7 +158,7 @@ func (reg *Registry) getAdminEpisodeOrder(ctx context.Context, in *AdminEpisodeO
 	if reg.deps.AdminEpisodeOrders == nil {
 		return nil, unavailable("episode orders")
 	}
-	state, err := reg.deps.AdminEpisodeOrders.EpisodeOrderState(ctx, in.ID)
+	state, err := reg.deps.AdminEpisodeOrders.EpisodeOrderState(ctx, in.ID, in.Orders)
 	if err != nil {
 		return nil, episodeOrderProblem(err)
 	}
@@ -154,6 +166,7 @@ func (reg *Registry) getAdminEpisodeOrder(ctx context.Context, in *AdminEpisodeO
 		Inherited:       !state.Override,
 		LibraryProvider: state.LibraryProvider,
 		Revision:        state.Revision,
+		OrderName:       state.OrderName,
 		Choice: EpisodeOrderChoice{
 			Provider: state.Settings.Provider, OrderID: state.Settings.OrderID,
 			FileOrder: state.Settings.FileOrder, Layout: state.Settings.Layout,
@@ -194,7 +207,12 @@ func (reg *Registry) previewAdminEpisodeOrder(ctx context.Context, in *AdminEpis
 		out.FileOrderFits = append(out.FileOrderFits, EpisodeOrderFileFit{FileOrder: fit.FileOrder, MatchedFiles: fit.MatchedFiles})
 	}
 	for _, s := range preview.Seasons {
-		out.Seasons = append(out.Seasons, EpisodeOrderPreviewSeason{Number: s.Number, Title: s.Title, EpisodeCount: s.EpisodeCount, FileCount: s.FileCount})
+		season := EpisodeOrderPreviewSeason{Number: s.Number, Title: s.Title, EpisodeCount: s.EpisodeCount, FileCount: s.FileCount,
+			Episodes: make([]EpisodeOrderPreviewEpisode, 0, len(s.Episodes))}
+		for _, e := range s.Episodes {
+			season.Episodes = append(season.Episodes, EpisodeOrderPreviewEpisode{Number: e.Number, Title: e.Title, File: e.File, FileSeason: e.FileSeason, FileEpisode: e.FileEpisode})
+		}
+		out.Seasons = append(out.Seasons, season)
 	}
 	return &AdminEpisodeOrderPreviewOutput{Body: out}, nil
 }

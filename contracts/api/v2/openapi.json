@@ -11203,6 +11203,13 @@
             ],
             "type": "string"
           },
+          "order_name": {
+            "description": "Name of choice.order_id as the provider gave it when the choice was saved; empty for the default order",
+            "examples": [
+              "DVD Order"
+            ],
+            "type": "string"
+          },
           "providers": {
             "description": "The series' remote episode providers, in chain order",
             "items": {
@@ -11224,6 +11231,7 @@
           "library_provider",
           "revision",
           "choice",
+          "order_name",
           "providers"
         ],
         "type": "object"
@@ -39958,6 +39966,54 @@
         ],
         "type": "object"
       },
+      "EpisodeOrderPreviewEpisode": {
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "description": "Name of the file the episode would link to; absent when none",
+            "examples": [
+              "Stargate SG-1 - S01E05.mkv"
+            ],
+            "type": "string"
+          },
+          "file_episode": {
+            "description": "Episode number a file name gives it in the file order; 0 when that order lacks it",
+            "examples": [
+              5
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "file_season": {
+            "description": "Season a file name gives the episode in the file order; 0 when that order lacks it",
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "number": {
+            "examples": [
+              5
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "examples": [
+              "The Broca Divide"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "title",
+          "file_season",
+          "file_episode"
+        ],
+        "type": "object"
+      },
       "EpisodeOrderPreviewSeason": {
         "additionalProperties": false,
         "properties": {
@@ -39967,6 +40023,13 @@
             ],
             "format": "int64",
             "type": "integer"
+          },
+          "episodes": {
+            "description": "The season's episodes in order",
+            "items": {
+              "$ref": "#/components/schemas/EpisodeOrderPreviewEpisode"
+            },
+            "type": "array"
           },
           "file_count": {
             "description": "Files the season would hold",
@@ -39995,7 +40058,8 @@
           "number",
           "title",
           "episode_count",
-          "file_count"
+          "file_count",
+          "episodes"
         ],
         "type": "object"
       },
@@ -100936,6 +101000,17 @@
               "maxLength": 512,
               "minLength": 1,
               "type": "string"
+            }
+          },
+          {
+            "description": "List each provider's orders; false skips asking the providers and answers empty orders lists",
+            "explode": false,
+            "in": "query",
+            "name": "orders",
+            "schema": {
+              "default": true,
+              "description": "List each provider's orders; false skips asking the providers and answers empty orders lists",
+              "type": "boolean"
             }
           }
         ],

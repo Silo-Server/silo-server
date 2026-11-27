@@ -66,7 +66,9 @@ type EpisodeOrderState struct {
 	// Override is true when the series has its own settings.
 	Override bool
 	Settings EpisodeOrderSettings
-	Revision int64
+	// OrderName names Settings.OrderID as the provider did when it was saved.
+	OrderName string
+	Revision  int64
 	// LibraryProvider is the provider the series follows without an
 	// override: its library's setting, else the first remote provider of the
 	// episode chain.
@@ -80,6 +82,18 @@ type EpisodeOrderPreviewSeason struct {
 	Title        string
 	EpisodeCount int
 	FileCount    int
+	Episodes     []EpisodeOrderPreviewEpisode
+}
+
+// EpisodeOrderPreviewEpisode is one episode of a previewed season.
+type EpisodeOrderPreviewEpisode struct {
+	Number int
+	Title  string
+	// File names the file the episode would link to; empty when none.
+	File string
+	// FileSeason and FileEpisode are the numbers a file name gives the
+	// episode in the file order; zero when the file order lacks it.
+	FileSeason, FileEpisode int
 }
 
 // EpisodeOrderPreview is what a series would look like under settings.
@@ -135,9 +149,9 @@ func (s *MetadataService) seriesForEpisodeOrder(ctx context.Context, seriesID st
 	return ctx, storedIdentityProviderIDs(item), language, nil
 }
 
-// EpisodeOrderState returns the series' episode order settings and every
-// remote episode provider's orders for it.
-func (s *MetadataService) EpisodeOrderState(ctx context.Context, seriesID string) (EpisodeOrderState, error) {
+// EpisodeOrderState returns the series' episode order settings and, with
+// withOrders, every remote episode provider's orders for it.
+func (s *MetadataService) EpisodeOrderState(ctx context.Context, seriesID string, withOrders bool) (EpisodeOrderState, error) {
 	state := EpisodeOrderState{Settings: EpisodeOrderSettings{Layout: episodeLayoutSeasons}}
 	ctx, ids, language, err := s.seriesForEpisodeOrder(ctx, seriesID)
 	if err != nil {
@@ -145,9 +159,9 @@ func (s *MetadataService) EpisodeOrderState(ctx context.Context, seriesID string
 	}
 	if s.dbPool != nil {
 		err := s.dbPool.QueryRow(ctx, `
-			SELECT provider, order_id, file_order, layout, revision
+			SELECT provider, order_id, order_name, file_order, layout, revision
 			FROM series_episode_orders WHERE series_id = $1`, seriesID).
-			Scan(&state.Settings.Provider, &state.Settings.OrderID, &state.Settings.FileOrder, &state.Settings.Layout, &state.Revision)
+			Scan(&state.Settings.Provider, &state.Settings.OrderID, &state.OrderName, &state.Settings.FileOrder, &state.Settings.Layout, &state.Revision)
 		switch {
 		case err == nil:
 			state.Override = true
@@ -172,7 +186,7 @@ func (s *MetadataService) EpisodeOrderState(ctx context.Context, seriesID string
 			state.LibraryProvider = slug
 		}
 		entry := EpisodeOrderProviderOrders{Provider: slug}
-		if lister, ok := p.(episodeOrderListerProvider); ok {
+		if lister, ok := p.(episodeOrderListerProvider); ok && withOrders {
 			orders, err := lister.ListEpisodeOrders(ctx, ids, language)
 			switch {
 			case errors.Is(err, ErrEpisodeOrdersUnsupported):
@@ -202,6 +216,7 @@ func (s *MetadataService) SaveEpisodeOrder(ctx context.Context, seriesID string,
 	if item.Type != "series" {
 		return 0, ErrEpisodeOrderNotSeries
 	}
+	orderName := s.episodeOrderName(ctx, seriesID, settings)
 	var saved int64
 	err = pgx.BeginFunc(ctx, s.dbPool, func(tx pgx.Tx) error {
 		var stored int64
@@ -221,15 +236,15 @@ func (s *MetadataService) SaveEpisodeOrder(ctx context.Context, seriesID string,
 			updatedBy = userID
 		}
 		return tx.QueryRow(ctx, `
-			INSERT INTO series_episode_orders (series_id, provider, order_id, file_order, layout, updated_by)
-			VALUES ($1, $2, $3, $4, $5, $6)
+			INSERT INTO series_episode_orders (series_id, provider, order_id, file_order, layout, updated_by, order_name)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (series_id) DO UPDATE SET
-				provider = EXCLUDED.provider, order_id = EXCLUDED.order_id,
+				provider = EXCLUDED.provider, order_id = EXCLUDED.order_id, order_name = EXCLUDED.order_name,
 				file_order = EXCLUDED.file_order, layout = EXCLUDED.layout,
 				updated_by = EXCLUDED.updated_by, updated_at = now(),
 				revision = series_episode_orders.revision + 1
 			RETURNING revision`,
-			seriesID, settings.Provider, settings.OrderID, settings.FileOrder, settings.Layout, updatedBy).Scan(&saved)
+			seriesID, settings.Provider, settings.OrderID, settings.FileOrder, settings.Layout, updatedBy, orderName).Scan(&saved)
 	})
 	if err != nil {
 		if errors.Is(err, ErrEpisodeOrderConflict) {
@@ -292,22 +307,26 @@ func (s *MetadataService) PreviewEpisodeOrder(ctx context.Context, seriesID stri
 	}
 
 	fileSlots := make(map[episodeSlot]int, len(episodes))
-	for _, ep := range episodes {
+	for i, ep := range episodes {
 		slot := episodeSlot{ep.SeasonNumber, ep.EpisodeNumber}
 		if ep.FileNumbered {
 			slot = episodeSlot{ep.FileSeasonNumber, ep.FileEpisodeNumber}
 		}
-		fileSlots[slot] = ep.SeasonNumber
+		fileSlots[slot] = i
 	}
 	filesBySeason := make(map[int]int)
+	fileOf := make(map[int]string)
 	for _, file := range files {
 		if !file.Numbered {
 			continue
 		}
 		preview.FileCount++
-		if season, ok := fileSlots[episodeSlot{file.Season, file.Episode}]; ok {
+		if i, ok := fileSlots[episodeSlot{file.Season, file.Episode}]; ok {
 			preview.MatchedFiles++
-			filesBySeason[season]++
+			filesBySeason[episodes[i].SeasonNumber]++
+			if _, seen := fileOf[i]; !seen {
+				fileOf[i] = path.Base(file.Path)
+			}
 			continue
 		}
 		if len(preview.UnmatchedFiles) < 50 {
@@ -319,19 +338,25 @@ func (s *MetadataService) PreviewEpisodeOrder(ctx context.Context, seriesID stri
 	for _, season := range seasons {
 		titles[season.SeasonNumber] = season.Title
 	}
-	counts := make(map[int]int)
-	for _, ep := range episodes {
-		counts[ep.SeasonNumber]++
+	bySeason := make(map[int][]EpisodeOrderPreviewEpisode)
+	for i, ep := range episodes {
+		entry := EpisodeOrderPreviewEpisode{Number: ep.EpisodeNumber, Title: ep.Title, File: fileOf[i]}
+		if ep.FileNumbered {
+			entry.FileSeason, entry.FileEpisode = ep.FileSeasonNumber, ep.FileEpisodeNumber
+		}
+		bySeason[ep.SeasonNumber] = append(bySeason[ep.SeasonNumber], entry)
 	}
-	for number, count := range counts {
+	for number, seasonEpisodes := range bySeason {
 		title := strings.TrimSpace(titles[number])
 		if title == "" {
 			title = fallbackSeasonTitle(number)
 		}
+		sort.Slice(seasonEpisodes, func(i, j int) bool { return seasonEpisodes[i].Number < seasonEpisodes[j].Number })
 		preview.Seasons = append(preview.Seasons, EpisodeOrderPreviewSeason{
-			Number: number, Title: title, EpisodeCount: count, FileCount: filesBySeason[number],
+			Number: number, Title: title, EpisodeCount: len(seasonEpisodes), FileCount: filesBySeason[number],
+			Episodes: seasonEpisodes,
 		})
-		preview.EpisodeCount += count
+		preview.EpisodeCount += len(seasonEpisodes)
 	}
 	sort.Slice(preview.Seasons, func(i, j int) bool {
 		// Specials last, as series pages list them.
@@ -414,4 +439,27 @@ func countPlacedFiles(files []seriesFileLink, episodes []EpisodeResult) int {
 		}
 	}
 	return placed
+}
+
+// episodeOrderName asks the order's provider for its name; empty for the
+// default order, and the ID when the provider cannot say.
+func (s *MetadataService) episodeOrderName(ctx context.Context, seriesID string, settings EpisodeOrderSettings) string {
+	if settings.OrderID == "" {
+		return ""
+	}
+	state, err := s.EpisodeOrderState(ctx, seriesID, true)
+	if err != nil {
+		return settings.OrderID
+	}
+	for _, p := range state.Providers {
+		if p.Provider != settings.Provider {
+			continue
+		}
+		for _, order := range p.Orders {
+			if order.ID == settings.OrderID {
+				return order.Name
+			}
+		}
+	}
+	return settings.OrderID
 }

@@ -14,9 +14,9 @@ type fakeAdminEpisodeOrders struct {
 	err      error
 }
 
-func (f *fakeAdminEpisodeOrders) EpisodeOrderState(context.Context, string) (metadata.EpisodeOrderState, error) {
+func (f *fakeAdminEpisodeOrders) EpisodeOrderState(context.Context, string, bool) (metadata.EpisodeOrderState, error) {
 	return metadata.EpisodeOrderState{
-		Override: true, Revision: 2, LibraryProvider: "tvdb",
+		Override: true, Revision: 2, LibraryProvider: "tvdb", OrderName: "DVD Order",
 		Settings: metadata.EpisodeOrderSettings{Provider: "tvdb", OrderID: "dvd", Layout: "seasons"},
 		Providers: []metadata.EpisodeOrderProviderOrders{
 			{Provider: "tvdb", Supported: true, Orders: []metadata.EpisodeOrder{

@@ -121609,6 +121609,12 @@
       "value": "⟦Éđîţ Ṁéţåđåţå~~~~~~⟧"
     }
   ],
+  "web.detail.actions.episodeOrder": [
+    {
+      "type": 0,
+      "value": "⟦Éþîšöđé öŕđéŕ~~~~~~⟧"
+    }
+  ],
   "web.detail.actions.favorite": [
     {
       "type": 0,
@@ -134808,6 +134814,862 @@
     {
       "type": 0,
       "value": "⟦Éđîţ Þéŕšöñ Ṁéţåđåţå~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.airedOrder": [
+    {
+      "type": 0,
+      "value": "⟦åîŕéđ öŕđéŕ~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.applied": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéöŕđéŕîñĝ "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.appliedBody": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö îš ŕéñûɱƀéŕîñĝ ţĥé éþîšöđéš. Ŵåţçĥ ĥîšţöŕý ɱöṽéš ŵîţĥ éåçĥ éþîšöđé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.apply": [
+    {
+      "type": 0,
+      "value": "⟦Åþþļý öŕđéŕ~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.change": [
+    {
+      "type": 0,
+      "value": "⟦Çĥåñĝé~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.conflict": [
+    {
+      "type": 0,
+      "value": "⟦Šöɱéöñé éļšé çĥåñĝéđ ţĥîš šĥöŵ'š éþîšöđé öŕđéŕ. Ŕéöþéñ ţĥé đîåļöĝ ţö šéé îţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.defaultOrder": [
+    {
+      "type": 0,
+      "value": "⟦đéƒåûļţ öŕđéŕ~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.description": [
+    {
+      "type": 0,
+      "value": "⟦Çĥööšé ŵĥîçĥ þŕöṽîđéŕ öŕđéŕ Šîļö ûšéš ƒöŕ ţĥîš šĥöŵ åñđ ĥöŵ îţš šéåšöñš åŕé ļåîđ öûţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.files.fit": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "matched"
+    },
+    {
+      "type": 0,
+      "value": " öƒ "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " ƒîļéš~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.files.fitsAll": [
+    {
+      "type": 0,
+      "value": "⟦Þļåçéš éṽéŕý ƒîļé~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.files.help": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöŵ Šîļö ŕéåđš ƒîļé ñåɱéš: Š02É05 îš šéåšöñ 2, éþîšöđé 5 öƒ ţĥîš öŕđéŕ. Éåçĥ éþîšöđé ţĥéñ ĝöéš ŵĥéŕé ţĥé öŕđéŕ åƀöṽé þûţš îţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.files.label": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîļéš åŕé ñåɱéđ îñ~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.files.suggestion": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ ƒîļéš ļööķ ļîķé "
+    },
+    {
+      "type": 1,
+      "value": "order"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.files.tmdb": [
+    {
+      "type": 0,
+      "value": "⟦ŢṀĐƁ šéåšöñš~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.files.tvdb": [
+    {
+      "type": 0,
+      "value": "⟦ŢṼĐƁ åîŕéđ öŕđéŕ~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.files.useSuggestion": [
+    {
+      "type": 0,
+      "value": "⟦Ûšé îţ~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.footer": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåţçĥ ĥîšţöŕý, þŕöĝŕéšš åñđ ŕåţîñĝš šţåý ŵîţĥ éåçĥ éþîšöđé. Ƒîļéš öñ đîšķ åŕé ñéṽéŕ ŕéñåɱéđ öŕ ɱöṽéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.kind.absolute": [
+    {
+      "type": 0,
+      "value": "⟦Åƀšöļûţé~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.kind.aired": [
+    {
+      "type": 0,
+      "value": "⟦Åîŕéđ~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.kind.alternate": [
+    {
+      "type": 0,
+      "value": "⟦Åļţéŕñåţé~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.kind.digital": [
+    {
+      "type": 0,
+      "value": "⟦Đîĝîţåļ~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.kind.dvd": [
+    {
+      "type": 0,
+      "value": "⟦ĐṼĐ~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.kind.production": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöđûçţîöñ~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.kind.storyArc": [
+    {
+      "type": 0,
+      "value": "⟦Šţöŕý åŕçš~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.kind.tv": [
+    {
+      "type": 0,
+      "value": "⟦ŢṼ~⟧"
+    }
+  ],
+  "web.item.episodeOrder.layout.absolute": [
+    {
+      "type": 0,
+      "value": "⟦Åƀšöļûţé~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.layout.absoluteBody": [
+    {
+      "type": 0,
+      "value": "⟦Öñé šéåšöñ, éþîšöđéš ñûɱƀéŕéđ ƒŕöɱ 1 îñ ţĥîš öŕđéŕ. Šþéçîåļš šţåý šéþåŕåţé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.layout.label": [
+    {
+      "type": 0,
+      "value": "⟦Šéåšöñ ļåýöûţ~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.layout.seasons": [
+    {
+      "type": 0,
+      "value": "⟦Šéåšöñš ƒŕöɱ ţĥé öŕđéŕ~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.layout.seasonsBody": [
+    {
+      "type": 0,
+      "value": "⟦Ķééþš ţĥé šéåšöñš åš "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " ļîšţš ţĥéɱ îñ ţĥîš öŕđéŕ.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.order.episodes": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđé~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđéš~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.item.episodeOrder.order.failed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ'ţ ļöåđ ţĥîš þŕöṽîđéŕ'š öŕđéŕš. Ţŕý åĝåîñ ļåţéŕ.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.order.help": [
+    {
+      "type": 0,
+      "value": "⟦Ŵĥéŕé šéåšöñš, éþîšöđé ñûɱƀéŕš åñđ ţîţļéš çöɱé ƒŕöɱ.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.order.helpLibrary": [
+    {
+      "type": 0,
+      "value": "⟦Þîçķ ŢṼĐƁ öŕ ŢṀĐƁ åƀöṽé ţö çĥööšé åñöţĥéŕ öŕđéŕ.~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.order.label": [
+    {
+      "type": 0,
+      "value": "⟦Öŕđéŕ~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.order.seasons": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " šéåšöñ~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " šéåšöñš~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.item.episodeOrder.order.unsupported": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš þŕöṽîđéŕ'š þļûĝîñ öƒƒéŕš öñļý îţš đéƒåûļţ öŕđéŕ.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.colEpisode": [
+    {
+      "type": 0,
+      "value": "⟦Éþîšöđé~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.colFile": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîļé öñ đîšķ~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.colFileNumber": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîļé ñö.~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.colNumber": [
+    {
+      "type": 0,
+      "value": "⟦Ñö.~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.empty": [
+    {
+      "type": 0,
+      "value": "⟦Ñéîţĥéŕ ŢṼĐƁ ñöŕ ŢṀĐƁ ĥåš éþîšöđéš ƒöŕ ţĥîš šĥöŵ, šö îţ ķééþš ţĥé ñûɱƀéŕš ƒŕöɱ îţš ƒîļé ñåɱéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.episodes": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđé~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđéš~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.item.episodeOrder.preview.failed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ'ţ ļöåđ ţĥé þŕéṽîéŵ. Çĥéçķ ţĥåţ ţĥé ɱéţåđåţå þŕöṽîđéŕš åŕé ŕéåçĥåƀļé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.fallback": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " ĥåš ñö éþîšöđéš ƒöŕ ţĥîš šĥöŵ, šö îţ ƒöļļöŵš "
+    },
+    {
+      "type": 1,
+      "value": "other"
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.files": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "matched"
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " ƒîļéš þļåçéđ~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.help": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöŵ "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " ŵîļļ ļööķ åƒţéŕ ýöû åþþļý. Éåçĥ ŕöŵ îš åñ éþîšöđé îñ îţš ñéŵ þļåçé, ŵîţĥ ţĥé ƒîļé Šîļö ļîñķš ţö îţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.loading": [
+    {
+      "type": 0,
+      "value": "⟦Ļöåđîñĝ ţĥé þŕéṽîéŵ…~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.moreEpisodes": [
+    {
+      "type": 0,
+      "value": "⟦åñđ "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ɱöŕé éþîšöđé"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ɱöŕé éþîšöđéš"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.moreFiles": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "names"
+    },
+    {
+      "type": 0,
+      "value": " åñđ "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ɱöŕé"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ɱöŕé"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.notOnDisk": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ öñ đîšķ~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.onDisk": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " öñ đîšķ~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.readAs": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéåđ ƒîļéš åš "
+    },
+    {
+      "type": 1,
+      "value": "order"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.season": [
+    {
+      "type": 0,
+      "value": "⟦Šéåšöñ "
+    },
+    {
+      "type": 1,
+      "value": "number"
+    },
+    {
+      "type": 0,
+      "value": "~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.seasonPicker": [
+    {
+      "type": 0,
+      "value": "⟦Šéåšöñ ţö þŕéṽîéŵ~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.seasons": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " šéåšöñ~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " šéåšöñš~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.item.episodeOrder.preview.specials": [
+    {
+      "type": 0,
+      "value": "⟦Šþéçîåļš~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.title": [
+    {
+      "type": 0,
+      "value": "⟦Þŕéṽîéŵ~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.unmatchedBody": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "files"
+    },
+    {
+      "type": 0,
+      "value": " ñåɱé éþîšöđéš ţĥîš öŕđéŕ đöéšñ'ţ ĥåṽé. Ţĥéý šţåý ûñþļåçéđ ûñţîļ ţĥé ƒîļé ñåɱîñĝ öŕ ţĥé öŕđéŕ çĥåñĝéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.preview.unmatchedTitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ƒîļé đöéšñ'ţ ƒîţ ţĥîš öŕđéŕ~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ƒîļéš đöñ'ţ ƒîţ ţĥîš öŕđéŕ~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.item.episodeOrder.saveFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ'ţ šåṽé ţĥé éþîšöđé öŕđéŕ.~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.source.label": [
+    {
+      "type": 0,
+      "value": "⟦Éþîšöđé đåţå ƒŕöɱ~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.source.library": [
+    {
+      "type": 0,
+      "value": "⟦Ļîƀŕåŕý đéƒåûļţ · "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.source.libraryBody": [
+    {
+      "type": 0,
+      "value": "⟦Ûšéš "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "'š đéƒåûļţ öŕđéŕ, åñđ "
+    },
+    {
+      "type": 1,
+      "value": "other"
+    },
+    {
+      "type": 0,
+      "value": " ŵĥéñ "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " ĥåš ñö éþîšöđéš ƒöŕ ţĥîš šĥöŵ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.source.tmdbBody": [
+    {
+      "type": 0,
+      "value": "⟦Đéƒåûļţ šéåšöñš öŕ öñé öƒ ŢṀĐƁ'š éþîšöđé ĝŕöûþš.~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.source.tvdbBody": [
+    {
+      "type": 0,
+      "value": "⟦Åîŕéđ, ĐṼĐ, åƀšöļûţé öŕ åļţéŕñåţé öŕđéŕ (ŢṼĐƁ šéåšöñ ţýþéš).~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.summary": [
+    {
+      "type": 0,
+      "value": "⟦Éþîšöđé öŕđéŕ: "
+    },
+    {
+      "type": 1,
+      "value": "summary"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.summaryAbsolute": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "order"
+    },
+    {
+      "type": 0,
+      "value": " · Åƀšöļûţé~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.summaryFiles": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "order"
+    },
+    {
+      "type": 0,
+      "value": " · ƒîļéš ñåɱéđ îñ "
+    },
+    {
+      "type": 1,
+      "value": "files"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.summaryLibrary": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "summary"
+    },
+    {
+      "type": 0,
+      "value": " (ļîƀŕåŕý đéƒåûļţ)~~~~~~~~⟧"
+    }
+  ],
+  "web.item.episodeOrder.title": [
+    {
+      "type": 0,
+      "value": "⟦Éþîšöđé öŕđéŕ~~~~~~⟧"
     }
   ],
   "web.item.images.allProviders": [
