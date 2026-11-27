@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 30;
+export const SETTINGS_REVISION = 31;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -239,6 +239,8 @@ export const SETTING_KEYS = {
   PLAYBACK_INTRO_SKIP_MODE: "playback.intro_skip_mode",
   /** Maximum bitrate */
   PLAYBACK_MAX_BITRATE_KBPS: "playback.max_bitrate_kbps",
+  /** Show Next Up */
+  PLAYBACK_NEXT_UP_ENABLED: "playback.next_up_enabled",
   /** Next up prompt */
   PLAYBACK_NEXT_UP_PROMPT_SECONDS: "playback.next_up_prompt_seconds",
   /** Preferred quality */
@@ -803,6 +805,21 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     unit: "kbps",
     minimum: 100,
     maximum: 200000,
+  },
+  "playback.next_up_enabled": {
+    key: "playback.next_up_enabled",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 31,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [31, 31],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: true,
+    label: "Show Next Up",
+    description: "Show the Next Up card near the end of an episode.",
+    category: "playback",
+    control: "switch",
   },
   "playback.next_up_prompt_seconds": {
     key: "playback.next_up_prompt_seconds",

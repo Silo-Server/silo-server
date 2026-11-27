@@ -1168,3 +1168,23 @@ not extend the Jellyfin protocol.
 
 How each client matches, loads and applies the language is in
 [the client translation architecture](architecture/i18n.md).
+
+## Next Up
+
+Two settings decide when the Next Up card opens near the end of an episode. Both are stored at
+`profile` or `profile_device` and resolved `profile_device` → `profile` → `default`.
+
+- `playback.next_up_prompt_seconds` (integer, 0–120, default 30) is how many seconds before the
+  end of the file the card opens. It counts from the file's end, never from a credits marker; 0
+  ("At end") opens it only when playback ends. Credits markers drive Skip Credits; skipping
+  credits that run to the end of the file ends playback, which opens the card. Clients differ on
+  playback that lands inside the window: Apple and the web open the card there, while Android opens it only
+  when forward playback crosses the point, so a resume or seek past it waits for the end.
+- `playback.next_up_enabled` (boolean, default true, revision 31) turns Next Up off when false:
+  no card before or at the end, no countdown, and no automatic next episode whatever
+  `playback.auto_play_next` says. The episode plays to its end and the player closes as its Close action does.
+  `next_up_prompt_seconds` applies only while this is true, so a client may present both as one
+  picker whose choices are Off, At end and the seconds values. A client that predates the key keeps
+  showing Next Up.
+
+Jellyfin clients run their own Next Up; this does not extend the Jellyfin protocol.
