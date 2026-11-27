@@ -11246,6 +11246,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "file_order_fits": {
+            "description": "Files each file order would place with this order, for suggesting the order the files are named in",
+            "items": {
+              "$ref": "#/components/schemas/EpisodeOrderFileFit"
+            },
+            "type": "array"
+          },
           "matched_files": {
             "description": "Of those, the files the order places",
             "examples": [
@@ -11282,7 +11289,8 @@
           "seasons",
           "file_count",
           "matched_files",
-          "unmatched_files"
+          "unmatched_files",
+          "file_order_fits"
         ],
         "type": "object"
       },
@@ -39863,6 +39871,30 @@
           "order_id",
           "file_order",
           "layout"
+        ],
+        "type": "object"
+      },
+      "EpisodeOrderFileFit": {
+        "additionalProperties": false,
+        "properties": {
+          "file_order": {
+            "description": "As EpisodeOrderChoice.file_order",
+            "examples": [
+              "tvdb"
+            ],
+            "type": "string"
+          },
+          "matched_files": {
+            "examples": [
+              63
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "file_order",
+          "matched_files"
         ],
         "type": "object"
       },

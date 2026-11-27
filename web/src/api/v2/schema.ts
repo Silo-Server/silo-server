@@ -18752,6 +18752,8 @@ export interface components {
        * @example 63
        */
       file_count: number;
+      /** @description Files each file order would place with this order, for suggesting the order the files are named in */
+      file_order_fits: components["schemas"]["EpisodeOrderFileFit"][];
       /**
        * Format: int64
        * @description Of those, the files the order places
@@ -30033,6 +30035,18 @@ export interface components {
        * @example tmdb
        */
       provider: string;
+    };
+    EpisodeOrderFileFit: {
+      /**
+       * @description As EpisodeOrderChoice.file_order
+       * @example tvdb
+       */
+      file_order: string;
+      /**
+       * Format: int64
+       * @example 63
+       */
+      matched_files: number;
     };
     EpisodeOrderOption: {
       description?: string;

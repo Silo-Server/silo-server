@@ -71,6 +71,13 @@ type AdminEpisodeOrderPreview struct {
 	FileCount         int                         `json:"file_count" doc:"The series' files named by season and episode" example:"63"`
 	MatchedFiles      int                         `json:"matched_files" doc:"Of those, the files the order places" example:"62"`
 	UnmatchedFiles    []string                    `json:"unmatched_files" doc:"File names the order does not place, at most 50"`
+	FileOrderFits     []EpisodeOrderFileFit       `json:"file_order_fits" doc:"Files each file order would place with this order, for suggesting the order the files are named in"`
+}
+
+// EpisodeOrderFileFit is how many files a file order would place.
+type EpisodeOrderFileFit struct {
+	FileOrder    string `json:"file_order" doc:"As EpisodeOrderChoice.file_order" example:"tvdb"`
+	MatchedFiles int    `json:"matched_files" example:"63"`
 }
 
 // AdminEpisodeOrderSaved answers a save: the stored order and the refresh job
@@ -181,6 +188,10 @@ func (reg *Registry) previewAdminEpisodeOrder(ctx context.Context, in *AdminEpis
 		FileCount:         preview.FileCount,
 		MatchedFiles:      preview.MatchedFiles,
 		UnmatchedFiles:    NonNil(preview.UnmatchedFiles),
+	}
+	out.FileOrderFits = make([]EpisodeOrderFileFit, 0, len(preview.FileOrderFits))
+	for _, fit := range preview.FileOrderFits {
+		out.FileOrderFits = append(out.FileOrderFits, EpisodeOrderFileFit{FileOrder: fit.FileOrder, MatchedFiles: fit.MatchedFiles})
 	}
 	for _, s := range preview.Seasons {
 		out.Seasons = append(out.Seasons, EpisodeOrderPreviewSeason{Number: s.Number, Title: s.Title, EpisodeCount: s.EpisodeCount, FileCount: s.FileCount})

@@ -96,6 +96,16 @@ type EpisodeOrderPreview struct {
 	FileCount      int
 	MatchedFiles   int
 	UnmatchedFiles []string
+	// FileOrderFits counts the files each file order would place, for the
+	// file orders that read differently: empty (the show's provider), tvdb
+	// and tmdb.
+	FileOrderFits []EpisodeOrderFileFit
+}
+
+// EpisodeOrderFileFit is how many files one file order places.
+type EpisodeOrderFileFit struct {
+	FileOrder    string
+	MatchedFiles int
 }
 
 // episodeOrderLister is a provider that lists a series' episode orders.
@@ -254,7 +264,27 @@ func (s *MetadataService) PreviewEpisodeOrder(ctx context.Context, seriesID stri
 	}
 	seasons, episodes, structureSlug := mergeSeriesStructure(structures.list, order.Provider, language)
 	preview.StructureProvider = structureSlug
+	var files []seriesFileLink
+	if s.dbPool != nil {
+		if files, err = s.loadSeriesFileLinks(ctx, s.dbPool, seriesID); err != nil {
+			return preview, err
+		}
+	}
 	if structureSlug != "" {
+		// File numbers do not depend on the layout, so each file order is
+		// tried on the order's own numbering.
+		for _, fileOrder := range []string{"", "tvdb", "tmdb"} {
+			if fileOrder == structureSlug {
+				continue
+			}
+			trial := append([]EpisodeResult(nil), episodes...)
+			if !assignFileNumbers(trial, structureSlug, fileOrder, structures.list) {
+				continue
+			}
+			preview.FileOrderFits = append(preview.FileOrderFits, EpisodeOrderFileFit{
+				FileOrder: fileOrder, MatchedFiles: countPlacedFiles(files, trial),
+			})
+		}
 		assignFileNumbers(episodes, structureSlug, order.FileOrder, structures.list)
 		if order.Layout == episodeLayoutAbsolute {
 			seasons, episodes = applyAbsoluteLayout(seasons, episodes)
@@ -270,24 +300,18 @@ func (s *MetadataService) PreviewEpisodeOrder(ctx context.Context, seriesID stri
 		fileSlots[slot] = ep.SeasonNumber
 	}
 	filesBySeason := make(map[int]int)
-	if s.dbPool != nil {
-		files, err := s.loadSeriesFileLinks(ctx, s.dbPool, seriesID)
-		if err != nil {
-			return preview, err
+	for _, file := range files {
+		if !file.Numbered {
+			continue
 		}
-		for _, file := range files {
-			if !file.Numbered {
-				continue
-			}
-			preview.FileCount++
-			if season, ok := fileSlots[episodeSlot{file.Season, file.Episode}]; ok {
-				preview.MatchedFiles++
-				filesBySeason[season]++
-				continue
-			}
-			if len(preview.UnmatchedFiles) < 50 {
-				preview.UnmatchedFiles = append(preview.UnmatchedFiles, path.Base(file.Path))
-			}
+		preview.FileCount++
+		if season, ok := fileSlots[episodeSlot{file.Season, file.Episode}]; ok {
+			preview.MatchedFiles++
+			filesBySeason[season]++
+			continue
+		}
+		if len(preview.UnmatchedFiles) < 50 {
+			preview.UnmatchedFiles = append(preview.UnmatchedFiles, path.Base(file.Path))
 		}
 	}
 
@@ -370,4 +394,24 @@ func (s *MetadataService) fetchRemoteStructures(ctx context.Context, ids map[str
 		}
 	}
 	return structures, nil
+}
+
+// countPlacedFiles counts the number-named files whose numbers name one of
+// episodes in its file order.
+func countPlacedFiles(files []seriesFileLink, episodes []EpisodeResult) int {
+	slots := make(map[episodeSlot]bool, len(episodes))
+	for _, ep := range episodes {
+		if ep.FileNumbered {
+			slots[episodeSlot{ep.FileSeasonNumber, ep.FileEpisodeNumber}] = true
+		} else {
+			slots[episodeSlot{ep.SeasonNumber, ep.EpisodeNumber}] = true
+		}
+	}
+	placed := 0
+	for _, file := range files {
+		if file.Numbered && slots[episodeSlot{file.Season, file.Episode}] {
+			placed++
+		}
+	}
+	return placed
 }
