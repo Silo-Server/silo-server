@@ -155,7 +155,7 @@ func validateSeriesMatchByEpisodes(
 		next = coordinateValidations[1]
 	}
 	if !episodeCoordinateEvidenceIsSufficient(
-		best, next, localEpisodes, len(coordinateValidations), contendersExhaustive,
+		best, next, localEpisodes, hints.Year, len(coordinateValidations), contendersExhaustive,
 	) {
 		return nil, errs
 	}
@@ -364,10 +364,18 @@ func episodeCoordinateEvidenceIsSufficient(
 	validation episodeCandidateValidation,
 	next episodeCandidateValidation,
 	localEpisodes []localEpisodeMatchHint,
+	hintYear int,
 	contenderCount int,
 	contendersExhaustive bool,
 ) bool {
 	if len(localEpisodes) < 2 || validation.coordinates != len(localEpisodes) {
+		return false
+	}
+	// The score-based pick rejects a candidate whose year is more than two
+	// years from the folder's; coordinates cannot overrule that either. A
+	// same-title show from another year often shares S01E01 and S02E01.
+	if hintYear != 0 && validation.candidate.Year != 0 &&
+		absYearDelta(validation.candidate.Year, hintYear) > 2 {
 		return false
 	}
 	// Two coordinates spread across two seasons carry meaningful series-shape
