@@ -75,8 +75,19 @@ func CompressWithExclusions(skipRequest func(*http.Request) bool, skipResponse f
 			}
 			coding, identityRefused := negotiate(r.Header.Values("Accept-Encoding"))
 			cw := &compressWriter{ResponseWriter: w, r: r, c: c, coding: coding, identityRefused: identityRefused}
-			defer cw.close()
+			// A handler that panics did not finish its response, so it must not
+			// be sent as finished. Not recovering keeps the panic's own stack
+			// for whatever answers it.
+			returned := false
+			defer func() {
+				if returned {
+					cw.close()
+				} else {
+					cw.abandon()
+				}
+			}()
 			next.ServeHTTP(cw, r)
+			returned = true
 		})
 	}
 }
@@ -382,6 +393,35 @@ func (w *compressWriter) close() {
 		w.writeHeldHeader(b.buf.Len())
 		_, _ = w.ResponseWriter.Write(b.buf.Bytes())
 	}
+	w.releaseHeld(b)
+}
+
+// abandon ends a response whose handler panicked, writing nothing more. A
+// held response never reaches the client: its status and body are dropped,
+// and the coding and length it declared come off the header, so whatever
+// answers the panic writes a response of its own. A response that already
+// streams is left without the coding's end, so the client cannot decode it
+// as complete. The encoder goes back to its pool, which resets it on reuse.
+func (w *compressWriter) abandon() {
+	if w.enc == nil {
+		return
+	}
+	w.coding.put(w.enc)
+	w.enc = nil
+	b := w.held
+	if b == nil {
+		return
+	}
+	if b.out == nil {
+		h := w.Header()
+		h.Del("Content-Encoding")
+		h.Del("Content-Length")
+	}
+	w.releaseHeld(b)
+}
+
+// releaseHeld returns a held response's buffer to its pool.
+func (w *compressWriter) releaseHeld(b *heldBody) {
 	w.held, w.header = nil, nil
 	// The pooled encoder still points at b until its next Reset, so a large
 	// buffer is dropped rather than left reachable through it.
