@@ -241,6 +241,48 @@ func applyEpisodeRenumber(ctx context.Context, tx pgx.Tx, seriesID string, moves
 		}
 	}
 
+	// A row outside this move can hold a composed ID a moving row needs (its
+	// ID stopped matching its numbers in earlier history). That moving row
+	// takes a fresh ID instead, as a re-anchored series' children do.
+	if len(finals) > 0 {
+		takenRows, err := tx.Query(ctx, `
+			SELECT content_id FROM episodes
+			WHERE content_id = ANY($1) AND NOT (content_id = ANY($2))`, finals, sources)
+		if err != nil {
+			return fmt.Errorf("renumber: check final ids: %w", err)
+		}
+		taken := make(map[string]bool)
+		for takenRows.Next() {
+			var id string
+			if err := takenRows.Scan(&id); err != nil {
+				takenRows.Close()
+				return fmt.Errorf("renumber: check final ids: %w", err)
+			}
+			taken[id] = true
+		}
+		takenRows.Close()
+		if err := takenRows.Err(); err != nil {
+			return fmt.Errorf("renumber: check final ids: %w", err)
+		}
+		for k, final := range finals {
+			if !taken[final] {
+				continue
+			}
+			fresh, err := generateContentID()
+			if err != nil {
+				return fmt.Errorf("renumber: mint id for %s: %w", sources[k], err)
+			}
+			slog.WarnContext(ctx, "metadata: renumbered episode takes a fresh id; its composed id is taken",
+				"component", "metadata", "series_id", seriesID, "episode_id", sources[k], "target_id", final, "fresh_id", fresh)
+			finals[k] = fresh
+			for i := range moves {
+				if moves[i].ContentID == sources[k] {
+					finalIDs[i] = fresh
+				}
+			}
+		}
+	}
+
 	// Free every slot first: numbers go negative, which no episode uses.
 	for i, move := range moves {
 		if _, err := tx.Exec(ctx, `

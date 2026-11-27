@@ -48,20 +48,15 @@ func mergeSeriesStructure(providers []providerStructure, preferred, language str
 		accumulateEpisodeResults(episodeResults, p.episodes, language)
 	}
 
-	bridge := newEpisodeBridge(episodeResults)
+	structureEpisodes := flattenEpisodePointers(episodeResults)
 	for i := range providers {
 		p := &providers[i]
 		if p.local || p == structure {
 			continue
 		}
-		bridge.countOther(p.episodes)
-		for _, episode := range p.episodes {
-			target := bridge.match(episode)
-			if target == nil {
-				continue
-			}
-			mergeEpisodeInto(target, episode, language)
-			lendProviderIDs(target, episode.ProviderIDs)
+		for j, target := range bridgeEpisodes(structureEpisodes, p.episodes) {
+			mergeEpisodeInto(target, p.episodes[j], language)
+			lendProviderIDs(target, p.episodes[j].ProviderIDs)
 		}
 	}
 	return flattenSeasonResults(seasonResults), flattenEpisodeResults(episodeResults), structureSlug
@@ -111,70 +106,189 @@ func structureProvider(providers []providerStructure, preferred string) *provide
 	return nil
 }
 
-// episodeBridge finds the structure episode another provider's episode is.
-// Providers rarely send each other's episode IDs, so after a shared ID it
-// goes by air date: a date both providers give exactly one episode, else the
-// same numbers on the same date. Anything else stays unmatched: a wrong match
-// would put one episode's data, and later its watch history, on another.
-type episodeBridge struct {
-	byID         map[string]*EpisodeResult
-	byDate       map[string][]*EpisodeResult
-	byNumbers    map[episodeResultKey]*EpisodeResult
-	otherPerDate map[string]int
-}
-
-func newEpisodeBridge(structure map[episodeResultKey]*EpisodeResult) *episodeBridge {
-	b := &episodeBridge{
-		byID:      make(map[string]*EpisodeResult),
-		byDate:    make(map[string][]*EpisodeResult),
-		byNumbers: make(map[episodeResultKey]*EpisodeResult, len(structure)),
+// bridgeEpisodes finds which structure episode each of another provider's
+// episodes is, keyed by index into other. Providers rarely send each other's
+// episode IDs, so it works in passes, each over what is still unmatched:
+//
+//  1. a shared provider ID;
+//  2. an air date on which both providers list the same number of episodes,
+//     each a consecutive run within one season, paired in episode order
+//     (one each is the plain case; two each is a double bill);
+//  3. the same numbers on the same date;
+//  4. a gap between two matched neighbours: when the other provider has as
+//     many unmatched regular episodes between them as the structure provider
+//     has between the episodes they matched, pair those in order. This
+//     catches air dates that differ by a day across time zones.
+//
+// Anything else stays unmatched: a wrong match would put one episode's data,
+// and later its watch history, on another.
+func bridgeEpisodes(structure []*EpisodeResult, other []EpisodeResult) map[int]*EpisodeResult {
+	matched := make(map[int]*EpisodeResult)
+	taken := make(map[*EpisodeResult]bool)
+	pair := func(i int, target *EpisodeResult) {
+		matched[i] = target
+		taken[target] = true
 	}
-	for key, episode := range structure {
-		b.byNumbers[key] = episode
-		for idKey, value := range episode.ProviderIDs {
+
+	byID := make(map[string]*EpisodeResult)
+	for _, episode := range structure {
+		for key, value := range episode.ProviderIDs {
 			if value != "" {
-				b.byID[idKey+"\x00"+value] = episode
+				byID[key+"\x00"+value] = episode
 			}
 		}
-		if date := episodeAirDate(episode.AirDate); date != "" {
-			b.byDate[date] = append(b.byDate[date], episode)
+	}
+	for i, episode := range other {
+		for key, value := range episode.ProviderIDs {
+			if target := byID[key+"\x00"+value]; value != "" && target != nil && !taken[target] {
+				pair(i, target)
+				break
+			}
 		}
 	}
-	return b
-}
 
-// countOther records how many episodes one other provider airs per date, so
-// match can tell a unique date from a shared one.
-func (b *episodeBridge) countOther(episodes []EpisodeResult) {
-	b.otherPerDate = make(map[string]int)
-	for _, episode := range episodes {
-		if date := episodeAirDate(episode.AirDate); date != "" {
-			b.otherPerDate[date]++
+	structureByDate := make(map[string][]*EpisodeResult)
+	for _, episode := range structure {
+		if date := episodeAirDate(episode.AirDate); date != "" && !taken[episode] {
+			structureByDate[date] = append(structureByDate[date], episode)
 		}
 	}
-}
-
-func (b *episodeBridge) match(episode EpisodeResult) *EpisodeResult {
-	for idKey, value := range episode.ProviderIDs {
-		if value == "" {
+	otherByDate := make(map[string][]int)
+	for i, episode := range other {
+		if _, done := matched[i]; done {
 			continue
 		}
-		if target := b.byID[idKey+"\x00"+value]; target != nil {
-			return target
+		if date := episodeAirDate(episode.AirDate); date != "" {
+			otherByDate[date] = append(otherByDate[date], i)
 		}
 	}
-	date := episodeAirDate(episode.AirDate)
-	if date == "" {
-		return nil
+	for date, indexes := range otherByDate {
+		targets := structureByDate[date]
+		if len(targets) != len(indexes) {
+			continue
+		}
+		sort.SliceStable(indexes, func(a, b int) bool { return episodeBefore(&other[indexes[a]], &other[indexes[b]]) })
+		otherRun := make([]*EpisodeResult, len(indexes))
+		for k, i := range indexes {
+			otherRun[k] = &other[i]
+		}
+		if !consecutiveRun(otherRun) || !consecutiveRun(targets) {
+			continue
+		}
+		for k, i := range indexes {
+			pair(i, targets[k])
+		}
 	}
-	if candidates := b.byDate[date]; len(candidates) == 1 && b.otherPerDate[date] == 1 {
-		return candidates[0]
+
+	byNumbers := make(map[episodeResultKey]*EpisodeResult, len(structure))
+	for _, episode := range structure {
+		byNumbers[episodeResultKey{seasonNumber: episode.SeasonNumber, episodeNumber: episode.EpisodeNumber}] = episode
 	}
-	target := b.byNumbers[episodeResultKey{seasonNumber: episode.SeasonNumber, episodeNumber: episode.EpisodeNumber}]
-	if target != nil && episodeAirDate(target.AirDate) == date {
-		return target
+	for i, episode := range other {
+		if _, done := matched[i]; done {
+			continue
+		}
+		target := byNumbers[episodeResultKey{seasonNumber: episode.SeasonNumber, episodeNumber: episode.EpisodeNumber}]
+		date := episodeAirDate(episode.AirDate)
+		if target != nil && !taken[target] && date != "" && episodeAirDate(target.AirDate) == date {
+			pair(i, target)
+		}
 	}
-	return nil
+
+	bridgeGaps(structure, other, matched, taken, pair)
+	return matched
+}
+
+// bridgeGaps is pass 4 of bridgeEpisodes, over regular episodes only.
+func bridgeGaps(structure []*EpisodeResult, other []EpisodeResult, matched map[int]*EpisodeResult,
+	taken map[*EpisodeResult]bool, pair func(int, *EpisodeResult)) {
+	var regular []*EpisodeResult
+	position := make(map[*EpisodeResult]int)
+	for _, episode := range structure {
+		if episode.SeasonNumber > 0 {
+			position[episode] = len(regular)
+			regular = append(regular, episode)
+		}
+	}
+	var order []int
+	for i := range other {
+		if other[i].SeasonNumber > 0 {
+			order = append(order, i)
+		}
+	}
+	sort.SliceStable(order, func(a, b int) bool { return episodeBefore(&other[order[a]], &other[order[b]]) })
+
+	// pairRun pairs a run of unmatched other episodes with the structure's
+	// episodes regular[from:to] when the counts agree and none of those is
+	// matched yet.
+	pairRun := func(run []int, from, to int) {
+		if len(run) == 0 || to-from != len(run) {
+			return
+		}
+		for _, t := range regular[from:to] {
+			if taken[t] {
+				return
+			}
+		}
+		for n, j := range run {
+			pair(j, regular[from+n])
+		}
+	}
+
+	first, last := -1, -1 // indexes into order of the first and last anchor
+	for k, i := range order {
+		target, ok := matched[i]
+		if !ok {
+			continue
+		}
+		to, inRegular := position[target]
+		if !inRegular {
+			continue
+		}
+		if last >= 0 {
+			pairRun(order[last+1:k], position[matched[order[last]]]+1, to)
+		} else {
+			first = k
+		}
+		last = k
+	}
+	if first < 0 {
+		return
+	}
+	// The runs before the first anchor and after the last: new episodes at the
+	// end are the common case, a day apart across time zones.
+	pairRun(order[:first], 0, position[matched[order[first]]])
+	pairRun(order[last+1:], position[matched[order[last]]]+1, len(regular))
+}
+
+// consecutiveRun reports whether episodes, in order, are consecutive
+// episodes of one season.
+func consecutiveRun(episodes []*EpisodeResult) bool {
+	for k := 1; k < len(episodes); k++ {
+		if episodes[k].SeasonNumber != episodes[0].SeasonNumber ||
+			episodes[k].EpisodeNumber != episodes[k-1].EpisodeNumber+1 {
+			return false
+		}
+	}
+	return true
+}
+
+func episodeBefore(a, b *EpisodeResult) bool {
+	if a.SeasonNumber != b.SeasonNumber {
+		return a.SeasonNumber < b.SeasonNumber
+	}
+	return a.EpisodeNumber < b.EpisodeNumber
+}
+
+// flattenEpisodePointers lists the accumulated episodes in season and
+// episode order, as pointers the bridge can fill in.
+func flattenEpisodePointers(accumulator map[episodeResultKey]*EpisodeResult) []*EpisodeResult {
+	out := make([]*EpisodeResult, 0, len(accumulator))
+	for _, episode := range accumulator {
+		out = append(out, episode)
+	}
+	sort.Slice(out, func(i, j int) bool { return episodeBefore(out[i], out[j]) })
+	return out
 }
 
 // episodeAirDate is the date part of a provider air date, empty when unknown.

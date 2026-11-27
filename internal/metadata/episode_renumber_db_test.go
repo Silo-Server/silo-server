@@ -222,3 +222,84 @@ func TestApplyEpisodeMergesDB(t *testing.T) {
 		t.Fatalf("file linked to %s S%dE%d, want %s S2E1", episodeID, season, number, keep)
 	}
 }
+
+// A row that is not moving can hold the composed ID a moving row needs: its
+// ID no longer matches its numbers after earlier history. The moving row then
+// takes a fresh ID, and its watch progress still follows it.
+func TestApplyEpisodeRenumberTakenIDDB(t *testing.T) {
+	pool := chainBuiltinTestPool(t)
+	ctx := t.Context()
+	items := catalog.NewItemRepository(pool)
+	episodes := catalog.NewEpisodeRepository(pool)
+
+	nonce := time.Now().UnixNano() % 100_000_000
+	tvdb := fmt.Sprintf("%d", 630_000_000+nonce)
+	series := "series-tvdb-" + tvdb
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, series)
+	})
+	if err := items.Upsert(ctx, &models.MediaItem{
+		ContentID: series, Type: "series", Title: "Re-anchored show", Status: "matched", TvdbID: tvdb,
+		DefaultMetadataLanguage: "en",
+		Studios:                 []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mover, _ := contentid.ForEpisode(series, 1, 1)
+	holder, _ := contentid.ForEpisode(series, 1, 2) // sits at S1E5
+	for _, e := range []struct {
+		id     string
+		number int
+	}{{mover, 1}, {holder, 5}} {
+		if err := episodes.Upsert(ctx, &models.Episode{
+			ContentID: e.id, SeriesID: series, SeasonNumber: 1, EpisodeNumber: e.number,
+			Title: fmt.Sprintf("E%d", e.number), DefaultMetadataLanguage: "en", MetadataSource: "provider",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
+		fmt.Sprintf("taken-user-%d", nonce)).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM user_watch_progress WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(bg, `DELETE FROM users WHERE id = $1`, userID)
+	})
+	profileID := fmt.Sprintf("00000000-0000-4000-8000-%012d", nonce)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, updated_at)
+		VALUES ($1, $2, $3, 300, 1440, now())`, userID, profileID, mover); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := applyEpisodeRenumber(ctx, tx, series, []episodeMove{
+		{ContentID: mover, FromSeason: 1, FromEpisode: 1, ToSeason: 1, ToEpisode: 2},
+	}); err != nil {
+		t.Fatalf("applyEpisodeRenumber = %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	var moved string
+	if err := pool.QueryRow(ctx, `SELECT content_id FROM episodes WHERE series_id = $1 AND season_number = 1 AND episode_number = 2`,
+		series).Scan(&moved); err != nil {
+		t.Fatalf("no row at S1E2: %v", err)
+	}
+	if moved == holder || moved == mover {
+		t.Fatalf("moved row id = %s, want a fresh id", moved)
+	}
+	var position int
+	if err := pool.QueryRow(ctx, `SELECT position_seconds FROM user_watch_progress WHERE user_id = $1 AND media_item_id = $2`,
+		userID, moved).Scan(&position); err != nil || position != 300 {
+		t.Fatalf("progress on %s = %d (%v), want 300", moved, position, err)
+	}
+}

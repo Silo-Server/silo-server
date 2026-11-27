@@ -182,3 +182,86 @@ func TestMergeSeriesStructure_BridgesByAirDate(t *testing.T) {
 		t.Fatalf("S3E1 = %+v, want nothing bridged onto it", one)
 	}
 }
+
+// Double bills air two episodes on one day; both providers listing two that
+// day pair them in episode order.
+func TestMergeSeriesStructure_BridgesSameDayPairsInOrder(t *testing.T) {
+	ep := func(season, number int, air string, ids map[string]string) EpisodeResult {
+		return EpisodeResult{SeasonNumber: season, EpisodeNumber: number, AirDate: air, ProviderIDs: ids}
+	}
+	tvdb := providerStructure{slug: "tvdb", episodes: []EpisodeResult{
+		ep(3, 11, "2005-10-04", map[string]string{"tvdb": "t52"}),
+		ep(3, 12, "2005-10-04", map[string]string{"tvdb": "t53"}),
+	}}
+	tmdb := providerStructure{slug: "tmdb", episodes: []EpisodeResult{
+		ep(1, 52, "2005-10-04", map[string]string{"tmdb": "m52"}),
+		ep(1, 53, "2005-10-04", map[string]string{"tmdb": "m53"}),
+	}}
+
+	_, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
+
+	got := episodesByKey(episodes)
+	if got[structureKey{3, 11}].ProviderIDs["tmdb"] != "m52" || got[structureKey{3, 12}].ProviderIDs["tmdb"] != "m53" {
+		t.Fatalf("episodes = %+v, want TMDB's E52/E53 on TVDB's S3E11/S3E12", episodes)
+	}
+}
+
+// Providers can disagree on an air date by a day (time zones). An episode
+// between two bridged neighbours, with exactly as many unbridged episodes
+// between the structure provider's matching neighbours, pairs in order.
+func TestMergeSeriesStructure_BridgesGapsBetweenMatchedNeighbours(t *testing.T) {
+	ep := func(season, number int, air string, ids map[string]string) EpisodeResult {
+		return EpisodeResult{SeasonNumber: season, EpisodeNumber: number, AirDate: air, ProviderIDs: ids}
+	}
+	tvdb := providerStructure{slug: "tvdb", episodes: []EpisodeResult{
+		ep(2, 12, "2005-05-17", map[string]string{"tvdb": "t32"}),
+		ep(2, 13, "2005-05-24", map[string]string{"tvdb": "t33"}),
+		ep(2, 14, "2005-05-31", map[string]string{"tvdb": "t34"}),
+		ep(2, 15, "2005-06-07", map[string]string{"tvdb": "t35"}),
+	}}
+	tmdb := providerStructure{slug: "tmdb", episodes: []EpisodeResult{
+		ep(1, 32, "2005-05-17", map[string]string{"tmdb": "m32"}),
+		ep(1, 33, "2005-05-26", map[string]string{"tmdb": "m33"}),
+		ep(1, 34, "2005-06-01", map[string]string{"tmdb": "m34"}),
+		ep(1, 35, "2005-06-07", map[string]string{"tmdb": "m35"}),
+	}}
+
+	_, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
+
+	got := episodesByKey(episodes)
+	for number, want := range map[int]string{12: "m32", 13: "m33", 14: "m34", 15: "m35"} {
+		if id := got[structureKey{2, number}].ProviderIDs["tmdb"]; id != want {
+			t.Fatalf("S2E%d tmdb = %q, want %q (episodes %+v)", number, id, want, episodes)
+		}
+	}
+}
+
+// The newest episodes come after the last bridged neighbour, often a day
+// apart across time zones. As many unmatched episodes at the end of both
+// lists pair in order; the same holds at the start.
+func TestMergeSeriesStructure_BridgesTheRunsAtEitherEnd(t *testing.T) {
+	ep := func(season, number int, air string, ids map[string]string) EpisodeResult {
+		return EpisodeResult{SeasonNumber: season, EpisodeNumber: number, AirDate: air, ProviderIDs: ids}
+	}
+	tvdb := providerStructure{slug: "tvdb", episodes: []EpisodeResult{
+		ep(17, 1, "2026-01-05", map[string]string{"tvdb": "t1"}),
+		ep(17, 48, "2026-10-12", map[string]string{"tvdb": "t48"}),
+		ep(17, 49, "2026-10-19", map[string]string{"tvdb": "t49"}),
+		ep(17, 50, "2026-10-26", map[string]string{"tvdb": "t50"}),
+	}}
+	tmdb := providerStructure{slug: "tmdb", episodes: []EpisodeResult{
+		ep(2, 1, "2026-01-06", map[string]string{"tmdb": "m1"}),
+		ep(2, 48, "2026-10-12", map[string]string{"tmdb": "m48"}),
+		ep(2, 49, "2026-10-20", map[string]string{"tmdb": "m49"}),
+		ep(2, 50, "2026-10-27", map[string]string{"tmdb": "m50"}),
+	}}
+
+	_, episodes, _ := mergeSeriesStructure([]providerStructure{tvdb, tmdb}, "tvdb", "en")
+
+	got := episodesByKey(episodes)
+	for number, want := range map[int]string{1: "m1", 48: "m48", 49: "m49", 50: "m50"} {
+		if id := got[structureKey{17, number}].ProviderIDs["tmdb"]; id != want {
+			t.Fatalf("S17E%d tmdb = %q, want %q", number, id, want)
+		}
+	}
+}
