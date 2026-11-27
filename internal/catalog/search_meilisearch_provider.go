@@ -239,6 +239,9 @@ func NewMeilisearchSearchProvider(
 
 func (p *MeilisearchSearchProvider) Search(ctx context.Context, req CatalogSearchRequest) (*CatalogSearchResult, error) {
 	if req.CursorPaging {
+		// A name_prefix narrows the ranked window in filterRankingWindow, so a
+		// letter keeps Meilisearch's own matches. Prefixed offset searches never
+		// reach a provider (useDirectSearchPath).
 		return p.searchCursorPage(ctx, req)
 	}
 	if req.Access.AllowedLibraryIDs != nil && len(req.Access.AllowedLibraryIDs) == 0 {

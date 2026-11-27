@@ -867,7 +867,12 @@ or the title when no sort title is set. "The Hobbit" with sort title
 "Hobbit, The" matches `h`, not `t` or `the`. Jellyfin's `NameStartsWith`
 follows the same rule, except in an Episode browse, which matches the
 episode's title. Recently added TV also matches an episode's own title so
-episode cards can be found by name.
+episode cards can be found by name. With `q`, `name_prefix` narrows the
+search's results without changing which titles match: the prefix keeps the
+titles the same search finds without it, from whichever provider served it,
+that start with the prefix. As in browse, `query_limit` and `group=work` apply
+after the prefix, so a work can be represented by another of its matching
+editions.
 
 Both operations return shared catalog cards, `page.next_cursor`, `page.has_more`,
 `total`, `total_exact`, and `window_cursor`. Send `next_cursor` unchanged as

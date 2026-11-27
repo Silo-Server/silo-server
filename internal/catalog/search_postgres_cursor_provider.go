@@ -10,7 +10,9 @@ import (
 // postgresCursorConfig names the meaning of the relevance keys a cursor
 // carries. Change it whenever a key's meaning changes, so a cursor issued
 // before the change is rejected rather than seeking with keys it cannot match.
-const postgresCursorConfig = "postgres-relevance-v3"
+// v4: name_prefix narrows a search's ranked rows instead of taking part in
+// matching, so a prefixed cursor's keys and consumed count refer to other rows.
+const postgresCursorConfig = "postgres-relevance-v4"
 
 func (p *PostgresSearchProvider) searchCursorPage(ctx context.Context, req CatalogSearchRequest) (*CatalogSearchResult, error) {
 	options := SearchCursorOptions{Definition: req.Definition, GroupByWork: req.GroupByWork}
