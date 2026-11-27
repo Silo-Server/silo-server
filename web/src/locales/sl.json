@@ -160453,6 +160453,12 @@
       "value": "E-pošta ali uporabniško ime"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Vnesite osnovni URL strežnika Emby, iz katerega želite uvoziti."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -160463,6 +160469,12 @@
     {
       "type": 0,
       "value": "Pustite prazno, če račun nima gesla"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL strežnika Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -160613,6 +160625,12 @@
     {
       "type": 0,
       "value": "Račun Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL strežnika"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -160906,7 +160924,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect ali shranjeni strežnik"
+      "value": "Emby Connect, URL strežnika ali shranjeni strežnik"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

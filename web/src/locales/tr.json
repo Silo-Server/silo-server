@@ -134959,6 +134959,12 @@
       "value": "E-posta veya kullanıcı adı"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "İçe aktarmak istediğiniz Emby sunucusunun temel URL’sini girin."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -134969,6 +134975,12 @@
     {
       "type": 0,
       "value": "Hesabın parolası yoksa boş bırakın"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby sunucu URL’si"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -135119,6 +135131,12 @@
     {
       "type": 0,
       "value": "Plex hesabı"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Sunucu URL’si"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -135412,7 +135430,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect veya kayıtlı sunucu"
+      "value": "Emby Connect, sunucu URL’si veya kayıtlı sunucu"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

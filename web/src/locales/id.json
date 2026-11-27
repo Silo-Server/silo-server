@@ -124585,6 +124585,12 @@
       "value": "Email atau nama pengguna"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Masukkan URL dasar server Emby yang ingin Anda impor."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -124595,6 +124601,12 @@
     {
       "type": 0,
       "value": "Kosongkan jika akun tidak memiliki kata sandi"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL server Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -124745,6 +124757,12 @@
     {
       "type": 0,
       "value": "Akun Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL server"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -125038,7 +125056,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect atau server tersimpan"
+      "value": "Emby Connect, URL server, atau server tersimpan"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

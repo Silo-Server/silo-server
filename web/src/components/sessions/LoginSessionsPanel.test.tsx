@@ -54,6 +54,7 @@ vi.mock("@/hooks/queries/loginSessions", () => ({
       refetch: vi.fn(),
     },
     sessions: mocks.sessions,
+    reducedIds: new Set(),
     currentSession: null,
     revoke: { isPending: mocks.pending, mutateAsync: mocks.revoke },
     revokeAll: { isPending: false, mutateAsync: mocks.all },

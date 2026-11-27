@@ -160863,6 +160863,12 @@
       "value": "E-mail nebo uživatelské jméno"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Zadejte základní URL serveru Emby, ze kterého chcete importovat."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -160873,6 +160879,12 @@
     {
       "type": 0,
       "value": "Nechte prázdné, pokud účet heslo nemá"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL serveru Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -161023,6 +161035,12 @@
     {
       "type": 0,
       "value": "Účet Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL serveru"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -161316,7 +161334,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect nebo uložený server"
+      "value": "Emby Connect, URL serveru nebo uložený server"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

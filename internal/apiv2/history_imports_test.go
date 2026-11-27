@@ -187,6 +187,30 @@ func TestCreateHistoryImportRun(t *testing.T) {
 	if p.Detail != "Choose a server and enter the Emby username." || len(p.Errors) != 1 || p.Errors[0].Detail != p.Detail {
 		t.Fatalf("invalid input problem = %+v", p)
 	}
+	fake.createErr = fmt.Errorf("%w: Emby server URL must be an HTTP or HTTPS URL without credentials, a query, or a fragment", historyimport.ErrInvalidInput)
+	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"emby","emby_base_url":"emby.example.test","username":"alice"}`, bearer(memberToken)), TypeValidationFailed)
+	if p.Detail != "Emby server URL must be an HTTP or HTTPS URL without credentials, a query, or a fragment." {
+		t.Fatalf("emby_base_url validation detail = %q", p.Detail)
+	}
+	fake.createErr = fmt.Errorf("authenticating against Emby server: %w", historyimport.ErrUnexpectedSourceResponse)
+	rec = do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"emby","emby_base_url":"https://emby.example.test","username":"alice"}`, bearer(memberToken))
+	p = requireProblem(t, rec, TypeDependencyUnavailable)
+	if p.Detail != historyimport.UnexpectedSourceResponseMessage || rec.Header().Get("Retry-After") != "30" {
+		t.Fatalf("unexpected response problem = %+v Retry-After=%q", p, rec.Header().Get("Retry-After"))
+	}
+	// Direct Emby URL maps emby_base_url into CreateRunInput.ServerURL and reports emby_custom_server capability.
+	fake.createErr = nil
+	rec = do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"emby","emby_base_url":"https://emby.example.test","username":"alice"}`, bearer(memberToken))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("emby direct: %d %s", rec.Code, rec.Body.String())
+	}
+	if in := fake.lastCreate; in == nil || in.Source != "emby" || in.ServerURL != "https://emby.example.test" || in.Username != "alice" || in.Password != "" {
+		t.Fatalf("emby direct input = %+v", in)
+	}
+	capRec := do(t, h, http.MethodGet, "/api/v2/history-imports/capability", "", bearer(memberToken))
+	if capRec.Code != http.StatusOK || !strings.Contains(capRec.Body.String(), `"emby_custom_server":true`) {
+		t.Fatalf("capability = %d %s", capRec.Code, capRec.Body.String())
+	}
 	// A server address the outbound guard refused names the fix, whether it
 	// arrives raw or through the v1 seam's mapping.
 	refusedDial := &url.Error{Op: "Post", URL: "http://192.168.1.10:8096/Users/AuthenticateByName", Err: &net.OpError{Op: "dial", Net: "tcp", Err: netguard.ErrPrivateDestination}}

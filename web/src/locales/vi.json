@@ -136851,6 +136851,12 @@
       "value": "Email hoặc tên người dùng"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Nhập URL gốc của máy chủ Emby mà bạn muốn nhập dữ liệu từ đó."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -136861,6 +136867,12 @@
     {
       "type": 0,
       "value": "Để trống nếu tài khoản không có mật khẩu"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL máy chủ Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -137011,6 +137023,12 @@
     {
       "type": 0,
       "value": "Tài khoản Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL máy chủ"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -137308,7 +137326,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect hoặc máy chủ đã lưu"
+      "value": "Emby Connect, URL máy chủ hoặc máy chủ đã lưu"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

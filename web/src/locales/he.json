@@ -146912,6 +146912,12 @@
       "value": "אימייל או שם משתמש"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "יש להזין את כתובת ה-URL הבסיסית של שרת ה-Emby שממנו רוצים לייבא."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -146922,6 +146928,12 @@
     {
       "type": 0,
       "value": "יש להשאיר ריק אם אין לחשבון סיסמה"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "כתובת URL של שרת Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -147072,6 +147084,12 @@
     {
       "type": 0,
       "value": "חשבון Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "כתובת URL של השרת"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -147365,7 +147383,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect או שרת שמור"
+      "value": "Emby Connect, כתובת URL של שרת או שרת שמור"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

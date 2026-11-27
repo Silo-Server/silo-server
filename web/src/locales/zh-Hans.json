@@ -125441,6 +125441,12 @@
       "value": "邮箱或用户名"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "输入要从中导入的Emby服务器的基础URL。"
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -125451,6 +125457,12 @@
     {
       "type": 0,
       "value": "如果账户没有密码，请留空"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby服务器URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -125601,6 +125613,12 @@
     {
       "type": 0,
       "value": "Plex账户"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "服务器URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -125898,7 +125916,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect或已保存的服务器"
+      "value": "Emby Connect、服务器URL或已保存的服务器"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

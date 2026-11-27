@@ -167,11 +167,15 @@ func countCPUSetEntries(list string) int {
 }
 
 // cgroupCPUSample is one cumulative CPU-time reading. Only differences between
-// two readings mean anything.
+// two readings of the same counter mean anything.
 type cgroupCPUSample struct {
 	usageNS int64
 	at      time.Time
 	valid   bool
+	// source is the usage file the reading came from. Each cgroup keeps its own
+	// counter, so a pass that reads a different cgroup than the last one did has
+	// nothing to difference against.
+	source string
 }
 
 // cgroupCPU returns this process's cgroup CPU reading for the given instant,
@@ -208,7 +212,7 @@ func (s *Sampler) cgroupCPU(now time.Time, pinned int) (cgroupCPUSample, float64
 			continue
 		}
 		s.cgroupCPUDetails = sampleCgroupCPU(binding, paths, quota, usage)
-		return cgroupCPUSample{usageNS: usage, at: now, valid: true}, quota
+		return cgroupCPUSample{usageNS: usage, at: now, valid: true, source: binding.usage}, quota
 	}
 	return cgroupCPUSample{}, 0
 }
@@ -328,11 +332,12 @@ func readCgroupCPUQuota(paths cgroupCPUPath) (float64, error) {
 // cgroupCPUPercent converts two cgroup CPU readings into a busy percentage of
 // the given core budget.
 //
-// A usage counter that went backwards means the readings do not describe one
-// continuous run (the container was restarted or migrated), so the pair is
-// unusable rather than negative.
+// Readings from two different usage files are two cgroups' counters, and a
+// usage counter that went backwards means the readings do not describe one
+// continuous run (the container was restarted or migrated). Either way the pair
+// is unusable rather than a busy figure.
 func cgroupCPUPercent(previous, current cgroupCPUSample, cores float64) (int, bool) {
-	if !previous.valid || !current.valid || cores <= 0 {
+	if !previous.valid || !current.valid || previous.source != current.source || cores <= 0 {
 		return 0, false
 	}
 	elapsedNS := current.at.Sub(previous.at).Nanoseconds()

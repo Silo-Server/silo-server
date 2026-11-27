@@ -1806,6 +1806,7 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, appCodeFixtureCases()...)
 	cases = append(cases, adminProfileSetEditFixtureCases()...)
 	cases = append(cases, signInLinkFixtureCases()...)
+	cases = append(cases, localPasswordOffFixtureCases()...)
 	return cases
 }
 

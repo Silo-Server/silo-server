@@ -126029,6 +126029,12 @@
       "value": "อีเมลหรือชื่อผู้ใช้"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "ป้อน URL หลักของเซิร์ฟเวอร์ Emby ที่ต้องการนำเข้าข้อมูล"
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -126039,6 +126045,12 @@
     {
       "type": 0,
       "value": "เว้นว่างไว้หากบัญชีไม่มีรหัสผ่าน"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL เซิร์ฟเวอร์ Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -126189,6 +126201,12 @@
     {
       "type": 0,
       "value": "บัญชี Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL เซิร์ฟเวอร์"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -126486,7 +126504,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect หรือเซิร์ฟเวอร์ที่บันทึกไว้"
+      "value": "Emby Connect URL เซิร์ฟเวอร์ หรือเซิร์ฟเวอร์ที่บันทึกไว้"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

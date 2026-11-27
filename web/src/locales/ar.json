@@ -181065,6 +181065,12 @@
       "value": "البريد الإلكتروني أو اسم المستخدم"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "أدخل عنوان URL الأساسي لخادم Emby الذي تريد الاستيراد منه."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -181075,6 +181081,12 @@
     {
       "type": 0,
       "value": "اتركها فارغة إن لم يكن للحساب كلمة مرور"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "عنوان URL لخادم Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -181225,6 +181237,12 @@
     {
       "type": 0,
       "value": "حساب Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "عنوان URL للخادم"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -181526,7 +181544,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect أو خادم محفوظ"
+      "value": "Emby Connect، أو عنوان URL للخادم، أو خادم محفوظ"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

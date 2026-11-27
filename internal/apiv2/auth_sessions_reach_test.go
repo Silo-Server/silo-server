@@ -10,7 +10,8 @@ import (
 // TestLimitedLoginSessionViewDecidesEveryMember: another session's item, as a
 // session limited to itself sees it, carries its id, the caller's created_at
 // and expires_at, and nothing else. Regression: a member added to
-// LoginSession would otherwise reach a device signed in by code before
+// LoginSession would otherwise reach a device signed in by code, or a demo
+// visitor (who gets the same view of another visitor's session), before
 // anyone decided whether it may see it; add the member here with its
 // decision.
 func TestLimitedLoginSessionViewDecidesEveryMember(t *testing.T) {

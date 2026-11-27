@@ -150372,6 +150372,12 @@
       "value": "⟦Éɱåîļ öŕ Ûšéŕñåɱé~~~~~~~⟧"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "⟦Éñţéŕ ţĥé ƀåšé ÛŔĻ ƒöŕ ţĥé Éɱƀý šéŕṽéŕ ýöû ŵåñţ ţö îɱþöŕţ ƒŕöɱ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -150382,6 +150388,12 @@
     {
       "type": 0,
       "value": "⟦Ļéåṽé ƀļåñķ îƒ ţĥé åççöûñţ ĥåš ñöñé~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "⟦Éɱƀý Šéŕṽéŕ ÛŔĻ~~~~~~⟧"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -150532,6 +150544,12 @@
     {
       "type": 0,
       "value": "⟦Þļéẋ Åççöûñţ~~~~~⟧"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "⟦Šéŕṽéŕ ÛŔĻ~~~~⟧"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -150865,7 +150883,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "⟦Éɱƀý Çöññéçţ öŕ šåṽéđ šéŕṽéŕ~~~~~~~~~~~~⟧"
+      "value": "⟦Éɱƀý Çöññéçţ, šéŕṽéŕ ÛŔĻ, öŕ šåṽéđ šéŕṽéŕ~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

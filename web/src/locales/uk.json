@@ -160417,6 +160417,12 @@
       "value": "Ел. пошта або ім’я користувача"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Введіть базову URL-адресу сервера Emby, з якого потрібно імпортувати."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -160427,6 +160433,12 @@
     {
       "type": 0,
       "value": "Залиште порожнім, якщо обліковий запис не має пароля"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL-адреса сервера Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -160577,6 +160589,12 @@
     {
       "type": 0,
       "value": "Обліковий запис Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL-адреса сервера"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -160870,7 +160888,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect або збережений сервер"
+      "value": "Emby Connect, URL-адреса сервера або збережений сервер"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

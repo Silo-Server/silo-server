@@ -150522,6 +150522,12 @@
       "value": "E-pasts vai lietotājvārds"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Ievadiet tā Emby servera bāzes URL, no kura vēlaties importēt."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -150532,6 +150538,12 @@
     {
       "type": 0,
       "value": "Atstājiet tukšu, ja kontam nav paroles"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby servera URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -150682,6 +150694,12 @@
     {
       "type": 0,
       "value": "Plex konts"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Servera URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -150983,7 +151001,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect vai saglabāts serveris"
+      "value": "Emby Connect, servera URL vai saglabāts serveris"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

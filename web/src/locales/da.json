@@ -136267,6 +136267,12 @@
       "value": "E-mail eller brugernavn"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Angiv basis-URL’en til den Emby-server, du vil importere fra."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -136277,6 +136283,12 @@
     {
       "type": 0,
       "value": "Lad feltet stå tomt, hvis kontoen ikke har en"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby-serverens URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -136427,6 +136439,12 @@
     {
       "type": 0,
       "value": "Plex-konto"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Server-URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -136720,7 +136738,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect eller gemt server"
+      "value": "Emby Connect, server-URL eller gemt server"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

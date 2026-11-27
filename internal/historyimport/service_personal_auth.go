@@ -71,25 +71,54 @@ func (s *Service) preparePersonalRun(ctx context.Context, userID int, input Crea
 			}
 			out.SourceID = source.ID
 			out.SourceRevision = source.Revision
+		case ConnectionModeCustom:
+			// Emby accounts may have no password, so only the server URL and username are required.
+			serverURL := strings.TrimSpace(input.ServerURL)
+			username := strings.TrimSpace(input.Username)
+			if username == "" {
+				return out, fmt.Errorf("%w: enter the Emby username", ErrInvalidInput)
+			}
+			if err := validateServerURL("Emby server URL", serverURL); err != nil {
+				return out, err
+			}
+			serverCtx, err := s.localNetwork.CheckServerURL(ctx, userID, serverURL)
+			if err != nil {
+				return out, err
+			}
+			auth, err = s.emby.AuthenticateServerUser(serverCtx, serverURL, username, input.Password)
+			if err != nil {
+				return out, tagUnreachable(err)
+			}
 		default:
 			return out, fmt.Errorf("%w: invalid connection mode", ErrInvalidInput)
 		}
 		out.Credentials = personalRunCredentials{BaseURL: auth.BaseURL, ExternalUserID: auth.UserID, ServerToken: auth.AccessToken}
 	case SourceTypeJellyfin:
-		if input.JellyfinBaseURL == "" || input.JellyfinUsername == "" || input.JellyfinPassword == "" {
+		if strings.TrimSpace(input.ServerURL) != "" {
+			return out, fmt.Errorf("%w: emby_base_url is only supported for Emby imports", ErrInvalidInput)
+		}
+		baseURL := strings.TrimSpace(input.JellyfinBaseURL)
+		username := strings.TrimSpace(input.JellyfinUsername)
+		if baseURL == "" || username == "" || input.JellyfinPassword == "" {
 			return out, fmt.Errorf("%w: Jellyfin address and credentials are required", ErrInvalidInput)
 		}
-		serverCtx, err := s.localNetwork.CheckServerURL(ctx, userID, input.JellyfinBaseURL)
+		if err := validateServerURL("Jellyfin server URL", baseURL); err != nil {
+			return out, err
+		}
+		serverCtx, err := s.localNetwork.CheckServerURL(ctx, userID, baseURL)
 		if err != nil {
 			return out, err
 		}
-		auth, err := s.jellyfin.AuthenticateServerUser(serverCtx, input.JellyfinBaseURL, input.JellyfinUsername, input.JellyfinPassword)
+		auth, err := s.jellyfin.AuthenticateServerUser(serverCtx, baseURL, username, input.JellyfinPassword)
 		if err != nil {
 			return out, tagUnreachable(err)
 		}
 		out.ConnectionMode = ConnectionModeCustom
 		out.Credentials = personalRunCredentials{BaseURL: auth.BaseURL, ExternalUserID: auth.UserID, ServerToken: auth.AccessToken}
 	case SourceTypePlex:
+		if strings.TrimSpace(input.ServerURL) != "" {
+			return out, fmt.Errorf("%w: emby_base_url is only supported for Emby imports", ErrInvalidInput)
+		}
 		out.ConnectionMode = ConnectionModePlexOAuth
 		switch {
 		case input.PlexSessionID != "":

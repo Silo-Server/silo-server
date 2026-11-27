@@ -161875,6 +161875,12 @@
       "value": "Эл. почта или имя пользователя"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Введите базовый URL сервера Emby, из которого нужно импортировать данные."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -161885,6 +161891,12 @@
     {
       "type": 0,
       "value": "Оставьте пустым, если у аккаунта нет пароля"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL сервера Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -162035,6 +162047,12 @@
     {
       "type": 0,
       "value": "Аккаунт Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL сервера"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -162332,7 +162350,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect или сохранённый сервер"
+      "value": "Emby Connect, URL сервера или сохранённый сервер"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

@@ -135653,6 +135653,12 @@
       "value": "ईमेल या उपयोगकर्ता नाम"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "उस Emby सर्वर का बेस URL डालें, जिससे आपको इंपोर्ट करना है।"
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -135663,6 +135669,12 @@
     {
       "type": 0,
       "value": "खाते का कोई पासवर्ड न हो, तो खाली छोड़ें"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby सर्वर URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -135813,6 +135825,12 @@
     {
       "type": 0,
       "value": "Plex खाता"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "सर्वर URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -136114,7 +136132,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect या सेव किया गया सर्वर"
+      "value": "Emby Connect, सर्वर URL या सेव किया गया सर्वर"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

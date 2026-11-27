@@ -162425,6 +162425,12 @@
       "value": "El. paštas arba naudotojo vardas"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Įveskite „Emby“ serverio, iš kurio norite importuoti, bazinį URL."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -162435,6 +162441,12 @@
     {
       "type": 0,
       "value": "Palikite tuščią, jei paskyra jo neturi"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "„Emby“ serverio URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -162585,6 +162597,12 @@
     {
       "type": 0,
       "value": "„Plex“ paskyra"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Serverio URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -162894,7 +162912,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect arba išsaugotas serveris"
+      "value": "Emby Connect, serverio URL arba išsaugotas serveris"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

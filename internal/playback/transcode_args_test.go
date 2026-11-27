@@ -553,6 +553,44 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 		forbid: []string{"-preset superfast"},
 	},
 	{
+		name: "software H.264 fresh start skips the restart tuning",
+		opts: TranscodeOpts{
+			InputPath: "/media/movie.mkv", OutputDir: "/tmp/out", SessionID: "session-start", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+			SegmentDuration: 2, HWAccel: HWAccelNone, FastStart: true, TargetResolution: "1080p", TargetBitrateKbps: 6000,
+		},
+		want:   []string{"-c:v libx264 -preset superfast -crf 23", "-level 4.1 -maxrate 6000k"},
+		forbid: []string{"-x264-params"},
+	},
+	{
+		// The player waits on a seek restart as on a fresh start, so software
+		// H.264 stays fast, with the macroblock tree for bit efficiency.
+		name: "software H.264 seek restart uses the restart x264 tuning",
+		opts: TranscodeOpts{
+			InputPath: "/media/movie.mkv", OutputDir: "/tmp/out", SessionID: "session-seek", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+			SegmentDuration: 2, HWAccel: HWAccelNone, SeekSeconds: 300, StartSegmentNumber: 150, TargetResolution: "1080p", TargetBitrateKbps: 6000,
+		},
+		want:   []string{"-c:v libx264 -preset superfast -crf 23", "-level 4.1 -x264-params mbtree=1:rc-lookahead=10 -maxrate 6000k"},
+		forbid: []string{"-preset veryfast"},
+	},
+	{
+		name: "software HEVC seek restart stays on veryfast",
+		opts: TranscodeOpts{
+			InputPath: "/media/movie.mkv", OutputDir: "/tmp/out", SessionID: "session-seek-hevc", TargetCodecVideo: "hevc", TargetCodecAudio: "aac",
+			SegmentDuration: 2, HWAccel: HWAccelNone, SeekSeconds: 300, StartSegmentNumber: 150,
+		},
+		want:   []string{"-c:v libx265 -preset veryfast"},
+		forbid: []string{"-x264-params"},
+	},
+	{
+		name: "prepared H.264 download keeps its own preset",
+		opts: TranscodeOpts{
+			InputPath: "/media/movie.mkv", OutputDir: "/tmp/out", SessionID: "session-prepared", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+			SegmentDuration: 2, HWAccel: HWAccelNone, preparedFileEncode: true,
+		},
+		want:   []string{"-c:v libx264 -preset medium"},
+		forbid: []string{"-x264-params", "-level 4.1"},
+	},
+	{
 		name: "bounds HLS manifest size",
 		opts: TranscodeOpts{
 			InputPath: "/media/long.mkv", OutputDir: "/tmp/out", SessionID: "session-long", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
