@@ -1,6 +1,6 @@
 /**
- * The scan code: an app code and the server address as text that only the
- * Silo app's own scanner reads, drawn as a QR code.
+ * The scan code: an app code and the server address as text, drawn as a QR
+ * code. Any QR reader can read it; only the Silo app acts on it.
  *
  *   SILOSCANA <app code: 64 letters> <server address: two letters a byte>
  *
@@ -126,7 +126,8 @@ function isServerAddress(address: string): boolean {
   const [, scheme, authority, path] = m as unknown as [string, string, string, string];
   if ((scheme !== "http" && scheme !== "https") || authority.includes("@")) return false;
   let host = authority;
-  let port = "";
+  // Null when no ":" follows the host; "" (an empty port) is refused.
+  let port: string | null = null;
   if (authority.startsWith("[")) {
     const close = authority.indexOf("]");
     if (close < 0) return false;
@@ -142,7 +143,10 @@ function isServerAddress(address: string): boolean {
     if (colon >= 0) [host, port] = [authority.slice(0, colon), authority.slice(colon + 1)];
     if (!isHostName(host)) return false;
   }
-  if (port !== "" && (!PORT.test(port) || Number(port) > 65535 || port === DEFAULT_PORTS[scheme])) {
+  if (
+    port !== null &&
+    (!PORT.test(port) || Number(port) > 65535 || port === DEFAULT_PORTS[scheme])
+  ) {
     return false;
   }
   if (path === "") return true;
@@ -176,15 +180,21 @@ const BYTE_CAPACITY_L = [17, 32, 53, 78, 106, 134, 154, 192, 230, 271, 321, 367]
 /** The smallest a drawn QR code is, and the least width of one module, in CSS pixels. */
 export const MIN_QR_PIXELS = 176;
 export const MIN_MODULE_PIXELS = 3.5;
+/** The white quiet zone a QR code needs on every side, in modules. */
+export const QUIET_ZONE_MODULES = 4;
 
 /**
- * The width to draw a scan code's QR code at, in CSS pixels. The QR library
- * encodes in byte mode at level L, so a longer address needs a higher version
- * with more modules; the code grows so that no module is under 3.5 px. The
- * longest scan code (331 bytes) is version 12, 65 modules: 228 px.
+ * How to draw a scan code's QR code, in CSS pixels: the code's width, and the
+ * white margin on every side. The QR library encodes in byte mode at level L,
+ * so a longer address needs a higher version with more modules; the code
+ * grows so that no module is under 3.5 px, and the margin is four modules of
+ * that size (in dark mode it is the only white around the code). The longest
+ * scan code (331 bytes) is version 12, 65 modules: 228 px with a 15 px margin,
+ * a 258 px box.
  */
-export function scanCodePixels(text: string): number {
+export function scanCodeLayout(text: string): { pixels: number; margin: number } {
   const version = BYTE_CAPACITY_L.findIndex((capacity) => text.length <= capacity) + 1;
   const modules = 17 + 4 * (version || BYTE_CAPACITY_L.length);
-  return Math.max(MIN_QR_PIXELS, Math.ceil(modules * MIN_MODULE_PIXELS));
+  const pixels = Math.max(MIN_QR_PIXELS, Math.ceil(modules * MIN_MODULE_PIXELS));
+  return { pixels, margin: Math.ceil((QUIET_ZONE_MODULES * pixels) / modules) };
 }

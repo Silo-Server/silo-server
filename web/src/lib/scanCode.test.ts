@@ -3,7 +3,8 @@ import {
   MAX_SCAN_CODE_ADDRESS_BYTES,
   MIN_MODULE_PIXELS,
   scanCode,
-  scanCodePixels,
+  QUIET_ZONE_MODULES,
+  scanCodeLayout,
 } from "./scanCode";
 import vectors from "./scanCode.vectors.json";
 
@@ -69,6 +70,9 @@ describe("scanCode", () => {
     ["a $ in the host", "https://a$b.example.com"],
     ["a ! in the host", "https://a!b.example.com"],
     ["a host label of 64 characters", `https://${"a".repeat(64)}.example.com`],
+    ["an empty port after a name", "http://example.com:"],
+    ["an empty port after an IPv6 host", "http://[::1]:"],
+    ["an empty port after an IPv4 host", "https://192.255.255.10:"],
   ])("draws nothing for %s", (_, address) => {
     expect(scanCode(appCode, address)).toEqual({ text: null, reason: "not_drawable" });
   });
@@ -83,15 +87,18 @@ describe("scanCode", () => {
   });
 });
 
-describe("scanCodePixels", () => {
-  // A module under 3.5 px is hard for a phone camera to resolve off a screen.
-  // Byte mode at level L: a typical address is version 6 (41 modules), the
-  // longest scan code version 12 (65 modules).
+describe("scanCodeLayout", () => {
+  // A module under 3.5 px is hard for a phone camera to resolve off a screen,
+  // and a QR code wants four modules of white on every side (in dark mode the
+  // margin is the only white there is). Byte mode at level L: a typical
+  // address is version 6 (41 modules), the longest scan code version 12 (65).
   it.each([
-    ["a typical address", valid[0]!.string, 41, 176],
-    ["the longest scan code", longest.string, 65, 228],
-  ])("sizes %s", (_, text, modules, pixels) => {
-    expect(scanCodePixels(text)).toBe(pixels);
-    expect(pixels / modules).toBeGreaterThanOrEqual(MIN_MODULE_PIXELS);
+    ["a typical address", valid[0]!.string, 41, { pixels: 176, margin: 18 }],
+    ["the longest scan code", longest.string, 65, { pixels: 228, margin: 15 }],
+  ])("sizes %s", (_, text, modules, layout) => {
+    expect(scanCodeLayout(text)).toEqual(layout);
+    const module = layout.pixels / modules;
+    expect(module).toBeGreaterThanOrEqual(MIN_MODULE_PIXELS);
+    expect(layout.margin).toBeGreaterThanOrEqual(QUIET_ZONE_MODULES * module);
   });
 });

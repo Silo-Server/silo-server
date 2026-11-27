@@ -6,7 +6,7 @@ import type { AppCode, JoinAppCode, LinkableJoinAppCode, SessionAppCode } from "
 import { Button } from "@/components/ui/button";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { buildJoinLink } from "@/lib/joinLink";
-import { scanCode as scanCodeFor, scanCodePixels } from "@/lib/scanCode";
+import { scanCode as scanCodeFor, scanCodeLayout } from "@/lib/scanCode";
 import { useT } from "@/i18n";
 
 type StepProps<Code extends AppCode> = {
@@ -92,8 +92,8 @@ export function JoinCodeStep({ appCode, onRenew, renewing }: StepProps<JoinAppCo
  * and the code, to scan, type or paste in the Silo app. Never a link or a
  * scannable link (a URL in a QR code): a link can be received by an app other
  * than Silo, which would redeem the code first and get a key on this existing
- * account. The scan code is not such a link: it is text only the Silo app's
- * own scanner acts on, and nothing opens it.
+ * account. The scan code is not such a link: it is text any QR reader can
+ * read but only the Silo app acts on, and nothing opens it.
  */
 export function SessionCodeStep({
   appCode,
@@ -121,13 +121,14 @@ export function SessionCodeStep({
 
 /**
  * A code whose answer said link_allowed: false, for the person to move by
- * hand: the scan code (a QR code of text only the Silo app's scanner reads,
+ * hand: the scan code (a QR code of text only the Silo app acts on,
  * never a link), the server address and the code as text to type, and Copy
  * code for a device that can't scan. A server address over 128 bytes has no
  * scan code, so the address and the code are all there is. The QR code grows
- * with the text so a module stays at least 3.5 px; where the column is
- * narrower (the longest code on a phone) it stays centered and reaches into
- * the card's padding rather than shrinking.
+ * with the text so a module stays at least 3.5 px, inside a white margin of
+ * four modules; where the column is narrower (the longest code on a phone)
+ * the box stays centered and reaches into the card's padding rather than
+ * shrinking.
  */
 function CodeToType({ appCode }: { appCode: AppCode }) {
   const t = useT();
@@ -147,16 +148,7 @@ function CodeToType({ appCode }: { appCode: AppCode }) {
     <div className="space-y-3">
       {scanCode.text !== null ? (
         <div className="space-y-2">
-          <div className="flex justify-center">
-            <div className="shrink-0 rounded-md bg-white p-3">
-              <QRCode
-                value={scanCode.text}
-                size={scanCodePixels(scanCode.text)}
-                role="img"
-                aria-label={t("web.auth.appCode.scanCodeLabel")}
-              />
-            </div>
-          </div>
+          <ScanCodeImage text={scanCode.text} label={t("web.auth.appCode.scanCodeLabel")} />
           <p className="text-muted-foreground text-center text-xs">
             {t("web.auth.appCode.scanHint")}
           </p>
@@ -190,6 +182,21 @@ function CodeToType({ appCode }: { appCode: AppCode }) {
           {t("web.auth.appCode.copyFailed")}
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * The scan code's QR code in its white box: the margin is the quiet zone.
+ * Centered; wider than a narrow column, it reaches into the card's padding.
+ */
+function ScanCodeImage({ text, label }: { text: string; label: string }) {
+  const { pixels, margin } = scanCodeLayout(text);
+  return (
+    <div className="flex justify-center">
+      <div className="shrink-0 rounded-md bg-white" style={{ padding: margin }}>
+        <QRCode value={text} size={pixels} role="img" aria-label={label} />
+      </div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { expect } from "vitest";
 
-/** A scan code: text only the Silo app's own scanner reads, never a URL. */
+/** A scan code: text only the Silo app acts on, never a URL. */
 const scanCode = /^SILOSCANA [A-P]{64} (?:[A-P]{2})+$/;
 
 /**
