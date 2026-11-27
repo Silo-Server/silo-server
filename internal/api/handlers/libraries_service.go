@@ -386,32 +386,14 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 	// A new episode order renumbers the library's shows, which a full
 	// refresh does as it fetches each show's episodes.
 	if h.JobRepo != nil && oldFolder.EpisodeOrderProvider != folder.EpisodeOrderProvider {
-		job, jobErr := h.JobRepo.CreateLibraryRefresh(ctx, userID, adminjob.LibraryRefreshRequest{
-			LibraryID:   folder.ID,
-			LibraryName: folder.Name,
-			Mode:        adminjob.LibraryRefreshModeFull,
-		}, "Queued metadata refresh after episode order change")
-		if jobErr != nil {
-			var conflict *adminjob.ActiveJobConflictError
-			if !errors.As(jobErr, &conflict) {
-				slog.WarnContext(ctx, "queue episode-order metadata refresh failed", "component", "api", "library_id", folder.ID, "error", jobErr)
-			}
-		} else {
-			publishEventJob(ctx, h.EventsHub, "job.created", job)
+		if err := h.queueSettingsRefresh(ctx, userID, folder, adminjob.LibraryRefreshModeFull,
+			"Queued metadata refresh after episode order change"); err != nil {
+			slog.WarnContext(ctx, "queue episode-order metadata refresh failed", "component", "api", "library_id", folder.ID, "error", err)
 		}
 	} else if h.JobRepo != nil && languageChanged {
-		job, jobErr := h.JobRepo.CreateLibraryRefresh(ctx, userID, adminjob.LibraryRefreshRequest{
-			LibraryID:   folder.ID,
-			LibraryName: folder.Name,
-			Mode:        adminjob.LibraryRefreshModeQuick,
-		}, "Queued metadata refresh after library language change")
-		if jobErr != nil {
-			var conflict *adminjob.ActiveJobConflictError
-			if !errors.As(jobErr, &conflict) {
-				slog.WarnContext(ctx, "queue language-change metadata refresh failed", "component", "api", "library_id", folder.ID, "error", jobErr)
-			}
-		} else {
-			publishEventJob(ctx, h.EventsHub, "job.created", job)
+		if err := h.queueSettingsRefresh(ctx, userID, folder, adminjob.LibraryRefreshModeQuick,
+			"Queued metadata refresh after library language change"); err != nil {
+			slog.WarnContext(ctx, "queue language-change metadata refresh failed", "component", "api", "library_id", folder.ID, "error", err)
 		}
 	}
 
@@ -453,6 +435,27 @@ func (h *LibraryHandler) publishLibraryEnabledChanged(ctx context.Context, libra
 	}); err != nil {
 		slog.WarnContext(ctx, "publish library enabled change", "component", "api", "library_id", libraryID, "error", err)
 	}
+}
+
+// queueSettingsRefresh queues a metadata refresh of folder in mode after a
+// library setting changed and announces the job. A refresh already running
+// for the library covers the change, so that conflict is not an error; the
+// caller logs other failures, which do not fail the update.
+func (h *LibraryHandler) queueSettingsRefresh(ctx context.Context, userID int, folder *models.MediaFolder, mode adminjob.LibraryRefreshMode, reason string) error {
+	job, err := h.JobRepo.CreateLibraryRefresh(ctx, userID, adminjob.LibraryRefreshRequest{
+		LibraryID:   folder.ID,
+		LibraryName: folder.Name,
+		Mode:        mode,
+	}, reason)
+	if err != nil {
+		var conflict *adminjob.ActiveJobConflictError
+		if errors.As(err, &conflict) {
+			return nil
+		}
+		return err
+	}
+	publishEventJob(ctx, h.EventsHub, "job.created", job)
+	return nil
 }
 
 // DeleteLibrary disables the library, queues its deletion job and cancels

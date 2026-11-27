@@ -1494,7 +1494,7 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) 
 	if o := d.EpisodeOrder; o != nil {
 		out.EpisodeOrder = &SeriesEpisodeOrder{
 			Provider: o.Provider, OrderID: o.OrderID, OrderName: o.OrderName, Layout: o.Layout,
-			FileOrder: o.FileOrder, CustomArrangement: o.Layout == "custom",
+			FileOrder: o.FileOrder, CustomArrangement: o.Layout == episodeOrderLayoutCustom,
 		}
 	}
 	return out

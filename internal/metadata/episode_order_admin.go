@@ -31,7 +31,7 @@ var (
 
 // Validate checks the settings' vocabulary.
 func (o EpisodeOrderSettings) Validate() error {
-	provider := func(v string) bool { return v == "" || v == "tvdb" || v == "tmdb" }
+	provider := func(v string) bool { return v == "" || v == providerSlugTVDB || v == providerSlugTMDB }
 	switch {
 	case !provider(o.Provider):
 		return fmt.Errorf("%w: provider must be tvdb, tmdb or empty", ErrEpisodeOrderInvalid)
@@ -135,7 +135,7 @@ func (s *MetadataService) seriesForEpisodeOrder(ctx context.Context, seriesID st
 	if err != nil {
 		return ctx, nil, "", err
 	}
-	if item.Type != "series" {
+	if item.Type != anchoredItemTypeSeries {
 		return ctx, nil, "", ErrEpisodeOrderNotSeries
 	}
 	ctx, err = s.withItemChainScope(ctx, seriesID, 0)
@@ -179,7 +179,7 @@ func (s *MetadataService) EpisodeOrderState(ctx context.Context, seriesID string
 	}
 	for _, p := range chain {
 		slug := p.Slug()
-		if slug != "tvdb" && slug != "tmdb" {
+		if slug != providerSlugTVDB && slug != providerSlugTMDB {
 			continue
 		}
 		if state.LibraryProvider == "" {
@@ -212,7 +212,7 @@ func (s *MetadataService) SaveEpisodeOrder(ctx context.Context, seriesID string,
 	if err != nil {
 		return 0, err
 	}
-	if item.Type != "series" {
+	if item.Type != anchoredItemTypeSeries {
 		return 0, ErrEpisodeOrderNotSeries
 	}
 	if settings.Layout == episodeLayoutCustom {
@@ -307,38 +307,63 @@ func (s *MetadataService) PreviewEpisodeOrder(ctx context.Context, seriesID stri
 		}
 	}
 	if structureSlug != "" {
-		// File numbers do not depend on the layout, so each file order is
-		// tried on the order's own numbering.
-		for _, fileOrder := range []string{"", "tvdb", "tmdb"} {
-			if fileOrder == structureSlug {
-				continue
-			}
-			trial := append([]EpisodeResult(nil), episodes...)
-			if !assignFileNumbers(trial, structureSlug, fileOrder, structures.list) {
-				continue
-			}
-			preview.FileOrderFits = append(preview.FileOrderFits, EpisodeOrderFileFit{
-				FileOrder: fileOrder, MatchedFiles: countPlacedFiles(files, trial),
-			})
-		}
+		preview.FileOrderFits = fileOrderFits(files, episodes, structureSlug, structures.list)
 		assignFileNumbers(episodes, structureSlug, order.FileOrder, structures.list)
-		switch order.Layout {
-		case episodeLayoutAbsolute:
-			seasons, episodes = applyAbsoluteLayout(seasons, episodes)
-		case episodeLayoutCustom:
-			layout, ok := customLayout{}, false
-			if s.dbPool != nil {
-				if layout, ok, err = loadCustomLayout(ctx, s.dbPool, seriesID); err != nil {
-					return preview, err
-				}
-			}
-			if !ok {
-				layout = startingLayout(seasons, episodes, structureSlug)
-			}
-			seasons, episodes = applyCustomLayout(seasons, episodes, structureSlug, layout)
+		if seasons, episodes, err = s.applyPreviewLayout(ctx, seriesID, order.Layout, seasons, episodes, structureSlug); err != nil {
+			return preview, err
 		}
 	}
+	fillPreviewSeasons(&preview, files, seasons, episodes)
+	return preview, nil
+}
 
+// fileOrderFits reports how many of files each file order other than the
+// structure provider's own would place. File numbers do not depend on the
+// layout, so each file order is tried on the order's own numbering.
+func fileOrderFits(files []seriesFileLink, episodes []EpisodeResult, structureSlug string, providers []providerStructure) []EpisodeOrderFileFit {
+	var fits []EpisodeOrderFileFit
+	for _, fileOrder := range []string{"", providerSlugTVDB, providerSlugTMDB} {
+		if fileOrder == structureSlug {
+			continue
+		}
+		trial := append([]EpisodeResult(nil), episodes...)
+		if !assignFileNumbers(trial, structureSlug, fileOrder, providers) {
+			continue
+		}
+		fits = append(fits, EpisodeOrderFileFit{
+			FileOrder: fileOrder, MatchedFiles: countPlacedFiles(files, trial),
+		})
+	}
+	return fits
+}
+
+// applyPreviewLayout arranges the order's seasons and episodes in layout. A
+// custom layout uses the series' stored arrangement, or the starting one when
+// none is stored.
+func (s *MetadataService) applyPreviewLayout(ctx context.Context, seriesID, layout string, seasons []SeasonResult, episodes []EpisodeResult, structureSlug string) ([]SeasonResult, []EpisodeResult, error) {
+	switch layout {
+	case episodeLayoutAbsolute:
+		seasons, episodes = applyAbsoluteLayout(seasons, episodes)
+	case episodeLayoutCustom:
+		custom, ok := customLayout{}, false
+		if s.dbPool != nil {
+			var err error
+			if custom, ok, err = loadCustomLayout(ctx, s.dbPool, seriesID); err != nil {
+				return nil, nil, err
+			}
+		}
+		if !ok {
+			custom = startingLayout(seasons, episodes, structureSlug)
+		}
+		seasons, episodes = applyCustomLayout(seasons, episodes, structureSlug, custom)
+	}
+	return seasons, episodes, nil
+}
+
+// fillPreviewSeasons fills preview's file counts and seasons: which of files
+// land on which episode, and each season's episodes in number order with
+// specials last.
+func fillPreviewSeasons(preview *EpisodeOrderPreview, files []seriesFileLink, seasons []SeasonResult, episodes []EpisodeResult) {
 	fileSlots := make(map[episodeSlot]int, len(episodes))
 	for i, ep := range episodes {
 		if ep.FileNumbered {
@@ -397,7 +422,6 @@ func (s *MetadataService) PreviewEpisodeOrder(ctx context.Context, seriesID stri
 		}
 		return a < b
 	})
-	return preview, nil
 }
 
 // fetchRemoteStructures asks every remote season and episode provider of the
@@ -416,7 +440,7 @@ func (s *MetadataService) fetchRemoteStructures(ctx context.Context, ids map[str
 			continue
 		}
 		seasons, err := ep.GetSeasons(ctx, SeasonsRequest{
-			ProviderIDs: ids, ContentType: "series", Language: language, Ordering: order.orderingFor(p.Slug()),
+			ProviderIDs: ids, ContentType: anchoredItemTypeSeries, Language: language, Ordering: order.orderingFor(p.Slug()),
 		})
 		if err != nil {
 			if !isProvider404(err) {

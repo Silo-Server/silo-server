@@ -119,7 +119,7 @@ func structureProvider(providers []providerStructure, preferred string) *provide
 //     each a consecutive run within one season, paired in episode order
 //     (one each is the plain case; two each is a double bill);
 //  3. the same numbers on the same date;
-//  4. a gap between two matched neighbours: when the other provider has as
+//  4. a gap between two matched neighbors: when the other provider has as
 //     many unmatched regular episodes between them as the structure provider
 //     has between the episodes they matched, pair those in order. This
 //     catches air dates that differ by a day across time zones.

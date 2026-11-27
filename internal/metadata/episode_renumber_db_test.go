@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/contentid"
@@ -18,29 +21,16 @@ import (
 func TestApplyEpisodeRenumberDB(t *testing.T) {
 	pool := chainBuiltinTestPool(t)
 	ctx := t.Context()
-	items := catalog.NewItemRepository(pool)
 	episodes := catalog.NewEpisodeRepository(pool)
 	seasons := catalog.NewSeasonRepository(pool)
 
-	nonce := time.Now().UnixNano() % 100_000_000
-	tvdb := fmt.Sprintf("%d", 610_000_000+nonce)
-	series := "series-tvdb-" + tvdb
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, series)
-	})
+	series, tvdb, nonce := insertRenumberTestSeries(t, pool, 610_000_000, "Renumbered show")
 	mustID := func(id string, ok bool) string {
 		t.Helper()
 		if !ok {
 			t.Fatal("content id did not compose")
 		}
 		return id
-	}
-	if err := items.Upsert(ctx, &models.MediaItem{
-		ContentID: series, Type: "series", Title: "Renumbered show", Status: "matched", TvdbID: tvdb,
-		DefaultMetadataLanguage: "en",
-		Studios:                 []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-	}); err != nil {
-		t.Fatal(err)
 	}
 	if err := seasons.Upsert(ctx, &models.Season{
 		ContentID: mustID(contentid.ForSeason(series, 1)), SeriesID: series, SeasonNumber: 1,
@@ -62,22 +52,7 @@ func TestApplyEpisodeRenumberDB(t *testing.T) {
 		}
 	}
 
-	var userID int
-	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
-		fmt.Sprintf("renumber-user-%d", nonce)).Scan(&userID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		bg := context.Background()
-		_, _ = pool.Exec(bg, `DELETE FROM user_watch_progress WHERE user_id = $1`, userID)
-		_, _ = pool.Exec(bg, `DELETE FROM users WHERE id = $1`, userID)
-	})
-	profileID := fmt.Sprintf("00000000-0000-4000-8000-%012d", nonce)
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, updated_at)
-		VALUES ($1, $2, $3, 500, 3600, now())`, userID, profileID, pilot); err != nil {
-		t.Fatal(err)
-	}
+	userID := insertRenumberTestProgress(t, pool, "renumber", nonce, pilot, 500, 3600)
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -126,23 +101,10 @@ func TestApplyEpisodeRenumberDB(t *testing.T) {
 func TestApplyEpisodeMergesDB(t *testing.T) {
 	pool := chainBuiltinTestPool(t)
 	ctx := t.Context()
-	items := catalog.NewItemRepository(pool)
 	episodes := catalog.NewEpisodeRepository(pool)
 	seasons := catalog.NewSeasonRepository(pool)
 
-	nonce := time.Now().UnixNano() % 100_000_000
-	tvdb := fmt.Sprintf("%d", 620_000_000+nonce)
-	series := "series-tvdb-" + tvdb
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, series)
-	})
-	if err := items.Upsert(ctx, &models.MediaItem{
-		ContentID: series, Type: "series", Title: "Bleach", Status: "matched", TvdbID: tvdb,
-		DefaultMetadataLanguage: "en",
-		Studios:                 []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	series, tvdb, nonce := insertRenumberTestSeries(t, pool, 620_000_000, "Bleach")
 	for _, n := range []int{1, 2} {
 		id, _ := contentid.ForSeason(series, n)
 		if err := seasons.Upsert(ctx, &models.Season{
@@ -175,22 +137,7 @@ func TestApplyEpisodeMergesDB(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_files WHERE id = $1`, fileID) })
 
-	var userID int
-	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
-		fmt.Sprintf("merge-user-%d", nonce)).Scan(&userID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		bg := context.Background()
-		_, _ = pool.Exec(bg, `DELETE FROM user_watch_progress WHERE user_id = $1`, userID)
-		_, _ = pool.Exec(bg, `DELETE FROM users WHERE id = $1`, userID)
-	})
-	profileID := fmt.Sprintf("00000000-0000-4000-8000-%012d", nonce)
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, updated_at)
-		VALUES ($1, $2, $3, 700, 1440, now())`, userID, profileID, duplicate); err != nil {
-		t.Fatal(err)
-	}
+	userID := insertRenumberTestProgress(t, pool, "merge", nonce, duplicate, 700, 1440)
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -231,22 +178,9 @@ func TestApplyEpisodeMergesDB(t *testing.T) {
 func TestApplyEpisodeRenumberTakenIDDB(t *testing.T) {
 	pool := chainBuiltinTestPool(t)
 	ctx := t.Context()
-	items := catalog.NewItemRepository(pool)
 	episodes := catalog.NewEpisodeRepository(pool)
 
-	nonce := time.Now().UnixNano() % 100_000_000
-	tvdb := fmt.Sprintf("%d", 630_000_000+nonce)
-	series := "series-tvdb-" + tvdb
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, series)
-	})
-	if err := items.Upsert(ctx, &models.MediaItem{
-		ContentID: series, Type: "series", Title: "Re-anchored show", Status: "matched", TvdbID: tvdb,
-		DefaultMetadataLanguage: "en",
-		Studios:                 []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	series, _, nonce := insertRenumberTestSeries(t, pool, 630_000_000, "Re-anchored show")
 	mover, _ := contentid.ForEpisode(series, 1, 1)
 	holder, _ := contentid.ForEpisode(series, 1, 2) // sits at S1E5
 	for _, e := range []struct {
@@ -260,22 +194,7 @@ func TestApplyEpisodeRenumberTakenIDDB(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	var userID int
-	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
-		fmt.Sprintf("taken-user-%d", nonce)).Scan(&userID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		bg := context.Background()
-		_, _ = pool.Exec(bg, `DELETE FROM user_watch_progress WHERE user_id = $1`, userID)
-		_, _ = pool.Exec(bg, `DELETE FROM users WHERE id = $1`, userID)
-	})
-	profileID := fmt.Sprintf("00000000-0000-4000-8000-%012d", nonce)
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, updated_at)
-		VALUES ($1, $2, $3, 300, 1440, now())`, userID, profileID, mover); err != nil {
-		t.Fatal(err)
-	}
+	userID := insertRenumberTestProgress(t, pool, "taken", nonce, mover, 300, 1440)
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -313,23 +232,10 @@ func TestApplyEpisodeRenumberTakenIDDB(t *testing.T) {
 func TestRelinkSeriesFilesDB(t *testing.T) {
 	pool := chainBuiltinTestPool(t)
 	ctx := t.Context()
-	items := catalog.NewItemRepository(pool)
 	episodes := catalog.NewEpisodeRepository(pool)
 	svc := &MetadataService{folderRepo: catalog.NewFolderRepository(pool)}
 
-	nonce := time.Now().UnixNano() % 100_000_000
-	tvdb := fmt.Sprintf("%d", 640_000_000+nonce)
-	series := "series-tvdb-" + tvdb
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, series)
-	})
-	if err := items.Upsert(ctx, &models.MediaItem{
-		ContentID: series, Type: "series", Title: "Bleach", Status: "matched", TvdbID: tvdb,
-		DefaultMetadataLanguage: "en",
-		Studios:                 []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	series, _, nonce := insertRenumberTestSeries(t, pool, 640_000_000, "Bleach")
 	s2e1, _ := contentid.ForEpisode(series, 2, 1)
 	s17e1, _ := contentid.ForEpisode(series, 17, 1)
 	s3e22, _ := contentid.ForEpisode(series, 3, 22)
@@ -365,22 +271,7 @@ func TestRelinkSeriesFilesDB(t *testing.T) {
 	rode := fileOn("Season 02/Bleach - S02E01.mkv", s17e1, 17, 1)
 	parked := fileOn("Season 03/Bleach - S03E22.mkv", placeholder, 3, 42)
 
-	var userID int
-	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
-		fmt.Sprintf("relink-user-%d", nonce)).Scan(&userID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		bg := context.Background()
-		_, _ = pool.Exec(bg, `DELETE FROM user_watch_progress WHERE user_id = $1`, userID)
-		_, _ = pool.Exec(bg, `DELETE FROM users WHERE id = $1`, userID)
-	})
-	profileID := fmt.Sprintf("00000000-0000-4000-8000-%012d", nonce)
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, updated_at)
-		VALUES ($1, $2, $3, 300, 1440, now())`, userID, profileID, placeholder); err != nil {
-		t.Fatal(err)
-	}
+	userID := insertRenumberTestProgress(t, pool, "relink", nonce, placeholder, 300, 1440)
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -435,19 +326,7 @@ func TestSaveCustomSeasonsDB(t *testing.T) {
 	items := catalog.NewItemRepository(pool)
 	svc := &MetadataService{itemRepo: items, dbPool: pool}
 
-	nonce := time.Now().UnixNano() % 100_000_000
-	tvdb := fmt.Sprintf("%d", 650_000_000+nonce)
-	series := "series-tvdb-" + tvdb
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, series)
-	})
-	if err := items.Upsert(ctx, &models.MediaItem{
-		ContentID: series, Type: "series", Title: "Arranged show", Status: "matched", TvdbID: tvdb,
-		DefaultMetadataLanguage: "en",
-		Studios:                 []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	series, _, _ := insertRenumberTestSeries(t, pool, 650_000_000, "Arranged show")
 	save := CustomSeasonsSave{
 		Settings: EpisodeOrderSettings{Provider: "tvdb"},
 		Seasons: []CustomSeasonsSeason{
@@ -485,4 +364,50 @@ func TestSaveCustomSeasonsDB(t *testing.T) {
 	if _, err := svc.SaveCustomSeasons(ctx, series, gap, &revision, 0); !errors.Is(err, ErrEpisodeOrderInvalid) {
 		t.Fatalf("save with a season gap = %v, want ErrEpisodeOrderInvalid", err)
 	}
+}
+
+// insertRenumberTestSeries stores a matched series titled title under a TVDB
+// ID made unique from base, and removes it when the test ends. It returns the
+// series' content ID, its TVDB ID and the nonce in that ID.
+func insertRenumberTestSeries(t *testing.T, pool *pgxpool.Pool, base int64, title string) (series, tvdb string, nonce int64) {
+	t.Helper()
+	nonce = time.Now().UnixNano() % 100_000_000
+	tvdb = strconv.FormatInt(base+nonce, 10)
+	series = "series-tvdb-" + tvdb
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, series)
+	})
+	if err := catalog.NewItemRepository(pool).Upsert(t.Context(), &models.MediaItem{
+		ContentID: series, Type: "series", Title: title, Status: "matched", TvdbID: tvdb,
+		DefaultMetadataLanguage: "en",
+		Studios:                 []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return series, tvdb, nonce
+}
+
+// insertRenumberTestProgress makes a user named after prefix and nonce with
+// watch progress on mediaItemID, removes both when the test ends, and
+// returns the user's ID.
+func insertRenumberTestProgress(t *testing.T, pool *pgxpool.Pool, prefix string, nonce int64, mediaItemID string, position, duration int) int {
+	t.Helper()
+	ctx := t.Context()
+	var userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
+		fmt.Sprintf("%s-user-%d", prefix, nonce)).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM user_watch_progress WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(bg, `DELETE FROM users WHERE id = $1`, userID)
+	})
+	profileID := fmt.Sprintf("00000000-0000-4000-8000-%012d", nonce)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, updated_at)
+		VALUES ($1, $2, $3, $4, $5, now())`, userID, profileID, mediaItemID, position, duration); err != nil {
+		t.Fatal(err)
+	}
+	return userID
 }

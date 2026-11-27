@@ -207,8 +207,8 @@ func TestMergeSeriesStructure_BridgesSameDayPairsInOrder(t *testing.T) {
 }
 
 // Providers can disagree on an air date by a day (time zones). An episode
-// between two bridged neighbours, with exactly as many unbridged episodes
-// between the structure provider's matching neighbours, pairs in order.
+// between two bridged neighbors, with exactly as many unbridged episodes
+// between the structure provider's matching neighbors, pairs in order.
 func TestMergeSeriesStructure_BridgesGapsBetweenMatchedNeighbours(t *testing.T) {
 	ep := func(season, number int, air string, ids map[string]string) EpisodeResult {
 		return EpisodeResult{SeasonNumber: season, EpisodeNumber: number, AirDate: air, ProviderIDs: ids}
@@ -236,7 +236,7 @@ func TestMergeSeriesStructure_BridgesGapsBetweenMatchedNeighbours(t *testing.T) 
 	}
 }
 
-// The newest episodes come after the last bridged neighbour, often a day
+// The newest episodes come after the last bridged neighbor, often a day
 // apart across time zones. As many unmatched episodes at the end of both
 // lists pair in order; the same holds at the start.
 func TestMergeSeriesStructure_BridgesTheRunsAtEitherEnd(t *testing.T) {

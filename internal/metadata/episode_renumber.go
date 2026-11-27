@@ -54,7 +54,7 @@ type episodeSlot struct{ season, episode int }
 
 // renumberIDKeys are the provider ID columns an episode row carries, in the
 // order the planner trusts them after the structure provider's own key.
-var renumberIDKeys = []string{"tvdb", "tmdb", "imdb"}
+var renumberIDKeys = []string{providerSlugTVDB, providerSlugTMDB, providerSlugIMDb}
 
 // planEpisodeRenumber works out which stored rows must take new numbers so
 // the series matches targets, the episodes its structure provider returned.
@@ -72,6 +72,20 @@ var renumberIDKeys = []string{"tvdb", "tmdb", "imdb"}
 // Moves come back as the claimed rows' moves, ordered by their current
 // numbers, then the parked rows', in the same order.
 func planEpisodeRenumber(existing []existingEpisode, targets []EpisodeResult, structureKey string) episodeRenumberPlan {
+	keys := renumberKeys(structureKey)
+	claims := newRenumberClaims(len(targets))
+	claims.claimByIDs(existing, targets, keys)
+	claims.claimBySlot(existing, targets, structureKey)
+	merges, merged := duplicateMerges(existing, targets, keys, claims)
+	moves, lastEpisode := claimedMoves(existing, targets, claims, merged)
+	parked, placeholderMerges := parkUnclaimed(existing, targets, claims, merged, lastEpisode)
+	merges = append(merges, placeholderMerges...)
+	return episodeRenumberPlan{Moves: append(moves, parked...), Merges: merges}
+}
+
+// renumberKeys lists the provider ID keys in the order the planner trusts
+// them: the structure provider's own key first.
+func renumberKeys(structureKey string) []string {
 	keys := make([]string, 0, len(renumberIDKeys))
 	keys = append(keys, structureKey)
 	for _, key := range renumberIDKeys {
@@ -79,18 +93,31 @@ func planEpisodeRenumber(existing []existingEpisode, targets []EpisodeResult, st
 			keys = append(keys, key)
 		}
 	}
+	return keys
+}
 
-	claimedBy := make(map[int]int, len(targets)) // existing index -> target index
-	claimOf := make(map[int]int, len(targets))   // target index -> existing index
-	claim := func(target, row int) {
-		claimedBy[row] = target
-		claimOf[target] = row
-	}
+// renumberClaims records which stored row each target claimed.
+type renumberClaims struct {
+	claimedBy map[int]int // existing index -> target index
+	claimOf   map[int]int // target index -> existing index
+}
 
+func newRenumberClaims(n int) renumberClaims {
+	return renumberClaims{claimedBy: make(map[int]int, n), claimOf: make(map[int]int, n)}
+}
+
+func (c renumberClaims) claim(target, row int) {
+	c.claimedBy[row] = target
+	c.claimOf[target] = row
+}
+
+// claimByIDs lets each target claim the unclaimed row sharing its ID, key by
+// key in keys' order.
+func (c renumberClaims) claimByIDs(existing []existingEpisode, targets []EpisodeResult, keys []string) {
 	for _, key := range keys {
 		byValue := make(map[string]int)
 		for i, row := range existing {
-			if _, taken := claimedBy[i]; taken {
+			if _, taken := c.claimedBy[i]; taken {
 				continue
 			}
 			if value := row.IDs[key]; value != "" {
@@ -98,7 +125,7 @@ func planEpisodeRenumber(existing []existingEpisode, targets []EpisodeResult, st
 			}
 		}
 		for t, target := range targets {
-			if _, done := claimOf[t]; done {
+			if _, done := c.claimOf[t]; done {
 				continue
 			}
 			value := target.ProviderIDs[key]
@@ -106,36 +133,43 @@ func planEpisodeRenumber(existing []existingEpisode, targets []EpisodeResult, st
 				continue
 			}
 			if row, ok := byValue[value]; ok {
-				claim(t, row)
+				c.claim(t, row)
 				delete(byValue, value)
 			}
 		}
 	}
+}
 
+// claimBySlot lets each target still unclaimed claim the unclaimed row at its
+// numbers, unless that row is another episode of the structure provider.
+func (c renumberClaims) claimBySlot(existing []existingEpisode, targets []EpisodeResult, structureKey string) {
 	atSlot := make(map[episodeSlot]int, len(existing))
 	for i, row := range existing {
 		atSlot[episodeSlot{row.Season, row.Episode}] = i
 	}
 	for t, target := range targets {
-		if _, done := claimOf[t]; done {
+		if _, done := c.claimOf[t]; done {
 			continue
 		}
 		row, ok := atSlot[episodeSlot{target.SeasonNumber, target.EpisodeNumber}]
 		if !ok {
 			continue
 		}
-		if _, taken := claimedBy[row]; taken {
+		if _, taken := c.claimedBy[row]; taken {
 			continue
 		}
 		own := existing[row].IDs[structureKey]
 		if own != "" && own != target.ProviderIDs[structureKey] {
 			continue
 		}
-		claim(t, row)
+		c.claim(t, row)
 	}
+}
 
-	var merges []episodeMerge
-	merged := make(map[int]bool)
+// duplicateMerges merges each unclaimed row sharing a provider ID with a
+// claimed target into that target's row. merged marks the rows that merge.
+func duplicateMerges(existing []existingEpisode, targets []EpisodeResult, keys []string, claims renumberClaims) (merges []episodeMerge, merged map[int]bool) {
+	merged = make(map[int]bool)
 	targetByID := make(map[string]int)
 	for t, target := range targets {
 		for key, value := range target.ProviderIDs {
@@ -145,7 +179,7 @@ func planEpisodeRenumber(existing []existingEpisode, targets []EpisodeResult, st
 		}
 	}
 	for i, row := range existing {
-		if _, ok := claimedBy[i]; ok {
+		if _, ok := claims.claimedBy[i]; ok {
 			continue
 		}
 		for _, key := range keys {
@@ -157,28 +191,31 @@ func planEpisodeRenumber(existing []existingEpisode, targets []EpisodeResult, st
 			if !ok {
 				continue
 			}
-			if into, claimed := claimOf[t]; claimed {
+			if into, claimed := claims.claimOf[t]; claimed {
 				merges = append(merges, episodeMerge{From: row.ContentID, Into: existing[into].ContentID})
 				merged[i] = true
 				break
 			}
 		}
 	}
+	return merges, merged
+}
 
-	var moves []episodeMove
-	targetSlots := make(map[episodeSlot]bool, len(targets))
-	targetAt := make(map[episodeSlot]int, len(targets))
-	lastEpisode := make(map[int]int)
-	for t, target := range targets {
-		targetSlots[episodeSlot{target.SeasonNumber, target.EpisodeNumber}] = true
-		targetAt[episodeSlot{target.SeasonNumber, target.EpisodeNumber}] = t
+// claimedMoves lists the moves of the claimed rows whose numbers differ from
+// their target's, ordered by their current numbers. lastEpisode is the last
+// episode number of each season among the targets and the rows that stay off
+// the targets' numbers.
+func claimedMoves(existing []existingEpisode, targets []EpisodeResult, claims renumberClaims, merged map[int]bool) (moves []episodeMove, lastEpisode map[int]int) {
+	targetSlots := targetSlotsOf(targets)
+	lastEpisode = make(map[int]int)
+	for _, target := range targets {
 		lastEpisode[target.SeasonNumber] = max(lastEpisode[target.SeasonNumber], target.EpisodeNumber)
 	}
 	for i, row := range existing {
 		if merged[i] {
 			continue
 		}
-		if t, ok := claimedBy[i]; ok {
+		if t, ok := claims.claimedBy[i]; ok {
 			target := targets[t]
 			if row.Season != target.SeasonNumber || row.Episode != target.EpisodeNumber {
 				moves = append(moves, episodeMove{
@@ -188,22 +225,30 @@ func planEpisodeRenumber(existing []existingEpisode, targets []EpisodeResult, st
 			}
 			continue
 		}
-		if !targetSlots[episodeSlot{row.Season, row.Episode}] {
+		if _, onTarget := targetSlots[episodeSlot{row.Season, row.Episode}]; !onTarget {
 			lastEpisode[row.Season] = max(lastEpisode[row.Season], row.Episode)
 		}
 	}
 	sortMoves(moves)
+	return moves, lastEpisode
+}
 
-	var parked []episodeMove
+// parkUnclaimed moves each row nobody claimed or merged that sits on a
+// target's numbers after the last episode of its season, ordered by its
+// current numbers. A scanner placeholder there merges into the row that
+// moves to its numbers instead. lastEpisode advances as rows park.
+func parkUnclaimed(existing []existingEpisode, targets []EpisodeResult, claims renumberClaims, merged map[int]bool, lastEpisode map[int]int) (parked []episodeMove, merges []episodeMerge) {
+	targetAt := targetSlotsOf(targets)
 	for i, row := range existing {
-		if _, ok := claimedBy[i]; ok || merged[i] {
+		if _, ok := claims.claimedBy[i]; ok || merged[i] {
 			continue
 		}
-		if !targetSlots[episodeSlot{row.Season, row.Episode}] {
+		t, onTarget := targetAt[episodeSlot{row.Season, row.Episode}]
+		if !onTarget {
 			continue
 		}
-		if t, ok := targetAt[episodeSlot{row.Season, row.Episode}]; ok && row.Fallback {
-			if into, claimed := claimOf[t]; claimed {
+		if row.Fallback {
+			if into, claimed := claims.claimOf[t]; claimed {
 				merges = append(merges, episodeMerge{From: row.ContentID, Into: existing[into].ContentID})
 				continue
 			}
@@ -215,7 +260,17 @@ func planEpisodeRenumber(existing []existingEpisode, targets []EpisodeResult, st
 		})
 	}
 	sortMoves(parked)
-	return episodeRenumberPlan{Moves: append(moves, parked...), Merges: merges}
+	return parked, merges
+}
+
+// targetSlotsOf maps each target's numbers to its index; a later target at
+// the same numbers wins.
+func targetSlotsOf(targets []EpisodeResult) map[episodeSlot]int {
+	at := make(map[episodeSlot]int, len(targets))
+	for t, target := range targets {
+		at[episodeSlot{target.SeasonNumber, target.EpisodeNumber}] = t
+	}
+	return at
 }
 
 func sortMoves(moves []episodeMove) {
@@ -256,46 +311,8 @@ func applyEpisodeRenumber(ctx context.Context, tx pgx.Tx, seriesID string, moves
 		}
 	}
 
-	// A row outside this move can hold a composed ID a moving row needs (its
-	// ID stopped matching its numbers in earlier history). That moving row
-	// takes a fresh ID instead, as a re-anchored series' children do.
-	if len(finals) > 0 {
-		takenRows, err := tx.Query(ctx, `
-			SELECT content_id FROM episodes
-			WHERE content_id = ANY($1) AND NOT (content_id = ANY($2))`, finals, sources)
-		if err != nil {
-			return fmt.Errorf("renumber: check final ids: %w", err)
-		}
-		taken := make(map[string]bool)
-		for takenRows.Next() {
-			var id string
-			if err := takenRows.Scan(&id); err != nil {
-				takenRows.Close()
-				return fmt.Errorf("renumber: check final ids: %w", err)
-			}
-			taken[id] = true
-		}
-		takenRows.Close()
-		if err := takenRows.Err(); err != nil {
-			return fmt.Errorf("renumber: check final ids: %w", err)
-		}
-		for k, final := range finals {
-			if !taken[final] {
-				continue
-			}
-			fresh, err := generateContentID()
-			if err != nil {
-				return fmt.Errorf("renumber: mint id for %s: %w", sources[k], err)
-			}
-			slog.WarnContext(ctx, "metadata: renumbered episode takes a fresh id; its composed id is taken",
-				"component", "metadata", "series_id", seriesID, "episode_id", sources[k], "target_id", final, "fresh_id", fresh)
-			finals[k] = fresh
-			for i := range moves {
-				if moves[i].ContentID == sources[k] {
-					finalIDs[i] = fresh
-				}
-			}
-		}
+	if err := freshIDsForTakenFinals(ctx, tx, seriesID, moves, sources, finals, finalIDs); err != nil {
+		return err
 	}
 
 	// Free every slot first: numbers go negative, which no episode uses.
@@ -307,23 +324,8 @@ func applyEpisodeRenumber(ctx context.Context, tx pgx.Tx, seriesID string, moves
 			return fmt.Errorf("renumber: park %s: %w", move.ContentID, err)
 		}
 	}
-	if len(sources) > 0 {
-		if _, err := tx.Exec(ctx, `SELECT silo_rename_content_ids($1, $2)`, sources, temps); err != nil {
-			return fmt.Errorf("renumber: rename to temporary ids: %w", err)
-		}
-		// A leftover row on a final id merges with the moving one, as in any
-		// rename, so an unmarked play cannot count as watched again.
-		if _, err := reattribute.MergeHistoryCutoffPairs(ctx, tx, temps, finals); err != nil {
-			return fmt.Errorf("renumber: %w", err)
-		}
-		if _, err := tx.Exec(ctx, `SELECT silo_rename_content_ids($1, $2)`, temps, finals); err != nil {
-			return fmt.Errorf("renumber: rename to final ids: %w", err)
-		}
-		for i := range sources {
-			if err := catalog.EnqueueSearchIndexRename(ctx, tx, sources[i], finals[i]); err != nil {
-				return fmt.Errorf("renumber: enqueue search rename %s: %w", sources[i], err)
-			}
-		}
+	if err := renameMovedIDs(ctx, tx, sources, temps, finals); err != nil {
+		return err
 	}
 	for i, move := range moves {
 		if _, err := tx.Exec(ctx, `
@@ -336,6 +338,87 @@ func applyEpisodeRenumber(ctx context.Context, tx pgx.Tx, seriesID string, moves
 			WHERE e.series_id = $1 AND e.content_id = $2`,
 			seriesID, finalIDs[i], move.ToSeason, move.ToEpisode); err != nil {
 			return fmt.Errorf("renumber: move %s to S%dE%d: %w", finalIDs[i], move.ToSeason, move.ToEpisode, err)
+		}
+	}
+	return nil
+}
+
+// freshIDsForTakenFinals gives a moving row a fresh ID when a row outside
+// this move holds the composed ID it needs (its ID stopped matching its
+// numbers in earlier history), as a re-anchored series' children do. It
+// updates finals and finalIDs in place; sources[k] takes finals[k].
+func freshIDsForTakenFinals(ctx context.Context, tx pgx.Tx, seriesID string, moves []episodeMove, sources, finals, finalIDs []string) error {
+	if len(finals) == 0 {
+		return nil
+	}
+	taken, err := takenEpisodeIDs(ctx, tx, finals, sources)
+	if err != nil {
+		return err
+	}
+	for k, final := range finals {
+		if !taken[final] {
+			continue
+		}
+		fresh, err := generateContentID()
+		if err != nil {
+			return fmt.Errorf("renumber: mint id for %s: %w", sources[k], err)
+		}
+		slog.WarnContext(ctx, "metadata: renumbered episode takes a fresh id; its composed id is taken",
+			"component", "metadata", "series_id", seriesID, "episode_id", sources[k], "target_id", final, "fresh_id", fresh)
+		finals[k] = fresh
+		for i := range moves {
+			if moves[i].ContentID == sources[k] {
+				finalIDs[i] = fresh
+			}
+		}
+	}
+	return nil
+}
+
+// takenEpisodeIDs returns which of ids an episode row other than sources
+// holds.
+func takenEpisodeIDs(ctx context.Context, tx pgx.Tx, ids, sources []string) (map[string]bool, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT content_id FROM episodes
+		WHERE content_id = ANY($1) AND NOT (content_id = ANY($2))`, ids, sources)
+	if err != nil {
+		return nil, fmt.Errorf("renumber: check final ids: %w", err)
+	}
+	defer rows.Close()
+	taken := make(map[string]bool)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("renumber: check final ids: %w", err)
+		}
+		taken[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("renumber: check final ids: %w", err)
+	}
+	return taken, nil
+}
+
+// renameMovedIDs renames sources to finals through temps, so rows can trade
+// IDs, and queues the search index renames.
+func renameMovedIDs(ctx context.Context, tx pgx.Tx, sources, temps, finals []string) error {
+	if len(sources) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `SELECT silo_rename_content_ids($1, $2)`, sources, temps); err != nil {
+		return fmt.Errorf("renumber: rename to temporary ids: %w", err)
+	}
+	// A leftover row on a final id merges with the moving one, as in any
+	// rename, so an unmarked play cannot count as watched again.
+	if _, err := reattribute.MergeHistoryCutoffPairs(ctx, tx, temps, finals); err != nil {
+		return fmt.Errorf("renumber: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT silo_rename_content_ids($1, $2)`, temps, finals); err != nil {
+		return fmt.Errorf("renumber: rename to final ids: %w", err)
+	}
+	for i := range sources {
+		if err := catalog.EnqueueSearchIndexRename(ctx, tx, sources[i], finals[i]); err != nil {
+			return fmt.Errorf("renumber: enqueue search rename %s: %w", sources[i], err)
 		}
 	}
 	return nil
@@ -371,7 +454,7 @@ func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID s
 			rows.Close()
 			return fmt.Errorf("renumber: scan episode: %w", err)
 		}
-		row.IDs = map[string]string{"tvdb": tvdb, "tmdb": tmdb, "imdb": imdb}
+		row.IDs = map[string]string{providerSlugTVDB: tvdb, providerSlugTMDB: tmdb, providerSlugIMDb: imdb}
 		existing = append(existing, row)
 	}
 	rows.Close()
@@ -706,7 +789,7 @@ func targetSeasonNumbers(seasons []SeasonResult, episodes []EpisodeResult) []int
 	add := func(n int) {
 		if !seen[n] && catalog.FitsPostgresInteger(n) {
 			seen[n] = true
-			out = append(out, int32(n))
+			out = append(out, int32(n)) //nolint:gosec // FitsPostgresInteger checked the range
 		}
 	}
 	for _, season := range seasons {

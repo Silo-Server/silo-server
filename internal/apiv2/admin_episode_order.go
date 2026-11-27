@@ -20,6 +20,9 @@ type AdminEpisodeOrderService interface {
 	SaveEpisodeOrder(ctx context.Context, seriesID string, settings metadata.EpisodeOrderSettings, revision *int64, userID int) (int64, error)
 }
 
+// episodeOrderLayoutCustom is the layout that uses the series' arranged seasons.
+const episodeOrderLayoutCustom = "custom"
+
 // EpisodeOrderChoice is how a series orders its episodes.
 type EpisodeOrderChoice struct {
 	Provider  string `json:"provider" pattern:"^(?:tvdb|tmdb)?$" doc:"Provider whose order the series follows; empty follows its library" example:"tmdb"`
@@ -346,7 +349,7 @@ func (reg *Registry) getAdminCustomSeasons(ctx context.Context, in *AdminCustomS
 	}
 	var base *metadata.EpisodeOrderSettings
 	if in.StartOver {
-		base = &metadata.EpisodeOrderSettings{Provider: in.Provider, OrderID: in.OrderID, FileOrder: in.FileOrder, Layout: "custom"}
+		base = &metadata.EpisodeOrderSettings{Provider: in.Provider, OrderID: in.OrderID, FileOrder: in.FileOrder, Layout: episodeOrderLayoutCustom}
 	}
 	custom, err := reg.deps.AdminCustomSeasons.CustomSeasons(ctx, in.ID, base)
 	if err != nil {
@@ -354,7 +357,7 @@ func (reg *Registry) getAdminCustomSeasons(ctx context.Context, in *AdminCustomS
 	}
 	out := AdminCustomSeasons{
 		Saved: custom.Saved, StructureProvider: custom.StructureProvider,
-		Choice:  EpisodeOrderChoice{Provider: custom.Settings.Provider, OrderID: custom.Settings.OrderID, FileOrder: custom.Settings.FileOrder, Layout: "custom"},
+		Choice:  EpisodeOrderChoice{Provider: custom.Settings.Provider, OrderID: custom.Settings.OrderID, FileOrder: custom.Settings.FileOrder, Layout: episodeOrderLayoutCustom},
 		Seasons: make([]CustomSeasonsSeason, 0, len(custom.Seasons)),
 	}
 	for _, s := range custom.Seasons {
@@ -374,7 +377,7 @@ func (reg *Registry) setAdminCustomSeasons(ctx context.Context, in *AdminCustomS
 		return nil, unavailable("custom seasons")
 	}
 	save := metadata.CustomSeasonsSave{
-		Settings: metadata.EpisodeOrderSettings{Provider: in.Body.Provider, OrderID: in.Body.OrderID, FileOrder: in.Body.FileOrder, Layout: "custom"},
+		Settings: metadata.EpisodeOrderSettings{Provider: in.Body.Provider, OrderID: in.Body.OrderID, FileOrder: in.Body.FileOrder, Layout: episodeOrderLayoutCustom},
 	}
 	for _, s := range in.Body.Seasons {
 		season := metadata.CustomSeasonsSeason{Number: s.Number, Title: s.Title, Overview: s.Overview}

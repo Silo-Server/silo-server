@@ -21,6 +21,13 @@ const (
 	episodeLayoutAbsolute = "absolute"
 )
 
+// Provider slugs and episode ID keys the episode order code names.
+const (
+	providerSlugTVDB = "tvdb"
+	providerSlugTMDB = "tmdb"
+	providerSlugIMDb = "imdb"
+)
+
 // applyAbsoluteLayout renumbers the regular episodes 1…N in one season 1, in
 // the order's season and episode sequence. Specials keep their numbers.
 // Season 1 keeps the first regular season's artwork and air date under a
@@ -217,15 +224,15 @@ func writeEpisodeFileNumbers(ctx context.Context, tx pgx.Tx, seriesID, structure
 			!catalog.FitsPostgresInteger(s) || !catalog.FitsPostgresInteger(e) {
 			return nil, nil
 		}
-		a, b := int32(s), int32(e)
+		a, b := int32(s), int32(e) //nolint:gosec // FitsPostgresInteger checked the range
 		return &a, &b
 	}
 	for _, ep := range targets {
 		if !catalog.FitsPostgresInteger(ep.SeasonNumber) || !catalog.FitsPostgresInteger(ep.EpisodeNumber) {
 			continue
 		}
-		seasons = append(seasons, int32(ep.SeasonNumber))
-		numbers = append(numbers, int32(ep.EpisodeNumber))
+		seasons = append(seasons, int32(ep.SeasonNumber))  //nolint:gosec // FitsPostgresInteger checked the range
+		numbers = append(numbers, int32(ep.EpisodeNumber)) //nolint:gosec // FitsPostgresInteger checked the range
 		fs, fe := pair(ep.FileNumbered, ep.FileSeasonNumber, ep.FileEpisodeNumber, ep)
 		if !ep.FileNumbered {
 			// The file order lacks the episode: no file name names it, and
@@ -426,7 +433,7 @@ func (s *MetadataService) seriesShowsOtherNumbering(ctx context.Context, seriesI
 		return false, err
 	}
 	for _, p := range chain {
-		if slug := p.Slug(); slug == "tvdb" || slug == "tmdb" {
+		if slug := p.Slug(); slug == providerSlugTVDB || slug == providerSlugTMDB {
 			return slug != order.Provider, nil
 		}
 	}

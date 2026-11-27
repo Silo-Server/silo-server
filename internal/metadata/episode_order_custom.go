@@ -152,20 +152,42 @@ func (s *MetadataService) CustomSeasons(ctx context.Context, seriesID string, ba
 	}
 	arrangedSeasons, arranged := applyCustomLayout(seasons, episodes, structureSlug, layout)
 
+	files, err := s.seriesFileNames(ctx, seriesID)
+	if err != nil {
+		return result, err
+	}
+	result.Seasons = arrangerSeasons(seasons, arrangedSeasons, arranged, inOrder, layout, files, structureSlug, result.Saved)
+	return result, nil
+}
+
+// seriesFileNames maps the file numbers of the series' numbered files to
+// their file names, the first file at each numbers winning.
+func (s *MetadataService) seriesFileNames(ctx context.Context, seriesID string) (map[episodeSlot]string, error) {
 	files := map[episodeSlot]string{}
-	if s.dbPool != nil {
-		links, err := s.loadSeriesFileLinks(ctx, s.dbPool, seriesID)
-		if err != nil {
-			return result, err
+	if s.dbPool == nil {
+		return files, nil
+	}
+	links, err := s.loadSeriesFileLinks(ctx, s.dbPool, seriesID)
+	if err != nil {
+		return nil, err
+	}
+	for _, link := range links {
+		if !link.Numbered {
+			continue
 		}
-		for _, link := range links {
-			if link.Numbered {
-				if _, ok := files[episodeSlot{link.Season, link.Episode}]; !ok {
-					files[episodeSlot{link.Season, link.Episode}] = path.Base(link.Path)
-				}
-			}
+		if _, ok := files[episodeSlot{link.Season, link.Episode}]; !ok {
+			files[episodeSlot{link.Season, link.Episode}] = path.Base(link.Path)
 		}
 	}
+	return files, nil
+}
+
+// arrangerSeasons lists the arranged seasons with their episodes for the
+// arranger, specials last. inOrder holds the base order's episodes in the
+// same order as arranged; files names the file at each file numbers. When
+// saved, an episode the layout does not place is marked as placed
+// automatically.
+func arrangerSeasons(seasons, arrangedSeasons []SeasonResult, arranged, inOrder []EpisodeResult, layout customLayout, files map[episodeSlot]string, structureSlug string, saved bool) []CustomSeasonsSeason {
 	provider := map[int]SeasonResult{}
 	for _, season := range seasons {
 		provider[season.SeasonNumber] = season
@@ -203,24 +225,25 @@ func (s *MetadataService) CustomSeasons(ctx context.Context, seriesID string, ba
 		season.Episodes = append(season.Episodes, CustomSeasonsEpisode{
 			Key: key, Title: ep.Title, AirDate: ep.AirDate,
 			ProviderSeason: inOrder[i].SeasonNumber, ProviderEpisode: inOrder[i].EpisodeNumber,
-			File: files[fileSlot], PlacedAutomatically: result.Saved && !inLayout,
+			File: files[fileSlot], PlacedAutomatically: saved && !inLayout,
 			position: ep.EpisodeNumber,
 		})
 	}
 	for _, season := range byNumber {
 		sort.SliceStable(season.Episodes, func(i, j int) bool { return season.Episodes[i].position < season.Episodes[j].position })
 	}
+	out := make([]CustomSeasonsSeason, 0, len(byNumber))
 	for _, season := range byNumber {
-		result.Seasons = append(result.Seasons, *season)
+		out = append(out, *season)
 	}
-	sort.Slice(result.Seasons, func(i, j int) bool {
-		a, b := result.Seasons[i].Number, result.Seasons[j].Number
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i].Number, out[j].Number
 		if (a == 0) != (b == 0) {
 			return b == 0
 		}
 		return a < b
 	})
-	return result, nil
+	return out
 }
 
 // startingLayout arranges the episodes as the order numbers them.
@@ -307,7 +330,7 @@ func (s *MetadataService) SaveCustomSeasons(ctx context.Context, seriesID string
 	if err != nil {
 		return 0, err
 	}
-	if item.Type != "series" {
+	if item.Type != anchoredItemTypeSeries {
 		return 0, ErrEpisodeOrderNotSeries
 	}
 	orderName := s.episodeOrderName(ctx, seriesID, save.Settings)
@@ -343,13 +366,13 @@ func replaceCustomLayout(ctx context.Context, tx pgx.Tx, seriesID string, season
 	var slotSeasons, positions []int32
 	for _, season := range seasons {
 		if season.Number > 0 {
-			numbers = append(numbers, int32(season.Number))
+			numbers = append(numbers, int32(season.Number)) //nolint:gosec // SaveCustomSeasons numbers seasons 0…len(seasons)
 			titles = append(titles, strings.TrimSpace(season.Title))
 			overviews = append(overviews, strings.TrimSpace(season.Overview))
 		}
 		for i, ep := range season.Episodes {
 			keys = append(keys, ep.Key)
-			slotSeasons = append(slotSeasons, int32(season.Number))
+			slotSeasons = append(slotSeasons, int32(season.Number)) //nolint:gosec // SaveCustomSeasons numbers seasons 0…len(seasons)
 			positions = append(positions, int32(i+1))
 		}
 	}
