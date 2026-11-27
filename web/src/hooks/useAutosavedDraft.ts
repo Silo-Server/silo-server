@@ -14,8 +14,8 @@ interface Machine<T> {
   queuedSave: Save<T> | null;
   /** Shows the machine's state in the editor mounted on it, if any. */
   publish: ((m: Machine<T>) => void) | null;
-  /** Waiting for every save to settle (whenIdle). */
-  idle: Array<() => void>;
+  /** A clear of the stored value waiting for the request in flight (clear). */
+  queuedClear: (() => Promise<void>) | null;
 }
 
 /**
@@ -25,32 +25,39 @@ interface Machine<T> {
  */
 const inFlight = new Map<string, unknown>();
 
-/** Send one patch; when it settles, send whatever queued up meanwhile. */
+/** Runs one request; when it settles, runs whatever queued up meanwhile. */
+function run<T>(m: Machine<T>, sending: Partial<T>, request: () => Promise<void>) {
+  m.sending = sending;
+  if (m.key !== undefined) inFlight.set(m.key, m);
+  void request().finally(() => {
+    m.sending = null;
+    const { queued, queuedSave, queuedClear } = m;
+    // A clear goes first: it was asked for before any edit still queued.
+    if (queuedClear) {
+      m.queuedClear = null;
+      run(m, {}, queuedClear);
+    } else if (queued && queuedSave) {
+      m.queued = null;
+      m.queuedSave = null;
+      send(m, queued, queuedSave);
+    } else if (m.key !== undefined && inFlight.get(m.key) === m) {
+      inFlight.delete(m.key);
+    }
+    m.publish?.(m);
+  });
+}
+
+/** Send one patch, built on the last acknowledged value. */
 function send<T>(m: Machine<T>, patch: Partial<T>, save: Save<T>) {
   const next = { ...m.confirmed, ...patch };
-  m.sending = patch;
-  if (m.key !== undefined) inFlight.set(m.key, m);
-  void save(next)
-    .then(
+  run(m, patch, () =>
+    save(next).then(
       () => {
         m.confirmed = next;
       },
       () => undefined,
-    )
-    .finally(() => {
-      m.sending = null;
-      const { queued, queuedSave } = m;
-      m.queued = null;
-      m.queuedSave = null;
-      if (queued && queuedSave) send(m, queued, queuedSave);
-      else {
-        if (m.key !== undefined && inFlight.get(m.key) === m) inFlight.delete(m.key);
-        const waiting = m.idle;
-        m.idle = [];
-        for (const resolve of waiting) resolve();
-      }
-      m.publish?.(m);
-    });
+    ),
+  );
 }
 
 const viewOf = <T>(m: Machine<T>) => ({
@@ -91,7 +98,7 @@ export function useAutosavedDraft<T extends object>(initial: T, key?: string) {
         queued: null,
         queuedSave: null,
         publish: null,
-        idle: [],
+        queuedClear: null,
       },
   );
   const machine = useRef(joined);
@@ -149,15 +156,32 @@ export function useAutosavedDraft<T extends object>(initial: T, key?: string) {
   }, [publish]);
 
   /**
-   * Resolves once no save is in flight or queued, so a clear of the stored
-   * value sent after it can't be overwritten by a save that lands later. It
-   * outlives the editor: a save already sent completes after an unmount.
+   * Clears the stored value through `request` (a reset), in order with the
+   * saves: edits not sent yet are dropped, the clear goes out once a save
+   * already sent has settled (so that save can't land after it and write the
+   * value back), and edits made after it wait for it and then build on
+   * `cleared`, the value with nothing stored. It outlives the editor: the
+   * value stays in flight under its key until the clear settles, so an editor
+   * reopened meanwhile queues behind it.
    */
-  const whenIdle = useCallback((): Promise<void> => {
-    const m = machine.current;
-    if (m.sending === null) return Promise.resolve();
-    return new Promise((resolve) => m.idle.push(resolve));
-  }, []);
+  const clear = useCallback(
+    (request: () => Promise<unknown>, cleared: T) => {
+      const m = machine.current;
+      m.queued = null;
+      m.queuedSave = null;
+      const op = () =>
+        request().then(
+          () => {
+            m.confirmed = cleared;
+          },
+          () => undefined,
+        );
+      if (m.sending) m.queuedClear = op;
+      else run(m, {}, op);
+      publish(m);
+    },
+    [publish],
+  );
 
-  return { value: view.value, saving: view.saving, edit, reset, discardQueued, whenIdle };
+  return { value: view.value, saving: view.saving, edit, reset, discardQueued, clear };
 }

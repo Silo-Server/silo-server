@@ -603,19 +603,26 @@ function DeviceDetail({
         onClose={() => setAppearanceOpen(false)}
         canReset={appearanceChangedHere}
         onReset={() => {
-          appearance.discardQueued();
           setAppearanceOpen(false);
           // The clear goes out once a save already sent has settled, so that
-          // save can't land after it and write the override back.
-          void appearance.whenIdle().then(() =>
-            clearValue.mutate(
-              { key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE, identity },
-              {
-                onError: (error) =>
-                  toast.error(v2ErrorText(error, t("web.settings.device.settingResetFailed"))),
-              },
-            ),
-          );
+          // save can't land after it and write the override back, and edits
+          // made after it wait for it. It goes out for the profile that asked
+          // for it, as a queued save does: after a switch it is dropped.
+          const authority = captureProfileRequestContext();
+          appearance.clear(async () => {
+            if (authority && !isCapturedProfileAuthorityActive(authority)) {
+              throw new Error("profile changed before the reset was sent");
+            }
+            try {
+              await clearValue.mutateAsync({
+                key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE,
+                identity,
+              });
+            } catch (error) {
+              toast.error(v2ErrorText(error, t("web.settings.device.settingResetFailed")));
+              throw error;
+            }
+          }, parseSubtitleAppearance(undefined));
         }}
         resetLabel={
           forSomeoneElse

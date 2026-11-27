@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest";
 import { setAccessToken, setProfileId } from "@/api/client";
 import type { AdminDeviceSetting } from "@/hooks/queries/admin/users";
+import { DEFAULT_SUBTITLE_APPEARANCE } from "@/lib/subtitleAppearance";
 import { AdminSubtitleAppearanceDialog } from "./AdminSubtitleAppearanceDialog";
 
 afterEach(cleanup);
@@ -165,4 +166,29 @@ it.each([
 
   await act(async () => settle(first));
   expect(onReset).toHaveBeenCalledTimes(1);
+});
+
+// An editor reopened while a reset waits is behind it: its edit goes out only
+// after the clear settles, built on the cleared value, so the reset can't
+// delete it and the old override doesn't come back with it (#4545 review).
+it("sends an edit made after a reset once the clear settles", async () => {
+  const first = deferred();
+  const cleared = deferred();
+  const onSave = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+  const onReset = vi.fn(() => cleared.promise);
+  const { unmount } = renderDialog(onSave, onReset);
+
+  fireEvent.click(radio("Large"));
+  fireEvent.click(screen.getByRole("button", { name: "Reset override" }));
+  unmount();
+  renderDialog(onSave, onReset);
+  fireEvent.click(radio("Monospace"));
+
+  await act(async () => first.resolve());
+  expect(onReset).toHaveBeenCalledTimes(1);
+  expect(onSave).toHaveBeenCalledTimes(1);
+
+  await act(async () => cleared.resolve());
+  expect(onSave).toHaveBeenCalledTimes(2);
+  expect(savedValue(onSave, 1)).toEqual({ ...DEFAULT_SUBTITLE_APPEARANCE, fontFamily: "monospace" });
 });

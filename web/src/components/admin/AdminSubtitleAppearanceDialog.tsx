@@ -29,7 +29,8 @@ interface AdminSubtitleAppearanceDialogProps {
    */
   onSave: (setting: AdminDeviceSetting, value: string) => Promise<unknown>;
   /** Remove the override on the device. Only invoked when `isOverride`. */
-  onReset: (setting: AdminDeviceSetting) => void;
+  /** Clears the override; a returned promise settles when the clear does. */
+  onReset: (setting: AdminDeviceSetting) => void | Promise<unknown>;
 }
 
 /**
@@ -66,13 +67,13 @@ export function AdminSubtitleAppearanceDialog({
   const handleChange = (patch: Partial<SubtitleAppearance>) =>
     draft.edit(patch, (next) => onSave(setting, JSON.stringify(next)));
 
-  // Reset wins over every save made before it: the clear goes out only once
-  // a save already sent has settled, or it could land after the clear and
-  // write the override back.
+  // Reset wins over every save made before it and loses to every edit made
+  // after it: the clear goes out once a save already sent has settled (or it
+  // could land after the clear and write the override back), and an editor
+  // reopened meanwhile queues its edits behind the clear.
   const handleReset = () => {
-    draft.discardQueued();
+    draft.clear(() => Promise.resolve(onReset(setting)), parseSubtitleAppearance(undefined));
     onClose();
-    void draft.whenIdle().then(() => onReset(setting));
   };
 
   // Eyebrow gives admin context that the player panel lacks: which user +

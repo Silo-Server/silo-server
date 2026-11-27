@@ -1752,7 +1752,7 @@ function DeviceDetailPanel({
             })
           }
           onReset={(setting) =>
-            deleteSetting.mutate({
+            deleteSetting.mutateAsync({
               userId: data.user_id,
               profileId: setting.profile_id,
               deviceId: setting.device_id,
