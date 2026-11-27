@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/demomode"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/google/uuid"
@@ -45,6 +46,12 @@ var (
 	// ErrSignupSessionStart reports a signup whose account was created but
 	// whose sign-in failed: repeating the signup cannot succeed.
 	ErrSignupSessionStart = errors.New("account created but login failed")
+	// ErrDemoLoginDisabled reports a demo sign-in while demo mode is off: the
+	// server is not a public demo.
+	ErrDemoLoginDisabled = errors.New("demo login is not enabled")
+	// ErrDemoLoginNotConfigured reports a demo sign-in on a public demo whose
+	// demo.username names no account that a visitor may be signed in to.
+	ErrDemoLoginNotConfigured = errors.New("demo login is not configured")
 )
 
 // SessionCheckRetryAfterSeconds is the Retry-After of every answer to a
@@ -206,6 +213,72 @@ func (s *Service) Login(ctx context.Context, username, password, deviceName, ip 
 		s.trustSignInSource(ctx, user)
 	}
 	return pair, user, err
+}
+
+// DemoLogin signs a visitor in to the public demo account: the account
+// demo.username names while demo.enabled is on. The session is an ordinary
+// login session, the one a visitor who typed the account's password gets, so
+// demo mode restricts it as it restricts them. It returns ErrDemoLoginDisabled
+// while demo mode is off, and ErrDemoLoginNotConfigured when demo.username is
+// empty or names an account that is missing, disabled, an administrator, or
+// holding a temporary password.
+func (s *Service) DemoLogin(ctx context.Context, deviceName, ip string) (*TokenPair, *models.User, error) {
+	if s.settings == nil || s.users == nil || s.sessions == nil {
+		return nil, nil, ErrDemoLoginDisabled
+	}
+	username, on, err := demomode.DemoAccount(ctx, s.settings)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading demo login settings: %w", err)
+	}
+	if !on {
+		return nil, nil, ErrDemoLoginDisabled
+	}
+	if username == "" {
+		return nil, nil, ErrDemoLoginNotConfigured
+	}
+	candidate, err := s.users.GetByUsername(ctx, username)
+	if IsNotFound(err) {
+		return nil, nil, ErrDemoLoginNotConfigured
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("looking up demo account: %w", err)
+	}
+	sessionID := uuid.New().String()
+	var user *models.User
+	// Account changes hold this row lock, so a promotion, disable or rename
+	// that commits first refuses the sign-in instead of missing its session.
+	err = pgx.BeginFunc(ctx, s.users.pool, func(tx pgx.Tx) error {
+		current, err := lockUser(ctx, tx, candidate.ID)
+		if IsNotFound(err) {
+			return ErrDemoLoginNotConfigured
+		}
+		if err != nil {
+			return err
+		}
+		if !current.Enabled || current.Role == models.RoleAdmin || current.PasswordChangeRequired ||
+			!strings.EqualFold(current.Username, username) {
+			return ErrDemoLoginNotConfigured
+		}
+		user = current
+		return s.sessions.createWithQuerier(ctx, tx, models.AuthSession{
+			ID:         sessionID,
+			UserID:     current.ID,
+			DeviceName: deviceName,
+			IPAddress:  ip,
+			ExpiresAt:  time.Now().Add(s.jwt.RefreshExpiry()),
+		})
+	})
+	if errors.Is(err, ErrDemoLoginNotConfigured) {
+		return nil, nil, err
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating demo session: %w", err)
+	}
+	pair, err := s.generateTokenPair(Claims{UserID: user.ID, Role: user.Role, SessionID: sessionID})
+	if err != nil {
+		return nil, nil, err
+	}
+	return pair, user, nil
 }
 
 // CompatLogin is Login for sign-in surfaces that cannot run the forced

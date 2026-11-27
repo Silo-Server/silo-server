@@ -1344,6 +1344,10 @@ type SessionService interface {
 	// NetworkSignIn signs in the overlay peer of the request through a
 	// network identity provider.
 	NetworkSignIn(ctx context.Context, in handlers.NetworkSignInInput) (handlers.TokenPairView, error)
+	// DemoLogin signs a visitor in to the public demo account. It returns
+	// auth.ErrDemoLoginDisabled or auth.ErrDemoLoginNotConfigured when demo
+	// sign-in is not available.
+	DemoLogin(ctx context.Context, in handlers.DemoLoginInput) (handlers.TokenPairView, error)
 }
 
 // DeviceLoginService is the slice of *handlers.AuthHandler the device-pairing
