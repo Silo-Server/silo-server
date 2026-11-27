@@ -63,9 +63,8 @@ type decodeBudget struct {
 // idleReleaseDelay is how long the budget stays empty before the memory the
 // decodes freed goes back to the operating system (releaseFreeMemory). A
 // burst of artwork, such as the images of a newly added library, holds
-// reservations nearly without a break; the release follows its end. A
-// variable so a test can shorten it.
-var idleReleaseDelay = 5 * time.Second
+// reservations nearly without a break; the release follows its end.
+const idleReleaseDelay = 5 * time.Second
 
 // newDecodeBudget sizes the budget to memoryBytes, the process's memory
 // limit, or to unboundedDecodePixels when that is zero.
