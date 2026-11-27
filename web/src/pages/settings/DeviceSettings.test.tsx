@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render as renderWithoutClient, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { UserDevice } from "@/api/types";
 import type { SettingsCapabilities } from "@/hooks/queries/settingValues";
+
+// The page reads the query client for the read after a subtitle reset.
+const render = (ui: ReactElement) =>
+  renderWithoutClient(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>);
 
 function device(overrides: Partial<UserDevice>): UserDevice {
   return {

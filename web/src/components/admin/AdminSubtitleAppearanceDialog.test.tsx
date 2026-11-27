@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest";
 import { setAccessToken, setProfileId } from "@/api/client";
 import type { AdminDeviceSetting } from "@/hooks/queries/admin/users";
-import { DEFAULT_SUBTITLE_APPEARANCE } from "@/lib/subtitleAppearance";
+import { DEFAULT_SUBTITLE_APPEARANCE, parseSubtitleAppearance } from "@/lib/subtitleAppearance";
 import { AdminSubtitleAppearanceDialog } from "./AdminSubtitleAppearanceDialog";
 
 afterEach(cleanup);
@@ -34,6 +34,7 @@ function deferred() {
 function renderDialog(
   onSave: (s: AdminDeviceSetting, value: string) => Promise<unknown>,
   onReset = vi.fn(),
+  inherited?: string,
 ) {
   return render(
     <AdminSubtitleAppearanceDialog
@@ -42,6 +43,7 @@ function renderDialog(
       onClose={vi.fn()}
       onSave={onSave}
       onReset={onReset}
+      inherited={inherited}
     />,
   );
 }
@@ -190,5 +192,31 @@ it("sends an edit made after a reset once the clear settles", async () => {
 
   await act(async () => cleared.resolve());
   expect(onSave).toHaveBeenCalledTimes(2);
-  expect(savedValue(onSave, 1)).toEqual({ ...DEFAULT_SUBTITLE_APPEARANCE, fontFamily: "monospace" });
+  expect(savedValue(onSave, 1)).toEqual({
+    ...DEFAULT_SUBTITLE_APPEARANCE,
+    fontFamily: "monospace",
+  });
+});
+
+// After a reset the device inherits the profile's appearance, so an edit
+// queued behind the reset changes only its own field and keeps the rest of
+// what is inherited (#4545 review).
+it("builds an edit made after a reset on the value the device inherits", async () => {
+  const inherited = JSON.stringify({ fontSize: "small", fontFamily: "serif" });
+  const cleared = deferred();
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  const onReset = vi.fn(() => cleared.promise);
+  const { unmount } = renderDialog(onSave, onReset, inherited);
+
+  fireEvent.click(screen.getByRole("button", { name: "Reset override" }));
+  unmount();
+  renderDialog(onSave, onReset, inherited);
+  fireEvent.click(radio("Large"));
+  await act(async () => cleared.resolve());
+
+  expect(onSave).toHaveBeenCalledTimes(1);
+  expect(savedValue(onSave, 0)).toEqual({
+    ...parseSubtitleAppearance(inherited),
+    fontSize: "large",
+  });
 });

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, Info, Pencil, ShieldCheck, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
@@ -32,6 +33,8 @@ import {
   type DeviceTarget,
 } from "@/hooks/queries/devices";
 import {
+  effectiveSettingsQueryKey,
+  type EffectiveSettingsMap,
   settingsCapabilitiesSupportKey,
   useSettingsCapabilities,
   useClearSettingValue,
@@ -303,6 +306,7 @@ function DeviceDetail({
   const isLoading = capabilities.isLoading || settingsLoading;
   const capabilitiesUnavailable = !capabilities.isLoading && !canUseDeviceSettings;
 
+  const queryClient = useQueryClient();
   const setValue = useSetSettingValue();
   const clearValue = useClearSettingValue();
   const clearDevice = useClearDeviceSettings();
@@ -609,20 +613,37 @@ function DeviceDetail({
           // made after it wait for it. It goes out for the profile that asked
           // for it, as a queued save does: after a switch it is dropped.
           const authority = captureProfileRequestContext();
-          appearance.clear(async () => {
-            if (authority && !isCapturedProfileAuthorityActive(authority)) {
-              throw new Error("profile changed before the reset was sent");
-            }
-            try {
-              await clearValue.mutateAsync({
-                key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE,
-                identity,
-              });
-            } catch (error) {
-              toast.error(v2ErrorText(error, t("web.settings.device.settingResetFailed")));
-              throw error;
-            }
-          }, parseSubtitleAppearance(undefined));
+          // The read the panel opens from. Once the override is gone it
+          // answers with what the device inherits (the profile's value, or
+          // the default), which edits made after the reset build on.
+          const effective = effectiveSettingsQueryKey({
+            keys: supportedKeys,
+            deviceId: device.device_id,
+            profileId: targetProfileId,
+          });
+          appearance.clear(
+            async () => {
+              if (authority && !isCapturedProfileAuthorityActive(authority)) {
+                throw new Error("profile changed before the reset was sent");
+              }
+              try {
+                await clearValue.mutateAsync({
+                  key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE,
+                  identity,
+                });
+              } catch (error) {
+                toast.error(v2ErrorText(error, t("web.settings.device.settingResetFailed")));
+                throw error;
+              }
+              await queryClient.refetchQueries({ queryKey: effective, exact: true });
+            },
+            () =>
+              parseSubtitleAppearance(
+                queryClient.getQueryData<EffectiveSettingsMap>(effective)?.[
+                  SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE
+                ]?.value,
+              ),
+          );
         }}
         resetLabel={
           forSomeoneElse

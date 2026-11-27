@@ -160,19 +160,21 @@ export function useAutosavedDraft<T extends object>(initial: T, key?: string) {
    * saves: edits not sent yet are dropped, the clear goes out once a save
    * already sent has settled (so that save can't land after it and write the
    * value back), and edits made after it wait for it and then build on
-   * `cleared`, the value with nothing stored. It outlives the editor: the
+   * `cleared()`, read once the clear has succeeded: the value in effect with
+   * nothing stored here, such as one inherited from a wider scope. It
+   * outlives the editor: the
    * value stays in flight under its key until the clear settles, so an editor
    * reopened meanwhile queues behind it.
    */
   const clear = useCallback(
-    (request: () => Promise<unknown>, cleared: T) => {
+    (request: () => Promise<unknown>, cleared: () => T) => {
       const m = machine.current;
       m.queued = null;
       m.queuedSave = null;
       const op = () =>
         request().then(
           () => {
-            m.confirmed = cleared;
+            m.confirmed = cleared();
           },
           () => undefined,
         );

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import {
   type AdminDeviceSetting,
+  type AdminUserSettingEntry,
   useAdminDeviceDetail,
   useAdminDeviceOverrides,
   useAdminUserSettings,
@@ -42,6 +43,7 @@ import {
   type PlatformKind,
 } from "@/components/admin/deviceOverrides";
 import { SETTING_KEYS } from "@/lib/settingsContract";
+import { deviceInheritedValue } from "@/lib/inheritedSettingValue";
 import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { AdminSubtitleAppearanceDialog } from "@/components/admin/AdminSubtitleAppearanceDialog";
 import { cn } from "@/lib/utils";
@@ -1759,6 +1761,7 @@ function DeviceDetailPanel({
               key: setting.key,
             })
           }
+          inherited={subtitleAppearanceInherited(jsonEditor.setting, storedSettings)}
         />
       )}
 
@@ -2030,4 +2033,25 @@ function ReadoutCell({
       )}
     </div>
   );
+}
+
+/**
+ * What the device resolves subtitle appearance to without its override, as
+ * the settings list shows for a row the device doesn't override: the
+ * profile's stored value, else the app default.
+ */
+function subtitleAppearanceInherited(
+  setting: AdminDeviceSetting,
+  storedSettings: readonly AdminUserSettingEntry[] = [],
+): string {
+  const profileAllEntries = storedSettings.filter(
+    (entry) => entry.profile_id === setting.profile_id,
+  );
+  const profileEntries = profileAllEntries.filter((entry) => entry.scope === "profile");
+  return deviceInheritedValue(
+    SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE,
+    setting.profile_name ?? "",
+    profileEntries,
+    profileAllEntries,
+  ).raw;
 }
