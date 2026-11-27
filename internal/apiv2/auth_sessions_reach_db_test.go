@@ -544,6 +544,21 @@ func TestDemoVisitorSessionListDB(t *testing.T) {
 		}
 	})
 
+	// Another app's session is limited to itself whatever demo mode says, so
+	// its rule answers first and the setting is not read: a demo server that
+	// can't read it still gives that session the reduced page, not a 500.
+	t.Run("another app's session on the demo server", func(t *testing.T) {
+		granted := uuid.NewString()
+		token := d.store(t, visitors, reachSession{id: granted, opened: models.SessionOpenedAppKey, keyVia: models.AppKeyEnrolledGrant})
+		defer func() { demo.err = nil }()
+		for _, readErr := range []error{nil, errors.New("settings store unreachable")} {
+			demo.err = readErr
+			page := d.list(t, token, "")
+			requireCompleteItem(t, "current_session", page.CurrentSession, granted, true)
+			requireRedactedItem(t, itemByID(t, page, first), first, page.CurrentSession)
+		}
+	})
+
 	t.Run("API key of a demo visitor", func(t *testing.T) {
 		d.keys["sa_reach_demo"] = &models.APIKey{ID: 1, UserID: visitors}
 		requireProblem(t, do(t, d.handler, http.MethodGet, Prefix+"/auth/sessions", "", bearer("sa_reach_demo")), TypePermissionDenied)
