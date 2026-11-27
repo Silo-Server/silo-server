@@ -374,7 +374,10 @@ The picture now decides the start, from the tail pass's keyframes:
   the black and the mostly black keyframes directly before it: a dense column
   of names measures as mostly black, and the rule that never moved a start back
   over one was what left those files late. The walk stops at a story keyframe,
-  at a gap wider than 12 seconds between keyframes, or after 45 seconds.
+  at a gap wider than 12 seconds between keyframes, or after 45 seconds from
+  the run's first text. (The old walk measured its ten-second cap from its own
+  moving start, so a dense black run was crossed anyway, but a sparse one was
+  not, and a mostly black keyframe stopped it outright.)
 - An audio match whose music starts after the credits' picture moves its start
   back to the black the credits open on, when nothing but black and text lies
   between the two starts. A story keyframe in between means the match starts on
