@@ -245,14 +245,27 @@ func (e envelope) sustainedBelow(from, to, level float64) bool {
 // snapIntroToChapters moves an edge onto a nearby authored chapter boundary,
 // as the Chromaprint path does, and never past the other edge.
 func snapIntroToChapters(candidate Candidate, segment Segment) (float64, float64) {
-	start, end := segment.Start, segment.End
+	// Each candidate boundary is read against the start the comparison
+	// placed, never against a start an earlier chapter moved it to: a chapter
+	// list of [0,4] and [4,34] would otherwise walk a start at 4 to 0 and
+	// leave it there, which is the fault this whole path exists to fix.
+	// The boundary the start belongs to is the nearest one, read from the
+	// start the comparison placed; the start may then move to it if the snap
+	// rule allows the distance.
+	bestStart, bestDistance := segment.Start, math.Inf(1)
 	for _, chapter := range candidate.Chapters {
-		start = snapBoundary(start, chapter.StartSeconds)
+		distance := math.Abs(chapter.StartSeconds - segment.Start)
+		if distance < bestDistance {
+			bestStart, bestDistance = snapBoundary(segment.Start, chapter.StartSeconds), distance
+		}
+	}
+	end := segment.End
+	for _, chapter := range candidate.Chapters {
 		end = snapBoundary(end, chapter.StartSeconds)
 		end = snapBoundary(end, chapter.EndSeconds)
 	}
-	if end <= start {
+	if end <= bestStart {
 		return segment.Start, segment.End
 	}
-	return start, end
+	return bestStart, end
 }

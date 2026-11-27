@@ -75,6 +75,12 @@ func cueDialogEnd(cues []subtitleCue, bound, searchSeconds float64) (float64, bo
 		if cue.Start > bound {
 			break
 		}
+		// A translator's card is part of the credits, not the dialog before
+		// them: reading it as dialog would move the start past the first
+		// fifteen seconds of credits picture.
+		if cueCreditsPattern.MatchString(cue.Text) {
+			continue
+		}
 		if cue.End >= bound-searchSeconds && cue.End > best {
 			best, found = cue.End, true
 		}

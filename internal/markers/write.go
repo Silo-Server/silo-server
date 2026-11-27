@@ -169,6 +169,10 @@ func markerRanges(payload SegmentPayload) []models.MarkerSegment {
 var seasonScoredFamilies = []struct{ family, refined string }{
 	{"chromaprint:", "dialogue:"}, //nolint:misspell // Persisted algorithm identifier.
 	{"credits-audio:", "video:"},
+	// An envelope intro refined by a fingerprint of its span is still the
+	// same season comparison, so a re-analysis replaces it rather than
+	// leaving a stale placement the confidence check would not match.
+	{"envelope:", "confirmed:"},
 }
 
 // sameSeasonScoredVersion reports whether two scanner algorithms are the

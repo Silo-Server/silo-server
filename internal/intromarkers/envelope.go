@@ -163,11 +163,15 @@ func sharedRuns(x, y envelope, cfg levelMatchConfig) []levelPair {
 		return nil
 	}
 	var pairs []levelPair
-	for _, offset := range candidateLevelOffsets(x, y, cfg) {
+	workspace := newRunWorkspace()
+	for _, coarse := range candidateLevelOffsets(x, y, cfg) {
 		// The offset search runs on a decimated trace, so its candidates sit
 		// on a coarse grid: a true alignment between two grid points scores
-		// badly there, and is found by walking the frames around each.
-		for _, run := range runsAtOffset(x, y, refineLevelOffset(x, y, offset, cfg), cfg) {
+		// badly there, and is found by walking the frames around each. The
+		// refined offset is what the run was found at, so it is what the
+		// partner's time is counted from as well.
+		offset := refineLevelOffset(x, y, coarse, cfg)
+		for _, run := range runsAtOffset(x, y, offset, cfg, workspace) {
 			pair := levelPair{
 				Start:        run.Start,
 				End:          run.End,
@@ -213,10 +217,11 @@ func overlappingPair(pairs []levelPair, pair levelPair) (levelPair, bool) {
 // correlates no better than chance at the grid point itself.
 func refineLevelOffset(x, y envelope, coarse int, cfg levelMatchConfig) int {
 	span := max(1, int(math.Round(coarseStepSeconds/x.hop)))
+	workspace := newRunWorkspace()
 	best, bestFrames := coarse, -1
 	for offset := coarse - span; offset <= coarse+span; offset++ {
 		frames := 0
-		for _, run := range runsAtOffset(x, y, offset, cfg) {
+		for _, run := range runsAtOffset(x, y, offset, cfg, workspace) {
 			frames = max(frames, int(math.Round((run.End-run.Start)/x.hop)))
 		}
 		if frames > bestFrames {
@@ -439,7 +444,7 @@ func overlapCorrelation(x, y []float64, offset int) float64 {
 // Each window is correlated against its own mean, not the trace's, because a
 // stretch of digital silence is a constant in the file's frame and would
 // otherwise correlate perfectly with any other silence.
-func runsAtOffset(x, y envelope, offset int, cfg levelMatchConfig) []levelRun {
+func runsAtOffset(x, y envelope, offset int, cfg levelMatchConfig, workspace *runWorkspace) []levelRun {
 	window := max(1, int(math.Round(cfg.WindowSeconds/x.hop)))
 	hop := max(1, int(math.Round(cfg.HopSeconds/x.hop)))
 	bridge := max(1, int(math.Round(cfg.BridgeSeconds/x.hop)))
@@ -450,28 +455,21 @@ func runsAtOffset(x, y envelope, offset int, cfg levelMatchConfig) []levelRun {
 	if to-from < window {
 		return nil
 	}
-	products := make([]float64, to-from)
-	xx := make([]float64, to-from)
-	yy := make([]float64, to-from)
-	xs := make([]float64, to-from)
-	ys := make([]float64, to-from)
+	// The sums are accumulated straight into one workspace: a ten-minute
+	// overlap walked this way allocates one set of buffers per pair rather
+	// than five temporaries and five prefix sums per offset.
+	windowed := workspace.resize(to - from)
 	for i := from; i < to; i++ {
 		a, b := x.v[i], y.v[i+offset]
-		products[i-from] = a * b
-		xx[i-from] = a * a
-		yy[i-from] = b * b
-		xs[i-from] = a
-		ys[i-from] = b
-	}
-	windowed := windowSums{
-		products: prefixSums(products),
-		squaresX: prefixSums(xx),
-		squaresY: prefixSums(yy),
-		sumsX:    prefixSums(xs),
-		sumsY:    prefixSums(ys),
+		at := i - from + 1
+		windowed.products[at] = windowed.products[at-1] + a*b
+		windowed.squaresX[at] = windowed.squaresX[at-1] + a*a
+		windowed.squaresY[at] = windowed.squaresY[at-1] + b*b
+		windowed.sumsX[at] = windowed.sumsX[at-1] + a
+		windowed.sumsY[at] = windowed.sumsY[at-1] + b
 	}
 
-	scored := make([]float64, len(products)-window+1)
+	scored := workspace.scored(to - from - window + 1)
 	for k := range scored {
 		scored[k] = windowed.correlation(k, window)
 	}
@@ -508,6 +506,44 @@ func runsAtOffset(x, y envelope, offset int, cfg levelMatchConfig) []levelRun {
 	}
 	flush()
 	return runs
+}
+
+// runWorkspace holds the buffers one pair's offset walk reuses between offsets.
+type runWorkspace struct {
+	sums   windowSums
+	scores []float64
+}
+
+func newRunWorkspace() *runWorkspace { return &runWorkspace{} }
+
+// resize returns prefix-sum buffers covering frames frames, keeping the
+// allocation of the previous offset when it was big enough.
+func (w *runWorkspace) resize(frames int) windowSums {
+	length := frames + 1
+	w.sums.products = growFloats(w.sums.products, length)
+	w.sums.squaresX = growFloats(w.sums.squaresX, length)
+	w.sums.squaresY = growFloats(w.sums.squaresY, length)
+	w.sums.sumsX = growFloats(w.sums.sumsX, length)
+	w.sums.sumsY = growFloats(w.sums.sumsY, length)
+	for _, sums := range [][]float64{w.sums.products, w.sums.squaresX, w.sums.squaresY, w.sums.sumsX, w.sums.sumsY} {
+		sums[0] = 0
+	}
+	return w.sums
+}
+
+// scored returns a reusable buffer of length values.
+func (w *runWorkspace) scored(values int) []float64 {
+	w.scores = growFloats(w.scores, values)
+	return w.scores[:values]
+}
+
+// growFloats returns values with at least length elements, reusing the
+// allocation when it is already big enough.
+func growFloats(values []float64, length int) []float64 {
+	if cap(values) >= length {
+		return values[:length]
+	}
+	return make([]float64, length)
 }
 
 // windowSums are the prefix sums a Pearson correlation over a window needs.

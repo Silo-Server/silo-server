@@ -1456,18 +1456,21 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		return summary, err
 	}
 	if distinctLevelEpisodeCount(inputs) < 2 {
-		state.LastError = "too few loudness envelopes"
-		settle(seasonStatusNotFound)
-		if opts.persistState {
-			if err := a.repo.UpsertSeasonState(ctx, state, analysisHash); err != nil {
-				return summary, err
-			}
+		if a.withdrawIntrosOfAnUncomparableGroup(ctx, group, opts, inputs, counts, &summary) {
+			state.LastError = "too few loudness envelopes; a withdrawal failed"
 		}
+		settle(seasonStatusNotFound)
 		summary.GroupsNotFound++
+		if !opts.persistState {
+			return summary, nil
+		}
+		if err := a.repo.UpsertSeasonState(ctx, state, analysisHash); err != nil {
+			return summary, err
+		}
 		return summary, nil
 	}
 
-	segments := a.refineIntroSegments(ctx, group.Candidates, inputs)
+	segments, cuesRetry := a.refineIntroSegments(ctx, group.Candidates, inputs)
 	writeFailures := a.writeIntroSegments(ctx, group, opts, inputs, segments, counts, &summary)
 
 	status := seasonStatusComplete
@@ -1483,6 +1486,12 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 			state.Status = seasonStatusFailed
 			state.LastError = fmt.Sprintf("%d intro marker write(s) failed", writeFailures)
 		}
+		if cuesRetry {
+			// A cue read that failed is not evidence that there are no cues:
+			// the group is left retryable so the hint is applied next time.
+			state.Status = seasonStatusPartial
+			state.LastError = "subtitle cue read failed; the intro may start inside a recap"
+		}
 		state.MarkersWritten = summary.SeasonMarkersWritten
 		if err := a.repo.UpsertSeasonState(ctx, state, analysisHash); err != nil {
 			return summary, err
@@ -1491,10 +1500,32 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 	return summary, nil
 }
 
+// withdrawIntrosOfAnUncomparableGroup withdraws the intros of a group the
+// comparison cannot run on: nothing confirms them, and a group settled as
+// not-found is skipped from then on, so a stored skip range would outlive the
+// partners that justified it. A file whose extraction failed, or one held out
+// because another source marked it, is left alone, as is a file outside the
+// caller's write scope.
+func (a *Analyzer) withdrawIntrosOfAnUncomparableGroup(ctx context.Context, group candidateGroup, opts analyzeGroupOptions, inputs []levelsInput, counts levelsCounts, summary *RunSummary) bool {
+	if counts.failed != 0 || counts.deferred != 0 || group.HeldOut {
+		return false
+	}
+	failed := false
+	for _, input := range inputs {
+		if !shouldPatchGroupFile(input.Candidate.FileID, opts.patchFileIDs) {
+			continue
+		}
+		if a.withdrawSeasonIntro(ctx, input.Candidate, summary) != nil {
+			failed = true
+		}
+	}
+	return failed
+}
+
 // refineIntroSegments compares the season's envelopes and bounds the result
 // with the evidence the comparison cannot see: the fingerprints of the placed
 // spans, and the cues of the files that got one.
-func (a *Analyzer) refineIntroSegments(ctx context.Context, candidates []Candidate, inputs []levelsInput) map[int]Segment {
+func (a *Analyzer) refineIntroSegments(ctx context.Context, candidates []Candidate, inputs []levelsInput) (map[int]Segment, bool) {
 	segments := CompareLevels(inputs, a.config)
 	segments = a.confirmLevelSegments(ctx, candidates, segments)
 	return a.applyIntroCueHints(ctx, candidates, inputs, segments)
@@ -1505,9 +1536,13 @@ func (a *Analyzer) refineIntroSegments(ctx context.Context, candidates []Candida
 // read for the files that got a segment, so a season without a detected intro
 // costs no demux. A file with no text track, or a cue read that fails, leaves
 // its segment as the audio comparison placed it.
-func (a *Analyzer) applyIntroCueHints(ctx context.Context, candidates []Candidate, inputs []levelsInput, segments map[int]Segment) map[int]Segment {
+// applyIntroCueHints bounds the placed intros with what their files' cues say,
+// and reports whether a cue read failed for a reason a later run should retry:
+// a group settled now would not be analyzed again until its inputs change, and
+// the intro of the file whose cues failed would keep the audio-only edges.
+func (a *Analyzer) applyIntroCueHints(ctx context.Context, candidates []Candidate, inputs []levelsInput, segments map[int]Segment) (map[int]Segment, bool) {
 	if a.cues == nil || len(segments) == 0 {
-		return segments
+		return segments, false
 	}
 	wanted := make([]Candidate, 0, len(segments))
 	for _, candidate := range candidates {
@@ -1516,12 +1551,12 @@ func (a *Analyzer) applyIntroCueHints(ctx context.Context, candidates []Candidat
 		}
 	}
 	if len(wanted) == 0 {
-		return segments
+		return segments, false
 	}
-	cues, err := a.ensureIntroCues(ctx, wanted)
+	cues, retry, err := a.ensureIntroCues(ctx, wanted)
 	if err != nil {
 		a.logger.WarnContext(ctx, "subtitle cue hints unavailable", "error", err)
-		return segments
+		return segments, false
 	}
 	byID := make(map[int]levelsInput, len(inputs))
 	for _, input := range inputs {
@@ -1541,7 +1576,7 @@ func (a *Analyzer) applyIntroCueHints(ctx context.Context, candidates []Candidat
 			segments[fileID] = refined
 		}
 	}
-	return segments
+	return segments, retry
 }
 
 // writeIntroSegments writes the intros a comparison placed and withdraws those

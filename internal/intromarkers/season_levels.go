@@ -232,84 +232,74 @@ func silenceBetween(env envelope, left, right levelPair) bool {
 	return gap < math.Min(before, after)-levelAdjacentDropDB
 }
 
+// levelCollector gathers what each pair of a season's files sees of one
+// another, holding the pair results so the neighbor pass and the wider search
+// compute each pair once.
+type levelCollector struct {
+	ordered   []levelsInput
+	envelopes []envelope
+	cfg       Config
+	stretches map[int]map[string][]levelStretch
+	pairs     map[[2]int][]levelPair
+	compared  map[[2]int]struct{}
+}
+
 func collectLevelStretches(ordered []levelsInput, envelopes []envelope, cfg Config) map[int]map[string][]levelStretch {
-	stretches := map[int]map[string][]levelStretch{}
-	record := func(i, j int, pair levelPair) {
-		left, right := ordered[i], ordered[j]
-		leftWindow := levelsWindow(left.Candidate, cfg)
-		rightWindow := levelsWindow(right.Candidate, cfg)
-		addLevelStretch(stretches, left.Candidate.FileID, right.Candidate.EpisodeID, levelStretch{
-			Start:        pair.Start,
-			End:          pair.End,
-			PartnerStart: pair.PartnerStart,
-			Correlation:  pair.Correlation,
-			ClippedEnd:   pair.End >= leftWindow.End-levelEdgeMarginSeconds,
-		})
-		partnerEnd := pair.PartnerStart + (pair.End - pair.Start)
-		addLevelStretch(stretches, right.Candidate.FileID, left.Candidate.EpisodeID, levelStretch{
-			Start:        pair.PartnerStart,
-			End:          partnerEnd,
-			PartnerStart: pair.Start,
-			Correlation:  pair.Correlation,
-			ClippedEnd:   partnerEnd >= rightWindow.End-levelEdgeMarginSeconds,
-		})
+	collector := &levelCollector{
+		ordered:   ordered,
+		envelopes: envelopes,
+		cfg:       cfg,
+		stretches: map[int]map[string][]levelStretch{},
+		pairs:     map[[2]int][]levelPair{},
+		compared:  map[[2]int]struct{}{},
 	}
-	episodesDiffer := func(i, j int) bool {
-		a, b := ordered[i].Candidate.EpisodeID, ordered[j].Candidate.EpisodeID
-		return a != "" && b != "" && a != b
-	}
-	compared := map[[2]int]struct{}{}
-	compare := func(i, j int) {
-		if i > j {
-			i, j = j, i
-		}
-		key := [2]int{i, j}
-		if _, done := compared[key]; done {
-			return
-		}
-		compared[key] = struct{}{}
-		for _, pair := range mergeAdjacentPairs(envelopes[i], sharedRuns(envelopes[i], envelopes[j], defaultLevelMatchConfig())) {
-			record(i, j, pair)
-		}
-	}
-	// Counted in episodes, not files, so every version of an episode in
-	// reach is compared but they share one place, as the Chromaprint path
-	// does.
-	within := func(episodes map[string]struct{}, limit int, episode string) bool {
-		if _, seen := episodes[episode]; seen {
-			return true
-		}
-		if len(episodes) == limit {
-			return false
-		}
-		episodes[episode] = struct{}{}
-		return true
-	}
-	for i := range ordered {
+	collector.neighborPass()
+	collector.wideSearch()
+	return collector.stretches
+}
+
+// neighborPass compares each file with the episodes next to it, adding both
+// files' sides of every match.
+func (c *levelCollector) neighborPass() {
+	for i := range c.ordered {
 		neighbors := map[string]struct{}{}
-		for j := i + 1; j < len(ordered); j++ {
-			if !episodesDiffer(i, j) {
+		for j := i + 1; j < len(c.ordered); j++ {
+			if !c.episodesDiffer(i, j) {
 				continue
 			}
-			if !within(neighbors, compareNeighborEpisodes, ordered[j].Candidate.EpisodeID) {
+			if !withinEpisodes(neighbors, compareNeighborEpisodes, c.ordered[j].Candidate.EpisodeID) {
 				break
 			}
-			compare(i, j)
+			if i > j {
+				continue
+			}
+			key := [2]int{i, j}
+			if _, done := c.compared[key]; done {
+				continue
+			}
+			c.compared[key] = struct{}{}
+			c.recordFrom(i, j, true)
 		}
 	}
+}
 
-	// A file whose neighbors gave it no qualifying span gets the wider
-	// search; one stretch that no partner confirms is not enough. The search
-	// walks episodes outward from the file's own.
-	groups := episodeGroups(levelsEpisodeOrder(ordered))
-	groupOf := make([]int, len(ordered))
+// wideSearch gives a file that its neighbors placed nothing for a wider look,
+// walking episodes outward from its own. Only the file that asked is credited
+// with what the search finds, so one file's search cannot move a partner's
+// marker.
+func (c *levelCollector) wideSearch() {
+	groups := episodeGroups(levelsEpisodeOrder(c.ordered))
+	groupOf := make([]int, len(c.ordered))
 	for g, group := range groups {
 		for i := group[0]; i < group[1]; i++ {
 			groupOf[i] = g
 		}
 	}
-	for i := range ordered {
-		if _, ok := bestLevelCluster(stretches[ordered[i].Candidate.FileID], ordered[i].Candidate, cfg); ok {
+	for i := range c.ordered {
+		// Only a span several partners agree on ends the search: one
+		// neighbor's recurring cue must not stand in for an opening two
+		// episodes out carry.
+		if stretch, ok := bestLevelCluster(c.stretches[c.ordered[i].Candidate.FileID], c.ordered[i].Candidate, c.cfg); ok && stretch.Supporters >= levelMinimumPartners {
 			continue
 		}
 		extra := map[string]struct{}{}
@@ -320,18 +310,98 @@ func collectLevelStretches(ordered []levelsInput, envelopes []envelope, cfg Conf
 					continue
 				}
 				for j := groups[h][0]; j < groups[h][1]; j++ {
-					if !episodesDiffer(i, j) {
+					if !c.episodesDiffer(i, j) {
 						continue
 					}
-					if !within(extra, levelWideSearchEpisodes, ordered[j].Candidate.EpisodeID) {
+					if !withinEpisodes(extra, levelWideSearchEpisodes, c.ordered[j].Candidate.EpisodeID) {
 						continue
 					}
-					compare(i, j)
+					c.recordFrom(i, j, false)
 				}
 			}
 		}
 	}
-	return stretches
+}
+
+func (c *levelCollector) episodesDiffer(i, j int) bool {
+	a, b := c.ordered[i].Candidate.EpisodeID, c.ordered[j].Candidate.EpisodeID
+	return a != "" && b != "" && a != b
+}
+
+// compute returns the runs the pair shares, at most once per pair.
+func (c *levelCollector) compute(i, j int) []levelPair {
+	if i > j {
+		i, j = j, i
+	}
+	key := [2]int{i, j}
+	if cached, ok := c.pairs[key]; ok {
+		return cached
+	}
+	runs := mergeAdjacentPairs(c.envelopes[i], sharedRuns(c.envelopes[i], c.envelopes[j], defaultLevelMatchConfig()))
+	c.pairs[key] = runs
+	return runs
+}
+
+// recordFrom adds what the pair (i, j) says about the files, both sides or
+// only the file at index i.
+func (c *levelCollector) recordFrom(i, j int, both bool) {
+	if i > j {
+		for _, pair := range c.compute(j, i) {
+			if both {
+				c.addBoth(j, i, pair)
+				continue
+			}
+			// The pair was measured in the other file's frame, and only the
+			// file that asked for the search gets the evidence.
+			c.addSide(i, j, pair.PartnerStart, pair.PartnerStart+(pair.End-pair.Start), pair.Start, pair.Correlation)
+		}
+		return
+	}
+	for _, pair := range c.compute(i, j) {
+		if both {
+			c.addBoth(i, j, pair)
+			continue
+		}
+		c.addSide(i, j, pair.Start, pair.End, pair.PartnerStart, pair.Correlation)
+	}
+}
+
+func (c *levelCollector) addBoth(i, j int, pair levelPair) {
+	c.addSide(i, j, pair.Start, pair.End, pair.PartnerStart, pair.Correlation)
+	c.addSide(j, i, pair.PartnerStart, pair.PartnerStart+(pair.End-pair.Start), pair.Start, pair.Correlation)
+}
+
+// addSide records what one file sees of one run. A run that reached the end of
+// either trace has not established where the recording ends, whichever of the
+// two it was found in, so the clipping applies to both sides.
+func (c *levelCollector) addSide(fileIndex, partnerIndex int, start, end, partnerStart, correlation float64) {
+	file, partner := c.ordered[fileIndex], c.ordered[partnerIndex]
+	fileWindow := levelsWindow(file.Candidate, c.cfg)
+	partnerWindow := levelsWindow(partner.Candidate, c.cfg)
+	partnerEnd := partnerStart + (end - start)
+	clipped := end >= fileWindow.End-levelEdgeMarginSeconds ||
+		partnerEnd >= partnerWindow.End-levelEdgeMarginSeconds
+	addLevelStretch(c.stretches, file.Candidate.FileID, partner.Candidate.EpisodeID, levelStretch{
+		Start:        start,
+		End:          end,
+		PartnerStart: partnerStart,
+		Correlation:  correlation,
+		ClippedEnd:   clipped,
+	})
+}
+
+// withinEpisodes reports whether episode still has room under limit, counting
+// episodes rather than files, so every version of an episode in reach is
+// compared but they share one place.
+func withinEpisodes(episodes map[string]struct{}, limit int, episode string) bool {
+	if _, seen := episodes[episode]; seen {
+		return true
+	}
+	if len(episodes) == limit {
+		return false
+	}
+	episodes[episode] = struct{}{}
+	return true
 }
 
 // addLevelStretch records one file's side of a pair result.
@@ -367,15 +437,14 @@ func bestLevelCluster(byPartner map[string][]levelStretch, candidate Candidate, 
 	if len(byPartner) == 0 {
 		return levelStretch{}, false
 	}
-	minimumPartners := levelMinimumPartners
 	if len(byPartner) < levelMinimumPartners {
-		minimumPartners = 1
+		// One partner can only ever be a pairing, so it is held to the
+		// pairing's gate from the start: a file with a single partner must
+		// not slip through the season's looser one.
+		return strongestLevelCluster(byPartner, candidate, cfg, 1, levelPairCorrelation, levelPairMinimumSeconds)
 	}
-	if stretch, ok := strongestLevelCluster(byPartner, candidate, cfg, minimumPartners, levelSupportCorrelation, max(5.0, float64(cfg.MinimumIntroDurationSeconds))); ok {
+	if stretch, ok := strongestLevelCluster(byPartner, candidate, cfg, levelMinimumPartners, levelSupportCorrelation, max(5.0, float64(cfg.MinimumIntroDurationSeconds))); ok {
 		return stretch, true
-	}
-	if minimumPartners == 1 {
-		return levelStretch{}, false
 	}
 	// One partner, and a better match and a longer span to make up for it.
 	return strongestLevelCluster(byPartner, candidate, cfg, 1, levelPairCorrelation, levelPairMinimumSeconds)
@@ -411,6 +480,11 @@ func strongestLevelCluster(byPartner map[string][]levelStretch, candidate Candid
 				math.Abs(other.End-anchor.End) > levelAgreementSeconds {
 				continue
 			}
+			// A weak stretch is neither a supporter nor a veto: counting it
+			// would let it fail the consensus for the partners that agree.
+			if other.Correlation < minimumCorrelation {
+				continue
+			}
 			if _, dup := seen[other.Partner]; dup {
 				continue
 			}
@@ -424,7 +498,10 @@ func strongestLevelCluster(byPartner map[string][]levelStretch, candidate Candid
 		if !ok || stretch.Start > headLimit {
 			continue
 		}
-		if len(cluster) > bestSupport || (len(cluster) == bestSupport && stretch.End-stretch.Start > best.End-best.Start) {
+		// Equal support goes to the earlier occurrence: a season's opening
+		// is what it plays first, and a longer reprise later in the episode
+		// would otherwise win on length.
+		if len(cluster) > bestSupport || (len(cluster) == bestSupport && stretch.Start < best.Start) {
 			best, bestSupport = stretch, len(cluster)
 		}
 	}

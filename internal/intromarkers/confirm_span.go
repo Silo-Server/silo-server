@@ -2,6 +2,7 @@ package intromarkers
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sort"
 	"time"
@@ -136,6 +137,11 @@ func decideSpanConfirmations(spans map[int][]uint32, segments map[int]Segment, c
 	for i := 0; i < len(fileIDs); i++ {
 		for j := i + 1; j < len(fileIDs); j++ {
 			left, right := fileIDs[i], fileIDs[j]
+			// Versions of one episode share their opening audio, so two of
+			// them confirming each other says nothing about the season.
+			if a, b := candidates[left].EpisodeID, candidates[right].EpisodeID; a != "" && a == b {
+				continue
+			}
 			profile := profileFor(left, right)
 			leftSeg, rightSeg, ok := comparePair(spans[left], spans[right], profile)
 			if !ok {
@@ -168,11 +174,36 @@ func decideSpanConfirmations(spans map[int][]uint32, segments map[int]Segment, c
 	if len(confirmed) == 0 {
 		return nil
 	}
-	dropUnconfirmed := float64(len(confirmed)) >= spanConfirmationShare*float64(len(segments))
+	// The share is counted over episodes, not files: two versions of one
+	// episode must not satisfy it between them.
+	confirmedEpisodes := map[string]struct{}{}
+	for fileID := range confirmed {
+		if episode := candidates[fileID].EpisodeID; episode != "" {
+			confirmedEpisodes[episode] = struct{}{}
+			continue
+		}
+		confirmedEpisodes[fmt.Sprintf("file:%d", fileID)] = struct{}{}
+	}
+	allEpisodes := map[string]struct{}{}
+	for fileID := range segments {
+		if episode := candidates[fileID].EpisodeID; episode != "" {
+			allEpisodes[episode] = struct{}{}
+			continue
+		}
+		allEpisodes[fmt.Sprintf("file:%d", fileID)] = struct{}{}
+	}
+	dropUnconfirmed := float64(len(confirmedEpisodes)) >= spanConfirmationShare*float64(len(allEpisodes))
 	out := make(map[int]Segment, len(segments))
 	for fileID, segment := range segments {
 		entry, ok := confirmed[fileID]
 		if !ok || len(entry.starts) == 0 {
+			// A span with no fingerprint behind it was never measured, so it
+			// is not a non-match: only a span whose fingerprint was compared
+			// and did not confirm can be dropped.
+			if _, measured := spans[fileID]; !measured {
+				out[fileID] = segment
+				continue
+			}
 			if dropUnconfirmed {
 				continue
 			}

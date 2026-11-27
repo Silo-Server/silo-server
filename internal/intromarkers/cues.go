@@ -184,20 +184,30 @@ func (e *SubtitleCueExtractor) FileCues(ctx context.Context, candidate Candidate
 // extracts the missing ones. A file with no text track is stored unusable so it
 // is not read again until it changes. Extraction is one demux per file, so it
 // is asked for the files a hint can act on, not the whole season.
-func (a *Analyzer) ensureIntroCues(ctx context.Context, candidates []Candidate) (map[int][]subtitleCue, error) {
+// retryable reports whether a cue read that failed should be retried, as
+// opposed to a file that has no text track to read.
+func (a *Analyzer) ensureIntroCues(ctx context.Context, candidates []Candidate) (map[int][]subtitleCue, bool, error) {
 	if a.cues == nil || len(candidates) == 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 	stored, err := a.loadCreditsArtifacts(ctx, candidates, introCuesKey())
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out := map[int][]subtitleCue{}
 	var (
 		mu       sync.Mutex
 		firstErr error
+		retry    bool
 		wg       sync.WaitGroup
 	)
+	// A read that failed for a temporary reason is not a file without a text
+	// track: the group stays retryable so the hint is not lost for good.
+	setRetry := func() {
+		mu.Lock()
+		retry = true
+		mu.Unlock()
+	}
 	setErr := func(err error) {
 		mu.Lock()
 		if firstErr == nil {
@@ -228,13 +238,22 @@ func (a *Analyzer) ensureIntroCues(ctx context.Context, candidates []Candidate) 
 					return
 				}
 			}
+			// Cue extraction runs ffmpeg, so it takes a slot from the same
+			// limiter every other extraction in this package takes one from.
+			release, err := a.ffmpegAcquirer()(ctx)
+			if err != nil {
+				setErr(err)
+				return
+			}
 			cues, ok, err := a.cues.FileCues(ctx, candidate)
+			release()
 			if err != nil {
 				if ctx.Err() != nil {
 					setErr(ctx.Err())
 					return
 				}
 				a.logger.DebugContext(ctx, "subtitle cue extraction failed", "file_id", candidate.FileID, "error", err)
+				setRetry()
 				return
 			}
 			if !ok {
@@ -251,7 +270,7 @@ func (a *Analyzer) ensureIntroCues(ctx context.Context, candidates []Candidate) 
 		}()
 	}
 	wg.Wait()
-	return out, firstErr
+	return out, retry, firstErr
 }
 
 // storeCues caches a file's cues.

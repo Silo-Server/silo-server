@@ -1706,7 +1706,7 @@ func main() {
 		introConfig.HWAccel, introConfig.HWDevice = cfg.Playback.HWAccel, cfg.Playback.HWDevice
 		deps.IntroAnalyzer = intromarkers.NewAnalyzer(deps.IntroRepository, introConfig, slog.Default())
 		// Subtitle cues bound the markers the detectors place: a recap cue
-		// ends where an intro may start, and the last dialogue cue ends where
+		// ends where an intro may start, and the last dialog cue ends where
 		// the credits begin. Read from the file's own text track, cached as an
 		// artifact, and only for the files that got a marker.
 		deps.IntroAnalyzer.SetCueSource(intromarkers.NewSubtitleCueExtractor(introConfig))

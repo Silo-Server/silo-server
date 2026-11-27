@@ -320,10 +320,13 @@ func (a *Analyzer) applyCreditsCueHints(ctx context.Context, placements []credit
 	for _, placement := range placements {
 		candidates = append(candidates, placement.candidate)
 	}
-	cues, err := a.ensureIntroCues(ctx, candidates)
+	cues, retry, err := a.ensureIntroCues(ctx, candidates)
 	if err != nil {
 		a.logger.WarnContext(ctx, "credits subtitle cue hints unavailable", "error", err)
 		return placements
+	}
+	if retry {
+		a.logger.WarnContext(ctx, "credits subtitle cue hints were read for some files only; a later run retries them")
 	}
 	out := placements[:0]
 	for _, placement := range placements {
