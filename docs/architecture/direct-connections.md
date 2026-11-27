@@ -387,12 +387,24 @@ sign-in provider check revokes the account's sessions. A password change that
 signs out the account's other sessions withdraws every entry except one that the
 session which made the change issued for its own device; a session ID or device
 ID that is empty or cannot be read, and an entry whose policy names no readable
-issuer, select the entry (fail closed). A session-selected withdrawal deletes an
+issuer, select the entry (fail closed). A withdrawal selected by session, profile or device deletes an
 entry only while its key and policy are still the ones listed; when the entry
 changed in between, the selector reads it again and applies the same rule, up to
-three times, so an entry that another session has since renewed stays and a
-changed audit marker does not save an entry the ending session still owns. A withdrawn or replaced key leaves the peer cache, and
-its signaling stream closes. A stream held on another replica closes once the
+three times, so an entry that another session or profile has since renewed stays
+and a changed audit marker does not save an entry the ending session still owns.
+After the third miss the selector judges the last read as well: an entry that no
+longer belongs to the target is skipped and the withdrawal goes on with the next
+entry, while an entry that still belongs to the target and keeps changing ends the
+withdrawal with a logged `entry_changing` reason. Only the withdrawal of a whole account deletes without that check. A revocation runs on a context detached
+from the request that caused it, and its listing and withdrawals share a bound of
+10 seconds, so a client that disconnects right after it signs out does not stop
+it. A withdrawn or replaced key leaves the peer cache, and
+its signaling stream closes. The enrollment write returns the key it replaced, in
+the same atomic step, so when two enrollments re-key one device at once, each
+removes the key its own write replaced. The Redis write names itself by that
+revision and stores it with its result, so a write that the Redis client sends
+again after the server applied it reports the original replacement and not a
+renewal. A stream held on another replica closes once the
 store confirms that the lease is gone, or at ticket expiry. The service counts the
 open device streams per node key, and a sweep worker, separate from the one that
 applies peer updates, checks them. A pass runs when the peer cache changes and
@@ -402,8 +414,23 @@ from the store, each read bounded by 5 seconds, so a pass over N keys takes at
 most N times 5 seconds and a slow pass delays only the next pass, never a peer
 update. The stream closes when the store reports no entry; a failed read leaves
 the key for the next pass. A device that left the peer cache only while its entry
-reloads keeps its stream. A store failure during revocation is logged once with a reason, does not
+reloads keeps its stream. The coordination store uses a Redis client whose sockets
+honor context deadlines, as the lease's client does, so each of these bounds holds
+when Redis stops answering. A store failure during revocation is logged once with a reason, does not
 fail the event, and leaves the entry to lapse at its lease end.
+
+A revocation lists the entries after the login session's end has committed, so an
+enrollment that began earlier can write its entry after the listing. `Enroll`
+therefore reads the login session again after it writes the entry, on a context
+that the request's cancellation does not end. A session that has ended, or that
+cannot be read, withdraws the entry with a compare-before-write
+and refuses the enrollment: `401 session_expired`, or `503 dependency_unavailable`
+when the read fails. A write that the check sees as live came before the commit,
+and so before the listing, which withdraws it. A device write that returns an
+unavailable error may have been applied before the reply was lost, so `Enroll`
+also withdraws the entry that write would have made, with the same
+compare-before-write, before it returns the error. When the store cannot take that
+withdrawal either, the entry lapses at its lease end.
 
 The operator commands `silo owner set`, when it promotes or enables the account,
 and `silo auth local-login enable -user <name> -temporary-password` run in their
@@ -420,6 +447,9 @@ and before a ticket is minted. The row is written in its own transaction and
 names the device ID and the node key, never the ticket. After the row commits,
 `Enroll` sets an `audited` marker in the entry's policy, with a compare-before-write
 that applies only while the entry still holds this request's node key and policy.
+Each write stores a random revision in the policy, so a policy is never equal to
+the policy of another request's write, a renewal with the same key, profile and
+path included.
 A renewal carries the marker only when the stored entry holds the same key and is
 audited, and then records no row. A new key, a missing entry, or an entry without
 the marker records a row, so an entry whose audit is pending, failed, or was lost
@@ -427,8 +457,9 @@ with its process is audited again. Two overlapping requests can both record a
 row for one key; that duplicate is accepted.
 
 When the row cannot be written, `Enroll` returns the error and deletes the entry
-only while it still holds this request's key and unaudited policy, so a failed
-audit never withdraws an entry that a later request replaced or audited. When the
+only while it still holds this request's key and policy, revision included, so a
+failed audit never withdraws an entry that a later request replaced, renewed or
+audited. When the
 stored entry cannot be read, `Enroll` refuses with `server.ErrUnavailable` and
 writes nothing. So no ticket for a first enrollment is issued before an audit row
 for its key has committed. The two conditional writes are `SwapDevicePolicy` and

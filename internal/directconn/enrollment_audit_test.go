@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -186,6 +187,52 @@ func TestEnrollmentRenewalDuringPendingAudit(t *testing.T) {
 				t.Fatalf("the renewal's ticket after the first audit failed: %v, want it valid", err)
 			}
 		})
+	}
+}
+
+// A failed audit withdraws only the entry its own enrollment wrote. A renewal
+// that wrote the same key, profile and path while the first audit ran has a
+// revision of its own, so the first enrollment's cleanup leaves it and the
+// renewal's ticket stays valid.
+func TestFailedAuditLeavesALaterIdenticalRenewal(t *testing.T) {
+	var c *Coordination
+	auditFailure := errors.New("synthetic audit failure")
+	request := EnrollRequest{UserID: 7, ProfileID: "profile-1", SessionID: testSessionID, DeviceID: "tv", NodeKey: testNodeKey(1), ConnectionPath: "automatic"}
+	var calls atomic.Int32
+	renewalAuditing, releaseRenewalAudit, renewalDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var renewal Enrollment
+	var renewalErr error
+	audit := func(ctx context.Context, _ string, _ protocol.NodeKey) error {
+		if calls.Add(1) > 1 {
+			// The renewal's audit stays open until the first enrollment has failed.
+			close(renewalAuditing)
+			<-releaseRenewalAudit
+			return nil
+		}
+		go func() {
+			defer close(renewalDone)
+			renewal, renewalErr = c.Enroll(ctx, request)
+		}()
+		<-renewalAuditing
+		return auditFailure
+	}
+	var err error
+	c, err = NewCoordination(CoordinationConfig{Store: NewCoordinationStore(nil, ""), AuthSecret: testAuthSecret, Clock: newTestClock().Now, Audit: audit})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := c.Enroll(t.Context(), request); !errors.Is(err, auditFailure) {
+		t.Fatalf("first enrollment: err = %v, want the audit failure", err)
+	}
+	close(releaseRenewalAudit)
+	<-renewalDone
+
+	if renewalErr != nil {
+		t.Fatalf("renewal: %v", renewalErr)
+	}
+	if _, _, err := c.Authorize(t.Context(), renewal.Ticket); err != nil {
+		t.Fatalf("the renewal's ticket after the first audit failed: %v, want it valid", err)
 	}
 }
 

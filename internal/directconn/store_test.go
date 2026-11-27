@@ -93,11 +93,43 @@ var redisConditionalHooks = conditionalHooks{
 
 // runConditionalStoreConformance checks SwapDevicePolicy and DeleteDeviceIf on a
 // fresh store per case: each acts only on a live entry that holds the named node
-// key and policy, and otherwise leaves the store unchanged.
+// key and policy, and otherwise leaves the store unchanged. It also checks that
+// PutDeviceReplacing names the key it replaced.
 func runConditionalStoreConformance(t *testing.T, newStore func(*testing.T) CoordinationStore, hooks conditionalHooks) {
 	t.Helper()
+	runPutDeviceReplacingConformance(t, newStore)
 	runSwapDevicePolicyConformance(t, newStore, hooks)
 	runDeleteDeviceIfConformance(t, newStore, hooks)
+}
+
+// PutDeviceReplacing returns the node key the write replaced, and the zero key
+// when the device had no entry or kept its key.
+func runPutDeviceReplacingConformance(t *testing.T, newStore func(*testing.T) CoordinationStore) {
+	t.Helper()
+	t.Run("put names the key it replaced", func(t *testing.T) {
+		ctx := context.Background()
+		store := newStore(t)
+		put := func(key byte) protocol.NodeKey {
+			t.Helper()
+			replaced, err := store.PutDeviceReplacing(ctx, labDevice("1", "tv", key), 32, labNow)
+			if err != nil {
+				t.Fatalf("PutDeviceReplacing(key %d): %v", key, err)
+			}
+			return replaced
+		}
+		if got := put(1); !got.IsZero() {
+			t.Fatalf("first write replaced %v, want no key", got)
+		}
+		if got := put(1); !got.IsZero() {
+			t.Fatalf("renewal with the same key replaced %v, want no key", got)
+		}
+		if got, want := put(2), (protocol.NodeKey{1}); got != want {
+			t.Fatalf("write of a new key replaced %v, want %v", got, want)
+		}
+		if got, want := put(3), (protocol.NodeKey{2}); got != want {
+			t.Fatalf("second write of a new key replaced %v, want %v", got, want)
+		}
+	})
 }
 
 // policyAfterRefusal returns the policy of d's stored entry after a refused

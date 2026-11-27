@@ -544,12 +544,14 @@ function ConnectedDevices() {
           <TableBody>
             {peers.data.items.map((peer) => (
               <TableRow key={`${peer.user_id}/${peer.device_id}`}>
-                <TableCell className="max-w-48 truncate">
-                  {peer.device_name || peer.device_id}
+                <TableCell className="max-w-48">
+                  <span dir="auto" className="block w-fit max-w-full truncate">
+                    {peer.device_name || peer.device_id}
+                  </span>
                 </TableCell>
                 <TableCell>{peer.username || peer.user_id}</TableCell>
                 <TableCell className="font-mono text-xs whitespace-nowrap">
-                  {peer.peer_endpoint}
+                  <span dir="ltr">{peer.peer_endpoint}</span>
                   <span className="text-muted-foreground ms-1">
                     {t("web.admin.settings.network.direct.connected.toPort", {
                       port: peer.local_port,

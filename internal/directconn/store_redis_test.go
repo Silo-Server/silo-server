@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,6 +30,60 @@ func (failingRedisHook) ProcessHook(redis.ProcessHook) redis.ProcessHook {
 }
 func (failingRedisHook) ProcessPipelineHook(redis.ProcessPipelineHook) redis.ProcessPipelineHook {
 	return func(context.Context, []redis.Cmder) error { return errors.New("redis down") }
+}
+
+// replayRedisHook sends the next script run twice, as the Redis client does when
+// the connection drops after the server applied the command and before the reply
+// arrived: the first run's reply is lost and the caller sees the second run's.
+type replayRedisHook struct{ armed atomic.Bool }
+
+func (*replayRedisHook) DialHook(next redis.DialHook) redis.DialHook { return next }
+func (h *replayRedisHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		err := next(ctx, cmd)
+		if err != nil || (cmd.Name() != "evalsha" && cmd.Name() != "eval") || !h.armed.CompareAndSwap(true, false) {
+			return err
+		}
+		return next(ctx, cmd)
+	}
+}
+func (*replayRedisHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+
+// A write that the client sends again after the server applied it reports the
+// key it replaced, not a renewal of the key it installed. A later write with its
+// own revision is not taken for a replay.
+func TestRedisPutDeviceReplayReportsTheKeyItReplaced(t *testing.T) {
+	client, store := miniredisStore(t)
+	hook := &replayRedisHook{}
+	client.AddHook(hook)
+	ctx := t.Context()
+	ref := server.DeviceRef{Account: "7", Device: "tv"}
+	keyA, keyB, keyC := protocol.NodeKey{1}, protocol.NodeKey{2}, protocol.NodeKey{3}
+	put := func(key protocol.NodeKey, revision string, replay bool) protocol.NodeKey {
+		t.Helper()
+		hook.armed.Store(replay)
+		d := server.Device{Ref: ref, NodeKey: key, Policy: marshalPolicy(devicePolicy{ProfileID: "p", SessionID: "s", Revision: revision}), LeaseExpires: labNow.Add(time.Minute)}
+		replaced, err := store.PutDeviceReplacing(ctx, d, 32, labNow)
+		if err != nil {
+			t.Fatalf("PutDeviceReplacing(key %v, revision %q): %v", key[0], revision, err)
+		}
+		if hook.armed.Load() {
+			t.Fatalf("the hook did not send the write for revision %q twice", revision)
+		}
+		return replaced
+	}
+
+	if got := put(keyA, "r1", false); !got.IsZero() {
+		t.Fatalf("first enrollment replaced %v, want no key", got)
+	}
+	if got := put(keyB, "r2", true); got != keyA {
+		t.Fatalf("replayed re-key replaced %v, want the original key %v", got, keyA)
+	}
+	if got := put(keyC, "r3", false); got != keyB {
+		t.Fatalf("later re-key replaced %v, want %v", got, keyB)
+	}
 }
 
 func TestRedisKeyLayout(t *testing.T) {

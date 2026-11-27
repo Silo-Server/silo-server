@@ -206,6 +206,8 @@ func directCoordinationProblem(err error) *Problem {
 		return NewProblem(TypeDirectNodeKeyConflict, "Another device holds this node key; make a new one and enroll again.")
 	case errors.Is(err, server.ErrUnavailable):
 		return NewProblem(TypeDependencyUnavailable, "The direct-connection store is unavailable; try again shortly.").WithRetryAfter(directRetryAfterSeconds)
+	case errors.Is(err, directconn.ErrSessionEnded):
+		return NewProblem(TypeSessionExpired, "This login session has ended.")
 	case errors.Is(err, directconn.ErrDraining):
 		return NewProblem(TypeDependencyUnavailable, "This server is shutting down; enroll again shortly.").WithRetryAfter(directRetryAfterSeconds)
 	case errors.Is(err, directconn.ErrSettingsNotRead):

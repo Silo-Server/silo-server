@@ -15,13 +15,19 @@ import (
 // coordinationHostLabel is the label of the API host in the coordination store.
 const coordinationHostLabel = "api"
 
-// CoordinationStore is the coordination store plus two compare-before-write
-// operations on one device entry. Each acts only while the live entry still
-// holds exactly the node key and policy the caller names, so a request never
-// changes an entry that another request has replaced, renewed or audited since.
-// The enrollment audit uses them; see Coordination.Enroll.
+// CoordinationStore is the coordination store plus a write that names the key it
+// replaced and two compare-before-write operations on one device entry. The two
+// compare-before-write operations act only while the live entry still holds
+// exactly the node key and policy the caller names, so a request never changes
+// an entry that another request has replaced, renewed or audited since. The
+// enrollment audit and the withdrawals use them; see Coordination.Enroll.
 type CoordinationStore interface {
 	server.Store
+	// PutDeviceReplacing is PutDevice, and returns the node key its write replaced
+	// instead of whether it replaced one. The read of that key and the write are
+	// one atomic step, so a concurrent enrollment's key is never missed. The key
+	// is zero when the device had no live entry or kept its key.
+	PutDeviceReplacing(ctx context.Context, d server.Device, maxPerAccount int, now time.Time) (protocol.NodeKey, error)
 	// SwapDevicePolicy replaces the policy of ref's live entry with policy when
 	// the entry holds nodeKey and expected. It reports whether it wrote; the
 	// lease, the indices and the registration stay as they are.
@@ -65,6 +71,20 @@ func (m *memoryStore) PutDevice(ctx context.Context, d server.Device, maxPerAcco
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.Store.PutDevice(ctx, d, maxPerAccount, now)
+}
+
+func (m *memoryStore) PutDeviceReplacing(ctx context.Context, d server.Device, maxPerAccount int, now time.Time) (protocol.NodeKey, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	stored, err := m.Device(ctx, d.Ref, now)
+	if err != nil && !errors.Is(err, server.ErrNotFound) {
+		return protocol.NodeKey{}, err
+	}
+	replaced, err := m.Store.PutDevice(ctx, d, maxPerAccount, now)
+	if err != nil || !replaced {
+		return protocol.NodeKey{}, err
+	}
+	return stored.NodeKey, nil
 }
 
 func (m *memoryStore) DeleteDevice(ctx context.Context, ref server.DeviceRef) error {

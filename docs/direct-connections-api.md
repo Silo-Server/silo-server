@@ -114,17 +114,23 @@ header `X-Silo-Device-Id` (1 to 128 characters) is required. The body has
   record a second row, for example when it overlaps the first enrollment's audit
   or when the first enrollment's audited mark could not be saved. When the audit row
   cannot be written, the call fails with `500 internal_error`, the new entry is
-  withdrawn unless another request has since replaced or audited it, and no ticket
-  is returned.
+  withdrawn unless another request has since replaced, renewed or audited it, and
+  no ticket is returned.
+- The server reads the login session again after it writes the entry, even when
+  the client has since canceled the request. A session that ended meanwhile gets
+  `401 session_expired`, the entry is withdrawn and no ticket is returned.
+- When the coordination store reports an error for the write, which can mean that
+  it applied the write and lost the reply, the server withdraws the entry that
+  write may have made before it answers `503`.
 - An account holds at most 32 unexpired enrollments. The 33rd device gets `409
   direct_device_limit`; the server evicts none. A lapsed lease frees its slot.
 - A node key that another device holds gets `409 direct_node_key_conflict`. The
   client makes a new key and enrolls again.
-- While the coordination store is unavailable, including when the device's stored
-  entry cannot be read, until the replica has read the direct-connection settings
-  once after it starts, and from the moment the server begins to shut down,
-  enrollment answers `503 dependency_unavailable` with `Retry-After: 5`. Any other
-  unexpected failure answers `500 internal_error`.
+- Enrollment answers `503 dependency_unavailable` with `Retry-After: 5` in four
+  cases: the coordination store is unavailable, including when the device's stored
+  entry cannot be read; the login session cannot be read; the replica has not yet
+  read the direct-connection settings once after it starts; and the server has
+  begun to shut down. Any other unexpected failure answers `500 internal_error`.
 
 `DELETE /api/v2/direct-connections/enrollment` withdraws the device named by
 `X-Silo-Device-Id` and answers `204`. A device with no enrollment also gets `204`.
@@ -149,6 +155,7 @@ enrolled or renewed for the device that session carries. When that device cannot
 be read, or the session carries no device ID, it withdraws all of them; a
 withdrawn device's client gets `401 invalid_token` and enrolls again. A store
 outage during a withdrawal is logged, and the entry lapses at the end of its lease.
+A withdrawal runs to its end when the request that caused it is canceled.
 
 ## Registration, Netmap and Signal
 
@@ -265,6 +272,7 @@ gate refusals with the same types (see above).
 | `409` | `direct_node_key_conflict` | enrollment | Make a new node key and enroll again. |
 | `409` | `capability_disabled` | enrollment, registration, netmap | Direct connections are off; use the regular path. |
 | `401` | `invalid_token` | registration, netmap | Enroll again. |
+| `401` | `session_expired` | enrollment | The login session ended; sign in again. |
 | `403` | `permission_denied` | enrollment | An API key or a View as user session cannot enroll. |
 | `408` | `request_timeout` | registration, netmap | Retry. |
 | `413` | `payload_too_large` | registration | The body is over 65,536 bytes. |

@@ -654,10 +654,11 @@ func (s *Service) publishHost(c *Coordination, e engineHandle, host *hostPublica
 
 // syncConfirmations publishes the engine's confirmations: a changed or new one
 // is set, an unchanged one is set again only when renew is true, and one the
-// engine dropped is cleared on an event, not on a renewal. It returns the set that is now published; a write
-// that failed stays out of it, or in it for a clear, so the next call retries.
-// Once fence has closed it writes nothing, and a skipped write counts as a
-// failed one.
+// engine dropped is cleared on an event, not on a renewal. It returns the set
+// that is now published. A set that failed keeps the previously published value
+// of its peer, if any, and a clear that failed stays in the set, so the next
+// call retries. Once fence has closed it writes nothing, and a clear it skips
+// stays in the set.
 func (s *Service) syncConfirmations(ctx context.Context, c *Coordination, fence *grantFence, current []protocol.Confirmation, published map[protocol.NodeKey]protocol.Confirmation, renew bool) map[protocol.NodeKey]protocol.Confirmation {
 	_, paths := s.coordination()
 	next := make(map[protocol.NodeKey]protocol.Confirmation, len(current))
@@ -679,6 +680,13 @@ func (s *Service) syncConfirmations(ctx context.Context, c *Coordination, fence 
 			paths.setConfirmed(confirmation.Peer, true)
 			s.storeResult(ctx, "confirmation", nil)
 		} else if !errors.Is(err, server.ErrNotFound) {
+			// The store may still hold the previous confirmation. Keeping it in next
+			// lets the following call retry the write, or clear it once the engine
+			// drops the peer. A missing device holds none: its confirmations went
+			// with it.
+			if old, ok := published[confirmation.Peer]; ok {
+				next[confirmation.Peer] = old
+			}
 			s.storeResult(ctx, "confirmation", err)
 		}
 	}

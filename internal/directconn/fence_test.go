@@ -2,9 +2,11 @@ package directconn
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -150,6 +152,56 @@ func TestCoordinationWritesStopAtTheGrantDeadline(t *testing.T) {
 		r.svc.syncConfirmations(t.Context(), coord, host.fence, nil, map[protocol.NodeKey]protocol.Confirmation{confirmation.Peer: confirmation}, false)
 		if got := store.since(before); len(got) != 0 {
 			t.Fatalf("syncConfirmations wrote %v at the grant's deadline, want nothing", got)
+		}
+	})
+}
+
+// failingConfirmStore fails every confirmation set while failSets is true.
+// Clears pass through.
+type failingConfirmStore struct {
+	CoordinationStore
+	failSets atomic.Bool
+}
+
+func (s *failingConfirmStore) PutConfirmation(ctx context.Context, hostLabel string, ref server.DeviceRef, c *protocol.Confirmation, expires, now time.Time) error {
+	if c != nil && s.failSets.Load() {
+		return fmt.Errorf("%w: test outage", server.ErrUnavailable)
+	}
+	return s.CoordinationStore.PutConfirmation(ctx, hostLabel, ref, c, expires, now) //nolint:wrapcheck // A test double passes the store's result through.
+}
+
+// A confirmation update that fails leaves the previous confirmation in the
+// store, so the published set keeps it: when the engine then drops the peer, the
+// next call clears the stored confirmation.
+func TestFailedConfirmationUpdateKeepsThePreviousOneToClear(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newThreadRig(t, rigOptions{})
+		defer shutdownService(t, r.svc)
+		store := &failingConfirmStore{CoordinationStore: newMemoryStore()}
+		coord, err := NewCoordination(CoordinationConfig{Store: store, AuthSecret: testAuthSecret, Clock: time.Now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = coord.Close() }()
+		r.svc.SetCoordination(coord)
+		d := newRegionDevice(t, coord, "tv")
+		d.register(t, coord)
+		first := protocol.Confirmation{Peer: d.nodeKey, DiscoKey: protocol.DiscoKey{0xD1}, Endpoint: netip.MustParseAddrPort("203.0.113.9:4000")}
+		second := first
+		second.Endpoint = netip.MustParseAddrPort("203.0.113.9:4001")
+
+		published := r.svc.syncConfirmations(t.Context(), coord, nil, []protocol.Confirmation{first}, map[protocol.NodeKey]protocol.Confirmation{}, true)
+		store.failSets.Store(true)
+		published = r.svc.syncConfirmations(t.Context(), coord, nil, []protocol.Confirmation{second}, published, false)
+		store.failSets.Store(false)
+		r.svc.syncConfirmations(t.Context(), coord, nil, nil, published, false)
+
+		stored, err := store.Confirmations(t.Context(), deviceRef(7, "tv"), time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(stored) != 0 {
+			t.Fatalf("stored confirmations after the engine dropped the peer = %v, want none", stored)
 		}
 	})
 }

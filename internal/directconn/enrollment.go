@@ -2,6 +2,7 @@ package directconn
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +24,9 @@ const (
 	// revokeAttempts bounds how often a revocation reads an entry again after it
 	// changed between the listing and the delete.
 	revokeAttempts = 3
+	// cleanupTimeout bounds work that runs past a canceled request: a revocation
+	// and the withdrawal of an entry that must not stay.
+	cleanupTimeout = 10 * time.Second
 )
 
 var (
@@ -31,6 +35,9 @@ var (
 	errNoSession = errors.New("direct enrollment needs the login session that issues it")
 	// errEntryChanging ends a revocation whose entry kept changing.
 	errEntryChanging = errors.New("enrolled device kept changing")
+	// ErrSessionEnded refuses an enrollment whose issuing login session ended
+	// before the enrollment finished. The entry it wrote is withdrawn.
+	ErrSessionEnded = errors.New("direct enrollment: the login session that issues it has ended")
 )
 
 // devicePolicy is the opaque policy the coordination store keeps for a device.
@@ -41,6 +48,10 @@ type devicePolicy struct {
 	// which owns it: its ticket names the session, and ending the session
 	// withdraws the entry.
 	SessionID string `json:"session_id"`
+	// Revision is unique to the write that stored the entry, so a conditional
+	// operation on the entry's policy bytes matches only that write, and not a
+	// later renewal that is otherwise identical.
+	Revision string `json:"revision,omitempty"`
 	// Audited is set once the enrollment audit row for the entry's node key has
 	// committed. A renewal of the same key carries it forward; see Enroll.
 	Audited bool `json:"audited,omitempty"`
@@ -77,6 +88,11 @@ type CoordinationConfig struct {
 	// audited entry with the same node key; a renewal of an audited key does not
 	// run it. Nil records nothing.
 	Audit EnrollmentAudit
+	// SessionActive, when set, reports whether a login session is live. Enroll
+	// asks it after it has written the entry, so a session that a revocation
+	// ended meanwhile cannot leave an entry the revocation's listing missed. Nil
+	// checks nothing.
+	SessionActive func(ctx context.Context, sessionID string) (bool, error)
 }
 
 // Coordination enrolls devices, issues and checks their signaling tickets, and
@@ -139,13 +155,19 @@ type Enrollment struct {
 // returns server.ErrDeviceLimit when the account has no free slot,
 // server.ErrNodeKeyConflict when another device holds the node key, ErrDraining
 // once the server has begun to shut down, an error for a request that names no
-// login session, and an error wrapping
-// server.ErrUnavailable when the store cannot answer, the read of the stored
-// entry included. A new node key for a device that is already enrolled replaces
-// the entry and drops the old key. When the config has an Audit, every
-// enrollment that is not a renewal of an audited entry with the same key runs it
-// before a ticket is minted; an audit error withdraws the entry this call wrote
-// and is returned, wrapped.
+// login session, and an error wrapping server.ErrUnavailable when the store
+// cannot answer, the read of the stored entry included. When the write itself
+// returns such an error, the store may have applied it, so Enroll withdraws the
+// entry that write would have made before it returns. A new node key for a
+// device that is already enrolled replaces the entry and drops the old key.
+//
+// When the config has a SessionActive, Enroll asks it after the write, on a
+// context that a canceled request does not end. A session that has ended returns
+// ErrSessionEnded, and one that cannot be checked returns an error wrapping
+// server.ErrUnavailable; either way the entry this call wrote is withdrawn. When
+// the config has an Audit, every enrollment that is not a renewal of an audited
+// entry with the same key runs it before a ticket is minted; an audit error
+// withdraws the entry this call wrote and is returned, wrapped.
 func (c *Coordination) Enroll(ctx context.Context, req EnrollRequest) (Enrollment, error) {
 	if c.draining.Load() {
 		return Enrollment{}, ErrDraining
@@ -165,22 +187,45 @@ func (c *Coordination) Enroll(ctx context.Context, req EnrollRequest) (Enrollmen
 	// same key. A new key, a missing entry and an entry whose audit has not
 	// committed (still pending, failed, or lost with its process) all audit.
 	carried := previous == req.NodeKey && policyAudited(stored.Policy)
-	written := devicePolicy{ConnectionPath: req.ConnectionPath, ProfileID: req.ProfileID, SessionID: req.SessionID, Audited: carried}
+	written := devicePolicy{ConnectionPath: req.ConnectionPath, ProfileID: req.ProfileID, SessionID: req.SessionID, Revision: rand.Text(), Audited: carried}
 	policy := marshalPolicy(written)
 	now := c.clock()
 	// The ticket carries whole seconds, so the lease end is cut to match: the
 	// ticket, the reported expiry and the stored lease then end together.
 	expires := now.Add(enrollmentLease).Truncate(time.Second)
-	replaced, err := c.srv.Enroll(ctx, ref, req.NodeKey, policy, expires)
+	if ref.Account == "" || ref.Device == "" || req.NodeKey.IsZero() || !now.Before(expires) {
+		return Enrollment{}, fmt.Errorf("%w: enrollment identity or deadline", protocol.ErrInvalid)
+	}
+	// The write returns the key it replaced, which a concurrent enrollment may
+	// have stored after the read above.
+	replaced, err := c.cfg.Store.PutDeviceReplacing(ctx, server.Device{Ref: ref, NodeKey: req.NodeKey, Policy: policy, LeaseExpires: expires}, maxDirectDevicesPerAccount, now)
 	if err != nil {
 		if errors.Is(err, server.ErrDeviceLimit) {
 			c.log.WarnContext(ctx, "direct connections: device limit reached")
 		}
-		return Enrollment{}, err
+		// An unavailable store may have applied the write and lost the reply. The
+		// entry then exists with this request's revision, and a revocation that ran
+		// before it would not have listed it, so it is withdrawn like any entry this
+		// request refuses. The withdrawal matches only this request's revision, so it
+		// leaves an entry that was never written, or that another request has since
+		// replaced. If the store cannot take the withdrawal either, the entry lapses
+		// at its lease end.
+		if errors.Is(err, server.ErrUnavailable) {
+			c.withdrawWritten(ctx, ref, req.NodeKey, policy)
+		}
+		return Enrollment{}, fmt.Errorf("enroll device: %w", err)
 	}
-	if replaced {
+	c.srv.Wake(ref)
+	if !replaced.IsZero() {
 		c.log.InfoContext(ctx, "direct connections: enrollment replaced")
-		c.removed(previous, req.NodeKey)
+		c.removed(replaced, req.NodeKey)
+	}
+	// A revocation of the login session lists entries after it commits. A write
+	// that this check sees as live therefore came before that commit, and the
+	// listing withdraws it; a write after the commit sees the session ended and
+	// withdraws itself.
+	if err := c.checkSessionActive(ctx, ref, req, policy); err != nil {
+		return Enrollment{}, err
 	}
 	// No ticket is minted for an unaudited entry before an audit row for its key
 	// has committed, so every first enrollment has a record. An audit that cannot
@@ -188,7 +233,7 @@ func (c *Coordination) Enroll(ctx context.Context, req EnrollRequest) (Enrollmen
 	// the same key; a duplicate row is accepted.
 	if c.cfg.Audit != nil && !carried {
 		if err := c.cfg.Audit(ctx, req.DeviceID, req.NodeKey); err != nil {
-			c.withdrawUnaudited(ctx, ref, req.NodeKey, policy)
+			c.withdrawWritten(ctx, ref, req.NodeKey, policy)
 			return Enrollment{}, fmt.Errorf("record enrollment audit: %w", err)
 		}
 		c.markAudited(ctx, ref, req.NodeKey, written)
@@ -212,17 +257,43 @@ func (c *Coordination) markAudited(ctx context.Context, ref server.DeviceRef, ke
 	}
 }
 
-// withdrawUnaudited withdraws the entry Enroll just made when its audit row
-// could not be written, but only while the entry still holds this request's key
-// and unaudited policy: an entry that a later request replaced, renewed or
+// checkSessionActive withdraws the entry Enroll just wrote, and refuses the
+// enrollment, when the request's login session has ended or cannot be shown to be
+// live: ErrSessionEnded for an ended session, an error wrapping
+// server.ErrUnavailable when the check fails. It checks nothing without a
+// SessionActive in the config.
+func (c *Coordination) checkSessionActive(ctx context.Context, ref server.DeviceRef, req EnrollRequest, policy []byte) error {
+	if c.cfg.SessionActive == nil {
+		return nil
+	}
+	// The check runs past a canceled request, as the withdrawal does: a caller that
+	// gave up is not a session that could not be shown to be live.
+	checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
+	active, err := c.cfg.SessionActive(checkCtx, req.SessionID)
+	if err == nil && active {
+		return nil
+	}
+	c.withdrawWritten(ctx, ref, req.NodeKey, policy)
+	if err != nil {
+		return fmt.Errorf("%w: check enrolling login session: %w", server.ErrUnavailable, err)
+	}
+	return ErrSessionEnded
+}
+
+// withdrawWritten withdraws the entry Enroll just made when it must not stay: its
+// audit row could not be written, its login session has ended, or the store lost
+// the reply to its write and so may hold it. It withdraws only while the entry
+// still holds this request's key and policy, and the policy carries this
+// request's revision, so an entry that a later request replaced, renewed or
 // audited stays. It runs past a canceled request, and a failure is logged: the
 // entry then lapses at its lease end, and no client holds its ticket.
-func (c *Coordination) withdrawUnaudited(ctx context.Context, ref server.DeviceRef, key protocol.NodeKey, policy []byte) {
-	withdrawCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+func (c *Coordination) withdrawWritten(ctx context.Context, ref server.DeviceRef, key protocol.NodeKey, policy []byte) {
+	withdrawCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	defer cancel()
 	removed, err := c.cfg.Store.DeleteDeviceIf(withdrawCtx, ref, key, policy, c.clock())
 	if err != nil {
-		c.log.WarnContext(ctx, "direct connections: withdrawing an unaudited enrollment failed", "error", err)
+		c.log.WarnContext(ctx, "direct connections: withdrawing a refused enrollment failed", "error", err)
 		return
 	}
 	if removed {
@@ -231,7 +302,7 @@ func (c *Coordination) withdrawUnaudited(ctx context.Context, ref server.DeviceR
 	}
 }
 
-// marshalPolicy encodes a device policy; three strings and a bool always encode.
+// marshalPolicy encodes a device policy; strings and a bool always encode.
 func marshalPolicy(p devicePolicy) []byte {
 	b, _ := json.Marshal(p)
 	return b
@@ -242,6 +313,16 @@ func marshalPolicy(p devicePolicy) []byte {
 func policyAudited(policy []byte) bool {
 	var p devicePolicy
 	return json.Unmarshal(policy, &p) == nil && p.Audited
+}
+
+// policyRevision returns the revision a stored policy carries, "" for a policy
+// without one or with unreadable bytes.
+func policyRevision(policy []byte) string {
+	var p devicePolicy
+	if json.Unmarshal(policy, &p) != nil {
+		return ""
+	}
+	return p.Revision
 }
 
 // policyOwnedBy reports whether stored policy bytes record sessionID as the
@@ -333,7 +414,7 @@ func (c *Coordination) RevokeProfileDevice(ctx context.Context, userID int, devi
 	if deviceID == "" {
 		return
 	}
-	c.revoke(ctx, userID, func(d server.Device) bool {
+	c.revokeOwned(ctx, userID, func(d server.Device) bool {
 		var policy devicePolicy
 		return string(d.Ref.Device) == deviceID && json.Unmarshal(d.Policy, &policy) == nil && policy.ProfileID == profileID
 	})
@@ -361,7 +442,7 @@ func (c *Coordination) RevokeProfile(ctx context.Context, userID int, profileID 
 	if profileID == "" {
 		return
 	}
-	c.revoke(ctx, userID, func(d server.Device) bool {
+	c.revokeOwned(ctx, userID, func(d server.Device) bool {
 		var policy devicePolicy
 		return json.Unmarshal(d.Policy, &policy) == nil && policy.ProfileID == profileID
 	})
@@ -369,7 +450,7 @@ func (c *Coordination) RevokeProfile(ctx context.Context, userID int, profileID 
 
 // revoke withdraws each selected entry of the account at once.
 func (c *Coordination) revoke(ctx context.Context, userID int, selected func(server.Device) bool) {
-	c.revokeEach(ctx, userID, func(d server.Device) error {
+	c.revokeEach(ctx, userID, func(ctx context.Context, d server.Device) error {
 		if !selected(d) {
 			return nil
 		}
@@ -387,7 +468,7 @@ func (c *Coordination) revoke(ctx context.Context, userID int, selected func(ser
 // the entry changed, it is read again and judged again, so an entry that a
 // surviving session has renewed stays and one the ending session still owns goes.
 func (c *Coordination) revokeOwned(ctx context.Context, userID int, selected func(server.Device) bool) {
-	c.revokeEach(ctx, userID, func(d server.Device) error {
+	c.revokeEach(ctx, userID, func(ctx context.Context, d server.Device) error {
 		for range revokeAttempts {
 			if !selected(d) {
 				return nil
@@ -409,18 +490,28 @@ func (c *Coordination) revokeOwned(ctx context.Context, userID int, selected fun
 				return fmt.Errorf("read changed enrolled device: %w", err)
 			}
 		}
+		// The last read has not been judged yet: an entry that another profile or
+		// session took over in the meantime is no longer the target's, and the
+		// revocation goes on to the next entry.
+		if !selected(d) {
+			return nil
+		}
 		return errEntryChanging
 	})
 }
 
 // revokeEach lists the account's entries from the store, never from a peer
 // cache, so an enrolled device that never registered is revoked too, and runs
-// withdraw for each. A failure is logged once and ends the call: the entry then
+// withdraw for each. It runs past a canceled request, as a revocation that has
+// begun must finish, and the listing and every withdrawal together get
+// cleanupTimeout. A failure is logged once and ends the call: the entry then
 // lapses at its lease end.
-func (c *Coordination) revokeEach(ctx context.Context, userID int, withdraw func(server.Device) error) {
+func (c *Coordination) revokeEach(ctx context.Context, userID int, withdraw func(context.Context, server.Device) error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
 	devices, err := c.cfg.Store.ListDevices(ctx, accountID(userID), c.clock())
 	for i := 0; err == nil && i < len(devices); i++ {
-		err = withdraw(devices[i])
+		err = withdraw(ctx, devices[i])
 	}
 	if err != nil {
 		reason := "store_error"

@@ -3300,10 +3300,17 @@ func main() {
 		})
 		deps.DirectConnections = directConn
 		deps.DirectState = directConn
-		directCoordination = newDirectCoordination(appCtx, deps.DB, directconn.CoordinationConfig{
-			Store: directconn.NewCoordinationStore(apiRedisClient, apiReplicaPresence.ID()), AuthSecret: cfg.Auth.JWTSecret, Logger: slog.Default(),
-			Host: directConn, TLSPin: lanTLS.Pin(), ACKDecimation: tuningCfg.DirectACKDecimation, ReceiveWindowMiB: tuningCfg.DirectReceiveWindowMiB,
-		})
+		// The store stays off, and with it enrollment, when its client cannot be
+		// built: the direct gate already fails closed on the same Redis config.
+		if coordinationStore, closeCoordinationStore, storeErr := newDirectCoordinationStore(cfg.Redis, apiReplicaPresence.ID()); storeErr != nil {
+			slog.ErrorContext(appCtx, "direct connections: coordination store unavailable", "component", "directconn", "error", storeErr)
+		} else {
+			defer closeCoordinationStore()
+			directCoordination = newDirectCoordination(appCtx, deps.DB, directconn.CoordinationConfig{
+				Store: coordinationStore, AuthSecret: cfg.Auth.JWTSecret, Logger: slog.Default(),
+				Host: directConn, TLSPin: lanTLS.Pin(), ACKDecimation: tuningCfg.DirectACKDecimation, ReceiveWindowMiB: tuningCfg.DirectReceiveWindowMiB,
+			})
+		}
 		if directCoordination != nil {
 			deps.DirectCoordination = directCoordination
 			deps.DirectRevoker = directCoordination
@@ -5772,12 +5779,34 @@ func (a *audiobooksSettingsAdapter) GetString(ctx context.Context, key string) (
 	return a.repo.Get(ctx, key)
 }
 
+// newDirectCoordinationStore builds the coordination store on a Redis client that
+// honors context deadlines at the socket, as the engine's client does. Every
+// coordination read and write, and each read of the revocation sweep, is bounded
+// by a context deadline, which a plain client does not enforce: it holds a
+// stalled connection for the URL's read timeout, which may be unlimited. Without
+// a Redis URL the store is the in-process memory store. The returned function
+// closes the client.
+func newDirectCoordinationStore(cfg config.RedisConfig, fence string) (directconn.CoordinationStore, func(), error) {
+	client, err := cache.NewDeadlineRedisClientForRole(cfg, "api")
+	if err != nil {
+		return nil, nil, fmt.Errorf("build coordination Redis client: %w", err)
+	}
+	closeClient := func() {
+		if client != nil {
+			_ = cache.CloseRedisClient(client)
+		}
+	}
+	return directconn.NewCoordinationStore(client, fence), closeClient, nil
+}
+
 // newDirectCoordination builds direct-connection enrollment from cfg. With a
-// database, enrollments write their audit rows to db. A build failure is logged
-// and returns nil: the server then runs without enrollment.
+// database, enrollments write their audit rows to db and check their login
+// session there after they write. A build failure is logged and returns nil: the
+// server then runs without enrollment.
 func newDirectCoordination(ctx context.Context, db *pgxpool.Pool, cfg directconn.CoordinationConfig) *directconn.Coordination {
 	if db != nil {
 		cfg.Audit = directconn.NewEnrollmentAudit(db)
+		cfg.SessionActive = auth.NewSessionRepository(db).IsValid
 	}
 	coordination, err := directconn.NewCoordination(cfg)
 	if err != nil {

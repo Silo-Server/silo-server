@@ -124,6 +124,13 @@ func (s *directFlakyStore) PutDevice(ctx context.Context, d server.Device, maxPe
 	return s.CoordinationStore.PutDevice(ctx, d, maxPerAccount, now)
 }
 
+func (s *directFlakyStore) PutDeviceReplacing(ctx context.Context, d server.Device, maxPerAccount int, now time.Time) (protocol.NodeKey, error) {
+	if s.isDown() {
+		return protocol.NodeKey{}, s.outage()
+	}
+	return s.CoordinationStore.PutDeviceReplacing(ctx, d, maxPerAccount, now)
+}
+
 func (s *directFlakyStore) Device(ctx context.Context, ref server.DeviceRef, now time.Time) (server.Device, error) {
 	if s.isDown() {
 		return server.Device{}, s.outage()
@@ -160,6 +167,10 @@ type directTestEnv struct {
 	clock *directTestClock
 	host  *directTestHost
 	logs  *bytes.Buffer
+	// sessionEnded and sessionErr set what the coordination's check of the
+	// enrolling login session answers: a live session by default.
+	sessionEnded bool
+	sessionErr   error
 }
 
 // newDirectTestEnv wires a real coordination service over the memory store,
@@ -173,6 +184,7 @@ func newDirectTestEnv(t *testing.T) *directTestEnv {
 	coord, err := directconn.NewCoordination(directconn.CoordinationConfig{
 		Store: e.store, AuthSecret: directTestSecret, Clock: e.clock.Now, Logger: slog.New(slog.NewTextHandler(e.logs, nil)),
 		Host: e.host, TLSPin: directTestPin, ACKDecimation: false, ReceiveWindowMiB: 32,
+		SessionActive: func(context.Context, string) (bool, error) { return !e.sessionEnded, e.sessionErr },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -314,6 +326,33 @@ func TestDirectConnectionEnrollment(t *testing.T) {
 		headers := with(directViewer(directLoginToken), "X-Silo-Device-Id", "tv")
 		rec = do(t, h, http.MethodDelete, Prefix+"/direct-connections/enrollment", "", headers)
 		requireProblem(t, rec, TypeDependencyUnavailable)
+	})
+}
+
+// Enrollment checks that the login session behind the token is still live. An
+// ended session is refused as a 401, and one that cannot be checked as a
+// retryable 503; neither leaves an entry.
+func TestDirectConnectionEnrollmentChecksLoginSession(t *testing.T) {
+	t.Run("an ended login session is a 401 and leaves no entry", func(t *testing.T) {
+		e := newDirectTestEnv(t)
+		e.sessionEnded = true
+		requireProblem(t, e.enroll(e.handler(), directLoginToken, "tv", directTestKey(1), "automatic"), TypeSessionExpired)
+		if devices, err := e.store.ListDevices(t.Context(), "1", e.clock.Now()); err != nil || len(devices) != 0 {
+			t.Fatalf("entries after the refusal = %v, %v", devices, err)
+		}
+	})
+
+	t.Run("a login session that cannot be checked is a retryable 503 and leaves no entry", func(t *testing.T) {
+		e := newDirectTestEnv(t)
+		e.sessionErr = errors.New("session store down")
+		rec := e.enroll(e.handler(), directLoginToken, "tv", directTestKey(1), "automatic")
+		requireProblem(t, rec, TypeDependencyUnavailable)
+		if got := rec.Header().Get("Retry-After"); got != "5" {
+			t.Fatalf("Retry-After = %q, want 5", got)
+		}
+		if devices, err := e.store.ListDevices(t.Context(), "1", e.clock.Now()); err != nil || len(devices) != 0 {
+			t.Fatalf("entries after the refusal = %v, %v", devices, err)
+		}
 	})
 }
 

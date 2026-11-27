@@ -52,11 +52,19 @@ local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
 
 // putDeviceScript enrolls or renews one device.
 // KEYS: dev, nk_new, acct, nk_old, reg.
-// ARGV: expected_old_key, uid:did, node_key, policy, lifetime_ms, max.
+// ARGV: expected_old_key, uid:did, node_key, policy, lifetime_ms, max, revision.
+// The revision names the write: the script stores it with the result of the write
+// it applied, and a run that names the revision the entry already holds returns
+// that stored result and changes nothing. A client that lost the reply to an
+// applied write and sent it again therefore gets the original result, which for a
+// replacement says that a key was replaced. An empty revision names no write.
 // The lease ends lifetime_ms after Redis time. The stored lease_end_ms, the
 // account score and every TTL carry that one deadline, and the account index is
 // pruned at Redis time.
 var putDeviceScript = redis.NewScript(redisNowLua + `
+if ARGV[7] ~= '' and redis.call('HGET', KEYS[1], 'rev') == ARGV[7] then
+  return redis.call('HGET', KEYS[1], 'res')
+end
 local old = redis.call('HGET', KEYS[1], 'node_key') or ''
 if old ~= ARGV[1] then return 'RETRY' end
 redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', now)
@@ -77,7 +85,8 @@ if ttl <= 0 then
   redis.call('DEL', KEYS[1], KEYS[2])
   redis.call('ZREM', KEYS[3], did)
 else
-  redis.call('HSET', KEYS[1], 'node_key', ARGV[3], 'policy', ARGV[4], 'lease_end_ms', lease_end)
+  redis.call('HSET', KEYS[1], 'node_key', ARGV[3], 'policy', ARGV[4], 'lease_end_ms', lease_end,
+    'rev', ARGV[7], 'res', replaced and 'REPLACED' or 'OK')
   redis.call('PEXPIRE', KEYS[1], ttl)
   redis.call('SET', KEYS[2], ARGV[2], 'PX', ttl)
   redis.call('ZADD', KEYS[3], lease_end, did)
@@ -319,38 +328,62 @@ func (s *redisStore) storedNodeKey(ctx context.Context, ref server.DeviceRef) (s
 }
 
 func (s *redisStore) PutDevice(ctx context.Context, d server.Device, maxPerAccount int, now time.Time) (bool, error) {
+	_, replaced, err := s.putDevice(ctx, d, maxPerAccount, now)
+	return replaced, err
+}
+
+// PutDeviceReplacing returns the node key the script itself replaced: the script
+// writes only while the stored key is still the one read before it, so that key
+// is the one the write removed.
+func (s *redisStore) PutDeviceReplacing(ctx context.Context, d server.Device, maxPerAccount int, now time.Time) (protocol.NodeKey, error) {
+	old, _, err := s.putDevice(ctx, d, maxPerAccount, now)
+	return old, err
+}
+
+// putDevice runs the put script and reports whether it replaced the device's
+// node key and, if so, which key. The stored key is decoded before the script
+// runs, so nothing can fail after the write. The policy's revision names the
+// write to the script, so a replay of an applied write by the Redis client
+// reports the replacement again and not a renewal of the key it installed.
+func (s *redisStore) putDevice(ctx context.Context, d server.Device, maxPerAccount int, now time.Time) (protocol.NodeKey, bool, error) {
 	nkNew := nkKey(d.NodeKey)
 	for range storeAttempts {
 		old, err := s.storedNodeKey(ctx, d.Ref)
 		if err != nil {
-			return false, err
+			return protocol.NodeKey{}, false, err
 		}
+		var oldKey protocol.NodeKey
 		nkOld := nkNew
 		if old != "" {
+			raw, err := hex.DecodeString(old)
+			if err != nil || len(raw) != len(oldKey) {
+				return protocol.NodeKey{}, false, malformed("device node key")
+			}
+			copy(oldKey[:], raw)
 			nkOld = nkKeyHex(old)
 		}
 		keys := []string{devKey(d.Ref), nkNew, acctKey(d.Ref.Account), nkOld, regKey(d.Ref)}
 		res, err := putDeviceScript.Run(ctx, s.client, keys,
 			old, ownerValue(d.Ref), hex.EncodeToString(d.NodeKey[:]), string(d.Policy),
-			d.LeaseExpires.Sub(now).Milliseconds(), maxPerAccount).Text()
+			d.LeaseExpires.Sub(now).Milliseconds(), maxPerAccount, policyRevision(d.Policy)).Text()
 		if err != nil {
-			return false, unavailable("put device", err)
+			return protocol.NodeKey{}, false, unavailable("put device", err)
 		}
 		switch res {
 		case scriptOK:
-			return false, nil
+			return protocol.NodeKey{}, false, nil
 		case scriptReplaced:
-			return true, nil
+			return oldKey, true, nil
 		case scriptConflict:
-			return false, server.ErrNodeKeyConflict
+			return protocol.NodeKey{}, false, server.ErrNodeKeyConflict
 		case scriptLimit:
-			return false, server.ErrDeviceLimit
+			return protocol.NodeKey{}, false, server.ErrDeviceLimit
 		case scriptRetry:
 		default:
-			return false, malformed("put device result")
+			return protocol.NodeKey{}, false, malformed("put device result")
 		}
 	}
-	return false, unavailable("put device", errors.New("node key kept changing"))
+	return protocol.NodeKey{}, false, unavailable("put device", errors.New("node key kept changing"))
 }
 
 // rebase returns a deadline in Redis time on the caller's clock: the caller's
