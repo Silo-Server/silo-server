@@ -7,8 +7,12 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/contentid"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // EpisodeOrderSettings is a series' episode order as an admin sets it
@@ -31,11 +35,10 @@ var (
 
 // Validate checks the settings' vocabulary.
 func (o EpisodeOrderSettings) Validate() error {
-	provider := func(v string) bool { return v == "" || v == providerSlugTVDB || v == providerSlugTMDB }
 	switch {
-	case !provider(o.Provider):
+	case !models.ValidEpisodeOrderProvider(o.Provider):
 		return fmt.Errorf("%w: provider must be tvdb, tmdb or empty", ErrEpisodeOrderInvalid)
-	case !provider(o.FileOrder):
+	case !models.ValidEpisodeOrderProvider(o.FileOrder):
 		return fmt.Errorf("%w: file_order must be tvdb, tmdb or empty", ErrEpisodeOrderInvalid)
 	case o.Layout != episodeLayoutSeasons && o.Layout != episodeLayoutAbsolute && o.Layout != episodeLayoutCustom:
 		return fmt.Errorf("%w: layout must be seasons, absolute or custom", ErrEpisodeOrderInvalid)
@@ -122,21 +125,31 @@ type EpisodeOrderFileFit struct {
 	MatchedFiles int
 }
 
-// episodeOrderLister is a provider that lists a series' episode orders.
+// episodeOrderListerProvider is a provider that lists a series' episode orders.
 type episodeOrderListerProvider interface {
 	Provider
 	ListEpisodeOrders(ctx context.Context, providerIDs map[string]string, language string) ([]EpisodeOrder, error)
 }
 
+// requireSeries loads the item an episode order operation names, which must
+// be a series.
+func (s *MetadataService) requireSeries(ctx context.Context, seriesID string) (*models.MediaItem, error) {
+	item, err := s.itemRepo.GetByID(ctx, seriesID)
+	if err != nil {
+		return nil, err
+	}
+	if item.Type != anchoredItemTypeSeries {
+		return nil, ErrEpisodeOrderNotSeries
+	}
+	return item, nil
+}
+
 // seriesForEpisodeOrder loads a series with its identity IDs and scopes ctx to
 // its libraries' provider chains.
 func (s *MetadataService) seriesForEpisodeOrder(ctx context.Context, seriesID string) (context.Context, map[string]string, string, error) {
-	item, err := s.itemRepo.GetByID(ctx, seriesID)
+	item, err := s.requireSeries(ctx, seriesID)
 	if err != nil {
 		return ctx, nil, "", err
-	}
-	if item.Type != anchoredItemTypeSeries {
-		return ctx, nil, "", ErrEpisodeOrderNotSeries
 	}
 	ctx, err = s.withItemChainScope(ctx, seriesID, 0)
 	if err != nil {
@@ -179,7 +192,7 @@ func (s *MetadataService) EpisodeOrderState(ctx context.Context, seriesID string
 	}
 	for _, p := range chain {
 		slug := p.Slug()
-		if slug != providerSlugTVDB && slug != providerSlugTMDB {
+		if slug != contentid.ProviderTVDB && slug != contentid.ProviderTMDB {
 			continue
 		}
 		if state.LibraryProvider == "" {
@@ -208,25 +221,23 @@ func (s *MetadataService) SaveEpisodeOrder(ctx context.Context, seriesID string,
 	if err := settings.Validate(); err != nil {
 		return 0, err
 	}
-	item, err := s.itemRepo.GetByID(ctx, seriesID)
-	if err != nil {
+	if _, err := s.requireSeries(ctx, seriesID); err != nil {
 		return 0, err
-	}
-	if item.Type != anchoredItemTypeSeries {
-		return 0, ErrEpisodeOrderNotSeries
 	}
 	if settings.Layout == episodeLayoutCustom {
 		// Seasons are arranged in the arranger (SaveCustomSeasons); this
 		// switches back to an arrangement already stored.
-		if _, ok, err := loadCustomLayout(ctx, s.dbPool, seriesID); err != nil {
+		var arranged bool
+		if err := s.dbPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM series_custom_seasons WHERE series_id = $1)`,
+			seriesID).Scan(&arranged); err != nil {
 			return 0, err
-		} else if !ok {
+		} else if !arranged {
 			return 0, fmt.Errorf("%w: arrange the seasons first", ErrEpisodeOrderInvalid)
 		}
 	}
 	orderName := s.episodeOrderName(ctx, seriesID, settings)
 	var saved int64
-	err = pgx.BeginFunc(ctx, s.dbPool, func(tx pgx.Tx) error {
+	err := pgx.BeginFunc(ctx, s.dbPool, func(tx pgx.Tx) error {
 		var err error
 		saved, err = storeSeriesOrder(ctx, tx, seriesID, settings, orderName, revision, userID)
 		return err
@@ -288,7 +299,7 @@ func (s *MetadataService) PreviewEpisodeOrder(ctx context.Context, seriesID stri
 	if err != nil {
 		return preview, err
 	}
-	order := episodeOrderSettings{Provider: settings.Provider, OrderID: settings.OrderID, FileOrder: settings.FileOrder, Layout: settings.Layout}
+	order := episodeOrderSettings{EpisodeOrderSettings: settings}
 	if order.Provider == "" {
 		if order.Provider, err = s.seriesEpisodeOrderProvider(ctx, seriesID); err != nil {
 			return preview, err
@@ -308,10 +319,12 @@ func (s *MetadataService) PreviewEpisodeOrder(ctx context.Context, seriesID stri
 	}
 	if structureSlug != "" {
 		preview.FileOrderFits = fileOrderFits(files, episodes, structureSlug, structures.list)
-		assignFileNumbers(episodes, structureSlug, order.FileOrder, structures.list)
-		if seasons, episodes, err = s.applyPreviewLayout(ctx, seriesID, order.Layout, seasons, episodes, structureSlug); err != nil {
-			return preview, err
+		if order.Layout == episodeLayoutCustom {
+			if order.Custom, err = s.previewCustomLayout(ctx, seriesID, seasons, episodes, structureSlug); err != nil {
+				return preview, err
+			}
 		}
+		seasons, episodes, _ = applyEpisodeOrder(order, seasons, episodes, structureSlug, structures.list)
 	}
 	fillPreviewSeasons(&preview, files, seasons, episodes)
 	return preview, nil
@@ -322,7 +335,7 @@ func (s *MetadataService) PreviewEpisodeOrder(ctx context.Context, seriesID stri
 // layout, so each file order is tried on the order's own numbering.
 func fileOrderFits(files []seriesFileLink, episodes []EpisodeResult, structureSlug string, providers []providerStructure) []EpisodeOrderFileFit {
 	var fits []EpisodeOrderFileFit
-	for _, fileOrder := range []string{"", providerSlugTVDB, providerSlugTMDB} {
+	for _, fileOrder := range []string{"", contentid.ProviderTVDB, contentid.ProviderTMDB} {
 		if fileOrder == structureSlug {
 			continue
 		}
@@ -337,27 +350,17 @@ func fileOrderFits(files []seriesFileLink, episodes []EpisodeResult, structureSl
 	return fits
 }
 
-// applyPreviewLayout arranges the order's seasons and episodes in layout. A
-// custom layout uses the series' stored arrangement, or the starting one when
-// none is stored.
-func (s *MetadataService) applyPreviewLayout(ctx context.Context, seriesID, layout string, seasons []SeasonResult, episodes []EpisodeResult, structureSlug string) ([]SeasonResult, []EpisodeResult, error) {
-	switch layout {
-	case episodeLayoutAbsolute:
-		seasons, episodes = applyAbsoluteLayout(seasons, episodes)
-	case episodeLayoutCustom:
-		custom, ok := customLayout{}, false
-		if s.dbPool != nil {
-			var err error
-			if custom, ok, err = loadCustomLayout(ctx, s.dbPool, seriesID); err != nil {
-				return nil, nil, err
-			}
+// previewCustomLayout is the arrangement a custom layout preview shows: the
+// series' stored one, or the order's own seasons when none is stored.
+func (s *MetadataService) previewCustomLayout(ctx context.Context, seriesID string, seasons []SeasonResult, episodes []EpisodeResult, structureSlug string) (*customLayout, error) {
+	if s.dbPool != nil {
+		custom, ok, err := loadCustomLayout(ctx, s.dbPool, seriesID)
+		if err != nil || ok {
+			return &custom, err
 		}
-		if !ok {
-			custom = startingLayout(seasons, episodes, structureSlug)
-		}
-		seasons, episodes = applyCustomLayout(seasons, episodes, structureSlug, custom)
 	}
-	return seasons, episodes, nil
+	custom := startingLayout(seasons, episodes, structureSlug)
+	return &custom, nil
 }
 
 // fillPreviewSeasons fills preview's file counts and seasons: which of files
@@ -415,12 +418,7 @@ func fillPreviewSeasons(preview *EpisodeOrderPreview, files []seriesFileLink, se
 		preview.EpisodeCount += len(seasonEpisodes)
 	}
 	sort.Slice(preview.Seasons, func(i, j int) bool {
-		// Specials last, as series pages list them.
-		a, b := preview.Seasons[i].Number, preview.Seasons[j].Number
-		if (a == 0) != (b == 0) {
-			return b == 0
-		}
-		return a < b
+		return seasonBefore(preview.Seasons[i].Number, preview.Seasons[j].Number)
 	})
 }
 
@@ -429,49 +427,88 @@ func fillPreviewSeasons(preview *EpisodeOrderPreview, files []seriesFileLink, se
 // the chosen order. A provider that does not know the series is left out; one
 // that fails is marked failed (mergeSeriesStructure).
 func (s *MetadataService) fetchRemoteStructures(ctx context.Context, ids map[string]string, language string, order episodeOrderSettings) (*providerStructures, error) {
-	structures := newProviderStructures()
+	remote := func(chain []Provider) []EpisodeProvider {
+		var out []EpisodeProvider
+		for _, p := range chain {
+			ep, ok := p.(EpisodeProvider)
+			if _, local := p.(IdentityHintProvider); ok && !local {
+				out = append(out, ep)
+			}
+		}
+		return out
+	}
 	seasonChain, err := s.resolveChainCached(ctx, 0, "season")
 	if err != nil {
 		return nil, err
-	}
-	for _, p := range seasonChain {
-		ep, ok := p.(EpisodeProvider)
-		if _, local := p.(IdentityHintProvider); !ok || local {
-			continue
-		}
-		seasons, err := ep.GetSeasons(ctx, SeasonsRequest{
-			ProviderIDs: ids, ContentType: anchoredItemTypeSeries, Language: language, Ordering: order.orderingFor(p.Slug()),
-		})
-		if err != nil {
-			if !isProvider404(err) {
-				structures.of(p.Slug(), false).failed = true
-			}
-			continue
-		}
-		structures.of(p.Slug(), false).seasons = seasons
 	}
 	episodeChain, err := s.resolveChainCached(ctx, 0, "episode")
 	if err != nil {
 		return nil, err
 	}
-	for _, seasonNumber := range structures.seasonNumbers() {
-		for _, p := range episodeChain {
-			ep, ok := p.(EpisodeProvider)
-			if _, local := p.(IdentityHintProvider); !ok || local {
-				continue
-			}
-			episodes, err := ep.GetEpisodes(ctx, EpisodesRequest{
-				ProviderIDs: ids, SeasonNumber: seasonNumber, Language: language, Ordering: order.orderingFor(p.Slug()),
-			})
-			if err != nil {
-				if !isProvider404(err) {
-					structures.of(p.Slug(), false).failed = true
-				}
-				continue
-			}
-			structure := structures.of(p.Slug(), false)
-			structure.episodes = append(structure.episodes, episodes...)
+
+	// Every provider call is independent, so they run at once (a few at a
+	// time); results land in their own slots and merge in chain and season
+	// order afterwards, as a sequential fetch would have merged them.
+	type answer struct {
+		seasons  []SeasonResult
+		episodes []EpisodeResult
+		err      error
+	}
+	run := func(calls []func() answer) []answer {
+		out := make([]answer, len(calls))
+		sem := make(chan struct{}, 6)
+		var wg sync.WaitGroup
+		for i, call := range calls {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func() {
+				defer func() { <-sem; wg.Done() }()
+				out[i] = call()
+			}()
 		}
+		wg.Wait()
+		return out
+	}
+	record := func(structures *providerStructures, slug string, a answer) {
+		structure := structures.of(slug, false)
+		if a.err != nil {
+			structure.failed = structure.failed || !isProvider404(a.err)
+			return
+		}
+		structure.seasons = append(structure.seasons, a.seasons...)
+		structure.episodes = append(structure.episodes, a.episodes...)
+	}
+
+	structures := newProviderStructures()
+	seasonProviders := remote(seasonChain)
+	seasonCalls := make([]func() answer, len(seasonProviders))
+	for i, ep := range seasonProviders {
+		seasonCalls[i] = func() answer {
+			seasons, err := ep.GetSeasons(ctx, SeasonsRequest{
+				ProviderIDs: ids, ContentType: anchoredItemTypeSeries, Language: language, Ordering: order.orderingFor(ep.Slug()),
+			})
+			return answer{seasons: seasons, err: err}
+		}
+	}
+	for i, a := range run(seasonCalls) {
+		record(structures, seasonProviders[i].Slug(), a)
+	}
+
+	episodeProviders := remote(episodeChain)
+	numbers := structures.seasonNumbers()
+	episodeCalls := make([]func() answer, 0, len(numbers)*len(episodeProviders))
+	for _, seasonNumber := range numbers {
+		for _, ep := range episodeProviders {
+			episodeCalls = append(episodeCalls, func() answer {
+				episodes, err := ep.GetEpisodes(ctx, EpisodesRequest{
+					ProviderIDs: ids, SeasonNumber: seasonNumber, Language: language, Ordering: order.orderingFor(ep.Slug()),
+				})
+				return answer{episodes: episodes, err: err}
+			})
+		}
+	}
+	for i, a := range run(episodeCalls) {
+		record(structures, episodeProviders[i%len(episodeProviders)].Slug(), a)
 	}
 	return structures, nil
 }
@@ -500,15 +537,24 @@ func (s *MetadataService) episodeOrderName(ctx context.Context, seriesID string,
 	if settings.OrderID == "" {
 		return ""
 	}
-	state, err := s.EpisodeOrderState(ctx, seriesID, true)
+	ctx, ids, language, err := s.seriesForEpisodeOrder(ctx, seriesID)
 	if err != nil {
 		return settings.OrderID
 	}
-	for _, p := range state.Providers {
-		if p.Provider != settings.Provider {
+	chain, err := s.resolveChainCached(ctx, 0, "episode")
+	if err != nil {
+		return settings.OrderID
+	}
+	for _, p := range chain {
+		lister, ok := p.(episodeOrderListerProvider)
+		if !ok || p.Slug() != settings.Provider {
 			continue
 		}
-		for _, order := range p.Orders {
+		orders, err := lister.ListEpisodeOrders(ctx, ids, language)
+		if err != nil {
+			break
+		}
+		for _, order := range orders {
 			if order.ID == settings.OrderID {
 				return order.Name
 			}

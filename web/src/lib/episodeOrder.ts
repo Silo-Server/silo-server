@@ -31,11 +31,3 @@ export function episodeOrderLabel(
     ),
   });
 }
-
-/** Whether a season title only repeats its number ("Season 3"), in English or the viewer's language. */
-export function isNumberedSeasonTitle(t: Translate, title: string, number: number): boolean {
-  const trimmed = title.trim();
-  return (
-    trimmed === `Season ${number}` || trimmed === t("web.item.arrangeSeasons.season", { number })
-  );
-}

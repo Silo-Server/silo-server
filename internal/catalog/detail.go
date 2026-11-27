@@ -1787,6 +1787,11 @@ func (s *DetailService) GetItemDetailWithOptions(ctx context.Context, contentID 
 			return nil, err
 		}
 		s.attachExtraBackdrops(ctx, []*ItemDetail{detail}, filter.Artwork(), true)
+		// Only a series' own detail page names its episode order; batch
+		// detail lists leave it out.
+		if detail.Type == AdminCatalogTypeSeries {
+			detail.EpisodeOrder = s.episodeOrderSummary(ctx, detail.ContentID)
+		}
 		return detail, nil
 	case target.season != nil:
 		return s.buildSeasonDetail(ctx, target.season, filter)
@@ -2661,9 +2666,6 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 	detail.BackdropURL = s.PresignImageURL(ctx, item.BackdropPath, "backdrop", string(filter.ImageSizeFor(imagesize.SlotBackdrop)))
 	detail.LogoURL = s.PresignImageURL(ctx, item.LogoPath, "logo", string(filter.ImageSizeFor(imagesize.SlotLogo)))
 	detail.PosterPath = item.PosterPath
-	if item.Type == "series" {
-		detail.EpisodeOrder = s.episodeOrderSummary(ctx, item.ContentID)
-	}
 	detail.BackdropPath = item.BackdropPath
 	detail.LogoPath = item.LogoPath
 	detail.UpdatedAt = item.UpdatedAt
@@ -5600,7 +5602,8 @@ type EpisodeOrderSummary struct {
 }
 
 // episodeOrderSummary reads the series' own episode order; nil while it
-// follows its library or on a read failure, which only hides the label.
+// follows its library or on a read failure, which only hides the label. The
+// WHERE clause is metadata.EpisodeOrderSettings.isDefault negated.
 func (s *DetailService) episodeOrderSummary(ctx context.Context, seriesID string) *EpisodeOrderSummary {
 	if s.itemRepo == nil || s.itemRepo.pool == nil {
 		return nil

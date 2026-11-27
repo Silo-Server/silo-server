@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/contentid"
 )
 
 // Episode order layouts (series_episode_orders.layout).
@@ -19,13 +20,6 @@ const (
 	// episodeLayoutAbsolute numbers every regular episode in one season, in
 	// the order's sequence; specials keep season 0.
 	episodeLayoutAbsolute = "absolute"
-)
-
-// Provider slugs and episode ID keys the episode order code names.
-const (
-	providerSlugTVDB = "tvdb"
-	providerSlugTMDB = "tmdb"
-	providerSlugIMDb = "imdb"
 )
 
 // applyAbsoluteLayout renumbers the regular episodes 1…N in one season 1, in
@@ -41,13 +35,7 @@ func applyAbsoluteLayout(seasons []SeasonResult, episodes []EpisodeResult) ([]Se
 			regular = append(regular, i)
 		}
 	}
-	sort.SliceStable(regular, func(a, b int) bool {
-		x, y := out[regular[a]], out[regular[b]]
-		if x.SeasonNumber != y.SeasonNumber {
-			return x.SeasonNumber < y.SeasonNumber
-		}
-		return x.EpisodeNumber < y.EpisodeNumber
-	})
+	sort.SliceStable(regular, func(a, b int) bool { return episodeBefore(&out[regular[a]], &out[regular[b]]) })
 	for n, i := range regular {
 		out[i].SeasonNumber = 1
 		out[i].EpisodeNumber = n + 1
@@ -93,10 +81,8 @@ func assignFileNumbers(episodes []EpisodeResult, structureSlug, fileOrder string
 	if fileOrder == "" || fileOrder == structureSlug {
 		for i := range episodes {
 			ep := &episodes[i]
-			ep.FileSeasonNumber, ep.FileEpisodeNumber, ep.FileNumbered = ep.SeasonNumber, ep.EpisodeNumber, true
-			if ep.DefaultSeasonNumber != nil && ep.DefaultEpisodeNumber != nil {
-				ep.FileSeasonNumber, ep.FileEpisodeNumber = *ep.DefaultSeasonNumber, *ep.DefaultEpisodeNumber
-			}
+			ep.FileSeasonNumber, ep.FileEpisodeNumber = defaultPlace(*ep)
+			ep.FileNumbered = true
 		}
 		return true
 	}
@@ -120,22 +106,50 @@ func assignFileNumbers(episodes []EpisodeResult, structureSlug, fileOrder string
 	return false
 }
 
-// episodeOrderSettings is how a series' episodes are ordered: the library's
-// provider unless the series overrides it (series_episode_orders).
+// defaultPlace is the episode's place in its provider's default order: the
+// default numbers the provider gave when it was fetched in another order,
+// else its own numbers.
+func defaultPlace(ep EpisodeResult) (int, int) {
+	if ep.DefaultSeasonNumber != nil && ep.DefaultEpisodeNumber != nil {
+		return *ep.DefaultSeasonNumber, *ep.DefaultEpisodeNumber
+	}
+	return ep.SeasonNumber, ep.EpisodeNumber
+}
+
+// seasonBefore orders season numbers as series pages list them: regular
+// seasons in order, then Specials.
+func seasonBefore(a, b int) bool {
+	if (a == 0) != (b == 0) {
+		return b == 0
+	}
+	return a < b
+}
+
+// episodeOrderSettings is how a series' episodes are ordered, resolved for a
+// refresh: the series' settings with its library's provider filled in, and
+// the arrangement of a custom layout.
 type episodeOrderSettings struct {
-	// Provider is the preferred structure provider (tvdb, tmdb); empty
-	// follows the episode chain.
-	Provider string
-	// OrderID is one of Provider's episode orders; empty is its default.
-	OrderID string
-	// FileOrder is the provider whose default order the file names follow;
-	// empty means the structure provider.
-	FileOrder string
-	Layout    string
+	EpisodeOrderSettings
 	// Custom is the arrangement of a custom layout.
 	Custom *customLayout
 	// Override is true when an admin chose the series' order.
 	Override bool
+}
+
+// applyEpisodeOrder numbers the merged structure as the order lays it out:
+// provider and file numbers first, from the order's own numbering, then the
+// layout. It reports whether the file numbers are known (assignFileNumbers).
+// Refresh and preview share it, so a preview shows what a save applies.
+func applyEpisodeOrder(order episodeOrderSettings, seasons []SeasonResult, episodes []EpisodeResult, structureSlug string, providers []providerStructure) ([]SeasonResult, []EpisodeResult, bool) {
+	assignProviderNumbers(episodes)
+	known := assignFileNumbers(episodes, structureSlug, order.FileOrder, providers)
+	switch {
+	case order.Layout == episodeLayoutAbsolute:
+		seasons, episodes = applyAbsoluteLayout(seasons, episodes)
+	case order.Layout == episodeLayoutCustom && order.Custom != nil:
+		seasons, episodes = applyCustomLayout(seasons, episodes, structureSlug, *order.Custom)
+	}
+	return seasons, episodes, known
 }
 
 // orderingFor is the ordering to request from the provider slug.
@@ -150,34 +164,31 @@ func (o episodeOrderSettings) orderingFor(slug string) string {
 // when an admin set one, else its library's provider with the default order
 // and layout.
 func (s *MetadataService) seriesEpisodeOrder(ctx context.Context, contentID string) (episodeOrderSettings, error) {
-	settings := episodeOrderSettings{Layout: episodeLayoutSeasons}
-	provider, err := s.seriesEpisodeOrderProvider(ctx, contentID)
-	if err != nil {
-		return settings, err
+	settings := episodeOrderSettings{EpisodeOrderSettings: EpisodeOrderSettings{Layout: episodeLayoutSeasons}}
+	if s != nil && s.dbPool != nil && contentID != "" {
+		var stored EpisodeOrderSettings
+		err := s.dbPool.QueryRow(ctx, `
+			SELECT provider, order_id, file_order, layout
+			FROM series_episode_orders WHERE series_id = $1`, contentID).
+			Scan(&stored.Provider, &stored.OrderID, &stored.FileOrder, &stored.Layout)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			return settings, fmt.Errorf("loading the series episode order: %w", err)
+		default:
+			if stored.Layout == "" {
+				stored.Layout = episodeLayoutSeasons
+			}
+			settings.EpisodeOrderSettings, settings.Override = stored, !stored.isDefault()
+		}
 	}
-	settings.Provider = provider
-	if s == nil || s.dbPool == nil || contentID == "" {
-		return settings, nil
-	}
-	var override episodeOrderSettings
-	err = s.dbPool.QueryRow(ctx, `
-		SELECT provider, order_id, file_order, layout
-		FROM series_episode_orders WHERE series_id = $1`, contentID).
-		Scan(&override.Provider, &override.OrderID, &override.FileOrder, &override.Layout)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return settings, nil
-	}
-	if err != nil {
-		return settings, fmt.Errorf("loading the series episode order: %w", err)
-	}
-	settings.Override = override.Provider != "" || override.OrderID != "" || override.FileOrder != "" ||
-		(override.Layout != "" && override.Layout != episodeLayoutSeasons)
-	if override.Provider != "" {
-		settings.Provider, settings.OrderID = override.Provider, override.OrderID
-	}
-	settings.FileOrder = override.FileOrder
-	if override.Layout != "" {
-		settings.Layout = override.Layout
+	// Only a series without its own provider follows its library's.
+	if settings.Provider == "" {
+		provider, err := s.seriesEpisodeOrderProvider(ctx, contentID)
+		if err != nil {
+			return settings, err
+		}
+		settings.Provider = provider
 	}
 	if settings.Layout == episodeLayoutCustom {
 		layout, ok, err := loadCustomLayout(ctx, s.dbPool, contentID)
@@ -341,11 +352,8 @@ func applyCustomLayout(seasons []SeasonResult, episodes []EpisodeResult, structu
 	}
 	sort.SliceStable(order, func(a, b int) bool {
 		x, y := out[order[a]], out[order[b]]
-		if (x.SeasonNumber == 0) != (y.SeasonNumber == 0) {
-			return y.SeasonNumber == 0
-		}
 		if x.SeasonNumber != y.SeasonNumber {
-			return x.SeasonNumber < y.SeasonNumber
+			return seasonBefore(x.SeasonNumber, y.SeasonNumber)
 		}
 		return x.EpisodeNumber < y.EpisodeNumber
 	})
@@ -406,11 +414,7 @@ func applyCustomLayout(seasons []SeasonResult, episodes []EpisodeResult, structu
 // renumbers the episodes.
 func assignProviderNumbers(episodes []EpisodeResult) {
 	for i := range episodes {
-		ep := &episodes[i]
-		ep.ProviderSeasonNumber, ep.ProviderEpisodeNumber = ep.SeasonNumber, ep.EpisodeNumber
-		if ep.DefaultSeasonNumber != nil && ep.DefaultEpisodeNumber != nil {
-			ep.ProviderSeasonNumber, ep.ProviderEpisodeNumber = *ep.DefaultSeasonNumber, *ep.DefaultEpisodeNumber
-		}
+		episodes[i].ProviderSeasonNumber, episodes[i].ProviderEpisodeNumber = defaultPlace(episodes[i])
 	}
 }
 
@@ -444,7 +448,7 @@ func (s *MetadataService) seriesShowsOtherNumbering(ctx context.Context, seriesI
 		return false, err
 	}
 	for _, p := range chain {
-		if slug := p.Slug(); slug == providerSlugTVDB || slug == providerSlugTMDB {
+		if slug := p.Slug(); slug == contentid.ProviderTVDB || slug == contentid.ProviderTMDB {
 			return slug != order.Provider, nil
 		}
 	}

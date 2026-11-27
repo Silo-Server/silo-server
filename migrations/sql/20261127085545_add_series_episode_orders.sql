@@ -29,7 +29,13 @@ ALTER TABLE public.episodes
     ADD COLUMN file_season_number integer,
     ADD COLUMN file_episode_number integer;
 
+-- File linking looks episodes up by these numbers.
+CREATE INDEX idx_episodes_series_file_numbers
+    ON public.episodes (series_id, file_season_number, file_episode_number)
+    WHERE file_season_number IS NOT NULL;
+
 -- +goose Down
+DROP INDEX IF EXISTS public.idx_episodes_series_file_numbers;
 ALTER TABLE public.episodes
     DROP COLUMN IF EXISTS file_season_number,
     DROP COLUMN IF EXISTS file_episode_number;

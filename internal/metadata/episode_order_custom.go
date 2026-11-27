@@ -117,11 +117,9 @@ func (s *MetadataService) CustomSeasons(ctx context.Context, seriesID string, ba
 	result.Revision = state.Revision
 	result.Settings = state.Settings
 	// A stored arrangement opens whatever layout the series shows now, so
-	// switching to another layout and back keeps it.
-	stored := true
+	// switching to another layout and back keeps it; a base starts over.
 	if base != nil {
 		result.Settings = *base
-		stored = false
 	}
 	result.Settings.Layout = episodeLayoutCustom
 	if err := result.Settings.Validate(); err != nil {
@@ -132,7 +130,7 @@ func (s *MetadataService) CustomSeasons(ctx context.Context, seriesID string, ba
 	if err != nil {
 		return result, err
 	}
-	order := episodeOrderSettings{Provider: result.Settings.Provider, OrderID: result.Settings.OrderID, FileOrder: result.Settings.FileOrder}
+	order := episodeOrderSettings{EpisodeOrderSettings: result.Settings}
 	if order.Provider == "" {
 		order.Provider = state.LibraryProvider
 	}
@@ -146,10 +144,9 @@ func (s *MetadataService) CustomSeasons(ctx context.Context, seriesID string, ba
 		return result, nil
 	}
 	assignFileNumbers(episodes, structureSlug, order.FileOrder, structures.list)
-	inOrder := append([]EpisodeResult(nil), episodes...)
 
 	var layout customLayout
-	if stored && s.dbPool != nil {
+	if base == nil && s.dbPool != nil {
 		if layout, result.Saved, err = loadCustomLayout(ctx, s.dbPool, seriesID); err != nil {
 			return result, err
 		}
@@ -163,7 +160,7 @@ func (s *MetadataService) CustomSeasons(ctx context.Context, seriesID string, ba
 	if err != nil {
 		return result, err
 	}
-	result.Seasons = arrangerSeasons(seasons, arrangedSeasons, arranged, inOrder, layout, files, structureSlug, result.Saved)
+	result.Seasons = arrangerSeasons(seasons, arrangedSeasons, arranged, episodes, layout, files, structureSlug, result.Saved)
 	return result, nil
 }
 
@@ -190,7 +187,7 @@ func (s *MetadataService) seriesFileNames(ctx context.Context, seriesID string) 
 }
 
 // arrangerSeasons lists the arranged seasons with their episodes for the
-// arranger, specials last. inOrder holds the base order's episodes in the
+// arranger, specials last. episodes are the base order's episodes in the
 // same order as arranged; files names the file at each file numbers. When
 // saved, an episode the layout does not place is marked as placed
 // automatically.
@@ -246,13 +243,7 @@ func arrangerSeasons(seasons, arrangedSeasons []SeasonResult, arranged, inOrder 
 	for _, season := range byNumber {
 		out = append(out, *season)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		a, b := out[i].Number, out[j].Number
-		if (a == 0) != (b == 0) {
-			return b == 0
-		}
-		return a < b
-	})
+	sort.Slice(out, func(i, j int) bool { return seasonBefore(out[i].Number, out[j].Number) })
 	return out
 }
 
@@ -336,16 +327,12 @@ func (s *MetadataService) SaveCustomSeasons(ctx context.Context, seriesID string
 			return 0, fmt.Errorf("%w: seasons are numbered 1 to %d without gaps", ErrEpisodeOrderInvalid, regular)
 		}
 	}
-	item, err := s.itemRepo.GetByID(ctx, seriesID)
-	if err != nil {
+	if _, err := s.requireSeries(ctx, seriesID); err != nil {
 		return 0, err
-	}
-	if item.Type != anchoredItemTypeSeries {
-		return 0, ErrEpisodeOrderNotSeries
 	}
 	orderName := s.episodeOrderName(ctx, seriesID, save.Settings)
 	var saved int64
-	err = pgx.BeginFunc(ctx, s.dbPool, func(tx pgx.Tx) error {
+	err := pgx.BeginFunc(ctx, s.dbPool, func(tx pgx.Tx) error {
 		var err error
 		if saved, err = storeSeriesOrder(ctx, tx, seriesID, save.Settings, orderName, revision, userID); err != nil {
 			return err
@@ -411,12 +398,8 @@ func replaceCustomLayout(ctx context.Context, tx pgx.Tx, seriesID string, season
 // series refreshes. A poster belongs to its arranged season, whatever number
 // the season takes.
 func (s *MetadataService) UploadCustomSeasonPoster(ctx context.Context, seriesID string, data []byte) (CustomSeasonPoster, error) {
-	item, err := s.itemRepo.GetByID(ctx, seriesID)
-	if err != nil {
+	if _, err := s.requireSeries(ctx, seriesID); err != nil {
 		return CustomSeasonPoster{}, err
-	}
-	if item.Type != anchoredItemTypeSeries {
-		return CustomSeasonPoster{}, ErrEpisodeOrderNotSeries
 	}
 	uploaded, err := s.ApplyUploadedItemImage(ctx, ApplyUploadedItemImageRequest{
 		ContentID: seriesID, ContentType: anchoredItemTypeSeries, ImageType: ImagePoster, Data: data,

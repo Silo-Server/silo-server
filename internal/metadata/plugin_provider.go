@@ -588,7 +588,6 @@ func (p *PluginProvider) GetEpisodes(ctx context.Context, req EpisodesRequest) (
 			Runtime:          int(episode.GetRuntime()),
 			Ratings:          ratingsFromStruct(episode.GetRatings(), p.declaredRatingSources),
 			StillPath:        p.remoteArtwork(ctx, episode.GetStillPath()),
-			AbsoluteNumber:   int(episode.GetAbsoluteNumber()),
 		})
 		if episode.DefaultSeasonNumber != nil && episode.DefaultEpisodeNumber != nil {
 			season, number := int(episode.GetDefaultSeasonNumber()), int(episode.GetDefaultEpisodeNumber())

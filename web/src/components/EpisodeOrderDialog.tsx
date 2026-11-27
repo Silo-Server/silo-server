@@ -42,6 +42,8 @@ import {
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
 import { providerLabel, episodeOrderLabel } from "@/lib/episodeOrder";
+import { formatEpisodeCode } from "@/lib/episodeCardLabels";
+import { seasonDisplayName } from "@/pages/ItemDetail/itemDetailLayout";
 import { cn } from "@/lib/utils";
 
 type Provider = "tvdb" | "tmdb";
@@ -57,7 +59,6 @@ interface Draft {
   layout: Layout;
 }
 
-// Provider names are brands, the same in every language.
 const otherProvider = (p: Provider): Provider => (p === "tvdb" ? "tmdb" : "tvdb");
 const asProvider = (v: string | undefined): Provider => (v === "tmdb" ? "tmdb" : "tvdb");
 
@@ -94,8 +95,13 @@ function draftOf(state: EpisodeOrderState): Draft {
   };
 }
 
+/** The provider that numbers the series under draft. */
+function structureOf(draft: Draft, libraryProvider: Provider): Provider {
+  return draft.source === "library" ? libraryProvider : draft.source;
+}
+
 function choiceOf(draft: Draft, libraryProvider: Provider): EpisodeOrderChoice {
-  const structure = draft.source === "library" ? libraryProvider : draft.source;
+  const structure = structureOf(draft, libraryProvider);
   return {
     provider: draft.source === "library" ? "" : draft.source,
     order_id: draft.source === "library" ? "" : draft.orderId,
@@ -288,7 +294,7 @@ function Settings({
 }) {
   const t = useT();
   const libraryProvider = asProvider(state.library_provider);
-  const structure = draft.source === "library" ? libraryProvider : draft.source;
+  const structure = structureOf(draft, libraryProvider);
   const providerEntry = state.providers.find((p) => p.provider === structure);
   const orders = providerEntry?.orders ?? [];
   const defaultOrder = orders.find((o) => o.is_default);
@@ -518,7 +524,7 @@ function PreviewPane({
 }) {
   const t = useT();
   const [seasonNumber, setSeasonNumber] = useState<number | null>(null);
-  const structure = draft.source === "library" ? libraryProvider : draft.source;
+  const structure = structureOf(draft, libraryProvider);
   const seasons = preview?.seasons ?? [];
   const shown =
     seasons.find((s) => s.number === seasonNumber) ??
@@ -535,11 +541,6 @@ function PreviewPane({
       : names;
   }, [preview, t]);
   const missingFiles = (preview?.file_count ?? 0) - (preview?.matched_files ?? 0);
-  const seasonName = (n: number) =>
-    n === 0
-      ? t("web.item.episodeOrder.preview.specials")
-      : t("web.item.episodeOrder.preview.season", { number: n });
-
   return (
     <div className="flex min-w-0 flex-col bg-black/10 max-md:min-h-[560px] md:min-h-0 md:flex-1">
       <div className="shrink-0 px-5 pt-4 pb-3">
@@ -633,8 +634,10 @@ function PreviewPane({
               </SelectTrigger>
               <SelectContent className="max-h-80">
                 {seasons.map((s) => {
-                  const name = seasonName(s.number);
-                  const label = s.title && s.title !== name ? [name, s.title].join(" · ") : name;
+                  // The number, then the season's own title when it has one.
+                  const name = seasonDisplayName(s.number);
+                  const titled = seasonDisplayName(s.number, s.title);
+                  const label = titled === name ? name : [name, titled].join(" · ");
                   const meta = [
                     t("web.item.episodeOrder.preview.episodes", { count: s.episode_count }),
                   ];
@@ -673,7 +676,7 @@ function PreviewPane({
             <div className="min-h-0 flex-1 overflow-y-auto py-1">
               {shown?.episodes.slice(0, 200).map((e) => {
                 const fileNumber =
-                  e.file_episode > 0 ? `S${pad(e.file_season)}E${pad(e.file_episode)}` : "–";
+                  e.file_episode > 0 ? formatEpisodeCode(e.file_season, e.file_episode) : "–";
                 return (
                   <div
                     key={`${shown.number}-${e.number}`}
@@ -722,8 +725,6 @@ function PreviewPane({
     </div>
   );
 }
-
-const pad = (n: number) => String(n).padStart(2, "0");
 
 // Matches the admin RestartBanner: icon tile, title and explanation, and the
 // action as a button on the end (wrapping under the text when narrow).

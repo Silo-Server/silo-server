@@ -629,9 +629,6 @@ type EpisodeResult struct {
 	StillPath        string
 	StillSourcePath  string
 	StillThumbhash   string
-	// AbsoluteNumber is the episode's position counted through the series'
-	// regular seasons, when the provider gives one.
-	AbsoluteNumber int
 	// DefaultSeasonNumber and DefaultEpisodeNumber place the episode in the
 	// provider's default order when it was fetched in another order; nil
 	// when the provider did not say.
@@ -640,7 +637,7 @@ type EpisodeResult struct {
 	// FileSeasonNumber and FileEpisodeNumber are the numbers a file name
 	// gives this episode, in the order the series' files are named in;
 	// FileNumbered is false when that order does not have the episode.
-	// Set by applyEpisodeFileOrder before persisting.
+	// Set by assignFileNumbers before persisting.
 	FileSeasonNumber  int
 	FileEpisodeNumber int
 	FileNumbered      bool

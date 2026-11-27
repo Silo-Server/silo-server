@@ -3,7 +3,6 @@ package apiv2
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -137,11 +136,9 @@ func episodeOrderProblem(err error) *Problem {
 	case errors.Is(err, catalogrepo.ErrItemNotFound):
 		return NewProblem(TypeNotFound, "Series not found")
 	case errors.Is(err, metadata.ErrEpisodeOrderNotSeries):
-		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-			WithErrors(ProblemError{Location: "path.id", Code: codeInvalid, Detail: "only a series has an episode order"})
+		return validationProblem("path.id", codeInvalid, "only a series has an episode order")
 	case errors.Is(err, metadata.ErrEpisodeOrderInvalid):
-		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-			WithErrors(ProblemError{Location: locationBody, Code: codeInvalid, Detail: err.Error()})
+		return validationProblem(locationBody, codeInvalid, err.Error())
 	}
 	return serviceProblem(err)
 }
@@ -377,7 +374,7 @@ func (reg *Registry) getAdminCustomSeasons(ctx context.Context, in *AdminCustomS
 	}
 	var base *metadata.EpisodeOrderSettings
 	if in.StartOver {
-		base = &metadata.EpisodeOrderSettings{Provider: in.Provider, OrderID: in.OrderID, FileOrder: in.FileOrder, Layout: episodeOrderLayoutCustom}
+		base = &metadata.EpisodeOrderSettings{Provider: in.Provider, OrderID: in.OrderID, FileOrder: in.FileOrder}
 	}
 	custom, err := reg.deps.AdminCustomSeasons.CustomSeasons(ctx, in.ID, base)
 	if err != nil {
@@ -411,7 +408,7 @@ func (reg *Registry) setAdminCustomSeasons(ctx context.Context, in *AdminCustomS
 		return nil, unavailable("custom seasons")
 	}
 	save := metadata.CustomSeasonsSave{
-		Settings: metadata.EpisodeOrderSettings{Provider: in.Body.Provider, OrderID: in.Body.OrderID, FileOrder: in.Body.FileOrder, Layout: episodeOrderLayoutCustom},
+		Settings: metadata.EpisodeOrderSettings{Provider: in.Body.Provider, OrderID: in.Body.OrderID, FileOrder: in.Body.FileOrder},
 	}
 	for _, s := range in.Body.Seasons {
 		season := metadata.CustomSeasonsSeason{Number: s.Number, Title: s.Title, Overview: s.Overview}
@@ -476,27 +473,17 @@ func (reg *Registry) uploadAdminCustomSeasonPoster(ctx context.Context, in *Admi
 		return nil, unavailable("custom seasons")
 	}
 	form := in.RawBody.Data()
-	if form == nil || !form.Image.IsSet {
-		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-			WithErrors(ProblemError{Location: locationBodyImage, Code: codeRequired, Detail: detailImageFileRequired})
+	if form == nil {
+		return nil, validationProblem(locationBodyImage, codeRequired, detailImageFileRequired)
 	}
-	defer func() { _ = form.Image.Close() }()
-	tooLarge := NewProblem(TypePayloadTooLarge, "The image exceeds 10 MiB.")
-	if form.Image.Size > metadata.MaxUploadedImageBytes {
-		return nil, tooLarge
-	}
-	data, err := io.ReadAll(io.LimitReader(form.Image, metadata.MaxUploadedImageBytes+1))
-	if err != nil {
-		return nil, NewProblem(TypeInternalError, "Could not read the image.")
-	}
-	if len(data) > metadata.MaxUploadedImageBytes {
-		return nil, tooLarge
+	data, problem := readUploadedImage(form.Image)
+	if problem != nil {
+		return nil, problem
 	}
 	poster, err := reg.deps.AdminCustomSeasons.UploadCustomSeasonPoster(ctx, in.ID, data)
 	switch {
 	case errors.Is(err, metadata.ErrUnsupportedUploadedImage):
-		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-			WithErrors(ProblemError{Location: locationBodyImage, Code: codeInvalid, Detail: "the file is not a JPEG, PNG or WebP image"})
+		return nil, validationProblem(locationBodyImage, codeInvalid, "the file is not a JPEG, PNG or WebP image")
 	case errors.Is(err, metadata.ErrImageUploadUnavailable):
 		return nil, NewProblem(TypeCapabilityNotConfigured, "Uploading images needs artwork storage")
 	case err != nil:

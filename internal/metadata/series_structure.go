@@ -60,7 +60,6 @@ func mergeSeriesStructure(providers []providerStructure, preferred, language str
 			season, number, contentID := target.SeasonNumber, target.EpisodeNumber, target.ContentID
 			mergeEpisodeInto(target, p.episodes[j], language)
 			target.SeasonNumber, target.EpisodeNumber, target.ContentID = season, number, contentID
-			lendProviderIDs(target, p.episodes[j].ProviderIDs)
 		}
 	}
 	return flattenSeasonResults(seasonResults), flattenEpisodeResults(episodeResults), structureSlug
@@ -302,21 +301,6 @@ func episodeAirDate(value string) string {
 		return value[:10]
 	}
 	return ""
-}
-
-// lendProviderIDs adds a bridged episode's provider IDs the structure
-// episode lacks, so the stored row can be found by them after a later order
-// change.
-func lendProviderIDs(target *EpisodeResult, ids map[string]string) {
-	for key, value := range ids {
-		if value == "" || target.ProviderIDs[key] != "" {
-			continue
-		}
-		if target.ProviderIDs == nil {
-			target.ProviderIDs = make(map[string]string)
-		}
-		target.ProviderIDs[key] = value
-	}
 }
 
 // providerStructures collects providerStructure values in the order providers

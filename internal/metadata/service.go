@@ -2401,15 +2401,10 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		allSeasons, allEpisodes, structureSlug = mergeSeriesStructure(structures.list, episodeOrder.Provider, req.Language)
 		if slices.Contains(renumberIDKeys, structureSlug) {
 			ctx = withEpisodeStructure(ctx, structureSlug)
-			assignProviderNumbers(allEpisodes)
-			if assignFileNumbers(allEpisodes, structureSlug, episodeOrder.FileOrder, structures.list) {
+			var fileNumbersKnown bool
+			allSeasons, allEpisodes, fileNumbersKnown = applyEpisodeOrder(episodeOrder, allSeasons, allEpisodes, structureSlug, structures.list)
+			if fileNumbersKnown {
 				ctx = withEpisodeFileNumbers(ctx)
-			}
-			switch {
-			case episodeOrder.Layout == episodeLayoutAbsolute:
-				allSeasons, allEpisodes = applyAbsoluteLayout(allSeasons, allEpisodes)
-			case episodeOrder.Layout == episodeLayoutCustom && episodeOrder.Custom != nil:
-				allSeasons, allEpisodes = applyCustomLayout(allSeasons, allEpisodes, structureSlug, *episodeOrder.Custom)
 			}
 		}
 	}

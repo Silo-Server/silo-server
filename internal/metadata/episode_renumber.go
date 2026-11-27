@@ -54,7 +54,7 @@ type episodeSlot struct{ season, episode int }
 
 // renumberIDKeys are the provider ID columns an episode row carries, in the
 // order the planner trusts them after the structure provider's own key.
-var renumberIDKeys = []string{providerSlugTVDB, providerSlugTMDB, providerSlugIMDb}
+var renumberIDKeys = []string{contentid.ProviderTVDB, contentid.ProviderTMDB, contentid.ProviderIMDB}
 
 // planEpisodeRenumber works out which stored rows must take new numbers so
 // the series matches targets, the episodes its structure provider returned.
@@ -454,7 +454,7 @@ func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID s
 			rows.Close()
 			return fmt.Errorf("renumber: scan episode: %w", err)
 		}
-		row.IDs = map[string]string{providerSlugTVDB: tvdb, providerSlugTMDB: tmdb, providerSlugIMDb: imdb}
+		row.IDs = map[string]string{contentid.ProviderTVDB: tvdb, contentid.ProviderTMDB: tmdb, contentid.ProviderIMDB: imdb}
 		existing = append(existing, row)
 	}
 	rows.Close()
@@ -512,16 +512,10 @@ func applyEpisodeMerges(ctx context.Context, tx pgx.Tx, seriesID string, merges 
 		return nil
 	}
 	pairs := make([]reattribute.IDPair, len(merges))
-	fromIDs := make([]string, len(merges))
-	intoIDs := make([]string, len(merges))
 	for i, merge := range merges {
 		pairs[i] = reattribute.IDPair{From: merge.From, To: merge.Into}
-		fromIDs[i] = merge.From
-		intoIDs[i] = merge.Into
 	}
-	if _, err := reattribute.MergeHistoryCutoffPairs(ctx, tx, fromIDs, intoIDs); err != nil {
-		return fmt.Errorf("renumber merge: %w", err)
-	}
+	// MovePairs merges the watched-state cutoffs too.
 	if _, err := reattribute.MovePairs(ctx, tx, pairs); err != nil {
 		return fmt.Errorf("renumber merge: move user state: %w", err)
 	}

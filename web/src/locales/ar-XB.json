@@ -129953,20 +129953,6 @@
       "value": "\u200F\u202EKeep editing\u202C"
     }
   ],
-  "web.item.arrangeSeasons.metaNote": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESeason details come from \u202C"
-    },
-    {
-      "type": 1,
-      "value": "provider"
-    },
-    {
-      "type": 0,
-      "value": "\u202E by season number. Move this season and it takes the details of its new number; a custom title or description stays with it. Change the poster on the season's page after saving.\u202C"
-    }
-  ],
   "web.item.arrangeSeasons.metaNoteSeasons": [
     {
       "type": 0,
@@ -130163,16 +130149,6 @@
       "value": "\u200F\u202ESilo is renumbering the episodes. Watch history moves with each episode.\u202C"
     }
   ],
-  "web.item.arrangeSeasons.season": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESeason \u202C"
-    },
-    {
-      "type": 1,
-      "value": "number"
-    }
-  ],
   "web.item.arrangeSeasons.seasonCount": [
     {
       "type": 6,
@@ -130265,12 +130241,6 @@
     {
       "type": 0,
       "value": "\u202E selected\u202C"
-    }
-  ],
-  "web.item.arrangeSeasons.specials": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESpecials\u202C"
     }
   ],
   "web.item.arrangeSeasons.specialsMeta": [
@@ -131629,16 +131599,6 @@
       "value": "order"
     }
   ],
-  "web.item.episodeOrder.preview.season": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESeason \u202C"
-    },
-    {
-      "type": 1,
-      "value": "number"
-    }
-  ],
   "web.item.episodeOrder.preview.seasonPicker": [
     {
       "type": 0,
@@ -131683,12 +131643,6 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
-    }
-  ],
-  "web.item.episodeOrder.preview.specials": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESpecials\u202C"
     }
   ],
   "web.item.episodeOrder.preview.title": [

@@ -23,12 +23,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import {
-  SortableContext,
-  arrayMove,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
+import { SortableContext, arrayMove, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
   EyeOff,
@@ -76,14 +71,19 @@ import {
   type CustomSeasons,
   type EpisodeOrderChoice,
 } from "@/hooks/queries/episodeOrder";
-import { useGripDragSensors } from "@/hooks/useSortableList";
+import {
+  useGripDragSensors,
+  useMotionSafeOverlay,
+  useMotionSafeSortable,
+} from "@/hooks/useSortableList";
 import { useT } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
-import { providerLabel, episodeOrderLabel, isNumberedSeasonTitle } from "@/lib/episodeOrder";
+import { providerLabel, episodeOrderLabel } from "@/lib/episodeOrder";
+import { formatEpisodeCode } from "@/lib/episodeCardLabels";
+import { seasonDisplayName } from "@/pages/ItemDetail/itemDetailLayout";
 import { cn } from "@/lib/utils";
 
 const SPECIALS = "specials";
-// Provider names are brands, the same in every language.
 
 interface ArrangedSeason {
   /** Stable while the arranger is open; numbers follow the list order. */
@@ -106,9 +106,10 @@ interface ProviderSeason {
   posterUrl?: string;
 }
 
+const withoutKeys = (keys: string[], removed: Set<string>) => keys.filter((k) => !removed.has(k));
+
 let seq = 0;
 const newId = () => `season-${Date.now().toString(36)}-${seq++}`;
-const pad = (n: number) => String(n).padStart(2, "0");
 
 export default function ArrangeSeasonsDialog({
   contentId,
@@ -254,6 +255,7 @@ function Arranger({
   const [dirty, setDirty] = useState(dirtyFromStart || !data.saved);
   const [discarding, setDiscarding] = useState(false);
   const sensors = useGripDragSensors();
+  const overlayMotion = useMotionSafeOverlay();
   // The episode list scrolls in the details pane on wide screens and with
   // the whole dialog body on narrow ones; the virtual list follows whichever.
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -270,15 +272,15 @@ function Arranger({
 
   const seasonName = (index: number) => {
     const season = seasons[index];
-    const shown = season?.title || providerSeasons.get(index + 1)?.title || "";
-    return shown && !isNumberedSeasonTitle(t, shown, index + 1)
-      ? t("web.item.arrangeSeasons.seasonTitled", { number: index + 1, title: shown })
-      : t("web.item.arrangeSeasons.season", { number: index + 1 });
+    const number = index + 1;
+    const named = seasonDisplayName(number, season?.title || providerSeasons.get(number)?.title);
+    const plain = seasonDisplayName(number);
+    return named === plain
+      ? plain
+      : t("web.item.arrangeSeasons.seasonTitled", { number, title: named });
   };
   const nameOf = (id: string) =>
-    id === SPECIALS
-      ? t("web.item.arrangeSeasons.specials")
-      : seasonName(seasons.findIndex((s) => s.id === id));
+    id === SPECIALS ? seasonDisplayName(0) : seasonName(seasons.findIndex((s) => s.id === id));
 
   function setList(seasonId: string, keys: string[]) {
     if (seasonId === SPECIALS) setSpecials(keys);
@@ -290,14 +292,12 @@ function Arranger({
     const moving = new Set(keys);
     setSeasons((all) =>
       all.map((s) => {
-        const kept = s.episodeKeys.filter((k) => !moving.has(k));
-        return s.id === target
-          ? { ...s, episodeKeys: [...kept, ...keys] }
-          : { ...s, episodeKeys: kept };
+        const kept = withoutKeys(s.episodeKeys, moving);
+        return { ...s, episodeKeys: s.id === target ? [...kept, ...keys] : kept };
       }),
     );
     setSpecials((sp) => {
-      const kept = sp.filter((k) => !moving.has(k));
+      const kept = withoutKeys(sp, moving);
       return target === SPECIALS ? [...kept, ...keys] : kept;
     });
     setSelected(new Set());
@@ -464,9 +464,9 @@ function Arranger({
     const keys = activeEpisodes.filter((k) => selected.has(k));
     const moving = new Set(keys);
     setSeasons((all) =>
-      all.map((s) => ({ ...s, episodeKeys: s.episodeKeys.filter((k) => !moving.has(k)) })),
+      all.map((s) => ({ ...s, episodeKeys: withoutKeys(s.episodeKeys, moving) })),
     );
-    setSpecials((sp) => sp.filter((k) => !moving.has(k)));
+    setSpecials((sp) => withoutKeys(sp, moving));
     setSelected(new Set());
     addSeason(activeId === SPECIALS ? undefined : activeId, keys);
   }
@@ -638,11 +638,7 @@ function Arranger({
                   <p className="text-muted-foreground min-w-0 text-xs leading-relaxed">
                     {t("web.item.arrangeSeasons.empty", {
                       count: emptySeasons.length,
-                      names: joinList(
-                        emptySeasons.map((i) =>
-                          t("web.item.arrangeSeasons.season", { number: i + 1 }),
-                        ),
-                      ),
+                      names: joinList(emptySeasons.map((i) => seasonDisplayName(i + 1))),
                     })}
                   </p>
                 </div>
@@ -715,9 +711,7 @@ function Arranger({
                           </SelectItem>
                         ))}
                       {activeId !== SPECIALS && (
-                        <SelectItem value={SPECIALS}>
-                          {t("web.item.arrangeSeasons.specials")}
-                        </SelectItem>
+                        <SelectItem value={SPECIALS}>{seasonDisplayName(0)}</SelectItem>
                       )}
                       <SelectItem value="__new">
                         {t("web.item.arrangeSeasons.newSeason")}
@@ -769,7 +763,7 @@ function Arranger({
           {/* The dialog is transformed, which would offset a fixed overlay
               inside it; render the drag preview on the body instead. */}
           {createPortal(
-            <DragOverlay zIndex={60}>
+            <DragOverlay zIndex={60} {...overlayMotion}>
               {dragged ? (
                 <div className="bg-surface border-border inline-flex max-w-xs items-center gap-2 rounded-lg border px-3 py-2 text-sm shadow-2xl">
                   <GripVertical className="text-muted-foreground size-4" aria-hidden="true" />
@@ -809,9 +803,7 @@ function Arranger({
             deleting
               ? t("web.item.arrangeSeasons.deleteBody", {
                   count: deleting.episodeKeys.length,
-                  heir: heirOf(deleting)
-                    ? nameOf(heirOf(deleting)!.id)
-                    : t("web.item.arrangeSeasons.specials"),
+                  heir: heirOf(deleting) ? nameOf(heirOf(deleting)!.id) : seasonDisplayName(0),
                 })
               : ""
           }
@@ -873,7 +865,7 @@ function SeasonDetails({
             <img src={poster} alt="" className="h-full w-full object-cover" />
           ) : (
             <div className="text-muted-foreground flex h-full items-center justify-center p-3 text-center text-xs font-medium">
-              {season.title || inherited?.title || t("web.item.arrangeSeasons.season", { number })}
+              {season.title || inherited?.title || seasonDisplayName(number)}
             </div>
           )}
           <span className="absolute start-1.5 bottom-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[0.625rem] font-medium text-white/85">
@@ -945,7 +937,7 @@ function SeasonDetails({
           <Input
             id={`season-title-${season.id}`}
             defaultValue={season.title}
-            placeholder={inherited?.title || t("web.item.arrangeSeasons.season", { number })}
+            placeholder={inherited?.title || seasonDisplayName(number)}
             onBlur={(e) => onTitle(e.target.value.trim())}
             onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
           />
@@ -1096,7 +1088,7 @@ function SeasonRow({
 }) {
   const t = useT();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver } =
-    useSortable({
+    useMotionSafeSortable({
       id: `season:${season.id}`,
     });
   return (
@@ -1191,7 +1183,7 @@ function SpecialsRow({
   onSelect: () => void;
 }) {
   const t = useT();
-  const { setNodeRef, isOver } = useSortable({
+  const { setNodeRef, isOver } = useMotionSafeSortable({
     id: `season:${SPECIALS}`,
     disabled: { draggable: true },
   });
@@ -1208,7 +1200,7 @@ function SpecialsRow({
       )}
     >
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium">{t("web.item.arrangeSeasons.specials")}</div>
+        <div className="text-sm font-medium">{seasonDisplayName(0)}</div>
         <div className="text-muted-foreground text-xs">
           {t("web.item.arrangeSeasons.specialsMeta", { count })}
         </div>
@@ -1233,12 +1225,13 @@ function EpisodeRow({
   onSplit?: () => void;
 }) {
   const t = useT();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: `ep:${episode.key}`,
-  });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useMotionSafeSortable({
+      id: `ep:${episode.key}`,
+    });
   const origin = [
     provider,
-    `S${pad(episode.provider_season)}E${pad(episode.provider_episode)}`,
+    formatEpisodeCode(episode.provider_season, episode.provider_episode),
   ].join(" ");
   const year = episode.air_date?.slice(0, 4);
   return (
