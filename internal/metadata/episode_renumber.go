@@ -48,6 +48,8 @@ type episodeMerge struct {
 type episodeRenumberPlan struct {
 	Moves  []episodeMove
 	Merges []episodeMerge
+	// Parked is where the parked rows go: the order lacks their episodes.
+	Parked []episodeSlot
 }
 
 type episodeSlot struct{ season, episode int }
@@ -80,7 +82,11 @@ func planEpisodeRenumber(existing []existingEpisode, targets []EpisodeResult, st
 	moves, lastEpisode := claimedMoves(existing, targets, claims, merged)
 	parked, placeholderMerges := parkUnclaimed(existing, targets, claims, merged, lastEpisode)
 	merges = append(merges, placeholderMerges...)
-	return episodeRenumberPlan{Moves: append(moves, parked...), Merges: merges}
+	plan := episodeRenumberPlan{Moves: append(moves, parked...), Merges: merges}
+	for _, move := range parked {
+		plan.Parked = append(plan.Parked, episodeSlot{move.ToSeason, move.ToEpisode})
+	}
+	return plan
 }
 
 // renumberKeys lists the provider ID keys in the order the planner trusts
@@ -470,6 +476,10 @@ func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID s
 	if err := applyEpisodeRenumber(ctx, tx, seriesID, plan.Moves); err != nil {
 		return err
 	}
+	marked, err := markListedEpisodes(ctx, tx, seriesID, targets, plan.Parked)
+	if err != nil {
+		return err
+	}
 	if episodeFileNumbersOf(ctx) {
 		if err := writeEpisodeFileNumbers(ctx, tx, seriesID, structureKey, targets); err != nil {
 			return err
@@ -487,7 +497,7 @@ func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID s
 		return err
 	}
 	changed := len(plan.Moves) > 0 || len(plan.Merges) > 0 || relinked > 0 || pruned > 0
-	if !changed && !episodeFileNumbersOf(ctx) {
+	if !changed && marked == 0 && !episodeFileNumbersOf(ctx) {
 		return nil
 	}
 	if err := tx.Commit(ctx); err != nil {

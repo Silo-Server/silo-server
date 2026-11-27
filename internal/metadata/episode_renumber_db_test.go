@@ -404,10 +404,11 @@ func TestSaveCustomSeasonsDB(t *testing.T) {
 	}
 }
 
-// A bare number counts through the episodes the structure provider listed in
-// its last full refresh: a row a renumber parked because the chosen order
-// lacks it, from the same provider or another, must not shift every later
-// file by one, while a row no refresh has numbered yet still counts.
+// A bare number counts through the episodes the series' order lists: a row a
+// renumber parked because the chosen order lacks it, from the same provider
+// or another, must not shift every later file by one. A row the refresh
+// neither listed nor parked (its season failed to load, or no refresh has
+// seen it yet) keeps what it was.
 func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 	pool := chainBuiltinTestPool(t)
 	ctx := t.Context()
@@ -431,15 +432,20 @@ func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 		}
 		all = append(all, episode)
 	}
-	write := func(slug string, numbers ...int) {
+	// mark records a refresh that listed listed and parked parked.
+	mark := func(listed []int, parked ...int) {
 		t.Helper()
-		targets := make([]EpisodeResult, 0, len(numbers))
-		for _, n := range numbers {
-			targets = append(targets, EpisodeResult{SeasonNumber: 1, EpisodeNumber: n, FileNumbered: true,
-				FileSeasonNumber: 1, FileEpisodeNumber: n})
+		targets := make([]EpisodeResult, 0, len(listed))
+		for _, n := range listed {
+			targets = append(targets, EpisodeResult{SeasonNumber: 1, EpisodeNumber: n})
+		}
+		slots := make([]episodeSlot, 0, len(parked))
+		for _, n := range parked {
+			slots = append(slots, episodeSlot{1, n})
 		}
 		if err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-			return writeEpisodeFileNumbers(ctx, tx, series, slug, targets)
+			_, err := markListedEpisodes(ctx, tx, series, targets, slots)
+			return err
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -461,19 +467,19 @@ func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 	for number := 1; number <= 3; number++ {
 		add(number)
 	}
-	write("tmdb", 1, 2, 3)
-	write("tvdb", 1, 3) // another provider lacks episode 2
+	mark([]int{1, 3}, 2) // the new order lacks episode 2
 	if got := current(); got != "[1 3]" {
-		t.Fatalf("after TVDB listed two = %v, want [1 3]", got)
+		t.Fatalf("after episode 2 was parked = %v, want [1 3]", got)
 	}
-	write("tvdb", 1, 2, 3)
-	write("tvdb", 2, 3) // another order of the same provider lacks episode 1
+	mark([]int{1, 2, 3})
+	mark([]int{2, 3}, 1) // another order of the same provider lacks episode 1
 	if got := current(); got != "[2 3]" {
-		t.Fatalf("after a TVDB order listed two = %v, want [2 3]", got)
+		t.Fatalf("after episode 1 was parked = %v, want [2 3]", got)
 	}
-	add(4) // stored by a refresh that wrote no file numbers
+	mark([]int{2}) // episode 3's season did not load: it keeps its place
+	add(4)         // stored before any refresh listed it
 	if got := current(); got != "[2 3 4]" {
-		t.Fatalf("with an episode no refresh numbered = %v, want [2 3 4]", got)
+		t.Fatalf("after a partial refresh = %v, want [2 3 4]", got)
 	}
 }
 

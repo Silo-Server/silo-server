@@ -269,27 +269,44 @@ func writeEpisodeFileNumbers(ctx context.Context, tx pgx.Tx, seriesID, structure
 		seriesID, seasons, numbers, fileSeasons, fileNumbers, providerSeasons, providerNumbers, structureSlug); err != nil {
 		return fmt.Errorf("writing episode file numbers of %s: %w", seriesID, err)
 	}
-	if structureSlug == "" {
-		return nil
-	}
-	// Mark which rows the structure provider listed (episodesOfCurrentNumbering).
-	if _, err := tx.Exec(ctx, `
-		UPDATE episodes e SET unlisted = NOT EXISTS (
-			SELECT 1 FROM unnest($2::int[], $3::int[]) AS v(s, n)
-			WHERE v.s = e.season_number AND v.n = e.episode_number)
-		WHERE e.series_id = $1 AND e.unlisted IS DISTINCT FROM NOT EXISTS (
-			SELECT 1 FROM unnest($2::int[], $3::int[]) AS v(s, n)
-			WHERE v.s = e.season_number AND v.n = e.episode_number)`,
-		seriesID, seasons, numbers); err != nil {
-		return fmt.Errorf("marking the unlisted episodes of %s: %w", seriesID, err)
-	}
 	return nil
 }
 
-// episodesOfCurrentNumbering drops the episodes the structure provider did
-// not list in its last full refresh (episodes.unlisted): rows a renumber
-// parked because the chosen order lacks them, which would otherwise shift
-// every later bare episode number.
+// markListedEpisodes records inside tx which rows the series' order lists
+// (episodesOfCurrentNumbering): the rows at the targets' numbers are listed,
+// the rows a renumber parked at parked are not, and every other row keeps
+// what it was, since a refresh that could not load a season says nothing
+// about that season's episodes. It returns how many rows changed.
+func markListedEpisodes(ctx context.Context, tx pgx.Tx, seriesID string, targets []EpisodeResult, parked []episodeSlot) (int64, error) {
+	var seasons, numbers []int32
+	var unlisted []bool
+	add := func(season, number int, parked bool) {
+		if catalog.FitsPostgresInteger(season) && catalog.FitsPostgresInteger(number) {
+			seasons, numbers = append(seasons, int32(season)), append(numbers, int32(number)) //nolint:gosec // FitsPostgresInteger checked the range
+			unlisted = append(unlisted, parked)
+		}
+	}
+	for _, target := range targets {
+		add(target.SeasonNumber, target.EpisodeNumber, false)
+	}
+	for _, slot := range parked {
+		add(slot.season, slot.episode, true)
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE episodes e SET unlisted = v.u
+		FROM unnest($2::int[], $3::int[], $4::bool[]) AS v(s, n, u)
+		WHERE e.series_id = $1 AND e.season_number = v.s AND e.episode_number = v.n AND e.unlisted <> v.u`,
+		seriesID, seasons, numbers, unlisted)
+	if err != nil {
+		return 0, fmt.Errorf("marking the listed episodes of %s: %w", seriesID, err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// episodesOfCurrentNumbering drops the episodes the series' order does not
+// list (episodes.unlisted, markListedEpisodes): rows a renumber parked
+// because the chosen order lacks them, which would otherwise shift every
+// later bare episode number.
 func (s *MetadataService) episodesOfCurrentNumbering(ctx context.Context, seriesID string, episodes []*models.Episode) ([]*models.Episode, error) {
 	rows, err := s.dbPool.Query(ctx, `SELECT content_id FROM episodes WHERE series_id = $1 AND unlisted`, seriesID)
 	if err != nil {
