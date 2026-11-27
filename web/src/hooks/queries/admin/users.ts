@@ -189,6 +189,23 @@ const MIRRORED_SETTING_KEYS: Partial<Record<string, string>> = {
 };
 
 /**
+ * The companion row the server writes beside a saved mirrored key, converted
+ * as settingscontract.MirrorWrite does: "always" pairs with true, "ask" and
+ * "never" with false; true pairs with "always", false with "ask".
+ */
+function mirroredSettingRow(stored: AdminSettingValueRow): AdminSettingValueRow | undefined {
+  const key = MIRRORED_SETTING_KEYS[stored.key];
+  if (!key) return undefined;
+  const value =
+    stored.key === SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
+      ? stored.value === "always"
+      : stored.value === true
+        ? "always"
+        : "ask";
+  return { ...stored, key, value };
+}
+
+/**
  * Takes reset device overrides out of the cached settings list before the
  * reset settles. A reopened subtitle appearance editor reads its row and
  * override flag from that list, so it can't wait on a refetch that may be
@@ -522,19 +539,27 @@ export function useUpdateAdminUserDeviceSetting() {
       // Put the stored row in the cached list before the save settles: the
       // subtitle appearance editor builds each save on that row, and a
       // reopened editor starts from it, so it can't wait on a refetch that may
-      // be slow, skipped (the list isn't on screen) or fail.
+      // be slow, skipped (the list isn't on screen) or fail. A mirrored key's
+      // companion row was written in the same request, so it goes in too.
       const settingsKey = adminUserSettingValuesKey(authority, variables.userId);
+      const written = [stored, mirroredSettingRow(stored)].filter(
+        (row): row is AdminSettingValueRow => row !== undefined,
+      );
       await queryClient.cancelQueries({ queryKey: settingsKey });
       queryClient.setQueryData<AdminSettingValueRow[]>(settingsKey, (rows) => {
         if (!rows) return rows;
-        const target = (row: AdminSettingValueRow) =>
-          row.key === stored.key &&
-          row.scope === stored.scope &&
-          row.profile_id === stored.profile_id &&
-          row.device_id === stored.device_id;
-        return rows.some(target)
-          ? rows.map((row) => (target(row) ? stored : row))
-          : [...rows, stored];
+        let next = rows;
+        for (const write of written) {
+          const target = (row: AdminSettingValueRow) =>
+            row.key === write.key &&
+            row.scope === write.scope &&
+            row.profile_id === write.profile_id &&
+            row.device_id === write.device_id;
+          next = next.some(target)
+            ? next.map((row) => (target(row) ? write : row))
+            : [...next, write];
+        }
+        return next;
       });
       invalidateAdminDeviceCaches(queryClient, variables.userId, authority);
       queryClient.invalidateQueries({
