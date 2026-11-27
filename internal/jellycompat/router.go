@@ -80,6 +80,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Use(compatImageProxyTagVariantMiddleware(deps.IDCodec))
 	r.Use(requestLoggerMiddleware)
 	r.Use(middleware.Recoverer)
+	// Inside the recoverer, so a panicking handler's held compressed
+	// response is dropped before the recoverer answers with its 500.
+	r.Use(httpstream.AbandonOnPanic)
 
 	artworkHandler := deps.ArtworkHandler
 	if artworkHandler == nil {

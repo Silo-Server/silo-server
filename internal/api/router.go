@@ -3645,6 +3645,9 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	// the activity log, so both record it like any other server error
 	// (#3735), an upgrade request included.
 	r.Use(apimw.Recoverer)
+	// Inside the recoverer, so a panicking handler's held compressed
+	// response is dropped before the recoverer answers with its 500.
+	r.Use(httpstream.AbandonOnPanic)
 }
 
 // nodeConfigSettings reads the server settings a transcode node's

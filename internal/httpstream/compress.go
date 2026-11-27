@@ -396,6 +396,41 @@ func (w *compressWriter) close() {
 	w.releaseHeld(b)
 }
 
+// AbandonOnPanic is for a recoverer mounted inside the compressor, as both
+// listeners mount theirs: mounted just inside that recoverer, it abandons the
+// compressor's response while a handler's panic unwinds, before the
+// recoverer answers it. Otherwise the recoverer's status reaches a held
+// writer as a second one, which the writer drops as net/http would, and the
+// handler's partial body is sent as finished. It does not recover the panic.
+func AbandonOnPanic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		returned := false
+		defer func() {
+			if !returned {
+				abandonResponse(w)
+			}
+		}()
+		next.ServeHTTP(w, r)
+		returned = true
+	})
+}
+
+// abandonResponse abandons the compressor's writer found through w's Unwrap
+// chain, if there is one.
+func abandonResponse(w http.ResponseWriter) {
+	for w != nil {
+		if cw, ok := w.(*compressWriter); ok {
+			cw.abandon()
+			return
+		}
+		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return
+		}
+		w = u.Unwrap()
+	}
+}
+
 // abandon ends a response whose handler panicked, writing nothing more. A
 // held response never reaches the client: its status and body are dropped,
 // and the coding and length it declared come off the header, so whatever
