@@ -60,21 +60,52 @@ func (s *Server) SetArtifactBudget(bytes int64) {
 // two starts arriving together at the cap less one cannot both pass.
 type jobSlot struct {
 	s    *Server
+	kind nodepool.JobKind
 	done bool
 }
 
-// admitJob admits new work under the job cap: work that is not a session,
-// remux or preparation the node already holds. It reports false at the cap.
+// admitJob admits new work of kind under the job cap: work that is not a
+// session, remux or preparation the node already holds. It reports false at
+// the cap. The health report counts the slot from here, so the core sees the
+// job while it gets ready (a RequireReady start waiting on its first segment).
 // The caller counts the slot with countJob once the job runs, and releases
 // it on every other return (release after count does nothing).
-func (s *Server) admitJob() (*jobSlot, bool) {
+func (s *Server) admitJob(kind nodepool.JobKind) (*jobSlot, bool) {
 	s.admission.Lock()
 	defer s.admission.Unlock()
 	if s.fullLocked() {
 		return nil, false
 	}
 	s.admitted++
-	return &jobSlot{s: s}, true
+	if s.admittedKinds == nil {
+		s.admittedKinds = make(map[nodepool.JobKind]int, len(nodepool.JobKinds))
+	}
+	s.admittedKinds[kind]++
+	return &jobSlot{s: s, kind: kind}, true
+}
+
+// unadmitLocked takes an uncounted slot out of the admitted counts. The caller
+// holds s.admission.
+func (s *Server) unadmitLocked(slot *jobSlot) {
+	slot.done = true
+	s.admitted--
+	s.admittedKinds[slot.kind]--
+}
+
+// reportedJobs is what the health report counts: the jobs activeJobs counts
+// plus the slots admitted and not yet counted, by kind as well. It reads under
+// s.admission, which countJob holds while it moves a slot from admitted to
+// counted, so a job is in exactly one of the two. A drained node reports only
+// the jobs it counts: what it admits from then on is a start it is about to
+// refuse.
+func (s *Server) reportedJobs(drained bool) (int32, map[nodepool.JobKind]int) {
+	if drained {
+		return s.activeJobs.Load(), s.jobKinds.snapshot(nil)
+	}
+	s.admission.Lock()
+	defer s.admission.Unlock()
+	jobs := int32(min(int(s.activeJobs.Load())+s.admitted, math.MaxInt32)) //nolint:gosec // min clamps it to int32
+	return jobs, s.jobKinds.snapshot(s.admittedKinds)
 }
 
 // countJob counts a job of kind in activeJobs: its admitted slot when it was
@@ -91,8 +122,7 @@ func (s *Server) countJob(slot *jobSlot, kind nodepool.JobKind) {
 	if slot.done {
 		return
 	}
-	slot.done = true
-	s.admitted--
+	s.unadmitLocked(slot)
 	s.activeJobs.Add(1)
 	s.jobKinds.add(kind, 1)
 }
@@ -121,13 +151,14 @@ func (c *jobKindCounts) add(kind nodepool.JobKind, delta int) {
 }
 
 // snapshot names every kind, idle ones as zero, so the core can tell a node
-// with no jobs of a kind from a node that cannot say.
-func (c *jobKindCounts) snapshot() map[nodepool.JobKind]int {
+// with no jobs of a kind from a node that cannot say. extra adds jobs not
+// counted here, such as admitted slots.
+func (c *jobKindCounts) snapshot(extra map[nodepool.JobKind]int) map[nodepool.JobKind]int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := make(map[nodepool.JobKind]int, len(nodepool.JobKinds))
 	for _, kind := range nodepool.JobKinds {
-		out[kind] = max(c.jobs[kind], 0)
+		out[kind] = max(c.jobs[kind]+extra[kind], 0)
 	}
 	return out
 }
@@ -148,8 +179,7 @@ func (slot *jobSlot) release() {
 	slot.s.admission.Lock()
 	defer slot.s.admission.Unlock()
 	if !slot.done {
-		slot.done = true
-		slot.s.admitted--
+		slot.s.unadmitLocked(slot)
 	}
 }
 
@@ -186,18 +216,18 @@ func (s *Server) admitPreparation(w http.ResponseWriter, req downloadprepare.Req
 	if _, prepared := existingDownloadPrepareResult(filepath.Join(s.artifactRoot, req.ArtifactID+".mp4"), req); prepared {
 		return nil, false
 	}
-	return s.admitNewPreparation(w)
+	return s.admitNewPreparation(w, req.JobKind())
 }
 
 // admitNewPreparation admits a preparation the node has to encode, under the
 // declared budget and the job cap, and writes the refusal when it is refused.
-func (s *Server) admitNewPreparation(w http.ResponseWriter) (slot *jobSlot, refused bool) {
+func (s *Server) admitNewPreparation(w http.ResponseWriter, kind nodepool.JobKind) (slot *jobSlot, refused bool) {
 	if s.artifactBudgetReached() {
 		setRefusal(w, nodepool.RefusalStorageFull)
 		http.Error(w, errNodeStorageFull, http.StatusServiceUnavailable)
 		return nil, true
 	}
-	slot, ok := s.admitJob()
+	slot, ok := s.admitJob(kind)
 	if !ok {
 		writeAtCapacity(w)
 		return nil, true
@@ -318,7 +348,7 @@ func (s *Server) admitStart(req TranscodeStartRequest, now time.Time) (slot *job
 	if overlap, continues := s.claimContinuation(req.PlaybackSessionID, now); continues {
 		return nil, overlap.release, true
 	}
-	slot, ok = s.admitJob()
+	slot, ok = s.admitJob(nodepool.CodecJobKind(req.TargetCodecVideo, req.TargetCodecAudio))
 	if !ok {
 		return nil, nil, false
 	}

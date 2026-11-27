@@ -16611,12 +16611,17 @@ export interface components {
     AdminChildStats: {
       /**
        * Format: double
+       * @description CPU of live owned FFmpeg children over the last sample window, on the same scale and capacity as system.cpu_pct. A lower bound: a child's last partial window and a child that starts and exits between two samples are missed. Omitted when the window was not measured, including a truncated pass.
+       */
+      cpu_pct?: number;
+      /**
+       * Format: double
        * @description Summed lifetime CPU seconds of currently live owned child processes. Decreases when a child exits; do not diff as a monotonic counter.
        */
       cpu_seconds: number;
       /**
        * Format: int64
-       * @description Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, trickplay, thumbnails, probes); may count shared pages more than once.
+       * @description Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, media analysis, trickplay and chapter thumbnails); may count shared pages more than once.
        */
       resident_bytes: number;
       /**
@@ -21603,6 +21608,8 @@ export interface components {
       device_platform?: string;
       /** @description Whole-session method: direct, remux, direct_stream (copied video, converted audio) or transcode; absent when unknown */
       effective_play_method?: string;
+      /** @description Viewer egress of the session, only when the list was read with include_egress=true. Absent when it is unknown: stream telemetry is off, its merged view is not built, its last refresh failed, the session's routes exceeded the telemetry route cap, a counting server's clock runs ahead of this server's beyond the telemetry tolerance, telemetry has no record of the session, or a proxy node served the session while telemetry is not shared between servers. Never present in session.* events. */
+      egress?: components["schemas"]["AdminPlaybackSessionEgress"];
       /**
        * Format: int64
        * @description Episode number; absent when not an episode
@@ -21781,6 +21788,8 @@ export interface components {
       device_identity: boolean;
       effective_play_method: boolean;
       effective_play_method_values: string[];
+      /** @description Stream telemetry is enabled: the list accepts include_egress and rows may then carry egress */
+      egress: boolean;
       is_jellyfin_client: boolean;
       /** @description The admin sessions channel carries session.started, session.paused, session.resumed and session.stopped, and rows may carry lifecycle_seq */
       lifecycle_events: boolean;
@@ -21807,6 +21816,20 @@ export interface components {
       tone_map_mode_values: string[];
       transcode_hw_accel: boolean;
       user_filter: boolean;
+    };
+    AdminPlaybackSessionEgress: {
+      /**
+       * Format: int64
+       * @description Bytes Silo has sent to the viewer for this playback session so far, summed across every API server and proxy node; hops between Silo's own nodes are not counted
+       */
+      bytes: number;
+      /**
+       * Format: date-time
+       * @description When the newest of the counting servers took its count, on that server's clock; the same on every API server for the same reports. Servers report about once a second and their clocks can differ slightly, so rates over short intervals jitter. Divide a change in bytes by the change in this, not by the time between polls
+       */
+      measured_at: string;
+      /** @description Opaque token naming the set of servers that make up bytes. Ignore an observation whose measured_at is not newer than the baseline's, whatever its series. Otherwise start a new baseline when series differs from the baseline's or bytes fell, and compare bytes only within one series */
+      series: string;
     };
     AdminPlaybackSessionMessageInputBody: {
       /**
@@ -22573,6 +22596,11 @@ export interface components {
       source: string;
     };
     AdminProcessStats: {
+      /**
+       * Format: double
+       * @description This process's CPU over the last sample window, on the same scale and capacity as system.cpu_pct. Omitted when the window was not measured; a measured idle process is 0.
+       */
+      cpu_pct?: number;
       /**
        * Format: double
        * @description Cumulative CPU time consumed by this Silo process in seconds (user + system).
@@ -23435,6 +23463,8 @@ export interface components {
       cgroup_resources: boolean;
       /** @description Responses include attribution.instance_id and per-metric scope and source metadata. */
       instance_attribution: boolean;
+      /** @description Responses may include attribution.process.cpu_pct and attribution.children.cpu_pct. */
+      process_cpu_percent: boolean;
       /** @description Responses may include attribution.process and attribution.children. */
       process_resources: boolean;
       /** @description Opaque revision of this document */
@@ -88421,6 +88451,8 @@ export interface operations {
     parameters: {
       query?: {
         cursor?: string;
+        /** @description Add egress to the rows. Send it only when the capabilities report egress true. */
+        include_egress?: boolean;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
         /** @description Only live observations belonging to this login account */

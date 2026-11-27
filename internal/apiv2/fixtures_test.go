@@ -1795,6 +1795,7 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, adminPlaybackHistoryDetailFixtureCases()...)
 	cases = append(cases, adminInsightsFixtureCases()...)
 	cases = append(cases, localPasswordOffFixtureCases()...)
+	cases = append(cases, adminSessionEgressFixtureCases()...)
 	return cases
 }
 
@@ -2237,6 +2238,7 @@ func fixtureDeps() Dependencies {
 	deps.ThemeSongs = &fakeThemeSongs{}
 	deps.UserLibraries = new(fakeUserLibraries)
 	deps.AdminPlaybackSessions = new(fakeAdminPlaybackSessions)
+	deps.AdminSessionEgress = fixtureSessionEgress()
 	deps.AdminDownloadPreparations = new(fakeAdminDownloadPreparations)
 	deps.AdminDownloadPreparationControls = new(fakeAdminDownloadPreparationControls)
 	deps.AdminDownloadStorage = new(fakeAdminDownloadStorage)

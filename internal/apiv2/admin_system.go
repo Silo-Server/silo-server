@@ -69,6 +69,7 @@ type AdminResourceCapabilities struct {
 	ProcessResources    bool `json:"process_resources" doc:"Responses may include attribution.process and attribution.children."`
 	CgroupResources     bool `json:"cgroup_resources" doc:"Responses may include attribution.cgroup_cpu and attribution.cgroup_memory."`
 	SampleFreshness     bool `json:"sample_freshness" doc:"Responses include sampled_at, stale, and attribution sample interval and duration."`
+	ProcessCPUPercent   bool `json:"process_cpu_percent" doc:"Responses may include attribution.process.cpu_pct and attribution.children.cpu_pct."`
 }
 type AdminResourceCapabilitiesOutput struct {
 	Status       int
@@ -85,7 +86,7 @@ func registerAdminSystem(reg *Registry) {
 		} else if runtime.GOOS != "linux" {
 			state = StateUnsupported
 		}
-		return &AdminResourceCapabilitiesOutput{Body: AdminResourceCapabilities{Capability: Capability{State: state}, InstanceAttribution: true, ProcessResources: true, CgroupResources: true, SampleFreshness: true}}, nil
+		return &AdminResourceCapabilitiesOutput{Body: AdminResourceCapabilities{Capability: Capability{State: state}, InstanceAttribution: true, ProcessResources: true, CgroupResources: true, SampleFreshness: true, ProcessCPUPercent: true}}, nil
 	})
 	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/system/build", "getAdminBuildInfo", "admin-settings", "Inspect build metadata; use capabilities for feature detection."), Class: ClassActingAdmin}, getAdminBuildInfo)
 	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/system/resources", "getAdminSystemResources", "admin-settings", "Read this API host's last resource sample without probing hardware."), Class: ClassActingAdmin}, reg.getAdminSystemResources)

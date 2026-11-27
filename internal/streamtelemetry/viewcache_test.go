@@ -15,6 +15,7 @@ type countingStore struct {
 	inner  *LocalStore
 	loads  int
 	failed error
+	gate   chan struct{} // when set, a load waits for it to close
 }
 
 func newCountingStore() *countingStore { return &countingStore{inner: NewLocalStore()} }
@@ -27,8 +28,15 @@ func (s *countingStore) Leave(ctx context.Context) error            { return s.i
 func (s *countingStore) LoadAll(ctx context.Context) (PublisherSet, error) {
 	s.mu.Lock()
 	s.loads++
-	failed := s.failed
+	failed, gate := s.failed, s.gate
 	s.mu.Unlock()
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return PublisherSet{}, ctx.Err()
+		}
+	}
 	if failed != nil {
 		return PublisherSet{}, failed
 	}
@@ -160,4 +168,130 @@ func TestViewCacheReportsUnavailableWithoutTelemetry(t *testing.T) {
 			t.Fatalf("nil registry reported available: %+v", status)
 		}
 	})
+}
+
+// The admin sessions list polls SessionEgress. A down Redis must cost one
+// failed load per TTL, not one per request, and the parity reader's View keeps
+// its retry-on-every-read behavior.
+func TestViewCacheSessionEgressCoolsDownAfterFailure(t *testing.T) {
+	cache, _, store := newCacheFixture(t, time.Minute)
+	if _, status := cache.SessionEgress(context.Background()); !status.Available || status.LastError != "" {
+		t.Fatalf("first read = %+v", status)
+	}
+
+	store.fail(errors.New("redis is down"))
+	restore := now
+	t.Cleanup(func() { now = restore })
+	now = func() time.Time { return restore().Add(2 * time.Minute) }
+	if _, status := cache.SessionEgress(context.Background()); !status.Available || status.LastError == "" {
+		t.Fatalf("failed refresh not reported: %+v", status)
+	}
+	loads := store.count()
+	for i := 0; i < 3; i++ {
+		if _, status := cache.SessionEgress(context.Background()); status.LastError == "" || !status.Stale {
+			t.Fatalf("read %d inside the cooldown = %+v", i, status)
+		}
+	}
+	if store.count() != loads {
+		t.Fatalf("loads inside the cooldown = %d, want %d", store.count(), loads)
+	}
+	_, _ = cache.View(context.Background())
+	if store.count() != loads+1 {
+		t.Fatal("View stopped retrying after a failure")
+	}
+
+	store.fail(nil)
+	now = func() time.Time { return restore().Add(4 * time.Minute) }
+	if _, status := cache.SessionEgress(context.Background()); status.LastError != "" || status.Stale {
+		t.Fatalf("read after the cooldown did not recover: %+v", status)
+	}
+}
+
+// A rebuild is shared by every reader, so the reader that happened to start it
+// must not decide its fate: giving up, by deadline or disconnect, costs that
+// reader its answer and nothing else.
+func TestViewCacheReaderThatGivesUpLeavesTheRebuildRunning(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		reader func() (context.Context, context.CancelFunc)
+	}{
+		{"deadline", func() (context.Context, context.CancelFunc) {
+			return context.WithTimeout(context.Background(), 20*time.Millisecond)
+		}},
+		{"canceled", func() (context.Context, context.CancelFunc) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			return ctx, cancel
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cache, _, store := newCacheFixture(t, time.Minute)
+			gate := make(chan struct{})
+			store.mu.Lock()
+			store.gate = gate
+			store.mu.Unlock()
+
+			ctx, cancel := tc.reader()
+			defer cancel()
+			if _, status := cache.View(ctx); status.Available {
+				t.Fatalf("a reader that gave up before the rebuild finished got a view: %+v", status)
+			}
+			close(gate)
+			view, status := cache.View(context.Background())
+			if !status.Available || status.LastError != "" || status.Failures != 0 {
+				t.Fatalf("the abandoned reader's context failed the shared rebuild: %+v", status)
+			}
+			if store.count() != 1 {
+				t.Fatalf("loads = %d, want the one rebuild the first reader started", store.count())
+			}
+			if len(view.Publishers) == 0 {
+				t.Fatalf("view = %+v", view)
+			}
+			if _, status := cache.SessionEgress(context.Background()); !status.Available || status.LastError != "" {
+				t.Fatalf("egress read after the rebuild = %+v", status)
+			}
+		})
+	}
+}
+
+// A reader that starts a rebuild and gives up on it still gets the older view,
+// marked stale, the same as a reader that arrives while the rebuild runs, so a
+// monitor that polls about once per TTL isn't left without egress whenever
+// Redis is slow.
+func TestViewCacheReaderThatGivesUpGetsTheOlderView(t *testing.T) {
+	cache, _, store := newCacheFixture(t, time.Minute)
+	if _, status := cache.View(context.Background()); !status.Available {
+		t.Fatalf("first read = %+v", status)
+	}
+	restore := now
+	now = func() time.Time { return restore().Add(2 * time.Minute) }
+	t.Cleanup(func() { now = restore })
+	gate := make(chan struct{})
+	store.mu.Lock()
+	store.gate = gate
+	store.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	egress, status := cache.SessionEgress(ctx)
+	if !status.Available || !status.Stale || status.LastError != "" {
+		t.Fatalf("reader that gave up on the rebuild = %+v, want the older view, stale", status)
+	}
+	if egress.Sessions == nil {
+		t.Fatalf("reader that gave up got no projection: %+v", egress)
+	}
+
+	// Let the rebuild finish before the clock is restored under it.
+	close(gate)
+	deadline := time.After(5 * time.Second)
+	for {
+		if _, status := cache.View(context.Background()); status.Refreshes >= 2 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("the rebuild never finished")
+		case <-time.After(time.Millisecond):
+		}
+	}
 }

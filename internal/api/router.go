@@ -2964,6 +2964,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 			v2deps.AdminWatchSummary = adminHandler
 		}
 		v2deps.AdminPlaybackSessions = adminHandler
+		// Proxy and transcode processes build no view cache, and one built over
+		// a disabled registry never has a view; neither is wired, so the
+		// interface never holds a typed nil and a wired one means telemetry
+		// is enabled.
+		if deps.StreamTelemetry.Enabled() && deps.StreamTelemetryViewCache != nil {
+			v2deps.AdminSessionEgress = deps.StreamTelemetryViewCache
+		}
 		if playbackHandler != nil && deps.DB != nil {
 			playbackHandler.LifecycleViews = adminHandler
 			v2deps.PlaybackLifecycleEvents = deps.EventsHub != nil

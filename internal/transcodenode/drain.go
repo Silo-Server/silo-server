@@ -155,7 +155,8 @@ func (s *Server) WaitDrained(ctx context.Context) error {
 	return nil
 }
 
-// ActiveJobs is the node's active job count, the number its health reports.
+// ActiveJobs is the node's count of running jobs. Its health report adds the
+// work it has admitted and not yet counted; see reportedJobs.
 func (s *Server) ActiveJobs() int {
 	return int(s.activeJobs.Load())
 }
