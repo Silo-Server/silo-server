@@ -36,6 +36,30 @@ func TestApplyEpisodeCatalogAccessFilterRejectsAnyDisabledMembership(t *testing.
 	}
 }
 
+// Pages and seeks fence the parent-series checks so a small library or a
+// maturity limit cannot push the planner off the sort index; the total keeps
+// them flattenable so large libraries still count with hash joins.
+func TestEpisodeCatalogPageWhereFencesOnlyParentChecks(t *testing.T) {
+	var whereParts []string
+	var args []any
+	argIdx := 2
+	parentChecks := applyEpisodeCatalogAccessFilter(5, AccessFilter{MaxContentRating: "PG"}, &whereParts, &args, &argIdx)
+	page := episodeCatalogPageWhere(whereParts, parentChecks)
+	total := "WHERE " + strings.Join(whereParts, " AND ")
+
+	if got := strings.Count(page, " OFFSET 0)"); got != 2 {
+		t.Fatalf("page WHERE fences %d checks, want the 2 parent checks: %s", got, page)
+	}
+	for _, i := range parentChecks {
+		if fenced := whereParts[i]; !strings.HasPrefix(fenced, "EXISTS (") || strings.Contains(fenced, "OFFSET 0") {
+			t.Fatalf("parent check %d = %q, want an unfenced EXISTS", i, fenced)
+		}
+	}
+	if strings.Contains(total, "OFFSET 0") {
+		t.Fatalf("total WHERE must stay unfenced: %s", total)
+	}
+}
+
 func TestEpisodeCatalogEntryQueryFallsBackForSameFileTechnicalAnd(t *testing.T) {
 	group := QueryGroup{
 		Match: "all",
