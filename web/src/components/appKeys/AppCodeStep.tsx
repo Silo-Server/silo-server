@@ -1,9 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Smartphone } from "lucide-react";
+import { Copy, Smartphone } from "lucide-react";
+import QRCode from "react-qr-code";
 import type { AppCode, JoinAppCode, LinkableJoinAppCode, SessionAppCode } from "@/api/v2/appCodes";
 import { Button } from "@/components/ui/button";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { buildJoinLink } from "@/lib/joinLink";
+import { scanCode as scanCodeFor, scanCodeLayout } from "@/lib/scanCode";
 import { useT } from "@/i18n";
 
 type StepProps<Code extends AppCode> = {
@@ -63,9 +66,9 @@ export function JoinLinkStep({ appCode, onRenew, renewing }: StepProps<LinkableJ
 
 /**
  * The step for an invitation's code whose answer refused a link (an
- * administrator's invitation): the server address and the code, to type in
- * the Silo app to create the account. An app that intercepted a link would
- * hold the new administrator's session.
+ * administrator's invitation): the scan code, the server address and the
+ * code, to scan, type or paste in the Silo app to create the account. An app
+ * that intercepted a link would hold the new administrator's session.
  */
 export function JoinCodeStep({ appCode, onRenew, renewing }: StepProps<JoinAppCode>) {
   const t = useT();
@@ -84,10 +87,13 @@ export function JoinCodeStep({ appCode, onRenew, renewing }: StepProps<JoinAppCo
 }
 
 /**
- * The step that shows a code for the signed-in account ("Open in Silo"): the
- * server address and the code, to type in the Silo app. Never a link or a
- * scannable link: a link can be received by an app other than Silo, which
- * would redeem the code first and get a key on this existing account.
+ * The step that shows a code for the signed-in account ("Open in Silo", and
+ * the page that redeems a sign-in link): the scan code, the server address
+ * and the code, to scan, type or paste in the Silo app. Never a link or a
+ * scannable link (a URL in a QR code): a link can be received by an app other
+ * than Silo, which would redeem the code first and get a key on this existing
+ * account. The scan code is not such a link: it is text for the Silo app's
+ * scanner, which any QR reader can read and nothing opens.
  */
 export function SessionCodeStep({
   appCode,
@@ -113,20 +119,85 @@ export function SessionCodeStep({
   );
 }
 
-/** The server address and the code as text to type: never a link. */
+/**
+ * A code whose answer said link_allowed: false, for the person to move by
+ * hand: the scan code (a QR code of text for the Silo app's scanner,
+ * never a link), the server address and the code as text to type, and Copy
+ * code for a device that can't scan. A server address over 128 bytes has no
+ * scan code, so the address and the code are all there is. The QR code grows
+ * with the text so a module stays at least 3.5 px, inside a white margin of
+ * four modules; where the column is narrower (the longest code on a phone)
+ * the box stays centered and reaches into the card's padding rather than
+ * shrinking.
+ */
 function CodeToType({ appCode }: { appCode: AppCode }) {
   const t = useT();
+  const scanCode = scanCodeFor(appCode.code, appCode.server_address);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+
+  async function copyCode() {
+    try {
+      await copyTextToClipboard(appCode.code);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+  }
+
   return (
-    <dl className="space-y-2">
-      <div>
-        <dt className="text-muted-foreground text-xs">{t("web.auth.appCode.serverAddress")}</dt>
-        <dd className="font-mono text-sm break-all select-all">{appCode.server_address}</dd>
+    <div className="space-y-3">
+      {scanCode.text !== null ? (
+        <div className="space-y-2">
+          <ScanCodeImage text={scanCode.text} label={t("web.auth.appCode.scanCodeLabel")} />
+          <p className="text-muted-foreground text-center text-xs">
+            {t("web.auth.appCode.scanHint")}
+          </p>
+        </div>
+      ) : (
+        <p className="text-muted-foreground text-sm">
+          {scanCode.reason === "too_long"
+            ? t("web.auth.appCode.noScanCode")
+            : t("web.auth.appCode.scanCodeUnavailable")}
+        </p>
+      )}
+      <dl className="space-y-2">
+        <div>
+          <dt className="text-muted-foreground text-xs">{t("web.auth.appCode.serverAddress")}</dt>
+          <dd className="font-mono text-sm break-all select-all">{appCode.server_address}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground text-xs">{t("web.auth.appCode.code")}</dt>
+          <dd className="font-mono text-base break-all select-all">{appCode.code}</dd>
+        </div>
+      </dl>
+      <Button type="button" variant="outline" className="w-full" onClick={() => void copyCode()}>
+        <Copy className="me-2 h-4 w-4" aria-hidden="true" />
+        {t("web.auth.appCode.copyCode")}
+      </Button>
+      <p role="status" className="text-center text-sm empty:hidden">
+        {copyState === "copied" && t("web.auth.appCode.codeCopied")}
+      </p>
+      {copyState === "failed" && (
+        <p role="alert" className="text-destructive text-sm">
+          {t("web.auth.appCode.copyFailed")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The scan code's QR code in its white box: the margin is the quiet zone.
+ * Centered; wider than a narrow column, it reaches into the card's padding.
+ */
+function ScanCodeImage({ text, label }: { text: string; label: string }) {
+  const { pixels, margin } = scanCodeLayout(text);
+  return (
+    <div className="flex justify-center">
+      <div className="shrink-0 rounded-md bg-white" style={{ padding: margin }}>
+        <QRCode value={text} size={pixels} role="img" aria-label={label} />
       </div>
-      <div>
-        <dt className="text-muted-foreground text-xs">{t("web.auth.appCode.code")}</dt>
-        <dd className="font-mono text-base break-all select-all">{appCode.code}</dd>
-      </div>
-    </dl>
+    </div>
   );
 }
 

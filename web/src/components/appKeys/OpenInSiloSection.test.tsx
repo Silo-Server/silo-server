@@ -26,6 +26,9 @@ vi.mock("@/hooks/queries/appKeySession", () => ({
   useAppKeySessionAccess: () => state.access,
 }));
 vi.mock("@/api/v2/appCodes", () => ({ createSessionAppCode: state.createSessionAppCode }));
+vi.mock("react-qr-code", async () =>
+  (await import("@/components/appKeys/codeLinkGuard.test-support")).qrCodeMock(),
+);
 
 const code = {
   code: "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o",
@@ -117,8 +120,8 @@ it("shows the session notice when the server refuses this sign-in", async () => 
 });
 
 // A session code reaches an existing account, so it is shown to type and is
-// never put in anything a device could open: no href, no src and no text
-// with a URL that carries the code. Any app can claim a link's scheme and
+// never put in anything a device could open: no href, no src, no QR code
+// but the scan code, and no text with a URL that carries the code. Any app can claim a link's scheme and
 // would redeem the code first.
 it("never puts the session code in a link", async () => {
   state.createSessionAppCode.mockResolvedValueOnce(code);
@@ -130,6 +133,7 @@ it("never puts the session code in a link", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Get a code for the Silo app" }));
   expect(await screen.findByText(code.code)).toBeTruthy();
   expect(screen.getByText(code.server_address)).toBeTruthy();
+  expect(screen.getByRole("img", { name: "Scan code for the Silo app" })).toBeTruthy();
   expectNoLinkCarrying(container, code.code);
-  expect(container.querySelector("a, img, svg, canvas")).toBeNull();
+  expect(container.querySelector("a, img, canvas")).toBeNull();
 });
