@@ -145,3 +145,24 @@ it("doesn't join a save still in flight from an earlier sign-in", async () => {
   expect(savedValue(onSave, 1)).toMatchObject({ fontSize: "medium", fontFamily: "monospace" });
   await act(async () => first.resolve());
 });
+
+// A save already sent could reach the server after Reset's DELETE and write
+// the override back, so the reset goes out once that save has settled,
+// whichever way it settles (#4545).
+it.each([
+  ["succeeds", (first: ReturnType<typeof deferred>) => first.resolve()],
+  ["fails", (first: ReturnType<typeof deferred>) => first.reject(new Error("rejected"))],
+])("sends the reset after a save already in flight %s", async (_case, settle) => {
+  const first = deferred();
+  const onSave = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+  const onReset = vi.fn();
+  renderDialog(onSave, onReset);
+
+  fireEvent.click(radio("Large"));
+  fireEvent.click(screen.getByRole("button", { name: "Reset override" }));
+  expect(onSave).toHaveBeenCalledTimes(1);
+  expect(onReset).not.toHaveBeenCalled();
+
+  await act(async () => settle(first));
+  expect(onReset).toHaveBeenCalledTimes(1);
+});

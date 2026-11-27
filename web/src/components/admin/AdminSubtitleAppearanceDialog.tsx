@@ -66,10 +66,13 @@ export function AdminSubtitleAppearanceDialog({
   const handleChange = (patch: Partial<SubtitleAppearance>) =>
     draft.edit(patch, (next) => onSave(setting, JSON.stringify(next)));
 
+  // Reset wins over every save made before it: the clear goes out only once
+  // a save already sent has settled, or it could land after the clear and
+  // write the override back.
   const handleReset = () => {
     draft.discardQueued();
-    onReset(setting);
     onClose();
+    void draft.whenIdle().then(() => onReset(setting));
   };
 
   // Eyebrow gives admin context that the player panel lacks: which user +

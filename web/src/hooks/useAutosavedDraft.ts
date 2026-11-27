@@ -14,6 +14,8 @@ interface Machine<T> {
   queuedSave: Save<T> | null;
   /** Shows the machine's state in the editor mounted on it, if any. */
   publish: ((m: Machine<T>) => void) | null;
+  /** Waiting for every save to settle (whenIdle). */
+  idle: Array<() => void>;
 }
 
 /**
@@ -41,7 +43,12 @@ function send<T>(m: Machine<T>, patch: Partial<T>, save: Save<T>) {
       m.queued = null;
       m.queuedSave = null;
       if (queued && queuedSave) send(m, queued, queuedSave);
-      else if (m.key !== undefined && inFlight.get(m.key) === m) inFlight.delete(m.key);
+      else {
+        if (m.key !== undefined && inFlight.get(m.key) === m) inFlight.delete(m.key);
+        const waiting = m.idle;
+        m.idle = [];
+        for (const resolve of waiting) resolve();
+      }
       m.publish?.(m);
     });
 }
@@ -84,6 +91,7 @@ export function useAutosavedDraft<T extends object>(initial: T, key?: string) {
         queued: null,
         queuedSave: null,
         publish: null,
+        idle: [],
       },
   );
   const machine = useRef(joined);
@@ -140,5 +148,16 @@ export function useAutosavedDraft<T extends object>(initial: T, key?: string) {
     publish(m);
   }, [publish]);
 
-  return { value: view.value, saving: view.saving, edit, reset, discardQueued };
+  /**
+   * Resolves once no save is in flight or queued, so a clear of the stored
+   * value sent after it can't be overwritten by a save that lands later. It
+   * outlives the editor: a save already sent completes after an unmount.
+   */
+  const whenIdle = useCallback((): Promise<void> => {
+    const m = machine.current;
+    if (m.sending === null) return Promise.resolve();
+    return new Promise((resolve) => m.idle.push(resolve));
+  }, []);
+
+  return { value: view.value, saving: view.saving, edit, reset, discardQueued, whenIdle };
 }
