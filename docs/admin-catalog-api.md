@@ -495,6 +495,37 @@ replay. No additional optimistic concurrency or request replay receipt is
 introduced. Existing native viewers and Jellyfin reads remain separate from
 these curation actions.
 
+## Episode order
+
+Admins and profiles with metadata curation choose how a series orders its
+episodes ([architecture/episode-ordering.md](architecture/episode-ordering.md)).
+
+- `GET /api/v2/admin/items/{id}/episode-order` (`getAdminEpisodeOrder`) answers
+  the series' `choice` (`provider`, `order_id`, `file_order`, `layout`),
+  `inherited` while it follows its library, `library_provider`, the stored
+  `order_name` and `revision`, and each remote episode provider's `orders`.
+  `?orders=false` skips asking the providers.
+- `POST …/episode-order/preview` (`previewAdminEpisodeOrder`) takes a choice and
+  answers the seasons and episodes it would give, which file each episode would
+  link to, the files it would not place, and `file_order_fits`: how many files
+  each file order would place. Nothing is stored.
+- `PUT …/episode-order` (`setAdminEpisodeOrder`) stores a choice and queues the
+  series' metadata refresh that applies it; the answer carries the new
+  `revision` and the `job_id`. A body `revision` that is not the stored one
+  answers `409`. Default values (empty provider, order and file order, layout
+  `seasons`) return the series to its library's order. Layout `custom` needs an
+  arrangement saved first, else `422`.
+- `GET /api/v2/admin/items/{id}/custom-seasons` (`getAdminCustomSeasons`)
+  answers the arranged seasons, each with its admin `title` and `overview`, the
+  base order's `provider_title` and `provider_overview` for its number, and its
+  episodes in order (`key`, provider numbers, linked `file`,
+  `placed_automatically`). Without an arrangement (`saved: false`), or with
+  `start_over=true` and a base order in `provider`, `order_id` and `file_order`,
+  it starts from that order's seasons.
+- `PUT …/custom-seasons` (`setAdminCustomSeasons`) stores the arrangement, with
+  regular seasons numbered 1…N and season 0 for specials, switches the series
+  to the `custom` layout and queues the refresh, like `setAdminEpisodeOrder`.
+
 ## Episode and movie marker analysis
 
 `POST /api/v2/admin/items/{id}/refresh-markers`,
