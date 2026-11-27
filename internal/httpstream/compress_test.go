@@ -310,3 +310,66 @@ func TestCompressWithExclusionsLeavesStreamedResponseOfPanickingHandlerUnfinishe
 		}
 	}
 }
+
+// A recoverer mounted inside the compressor, with AbandonOnPanic inside it as
+// the listeners mount them, answers a handler's panic. A held response gives
+// way to its 500; one already streaming can't, so the compressor breaks the
+// connection with http.ErrAbortHandler once the recoverer returns (#5240).
+func TestCompressWithExclusionsBreaksCommittedResponseAnsweredInside(t *testing.T) {
+	partial := strings.Repeat(`{"item":1},`, 30)
+	for _, tc := range []struct {
+		name      string
+		declared  bool
+		wantAbort bool
+	}{
+		{name: "held", declared: true},
+		{name: "streamed", wantAbort: true},
+	} {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if tc.declared {
+				w.Header().Set("Content-Length", strconv.Itoa(2*len(partial)))
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, partial)
+			if !tc.declared {
+				_ = http.NewResponseController(w).Flush()
+			}
+			panic("boom")
+		})
+		recoverer := func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer func() {
+					if p := recover(); p != nil {
+						if p == http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+							panic(p)
+						}
+						w.WriteHeader(http.StatusInternalServerError)
+					}
+				}()
+				next.ServeHTTP(w, r)
+			})
+		}
+		h := CompressWithExclusions(nil, nil, "application/json")(recoverer(AbandonOnPanic(handler)))
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Accept-Encoding", "gzip")
+		var aborted any
+		func() {
+			defer func() { aborted = recover() }()
+			h.ServeHTTP(rec, r)
+		}()
+		if tc.wantAbort {
+			if aborted != http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+				t.Fatalf("%s: panic = %v, want http.ErrAbortHandler to break the connection", tc.name, aborted)
+			}
+			continue
+		}
+		if aborted != nil {
+			t.Fatalf("%s: panic = %v, want the recoverer's 500", tc.name, aborted)
+		}
+		if rec.Code != http.StatusInternalServerError || rec.Body.Len() != 0 {
+			t.Fatalf("%s: status %d with %d body bytes, want the recoverer's empty 500", tc.name, rec.Code, rec.Body.Len())
+		}
+	}
+}

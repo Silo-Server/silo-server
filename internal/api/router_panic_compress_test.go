@@ -48,3 +48,33 @@ func TestNativePanicDropsHeldCompressedResponse(t *testing.T) {
 		t.Fatalf("%d bytes of the held body were sent", rec.Body.Len())
 	}
 }
+
+// One already streaming when the handler panics can't be replaced by the
+// 500, so its connection is broken: http.ErrAbortHandler leaves the chain for
+// net/http (#5240).
+func TestNativePanicBreaksStreamedCompressedResponse(t *testing.T) {
+	cfg, err := config.LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+	root := chi.NewRouter()
+	useBaseMiddleware(root, Dependencies{Config: cfg})
+	root.Get("/api/v1/panic-streamed-test", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, strings.Repeat(`{"item":1},`, 30))
+		_ = http.NewResponseController(w).Flush()
+		panic("boom")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/panic-streamed-test", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	var aborted any
+	func() {
+		defer func() { aborted = recover() }()
+		root.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	if aborted != http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+		t.Fatalf("panic = %v, want http.ErrAbortHandler to break the connection", aborted)
+	}
+}

@@ -51,3 +51,36 @@ func TestCompatPanicDropsHeldCompressedResponse(t *testing.T) {
 		t.Fatalf("%d bytes of the held body were sent", rec.Body.Len())
 	}
 }
+
+// One already streaming when the handler panics can't be replaced by the
+// 500, so its connection is broken (#5240).
+func TestCompatPanicBreaksStreamedCompressedResponse(t *testing.T) {
+	cfg, err := config.LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+	router := NewRouter(Dependencies{
+		Config:       cfg,
+		SessionStore: NewSessionStore(time.Hour, nil),
+		IDCodec:      NewResourceIDCodec(),
+		SessionMgr:   &testCompatSessionManager{},
+	})
+	router.Get("/silopanicstreamedtest", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, strings.Repeat(`{"Item":1},`, 30))
+		_ = http.NewResponseController(w).Flush()
+		panic("boom")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/silopanicstreamedtest", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	var aborted any
+	func() {
+		defer func() { aborted = recover() }()
+		router.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	if aborted != http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+		t.Fatalf("panic = %v, want http.ErrAbortHandler to break the connection", aborted)
+	}
+}

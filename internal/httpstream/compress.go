@@ -81,6 +81,13 @@ func CompressWithExclusions(skipRequest func(*http.Request) bool, skipResponse f
 			returned := false
 			defer func() {
 				if returned {
+					// A recoverer inside this middleware answered a panic after the
+					// response was committed (AbandonOnPanic marked it): its status
+					// cannot replace the one sent, so the connection is broken, as
+					// a raw /api/v2 route's committed panic is.
+					if cw.committedAbandon {
+						panic(http.ErrAbortHandler)
+					}
 					cw.close()
 				} else {
 					cw.abandon()
@@ -253,6 +260,10 @@ type compressWriter struct {
 	status    int
 	header    http.Header
 	remaining int64
+	// committedAbandon is set when abandon dropped a response whose status
+	// had already gone out: only breaking the connection keeps the client
+	// from reading its end as a finished response.
+	committedAbandon bool
 }
 
 func (w *compressWriter) WriteHeader(status int) {
@@ -401,7 +412,9 @@ func (w *compressWriter) close() {
 // compressor's response while a handler's panic unwinds, before the
 // recoverer answers it. Otherwise the recoverer's status reaches a held
 // writer as a second one, which the writer drops as net/http would, and the
-// handler's partial body is sent as finished. It does not recover the panic.
+// handler's partial body is sent as finished. A response already streaming
+// can't be replaced, so the compressor breaks its connection once the
+// recoverer has returned. It does not recover the panic.
 func AbandonOnPanic(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		returned := false
@@ -436,7 +449,8 @@ func abandonResponse(w http.ResponseWriter) {
 // and the coding and length it declared come off the header, so whatever
 // answers the panic writes a response of its own. A response that already
 // streams is left without the coding's end, so the client cannot decode it
-// as complete. The encoder goes back to its pool, which resets it on reuse.
+// as complete, and is marked committedAbandon. The encoder goes back to its
+// pool, which resets it on reuse.
 func (w *compressWriter) abandon() {
 	if w.enc == nil {
 		return
@@ -444,6 +458,8 @@ func (w *compressWriter) abandon() {
 	w.coding.put(w.enc)
 	w.enc = nil
 	b := w.held
+	// Not held, or held and then streamed: the status has gone out.
+	w.committedAbandon = b == nil || b.out != nil
 	if b == nil {
 		return
 	}
