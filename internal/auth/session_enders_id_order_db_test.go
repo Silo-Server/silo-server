@@ -66,7 +66,7 @@ func (e *keyEnv) requireLocksInIDOrder(t *testing.T, sessions []string, k int, e
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = hold.Rollback(context.Background()) })
+	t.Cleanup(func() { rollbackWithin(hold) })
 	if _, err := hold.Exec(ctx, `SELECT 1 FROM auth_sessions WHERE id = $1 FOR UPDATE`, sessions[k]); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func (e *keyEnv) requireLocksInIDOrder(t *testing.T, sessions []string, k int, e
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = probe.Rollback(context.Background()) })
+	t.Cleanup(func() { rollbackWithin(probe) })
 	var wrong []string
 	for i, id := range sessions {
 		if i == k {
@@ -267,4 +267,12 @@ func (e *keyEnv) sessionOf(userID int, via string, deviceKey *string, impersonat
 			t.Fatal(err)
 		}
 	}
+}
+
+// rollbackWithin rolls tx back in a cleanup, giving up after five seconds so
+// a connection that stopped answering cannot hang the test's end.
+func rollbackWithin(tx pgx.Tx) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = tx.Rollback(ctx)
 }
