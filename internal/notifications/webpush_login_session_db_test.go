@@ -249,7 +249,12 @@ func TestQueuedWebPushStopsWhenTheRegisteringLoginEndsDB(t *testing.T) {
 		if err := tx.Commit(ctx); err != nil {
 			t.Fatal(err)
 		}
-		return queued
+		// Sent as the dispatcher sends it: under a claim.
+		claimed, err := repo.ClaimPendingForDelivery(ctx, delivery)
+		if err != nil || len(claimed) != 1 {
+			t.Fatalf("claim = %v, %v", claimed, err)
+		}
+		return claimed[0]
 	}
 	outcome := func(id string) (string, string) {
 		t.Helper()
@@ -301,11 +306,16 @@ func TestWebPushRetryAfterNeverShortensTheScheduleDB(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO web_push_delivery_attempts (id, notification_delivery_id, subscription_id, attempt_number, outcome)
-		VALUES ('attempt', 'delivery', $1, 0, 'retrying')`, sub.ID); err != nil {
+		VALUES ('attempt', 'delivery', $1, 0, 'pending')`, sub.ID); err != nil {
 		t.Fatal(err)
 	}
+	// Sent as the dispatcher sends it: under a claim.
+	claimed, err := repo.ClaimPendingForDelivery(ctx, "delivery")
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim = %v, %v", claimed, err)
+	}
 
-	sender.processAttempt(ctx, DeliveryAttempt{ID: "attempt", NotificationDeliveryID: "delivery", TargetID: sub.ID})
+	sender.processAttempt(ctx, claimed[0])
 	var state string
 	var wait time.Duration
 	if err := pool.QueryRow(ctx, `

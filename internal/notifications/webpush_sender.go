@@ -102,20 +102,20 @@ func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 	sub, loginLive, err := s.subscriptions.getByIDUnscoped(ctx, attempt.TargetID)
 	if err != nil || sub == nil {
 		if err == nil {
-			_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
+			_, _ = s.subscriptions.FinalizeAttempt(ctx, attempt, WebhookOutcomeFailed,
 				attempt.AttemptNumber+1, nil, "subscription deleted", nil)
 		}
 		return
 	}
 	if !sub.Enabled || !s.settings.WebPushEnabled(ctx) {
-		_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
+		_, _ = s.subscriptions.FinalizeAttempt(ctx, attempt, WebhookOutcomeFailed,
 			attempt.AttemptNumber+1, nil, "subscription disabled", nil)
 		return
 	}
 	// The attempt may have been queued while the login was live; retries run for
 	// half an hour after that.
 	if !loginLive {
-		_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
+		_, _ = s.subscriptions.FinalizeAttempt(ctx, attempt, WebhookOutcomeFailed,
 			attempt.AttemptNumber+1, nil, "login session ended", nil)
 		return
 	}
@@ -132,7 +132,7 @@ func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 		return
 	}
 	if row == nil {
-		_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
+		_, _ = s.subscriptions.FinalizeAttempt(ctx, attempt, WebhookOutcomeFailed,
 			attempt.AttemptNumber+1, nil, "delivery row missing", nil)
 		return
 	}
@@ -140,7 +140,7 @@ func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 		// The endpoint was reassigned to a different profile, possibly one
 		// with the same ID on another account, between enqueue and dispatch;
 		// this delivery belongs to the previous owner.
-		_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
+		_, _ = s.subscriptions.FinalizeAttempt(ctx, attempt, WebhookOutcomeFailed,
 			attempt.AttemptNumber+1, nil, "subscription reassigned", nil)
 		return
 	}
@@ -148,7 +148,7 @@ func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 	publicKey, privateKey, err := s.service.vapidKeys(ctx)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "VAPID keys unavailable", "error", err)
-		_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
+		_, _ = s.subscriptions.FinalizeAttempt(ctx, attempt, WebhookOutcomeFailed,
 			attempt.AttemptNumber+1, nil, "VAPID keys unavailable", nil)
 		return
 	}
@@ -159,18 +159,25 @@ func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 	}
 	message, err := buildWebPushPayload(*row, posterURL)
 	if err != nil {
-		_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
+		_, _ = s.subscriptions.FinalizeAttempt(ctx, attempt, WebhookOutcomeFailed,
 			attempt.AttemptNumber+1, nil, "payload build failed", nil)
 		return
 	}
 
+	if time.Since(attempt.claimedAt) > webhookClaimLease-webhookSendBudget {
+		// Too little lease left to finish the send (a long claimed batch):
+		// the retry sweep reclaims the attempt once the lease runs out.
+		return
+	}
 	status, retryAfter, sendErr := s.send(ctx, sub, message, publicKey, privateKey)
 	attemptNumber := attempt.AttemptNumber + 1
 
 	if sendErr == nil && status >= 200 && status < 300 {
-		_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeDelivered,
-			attemptNumber, &status, "", nil)
-		_ = s.subscriptions.RecordSuccess(ctx, sub.ID)
+		// A reclaimed attempt's result is the new claim's to record.
+		if applied, _ := s.subscriptions.FinalizeAttempt(ctx, attempt, WebhookOutcomeDelivered,
+			attemptNumber, &status, "", nil); applied {
+			_ = s.subscriptions.RecordSuccess(ctx, sub.ID)
+		}
 		return
 	}
 
@@ -187,8 +194,6 @@ func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 	if status > 0 {
 		statusPtr = &status
 	}
-	_ = s.subscriptions.RecordFailure(ctx, sub.ID, statusPtr)
-
 	message_ := "push service error"
 	if sendErr != nil {
 		message_ = classifyWebhookError(sendErr)
@@ -200,12 +205,17 @@ func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 	if more && (sendErr != nil || retryableHTTPStatus(status)) {
 		// Retry-After can lengthen the wait but never shorten the schedule.
 		nextRetry := time.Now().Add(max(delay, retryAfter))
-		_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeRetrying,
-			attemptNumber, statusPtr, message_, &nextRetry)
+		if applied, _ := s.subscriptions.FinalizeAttempt(ctx, attempt, WebhookOutcomeRetrying,
+			attemptNumber, statusPtr, message_, &nextRetry); applied {
+			_ = s.subscriptions.RecordFailure(ctx, sub.ID, statusPtr)
+		}
 		return
 	}
-	_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
-		attemptNumber, statusPtr, message_, nil)
+	// Only the worker that still held the claim counts the failure.
+	if applied, _ := s.subscriptions.FinalizeAttempt(ctx, attempt, WebhookOutcomeFailed,
+		attemptNumber, statusPtr, message_, nil); applied {
+		_ = s.subscriptions.RecordFailure(ctx, sub.ID, statusPtr)
+	}
 }
 
 func (s *webPushSender) send(ctx context.Context, sub *WebPushSubscription, message []byte, publicKey, privateKey string) (status int, retryAfter time.Duration, err error) {

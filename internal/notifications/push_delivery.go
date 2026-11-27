@@ -45,6 +45,10 @@ type PushDeliveryAttempt struct {
 	FailureMessage         *string
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
+	// claimedAt is when this process received the claim, on its own
+	// monotonic clock: a send starts only while enough of the lease is left
+	// (pushSendBudget).
+	claimedAt time.Time
 }
 
 // newPushDeliveryAttempts builds the pending outbox rows fanning one delivery
@@ -343,14 +347,30 @@ func (r *PushDeviceRepository) ClaimDuePushAttempts(ctx context.Context, limit i
 }
 
 func (r *PushDeviceRepository) claimPushAttempts(ctx context.Context, query string, args ...any) ([]PushDeliveryAttempt, error) {
-	rows, err := r.pool.Query(ctx, query, args...)
+	conn, err := r.pool.Acquire(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("claim push attempts: %w", err)
 	}
-	return scanPushDeliveryAttempts(rows)
+	defer conn.Release()
+	// Taken once a connection is in hand and before the query, as for
+	// webhooks: the lease starts when the claiming statement does.
+	claimedAt := time.Now()
+	rows, err := conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("claim push attempts: %w", err)
+	}
+	attempts, err := scanPushDeliveryAttempts(rows)
+	for i := range attempts {
+		attempts[i].claimedAt = claimedAt
+	}
+	return attempts, err
 }
 
-func (r *PushDeviceRepository) FinalizePushAttempt(ctx context.Context, attemptID, outcome string, attemptNumber int, relayRequestID string, upstreamStatus *int, upstreamReason, failureMessage string, nextRetryAt *time.Time) (*PushDeliveryAttempt, error) {
+// FinalizePushAttempt records a send result. It applies only while the attempt
+// still holds the claim it was sent under, and returns nil otherwise: a send
+// that outlived its lease was reclaimed, and the worker holding the new
+// claim records the outcome.
+func (r *PushDeviceRepository) FinalizePushAttempt(ctx context.Context, claimed PushDeliveryAttempt, outcome string, attemptNumber int, relayRequestID string, upstreamStatus *int, upstreamReason, failureMessage string, nextRetryAt *time.Time) (*PushDeliveryAttempt, error) {
 	var relayRequestIDPtr *string
 	if relayRequestID != "" {
 		relayRequestIDPtr = &relayRequestID
@@ -374,8 +394,8 @@ func (r *PushDeviceRepository) FinalizePushAttempt(ctx context.Context, attemptI
 		    upstream_reason = left($7, 256),
 		    failure_message = left($8, 256),
 		    updated_at = now()
-		WHERE id = $1`+pushAttemptReturning,
-		attemptID, outcome, attemptNumber, nextRetryAt, relayRequestIDPtr, upstreamStatus, upstreamReasonPtr, failureMessagePtr)
+		WHERE id = $1 AND outcome = 'retrying' AND next_retry_at = $9`+pushAttemptReturning,
+		claimed.ID, outcome, attemptNumber, nextRetryAt, relayRequestIDPtr, upstreamStatus, upstreamReasonPtr, failureMessagePtr, claimed.NextRetryAt)
 	if err != nil {
 		return nil, fmt.Errorf("finalize push attempt: %w", err)
 	}
