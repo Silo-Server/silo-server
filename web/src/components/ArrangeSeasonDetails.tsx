@@ -1,5 +1,5 @@
 // The arranger's panel for one season: title, description and poster.
-import { useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 import { ImagePlus, Info, Loader2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -39,6 +39,13 @@ export function SeasonDetails({
   const [overviewKey, setOverviewKey] = useState(0);
   const from = t("web.item.arrangeSeasons.fromProvider", { provider, number });
   const input = useRef<HTMLInputElement>(null);
+  // The title field is uncontrolled; a rename in the sidebar updates it in
+  // place (remounting it would move focus out of the dialog's focus trap).
+  const titleInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const field = titleInput.current;
+    if (field && document.activeElement !== field) field.value = season.title;
+  }, [season.title]);
   const upload = useUploadCustomSeasonPoster(contentId);
   const poster = season.poster?.url ?? inherited?.posterUrl;
   return (
@@ -119,6 +126,7 @@ export function SeasonDetails({
             </span>
           </div>
           <Input
+            ref={titleInput}
             id={`season-title-${season.id}`}
             defaultValue={season.title}
             placeholder={inherited?.title || seasonDisplayName(number)}

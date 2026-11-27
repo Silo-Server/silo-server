@@ -404,9 +404,9 @@ func TestSaveCustomSeasonsDB(t *testing.T) {
 	}
 }
 
-// A bare number counts through the episodes the last refresh numbered: a
-// row the structure provider no longer lists (parked by a renumber) must not
-// shift every later file by one.
+// A bare number counts through the episodes the chosen provider numbered: a
+// row another provider numbered (parked by a renumber) must not shift every
+// later file by one, while a row no refresh numbered yet still counts.
 func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 	pool := chainBuiltinTestPool(t)
 	ctx := t.Context()
@@ -415,7 +415,7 @@ func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 
 	series, tvdb, _ := insertRenumberTestSeries(t, pool, 660_000_000, "Absolute show")
 	var all []*models.Episode
-	for number := 1; number <= 3; number++ {
+	for number := 1; number <= 4; number++ {
 		id, ok := contentid.ForEpisode(series, 1, number)
 		if !ok {
 			t.Fatal("content id did not compose")
@@ -442,9 +442,9 @@ func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	current := func() []int {
+	current := func(provider string) string {
 		t.Helper()
-		kept, err := svc.episodesOfCurrentNumbering(ctx, series, all)
+		kept, err := svc.episodesOfCurrentNumbering(ctx, series, provider, all)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -453,17 +453,18 @@ func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 			numbers = append(numbers, e.EpisodeNumber)
 		}
 		sort.Ints(numbers)
-		return numbers
+		return fmt.Sprint(numbers)
 	}
 
+	// TMDB numbered 1-3; episode 4 is new and unnumbered.
 	write("tmdb", 1, 2, 3)
-	if got := current(); fmt.Sprint(got) != "[1 2 3]" {
-		t.Fatalf("after numbering all three = %v, want [1 2 3]", got)
+	if got := current("tvdb"); got != "[1 2 3 4]" {
+		t.Fatalf("before TVDB numbered any = %v, want every episode", got)
 	}
-	// TVDB lists two of them; the third is parked and no longer counts.
+	// TVDB numbers 1 and 3; episode 2 keeps TMDB's numbering and drops out.
 	write("tvdb", 1, 3)
-	if got := current(); fmt.Sprint(got) != "[1 3]" {
-		t.Fatalf("after TVDB numbered two = %v, want [1 3]", got)
+	if got := current("tvdb"); got != "[1 3 4]" {
+		t.Fatalf("after TVDB numbered two = %v, want [1 3 4]", got)
 	}
 }
 

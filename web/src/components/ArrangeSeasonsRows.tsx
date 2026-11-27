@@ -31,7 +31,8 @@ export function VirtualEpisodeList({
   const [offset, setOffset] = useState(0);
   // The scroll element can still be detached when the list mounts (the
   // arranger remounts in its dialog on a start over), so it is looked up
-  // again a frame later; the virtualizer only reads it on a render.
+  // again a frame later; finding it renders the list, and the virtualizer
+  // reads the scroll element on every render.
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => {
     const found = scrollElement();
@@ -46,21 +47,22 @@ export function VirtualEpisodeList({
   useLayoutEffect(() => {
     const list = listRef.current;
     if (!list || !scroller) return;
-    const measure = () =>
+    // Read live: a resize can move scrolling between the pane and the body.
+    const measure = () => {
+      const current = scrollElement() ?? scroller;
       setOffset(
-        list.getBoundingClientRect().top -
-          scroller.getBoundingClientRect().top +
-          scroller.scrollTop,
+        list.getBoundingClientRect().top - current.getBoundingClientRect().top + current.scrollTop,
       );
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(scroller);
     if (list.parentElement) observer.observe(list.parentElement);
     return () => observer.disconnect();
-  }, [scroller]);
+  }, [scroller, scrollElement]);
   const virtualizer = useVirtualizer({
     count: keys.length,
-    getScrollElement: () => scroller,
+    getScrollElement: scrollElement,
     estimateSize: () => 60,
     overscan: 8,
     scrollMargin: offset,

@@ -130301,6 +130301,12 @@
       "value": "\u200F\u202EStart over from…\u202C"
     }
   ],
+  "web.item.arrangeSeasons.startOverBody": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour changes are lost, and the seasons start again from the order you picked.\u202C"
+    }
+  ],
   "web.item.arrangeSeasons.startOverOption": [
     {
       "type": 0,

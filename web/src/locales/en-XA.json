@@ -134821,6 +134821,12 @@
       "value": "⟦Šţåŕţ öṽéŕ ƒŕöɱ…~~~~~~~⟧"
     }
   ],
+  "web.item.arrangeSeasons.startOverBody": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ çĥåñĝéš åŕé ļöšţ, åñđ ţĥé šéåšöñš šţåŕţ åĝåîñ ƒŕöɱ ţĥé öŕđéŕ ýöû þîçķéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.item.arrangeSeasons.startOverOption": [
     {
       "type": 0,

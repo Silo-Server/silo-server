@@ -124029,6 +124029,12 @@
       "value": "Start over from…"
     }
   ],
+  "web.item.arrangeSeasons.startOverBody": [
+    {
+      "type": 0,
+      "value": "Your changes are lost, and the seasons start again from the order you picked."
+    }
+  ],
   "web.item.arrangeSeasons.startOverOption": [
     {
       "type": 1,

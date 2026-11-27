@@ -7206,7 +7206,13 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 			return err
 		}
 		if order.Override {
-			if seriesEpisodes, err = s.episodesOfCurrentNumbering(ctx, seriesID, seriesEpisodes); err != nil {
+			provider := order.Provider
+			if provider == "" {
+				if provider, err = s.seriesEpisodeOrderProvider(ctx, seriesID); err != nil {
+					return err
+				}
+			}
+			if seriesEpisodes, err = s.episodesOfCurrentNumbering(ctx, seriesID, provider, seriesEpisodes); err != nil {
 				return err
 			}
 		}

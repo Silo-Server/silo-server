@@ -309,6 +309,16 @@ func (s *MetadataService) PreviewEpisodeOrder(ctx context.Context, seriesID stri
 		return preview, err
 	}
 	order := episodeOrderSettings{EpisodeOrderSettings: settings}
+	if order.Provider == "" && order.Layout == episodeLayoutCustom {
+		// As a save would (SaveEpisodeOrder): the arrangement's provider.
+		base, arranged, err := s.customLayoutBase(ctx, seriesID)
+		if err != nil {
+			return preview, err
+		}
+		if arranged {
+			order.Provider = base.Provider
+		}
+	}
 	if order.Provider == "" {
 		if order.Provider, err = s.seriesEpisodeOrderProvider(ctx, seriesID); err != nil {
 			return preview, err

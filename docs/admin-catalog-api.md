@@ -514,7 +514,9 @@ episodes ([architecture/episode-ordering.md](architecture/episode-ordering.md)).
   stores the choice and answers `202` with the metadata refresh job that applies
   it. Default values (empty provider, order and file order, layout `seasons`)
   return the series to its library's order; an arrangement stays stored. Layout
-  `custom` needs an arrangement saved first, else `422`.
+  `custom` needs an arrangement saved first, else `422`. Its episodes belong to
+  the provider the seasons were arranged from: an empty provider takes that one
+  (in a preview too), and another provider is a `422`.
 - `GET /api/v2/admin/items/{id}/custom-seasons` (`getAdminCustomSeasons`)
   answers the arranged seasons, each with its admin `title` and `overview`, the
   base order's `provider_title` and `provider_overview` for its number, and its

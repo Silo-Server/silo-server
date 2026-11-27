@@ -108,6 +108,8 @@ function Loader({
 }) {
   const t = useT();
   const [base, setBase] = useState<EpisodeOrderChoice | null>(startFrom);
+  // Counts start overs, so starting over from the same order still resets.
+  const [restarts, setRestarts] = useState(0);
   const query = useCustomSeasons(contentId, true, base);
   const data = query.data;
   if (!data) {
@@ -132,12 +134,15 @@ function Loader({
   return (
     <Arranger
       // A start over loads new data; the arranger starts from it.
-      key={JSON.stringify(base)}
+      key={`${restarts}:${JSON.stringify(base)}`}
       contentId={contentId}
       title={title}
       data={data}
       dirtyFromStart={base !== null || activate}
-      onStartOver={setBase}
+      onStartOver={(choice) => {
+        setBase(choice);
+        setRestarts((n) => n + 1);
+      }}
       onClose={onClose}
     />
   );
@@ -594,8 +599,7 @@ function Arranger({
 
               {activeSeason && (
                 <SeasonDetails
-                  // A rename in the sidebar refreshes the uncontrolled title field.
-                  key={`${activeSeason.id}:${activeSeason.title}`}
+                  key={activeSeason.id}
                   season={activeSeason}
                   number={activeIndex + 1}
                   provider={provider}
@@ -771,7 +775,7 @@ function Arranger({
           open={restarting !== null}
           onOpenChange={(next) => !next && setRestarting(null)}
           title={t("web.item.arrangeSeasons.discardTitle")}
-          description={t("web.item.arrangeSeasons.discardBody")}
+          description={t("web.item.arrangeSeasons.startOverBody")}
           confirmLabel={t("web.item.arrangeSeasons.discard")}
           cancelLabel={t("web.item.arrangeSeasons.keepEditing")}
           variant="destructive"
