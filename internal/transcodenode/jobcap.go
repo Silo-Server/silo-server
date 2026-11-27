@@ -95,11 +95,12 @@ func (s *Server) unadmitLocked(slot *jobSlot) {
 // reportedJobs is what the health report counts: the jobs activeJobs counts
 // plus the slots admitted and not yet counted, by kind as well. It reads under
 // s.admission, which countJob holds while it moves a slot from admitted to
-// counted, so a job is in exactly one of the two. A drained node reports none:
-// what it admits from then on is a start it is about to refuse.
+// counted, so a job is in exactly one of the two. A drained node reports only
+// the jobs it counts: what it admits from then on is a start it is about to
+// refuse.
 func (s *Server) reportedJobs(drained bool) (int32, map[nodepool.JobKind]int) {
 	if drained {
-		return 0, (&jobKindCounts{}).snapshot(nil)
+		return s.activeJobs.Load(), s.jobKinds.snapshot(nil)
 	}
 	s.admission.Lock()
 	defer s.admission.Unlock()

@@ -248,9 +248,9 @@ func TestHealthCountsARunningStartOnce(t *testing.T) {
 	}
 }
 
-// A drained node reports no jobs. Work admitted after the drain completes,
-// such as a start a draining node is about to refuse, would otherwise show a
-// drained node with a job.
+// A drained node leaves admitted work out of its report. Work admitted after
+// the drain completes, such as a start a draining node is about to refuse,
+// would otherwise show a drained node with a job.
 func TestDrainedHealthReportsNoJobs(t *testing.T) {
 	s := newTestServer(t)
 	s.shutdownDrain.Store(true)
