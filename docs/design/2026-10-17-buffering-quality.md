@@ -64,7 +64,7 @@ answers where they differ:
 | --- | --- |
 | When is playback in an outage? | When a media request fails or cannot connect, the device is offline, or the player waits while no media request has received data for `OUTAGE_NO_DATA_MS = 4000` on progressive delivery, or `OUTAGE_NO_DATA_SEGMENTED_MS = 15000` on segmented (HLS) delivery, where the server holds a segment request silent while it produces the segment. A request that keeps receiving data never fails, however slow. A client's player or engine timeouts no longer decide it. |
 | When is a wait with media buffered a stall? | A renderer wait whose buffer stays under the player's own resume amount becomes a stall after `RENDERER_WAIT_MAX_MS = 3000`. On a player that resumes at an explicit buffered amount (Media3, tunneled or not, and Apple's software route) or as soon as data reaches the playhead (browsers), a wait with more buffered than its ample threshold is a renderer wait from that moment: the device, not the network, is behind. The threshold is 5000 ms in browsers and on Apple's software route, which resumes at a fixed 2000 ms lead, and twice the resume amount on Media3 (10000 ms). AVPlayer has none. |
-| What does a lowering send? | The step-down estimate, as before, plus `observed_throughput_kbps`, the throughput the plan that kept buffering measured. The server plans with, and learns, the lower figure. |
+| What does a lowering send? | The step-down estimate, as before, plus `observed_throughput_kbps`, the throughput the plan that kept buffering measured. The server plans with the lower figure and learns it, unless the connection's current reading contradicts it (see *Contradicted lowerings*). |
 | How low can Auto go? | Until a stream fits a 500 kbps link. The menu gains 480p Low (800 kbps) and 360p (300 kbps). An Auto encode fits video and audio together within its budget, in stereo once the audio share drops below 192 kbps. |
 | What if a start or replan sends no estimate? | On Auto, the server uses the connection's current reading in its place. It replaces "the server plans only from the estimate a request carries". |
 | When does Auto try a lower version? | Under any Auto budget, not only after buffering. Of the versions that fit, one that keeps the source's dynamic range comes first, then the highest bitrate. |
@@ -546,6 +546,12 @@ A limit is recorded when a start or replan carries
   `observed_throughput_kbps`, which is also what the request plans with. A
   later lowering on the same key replaces it, and it is lower by
   construction, because Auto was already planning under the old limit.
+- **Contradicted lowerings**: a lowering more than 10 times below the
+  connection's current reading plans at its own figure, or at a lower stored
+  limit, but is not recorded, so a stall the server caused (a disk spinning
+  up) does not cap the next titles. A `provider:` key skips only this reading
+  check; a stall the server's own transcode paced, or whose cause is unknown,
+  is still not recorded. See [playback protocol v3](../architecture/playback-protocol-v3.md#buffering-quality-native-v2).
 - **Lifetime**: `LEARNED_LIMIT_TTL = 24 hours` from the most recent
   observation, so one bad evening does not cap a week. A changed home IP
   address simply starts a new key. That fails toward the source, and a new
@@ -1050,7 +1056,7 @@ in parallel:
 | --- | --- |
 | Feature | The server advertises `buffering_quality_v1` in the `/api/v2` capability `features` and native v2 start/replan response `server_features`. A client that sees it adds `buffering_quality_v1` to `client_features` on start and replan, and only then sends the fields below, because the server rejects unknown fields. The server records and applies learned limits only on requests that carry the feature. Against a server without it, clients still run the controller and send the same replans without the new fields; nothing is learned, and the limit row in Settings stays hidden. |
 | `bandwidth_estimate_source` | Start and replan, optional: `probe` or `observed_rebuffer`. Valid only alongside `bandwidth_estimate_kbps`; otherwise the request is a `400`. |
-| `observed_throughput_kbps` | Start and replan, optional integer, 100 to 1,000,000. Valid only with `bandwidth_estimate_source: "observed_rebuffer"`; otherwise the request is a `422`, as for the other buffering-quality validation. The throughput the plan that kept buffering has received so far, timed the way *Slow-link evidence* describes, as `plan_summary` `throughput_kbps` is. The server plans with, and learns, `min(bandwidth_estimate_kbps, observed_throughput_kbps)`. |
+| `observed_throughput_kbps` | Start and replan, optional integer, 100 to 1,000,000. Valid only with `bandwidth_estimate_source: "observed_rebuffer"`; otherwise the request is a `422`, as for the other buffering-quality validation. The throughput the plan that kept buffering has received so far, timed the way *Slow-link evidence* describes, as `plan_summary` `throughput_kbps` is. The server plans with `min(bandwidth_estimate_kbps, observed_throughput_kbps)` and learns it, unless the connection's current reading contradicts it (see *Contradicted lowerings*). |
 | `learned_limit` | Start and replan, optional: `ignore` or `clear`. |
 | `playback_plan.bandwidth_limit` | Optional object: `kbps` (integer), `source` (`"observed_rebuffer"`), `expires_at` (RFC 3339). Present only when the learned limit lowered the plan. |
 | Connection endpoints | `GET /api/v2/playback/connection`, and `DELETE /api/v2/playback/connection/learned-limit` returning 204. Both exist when the feature is advertised. They use normal authenticated profile-scoped headers and `X-Silo-Device-Id`; no installation ID or body is required. The reset without `X-Silo-Device-Id` is a `422`. |

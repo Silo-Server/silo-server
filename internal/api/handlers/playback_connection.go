@@ -121,11 +121,8 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 		case device == "" || key == "":
 			// Observe stores nothing without a device and a connection, so
 			// the replan need not wait on a node to ask.
-		case outputBound != nil && outputBound():
-			slog.InfoContext(r.Context(), "learned limit not recorded: the server paced playback, or whether it did is unknown", "component", "playback",
-				"estimate_kbps", *req.BandwidthEstimateKbps)
 		default:
-			if err := h.Connections.Observe(r.Context(), user, device, key, *req.BandwidthEstimateKbps); err != nil {
+			if err := h.observeLearnedLimit(r.Context(), user, device, key, *req.BandwidthEstimateKbps, outputBound); err != nil {
 				return nil, err
 			}
 		}
@@ -144,6 +141,47 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 	req.BandwidthEstimateKbps = new(limit.Kbps)
 	req.BandwidthEstimateSource = playback.BandwidthEstimateObservedRebufferV3
 	return &playback.BandwidthLimitV3{Kbps: limit.Kbps, Source: playback.BandwidthEstimateObservedRebufferV3, ExpiresAt: limit.ExpiresAt.UTC().Format(time.RFC3339)}, nil
+}
+
+// observeLearnedLimit records a lowering as the connection's learned limit
+// unless the connection's current reading contradicts it or the server paced
+// the stall. A start that stalls because the server is slow (a disk spinning
+// up, a probe that took seconds) looks like a slow link to the client, but a
+// link that a recent speed test or playback sample measured many times faster
+// did not cause it. The request still plans at its lowered estimate; only the
+// next titles go without it. A provider path follows the device across
+// networks, so its reading does not speak for the network that stalled and
+// skips the reading check, but never the encoder check. The reading check runs
+// first: it reads this database, while outputBound may ask a remote node.
+func (h *PlaybackHandler) observeLearnedLimit(ctx context.Context, user int, device, key string, kbps int, outputBound func() bool) error {
+	if !connectionstore.SpansNetworks(key) {
+		contradicted, err := h.readingContradicts(ctx, user, device, key, kbps)
+		if err != nil || contradicted {
+			return err
+		}
+	}
+	if outputBound != nil && outputBound() {
+		slog.InfoContext(ctx, "learned limit not recorded: the server paced playback, or whether it did is unknown", logComponentKey, "playback",
+			"estimate_kbps", kbps)
+		return nil
+	}
+	return h.Connections.Observe(ctx, user, device, key, kbps)
+}
+
+// readingContradicts reports whether the connection's current reading is so
+// much faster than kbps that the link cannot have caused the stall.
+func (h *PlaybackHandler) readingContradicts(ctx context.Context, user int, device, key string, kbps int) (bool, error) {
+	c, err := h.Connections.Connection(ctx, user, device, key)
+	if err != nil || c == nil {
+		return false, err
+	}
+	reading := connectionstore.Reading(h.currentReadings(c.Probe, c.PlaybackSample))
+	if !connectionstore.Contradicts(reading, kbps) {
+		return false, nil
+	}
+	slog.InfoContext(ctx, "learned limit not recorded: the connection's reading contradicts it", logComponentKey, "playback",
+		"connection", c.Connection, "limit_kbps", kbps, "reading_kbps", reading)
+	return true, nil
 }
 
 // transcodeOutputBoundV3 says whether sessionID's transcode has no lead over

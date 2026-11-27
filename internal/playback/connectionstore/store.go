@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	labelRemote = "remote"
-	labelLocal  = "local"
+	labelRemote    = "remote"
+	labelLocal     = "local"
+	providerPrefix = "provider:"
 )
 
 const (
@@ -31,7 +32,28 @@ const (
 	TTL = 24 * time.Hour
 	// Retention is how long a row survives without an update.
 	Retention = 30 * 24 * time.Hour
+	// ReadingContradictsRatio is how many times faster than a lowering the
+	// connection's current reading must be to contradict it. A margin chosen
+	// by judgement: a start that waited on a disk spinning up measured about
+	// 50 times below its reading. The reading is the best the connection did within the reading
+	// lifetime, so a link that really falls this far below it on the same key
+	// (weak Wi-Fi far from the access point) no longer learns a limit.
+	ReadingContradictsRatio = 10
 )
+
+// Contradicts reports whether reading, the connection's current measured
+// speed, is more than ReadingContradictsRatio times kbps. A missing reading
+// contradicts nothing.
+func Contradicts(reading, kbps int) bool {
+	return reading > 0 && kbps > 0 && reading > kbps*ReadingContradictsRatio
+}
+
+// SpansNetworks reports whether key follows a device across networks, as a
+// network-access provider's does: its reading may come from another network
+// than the one that stalled.
+func SpansNetworks(key string) bool {
+	return strings.HasPrefix(key, providerPrefix)
+}
 
 // Limit is a learned limit: the step-down estimate a buffering client last
 // reported for one device on one connection.
@@ -86,7 +108,7 @@ type Store struct{ Pool *pgxpool.Pool }
 // An unresolved address has no identity and must not share another viewer's limit.
 func Key(ctx context.Context, secret string) (key, label string) {
 	if provider := netaccess.PathFromContext(ctx).Provider; provider != "" {
-		return "provider:" + provider, "provider:" + provider
+		return providerPrefix + provider, providerPrefix + provider
 	}
 	ip := net.ParseIP(clientip.FromContext(ctx))
 	if ip == nil {
