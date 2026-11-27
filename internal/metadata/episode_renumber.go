@@ -48,8 +48,6 @@ type episodeMerge struct {
 type episodeRenumberPlan struct {
 	Moves  []episodeMove
 	Merges []episodeMerge
-	// Parked is where the parked rows go: the order lacks their episodes.
-	Parked []episodeSlot
 }
 
 type episodeSlot struct{ season, episode int }
@@ -82,11 +80,7 @@ func planEpisodeRenumber(existing []existingEpisode, targets []EpisodeResult, st
 	moves, lastEpisode := claimedMoves(existing, targets, claims, merged)
 	parked, placeholderMerges := parkUnclaimed(existing, targets, claims, merged, lastEpisode)
 	merges = append(merges, placeholderMerges...)
-	plan := episodeRenumberPlan{Moves: append(moves, parked...), Merges: merges}
-	for _, move := range parked {
-		plan.Parked = append(plan.Parked, episodeSlot{move.ToSeason, move.ToEpisode})
-	}
-	return plan
+	return episodeRenumberPlan{Moves: append(moves, parked...), Merges: merges}
 }
 
 // renumberKeys lists the provider ID keys in the order the planner trusts
@@ -476,7 +470,7 @@ func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID s
 	if err := applyEpisodeRenumber(ctx, tx, seriesID, plan.Moves); err != nil {
 		return err
 	}
-	marked, err := markListedEpisodes(ctx, tx, seriesID, targets, plan.Parked)
+	marked, err := markListedEpisodes(ctx, tx, seriesID, targets)
 	if err != nil {
 		return err
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -404,11 +405,11 @@ func TestSaveCustomSeasonsDB(t *testing.T) {
 	}
 }
 
-// A bare number counts through the episodes the series' order lists: a row a
-// renumber parked because the chosen order lacks it, from the same provider
-// or another, must not shift every later file by one. A row the refresh
-// neither listed nor parked (its season failed to load, or no refresh has
-// seen it yet) keeps what it was.
+// A bare number counts through the episodes the series' order lists: a row
+// in a season the refresh loaded that the chosen order lacks, from the same
+// provider or another, must not shift every later file by one. A season the
+// refresh did not load keeps its marks, and a row no refresh has seen yet
+// counts.
 func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 	pool := chainBuiltinTestPool(t)
 	ctx := t.Context()
@@ -417,34 +418,35 @@ func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 
 	series, tvdb, _ := insertRenumberTestSeries(t, pool, 660_000_000, "Absolute show")
 	var all []*models.Episode
-	add := func(number int) {
+	add := func(season, number int) {
 		t.Helper()
-		id, ok := contentid.ForEpisode(series, 1, number)
+		id, ok := contentid.ForEpisode(series, season, number)
 		if !ok {
 			t.Fatal("content id did not compose")
 		}
 		episode := &models.Episode{
-			ContentID: id, SeriesID: series, SeasonNumber: 1, EpisodeNumber: number, TvdbID: fmt.Sprint(tvdb, number),
-			Title: fmt.Sprint("Episode ", number), DefaultMetadataLanguage: "en", MetadataSource: "provider",
+			ContentID: id, SeriesID: series, SeasonNumber: season, EpisodeNumber: number,
+			TvdbID: fmt.Sprint(tvdb, season, number), Title: fmt.Sprintf("Episode %d.%d", season, number),
+			DefaultMetadataLanguage: "en", MetadataSource: "provider",
 		}
 		if err := episodes.Upsert(ctx, episode); err != nil {
 			t.Fatal(err)
 		}
 		all = append(all, episode)
 	}
-	// mark records a refresh that listed listed and parked parked.
-	mark := func(listed []int, parked ...int) {
+	// mark records a refresh whose order listed the episodes at slots ("1.2").
+	mark := func(slots ...string) {
 		t.Helper()
-		targets := make([]EpisodeResult, 0, len(listed))
-		for _, n := range listed {
-			targets = append(targets, EpisodeResult{SeasonNumber: 1, EpisodeNumber: n})
-		}
-		slots := make([]episodeSlot, 0, len(parked))
-		for _, n := range parked {
-			slots = append(slots, episodeSlot{1, n})
+		targets := make([]EpisodeResult, 0, len(slots))
+		for _, slot := range slots {
+			var season, number int
+			if _, err := fmt.Sscanf(slot, "%d.%d", &season, &number); err != nil {
+				t.Fatal(err)
+			}
+			targets = append(targets, EpisodeResult{SeasonNumber: season, EpisodeNumber: number})
 		}
 		if err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-			_, err := markListedEpisodes(ctx, tx, series, targets, slots)
+			_, err := markListedEpisodes(ctx, tx, series, targets)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -456,30 +458,31 @@ func TestEpisodesOfCurrentNumberingDB(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var numbers []int
+		var slots []string
 		for _, e := range kept {
-			numbers = append(numbers, e.EpisodeNumber)
+			slots = append(slots, fmt.Sprintf("%d.%d", e.SeasonNumber, e.EpisodeNumber))
 		}
-		sort.Ints(numbers)
-		return fmt.Sprint(numbers)
+		sort.Strings(slots)
+		return strings.Join(slots, " ")
 	}
 
-	for number := 1; number <= 3; number++ {
-		add(number)
+	add(1, 1)
+	add(1, 2)
+	add(1, 3)
+	add(2, 1)
+	mark("1.1", "1.2", "2.1") // the new order ends season 1 a row early
+	if got := current(); got != "1.1 1.2 2.1" {
+		t.Fatalf("after season 1 lost its last row = %q", got)
 	}
-	mark([]int{1, 3}, 2) // the new order lacks episode 2
-	if got := current(); got != "[1 3]" {
-		t.Fatalf("after episode 2 was parked = %v, want [1 3]", got)
+	mark("1.1", "1.2", "1.3", "2.1")
+	mark("1.2", "1.3", "2.1") // another order of the same provider lacks 1.1
+	if got := current(); got != "1.2 1.3 2.1" {
+		t.Fatalf("after an order without 1.1 = %q", got)
 	}
-	mark([]int{1, 2, 3})
-	mark([]int{2, 3}, 1) // another order of the same provider lacks episode 1
-	if got := current(); got != "[2 3]" {
-		t.Fatalf("after episode 1 was parked = %v, want [2 3]", got)
-	}
-	mark([]int{2}) // episode 3's season did not load: it keeps its place
-	add(4)         // stored before any refresh listed it
-	if got := current(); got != "[2 3 4]" {
-		t.Fatalf("after a partial refresh = %v, want [2 3 4]", got)
+	mark("1.2", "1.3") // season 2 did not load: its row keeps its place
+	add(1, 4)          // stored before any refresh listed it
+	if got := current(); got != "1.2 1.3 1.4 2.1" {
+		t.Fatalf("after a partial refresh = %q", got)
 	}
 }
 

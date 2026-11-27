@@ -273,30 +273,28 @@ func writeEpisodeFileNumbers(ctx context.Context, tx pgx.Tx, seriesID, structure
 }
 
 // markListedEpisodes records inside tx which rows the series' order lists
-// (episodesOfCurrentNumbering): the rows at the targets' numbers are listed,
-// the rows a renumber parked at parked are not, and every other row keeps
-// what it was, since a refresh that could not load a season says nothing
-// about that season's episodes. It returns how many rows changed.
-func markListedEpisodes(ctx context.Context, tx pgx.Tx, seriesID string, targets []EpisodeResult, parked []episodeSlot) (int64, error) {
-	var seasons, numbers []int32
-	var unlisted []bool
-	add := func(season, number int, parked bool) {
-		if catalog.FitsPostgresInteger(season) && catalog.FitsPostgresInteger(number) {
-			seasons, numbers = append(seasons, int32(season)), append(numbers, int32(number)) //nolint:gosec // FitsPostgresInteger checked the range
-			unlisted = append(unlisted, parked)
+// (episodesOfCurrentNumbering). In each season targets has episodes in, the
+// rows at the targets' numbers are listed and the rest, which the order
+// lacks (a renumber parks them after the season's last episode), are not.
+// A season targets has none of keeps its marks: a refresh that could not
+// load a season says nothing about its episodes. It returns how many rows
+// changed.
+func markListedEpisodes(ctx context.Context, tx pgx.Tx, seriesID string, targets []EpisodeResult) (int64, error) {
+	seasons, numbers := make([]int32, 0, len(targets)), make([]int32, 0, len(targets))
+	for _, target := range targets {
+		if catalog.FitsPostgresInteger(target.SeasonNumber) && catalog.FitsPostgresInteger(target.EpisodeNumber) {
+			seasons = append(seasons, int32(target.SeasonNumber))  //nolint:gosec // FitsPostgresInteger checked the range
+			numbers = append(numbers, int32(target.EpisodeNumber)) //nolint:gosec // FitsPostgresInteger checked the range
 		}
 	}
-	for _, target := range targets {
-		add(target.SeasonNumber, target.EpisodeNumber, false)
-	}
-	for _, slot := range parked {
-		add(slot.season, slot.episode, true)
-	}
 	tag, err := tx.Exec(ctx, `
-		UPDATE episodes e SET unlisted = v.u
-		FROM unnest($2::int[], $3::int[], $4::bool[]) AS v(s, n, u)
-		WHERE e.series_id = $1 AND e.season_number = v.s AND e.episode_number = v.n AND e.unlisted <> v.u`,
-		seriesID, seasons, numbers, unlisted)
+		WITH listed AS (SELECT s, n FROM unnest($2::int[], $3::int[]) AS v(s, n))
+		UPDATE episodes e
+		SET unlisted = NOT EXISTS (SELECT 1 FROM listed WHERE s = e.season_number AND n = e.episode_number)
+		WHERE e.series_id = $1
+		  AND e.season_number IN (SELECT s FROM listed)
+		  AND e.unlisted IS DISTINCT FROM NOT EXISTS (SELECT 1 FROM listed WHERE s = e.season_number AND n = e.episode_number)`,
+		seriesID, seasons, numbers)
 	if err != nil {
 		return 0, fmt.Errorf("marking the listed episodes of %s: %w", seriesID, err)
 	}
