@@ -76,8 +76,10 @@ vi.mock("../hooks/usePlaybackRealtime", () => ({
     return { connectionState: "connected" };
   }),
 }));
+// One flush function for every render, as the hook's is.
+const flushWatchProgress = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock("../hooks/useWatchProgress", () => ({
-  useWatchProgress: () => vi.fn().mockResolvedValue(undefined),
+  useWatchProgress: () => flushWatchProgress,
 }));
 // Opted into per test: plans whose original the browser engine plays.
 const engineRoute = vi.hoisted(() => ({ chosen: false, refused: false }));
@@ -1564,6 +1566,90 @@ describe("VideoPlayer session end", () => {
       finishMinimize();
     });
 
+    await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
+  });
+
+  // Three other leaves can arrive while a minimize holds the leave guard. Each
+  // must still leave the minimized player once the minimize is done (#5253).
+  async function minimizing(overrides: Partial<Parameters<typeof VideoPlayer>[0]> = {}) {
+    let finishMinimize: () => void = () => {};
+    const onMinimize = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishMinimize = resolve;
+        }),
+    );
+    const onExit = vi.fn();
+    const rendered = renderPlayer({ onMinimize, onExit, ...overrides });
+    fireEvent.click(rendered.getByRole("button", { name: "Minimize player" }));
+    await waitFor(() => expect(onMinimize).toHaveBeenCalledOnce());
+    return {
+      ...rendered,
+      onMinimize,
+      onExit,
+      finish: () =>
+        act(async () => {
+          finishMinimize();
+        }),
+    };
+  }
+
+  it("leaves when a realtime stop arrives while the player is minimizing", async () => {
+    const { onExit, finish } = await minimizing();
+
+    await act(async () => {
+      await realtimeOptions.current?.onCommand({
+        type: "command",
+        command_id: "stop-1",
+        session_id: "session-1",
+        name: "stop",
+      });
+    });
+    expect(onExit).not.toHaveBeenCalled();
+
+    await finish();
+    await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
+  });
+
+  it("leaves for the rooms hub when the room closes while the player is minimizing", async () => {
+    const connection = roomConnection();
+    const { onMinimize, onExit, finish, rerenderPlayer } = await minimizing({
+      watchTogetherRoomId: "room-1",
+      watchTogetherConnection: connection,
+    });
+
+    rerenderPlayer({
+      onMinimize,
+      onExit,
+      watchTogetherRoomId: "room-1",
+      watchTogetherConnection: { ...connection, closedReason: "closed" },
+    });
+    expect(onExit).not.toHaveBeenCalled();
+
+    await finish();
+    await waitFor(() =>
+      expect(onExit).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ destinationHref: "/rooms" }),
+      ),
+    );
+  });
+
+  it("leaves when the host stops room playback while the player is minimizing", async () => {
+    const connection = roomConnection();
+    const { onMinimize, onExit, finish, rerenderPlayer } = await minimizing({
+      watchTogetherRoomId: "room-1",
+      watchTogetherConnection: connection,
+    });
+
+    rerenderPlayer({
+      onMinimize,
+      onExit,
+      watchTogetherRoomId: "room-1",
+      watchTogetherConnection: { ...connection, room: { ...connection.room!, phase: "lobby" } },
+    });
+    expect(onExit).not.toHaveBeenCalled();
+
+    await finish();
     await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
   });
 });

@@ -825,6 +825,12 @@ export function VideoPlayer({
   // Whether the leave holding leaveInProgressRef is a minimize, which lets go
   // of the guard when it finishes; every other leave exits.
   const minimizeInProgressRef = useRef(false);
+  // A leave that met a minimize holding the guard: a room closing, the host
+  // stopping, or an exit such as a realtime stop. When the minimize finishes,
+  // minimizeSettled bumps so the room effects run again, and an owed exit runs.
+  const leaveAfterMinimizeRef = useRef(false);
+  const exitAfterMinimizeRef = useRef(false);
+  const [minimizeSettled, setMinimizeSettled] = useState(0);
   const [notice, setNotice] = useState<PlaybackNoticeState | null>(null);
   const noticeRef = useRef(notice);
   useEffect(() => {
@@ -2092,7 +2098,11 @@ export function VideoPlayer({
   }, [activeFileId, currentTime, duration, elementMediaPosition, resumeVersion, selectedVersion]);
 
   useEffect(() => {
-    if (!watchTogetherRoomId || !watchTogether.closedReason || leaveInProgressRef.current) {
+    if (!watchTogetherRoomId || !watchTogether.closedReason) {
+      return;
+    }
+    if (leaveInProgressRef.current) {
+      if (minimizeInProgressRef.current) leaveAfterMinimizeRef.current = true;
       return;
     }
 
@@ -2135,6 +2145,7 @@ export function VideoPlayer({
   }, [
     buildExitState,
     flushWatchProgress,
+    minimizeSettled,
     onExit,
     resetLeaveState,
     watchTogether.closedReason,
@@ -2159,7 +2170,11 @@ export function VideoPlayer({
       wasRoomPlayingRef.current = true;
       return;
     }
-    if (!wasRoomPlayingRef.current || leaveInProgressRef.current) return;
+    if (!wasRoomPlayingRef.current) return;
+    if (leaveInProgressRef.current) {
+      if (minimizeInProgressRef.current) leaveAfterMinimizeRef.current = true;
+      return;
+    }
     wasRoomPlayingRef.current = false;
     leaveInProgressRef.current = true;
     setIsLeaving(true);
@@ -2189,6 +2204,7 @@ export function VideoPlayer({
   }, [
     buildExitState,
     flushWatchProgress,
+    minimizeSettled,
     onExit,
     showWatchTogetherNotice,
     watchTogether.closedReason,
@@ -2199,7 +2215,14 @@ export function VideoPlayer({
 
   const handleLeave = useCallback(
     async (action: "exit" | "minimize") => {
-      if (leaveInProgressRef.current) return;
+      if (leaveInProgressRef.current) {
+        // An exit asked for while a minimize finishes still exits after it.
+        if (action === "exit" && minimizeInProgressRef.current) {
+          exitAfterMinimizeRef.current = true;
+          leaveAfterMinimizeRef.current = true;
+        }
+        return;
+      }
 
       // A replaced room's minimize exits instead.
       const minimizes = action === "minimize" && !!onMinimize && !watchTogether.replacementReason;
@@ -2236,6 +2259,10 @@ export function VideoPlayer({
         if (action === "minimize") {
           minimizeInProgressRef.current = false;
           resetLeaveState();
+          if (leaveAfterMinimizeRef.current) {
+            leaveAfterMinimizeRef.current = false;
+            setMinimizeSettled((n) => n + 1);
+          }
         }
       }
     },
@@ -2245,6 +2272,13 @@ export function VideoPlayer({
   const handleExit = useCallback(async () => {
     await handleLeave("exit");
   }, [handleLeave]);
+
+  // Runs an exit that arrived while a minimize held the guard.
+  useEffect(() => {
+    if (!exitAfterMinimizeRef.current || leaveInProgressRef.current) return;
+    exitAfterMinimizeRef.current = false;
+    void handleExit();
+  }, [handleExit, minimizeSettled]);
 
   // The server ended the session for good (an administrator stopped it while
   // this player could not be told directly, or it stayed paused too long):
