@@ -922,6 +922,28 @@ func TestSwapReportsOnlyWhatTheRestoredServerLacks(t *testing.T) {
 	}
 }
 
+// TestSwapListsNoServerSpecificSettingAsLost: a replace gives the restored
+// database the live server's server-specific settings and deletes the
+// backup's ones the live server lacks, so a server-specific setting the
+// backup's key cannot read is never one to enter again, also when the live
+// server has no value: a server that never used web push has no key pair,
+// and Silo generates one on first use (#5249). What the restored server
+// keeps from the backup, such as the TMDB key, is still listed.
+func TestSwapListsNoServerSpecificSettingAsLost(t *testing.T) {
+	f := newSwapFixture(t)
+	f.ctl.liveServerID = "another-deployment"
+	f.validate = ValidateOptions{KeyCheck: "another-key", AcceptLostCredentials: true}
+	f.ctl.unreadable = []string{"ai.providers", "notifications.web_push.vapid_keypair", "tmdb.api_key"}
+	f.ctl.liveOwn = nil
+	if err, _ := f.restore(); err != nil {
+		t.Fatalf("%v\n%s", err, f.output.String())
+	}
+	out := f.output.String()
+	if !strings.Contains(out, "Cleared 1 encrypted settings this SECRET_KEY cannot read; enter them again after Silo starts: tmdb.api_key\n") {
+		t.Fatalf("output lists more than the TMDB key to enter again:\n%s", out)
+	}
+}
+
 // TestSwapRefusesExtensionsTheRoleCannotCreate: the restored database is
 // new, so a role that cannot create an extension the backup needs is
 // refused in preflight, before anything changes.
