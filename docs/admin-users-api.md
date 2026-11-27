@@ -245,13 +245,16 @@ administrator. The operation is not retryable; a replay is
 refused because the caller is no longer the Owner. The capability endpoint reports
 `ownership_transfer`. Moving ownership ends every session in which someone views the
 server as the new Owner and the previous Owner's sessions viewing as other
-administrators. It deletes the new Owner's API keys and reset link, since the previous
-Owner could have created them; the new Owner creates new keys. It also revokes pending
+administrators. It ends what the new Owner set going while ordinary, as a promotion does
+(see below), since the previous Owner could have created some of it; the new
+Owner creates new keys. It also revokes pending
 administrator invitations, which the new Owner can resend.
 
-Making an account an administrator deletes its API keys and its reset link. Any
-administrator may create those for an ordinary account, so after a promotion they
-would carry administrator authority that only the Owner grants. Creating an API key
+Making an account an administrator ends everything it set going while it was
+ordinary, as listed under "Promotion" in
+[app-keys.md](architecture/app-keys.md#promotion). Any administrator may create
+some of those for an ordinary account, so after a promotion they would carry
+administrator authority that only the Owner grants. Creating an API key
 for another account checks both accounts in the transaction that stores the key:
 the check sees a promotion or ownership transfer that commits first, and a later
 promotion of that account, or transfer of ownership to it, deletes the key with the

@@ -1073,6 +1073,18 @@ while local passwords are on, a password or a provider account; while they
 are off, a provider account, or a password for a break-glass administrator
 it names.
 
+Two changes to an account, rather than to these settings, can still leave it
+with no way in; neither is new, and neither is refused. Making an account an
+administrator revokes its app keys, so an account whose keys were its only
+way in has none until an administrator sets a password for it or makes it a
+sign-in link, which gives an administrator the password route only; while
+local passwords are off, that password signs in only once the Owner makes the
+account break-glass. Clearing break-glass while local passwords are off ends
+the account's password sign-in, and with it the local keys that need it, so
+an account with no sign-in provider account it can use has no way in until
+the Owner sets break-glass again; the last usable break-glass account can't
+be cleared.
+
 ### Sign-in links
 
 A sign-in link is how a person who lost every device gets back in. An
@@ -1253,6 +1265,14 @@ Order: the key sessions, then the request rows, then the link and code rows.
 When adding a new kind of pending credential (something an account can set
 going that later signs someone in or enrolls a key), add it to this list and
 to that function.
+
+Promotion keeps the account's own password, provider and device sign-in
+sessions, which refresh into the new role, a sign-in at a provider already
+in progress, which completes, and its Jellyfin-compatible and
+Audiobookshelf-compatible sessions. The person opened each of these by
+signing in, so no other administrator minted them, and an administrator
+viewing as the account cannot approve a device sign-in for it. Someone who
+knew or set the account's password before the promotion still knows it.
 
 ### Sessions that can't manage keys
 
@@ -2219,7 +2239,8 @@ trigger rewrites the request (a migration dropped the trigger that did; no
 row was rewritten). A schema check (`TestNoUnlistedSideWritesDB`) fails on
 any trigger, rule or foreign-key action that writes another table on a write
 to sessions, device sign-ins, keys or sign-in links, or writes one of those on
-a write to another table, unless it is listed with its reason.
+a write to another table, unless it is listed with its reason. It cannot see
+SQL a function builds at run time (`EXECUTE` of a string).
 Staged tests run, each in both orders and without a deadlock: logout against
 the sweep; deleting an account against a logout and against the sweep; the
 sweep against ending all of an account's sessions (as a password reset and
