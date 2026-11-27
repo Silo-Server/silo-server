@@ -100,7 +100,7 @@ var deviceCodeAlphabet = []byte("0123456789")
 // the approving accounts first, as approval and collection do, and commit this
 // update together with session revocation. Already-issued playback grants and
 // requests approved by other accounts are unchanged.
-func withdrawDeviceSignInApprovalsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) (int64, error) {
+func withdrawDeviceSignInApprovalsInTransaction(ctx context.Context, tx sessionExecQuerier, userIDs []int) (int64, error) {
 	// In id order, so two withdrawals over shared rows never hold each
 	// other's. Callers end the account's sessions first: session rows
 	// before request rows.

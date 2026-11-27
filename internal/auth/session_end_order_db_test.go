@@ -312,15 +312,64 @@ func TestCollectRacingTheApproversRevokeDB(t *testing.T) {
 	}
 }
 
-// Promotion to administrator withdraws the device sign-ins the account
-// approved in advance (a direct write of the request rows, unlike the side
-// writes TestNoUnlistedSideWritesDB guards): collecting one afterwards is
-// refused with no session. A collect racing the promotion queues on the
-// account row, which both take before the request row, so either order
-// finishes; once the promotion has committed before the collect reads,
-// there is never a session.
-func TestPromotionWithdrawsPreapprovalsDB(t *testing.T) {
+// A collect judges its approver's session by the clock when it reads it,
+// not when its transaction began: the collect waits on the account row, the
+// approving session expires meanwhile (its expires_at set to the current
+// clock and committed), and once the row is free the collect is refused with
+// no session. Read against the transaction's start (NOW()) the approver
+// would still be live, and an expired session's approval would sign the
+// device in.
+func TestCollectReadsApproverAtStatementClockDB(t *testing.T) {
 	svc, pool, userID, name := deviceLoginTestService(t)
+	ctx := t.Context()
+	approver := preapprovalApprover(t, svc, userID, nil, nil)
+	secret, binding := preapprovalSecret(t)
+	created, err := svc.Preapprove(approver, DevicePreapprovalInput{DeviceName: name("expiring approver"), Binding: binding}, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hold, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = hold.Rollback(context.Background()) })
+	if _, err := hold.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
+		t.Fatal(err)
+	}
+	deadline, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	type polled struct {
+		poll *DeviceLoginPollResult
+		err  error
+	}
+	collected := make(chan polled, 1)
+	go func() {
+		poll, err := svc.Poll(deadline, created.DeviceCode, secret)
+		collected <- polled{poll, err}
+	}()
+	waitForLockWaiters(t, pool, 1)
+	if _, err := pool.Exec(ctx, `UPDATE auth_sessions SET expires_at = clock_timestamp() WHERE id = $1`,
+		ClaimsFromContext(approver).SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := hold.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-collected; got.err != nil || got.poll.TokenPair != nil || got.poll.Status != DeviceLoginStatusDenied {
+		t.Fatalf("collect after the approver expired = %+v, %v; want denied with no session", got.poll, got.err)
+	}
+}
+
+// Promotion to administrator withdraws every device sign-in the account
+// approved that no device has collected, in advance or at the moment (a
+// direct write of the request rows, unlike the side writes
+// TestNoUnlistedSideWritesDB guards): collecting one afterwards is refused
+// with no session. A collect racing the promotion queues on the account row,
+// which both take before the request row: with the promotion first the
+// collect is refused with no session; with the collect first it signs the
+// device in, before the account was an administrator's.
+func TestPromotionWithdrawsApprovalsDB(t *testing.T) {
+	svc, pool, _, name := deviceLoginTestService(t)
 	ctx := t.Context()
 	users := NewUserRepository(pool)
 	promote := func(ctx context.Context, id int) error {
@@ -338,77 +387,101 @@ func TestPromotionWithdrawsPreapprovalsDB(t *testing.T) {
 		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, id) })
 		return id
 	}
-	approve := func(id int, label string) (code, secret string) {
-		t.Helper()
-		approver := preapprovalApprover(t, svc, id, nil, nil)
-		secret, binding := preapprovalSecret(t)
-		created, err := svc.Preapprove(approver, DevicePreapprovalInput{DeviceName: name(label), Binding: binding}, id)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return created.DeviceCode, secret
-	}
-	_ = userID
-
-	// Approve, promote, collect.
-	promoted := account("promoted")
-	code, secret := approve(promoted, "before promotion")
-	if err := promote(ctx, promoted); err != nil {
-		t.Fatal(err)
-	}
-	if poll, err := svc.Poll(ctx, code, secret); err != nil || poll.TokenPair != nil || poll.Status != DeviceLoginStatusDenied {
-		t.Fatalf("collect after promotion = %+v, %v; want denied with no session", poll, err)
-	}
-
-	// The two racing on the account row, each first.
-	for _, promoteFirst := range []bool{true, false} {
-		t.Run(map[bool]string{true: "promotion first", false: "collect first"}[promoteFirst], func(t *testing.T) {
-			id := account(map[bool]string{true: "race-promote", false: "race-collect"}[promoteFirst])
-			code, secret := approve(id, "racing")
-			hold, err := pool.Begin(ctx)
+	approvals := []struct {
+		name    string
+		approve func(t *testing.T, id int, label string) (code, secret string)
+	}{
+		{"in advance", func(t *testing.T, id int, label string) (string, string) {
+			approver := preapprovalApprover(t, svc, id, nil, nil)
+			secret, binding := preapprovalSecret(t)
+			created, err := svc.Preapprove(approver, DevicePreapprovalInput{DeviceName: name(label), Binding: binding}, id)
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { _ = hold.Rollback(context.Background()) })
-			if _, err := hold.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, id); err != nil {
+			return created.DeviceCode, secret
+		}},
+		{"at the moment", func(t *testing.T, id int, label string) (string, string) {
+			start, err := svc.Start(ctx, DeviceLoginStartInput{DeviceName: name(label)})
+			if err != nil {
 				t.Fatal(err)
 			}
-			deadline, cancel := context.WithTimeout(ctx, 15*time.Second)
-			defer cancel()
-			type polled struct {
-				poll *DeviceLoginPollResult
-				err  error
-			}
-			promoted, collected := make(chan error, 1), make(chan polled, 1)
-			startPromote := func() { go func() { promoted <- promote(deadline, id) }() }
-			startCollect := func() {
-				go func() {
-					poll, err := svc.Poll(deadline, code, secret)
-					collected <- polled{poll, err}
-				}()
-			}
-			if promoteFirst {
-				startPromote()
-				waitForLockWaiters(t, pool, 1)
-				startCollect()
-			} else {
-				startCollect()
-				waitForLockWaiters(t, pool, 1)
-				startPromote()
-			}
-			waitForLockWaiters(t, pool, 2)
-			if err := hold.Rollback(ctx); err != nil {
+			if err := svc.Approve(ctx, DeviceLoginLookupInput{UserCode: start.UserCode}, id); err != nil {
 				t.Fatal(err)
 			}
-			if err := <-promoted; err != nil {
-				t.Fatalf("promotion: %v", err)
+			return start.DeviceCode, ""
+		}},
+	}
+	for _, kind := range approvals {
+		t.Run(kind.name, func(t *testing.T) {
+			// Approve, promote, collect.
+			promoted := account(kind.name + " promoted")
+			code, secret := kind.approve(t, promoted, kind.name+" before promotion")
+			if err := promote(ctx, promoted); err != nil {
+				t.Fatal(err)
 			}
-			got := <-collected
-			if got.err != nil {
-				t.Fatalf("collect: %v", got.err)
+			if poll, err := svc.Poll(ctx, code, secret); err != nil || poll.TokenPair != nil || poll.Status != DeviceLoginStatusDenied {
+				t.Fatalf("collect after promotion = %+v, %v; want denied with no session", poll, err)
 			}
-			if promoteFirst && (got.poll.TokenPair != nil || got.poll.Status != DeviceLoginStatusDenied) {
-				t.Fatalf("collect after the promotion committed = %+v; want denied with no session", got.poll)
+			for _, promoteFirst := range []bool{true, false} {
+				t.Run(map[bool]string{true: "promotion first", false: "collect first"}[promoteFirst], func(t *testing.T) {
+					order := map[bool]string{true: " race-promote", false: " race-collect"}[promoteFirst]
+					id := account(kind.name + order)
+					code, secret := kind.approve(t, id, kind.name+order+" racing")
+					hold, err := pool.Begin(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { _ = hold.Rollback(context.Background()) })
+					if _, err := hold.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, id); err != nil {
+						t.Fatal(err)
+					}
+					deadline, cancel := context.WithTimeout(ctx, 15*time.Second)
+					defer cancel()
+					type polled struct {
+						poll *DeviceLoginPollResult
+						err  error
+					}
+					promoted, collected := make(chan error, 1), make(chan polled, 1)
+					returned := make(chan error, 2)
+					startPromote := func() {
+						go func() {
+							err := promote(deadline, id)
+							promoted <- err
+							returned <- fmt.Errorf("promotion: %v", err)
+						}()
+					}
+					startCollect := func() {
+						go func() {
+							poll, err := svc.Poll(deadline, code, secret)
+							collected <- polled{poll, err}
+							returned <- fmt.Errorf("collect: %+v, %v", poll, err)
+						}()
+					}
+					first, second := startCollect, startPromote
+					if promoteFirst {
+						first, second = startPromote, startCollect
+					}
+					first()
+					waitForLockWaitersWhile(t, pool, 1, returned)
+					second()
+					waitForLockWaitersWhile(t, pool, 2, returned)
+					if err := hold.Rollback(ctx); err != nil {
+						t.Fatal(err)
+					}
+					if err := <-promoted; err != nil {
+						t.Fatalf("promotion: %v", err)
+					}
+					got := <-collected
+					if got.err != nil {
+						t.Fatalf("collect: %v", got.err)
+					}
+					if promoteFirst && (got.poll.TokenPair != nil || got.poll.Status != DeviceLoginStatusDenied) {
+						t.Fatalf("collect after the promotion committed = %+v; want denied with no session", got.poll)
+					}
+					if !promoteFirst && got.poll.TokenPair == nil {
+						t.Fatalf("collect before the promotion = %+v; want the device signed in", got.poll)
+					}
+				})
 			}
 		})
 	}

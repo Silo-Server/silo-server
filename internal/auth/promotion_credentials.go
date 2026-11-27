@@ -3,25 +3,26 @@ package auth
 import (
 	"context"
 	"fmt"
-
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// revokeCredentialsIssuedToNonAdmin deletes the API keys, reset and sign-in
-// links of an account being made an admin or the Owner, revokes its app keys,
-// and withdraws the device sign-ins it approved in advance that no device has
-// collected. Other admins may have minted them and kept them; afterwards they
-// would carry authority that only the Owner grants, and a device collecting
-// such a sign-in would open an administrator's session. An admin's app keys
-// also need the admin's own approval, which keys enrolled before were never
-// given. The withdrawal marks those requests denied, as the person's own
-// withdrawal does, after the sessions (session rows before request rows),
-// with the request rows locked in id order. It is a direct write, not a
-// side write of ending a session. The sign-in links and their codes go last;
-// their rows reference no session or request.
-func revokeCredentialsIssuedToNonAdmin(ctx context.Context, db interface {
-	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
-}, id int) error {
+// revokeCredentialsIssuedToNonAdmin ends, when an account becomes an
+// administrator or the Owner, everything it set going while it was ordinary
+// that could still produce a session or a key: nothing it planted may sign
+// anyone in as an administrator. That is its API keys; its password reset
+// links; its app keys (the person key, device keys, waiting device keys) and
+// the sessions they opened; every device sign-in it approved, in advance or
+// at the moment, that no device has collected; its sign-in links with their
+// codes and set-password tokens; and its unredeemed app codes of every kind.
+// Other admins may have minted some of them and kept them; afterwards they
+// would carry authority that only the Owner grants. An admin's app keys also
+// need the admin's own approval, which keys enrolled before were never
+// given. Order: session rows (the key sessions), then request rows (the
+// withdrawal every sign-out-everywhere uses, in id order), then link and code
+// rows, which reference no session or request. The withdrawal and the code
+// deletion are direct writes, not side writes of ending a session. Add any
+// new kind of pending credential here and to the list in
+// docs/architecture/app-keys.md.
+func revokeCredentialsIssuedToNonAdmin(ctx context.Context, db sessionExecQuerier, id int) error {
 	if _, err := db.Exec(ctx, `DELETE FROM api_keys WHERE user_id = $1`, id); err != nil {
 		return fmt.Errorf("revoking the promoted account's API keys: %w", err)
 	}
@@ -31,15 +32,14 @@ func revokeCredentialsIssuedToNonAdmin(ctx context.Context, db interface {
 	if err := revokeAccountKeysTx(ctx, db, id); err != nil {
 		return err
 	}
-	if _, err := db.Exec(ctx, `SELECT id FROM device_login_requests
-		WHERE approved_by_user_id = $1 AND preapproved_at IS NOT NULL AND status = $2 ORDER BY id FOR UPDATE`,
-		id, DeviceLoginStatusApproved); err != nil {
-		return fmt.Errorf("locking the promoted account's device sign-ins approved in advance: %w", err)
+	if _, err := withdrawDeviceSignInApprovalsInTransaction(ctx, db, []int{id}); err != nil {
+		return err
 	}
-	if _, err := db.Exec(ctx, `UPDATE device_login_requests SET status = $2, denied_at = NOW(), updated_at = NOW()
-		WHERE approved_by_user_id = $1 AND preapproved_at IS NOT NULL AND status = $3`,
-		id, DeviceLoginStatusDenied, DeviceLoginStatusApproved); err != nil {
-		return fmt.Errorf("withdrawing the promoted account's device sign-ins approved in advance: %w", err)
+	if err := EndSignInLinksTx(ctx, db, id); err != nil {
+		return err
 	}
-	return EndSignInLinksTx(ctx, db, id)
+	if _, err := db.Exec(ctx, `DELETE FROM auth_app_codes WHERE user_id = $1 AND redeemed_at IS NULL`, id); err != nil {
+		return fmt.Errorf("deleting the promoted account's app codes: %w", err)
+	}
+	return nil
 }
