@@ -1288,8 +1288,10 @@ process's own counters were unavailable, a change in what `system.cpu_pct` is
 measured against, the pass after any of those, and for children a truncated
 pass and the one after it. A measured idle process reports `0`. `children.cpu_pct`
 is a lower bound: a child's last partial window before it exits, a child that
-starts and exits between two samples, and the window in which a child could not be read
-are not counted; completed-child totals cover those. Proxy and transcode nodes
+starts and exits between two samples, the first window of a child that starts
+while children are being listed, and the window in which a child could not be
+read are not counted. The cumulative `silo_subprocess_cpu_seconds_total`
+Prometheus counter, per workload, covers completed children. Proxy and transcode nodes
 on a build with this field report it in their attribution in
 `GET /api/v2/admin/nodes/summary`; a node on an older build leaves it out.
 

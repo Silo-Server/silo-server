@@ -400,6 +400,12 @@ func TestChildCPUShareSurvivesDiscoveryGaps(t *testing.T) {
 	h.setChild(201, h.uptimeTicks()+testUserHZ+testUserHZ/2, 100)
 	wantPct(t, "born inside the window", pass().Attribution.Children.CPUPct, 15)
 
+	// A child that started in the opening reading's own tick may have started
+	// before it, so it becomes a baseline too.
+	h.children = []int{200, 201, 203}
+	h.setChild(203, h.uptimeTicks()+testUserHZ, 40)
+	wantPct(t, "born in the opening tick", pass().Attribution.Children.CPUPct, 10)
+
 	// A child born after the window closed is not charged to that window; it
 	// becomes a baseline.
 	h.children = []int{200, 201, 202}

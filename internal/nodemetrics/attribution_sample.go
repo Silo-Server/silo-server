@@ -174,11 +174,12 @@ func (s *Sampler) publishCPUShares(out *ResourceAttribution, basis cpuShareBasis
 //
 // A child in the baseline contributes its growth. A child the baseline has not
 // seen contributes its whole lifetime only when it was born inside the window:
-// its start time is on or after the boot clock reading taken when the window
-// opened and before the one taken when it closed. A child born after the
-// close only becomes a baseline, and so does an older one (a child that was
-// unreadable for a pass, say), because its lifetime is mostly earlier windows'
-// work. A child that exited contributes nothing, so this is a lower bound.
+// its start time is after the boot clock reading taken when the window opened
+// and before the one taken when it closed. Both clocks count whole ticks, so a
+// child that started in the opening reading's own tick may have started before
+// it and is left out. A child born after the close only becomes a baseline,
+// and so does an older one (a child that was unreadable for a pass, say),
+// because its lifetime is mostly earlier windows' work. A child that exited contributes nothing, so this is a lower bound.
 //
 // Start times count on the kernel's boot clock, which is read directly because
 // lxcfs replaces /proc/uptime with a container's own. A lifetime larger than
@@ -192,7 +193,7 @@ func (s *Sampler) childTickDelta(children map[childKey]uint64, basis cpuShareBas
 			total += tickDelta(ticks, previous)
 			continue
 		}
-		if s.prevBootOK && key.start >= s.prevBoot && key.start < closeBoot && float64(ticks) <= limitTicks {
+		if s.prevBootOK && key.start > s.prevBoot && key.start < closeBoot && float64(ticks) <= limitTicks {
 			total += ticks
 		}
 	}
