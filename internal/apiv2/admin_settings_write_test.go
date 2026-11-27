@@ -2,12 +2,17 @@ package apiv2
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"maps"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
 type fakeAdminSettingsWrite struct {
@@ -121,4 +126,63 @@ func TestAdminSettingsWriteSnapshotGuard(t *testing.T) {
 
 func (f *fakeAdminSettingsWrite) SnapshotAdminSettings(stored map[string]string) handlers.AdminSettingsSnapshot {
 	return (&handlers.AdminHandler{}).SnapshotAdminSettings(stored)
+}
+
+// refusingSettingsWrite refuses every write with err, as the settings
+// service does for a refused auth.local_password_login change.
+type refusingSettingsWrite struct {
+	fakeAdminSettingsWrite
+	err error
+}
+
+func (f *refusingSettingsWrite) UpdateAdminSettings(context.Context, map[string]string, func(handlers.AdminSettingsSnapshot) error) (handlers.AdminSettingsUpdateResult, error) {
+	return handlers.AdminSettingsUpdateResult{}, f.err
+}
+
+func (f *refusingSettingsWrite) UpdateAdminSetting(context.Context, string, string, func(handlers.AdminSettingsSnapshot) error) (handlers.AdminSettingUpdateResult, error) {
+	return handlers.AdminSettingUpdateResult{}, f.err
+}
+
+// The two refusals of turning password sign-in off reach clients as their
+// own problem types, so the Sign-in page can tell "add a break-glass admin"
+// from "turn a provider on" instead of showing a generic conflict.
+func TestLocalLoginRefusalProblemTypes(t *testing.T) {
+	for _, tc := range []struct {
+		code string
+		want ProblemType
+	}{
+		{"break_glass_required", TypeBreakGlassRequired},
+		{"sign_in_provider_required", TypeSignInProviderRequired},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			f := &refusingSettingsWrite{err: &handlers.APIError{Status: 409, Code: tc.code, Message: "refused"}}
+			deps := pilotDeps(nil, nil)
+			deps.CursorSecret = []byte("synthetic-settings-test-secret")
+			deps.AdminSettingsInspection = f
+			deps.AdminSettingsWrite = f
+			h := NewHandler(deps)
+			headers := with(bearer(adminToken), "If-Match", "*")
+			requireProblem(t, do(t, h, "PUT", Prefix+"/admin/settings", `{"values":{"auth.local_password_login":"false"}}`, headers), tc.want)
+			requireProblem(t, do(t, h, "PUT", Prefix+"/admin/settings/auth.local_password_login", `{"value":"false"}`, headers), tc.want)
+		})
+	}
+}
+
+// Taking away the last sign-in provider while password sign-in is off is
+// refused with the same problem type the settings write uses, so the web's
+// plugin and sign-in pages can explain it.
+func TestPluginWriteSignInProviderRefusal(t *testing.T) {
+	p, ok := errors.AsType[*Problem](adminPluginMutationProblem(fmt.Errorf("disabling: %w", auth.ErrSignInProviderRequired)))
+	if !ok || p.Type != TypeSignInProviderRequired.URI() || p.Status != http.StatusConflict {
+		t.Fatalf("problem = %+v", p)
+	}
+}
+
+// An uninstall that found the plugin's sign-in identities busy changed
+// nothing; clients get the server-busy answer with a retry delay, and repeat.
+func TestPluginUninstallBusyIsRetryable(t *testing.T) {
+	p, ok := errors.AsType[*Problem](adminPluginMutationProblem(plugins.ErrInstallationBusy))
+	if !ok || p.Type != TypeDependencyUnavailable.URI() || p.Status != http.StatusServiceUnavailable || p.headers.Get("Retry-After") == "" {
+		t.Fatalf("problem = %+v", p)
+	}
 }

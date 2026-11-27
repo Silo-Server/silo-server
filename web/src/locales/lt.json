@@ -641,6 +641,12 @@
       "value": "Jūsų seansas baigėsi. Prisijunkite dar kartą."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Kol prisijungimas slaptažodžiu išjungtas, turi likti įjungtas prisijungimo teikėjas, kuriuo žmonės gali naudotis. OpenID Connect teikėjui taip pat reikia viešojo serverio URL."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -94784,6 +94790,20 @@
       "value": "Pirmiausia įjunkite prisijungimo teikėją. Jei prisijungimas slaptažodžiu išjungtas ir neįjungtas joks teikėjas, prisijungti galėtų tik avariniai administratoriai."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Pirmiausia nustatykite viešąjį serverio URL. Be jo teikėjas „"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "“ negali nieko prijungti, todėl išjungus prisijungimą slaptažodžiu prisijungti galėtų tik avarinės prieigos administratoriai."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -94874,6 +94894,304 @@
       "value": "Leisti naudotojams kurti API raktus"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Išjungti prisijungimą slaptažodžiu"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Slaptažodžiu prisijungs tik avarinės prieigos administratoriai. Visi kiti prisijungs per „"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "“."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Teikėjas „"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "“ sukuria paskyras pirmą kartą prisijungus, todėl jei kuris nors iš šių žmonių prisijungs per jį, kol dar nesusiejote jo paskyros, jis gaus naują, atskirą paskyrą."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Susiekite kiekvieną paskyrą su „"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "“ paskyra jos puslapyje skiltyje „Naudotojai“."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " paskyra negali prisijungti, kol administratorius jos nesusies"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " paskyros negali prisijungti, kol administratorius jų nesusies"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " paskyros negali prisijungti, kol administratorius jų nesusies"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " paskyrų negali prisijungti, kol administratorius jų nesusies"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko patikrinti, kurioms paskyroms tai turės įtakos. Vis tiek galite išjungti prisijungimą slaptažodžiu."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Tikrinama, kas prisijungia slaptažodžiu…"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Kai teikėjas „"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "“ prisijungimo metu patvirtina vieną iš šių el. pašto adresų, „Silo“ susieja tą žmogų su jo paskyra."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " paskyra susiejama pagal el. paštą"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " paskyros susiejamos pagal el. paštą"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " paskyros susiejama pagal el. paštą"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " paskyrų susiejama pagal el. paštą"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti dar "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti dar "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti dar "
+            },
+            {
+              "type": 7
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti dar "
+            },
+            {
+              "type": 7
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko įkelti daugiau paskyrų. Bandykite dar kartą."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Po to visos paskyros vis tiek galės prisijungti."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administratorius"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Susiejimas pagal el. paštą išjungtas"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Nėra el. pašto"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Tai nieko neatjungia. Esami prisijungimai išlieka, API raktai toliau veikia, o žmonės vis tiek gali patvirtinti naujus įrenginius. Norėdami ką nors atjungti, užbaikite to naudotojo seansus jo puslapyje skiltyje „"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Naudotojai"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "“."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Išjungti prisijungimą slaptažodžiu?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Peržiūrėti visas paskyras skiltyje „Naudotojai“"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -94916,6 +95234,28 @@
     {
       "type": 0,
       "value": "“ būsenos."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Prisijungimas slaptažodžiu išjungtas, todėl per „"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "“ prisijungia visi, išskyrus avarinės prieigos administratorius. Pirmiausia vėl įjunkite prisijungimą slaptažodžiu, tada išjunkite teikėją „"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "“."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -162085,6 +162425,12 @@
       "value": "El. paštas arba naudotojo vardas"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Įveskite „Emby“ serverio, iš kurio norite importuoti, bazinį URL."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -162095,6 +162441,12 @@
     {
       "type": 0,
       "value": "Palikite tuščią, jei paskyra jo neturi"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "„Emby“ serverio URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -162245,6 +162597,12 @@
     {
       "type": 0,
       "value": "„Plex“ paskyra"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Serverio URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -162554,7 +162912,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect arba išsaugotas serveris"
+      "value": "Emby Connect, serverio URL arba išsaugotas serveris"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

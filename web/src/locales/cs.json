@@ -641,6 +641,12 @@
       "value": "Vaše relace vypršela. Přihlaste se znovu."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Když je přihlašování heslem vypnuté, musí zůstat zapnutý poskytovatel přihlášení, kterého mohou uživatelé používat. OpenID Connect navíc potřebuje veřejnou adresu URL serveru."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -93993,6 +93999,20 @@
       "value": "Nejprve zapněte poskytovatele přihlášení. Při vypnutém přihlášení heslem a bez zapnutého poskytovatele by se mohli přihlásit jen nouzoví správci."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Nejdříve nastavte veřejnou adresu URL serveru. Poskytovatel "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " bez ní nikoho nepřihlásí, takže při vypnutém přihlašování heslem by se mohli přihlásit jen správci s nouzovým přístupem."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -94083,6 +94103,320 @@
       "value": "Povolit uživatelům vytvářet klíče API"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Vypnout přihlašování heslem"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Heslem se budou přihlašovat jen správci s nouzovým přístupem. Všichni ostatní se přihlašují přes poskytovatele "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Poskytovatel "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " vytváří účty při prvním přihlášení. Pokud se přes něj některý z těchto uživatelů přihlásí dřív, než jeho účet propojíte, získá nový, samostatný účet."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Každý z nich propojte s účtem poskytovatele "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " na jeho stránce v sekci Uživatelé."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " účet se nemůže přihlásit, dokud ho správce nepropojí"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " účty se nemohou přihlásit, dokud je správce nepropojí"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " účtu se nemůže přihlásit, dokud je správce nepropojí"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " účtů se nemůže přihlásit, dokud je správce nepropojí"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nepodařilo se ověřit, kterých účtů se to týká. Přihlašování heslem můžete přesto vypnout."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Zjišťování, kdo se přihlašuje heslem"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Když poskytovatel "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " při přihlášení potvrdí některý z těchto e-mailů, Silo daného uživatele propojí s jeho účtem."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " účet se propojí podle e-mailu"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " účty se propojí podle e-mailu"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " účtu se propojí podle e-mailu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " účtů se propojí podle e-mailu"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " další"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " další"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dalšího"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dalších"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Další účty se nepodařilo načíst. Zkuste to znovu."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Po této změně se budou moci přihlásit všechny účty."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Správce"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Propojování podle e-mailu je vypnuté"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Bez e-mailu"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Tím nikoho neodhlásíte. Uživatelé, kteří jsou už přihlášeni, zůstanou přihlášeni, jejich klíče API dál fungují a mohou dál schvalovat nová zařízení. Pokud chcete někoho odhlásit, ukončete jeho relace na jeho stránce v sekci "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Uživatelé"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Vypnout přihlašování heslem?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Zobrazit všechny účty v sekci Uživatelé"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -94125,6 +94459,28 @@
     {
       "type": 0,
       "value": " se nepodařilo změnit."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Přihlašování heslem je vypnuté, takže se všichni kromě správců s nouzovým přístupem přihlašují přes poskytovatele "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Nejdříve znovu zapněte přihlašování heslem a pak vypněte poskytovatele "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -160507,6 +160863,12 @@
       "value": "E-mail nebo uživatelské jméno"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Zadejte základní URL serveru Emby, ze kterého chcete importovat."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -160517,6 +160879,12 @@
     {
       "type": 0,
       "value": "Nechte prázdné, pokud účet heslo nemá"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "URL serveru Emby"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -160667,6 +161035,12 @@
     {
       "type": 0,
       "value": "Účet Plex"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "URL serveru"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -160960,7 +161334,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect nebo uložený server"
+      "value": "Emby Connect, URL serveru nebo uložený server"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

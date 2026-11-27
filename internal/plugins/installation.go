@@ -476,6 +476,13 @@ func (s *InstallationStore) update(ctx context.Context, id int, input UpdateInst
 	}
 	setClauses, args := installationUpdateClauses(input)
 
+	var guard signInGuard
+	if touchesBindings && !provisioning {
+		if guard, err = beginSignInGuard(ctx, tx); err != nil {
+			return err
+		}
+	}
+
 	// A guarded write always runs the row update, so the guard also holds
 	// for an Archive or Capabilities write that changes no column.
 	if len(setClauses) > 0 || input.IfVersion != nil || input.IfInstallPath != nil {
@@ -498,6 +505,11 @@ func (s *InstallationStore) update(ctx context.Context, id int, input UpdateInst
 
 	if !provisioning && (input.Capabilities != nil || (input.Enabled != nil && *input.Enabled)) {
 		if err := validateInstallationAuthBindings(ctx, tx, id); err != nil {
+			return err
+		}
+	}
+	if touchesBindings && !provisioning {
+		if err := guard.finish(ctx, tx); err != nil {
 			return err
 		}
 	}
@@ -744,6 +756,93 @@ func (s *InstallationStore) repairArchive(ctx context.Context, original *Install
 }
 
 func (s *InstallationStore) Delete(ctx context.Context, id int) error {
+	return s.DeleteThen(ctx, id, nil)
+}
+
+// DeleteThen deletes installation id like Delete, and runs afterCommit once
+// the delete has committed and before the plugin's files are removed: the
+// caller stops the plugin there, so a refused delete never stopped it and its
+// files go only once it no longer runs.
+//
+// A store on a caller's transaction (WithTx) cannot take a callback: its
+// delete only releases a savepoint, and the caller's transaction can still
+// roll it back.
+func (s *InstallationStore) DeleteThen(ctx context.Context, id int, afterCommit func()) error {
+	if _, inTx := s.pool.(pgx.Tx); inTx && afterCommit != nil {
+		return errDeleteThenInTx
+	}
+	installation, err := s.deleteWithIdentityRetry(ctx, id)
+	if err != nil {
+		return err
+	}
+	if afterCommit != nil {
+		afterCommit()
+	}
+
+	if _, inTx := s.pool.(pgx.Tx); !inTx {
+		if err := s.archiveCache.retire(installation, nil); err != nil {
+			slog.WarnContext(ctx, "remove uninstalled plugin files", "component", "plugins", "installation_id", id, "error", err)
+		}
+	}
+
+	return nil
+}
+
+// errDeleteThenInTx refuses DeleteThen with a callback on a store that runs
+// in a caller's transaction, where nothing commits yet.
+var errDeleteThenInTx = errors.New("plugins: DeleteThen with an after-commit callback needs a pool-backed store")
+
+// ErrInstallationBusy answers an uninstall that found the plugin's sign-in
+// identities held by another change on every bounded attempt: nothing was
+// changed, and repeating it in a moment succeeds.
+var ErrInstallationBusy = errors.New("the plugin's sign-in identities are being changed; try again")
+
+// sqlStateLockNotAvailable is Postgres's lock_not_available, what NOWAIT
+// answers when a row is already locked.
+const sqlStateLockNotAvailable = "55P03"
+
+// errIdentitiesHeld is one attempt finding an identity row already locked.
+var errIdentitiesHeld = errors.New("plugin identities are locked")
+
+// Uninstall attempts and the pause between them. The pauses add about 150 ms
+// in all. Each attempt still waits, with no timeout of its own, for the
+// plugin-bindings lock, then the installation row, then the server-settings
+// lock; the call ends when those are free or when ctx is canceled (for an
+// admin request, when the client or a proxy in front of it disconnects).
+const (
+	deleteIdentityAttempts = 3
+	deleteIdentityBackoff  = 50 * time.Millisecond
+)
+
+// deleteWithIdentityRetry runs the delete transaction, retrying a bounded
+// number of times when the installation's identities are held. The delete
+// holds the server-settings lock (signInGuard) and its cascade removes the
+// installation's plugin_auth_identities rows; an unlink and an account delete
+// lock an identity first and then wait for the settings lock. To add no lock
+// cycle with them the delete never waits for an identity while it holds the
+// settings lock: it takes them with NOWAIT, in id order, before the DELETE,
+// and rolls the whole transaction back (releasing the settings lock) if one
+// is held.
+func (s *InstallationStore) deleteWithIdentityRetry(ctx context.Context, id int) (*Installation, error) {
+	for attempt := 1; ; attempt++ {
+		installation, err := s.deleteOnce(ctx, id)
+		if !errors.Is(err, errIdentitiesHeld) {
+			return installation, err
+		}
+		if attempt == deleteIdentityAttempts {
+			return nil, ErrInstallationBusy
+		}
+		timer := time.NewTimer(time.Duration(attempt) * deleteIdentityBackoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *InstallationStore) deleteOnce(ctx context.Context, id int) (*Installation, error) {
 	var installation *Installation
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if err := lockAuthBindings(ctx, tx); err != nil {
@@ -767,22 +866,23 @@ func (s *InstallationStore) Delete(ctx context.Context, id int) error {
 		if ownership.Managed {
 			return &ManagedByEnvironmentError{Field: managedInstallationField}
 		}
+		guard, err := beginSignInGuard(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT id FROM plugin_auth_identities WHERE plugin_installation_id = $1
+			ORDER BY id FOR UPDATE NOWAIT`, id); err != nil {
+			if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == sqlStateLockNotAvailable {
+				return errIdentitiesHeld
+			}
+			return fmt.Errorf("locking plugin identities: %w", err)
+		}
 		if _, err := tx.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, id); err != nil {
 			return fmt.Errorf("deleting plugin installation: %w", err)
 		}
-		return nil
+		return guard.finish(ctx, tx)
 	})
-	if err != nil {
-		return err
-	}
-
-	if _, inTx := s.pool.(pgx.Tx); !inTx {
-		if err := s.archiveCache.retire(installation, nil); err != nil {
-			slog.WarnContext(ctx, "remove uninstalled plugin files", "component", "plugins", "installation_id", id, "error", err)
-		}
-	}
-
-	return nil
+	return installation, err
 }
 
 func (s *InstallationStore) replaceCapabilities(

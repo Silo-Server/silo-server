@@ -14,9 +14,12 @@ const WRAPPING_BUTTON = "h-auto min-h-8 max-w-full py-1 text-start wrap-anywhere
 export function LoginSessionRow({
   session,
   onSignOut,
+  reduced = false,
 }: {
   session: LoginSession;
   onSignOut?: (session: LoginSession) => void;
+  /** The server sent only this session's id; its times are the caller's own. */
+  reduced?: boolean;
 }) {
   const t = useT();
   const [expanded, setExpanded] = useState(false);
@@ -44,23 +47,25 @@ export function LoginSessionRow({
               <Badge variant="outline">{t("web.settings.sessions.row.thisBrowser")}</Badge>
             )}
           </div>
-          <p className="text-muted-foreground mt-1 text-xs">
-            {t("web.settings.sessions.row.summary", {
-              last_seen: lastSeen,
-              signed_in: formatDateTime(session.created_at, { seconds: false }),
-              status: (chunks) => (
-                <span
-                  className={
-                    sessionActive(session.last_seen_at)
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : undefined
-                  }
-                >
-                  {chunks}
-                </span>
-              ),
-            })}
-          </p>
+          {!reduced && (
+            <p className="text-muted-foreground mt-1 text-xs">
+              {t("web.settings.sessions.row.summary", {
+                last_seen: lastSeen,
+                signed_in: formatDateTime(session.created_at, { seconds: false }),
+                status: (chunks) => (
+                  <span
+                    className={
+                      sessionActive(session.last_seen_at)
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : undefined
+                    }
+                  >
+                    {chunks}
+                  </span>
+                ),
+              })}
+            </p>
+          )}
         </div>
         <div className="ms-auto flex max-w-full min-w-0 flex-wrap items-center gap-1">
           {onSignOut && (
@@ -82,25 +87,27 @@ export function LoginSessionRow({
                 : t("common.signOut")}
             </Button>
           )}
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className={cn(WRAPPING_BUTTON, "text-muted-foreground hover:text-foreground")}
-            aria-label={t("web.settings.sessions.row.detailsFor", { device: device.name })}
-            aria-expanded={expanded}
-            aria-controls={detailsId}
-            onClick={() => setExpanded(!expanded)}
-          >
-            {t("web.settings.sessions.row.details")}
-            <ChevronDown
-              className={cn("transition-transform", expanded && "rotate-180")}
-              aria-hidden="true"
-            />
-          </Button>
+          {!reduced && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className={cn(WRAPPING_BUTTON, "text-muted-foreground hover:text-foreground")}
+              aria-label={t("web.settings.sessions.row.detailsFor", { device: device.name })}
+              aria-expanded={expanded}
+              aria-controls={detailsId}
+              onClick={() => setExpanded(!expanded)}
+            >
+              {t("web.settings.sessions.row.details")}
+              <ChevronDown
+                className={cn("transition-transform", expanded && "rotate-180")}
+                aria-hidden="true"
+              />
+            </Button>
+          )}
         </div>
       </div>
-      {expanded && (
+      {expanded && !reduced && (
         <dl
           id={detailsId}
           className="border-border mt-3 grid grid-cols-1 gap-3 border-t pt-3 text-xs sm:grid-cols-2 sm:ps-12"

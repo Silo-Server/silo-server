@@ -1582,7 +1582,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Discover dashboard features supported by v2 in this build. Support does not promise dependency readiness; layout storage is not yet available on v2. */
+    /** Discover dashboard features supported by v2 in this build. Support does not promise dependency readiness; server_layouts stays false until the layout lifecycle is accepted, although layout read, save and reset are served. */
     get: operations["getAdminDashboardCapabilities"];
     put?: never;
     post?: never;
@@ -4104,10 +4104,10 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Assign enabled and/or update_policy on one installation. Disabling stops the running plugin first. Repeating the same assignment converges on one stored row. */
+    /** Assign enabled and/or update_policy on one installation. Disabling stops the running plugin once the change is saved. Disabling the installation of the last OIDC or LDAP provider people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required, and the plugin keeps running. Repeating the same assignment converges on one stored row. */
     put: operations["updateAdminPluginInstallation"];
     post?: never;
-    /** Stop the plugin, delete the installation row (configuration, bindings and archives cascade) and remove its files. Row delete and file removal are not one transaction and a repeat finds no row: a later 404 is not this caller's receipt; never automatically retry. */
+    /** Delete the installation row (configuration, bindings and archives cascade), then stop the plugin and remove its files. Row delete and file removal are not one transaction and a repeat finds no row: a later 404 is not this caller's receipt; never automatically retry. Uninstalling the last OIDC or LDAP provider people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required, and the plugin keeps running. While another request is changing the sign-in accounts of this plugin, the uninstall changes nothing and answers 503 dependency_unavailable with Retry-After; repeat it then. */
     delete: operations["deleteAdminPluginInstallation"];
     options?: never;
     head?: never;
@@ -4122,7 +4122,7 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Replace the auth provider binding for one capability. Sign-in providers rebuild on every node without a restart. Enabling a binding while another one is enabled is 409 provider_already_enabled. The whole row is assigned, so repeating the request converges on one stored binding. */
+    /** Replace the auth provider binding for one capability. Sign-in providers rebuild on every node without a restart. Enabling a binding while another one is enabled is 409 provider_already_enabled. Turning off the last OIDC or LDAP binding people can sign in with while auth.local_password_login is off is 409 sign_in_provider_required. The whole row is assigned, so repeating the request converges on one stored binding. */
     put: operations["updateAdminPluginAuthBinding"];
     post?: never;
     delete?: never;
@@ -5425,7 +5425,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read live playback observations; these do not confer control authority. Pagination bounds the SQL source and response using session identity. */
+    /** Discover live playback observation features and supported row fields on this server. */
     get: operations["getAdminPlaybackSessionCapabilities"];
     put?: never;
     post?: never;
@@ -5460,7 +5460,7 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Read live playback observations; these do not confer control authority. Pagination bounds the SQL source and response using session identity.
+     * Read a bounded sample and total count of live playback observations without session identifiers or diagnostic metadata.
      * @description Read a bounded sample and total count of live playback observations, optionally filtered by account, without session identifiers or diagnostic metadata.
      */
     get: operations["getAdminPlaybackSummary"];
@@ -5483,7 +5483,7 @@ export interface paths {
     get: operations["getAdminStoredSettings"];
     /**
      * Validate and merge captured settings under the existing transaction guard; prerequisite probes and runtime notifications are not replayable receipts.
-     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required.
+     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP provider people can sign in with is on it is 409 sign_in_provider_required (an OpenID Connect provider counts only with server.public_url set, so clearing server.public_url while auth.local_password_login is off and it is the only provider is refused the same way). Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in.
      */
     put: operations["updateAdminSettings"];
     post?: never;
@@ -5504,7 +5504,7 @@ export interface paths {
     get: operations["getAdminSetting"];
     /**
      * Validate and replace one setting with the established single-key validation rules and transaction guard.
-     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required.
+     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required, and while no OIDC or LDAP provider people can sign in with is on it is 409 sign_in_provider_required (an OpenID Connect provider counts only with server.public_url set, so clearing server.public_url while auth.local_password_login is off and it is the only provider is refused the same way). Otherwise the change applies at once; listAdminLocalPasswordOffAccounts tells beforehand which accounts lose their way in.
      */
     put: operations["updateAdminSetting"];
     post?: never;
@@ -5574,6 +5574,26 @@ export interface paths {
     };
     /** Read configured secret key names without returning secret values. */
     get: operations["getAdminSensitiveSettingsStatus"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/sign-in/local-password-off/accounts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the accounts that lose their way in when local password sign-in is turned off.
+     * @description Answers for turning auth.local_password_login off: enabled accounts whose local password signs in today, that are not break-glass admins and have no linked identity at an enabled provider. Break-glass admins keep their password and are not listed; neither are disabled accounts. Each account is in one group: email_match when email auto-match can link it at its first provider sign-in (the provider must assert that email as verified), otherwise admin_link. totals counts both groups whichever is asked for. Ordered by username; pages are live, not a snapshot.
+     */
+    get: operations["listAdminLocalPasswordOffAccounts"];
     put?: never;
     post?: never;
     delete?: never;
@@ -7130,7 +7150,7 @@ export interface paths {
     };
     /**
      * List the caller's live login sessions, newest first.
-     * @description A session opened by device sign-in (a code a signed-in person approved, Jellyfin Quick Connect, or a remote-playback handoff), and a session from before this rule was recorded whose X-Silo-Device-Platform was tvOS, android-tv or roku, sees only itself in full. It still gets every live session of the account, but another session's item carries only its id and current: device_name and ip_address are empty, device_id and device_platform are absent, last_seen_at is null, and created_at and expires_at repeat the caller's own. For such a caller the page is ordered by id, not newest first, and a cursor from the other kind of caller is invalid_cursor.
+     * @description A session opened by device sign-in (a code a signed-in person approved, Jellyfin Quick Connect, or a remote-playback handoff), and a session from before this rule was recorded whose X-Silo-Device-Platform was tvOS, android-tv or roku, sees only itself in full. It still gets every live session of the account, but another session's item carries only its id and current: device_name and ip_address are empty, device_id and device_platform are absent, last_seen_at is null, and created_at and expires_at repeat the caller's own. For such a caller the page is ordered by id, not newest first, and a cursor from the other kind of caller is invalid_cursor. In demo mode a caller that is not an administrator gets the same page: demo visitors share one account, so its other sessions are other visitors'. A session that already gets the reduced page (see above) is unaffected by demo mode: the setting is not read for it, and its cursor stays valid when demo mode is switched on or off. For any other such caller, when the server has never read whether demo mode is on, the answer is 500 internal_error rather than the full page. An API key of such a caller, which has no session of its own, gets that 500 too, and 403 permission_denied once the setting has been read and demo mode is on.
      */
     get: operations["listSessions"];
     put?: never;
@@ -9124,7 +9144,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Describe what an import run may rely on, including Plex connection fallback. */
+    /** Describe what an import run may rely on, including Plex connection fallback and direct Emby server URLs. */
     get: operations["getHistoryImportCapability"];
     put?: never;
     post?: never;
@@ -16477,43 +16497,95 @@ export interface components {
       size_bytes: number;
     };
     AdminCgroupCPUStats: {
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Total cgroup CPU bandwidth enforcement periods elapsed.
+       */
       periods?: number;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Linux PSI cpu some avg10 percentage (10-second average).
+       */
       pressure_some_pct?: number;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Effective CPU quota in cores at the selected cgroup level (may reflect a tighter cpuset); omitted when unlimited.
+       */
       quota_cores?: number;
+      /** @description Selected visible cgroup level: leaf or ancestor (an ancestor includes sibling workloads); new values may appear. */
       scope: string;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Enforcement periods during which the cgroup was CPU-throttled.
+       */
       throttled_periods?: number;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Cumulative CPU time spent throttled by cgroup bandwidth limits in seconds.
+       */
       throttled_seconds?: number;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Cumulative CPU time consumed by the selected cgroup in seconds.
+       */
       usage_seconds?: number;
+      /** @description Cgroup hierarchy version: v1 or v2; new values may appear. */
       version: string;
     };
     AdminCgroupMemoryStats: {
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Total memory charged to the selected cgroup in bytes, including page cache. In all-in-one containers this includes co-resident services such as bundled Postgres or Redis.
+       */
       current_bytes?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Count of memory.high throttle events on cgroup v2.
+       */
       high_events?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Concrete memory limit of the selected cgroup in bytes; omitted when unlimited.
+       */
       limit_bytes?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Count of memory.max (v2) or failcnt (v1) limit-hit events.
+       */
       max_events?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Count of cgroup OOM events.
+       */
       oom_events?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Count of processes killed by the cgroup OOM killer.
+       */
       oom_kills?: number;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Linux PSI memory full avg10 percentage (10-second average).
+       */
       pressure_full_pct?: number;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Linux PSI memory some avg10 percentage (10-second average).
+       */
       pressure_some_pct?: number;
+      /** @description Selected visible cgroup level: leaf or ancestor (an ancestor includes sibling workloads); new values may appear. */
       scope: string;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Swap usage of the selected cgroup in bytes.
+       */
       swap_bytes?: number;
+      /** @description Cgroup hierarchy version: v1 or v2; new values may appear. */
       version: string;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Selected cgroup memory charge minus inactive file pages in bytes; closest single figure for container memory use, though an ancestor scope includes sibling workloads and it is not an exact OOM predictor.
+       */
       working_set_bytes?: number;
     };
     AdminChildStats: {
@@ -16522,15 +16594,29 @@ export interface components {
        * @description CPU of live owned FFmpeg children over the last sample window, on the same scale and capacity as system.cpu_pct. A lower bound: a child's last partial window and children shorter than one window are missed. Omitted when the window was not measured, including a truncated pass.
        */
       cpu_pct?: number;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Summed lifetime CPU seconds of currently live owned child processes. Decreases when a child exits; do not diff as a monotonic counter.
+       */
       cpu_seconds: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Summed resident memory (RSS) in bytes across sampled live owned child processes (transcodes, remuxes, trickplay, thumbnails, probes); may count shared pages more than once.
+       */
       resident_bytes: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Live owned child processes successfully read in this sample.
+       */
       sampled: number;
+      /** @description True when more live owned child processes existed than the per-sample cap (256). */
       truncated: boolean;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Live owned child processes whose /proc entries could not be read.
+       */
       unavailable: number;
+      /** @description Owned child workload sampled (for example ffmpeg); new values may appear. */
       workload: string;
     };
     AdminCollection: {
@@ -16898,24 +16984,36 @@ export interface components {
     AdminDashboardCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description GET /admin/stats/api-clients and GET /admin/stats/api-clients/{session_id}/endpoints serve per-session API request counts. */
       api_clients: boolean;
+      /** @description GET /admin/stats/downloads serves managed-download aggregates and timeseries points carry download_egress_kbps. */
       downloads_stats: boolean;
+      /** @description GET /admin/stats/timeseries carries egress_sources and each point's egress_by_source split. */
       egress_by_source: boolean;
+      /** @description GET /admin/stats/timeseries carries window-wide egress_bytes and download_egress_bytes totals. */
       egress_totals: boolean;
+      /** @description GET /admin/server/status carries the health object. */
       health: boolean;
+      /** @description GET /admin/logs/app accepts a multi-level filter. */
       log_level_list: boolean;
+      /** @description GET /admin/stats/playback-activity serves rolling playback activity buckets and reliability counts. */
       playback_activity: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      /** @description Per-account dashboard layout storage (GET/PUT/DELETE /admin/dashboard/layout) is accepted for clients. Stays false until the layout lifecycle is accepted, although the routes are served. */
       server_layouts: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /** @description GET /admin/stats/timeseries points carry streams_by_method. */
       streams_by_method: boolean;
+      /** @description GET /admin/stats/timeseries serves sampled concurrent-stream and viewer-egress history. */
       timeseries: boolean;
+      /** @description GET /admin/stats/top-activity serves title and profile watch-history leaderboards. */
       top_activity: boolean;
+      /** @description GET /admin/stats carries the watch_providers array. */
       watch_providers: boolean;
     };
     AdminDashboardDownloadsStats: {
@@ -17042,62 +17140,99 @@ export interface components {
       watch_providers: components["schemas"]["AdminDashboardWatchProviderStats"][];
     };
     AdminDashboardStreamsByMethod: {
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Direct-play sessions during the bucket's peak-streams minute.
+       */
       direct: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Remux sessions during the bucket's peak-streams minute.
+       */
       remux: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Transcode sessions during the bucket's peak-streams minute.
+       */
       transcode: number;
     };
     AdminDashboardTimeseries: {
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Total API file-transfer egress over the window in bytes, integrated from every sampled minute; subset of egress_bytes.
+       */
       download_egress_bytes: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Total viewer-facing egress served over the window in bytes, integrated from every sampled minute rather than from peak-per-bucket points.
+       */
       egress_bytes: number;
       /** @description Every source with samples in the window, which covers every key a point's egress_by_source uses; the API source first, then nodes by name. */
       egress_sources: components["schemas"]["AdminDashboardEgressSource"][];
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision
+       * @description Start of the requested window in UTC.
        */
       from: string;
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       * @description Timestamp of the oldest retained minute sample, or null until the first sample is written.
        */
       oldest_sample_at: string | null;
+      /** @description Sampled buckets in ascending time order; buckets with no sample are omitted rather than zero-filled. Wider buckets report per-column peak minutes. */
       points: components["schemas"]["AdminDashboardTimeseriesPoint"][];
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Bucket width in seconds chosen for the requested window (60 for <=2h, 300 for <=48h, 1800 for <=336h, 7200 wider).
+       */
       resolution_seconds: number;
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision
+       * @description End of the requested window in UTC.
        */
       to: string;
     };
     AdminDashboardTimeseriesPoint: {
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Peak direct-play sessions in the bucket; taken independently of streams and may come from a different minute. Use streams_by_method to stack methods.
+       */
       direct: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Peak API file-transfer egress subset in kbps (offline and direct downloads, ebook/audiobook fetches, theme audio, bandwidth probes). Proxy nodes do not split downloads out. Past a 2-hour window this peak can come from a different minute than egress_kbps, so do not subtract them to derive playback rate.
+       */
       download_egress_kbps: number;
       /** @description egress_kbps split by egress_sources key, from the bucket's peak-egress minute. Egress no listed source accounts for, such as minutes sampled before per-source rows existed, is egress_kbps minus the sum of these values. */
       egress_by_source: {
         [key: string]: number;
       };
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Peak viewer-facing Silo egress in kbps for the bucket, summing API stream telemetry and enabled healthy stream nodes with internal relay hops excluded.
+       */
       egress_kbps: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Peak remux sessions in the bucket; taken independently of streams. Use streams_by_method to stack methods.
+       */
       remux: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Peak concurrent playback sessions in the bucket.
+       */
       streams: number;
       /** @description streams split by play method, from the bucket's peak-streams minute, so the parts add up to no more than streams and can be stacked. direct, remux and transcode on the point are each their own peak and may come from different minutes. Sessions with any other play method are streams minus the sum of these values. */
       streams_by_method: components["schemas"]["AdminDashboardStreamsByMethod"];
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision
+       * @description Start of the bucket in UTC.
        */
       t: string;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Peak transcode sessions in the bucket; taken independently of streams. Use streams_by_method to stack methods.
+       */
       transcode: number;
     };
     AdminDashboardTopActivity: {
@@ -17609,22 +17744,39 @@ export interface components {
       state: "pending" | "ready" | "empty" | "error";
     };
     AdminDiskDetails: {
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Total inodes on the filesystem.
+       */
       inodes_total?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Inodes currently allocated on the filesystem.
+       */
       inodes_used?: number;
+      /** @description Mount role matching the corresponding system.disks entry (scratch or library-N). */
       role: string;
     };
     AdminDiskStats: {
       /** @description Where the mount is; omitted for scoped API keys */
       path?: string;
+      /** @description Mount role: scratch for the transcode working directory, or library-N positionally for each media root. */
       role?: string;
+      /** @description True for the transcode working directory mount (at most one entry per sample). */
       scratch?: boolean;
+      /** @description True when the mount's last probe did not finish in time and this reading is carried forward. */
       stale?: boolean;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Usable filesystem capacity in GiB (bytes used plus bytes available to this process, excluding blocks reserved for root).
+       */
       total_gb: number;
+      /** @description True when the mount has never been measured successfully; used_gb and total_gb are meaningless when true. */
       unavailable?: boolean;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Used space on the filesystem in GiB (bytes divided by 1024^3).
+       */
       used_gb: number;
     };
     AdminDownloadDevice: {
@@ -18411,20 +18563,41 @@ export interface components {
       value: string;
     };
     AdminGPUStats: {
+      /** @description Render device path (for example /dev/dri/renderD128) or CUDA index/UUID when no DRM render node is visible. */
       device: string;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Render/3D engine busy percentage when reported; omitted when not measurable.
+       */
       render_busy_pct?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Active hardware-accelerated sessions attributed to this GPU.
+       */
       sessions: number;
+      /** @description Measurement source (fdinfo, nvidia-smi, fdinfo+nvidia-smi, unavailable); new values may appear. */
       source: string;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Overall GPU busy percentage when reported; omitted when not measurable.
+       */
       total_busy_pct?: number;
+      /** @description GPU vendor (for example nvidia, intel, amd); new values may appear. */
       vendor?: string;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Video engine busy percentage when reported; omitted when not measurable.
+       */
       video_busy_pct?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Total GPU memory in MiB when reported; omitted when not measurable.
+       */
       vram_total_mb?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description GPU memory in use in MiB when reported; omitted when not measurable.
+       */
       vram_used_mb?: number;
     };
     AdminGroups: {
@@ -18885,33 +19058,42 @@ export interface components {
     AdminInsightsBandwidth: {
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision
+       * @description Start of the resolved window in UTC.
        */
       from: string;
+      /** @description True when any stream node is registered or contributed bandwidth in the window. */
       has_remote_nodes: boolean;
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       * @description Oldest retained bandwidth metric timestamp across daily archives and live minute samples, or null.
        */
       oldest_metric_at: string | null;
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       * @description Oldest session timestamp with recorded route facts (local/remote location), or null.
        */
       oldest_route_facts_at: string | null;
+      /** @description Daily UTC bandwidth points in ascending date order; days with no samples are omitted. */
       points: components["schemas"]["AdminInsightsBandwidthPoint"][];
+      /** @description Per-source totals across the window (API first, then stream nodes by egress_bytes descending). */
       sources: components["schemas"]["AdminInsightsEgressSource"][];
+      /** @description Window-wide bandwidth totals, peak rates, and session location counts. */
       summary: components["schemas"]["AdminInsightsBandwidthSummary"];
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision
+       * @description End of the resolved window in UTC.
        */
       to: string;
+      /** @description Requested IANA timezone used to resolve window bounds and session location counts; daily points remain UTC calendar days. */
       tz: string;
     };
     AdminInsightsBandwidthPoint: {
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Viewer-facing egress served directly by API server processes on this UTC day in bytes.
+       */
       api_egress_bytes: number;
+      /** @description Daily egress in bytes keyed by sources[].key ("api" or "node:<node_id>"). */
       bytes_by_source: {
         [key: string]: number;
       };
@@ -18920,49 +19102,101 @@ export interface components {
        * @description UTC calendar day (YYYY-MM-DD)
        */
       date: string;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description API file-transfer egress on this UTC day in bytes.
+       */
       download_egress_bytes: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Total viewer-facing egress served on this UTC day in bytes.
+       */
       egress_bytes: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Highest sampled minute API file-transfer egress rate on this UTC day in kbps.
+       */
       peak_download_kbps: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Highest sampled minute total egress rate on this UTC day in kbps.
+       */
       peak_egress_kbps: number;
+      /** @description Daily peak minute egress in kbps keyed by sources[].key. */
       peak_kbps_by_source: {
         [key: string]: number;
       };
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Estimated playback egress on this UTC day in bytes (max(egress_bytes - download_egress_bytes, 0)).
+       */
       playback_egress_bytes: number;
     };
     AdminInsightsBandwidthSummary: {
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description UTC calendar days in the window with at least one daily rollup or live metric sample.
+       */
       active_days: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Total viewer-facing egress served directly by API server processes in bytes.
+       */
       api_egress_bytes: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Mean daily egress across active_days in bytes (0 when active_days is 0).
+       */
       avg_daily_bytes: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description API file-transfer egress in bytes (offline and direct downloads, ebook/audiobook fetches, theme audio, bandwidth probes).
+       */
       download_egress_bytes: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Playback sessions started in the window classified as local (count of sessions, not bytes).
+       */
       local_sessions: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Total viewer-facing egress served by remote stream nodes in bytes.
+       */
       node_egress_bytes: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Highest sampled minute API file-transfer egress rate in the window in kbps.
+       */
       peak_download_kbps: number;
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       * @description Timestamp of the peak_egress_kbps minute, or null when no samples exist.
        */
       peak_egress_at: string | null;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Highest sampled minute total egress rate in the window in kbps.
+       */
       peak_egress_kbps: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Estimated playback egress in bytes (sum of daily max(egress_bytes - download_egress_bytes, 0)). Includes proxy-served downloads because proxy nodes do not split downloads out.
+       */
       playback_egress_bytes: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Playback sessions started in the window classified as remote (count of sessions, not bytes).
+       */
       remote_sessions: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Total viewer-facing egress served across the window in bytes (API servers plus stream nodes, relays excluded).
+       */
       total_egress_bytes: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Playback sessions started in the window without a recorded local/remote classification.
+       */
       unknown_location_sessions: number;
     };
     AdminInsightsCapabilities: {
@@ -19134,21 +19368,36 @@ export interface components {
       transcode_sessions: number;
     };
     AdminInsightsEgressSource: {
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Total bytes this source served over the window.
+       */
       egress_bytes: number;
+      /** @description Source key used in bytes_by_source and peak_kbps_by_source: "api" or "node:<node_id>". */
       key: string;
-      /** @enum {string} */
+      /**
+       * @description api covers all API server processes together; node is one stream node.
+       * @enum {string}
+       */
       kind: "api" | "node";
+      /** @description Display name; deleted or archived nodes keep a fallback label. */
       name: string;
       /**
-       * @description Opaque identifier
+       * @description Stream node identifier when kind is node.
        * @example 1
        */
       node_id?: string;
+      /** @description Stream node type (proxy or transcode) when known; null for api or removed nodes without a recorded type. */
       node_type: string | null;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Highest sampled minute egress rate for this source in the window in kbps.
+       */
       peak_egress_kbps: number;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Fraction of summary.total_egress_bytes served by this source (0 to 1, rounded to 4 decimal places).
+       */
       share_of_total: number;
     };
     AdminInsightsEpisodeRef: {
@@ -20150,6 +20399,62 @@ export interface components {
       /** @description Existing work; omit to reuse a linked work or create one. */
       work_id?: string;
     };
+    AdminLocalPasswordOffAccount: {
+      /**
+       * @description The account's email; empty when it has none
+       * @example alice@example.test
+       */
+      email: string;
+      /**
+       * @description Opaque identifier
+       * @example 12
+       */
+      id: string;
+      /**
+       * @description Whether the account is the server Owner
+       * @example false
+       */
+      is_owner: boolean;
+      /**
+       * @description What decides the account's outcome. email_match: an ordinary account with an email, and email auto-match is on, so the provider's first sign-in for that verified email links it. email_match_off: the same, with email auto-match off. administrator: an admin or the Owner, which email auto-match never links. no_email: an ordinary account without an email
+       * @example email_match
+       * @enum {string}
+       */
+      reason: "email_match" | "email_match_off" | "administrator" | "no_email";
+      /**
+       * @example user
+       * @enum {string}
+       */
+      role: "admin" | "user";
+      /** @example alice */
+      username: string;
+    };
+    AdminLocalPasswordOffAccounts: {
+      /**
+       * @description The auth.email_auto_match value the grouping used
+       * @example true
+       */
+      email_auto_match: boolean;
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AdminLocalPasswordOffAccount"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+      totals: components["schemas"]["AdminLocalPasswordOffTotals"];
+    };
+    AdminLocalPasswordOffTotals: {
+      /**
+       * Format: int64
+       * @description Accounts in the admin_link group
+       * @example 1
+       */
+      admin_link: number;
+      /**
+       * Format: int64
+       * @description Accounts in the email_match group
+       * @example 3
+       */
+      email_match: number;
+    };
     AdminLoginSessionsRevoked: {
       /**
        * Format: int64
@@ -20501,7 +20806,7 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision, or null
        */
       last_health_check: string | null;
-      /** @description Worker resource sample stored at the last health check. */
+      /** @description Raw JSON worker health snapshot stored at the last health check; may contain optional system, gpu, attribution, sampled_at, build, and artifacts members. Read GET /api/v2/admin/nodes/summary resources for the typed, path-free form. */
       last_stats?: unknown;
       /** Format: int64 */
       max_bandwidth_kbps: number | null;
@@ -20642,13 +20947,16 @@ export interface components {
       status: "ok" | "error";
     };
     AdminNodeResources: {
+      /** @description Node metric scopes, process, cgroup, and owned FFmpeg child detail; omitted when unavailable. */
       attribution?: components["schemas"]["AdminResourceAttribution"];
+      /** @description Node GPU measurements, always an array. */
       gpu: components["schemas"]["AdminGPUStats"][];
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision
+       * @description When the node took this sample; omitted when not reported.
        */
       sampled_at?: string;
+      /** @description Node host or cgroup CPU, memory, load, disk (without mount paths), and network sample; omitted when unavailable. */
       system?: components["schemas"]["AdminSystemStats"];
     };
     AdminNodeSession: {
@@ -20720,7 +21028,10 @@ export interface components {
        * @enum {string}
        */
       drain_state: "none" | "draining" | "drained";
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Node-reported viewer egress rate at the last health check in kbps (30-second rolling average).
+       */
       egress_kbps: number;
       enabled: boolean;
       group: string | null;
@@ -22252,27 +22563,60 @@ export interface components {
        * @description This process's CPU over the last sample window, on the same scale and capacity as system.cpu_pct. Omitted when the window was not measured; a measured idle process is 0.
        */
       cpu_pct?: number;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Cumulative CPU time consumed by this Silo process in seconds (user + system).
+       */
       cpu_seconds?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Total memory mapped by the Go runtime in bytes; this is a runtime reservation, not RSS.
+       */
       go_memory_bytes?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Live goroutine count in this Silo process.
+       */
       goroutines?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Marked live Go heap after the last GC cycle in bytes (subset of resident_bytes; subtracting from RSS does not yield exact native allocations).
+       */
       heap_live_bytes?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Soft file-descriptor limit (RLIMIT_NOFILE) of this Silo process.
+       */
       max_fds?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Open file descriptors held by this Silo process.
+       */
       open_fds?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Cumulative storage bytes read from /proc/PID/io; on Linux this includes I/O attributed to waited-for children.
+       */
       read_bytes?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Resident set size (RSS) of this Silo server process alone in bytes; excludes FFmpeg children and separate database/cache processes.
+       */
       resident_bytes?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description OS thread count of this Silo process.
+       */
       threads?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Virtual memory size of this Silo process in bytes.
+       */
       virtual_bytes?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Cumulative storage bytes written from /proc/PID/io; on Linux this includes I/O attributed to waited-for children.
+       */
       write_bytes?: number;
     };
     AdminRateLimitAuthEndpoint: {
@@ -23038,32 +23382,56 @@ export interface components {
       window_start: string;
     };
     AdminResourceAttribution: {
+      /** @description Visible cgroup CPU usage, quota, throttling, and pressure; omitted when unavailable. */
       cgroup_cpu?: components["schemas"]["AdminCgroupCPUStats"];
+      /** @description Visible cgroup memory usage, limit, events, and pressure; omitted when unavailable. Overlaps with process and children; do not add them together. */
       cgroup_memory?: components["schemas"]["AdminCgroupMemoryStats"];
+      /** @description Bounded point-in-time snapshot of live owned FFmpeg children; omitted when unavailable. Overlaps with cgroup_memory; do not add to cgroup_memory. */
       children?: components["schemas"]["AdminChildStats"];
+      /** @description Scope, source, and availability of system.cpu_pct and system.cores. */
       cpu: components["schemas"]["AdminResourceSource"];
+      /** @description Inode counts keyed by disk role, carrying the matching system.disks entry's freshness; omitted when none. */
       disks?: components["schemas"]["AdminDiskDetails"][];
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Configured media roots beyond the bounded disk sampling cap that were not probed.
+       */
       dropped_disk_roots: number;
+      /** @description Random identifier for this sampler lifetime; identifies which process answered behind a load balancer without exposing a hostname. */
       instance_id: string;
+      /** @description Scope, source, and availability of system.load1. */
       load: components["schemas"]["AdminResourceSource"];
+      /** @description Scope, source, and availability of system.mem_used_mb and system.mem_total_mb. */
       memory: components["schemas"]["AdminResourceSource"];
+      /** @description Scope, source, and availability of system.net_rx_bps and system.net_tx_bps. */
       network: components["schemas"]["AdminResourceSource"];
+      /** @description Resource usage of this Silo process alone. Overlaps with children and cgroup_memory; do not add them together. */
       process?: components["schemas"]["AdminProcessStats"];
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Wall-clock duration of the last completed sampling pass in seconds.
+       */
       sample_duration_seconds: number;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Configured sampling cadence in seconds.
+       */
       sample_interval_seconds: number;
     };
     AdminResourceCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description Responses may include attribution.cgroup_cpu and attribution.cgroup_memory. */
       cgroup_resources: boolean;
+      /** @description Responses include attribution.instance_id and per-metric scope and source metadata. */
       instance_attribution: boolean;
+      /** @description Responses may include attribution.process.cpu_pct and attribution.children.cpu_pct. */
       process_cpu_percent: boolean;
+      /** @description Responses may include attribution.process and attribution.children. */
       process_resources: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      /** @description Responses include sampled_at, stale, and attribution sample interval and duration. */
       sample_freshness: boolean;
       /**
        * @description Support and configuration state, not health
@@ -23072,8 +23440,11 @@ export interface components {
       state: "available" | "disabled" | "not_configured" | "unsupported";
     };
     AdminResourceSource: {
+      /** @description True when the corresponding system reading was measured in this sample. */
       available: boolean;
+      /** @description Population measured: host, virtualized_host, cgroup, or network_namespace; new values may appear. */
       scope: string;
+      /** @description Operating-system source: procfs, lxcfs, cgroup_v1, or cgroup_v2; new values may appear. */
       source: string;
     };
     AdminRestartKeys: {
@@ -23676,32 +24047,59 @@ export interface components {
       username?: string;
     };
     AdminSystemResources: {
+      /** @description Scope and source of each system reading, plus process, cgroup, and owned FFmpeg child detail; omitted when none is reported. */
       attribution?: components["schemas"]["AdminResourceAttribution"];
+      /** @description True when this host can be sampled. False on non-Linux hosts, before the first sample completes, or without a sampler; do not read false as zero load. */
       available: boolean;
+      /** @description One entry per visible GPU, always an array. Missing measurements are omitted while a measured zero remains zero. */
       gpu: components["schemas"]["AdminGPUStats"][];
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision
+       * @description When the sample was taken; omitted when no sample exists.
        */
       sampled_at?: string;
+      /** @description True when no sample exists or its age exceeds three sampling intervals. */
       stale: boolean;
+      /** @description Host or cgroup CPU, memory, load, disk, and network sample; omitted when unavailable. */
       system?: components["schemas"]["AdminSystemStats"];
     };
     AdminSystemStats: {
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description CPUs available to this process: cgroup CPU quota rounded up when limited, otherwise all CPUs the kernel reports.
+       */
       cores: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Aggregate busy percentage across available cores over the last sampling interval (0-100; idle and iowait count as not busy). Uses cgroup usage against cgroup quota when a CPU limit binds; attribution.cpu reports which.
+       */
       cpu_pct: number;
+      /** @description Sampled mounts (transcode scratch first, then library roots), deduplicated by filesystem and bounded. */
       disks: components["schemas"]["AdminDiskStats"][];
-      /** Format: double */
+      /**
+       * Format: double
+       * @description 1-minute load average, including tasks blocked on storage I/O. Always host-wide (or lxcfs-virtualized); read relative to cores.
+       */
       load1: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Total memory capacity in MiB, from the same host or cgroup domain as mem_used_mb.
+       */
       mem_total_mb: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Memory in use in MiB. Matches the cgroup working set when a concrete memory limit binds, otherwise the host; paired with mem_total_mb from the same domain (see attribution.memory).
+       */
       mem_used_mb: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Aggregate received network throughput in bits per second, excluding loopback. Covers Silo's network namespace (container interfaces under bridge Docker, or host NICs), not streaming traffic alone; use GET /api/v2/admin/stats/timeseries for Silo viewer egress.
+       */
       net_rx_bps: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Aggregate transmitted network throughput in bits per second, excluding loopback. Covers Silo's network namespace (all traffic, not streaming alone); use GET /api/v2/admin/stats/timeseries for Silo viewer egress.
+       */
       net_tx_bps: number;
     };
     AdminTask: {
@@ -29259,6 +29657,8 @@ export interface components {
       identities: boolean;
       /** @description Whether auth binding and auth plugin changes apply without a server restart */
       live_provider_changes: boolean;
+      /** @description Whether listAdminLocalPasswordOffAccounts lists the accounts that lose their way in when auth.local_password_login is turned off, and whether updateAdminSettings refuses turning it off without an enabled OIDC or LDAP provider (sign_in_provider_required) */
+      local_password_off_accounts: boolean;
       /** @description Whether linking a network identity (linkAccountIdentityWithNetwork, or createAdminUserIdentity at a network provider) keeps the account's local password sign-in. While the provider's latest answer refuses the person, that password is refused with not_permitted (break-glass accounts excepted); an unavailable or unsupported answer keeps the refusal, and it ends when the provider vouches again or the network provider is turned off. Servers without the field turn local password sign-in off on such a link. network_sign_in says whether the link operations are served */
       network_link_keeps_password: boolean;
       /** @description Whether signInWithNetworkIdentity and linkAccountIdentityWithNetwork are served. Whether a given request may use them is answered by listAuthProviders, which lists a network provider only to a request that arrived through that provider's network */
@@ -29661,6 +30061,11 @@ export interface components {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       /**
+       * @description Whether emby_base_url is honored for direct Emby server sign-in
+       * @example true
+       */
+      emby_custom_server: boolean;
+      /**
        * Format: int64
        * @description How many Plex addresses one run races, counting plex_base_url
        * @example 8
@@ -29796,6 +30201,12 @@ export interface components {
       connect_session_id?: string;
       /**
        * Format: uri-reference
+       * @description Emby: the server address for a direct sign-in
+       * @example https://emby.example.test
+       */
+      emby_base_url?: string;
+      /**
+       * Format: uri-reference
        * @description Jellyfin: the server address
        * @example https://jellyfin.example.test
        */
@@ -29804,7 +30215,7 @@ export interface components {
       jellyfin_password?: string;
       /** @description Jellyfin: the user name */
       jellyfin_username?: string;
-      /** @description Emby: the source server password when importing from a configured source; empty for an account without one */
+      /** @description Emby: the source server password when importing from a configured source or emby_base_url; empty for an account without one */
       password?: string;
       /** @description Plex: the plex.tv account token, for watchlist import alongside a server token */
       plex_account_token?: string;
@@ -29844,7 +30255,7 @@ export interface components {
        * @example 1
        */
       source_id?: string;
-      /** @description Emby: the source server user name when importing from a configured source */
+      /** @description Emby: the source server user name when importing from a configured source or emby_base_url */
       username?: string;
     };
     HistoryImportSource: {
@@ -30992,46 +31403,46 @@ export interface components {
     LoginSession: {
       /**
        * Format: date-time
-       * @description When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at
+       * @description When the session was opened. On another session's item, a session opened by device sign-in or a demo visitor sees its own created_at
        * @example 2026-01-02T03:04:05.678Z
        */
       created_at: string;
       /** @description Whether this is the login session making this request */
       current: boolean;
       /**
-       * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in
+       * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in or a demo visitor
        * @example 8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50
        */
       device_id?: string;
       /**
-       * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in
+       * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in or a demo visitor
        * @example Living Room Apple TV
        */
       device_name: string;
       /**
-       * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in
+       * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in or a demo visitor
        * @example tvOS
        */
       device_platform?: string;
       /**
        * Format: date-time
-       * @description When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at
+       * @description When the session expires unless refreshed. On another session's item, a session opened by device sign-in or a demo visitor sees its own expires_at
        * @example 2026-02-01T03:04:05.678Z
        */
       expires_at: string;
       /**
-       * @description Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current
+       * @description Session identifier; the value deleteSession takes. A session opened by device sign-in, and a demo visitor (see listSessions), sees every session's id, and of another session nothing else but current
        * @example 6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c
        */
       id: string;
       /**
-       * @description Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in
+       * @description Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in or a demo visitor
        * @example 203.0.113.7
        */
       ip_address: string;
       /**
        * Format: date-time
-       * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in
+       * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in or a demo visitor
        * @example 2026-01-02T03:04:05.678Z
        */
       last_seen_at: string | null;
@@ -31059,46 +31470,46 @@ export interface components {
       current_session: {
         /**
          * Format: date-time
-         * @description When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at
+         * @description When the session was opened. On another session's item, a session opened by device sign-in or a demo visitor sees its own created_at
          * @example 2026-01-02T03:04:05.678Z
          */
         created_at: string;
         /** @description Whether this is the login session making this request */
         current: boolean;
         /**
-         * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in
+         * @description Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in or a demo visitor
          * @example 8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50
          */
         device_id?: string;
         /**
-         * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in
+         * @description Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in or a demo visitor
          * @example Living Room Apple TV
          */
         device_name: string;
         /**
-         * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in
+         * @description Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in or a demo visitor
          * @example tvOS
          */
         device_platform?: string;
         /**
          * Format: date-time
-         * @description When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at
+         * @description When the session expires unless refreshed. On another session's item, a session opened by device sign-in or a demo visitor sees its own expires_at
          * @example 2026-02-01T03:04:05.678Z
          */
         expires_at: string;
         /**
-         * @description Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current
+         * @description Session identifier; the value deleteSession takes. A session opened by device sign-in, and a demo visitor (see listSessions), sees every session's id, and of another session nothing else but current
          * @example 6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c
          */
         id: string;
         /**
-         * @description Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in
+         * @description Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in or a demo visitor
          * @example 203.0.113.7
          */
         ip_address: string;
         /**
          * Format: date-time
-         * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in
+         * @description Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in or a demo visitor
          * @example 2026-01-02T03:04:05.678Z
          */
         last_seen_at: string | null;
@@ -90289,6 +90700,120 @@ export interface operations {
       };
     };
   };
+  listAdminLocalPasswordOffAccounts: {
+    parameters: {
+      query: {
+        cursor?: string;
+        /** @description Answer as if auth.email_auto_match had this value, for an edit that changes both settings; omitted uses the saved value */
+        email_auto_match?: "true" | "false";
+        /** @description email_match: accounts email auto-match can link at their first provider sign-in. admin_link: accounts nothing links until an administrator does */
+        group: "email_match" | "admin_link";
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminLocalPasswordOffAccounts"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getAdminDashboardStats: {
     parameters: {
       query?: {
@@ -90731,6 +91256,7 @@ export interface operations {
   getAdminDashboardPlaybackActivity: {
     parameters: {
       query?: {
+        /** @description Window length in hours (1 to 744, up to 31 days). */
         hours?: number;
         /** @description Invalidate the cached aggregate before reading; ignored for scoped API keys. */
         refresh?: boolean;
@@ -90841,6 +91367,7 @@ export interface operations {
   getAdminDashboardTimeseries: {
     parameters: {
       query?: {
+        /** @description Window length in hours (1 to 744, up to 31 days). */
         hours?: number;
         /** @description Invalidate the cached aggregate before reading; ignored for scoped API keys. */
         refresh?: boolean;

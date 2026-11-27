@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 )
 
@@ -18,6 +19,13 @@ const (
 	sessionReachDeleteDescription = "A session opened by device sign-in (see listSessions) may revoke only itself: " +
 		"another session of the account is 403 permission_denied, and a session of another account or an unknown id is 404 as for every caller."
 )
+
+// sessionReachDemoListDescription adds demo visitors to listSessions'
+// description: they get the page a session limited to itself gets.
+const sessionReachDemoListDescription = "In demo mode a caller that is not an administrator gets the same page: demo visitors share one account, so its other sessions are other visitors'. " +
+	"A session that already gets the reduced page (see above) is unaffected by demo mode: the setting is not read for it, and its cursor stays valid when demo mode is switched on or off. " +
+	"For any other such caller, when the server has never read whether demo mode is on, the answer is 500 internal_error rather than the full page. " +
+	"An API key of such a caller, which has no session of its own, gets that 500 too, and 403 permission_denied once the setting has been read and demo mode is on."
 
 // loginSessionIDCursorSort is the listSessions order for a session limited
 // to itself (auth.LimitedToItself). It is part of the cursor scope, so a
@@ -90,4 +98,22 @@ func (reg *Registry) limitedLoginSessionPage(ctx context.Context, cursors *Curso
 	out := &LoginSessionCollectionOutput{Body: LoginSessionCollection{Collection: Paginated(items, next)}}
 	out.Body.CurrentSession.Value = &own
 	return out, nil
+}
+
+// demoVisitorListing reports whether listSessions answers the caller with
+// limitedLoginSessionPage because demo mode restricts it. Demo visitors share
+// one account, so its other sessions are other visitors': each sees them as a
+// session limited to itself does. A setting that can't be read refuses, as
+// deleteSession does, rather than fall back to the full page; so does a
+// restricted caller with no session of its own (an API key), which has no
+// item of its own to show in full.
+func demoVisitorListing(ctx context.Context, settings apimw.DemoSettingsReader, claims *auth.Claims) (bool, *Problem) {
+	restricted, err := demoRestricted(ctx, settings)
+	if err != nil {
+		return false, serviceProblem(err)
+	}
+	if restricted && claims.SessionID == "" {
+		return false, demoRestrictedProblem()
+	}
+	return restricted, nil
 }

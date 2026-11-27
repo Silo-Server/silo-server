@@ -641,6 +641,12 @@
       "value": "Din session er udløbet. Log ind igen."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Mens login med adgangskode er slået fra, skal en loginudbyder, som folk kan bruge, forblive slået til. OpenID Connect kræver også serverens offentlige URL."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -79039,6 +79045,20 @@
       "value": "Slå en loginudbyder til først. Med login med adgangskode slået fra og ingen udbyder slået til ville kun nødadministratorer kunne logge ind."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Angiv først serverens offentlige URL. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " kan ikke logge nogen ind uden den, så med login med adgangskode slået fra ville kun nødadministratorer kunne logge ind."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -79129,6 +79149,242 @@
       "value": "Lad brugere oprette API-nøgler"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Slå login med adgangskode fra"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Kun nødadministratorer logger ind med en adgangskode. Alle andre logger ind med "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " opretter konti ved første login, så hvis en af disse personer logger ind med den, før du har tilknyttet deres konto, får de en ny, separat konto."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Tilknyt hver enkelt til en "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "-konto fra dens side under Brugere."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konto kan ikke logge ind, før en administrator tilknytter den"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konti kan ikke logge ind, før en administrator tilknytter dem"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke tjekke, hvilke konti dette påvirker. Du kan stadig slå det fra."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Tjekker, hvem der logger ind med en adgangskode"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Når "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " bekræfter en af disse e-mailadresser ved login, forbinder Silo personen med personens konto."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konto forbindes via e-mail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " konti forbindes via e-mail"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " til"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " til"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke indlæse flere konti. Prøv igen."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Alle konti kan stadig logge ind efter dette."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Administrator"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "E-mailmatchning er slået fra"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Ingen e-mail"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Dette logger ikke nogen ud. Personer, der allerede er logget ind, forbliver logget ind, deres API-nøgler virker fortsat, og de kan stadig godkende nye enheder. Hvis du vil logge en person ud, skal du afslutte personens sessioner fra vedkommendes side under "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Brugere"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Slå login med adgangskode fra?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Se alle konti under Brugere"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -79171,6 +79427,28 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Login med adgangskode er slået fra, så "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " er den måde, alle undtagen nødadministratorer logger ind på. Slå først login med adgangskode til igen, og slå derefter "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " fra."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -135989,6 +136267,12 @@
       "value": "E-mail eller brugernavn"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Angiv basis-URL’en til den Emby-server, du vil importere fra."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -135999,6 +136283,12 @@
     {
       "type": 0,
       "value": "Lad feltet stå tomt, hvis kontoen ikke har en"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby-serverens URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -136149,6 +136439,12 @@
     {
       "type": 0,
       "value": "Plex-konto"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Server-URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -136442,7 +136738,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect eller gemt server"
+      "value": "Emby Connect, server-URL eller gemt server"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

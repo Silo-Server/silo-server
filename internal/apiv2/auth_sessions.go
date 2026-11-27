@@ -79,14 +79,14 @@ type RefreshSessionOutput struct {
 
 // LoginSession is one live login session of the caller's account.
 type LoginSession struct {
-	ID             ID              `json:"id" doc:"Session identifier; the value deleteSession takes. A session opened by device sign-in sees every session's id, and of another session nothing else but current" example:"6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"`
-	DeviceName     string          `json:"device_name" doc:"Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in" example:"Living Room Apple TV"`
-	IPAddress      string          `json:"ip_address" doc:"Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in" example:"203.0.113.7"`
-	CreatedAt      Instant         `json:"created_at" doc:"When the session was opened. On another session's item, a session opened by device sign-in sees its own created_at" example:"2026-01-02T03:04:05.678Z"`
-	ExpiresAt      Instant         `json:"expires_at" doc:"When the session expires unless refreshed. On another session's item, a session opened by device sign-in sees its own expires_at" example:"2026-02-01T03:04:05.678Z"`
-	DeviceID       string          `json:"device_id,omitempty" doc:"Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in" example:"8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"`
-	DevicePlatform string          `json:"device_platform,omitempty" doc:"Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in" example:"tvOS"`
-	LastSeenAt     NullableInstant `json:"last_seen_at" doc:"Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in" example:"2026-01-02T03:04:05.678Z"`
+	ID             ID              `json:"id" doc:"Session identifier; the value deleteSession takes. A session opened by device sign-in, and a demo visitor (see listSessions), sees every session's id, and of another session nothing else but current" example:"6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"`
+	DeviceName     string          `json:"device_name" doc:"Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device. Empty on another session's item for a session opened by device sign-in or a demo visitor" example:"Living Room Apple TV"`
+	IPAddress      string          `json:"ip_address" doc:"Client address recorded at login; empty when unknown, and on another session's item for a session opened by device sign-in or a demo visitor" example:"203.0.113.7"`
+	CreatedAt      Instant         `json:"created_at" doc:"When the session was opened. On another session's item, a session opened by device sign-in or a demo visitor sees its own created_at" example:"2026-01-02T03:04:05.678Z"`
+	ExpiresAt      Instant         `json:"expires_at" doc:"When the session expires unless refreshed. On another session's item, a session opened by device sign-in or a demo visitor sees its own expires_at" example:"2026-02-01T03:04:05.678Z"`
+	DeviceID       string          `json:"device_id,omitempty" doc:"Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing. Absent on another session's item for a session opened by device sign-in or a demo visitor" example:"8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"`
+	DevicePlatform string          `json:"device_platform,omitempty" doc:"Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none, and on another session's item for a session opened by device sign-in or a demo visitor" example:"tvOS"`
+	LastSeenAt     NullableInstant `json:"last_seen_at" doc:"Most recent authenticated request, coalesced to at most one update per minute; null until recorded, and on another session's item for a session opened by device sign-in or a demo visitor" example:"2026-01-02T03:04:05.678Z"`
 	Current        bool            `json:"current" doc:"Whether this is the login session making this request"`
 }
 
@@ -221,7 +221,7 @@ func registerAuthSessions(reg *Registry) {
 	Register(reg, Operation{Operation: refresh, RetrySafety: RetrySafetyDomainIdentity, Class: ClassPublic, ServiceBacked: true}, reg.refreshSession)
 	list := humaOp(http.MethodGet, Prefix+"/auth/sessions", opListSessions, "auth",
 		"List the caller's live login sessions, newest first.")
-	list.Description = sessionReachListDescription
+	list.Description = sessionReachListDescription + " " + sessionReachDemoListDescription
 	Register(reg, Operation{
 		Operation: list,
 		Class:     ClassAuthenticated, ServiceBacked: true,
@@ -339,6 +339,12 @@ func (reg *Registry) listSessions(ctx context.Context, cursors *Cursors, in *Log
 	limited, err := reg.deps.Sessions.SessionLimitedToItself(ctx, claims.SessionID)
 	if err != nil {
 		return nil, serviceProblem(err)
+	}
+	if !limited {
+		var p *Problem
+		if limited, p = demoVisitorListing(ctx, reg.deps.DemoSettings, claims); p != nil {
+			return nil, p
+		}
 	}
 	if limited {
 		return reg.limitedLoginSessionPage(ctx, cursors, claims, in)

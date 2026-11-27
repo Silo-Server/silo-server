@@ -28,13 +28,22 @@ const (
 
 type EmbyClient struct {
 	httpClient *http.Client
-	limiter    *upstreamRateLimiter
+	// listingClient reads paged full-history listings (IsPlayed, IsFavorite).
+	// Large Emby libraries can take over 30s to evaluate a filtered page;
+	// short held lists (IsResumable, Items/Resume), sign-in, and ID lookups
+	// stay on the 30s httpClient while sharing the same guarded Transport.
+	listingClient *http.Client
+	limiter       *upstreamRateLimiter
 }
 
 func NewEmbyClient() *EmbyClient {
+	base := netguard.NewClient(30 * time.Second)
+	listing := *base
+	listing.Timeout = 5 * time.Minute
 	return &EmbyClient{
-		httpClient: netguard.NewClient(30 * time.Second),
-		limiter:    sharedHistoryImportUpstreamLimiter,
+		httpClient:    base,
+		listingClient: &listing,
+		limiter:       sharedHistoryImportUpstreamLimiter,
 	}
 }
 
@@ -173,8 +182,7 @@ func (c *EmbyClient) ConnectServers(ctx context.Context, connectUserID, connectT
 
 func (c *EmbyClient) ConnectExchange(ctx context.Context, baseURL, connectUserID, accessKey string) (*embyLocalAuth, error) {
 	path := "/Connect/Exchange?format=json&ConnectUserId=" + url.QueryEscape(connectUserID)
-	var lastErr error
-	for _, candidate := range baseCandidates(baseURL) {
+	return runEmbyAuthCandidates(ctx, baseURL, "exchanging Emby Connect token", func(candidate string) (*embyLocalAuth, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, candidate+path, nil)
 		if err != nil {
 			return nil, err
@@ -182,19 +190,14 @@ func (c *EmbyClient) ConnectExchange(ctx context.Context, baseURL, connectUserID
 		req.Header.Set("X-Emby-Token", accessKey)
 		req.Header.Set("X-Emby-Authorization", embyAuthorizationHeader("", accessKey))
 		var resp embyExchangeResponse
-		err = c.doJSON(req, &resp)
-		if err == nil {
-			return &embyLocalAuth{BaseURL: candidate, UserID: resp.LocalUserID, AccessToken: resp.AccessToken}, nil
+		if err := c.doJSON(req, &resp); err != nil {
+			return nil, err
 		}
-		if !shouldTryAnotherBase(err) {
-			return nil, fmt.Errorf("exchanging Emby Connect token: %w", err)
+		if strings.TrimSpace(resp.LocalUserID) == "" || strings.TrimSpace(resp.AccessToken) == "" {
+			return nil, ErrUnexpectedSourceResponse
 		}
-		lastErr = err
-	}
-	if lastErr != nil {
-		return nil, fmt.Errorf("exchanging Emby Connect token: %w", lastErr)
-	}
-	return nil, fmt.Errorf("exchanging Emby Connect token: no reachable server URL")
+		return &embyLocalAuth{BaseURL: candidate, UserID: resp.LocalUserID, AccessToken: resp.AccessToken}, nil
+	})
 }
 
 func (c *EmbyClient) AuthenticateServerUser(ctx context.Context, baseURL, username, password string) (*embyLocalAuth, error) {
@@ -202,8 +205,7 @@ func (c *EmbyClient) AuthenticateServerUser(ctx context.Context, baseURL, userna
 		"Username": username,
 		"Pw":       password,
 	})
-	var lastErr error
-	for _, candidate := range baseCandidates(baseURL) {
+	return runEmbyAuthCandidates(ctx, baseURL, "authenticating against Emby server", func(candidate string) (*embyLocalAuth, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, candidate+"/Users/AuthenticateByName", bytes.NewReader(body))
 		if err != nil {
 			return nil, err
@@ -211,19 +213,42 @@ func (c *EmbyClient) AuthenticateServerUser(ctx context.Context, baseURL, userna
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Emby-Authorization", embyAuthorizationHeader("", ""))
 		var resp embyServerAuthResponse
-		err = c.doJSON(req, &resp)
-		if err == nil {
-			return &embyLocalAuth{BaseURL: candidate, UserID: resp.User.ID, AccessToken: resp.AccessToken}, nil
+		if err := c.doJSON(req, &resp); err != nil {
+			return nil, err
 		}
-		if !shouldTryAnotherBase(err) {
-			return nil, fmt.Errorf("authenticating against Emby server: %w", err)
+		if strings.TrimSpace(resp.User.ID) == "" || strings.TrimSpace(resp.AccessToken) == "" {
+			return nil, ErrUnexpectedSourceResponse
+		}
+		return &embyLocalAuth{BaseURL: candidate, UserID: resp.User.ID, AccessToken: resp.AccessToken}, nil
+	})
+}
+
+func runEmbyAuthCandidates(ctx context.Context, baseURL, action string, attempt func(candidate string) (*embyLocalAuth, error)) (*embyLocalAuth, error) {
+	var lastErr, firstDecodeErr error
+	for _, candidate := range baseCandidates(baseURL) {
+		auth, err := attempt(candidate)
+		if err == nil {
+			return auth, nil
+		}
+		if errors.Is(err, ErrUnexpectedSourceResponse) {
+			return nil, fmt.Errorf("%s: %w", action, err)
+		}
+		decodeErr := ctx.Err() == nil && isJSONDecodeError(err)
+		if decodeErr && firstDecodeErr == nil {
+			firstDecodeErr = err
+		}
+		if !decodeErr && !shouldTryAnotherBase(ctx, err) {
+			return nil, fmt.Errorf("%s: %w", action, err)
 		}
 		lastErr = err
 	}
-	if lastErr != nil {
-		return nil, fmt.Errorf("authenticating against Emby server: %w", lastErr)
+	if firstDecodeErr != nil {
+		return nil, fmt.Errorf("%s: %w: %w", action, ErrUnexpectedSourceResponse, firstDecodeErr)
 	}
-	return nil, fmt.Errorf("authenticating against Emby server: no reachable server URL")
+	if lastErr != nil {
+		return nil, fmt.Errorf("%s: %w", action, lastErr)
+	}
+	return nil, fmt.Errorf("%s: no reachable server URL", action)
 }
 
 // Emby item listings. Favorites include seasons so the provider can report the
@@ -238,10 +263,11 @@ const (
 	embyEndpointResume = "Items/Resume"
 )
 
-// fetchAllItems reads a short listing whole. Only held lists may use it.
+// fetchAllItems reads a short listing whole on the 30s client. Only held lists
+// (IsResumable, Items/Resume) may use it.
 func (c *EmbyClient) fetchAllItems(ctx context.Context, auth embyLocalAuth, endpoint, filter, includeItemTypes string) ([]embyItem, error) {
 	var items []embyItem
-	err := c.forEachItemsPage(ctx, auth, endpoint, filter, includeItemTypes, 0, collectHeld(ctx, &items))
+	err := c.forEachItemsPageWithClient(ctx, c.httpClient, auth, endpoint, filter, includeItemTypes, 0, collectHeld(ctx, &items))
 	if err != nil {
 		releaseItems(ctx, items)
 		return nil, err
@@ -250,8 +276,13 @@ func (c *EmbyClient) fetchAllItems(ctx context.Context, auth embyLocalAuth, endp
 }
 
 // forEachItemsPage visits one of the user's item lists (endpoint is relative
-// to /Users/{id}) page by page from startIndex.
+// to /Users/{id}) page by page from startIndex, using the longer listing client
+// for full-history pages.
 func (c *EmbyClient) forEachItemsPage(ctx context.Context, auth embyLocalAuth, endpoint, filter, includeItemTypes string, startIndex int, visit func(items []embyItem, pageStart int) error) error {
+	return c.forEachItemsPageWithClient(ctx, c.listingClient, auth, endpoint, filter, includeItemTypes, startIndex, visit)
+}
+
+func (c *EmbyClient) forEachItemsPageWithClient(ctx context.Context, client *http.Client, auth embyLocalAuth, endpoint, filter, includeItemTypes string, startIndex int, visit func(items []embyItem, pageStart int) error) error {
 	var budget listingBudget
 	for {
 		if err := budget.startPage(); err != nil {
@@ -267,7 +298,7 @@ func (c *EmbyClient) forEachItemsPage(ctx context.Context, auth embyLocalAuth, e
 		}
 		query.Set("StartIndex", strconv.Itoa(startIndex))
 		query.Set("Limit", strconv.Itoa(embyPageSize))
-		payload, err := c.getItems(ctx, auth, endpoint, query, &budget)
+		payload, err := c.getItems(ctx, client, auth, endpoint, query, &budget)
 		if err == nil {
 			err = budget.addItems(len(payload.Items))
 		}
@@ -306,7 +337,7 @@ func (c *EmbyClient) FetchItemsByIDs(ctx context.Context, auth embyLocalAuth, id
 		if strings.TrimSpace(includeItemTypes) != "" {
 			query.Set("IncludeItemTypes", includeItemTypes)
 		}
-		payload, err := c.getItems(ctx, auth, "Items", query, nil)
+		payload, err := c.getItems(ctx, c.httpClient, auth, "Items", query, nil)
 		if err != nil {
 			return nil, fmt.Errorf("fetching Emby items by ids: %w", err)
 		}
@@ -316,7 +347,7 @@ func (c *EmbyClient) FetchItemsByIDs(ctx context.Context, auth embyLocalAuth, id
 }
 
 // getItems reads one /Users/{id} item list response; budget may be nil.
-func (c *EmbyClient) getItems(ctx context.Context, auth embyLocalAuth, endpoint string, query url.Values, budget *listingBudget) (embyItemsResponse, error) {
+func (c *EmbyClient) getItems(ctx context.Context, client *http.Client, auth embyLocalAuth, endpoint string, query url.Values, budget *listingBudget) (embyItemsResponse, error) {
 	path := fmt.Sprintf("%s/Users/%s/%s?%s", auth.BaseURL, url.PathEscape(auth.UserID), endpoint, query.Encode())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -325,22 +356,26 @@ func (c *EmbyClient) getItems(ctx context.Context, auth embyLocalAuth, endpoint 
 	req.Header.Set("X-Emby-Token", auth.AccessToken)
 	req.Header.Set("X-Emby-Authorization", embyAuthorizationHeader(auth.UserID, auth.AccessToken))
 	var payload embyItemsResponse
-	if err := c.doJSONWithBudget(req, &payload, budget); err != nil {
+	if err := c.doJSONWithClient(client, req, &payload, budget); err != nil {
 		return embyItemsResponse{}, err
 	}
 	return payload, nil
 }
 
 func (c *EmbyClient) doJSON(req *http.Request, out any) error {
-	return c.doJSONWithBudget(req, out, nil)
+	return c.doJSONWithClient(c.httpClient, req, out, nil)
 }
 
-// doJSONWithBudget is doJSON for one page of a listing; budget may be nil.
-func (c *EmbyClient) doJSONWithBudget(req *http.Request, out any, budget *listingBudget) error {
+// doJSONWithClient runs req with client (defaulting to c.httpClient) and
+// decodes its JSON response under budget; budget may be nil.
+func (c *EmbyClient) doJSONWithClient(client *http.Client, req *http.Request, out any, budget *listingBudget) error {
 	if err := c.limiter.Wait(req.Context(), req.URL); err != nil {
 		return err
 	}
-	resp, err := c.httpClient.Do(req)
+	if client == nil {
+		client = c.httpClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -385,12 +420,19 @@ func UpstreamHTTPStatus(err error) int {
 	return 0
 }
 
-func shouldTryAnotherBase(err error) bool {
-	var httpErr *embyHTTPError
-	if !errors.As(err, &httpErr) {
-		return true
+// shouldTryAnotherBase reports whether trying the "/emby" suffix can succeed
+// after err: only when the root path returned 404, 405, or a non-JSON 2xx (such
+// as a reverse-proxy landing page), never on cancellation, address refusals,
+// transport failures, or auth rejections.
+func shouldTryAnotherBase(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return false
 	}
-	return httpErr.StatusCode == http.StatusNotFound
+	var httpErr *embyHTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.StatusCode == http.StatusNotFound || httpErr.StatusCode == http.StatusMethodNotAllowed
+	}
+	return isJSONDecodeError(err)
 }
 
 func embyAuthorizationHeader(userID, token string) string {

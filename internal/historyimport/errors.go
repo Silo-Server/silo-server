@@ -5,10 +5,25 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"strings"
 )
+
+// ErrUnexpectedSourceResponse reports an upstream server that answered 2xx with
+// a non-JSON body or without the expected sign-in fields.
+var ErrUnexpectedSourceResponse = errors.New("history import source returned an unexpected response")
+
+// UnexpectedSourceResponseMessage is the user-facing text for
+// ErrUnexpectedSourceResponse.
+const UnexpectedSourceResponseMessage = "The server didn't return a valid response. Check the server URL and try again."
+
+// isJSONDecodeError reports a JSON decode failure from decodeUpstreamJSON on a
+// cleanly received 2xx body, excluding transport, body-read, and size-limit errors.
+func isJSONDecodeError(err error) bool {
+	return errors.Is(err, errUpstreamJSONDecode)
+}
 
 // UpstreamHTTPError is the error a source server answering with status
 // produces. The client types that carry an upstream status are unexported;
@@ -18,7 +33,7 @@ func UpstreamHTTPError(status int) error { return &embyHTTPError{StatusCode: sta
 // IsReachabilityError reports whether err indicates the upstream server could
 // not be reached due to URL, DNS, connection, timeout, or TLS issues.
 func IsReachabilityError(err error) bool {
-	if err == nil || UpstreamHTTPStatus(err) > 0 {
+	if err == nil || UpstreamHTTPStatus(err) > 0 || errors.Is(err, ErrUnexpectedSourceResponse) {
 		return false
 	}
 	// The guard refuses before connecting: the address is not allowed, and
@@ -27,13 +42,13 @@ func IsReachabilityError(err error) bool {
 		return false
 	}
 
-	if errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errUpstreamBodyRead) {
 		return true
 	}
 
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
-		if urlErr.Timeout() || urlErr.Op == "parse" {
+		if urlErr.Timeout() || urlErr.Op == "parse" || errors.Is(urlErr.Err, io.EOF) || errors.Is(urlErr.Err, io.ErrUnexpectedEOF) {
 			return true
 		}
 	}

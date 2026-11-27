@@ -641,6 +641,12 @@
       "value": "Istuntosi on vanhentunut. Kirjaudu sisään uudelleen."
     }
   ],
+  "error.sign_in_provider_required": [
+    {
+      "type": 0,
+      "value": "Kun salasanalla kirjautuminen on poistettu käytöstä, käytössä on oltava jokin kirjautumispalvelu, jota käyttäjät voivat käyttää. OpenID Connect vaatii lisäksi palvelimen julkisen URL-osoitteen."
+    }
+  ],
   "error.snapshot_request_conflict": [
     {
       "type": 0,
@@ -79143,6 +79149,20 @@
       "value": "Ota ensin kirjautumispalvelu käyttöön. Jos salasanakirjautuminen on pois käytöstä eikä mikään palvelu ole käytössä, vain hätäylläpitäjät voisivat kirjautua sisään."
     }
   ],
+  "web.admin.settings.signIn.page.noPublicUrlError": [
+    {
+      "type": 0,
+      "value": "Aseta ensin palvelimen julkinen URL-osoite. Palvelu "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ei voi kirjata ketään sisään ilman sitä, joten kun salasanalla kirjautuminen on poistettu käytöstä, vain hätäpääsyn järjestelmänvalvojat voisivat kirjautua sisään."
+    }
+  ],
   "web.admin.settings.signIn.page.passwordMinLengthDescription": [
     {
       "type": 0,
@@ -79233,6 +79253,246 @@
       "value": "Salli käyttäjien luoda API-avaimia"
     }
   ],
+  "web.admin.settings.signIn.passwordsOff.confirm": [
+    {
+      "type": 0,
+      "value": "Poista salasanalla kirjautuminen käytöstä"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.description": [
+    {
+      "type": 0,
+      "value": "Vain hätäpääsyn järjestelmänvalvojat kirjautuvat sisään salasanalla. Kaikki muut kirjautuvat sisään palvelun "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " kautta."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkAutoCreate": [
+    {
+      "type": 0,
+      "value": "Palvelu "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " luo tilit ensimmäisellä kirjautumiskerralla, joten jos joku näistä henkilöistä kirjautuu sisään sen kautta ennen kuin linkität hänet, hän saa uuden, erillisen tilin."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkExplain": [
+    {
+      "type": 0,
+      "value": "Linkitä kukin tili palvelun "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " tiliin tilin omalta sivulta Käyttäjät-sivulla."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.linkHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tili ei voi kirjautua sisään, ennen kuin järjestelmänvalvoja linkittää sen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tiliä ei voi kirjautua sisään, ennen kuin järjestelmänvalvoja linkittää ne"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loadFailed": [
+    {
+      "type": 0,
+      "value": "Ei voitu tarkistaa, mihin tileihin tämä vaikuttaa. Voit silti poistaa sen käytöstä."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.loading": [
+    {
+      "type": 0,
+      "value": "Tarkistetaan, ketkä kirjautuvat sisään salasanalla…"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchExplain": [
+    {
+      "type": 0,
+      "value": "Kun palvelu "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " vahvistaa jonkin näistä sähköpostiosoitteista kirjautumisen yhteydessä, Silo yhdistää henkilön hänen tiliinsä."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.matchHeading": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tili yhdistetään sähköpostin perusteella"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tiliä yhdistetään sähköpostin perusteella"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näytä "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " lisää"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näytä "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " lisää"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.moreFailed": [
+    {
+      "type": 0,
+      "value": "Lisää tilejä ei voitu ladata. Yritä uudelleen."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.nobodyAffected": [
+    {
+      "type": 0,
+      "value": "Kaikki tilit voivat edelleen kirjautua sisään tämän jälkeen."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.administrator": [
+    {
+      "type": 0,
+      "value": "Järjestelmänvalvoja"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.emailMatchOff": [
+    {
+      "type": 0,
+      "value": "Sähköpostin täsmäytys on pois käytöstä"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.reason.noEmail": [
+    {
+      "type": 0,
+      "value": "Ei sähköpostia"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.sessions": [
+    {
+      "type": 0,
+      "value": "Tämä ei kirjaa ketään ulos. Jo kirjautuneet henkilöt pysyvät kirjautuneina, heidän API-avaimensa toimivat edelleen ja he voivat yhä hyväksyä uusia laitteita. Jos haluat kirjata jonkun ulos, lopeta hänen istuntonsa hänen omalta sivultaan "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Käyttäjät"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "-sivulla."
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.title": [
+    {
+      "type": 0,
+      "value": "Poistetaanko salasanalla kirjautuminen käytöstä?"
+    }
+  ],
+  "web.admin.settings.signIn.passwordsOff.usersLink": [
+    {
+      "type": 0,
+      "value": "Näytä kaikki tilit Käyttäjät-sivulla"
+    }
+  ],
   "web.admin.settings.signIn.provider.accounts.title": [
     {
       "type": 0,
@@ -79275,6 +79535,28 @@
     {
       "type": 0,
       "value": " muuttaminen epäonnistui."
+    }
+  ],
+  "web.admin.settings.signIn.provider.binding.turnOffBlocked": [
+    {
+      "type": 0,
+      "value": "Salasanalla kirjautuminen on poistettu käytöstä, joten kaikki paitsi hätäpääsyn järjestelmänvalvojat kirjautuvat sisään palvelun "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " kautta. Ota ensin salasanalla kirjautuminen uudelleen käyttöön ja poista sitten palvelu "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " käytöstä."
     }
   ],
   "web.admin.settings.signIn.provider.binding.turnOffConfirm": [
@@ -136353,6 +136635,12 @@
       "value": "Sähköposti tai käyttäjänimi"
     }
   ],
+  "web.settings.historyImport.embyDirectHelp": [
+    {
+      "type": 0,
+      "value": "Anna sen Emby-palvelimen perus-URL, josta haluat tuoda tiedot."
+    }
+  ],
   "web.settings.historyImport.embyPassword": [
     {
       "type": 0,
@@ -136363,6 +136651,12 @@
     {
       "type": 0,
       "value": "Jätä tyhjäksi, jos tilillä ei ole salasanaa"
+    }
+  ],
+  "web.settings.historyImport.embyServerUrl": [
+    {
+      "type": 0,
+      "value": "Emby-palvelimen URL"
     }
   ],
   "web.settings.historyImport.embyUsername": [
@@ -136513,6 +136807,12 @@
     {
       "type": 0,
       "value": "Plex-tili"
+    }
+  ],
+  "web.settings.historyImport.mode.serverUrl": [
+    {
+      "type": 0,
+      "value": "Palvelimen URL"
     }
   ],
   "web.settings.historyImport.newImport.description": [
@@ -136810,7 +137110,7 @@
   "web.settings.historyImport.source.emby": [
     {
       "type": 0,
-      "value": "Emby Connect tai tallennettu palvelin"
+      "value": "Emby Connect, palvelimen URL tai tallennettu palvelin"
     }
   ],
   "web.settings.historyImport.source.jellyfin": [

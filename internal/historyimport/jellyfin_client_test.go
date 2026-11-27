@@ -2,6 +2,7 @@ package historyimport
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -68,6 +69,34 @@ func TestJellyfinAuthenticateServerUser_RejectedPasswordIsNotRetried(t *testing.
 	}
 	if len(paths) != 1 || paths[0] != "/Users/AuthenticateByName" {
 		t.Fatalf("requested paths = %v, want one /Users/AuthenticateByName", paths)
+	}
+}
+
+func TestJellyfinAuthenticateServerUser_ClassifiesUnexpectedResponses(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "html landing page", body: "<html><body>Not Jellyfin</body></html>"},
+		{name: "incomplete json", body: `{"User":{}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+
+			_, err := newUnthrottledJellyfinClient().AuthenticateServerUser(trustLoopback(t.Context()), server.URL, "alice", "pw")
+			if !errors.Is(err, ErrUnexpectedSourceResponse) {
+				t.Fatalf("err = %v, want ErrUnexpectedSourceResponse", err)
+			}
+			if IsReachabilityError(err) {
+				t.Fatalf("unexpected response misclassified as reachability error: %v", err)
+			}
+		})
 	}
 }
 
