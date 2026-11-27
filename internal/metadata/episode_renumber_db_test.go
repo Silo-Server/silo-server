@@ -364,6 +364,29 @@ func TestSaveCustomSeasonsDB(t *testing.T) {
 	if _, err := svc.SaveCustomSeasons(ctx, series, gap, &revision, 0); !errors.Is(err, ErrEpisodeOrderInvalid) {
 		t.Fatalf("save with a season gap = %v, want ErrEpisodeOrderInvalid", err)
 	}
+
+	// A season poster is named by an upload recorded for this series; a save
+	// cannot point a season at any other image.
+	foreign := save
+	foreign.Seasons = []CustomSeasonsSeason{{Number: 1, Poster: CustomSeasonPoster{Source: "upload://sha256:not-ours"},
+		Episodes: []CustomSeasonsEpisode{{Key: "tvdb:a"}}}}
+	if _, err := svc.SaveCustomSeasons(ctx, series, foreign, &revision, 0); !errors.Is(err, ErrEpisodeOrderInvalid) {
+		t.Fatalf("save with a poster not uploaded for the series = %v, want ErrEpisodeOrderInvalid", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO series_custom_season_uploads (series_id, source, path, thumbhash)
+		VALUES ($1, 'upload://sha256:ours', 'series/x/poster/original.ab.webp', 'th')`, series); err != nil {
+		t.Fatal(err)
+	}
+	ours := foreign
+	ours.Seasons = []CustomSeasonsSeason{{Number: 1, Poster: CustomSeasonPoster{Source: "upload://sha256:ours"},
+		Episodes: []CustomSeasonsEpisode{{Key: "tvdb:a"}}}}
+	if _, err := svc.SaveCustomSeasons(ctx, series, ours, &revision, 0); err != nil {
+		t.Fatalf("save with the series' own upload = %v", err)
+	}
+	layout, _, err = loadCustomLayout(ctx, pool, series)
+	if err != nil || layout.Seasons[0].Poster.Path != "series/x/poster/original.ab.webp" {
+		t.Fatalf("stored poster = %+v (%v), want the upload's stored path", layout.Seasons, err)
+	}
 }
 
 // insertRenumberTestSeries stores a matched series titled title under a TVDB

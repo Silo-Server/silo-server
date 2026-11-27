@@ -283,9 +283,7 @@ type AdminImagePresigner interface {
 // CustomSeasonPoster is a poster uploaded for an arranged season. Send it
 // back unchanged as the season's poster.
 type CustomSeasonPoster struct {
-	Path      string `json:"path" maxLength:"1024" doc:"Artwork storage path"`
-	Source    string `json:"source" maxLength:"1024" pattern:"^upload://" doc:"The upload:// source of the image"`
-	Thumbhash string `json:"thumbhash" maxLength:"256"`
+	Source string `json:"source" maxLength:"1024" pattern:"^upload://" doc:"Names a poster uploadAdminCustomSeasonPoster stored for this series; a save that names any other answers 422"`
 }
 
 // CustomSeasonsEpisode is one episode in the season arranger.
@@ -395,7 +393,7 @@ func (reg *Registry) getAdminCustomSeasons(ctx context.Context, in *AdminCustomS
 				AirDate: e.AirDate, File: e.File, PlacedAutomatically: e.PlacedAutomatically, StillURL: stills[e.StillPath]})
 		}
 		if s.Poster.Path != "" {
-			season.Poster = &CustomSeasonPoster{Path: s.Poster.Path, Source: s.Poster.Source, Thumbhash: s.Poster.Thumbhash}
+			season.Poster = &CustomSeasonPoster{Source: s.Poster.Source}
 			season.PosterURL = posters[s.Poster.Path]
 		}
 		out.Seasons = append(out.Seasons, season)
@@ -412,8 +410,8 @@ func (reg *Registry) setAdminCustomSeasons(ctx context.Context, in *AdminCustomS
 	}
 	for _, s := range in.Body.Seasons {
 		season := metadata.CustomSeasonsSeason{Number: s.Number, Title: s.Title, Overview: s.Overview}
-		if s.Poster != nil && s.Poster.Path != "" {
-			season.Poster = metadata.CustomSeasonPoster{Path: s.Poster.Path, Source: s.Poster.Source, Thumbhash: s.Poster.Thumbhash}
+		if s.Poster != nil && s.Poster.Source != "" {
+			season.Poster = metadata.CustomSeasonPoster{Source: s.Poster.Source}
 		}
 		for _, key := range s.Episodes {
 			season.Episodes = append(season.Episodes, metadata.CustomSeasonsEpisode{Key: key})
@@ -489,7 +487,7 @@ func (reg *Registry) uploadAdminCustomSeasonPoster(ctx context.Context, in *Admi
 	case err != nil:
 		return nil, episodeOrderProblem(err)
 	}
-	out := AdminCustomSeasonPosterUploaded{Poster: CustomSeasonPoster{Path: poster.Path, Source: poster.Source, Thumbhash: poster.Thumbhash}}
+	out := AdminCustomSeasonPosterUploaded{Poster: CustomSeasonPoster{Source: poster.Source}}
 	if reg.deps.AdminImagePresigner != nil {
 		out.PosterURL = reg.deps.AdminImagePresigner.PresignImageURLs(ctx, []string{poster.Path}, "poster", "small")[poster.Path]
 	}

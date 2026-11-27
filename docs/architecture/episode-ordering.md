@@ -41,7 +41,9 @@ field of `GetSeasons`/`GetEpisodes` (silo-plugin-sdk, capability metadata key
   An episode the arrangement does not place goes after the last custom
   season's episodes. A custom season takes the title, description, artwork
   and air date of the order's season with the same number unless the admin
-  wrote its own title or description.
+  wrote its own title, description or uploaded poster, which move with it.
+  Uploads are recorded per series (`series_custom_season_uploads`), and a save
+  can only name those.
 
 ## Stored episodes follow the order
 
@@ -101,7 +103,9 @@ within season 1, where per-season and absolute numbering agree.
 A season or episode refresh of a series shown in another order than its
 providers' default refreshes the whole series: the per-target fetch asks
 providers for the shown numbers in their default order and would write another
-episode's data.
+episode's data. Reset to Provider of one season or episode of such a series
+fails instead: it would clear that target's locks from an answer it cannot
+fetch on its own.
 
 ## Services that address episodes by number
 

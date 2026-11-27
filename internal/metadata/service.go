@@ -4836,8 +4836,9 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		return err
 	} else if reordered {
 		if reset != nil {
-			slog.InfoContext(ctx, "metadata: a reordered series resets as a whole-series refresh; its season and episode locks stay",
-				"component", "metadata", "series_id", seriesID)
+			// A reset clears one target's locks from its provider's answer,
+			// which a reordered series cannot fetch for one target.
+			return ErrResetReorderedChild
 		}
 		return s.refreshItemTarget(unscopedCtx, seriesID, folderID, mode, false, false)
 	}
@@ -6082,6 +6083,17 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 		return s.seasonRepo.GetBySeriesAndNumber(ctx, seriesID, seasonNumber)
 	}
 
+	// Posters uploaded for arranged seasons, by source: a season that drops
+	// one goes back to the provider's poster.
+	customUploads := map[string]bool{}
+	if uploads, err := s.customSeasonUploads(ctx, seriesID); err != nil {
+		slog.WarnContext(ctx, "metadata: loading uploaded season posters failed", "component", "metadata",
+			"series_id", seriesID, "error", err)
+	} else {
+		for source := range uploads {
+			customUploads[source] = true
+		}
+	}
 	prepareExplicitSeason := func(season SeasonResult, forcePointRead bool) (preparedSeasonWrite, bool) {
 		existingSeason, err := loadSeason(season.SeasonNumber, forcePointRead)
 		if err != nil && !errors.Is(err, catalog.ErrSeasonNotFound) {
@@ -6131,9 +6143,16 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 		// storage; its upload:// source keeps the image cache from
 		// replacing it. A season that loses it takes the provider's poster
 		// again, which the cache then fetches over the stored copy.
-		if custom := season.customPoster; custom != nil && !imagesLocked {
+		switch custom := season.customPoster; {
+		case imagesLocked:
+		case custom != nil:
 			providerSeason.PosterPath, providerSeason.PosterSourcePath, providerSeason.PosterThumbhash =
 				custom.Path, custom.Source, custom.Thumbhash
+		case existingSeason != nil && customUploads[existingSeason.PosterSourcePath]:
+			// The season dropped an arranged season's upload: it takes the
+			// provider's poster, or none, rather than keeping the upload.
+			providerSeason.PosterPath, providerSeason.PosterSourcePath = splitProviderImagePath(season.PosterPath)
+			providerSeason.PosterThumbhash = season.PosterThumbhash
 		}
 		dbSeason := &models.Season{
 			SeriesID:                seriesID,

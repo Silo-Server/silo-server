@@ -1494,7 +1494,7 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) 
 	if o := d.EpisodeOrder; o != nil {
 		out.EpisodeOrder = &SeriesEpisodeOrder{
 			Provider: o.Provider, OrderID: o.OrderID, OrderName: o.OrderName, Layout: o.Layout,
-			FileOrder: o.FileOrder, CustomArrangement: o.Layout == episodeOrderLayoutCustom,
+			FileOrder: o.FileOrder, CustomArrangement: o.CustomArrangement,
 		}
 	}
 	return out
@@ -1549,5 +1549,5 @@ type SeriesEpisodeOrder struct {
 	OrderName         string `json:"order_name" doc:"The order's name as the provider gave it; empty for the default order" example:"DVD Order"`
 	Layout            string `json:"layout" doc:"seasons, absolute or custom; treat an unknown value as seasons" example:"seasons"`
 	FileOrder         string `json:"file_order" doc:"tvdb or tmdb when the files are named in another provider's order than the series follows; empty otherwise" example:""`
-	CustomArrangement bool   `json:"custom_arrangement" doc:"The seasons are arranged by an admin, so they may differ from every provider's" example:"false"`
+	CustomArrangement bool   `json:"custom_arrangement" doc:"Arranged seasons place an episode elsewhere than the provider's default order does; false for seasons that were only renamed or described" example:"false"`
 }

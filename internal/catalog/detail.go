@@ -5599,6 +5599,10 @@ type EpisodeOrderSummary struct {
 	OrderName string
 	Layout    string
 	FileOrder string
+	// CustomArrangement is true when arranged seasons place an episode
+	// elsewhere than its provider's default order does, not for a renamed
+	// season alone.
+	CustomArrangement bool
 }
 
 // episodeOrderSummary reads the series' own episode order; nil while it
@@ -5610,10 +5614,14 @@ func (s *DetailService) episodeOrderSummary(ctx context.Context, seriesID string
 	}
 	var o EpisodeOrderSummary
 	err := s.itemRepo.pool.QueryRow(ctx, `
-		SELECT provider, order_id, order_name, layout, file_order FROM series_episode_orders
-		WHERE series_id = $1
-		  AND (provider <> '' OR order_id <> '' OR file_order <> '' OR layout <> 'seasons')`, seriesID).
-		Scan(&o.Provider, &o.OrderID, &o.OrderName, &o.Layout, &o.FileOrder)
+		SELECT o.provider, o.order_id, o.order_name, o.layout, o.file_order,
+		       o.layout = 'custom' AND EXISTS (
+		           SELECT 1 FROM episodes e
+		           WHERE e.series_id = o.series_id AND e.provider_season_number IS NOT NULL)
+		FROM series_episode_orders o
+		WHERE o.series_id = $1
+		  AND (o.provider <> '' OR o.order_id <> '' OR o.file_order <> '' OR o.layout <> 'seasons')`, seriesID).
+		Scan(&o.Provider, &o.OrderID, &o.OrderName, &o.Layout, &o.FileOrder, &o.CustomArrangement)
 	if err != nil {
 		return nil
 	}

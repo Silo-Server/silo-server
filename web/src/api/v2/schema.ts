@@ -28352,11 +28352,8 @@ export interface components {
       poster_url?: string;
     };
     CustomSeasonPoster: {
-      /** @description Artwork storage path */
-      path: string;
-      /** @description The upload:// source of the image */
+      /** @description Names a poster uploadAdminCustomSeasonPoster stored for this series; a save that names any other answers 422 */
       source: string;
-      thumbhash: string;
     };
     CustomSeasonsEpisode: {
       /** @example 1997-07-27 */
@@ -37562,7 +37559,7 @@ export interface components {
     };
     SeriesEpisodeOrder: {
       /**
-       * @description The seasons are arranged by an admin, so they may differ from every provider's
+       * @description Arranged seasons place an episode elsewhere than the provider's default order does; false for seasons that were only renamed or described
        * @example false
        */
       custom_arrangement: boolean;

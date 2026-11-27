@@ -519,17 +519,31 @@ episodes ([architecture/episode-ordering.md](architecture/episode-ordering.md)).
   answers the arranged seasons, each with its admin `title` and `overview`, the
   base order's `provider_title` and `provider_overview` for its number, and its
   episodes in order (`key`, provider numbers, linked `file`,
-  `placed_automatically`). Without an arrangement (`saved: false`), or with
-  `start_over=true` and a base order in `provider`, `order_id` and `file_order`,
-  it starts from that order's seasons. It carries the order's `ETag`.
+  `placed_automatically`, the provider's `still_url`), and each season's uploaded
+  `poster` with its `poster_url` and the base order's `provider_poster_url`. A
+  stored arrangement opens on the order it was made from. Without one
+  (`saved: false`), or with `start_over=true` and a base order in `provider`,
+  `order_id` and `file_order`, it starts from that order's seasons; when the
+  chosen provider has no episodes for the series, the base names the provider
+  that numbered it. It carries the order's `ETag`.
+- `POST …/custom-seasons/posters` (`uploadAdminCustomSeasonPoster`) stores an
+  uploaded poster (JPEG, PNG or WebP, at most 10 MiB) for the series' arranged
+  seasons without publishing it, and answers its `poster` reference and
+  `poster_url`. A season save names it in the season's `poster`; a reference
+  this series has no upload for answers `422`. The poster stays with that
+  season wherever it moves; a season that drops it gets the provider's poster
+  back.
 - `PUT …/custom-seasons` (`setAdminCustomSeasons`) stores the arrangement, with
   regular seasons numbered 1…N and season 0 for specials, switches the series
   to the `custom` layout and to the provider its episode keys belong to, and
   queues the refresh, guarded and answered like `setAdminEpisodeOrder`.
 
 Series detail carries `episode_order` (provider, order and its name, layout,
-file order, `custom_arrangement`) while the series has its own order, and
-`getLibraryCapabilities` reports `episode_ordering`.
+file order, and `custom_arrangement` when arranged seasons place an episode
+elsewhere than the provider's default order) while the series has its own
+order, and `getLibraryCapabilities` reports `episode_ordering`. Reset to
+Provider (`refreshAdminItemMetadata` with `mode: reset`) of one season or
+episode of a series in its own order fails; reset the series instead.
 
 ## Episode and movie marker analysis
 

@@ -75,6 +75,8 @@ metadata refresh of the library, which renumbers its shows. A show the provider
 has no episodes for follows the other enabled provider. A show can override the
 library (see [admin-catalog-api.md](admin-catalog-api.md#episode-order)); the
 rules are in [architecture/episode-ordering.md](architecture/episode-ordering.md).
+`getLibraryCapabilities` reports `episode_ordering` when the server supports
+the setting and the series operations.
 
 ## Real-time monitoring
 

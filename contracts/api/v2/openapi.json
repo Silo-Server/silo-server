@@ -35664,26 +35664,15 @@
       "CustomSeasonPoster": {
         "additionalProperties": false,
         "properties": {
-          "path": {
-            "description": "Artwork storage path",
-            "maxLength": 1024,
-            "type": "string"
-          },
           "source": {
-            "description": "The upload:// source of the image",
+            "description": "Names a poster uploadAdminCustomSeasonPoster stored for this series; a save that names any other answers 422",
             "maxLength": 1024,
             "pattern": "^upload://",
-            "type": "string"
-          },
-          "thumbhash": {
-            "maxLength": 256,
             "type": "string"
           }
         },
         "required": [
-          "path",
-          "source",
-          "thumbhash"
+          "source"
         ],
         "type": "object"
       },
@@ -57018,7 +57007,7 @@
         "additionalProperties": false,
         "properties": {
           "custom_arrangement": {
-            "description": "The seasons are arranged by an admin, so they may differ from every provider's",
+            "description": "Arranged seasons place an episode elsewhere than the provider's default order does; false for seasons that were only renamed or described",
             "examples": [
               false
             ],

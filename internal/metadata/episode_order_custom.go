@@ -116,10 +116,18 @@ func (s *MetadataService) CustomSeasons(ctx context.Context, seriesID string, ba
 	}
 	result.Revision = state.Revision
 	result.Settings = state.Settings
-	// A stored arrangement opens whatever layout the series shows now, so
-	// switching to another layout and back keeps it; a base starts over.
-	if base != nil {
+	// A stored arrangement opens on the order it was made from, whatever the
+	// series shows now, so switching to another layout and back keeps it; a
+	// base starts over.
+	switch {
+	case base != nil:
 		result.Settings = *base
+	default:
+		if stored, ok, err := s.customLayoutBase(ctx, seriesID); err != nil {
+			return result, err
+		} else if ok {
+			result.Settings = stored
+		}
 	}
 	result.Settings.Layout = episodeLayoutCustom
 	if err := result.Settings.Validate(); err != nil {
@@ -142,6 +150,15 @@ func (s *MetadataService) CustomSeasons(ctx context.Context, seriesID string, ba
 	result.StructureProvider = structureSlug
 	if structureSlug == "" {
 		return result, nil
+	}
+	if structureSlug != order.Provider {
+		// The chosen provider has no episodes for the series, so the other
+		// one numbered it in its default order: the arrangement is made from
+		// that, and a save names it.
+		result.Settings.Provider, result.Settings.OrderID = structureSlug, ""
+		if result.Settings.FileOrder == structureSlug {
+			result.Settings.FileOrder = ""
+		}
 	}
 	assignFileNumbers(episodes, structureSlug, order.FileOrder, structures.list)
 
@@ -330,11 +347,20 @@ func (s *MetadataService) SaveCustomSeasons(ctx context.Context, seriesID string
 	if _, err := s.requireSeries(ctx, seriesID); err != nil {
 		return 0, err
 	}
+	if err := s.resolveCustomSeasonPosters(ctx, seriesID, save.Seasons); err != nil {
+		return 0, err
+	}
 	orderName := s.episodeOrderName(ctx, seriesID, save.Settings)
 	var saved int64
 	err := pgx.BeginFunc(ctx, s.dbPool, func(tx pgx.Tx) error {
 		var err error
 		if saved, err = storeSeriesOrder(ctx, tx, seriesID, save.Settings, orderName, revision, userID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE series_episode_orders
+			SET custom_provider = $2, custom_order_id = $3, custom_file_order = $4
+			WHERE series_id = $1`, seriesID, save.Settings.Provider, save.Settings.OrderID, save.Settings.FileOrder); err != nil {
 			return err
 		}
 		return replaceCustomLayout(ctx, tx, seriesID, save.Seasons)
@@ -407,5 +433,82 @@ func (s *MetadataService) UploadCustomSeasonPoster(ctx context.Context, seriesID
 	if err != nil {
 		return CustomSeasonPoster{}, err
 	}
-	return CustomSeasonPoster{Path: uploaded.StoredPath, Source: uploaded.SourcePath, Thumbhash: uploaded.Thumbhash}, nil
+	poster := CustomSeasonPoster{Path: uploaded.StoredPath, Source: uploaded.SourcePath, Thumbhash: uploaded.Thumbhash}
+	// A save names the poster by its source; the server keeps where it is
+	// stored, so a save cannot point a season at any other image.
+	if _, err := s.dbPool.Exec(ctx, `
+		INSERT INTO series_custom_season_uploads (series_id, source, path, thumbhash)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (series_id, source) DO UPDATE SET path = EXCLUDED.path, thumbhash = EXCLUDED.thumbhash`,
+		seriesID, poster.Source, poster.Path, poster.Thumbhash); err != nil {
+		return CustomSeasonPoster{}, fmt.Errorf("recording the uploaded season poster: %w", err)
+	}
+	return poster, nil
+}
+
+// resolveCustomSeasonPosters fills each season's poster from the series'
+// uploads by its source; a source the series has no upload for is refused.
+func (s *MetadataService) resolveCustomSeasonPosters(ctx context.Context, seriesID string, seasons []CustomSeasonsSeason) error {
+	uploads, err := s.customSeasonUploads(ctx, seriesID)
+	if err != nil {
+		return err
+	}
+	for i := range seasons {
+		source := seasons[i].Poster.Source
+		if source == "" {
+			seasons[i].Poster = CustomSeasonPoster{}
+			continue
+		}
+		upload, ok := uploads[source]
+		if !ok {
+			return fmt.Errorf("%w: season %d's poster was not uploaded for this series", ErrEpisodeOrderInvalid, seasons[i].Number)
+		}
+		seasons[i].Poster = upload
+	}
+	return nil
+}
+
+// customSeasonUploads lists the posters uploaded for the series' arranged
+// seasons, by source.
+func (s *MetadataService) customSeasonUploads(ctx context.Context, seriesID string) (map[string]CustomSeasonPoster, error) {
+	uploads := map[string]CustomSeasonPoster{}
+	if s == nil || s.dbPool == nil {
+		return uploads, nil
+	}
+	rows, err := s.dbPool.Query(ctx, `
+		SELECT source, path, thumbhash FROM series_custom_season_uploads WHERE series_id = $1`, seriesID)
+	if err != nil {
+		return nil, fmt.Errorf("loading uploaded season posters: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var poster CustomSeasonPoster
+		if err := rows.Scan(&poster.Source, &poster.Path, &poster.Thumbhash); err != nil {
+			return nil, fmt.Errorf("loading uploaded season posters: %w", err)
+		}
+		uploads[poster.Source] = poster
+	}
+	return uploads, rows.Err()
+}
+
+// customLayoutBase is the order the series' stored arrangement was made from;
+// ok is false when it has none.
+func (s *MetadataService) customLayoutBase(ctx context.Context, seriesID string) (EpisodeOrderSettings, bool, error) {
+	base := EpisodeOrderSettings{Layout: episodeLayoutCustom}
+	if s == nil || s.dbPool == nil {
+		return base, false, nil
+	}
+	err := s.dbPool.QueryRow(ctx, `
+		SELECT o.custom_provider, o.custom_order_id, o.custom_file_order
+		FROM series_episode_orders o
+		WHERE o.series_id = $1 AND o.custom_provider <> ''
+		  AND EXISTS (SELECT 1 FROM series_custom_seasons c WHERE c.series_id = o.series_id)`, seriesID).
+		Scan(&base.Provider, &base.OrderID, &base.FileOrder)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return base, false, nil
+	}
+	if err != nil {
+		return base, false, fmt.Errorf("loading the arrangement's order: %w", err)
+	}
+	return base, true, nil
 }

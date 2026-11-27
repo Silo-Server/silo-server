@@ -31,6 +31,10 @@ var (
 	ErrEpisodeOrderNotSeries = errors.New("episode order: the item is not a series")
 	ErrEpisodeOrderInvalid   = errors.New("episode order: invalid settings")
 	ErrEpisodeOrderConflict  = errors.New("episode order: changed since it was read")
+	// ErrResetReorderedChild refuses Reset to Provider for one season or
+	// episode of a series shown in another order than its provider's
+	// default; resetting the whole series works.
+	ErrResetReorderedChild = errors.New("reset to provider: this series uses its own episode order, so reset the whole series instead of one season or episode")
 )
 
 // Validate checks the settings' vocabulary.
