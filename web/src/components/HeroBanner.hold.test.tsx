@@ -325,3 +325,32 @@ describe("HeroBanner progress rail out of view", () => {
     expect(announced()).toBe("Slide 2");
   });
 });
+
+describe("HeroBanner progress rail when the slide count changes", () => {
+  function hero(count: number) {
+    return (
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <MemoryRouter>
+          <HeroBanner items={Array.from({ length: count }, (_, i) => slide(i + 1))} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  it("restarts the rail with the timer when the slides refresh to another count", () => {
+    const { rerender } = render(hero(3));
+    wait(5000);
+    const running = document.querySelector(".hero-progress-rail > span");
+
+    rerender(hero(4));
+    // The timer starts a fresh 8s cycle, so a new bar starts its animation
+    // from empty with it instead of filling 3s later.
+    expect(document.querySelector(".hero-progress-rail > span")).not.toBe(running);
+    wait(3100);
+    expect(announced()).toBe("Slide 1");
+    wait(5000);
+    expect(announced()).toBe("Slide 2");
+  });
+});
