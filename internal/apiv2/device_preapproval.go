@@ -78,7 +78,7 @@ func registerDevicePreapprovals(reg *Registry) {
 	}), grantedRefusedSignIn), reg.preapproveDeviceLogin)
 	list := humaOp(http.MethodGet, Prefix+"/auth/device/preapprovals", "listDevicePreapprovals", "device-login",
 		"List the account's device sign-ins approved in advance and not yet redeemed.")
-	list.Description = preapprovalSessionRule
+	list.Description = preapprovalSessionRule + demoVisitorKeyListRule
 	list.Errors = []int{http.StatusForbidden}
 	Register(reg, Operation{Operation: list, Class: ClassAuthenticated, ServiceBacked: true, Origins: grantedRefusedSignIn}, reg.listDevicePreapprovals)
 	revoke := humaOp(http.MethodDelete, Prefix+"/auth/device/preapprovals/{id}", "revokeDevicePreapproval", "device-login",
@@ -154,6 +154,11 @@ func (reg *Registry) listDevicePreapprovals(ctx context.Context, _ *struct{}) (*
 	claims, p := ownLoginSession(ctx)
 	if p != nil {
 		return nil, p
+	}
+	if visitor, p := demoVisitorOwnSession(ctx, reg.deps.DemoSettings); p != nil {
+		return nil, p
+	} else if visitor {
+		return devicePreapprovalPage(nil), nil
 	}
 	items, err := reg.deps.Devices.ListDevicePreapprovals(ctx, claims.UserID)
 	if err != nil {

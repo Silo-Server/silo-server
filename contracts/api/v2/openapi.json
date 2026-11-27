@@ -2258,7 +2258,7 @@
             "type": "string"
           },
           "enrolled_ip_address": {
-            "description": "Client address of the request that enrolled the key, decided as a login session's ip_address is, except that an unspecified address (0.0.0.0 or ::) is stored as none; empty when unknown, which includes every key enrolled before this server recorded it, and for a caller who is not an administrator while the server runs in demo mode",
+            "description": "Client address of the request that enrolled the key, decided as a login session's ip_address is, except that an unspecified address (0.0.0.0 or ::) is stored as none; empty when unknown, which includes every key enrolled before this server recorded it",
             "examples": [
               "203.0.113.7"
             ],
@@ -2416,7 +2416,7 @@
             "type": "string"
           },
           "enrolled_ip_address": {
-            "description": "Client address of the request that enrolled the key, decided as a login session's ip_address is, except that an unspecified address (0.0.0.0 or ::) is stored as none; empty when unknown, which includes every key enrolled before this server recorded it, and for a caller who is not an administrator while the server runs in demo mode",
+            "description": "Client address of the request that enrolled the key, decided as a login session's ip_address is, except that an unspecified address (0.0.0.0 or ::) is stored as none; empty when unknown, which includes every key enrolled before this server recorded it",
             "examples": [
               "203.0.113.7"
             ],
@@ -29503,7 +29503,7 @@
             "type": "string"
           },
           "enrolled_ip_address": {
-            "description": "Client address of the request that enrolled the key, decided as a login session's ip_address is, except that an unspecified address (0.0.0.0 or ::) is stored as none; empty when unknown, which includes every key enrolled before this server recorded it, and for a caller who is not an administrator while the server runs in demo mode",
+            "description": "Client address of the request that enrolled the key, decided as a login session's ip_address is, except that an unspecified address (0.0.0.0 or ::) is stored as none; empty when unknown, which includes every key enrolled before this server recorded it",
             "examples": [
               "203.0.113.7"
             ],
@@ -29879,7 +29879,7 @@
             "type": "string"
           },
           "enrolled_ip_address": {
-            "description": "Client address of the request that enrolled the key, decided as a login session's ip_address is, except that an unspecified address (0.0.0.0 or ::) is stored as none; empty when unknown, which includes every key enrolled before this server recorded it, and for a caller who is not an administrator while the server runs in demo mode",
+            "description": "Client address of the request that enrolled the key, decided as a login session's ip_address is, except that an unspecified address (0.0.0.0 or ::) is stored as none; empty when unknown, which includes every key enrolled before this server recorded it",
             "examples": [
               "203.0.113.7"
             ],
@@ -158412,7 +158412,7 @@
     },
     "/api/v2/auth/device/preapprovals": {
       "get": {
-        "description": "Only the account's own signed-in session: an API key, a session an administrator opened as the account, a remote-playback session, or a session opened by device sign-in or by another app's key is 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that.",
+        "description": "Only the account's own signed-in session: an API key, a session an administrator opened as the account, a remote-playback session, or a session opened by device sign-in or by another app's key is 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. In demo mode a caller that is not an administrator gets an empty list, whatever the account holds: demo visitors share one account, so its devices and approvals are other visitors'. That holds for every login session of such a caller, however it was opened, so it is decided before the session rule above: a session opened by device sign-in, or before this server recorded how sessions open, gets the empty list too rather than 403. An API key, an administrator acting as the account and another app's session are refused as above, and the setting is not read for them. For any other such caller, a server that has never read whether demo mode is on answers 500 internal_error rather than the list. An administrator gets the full list.",
         "operationId": "listDevicePreapprovals",
         "responses": {
           "200": {
@@ -159450,7 +159450,7 @@
     },
     "/api/v2/auth/keys": {
       "get": {
-        "description": "Only the account's own login session: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. The list names every device the person signed in, so a TV's or another app's session can't read it. Answers while auth.app_key_sign_in is off, so keys can still be reviewed and revoked.",
+        "description": "Only the account's own login session: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. The list names every device the person signed in, so a TV's or another app's session can't read it. Answers while auth.app_key_sign_in is off, so keys can still be reviewed and revoked. In demo mode a caller that is not an administrator gets an empty list, whatever the account holds: demo visitors share one account, so its devices and approvals are other visitors'. That holds for every login session of such a caller, however it was opened, so it is decided before the session rule above: a session opened by device sign-in, or before this server recorded how sessions open, gets the empty list too rather than 403. An API key, an administrator acting as the account and another app's session are refused as above, and the setting is not read for them. For any other such caller, a server that has never read whether demo mode is on answers 500 internal_error rather than the list. An administrator gets the full list.",
         "operationId": "listAppKeys",
         "responses": {
           "200": {
@@ -160450,7 +160450,7 @@
     },
     "/api/v2/auth/keys/pending": {
       "get": {
-        "description": "Only the account's own login session: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. Only an administrator's account has waiting devices: a device a person key introduces to it waits for approval for 24 hours. Each item is a device object as listAppKeys returns it. Answers while auth.app_key_sign_in is off.",
+        "description": "Only the account's own login session: an API key, an administrator acting as the account, and a session opened by device sign-in or by another app's key are 403 permission_denied. A session opened before this server recorded how sessions open is refused the same way; signing in again clears that. Only an administrator's account has waiting devices: a device a person key introduces to it waits for approval for 24 hours. Each item is a device object as listAppKeys returns it. Answers while auth.app_key_sign_in is off. In demo mode a caller that is not an administrator gets an empty list, whatever the account holds: demo visitors share one account, so its devices and approvals are other visitors'. That holds for every login session of such a caller, however it was opened, so it is decided before the session rule above: a session opened by device sign-in, or before this server recorded how sessions open, gets the empty list too rather than 403. An API key, an administrator acting as the account and another app's session are refused as above, and the setting is not read for them. For any other such caller, a server that has never read whether demo mode is on answers 500 internal_error rather than the list. An administrator gets the full list.",
         "operationId": "listPendingAppKeys",
         "responses": {
           "200": {
@@ -161148,7 +161148,7 @@
     },
     "/api/v2/auth/keys/session": {
       "get": {
-        "description": "So a page can tell, before it asks, whether this session may list or manage keys, and whether signing in again would help. Answers while auth.app_key_sign_in is off; read getAppKeyCapability for the switch. approve follows the X-Profile-Id the request declares.",
+        "description": "So a page can tell, before it asks, whether this session may list or manage keys, and whether signing in again would help. Answers while auth.app_key_sign_in is off; read getAppKeyCapability for the switch. approve follows the X-Profile-Id the request declares. In demo mode a caller that is not an administrator gets list true (the lists answer it empty) and manage, approve and sign_in_again false, for every login session however it was opened; an API key, an administrator acting as the account and another app's session get their usual answer, and for any other such caller a server that has never read whether demo mode is on answers 500 internal_error.",
         "operationId": "getAppKeySessionAccess",
         "parameters": [
           {

@@ -102,17 +102,52 @@ func (reg *Registry) limitedLoginSessionPage(ctx context.Context, cursors *Curso
 	return out, nil
 }
 
-// demoVisitorListing reports whether listSessions answers the caller with
-// limitedLoginSessionPage because demo mode restricts it. Demo visitors share
-// one account, so its other sessions are other visitors': each sees them as a
-// session limited to itself does. A setting that can't be read refuses, as
-// deleteSession does, rather than fall back to the full page; so does a
-// restricted caller with no session of its own (an API key), which has no
-// item of its own to show in full.
-func demoVisitorListing(ctx context.Context, settings apimw.DemoSettingsReader, claims *auth.Claims) (bool, *Problem) {
+// demoVisitor reports whether the caller is a demo visitor: demo mode is on
+// and the caller is not an administrator (demoRestricted). It is the one
+// rule for every list of the account's sessions, devices, keys and approvals:
+// demo visitors share one account, so those rows are other visitors'. It
+// looks at the role and demo.enabled only, never at how the session was
+// opened. A setting that can't be read refuses with 500, as deleteSession
+// does, rather than answer the full list.
+func demoVisitor(ctx context.Context, settings apimw.DemoSettingsReader) (bool, *Problem) {
 	restricted, err := demoRestricted(ctx, settings)
 	if err != nil {
 		return false, serviceProblem(err)
+	}
+	return restricted, nil
+}
+
+// demoVisitorOwnSession is demoVisitor for the key reads (listAppKeys,
+// listPendingAppKeys, listDevicePreapprovals, getAppKeySessionAccess),
+// judged before the rule on how the session was opened: every login session
+// of a demo visitor gets the same answer, whether it was opened by password,
+// by device sign-in or with no record of how. A caller that is not the
+// account's own login session (an API key, an administrator acting as the
+// account, a remote-playback session) and another app's session keep their
+// own answers, and the setting is not read for them.
+func demoVisitorOwnSession(ctx context.Context, settings apimw.DemoSettingsReader) (bool, *Problem) {
+	claims := claimsFrom(ctx)
+	if !claims.IsOwnLoginSession() || claims.IsGrantedApp() {
+		return false, nil
+	}
+	return demoVisitor(ctx, settings)
+}
+
+// demoVisitorKeyListRule is what listAppKeys, listPendingAppKeys and
+// listDevicePreapprovals answer a demo visitor.
+const demoVisitorKeyListRule = " In demo mode a caller that is not an administrator gets an empty list, whatever the account holds: demo visitors share one account, so its devices and approvals are other visitors'. " +
+	"That holds for every login session of such a caller, however it was opened, so it is decided before the session rule above: a session opened by device sign-in, or before this server recorded how sessions open, gets the empty list too rather than 403. " +
+	"An API key, an administrator acting as the account and another app's session are refused as above, and the setting is not read for them. " +
+	"For any other such caller, a server that has never read whether demo mode is on answers 500 internal_error rather than the list. An administrator gets the full list."
+
+// demoVisitorListing reports whether listSessions answers the caller with
+// limitedLoginSessionPage because demo mode restricts it (demoVisitor). A
+// restricted caller with no session of its own (an API key) is refused, as
+// it has no item of its own to show in full.
+func demoVisitorListing(ctx context.Context, settings apimw.DemoSettingsReader, claims *auth.Claims) (bool, *Problem) {
+	restricted, p := demoVisitor(ctx, settings)
+	if p != nil {
+		return false, p
 	}
 	if restricted && claims.SessionID == "" {
 		return false, demoRestrictedProblem()

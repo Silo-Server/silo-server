@@ -175,3 +175,19 @@ it.each([
     ),
   ).toBe(!row.primary);
 });
+
+// A demo visitor's lists come back empty and nothing on them can be changed.
+// The panel says only that no device uses the Silo app here: not that the
+// visitor can remove devices, and not that signing in again would help.
+it("tells a demo visitor nothing it can't do", () => {
+  state.capability = "disabled";
+  state.access = { list: true, manage: false, approve: false, sign_in_again: false };
+  state.useOwnAppKeys.mockReturnValue({
+    ...keysResult(false),
+    keys: { isPending: false, isError: false, data: { devices: [] }, refetch: vi.fn() },
+  });
+  mount();
+  expect(screen.getByText("No devices use the Silo app on your account.")).toBeTruthy();
+  expect(screen.queryByText(/remove them/)).toBeNull();
+  expect(screen.queryByText(/sign in again/i)).toBeNull();
+});

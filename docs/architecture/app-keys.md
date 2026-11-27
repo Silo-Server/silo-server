@@ -2064,11 +2064,21 @@ inherits it. A `demo.enabled` that can't be read fails those routes; it is
 never taken as "not a demo". Approving a device sign-in in advance is not behind the switch;
 it carries the ordinary demo restriction (refused for a caller who is not an
 administrator) and the device login capability reports `preapprove: false`.
-The key lists stay open in demo mode, so its visitors can see and revoke
-keys enrolled before it was turned on, but `GET /auth/keys` and
-`GET /auth/keys/pending` answer `enrolled_ip_address` as the empty string to a
-caller who is not an administrator: those keys' addresses are not every
-visitor's to see. The administrator's list is unchanged.
+Keys and approvals made before demo mode was turned on are not every
+visitor's to see, and no visitor can change one (revoking a key and denying
+a waiting device carry the demo restriction, approving is behind the
+switch). So for a caller who is not an administrator `GET /auth/keys`,
+`GET /auth/keys/pending` and `GET /auth/device/preapprovals` answer an
+empty list, and `GET /auth/keys/session` answers `list` true and the rest
+false. One rule decides it (`demoVisitor`, through `demoVisitorOwnSession`
+in `internal/apiv2`): demo mode is on and the caller is not an
+administrator. It is judged before the rule on how the session was opened,
+so every login session of a visitor gets the same answer, however it was
+opened; an API key, an administrator acting as the account and another
+app's session keep their refusal. Empty rather than reduced: none of those
+rows is the visitor's, and an empty list can't show a member added to the
+row later. An unreadable setting answers 500, not the list. The
+administrator's lists are unchanged.
 
 ## Backups
 

@@ -371,6 +371,7 @@
 ./internal/api TestPluginAccessTreatsAnotherAppAsNoSessionDB
 ./internal/auth TestExpiredPendingKeySweepDB
 ./internal/apiv2 TestKeyRoutesRefuseSessionsDB
+./internal/apiv2 TestDemoVisitorKeyListsDB
 ./internal/apiv2 TestAllowedOperationsAnswerGrantedAppsDB
 ./internal/apiv2 TestHouseholdSessionsForAnotherAppDB
 ./internal/apiv2 TestFilePathsHiddenFromAnotherAppDB
