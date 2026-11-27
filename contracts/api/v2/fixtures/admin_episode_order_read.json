@@ -1,0 +1,51 @@
+{
+  "inherited": false,
+  "library_provider": "tvdb",
+  "revision": 2,
+  "choice": {
+    "provider": "tvdb",
+    "order_id": "dvd",
+    "file_order": "",
+    "layout": "seasons"
+  },
+  "providers": [
+    {
+      "provider": "tvdb",
+      "supported": true,
+      "failed": false,
+      "orders": [
+        {
+          "id": "official",
+          "name": "Aired Order",
+          "kind": "aired",
+          "season_count": 10,
+          "episode_count": 0,
+          "is_default": true
+        },
+        {
+          "id": "dvd",
+          "name": "DVD Order",
+          "kind": "dvd",
+          "season_count": 10,
+          "episode_count": 0,
+          "is_default": false
+        }
+      ]
+    },
+    {
+      "provider": "tmdb",
+      "supported": true,
+      "failed": false,
+      "orders": [
+        {
+          "id": "default",
+          "name": "Seasons",
+          "kind": "aired",
+          "season_count": 0,
+          "episode_count": 0,
+          "is_default": true
+        }
+      ]
+    }
+  ]
+}

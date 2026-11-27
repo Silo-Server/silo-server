@@ -350,7 +350,7 @@ func applyEpisodeRenumber(ctx context.Context, tx pgx.Tx, seriesID string, moves
 // renumberSeriesEpisodes moves the series' stored episode rows to the
 // numbers targets give them (planEpisodeRenumber, applyEpisodeRenumber), in
 // one transaction.
-func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID string, targets []EpisodeResult, structureKey string) error {
+func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID string, seasons []SeasonResult, targets []EpisodeResult, structureKey string) error {
 	if s.dbPool == nil {
 		return nil
 	}
@@ -393,6 +393,11 @@ func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID s
 	if err := applyEpisodeRenumber(ctx, tx, seriesID, plan.Moves); err != nil {
 		return err
 	}
+	if episodeFileNumbersOf(ctx) {
+		if err := writeEpisodeFileNumbers(ctx, tx, seriesID, targets); err != nil {
+			return err
+		}
+	}
 	// Moved rows took their files along; files named by number go back to
 	// the episode their names give. This also runs when nothing moved, so a
 	// refresh repairs links an earlier order left behind.
@@ -400,15 +405,23 @@ func (s *MetadataService) renumberSeriesEpisodes(ctx context.Context, seriesID s
 	if err != nil {
 		return err
 	}
-	if len(plan.Moves) == 0 && len(plan.Merges) == 0 && relinked == 0 {
+	pruned, err := pruneVacatedSeasons(ctx, tx, seriesID, targetSeasonNumbers(seasons, targets))
+	if err != nil {
+		return err
+	}
+	changed := len(plan.Moves) > 0 || len(plan.Merges) > 0 || relinked > 0 || pruned > 0
+	if !changed && !episodeFileNumbersOf(ctx) {
 		return nil
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("renumber: commit: %w", err)
 	}
+	if !changed {
+		return nil
+	}
 	slog.InfoContext(ctx, "metadata: renumbered episodes", "component", "metadata",
 		"series_id", seriesID, "provider", structureKey, "moved", len(plan.Moves), "merged", len(plan.Merges),
-		"files_relinked", relinked, "fallbacks_retired", retired)
+		"files_relinked", relinked, "fallbacks_retired", retired, "seasons_pruned", pruned)
 	return nil
 }
 
@@ -584,7 +597,9 @@ func applyFileRelinks(ctx context.Context, tx pgx.Tx, seriesID string, relinks [
 
 // loadSeriesFileLinks reads the series' present files inside tx with the
 // numbers their names give.
-func (s *MetadataService) loadSeriesFileLinks(ctx context.Context, tx pgx.Tx, seriesID string) ([]seriesFileLink, error) {
+func (s *MetadataService) loadSeriesFileLinks(ctx context.Context, tx interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}, seriesID string) ([]seriesFileLink, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id, file_path, media_folder_id, COALESCE(episode_id, '')
 		FROM media_files
@@ -631,8 +646,10 @@ func (s *MetadataService) relinkSeriesFiles(ctx context.Context, tx pgx.Tx, seri
 		return 0, 0, err
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT content_id, season_number, episode_number, metadata_source = 'scanner_fallback'
-		FROM episodes WHERE series_id = $1`, seriesID)
+		SELECT content_id, COALESCE(file_season_number, season_number),
+		       COALESCE(file_episode_number, episode_number), metadata_source = 'scanner_fallback'
+		FROM episodes WHERE series_id = $1
+		ORDER BY file_season_number IS NOT NULL`, seriesID)
 	if err != nil {
 		return 0, 0, fmt.Errorf("relink: list episodes of %s: %w", seriesID, err)
 	}
@@ -663,4 +680,45 @@ func (s *MetadataService) relinkSeriesFiles(ctx context.Context, tx pgx.Tx, seri
 		return 0, 0, err
 	}
 	return len(relinks), len(merges), nil
+}
+
+// pruneVacatedSeasons removes the series' season rows that the new order
+// does not have (keep lists its season numbers) and that no episode is in any
+// more, inside tx: an order with fewer seasons, or an absolute layout, leaves
+// them behind empty. Seasons cascade to their episodes, so a row that still
+// holds one stays.
+func pruneVacatedSeasons(ctx context.Context, tx pgx.Tx, seriesID string, keep []int32) (int64, error) {
+	tag, err := tx.Exec(ctx, `
+		DELETE FROM seasons s
+		WHERE s.series_id = $1
+		  AND NOT (s.season_number = ANY($2::int[]))
+		  AND NOT EXISTS (
+			SELECT 1 FROM episodes e
+			WHERE e.season_id = s.content_id
+			   OR (e.series_id = s.series_id AND e.season_number = s.season_number)
+		  )`, seriesID, keep)
+	if err != nil {
+		return 0, fmt.Errorf("renumber: prune vacated seasons of %s: %w", seriesID, err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// targetSeasonNumbers lists the season numbers of the new order: the
+// provider's seasons and every season an episode lands in.
+func targetSeasonNumbers(seasons []SeasonResult, episodes []EpisodeResult) []int32 {
+	seen := make(map[int]bool)
+	var out []int32
+	add := func(n int) {
+		if !seen[n] && catalog.FitsPostgresInteger(n) {
+			seen[n] = true
+			out = append(out, int32(n))
+		}
+	}
+	for _, season := range seasons {
+		add(season.SeasonNumber)
+	}
+	for _, ep := range episodes {
+		add(ep.SeasonNumber)
+	}
+	return out
 }

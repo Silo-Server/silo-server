@@ -2267,6 +2267,10 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// Each provider's seasons and episodes are kept apart until both are
 		// fetched: one provider numbers the series (mergeSeriesStructure).
 		structures := newProviderStructures()
+		episodeOrder, err := s.seriesEpisodeOrder(ctx, req.ContentID)
+		if err != nil {
+			return nil, err
+		}
 		seasonsComplete := true
 		for _, p := range seasonChain {
 			ep, ok := p.(EpisodeProvider)
@@ -2283,6 +2287,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				ProviderIDs:          accumulatedIDs,
 				ContentType:          contentType,
 				Language:             req.Language,
+				Ordering:             episodeOrder.orderingFor(p.Slug()),
 				SeriesRootPaths:      childCtx.seriesRootPaths,
 				SeasonDirectoryPaths: childCtx.seasonDirectoryPaths,
 				ShowFilePaths:        showFilePaths(childCtx.episodeFilePaths),
@@ -2356,6 +2361,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						ProviderIDs:      accumulatedIDs,
 						SeasonNumber:     seasonNumber,
 						Language:         req.Language,
+						Ordering:         episodeOrder.orderingFor(p.Slug()),
 						SeriesRootPaths:  childCtx.seriesRootPaths,
 						EpisodeFilePaths: childCtx.episodeFilePaths[seasonNumber],
 						ShowFilePaths:    showFiles,
@@ -2391,14 +2397,16 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				}
 			}
 		}
-		orderProvider, err := s.seriesEpisodeOrderProvider(ctx, req.ContentID)
-		if err != nil {
-			return nil, err
-		}
 		var structureSlug string
-		allSeasons, allEpisodes, structureSlug = mergeSeriesStructure(structures.list, orderProvider, req.Language)
+		allSeasons, allEpisodes, structureSlug = mergeSeriesStructure(structures.list, episodeOrder.Provider, req.Language)
 		if slices.Contains(renumberIDKeys, structureSlug) {
 			ctx = withEpisodeStructure(ctx, structureSlug)
+			if assignFileNumbers(allEpisodes, structureSlug, episodeOrder.FileOrder, structures.list) {
+				ctx = withEpisodeFileNumbers(ctx)
+			}
+			if episodeOrder.Layout == episodeLayoutAbsolute {
+				allSeasons, allEpisodes = applyAbsoluteLayout(allSeasons, allEpisodes)
+			}
 		}
 	}
 	// Phase 5: Merge & Persist.
@@ -6445,7 +6453,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 	// on another's row, so this refresh leaves the episodes alone.
 	if isCanonicalWrite && len(episodes) > 0 {
 		if structureKey := episodeStructureOf(ctx); structureKey != "" {
-			if err := s.renumberSeriesEpisodes(ctx, seriesID, episodes, structureKey); err != nil {
+			if err := s.renumberSeriesEpisodes(ctx, seriesID, seasons, episodes, structureKey); err != nil {
 				slog.WarnContext(ctx, "metadata: renumbering episodes failed; episodes left as stored", "component", "metadata",
 					"series_id", seriesID, "error", err)
 				episodes = nil
@@ -6735,6 +6743,14 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 				finishEpisodes(successfulWrites)
 			}
 		}
+		// Rows created above take their file numbers too; the renumber gave
+		// the existing rows theirs.
+		if episodeStructureOf(ctx) != "" && episodeFileNumbersOf(ctx) {
+			if err := s.storeEpisodeFileNumbers(ctx, seriesID, episodes); err != nil {
+				slog.WarnContext(ctx, "metadata: storing episode file numbers failed", "component", "metadata",
+					"series_id", seriesID, "error", err)
+			}
+		}
 	}
 
 	s.enqueueSeriesChildImages(ctx, seriesID, imageJobs)
@@ -6873,6 +6889,36 @@ func (s *MetadataService) synthesizeFallbackSeriesStructure(ctx context.Context,
 	}
 
 	seasonIDs := make(map[int]string)
+	seasonFor := func(seasonNum int) (string, error) {
+		if seasonID, ok := seasonIDs[seasonNum]; ok {
+			return seasonID, nil
+		}
+		existingSeason, err := s.seasonRepo.GetBySeriesAndNumber(ctx, seriesID, seasonNum)
+		switch {
+		case err == nil:
+			seasonIDs[seasonNum] = existingSeason.ContentID
+			return existingSeason.ContentID, nil
+		case errors.Is(err, catalog.ErrSeasonNotFound):
+			seasonID, err := deriveSeasonContentID(seriesID, seasonNum)
+			if err != nil {
+				return "", fmt.Errorf("generating fallback season id: %w", err)
+			}
+			season := &models.Season{
+				ContentID:      seasonID,
+				SeriesID:       seriesID,
+				SeasonNumber:   seasonNum,
+				Title:          fallbackSeasonTitle(seasonNum),
+				MetadataSource: "scanner_fallback",
+			}
+			if err := s.seasonRepo.Upsert(ctx, season); err != nil {
+				return "", fmt.Errorf("upserting fallback season: %w", err)
+			}
+			seasonIDs[seasonNum] = season.ContentID
+			return season.ContentID, nil
+		default:
+			return "", fmt.Errorf("loading fallback season: %w", err)
+		}
+	}
 	for _, file := range files {
 		if file == nil {
 			continue
@@ -6882,38 +6928,18 @@ func (s *MetadataService) synthesizeFallbackSeriesStructure(ctx context.Context,
 			continue
 		}
 
-		seasonID, ok := seasonIDs[seasonNum]
-		if !ok {
-			existingSeason, err := s.seasonRepo.GetBySeriesAndNumber(ctx, seriesID, seasonNum)
-			switch {
-			case err == nil:
-				seasonID = existingSeason.ContentID
-				seasonIDs[seasonNum] = seasonID
-			case errors.Is(err, catalog.ErrSeasonNotFound):
-				seasonID, err = deriveSeasonContentID(seriesID, seasonNum)
-				if err != nil {
-					return fmt.Errorf("generating fallback season id: %w", err)
-				}
-				season := &models.Season{
-					ContentID:      seasonID,
-					SeriesID:       seriesID,
-					SeasonNumber:   seasonNum,
-					Title:          fallbackSeasonTitle(seasonNum),
-					MetadataSource: "scanner_fallback",
-				}
-				if err := s.seasonRepo.Upsert(ctx, season); err != nil {
-					return fmt.Errorf("upserting fallback season: %w", err)
-				}
-				seasonID = season.ContentID
-				seasonIDs[seasonNum] = seasonID
-			default:
-				return fmt.Errorf("loading fallback season: %w", err)
-			}
-		}
-
-		existingEpisode, err := s.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, seasonNum, episodeNum)
+		existingEpisode, err := s.episodeAtFileNumber(ctx, seriesID, seasonNum, episodeNum)
 		switch {
 		case err == nil:
+			// An episode found by its file numbers in another order keeps
+			// its own season.
+			if existingEpisode.SeasonNumber != seasonNum || existingEpisode.EpisodeNumber != episodeNum {
+				continue
+			}
+			seasonID, err := seasonFor(seasonNum)
+			if err != nil {
+				return err
+			}
 			if existingEpisode.SeasonID == seasonID {
 				continue
 			}
@@ -6921,8 +6947,16 @@ func (s *MetadataService) synthesizeFallbackSeriesStructure(ctx context.Context,
 			if err := s.episodeRepo.Upsert(ctx, existingEpisode); err != nil {
 				return fmt.Errorf("updating fallback episode season link: %w", err)
 			}
-			continue
 		case errors.Is(err, catalog.ErrEpisodeNotFound):
+			// No episode has these file numbers, but one may show them in
+			// another order: a placeholder must not take its slot.
+			if _, slotErr := s.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, seasonNum, episodeNum); slotErr == nil {
+				continue
+			}
+			seasonID, err := seasonFor(seasonNum)
+			if err != nil {
+				return err
+			}
 			episodeID, err := deriveEpisodeContentID(seriesID, seasonNum, episodeNum)
 			if err != nil {
 				return fmt.Errorf("generating fallback episode id: %w", err)
@@ -6950,6 +6984,18 @@ func (s *MetadataService) synthesizeFallbackSeriesStructure(ctx context.Context,
 	}
 	s.refreshSeriesEpisodeMetadataState(ctx, seriesID, time.Now())
 	return nil
+}
+
+// episodeAtFileNumber returns the episode a file named season, episode
+// belongs to, reading the numbers in the order the series' files follow
+// (catalog.EpisodeRepository.GetBySeriesAndFileNumber).
+func (s *MetadataService) episodeAtFileNumber(ctx context.Context, seriesID string, season, episode int) (*models.Episode, error) {
+	if repo, ok := s.episodeRepo.(interface {
+		GetBySeriesAndFileNumber(ctx context.Context, seriesID string, season, episode int) (*models.Episode, error)
+	}); ok {
+		return repo.GetBySeriesAndFileNumber(ctx, seriesID, season, episode)
+	}
+	return s.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, season, episode)
 }
 
 func (s *MetadataService) linkSeriesFilesToEpisodes(ctx context.Context, seriesID string) {
@@ -7005,7 +7051,7 @@ func (s *MetadataService) ensureSeriesEpisodeLinksCore(ctx context.Context, seri
 		if !ok {
 			continue
 		}
-		if _, err := s.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, seasonNum, episodeNum); errors.Is(err, catalog.ErrEpisodeNotFound) {
+		if _, err := s.episodeAtFileNumber(ctx, seriesID, seasonNum, episodeNum); errors.Is(err, catalog.ErrEpisodeNotFound) {
 			needsSynthesis = true
 			break
 		}
@@ -7184,7 +7230,7 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 			episodeNum = episode.EpisodeNumber
 		} else {
 			var err error
-			episode, err = s.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, seasonNum, episodeNum)
+			episode, err = s.episodeAtFileNumber(ctx, seriesID, seasonNum, episodeNum)
 			if err != nil {
 				if suppressMissing && errors.Is(err, catalog.ErrEpisodeNotFound) {
 					continue

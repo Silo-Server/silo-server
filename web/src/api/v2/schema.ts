@@ -2626,6 +2626,41 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/items/{id}/episode-order": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read a series' episode order and the orders its providers offer. */
+    get: operations["getAdminEpisodeOrder"];
+    /** Save a series' episode order and queue the refresh that renumbers it. Default values return the series to its library's order. */
+    put: operations["setAdminEpisodeOrder"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/items/{id}/episode-order/preview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Show how a series would be numbered under an episode order, without changing it. */
+    post: operations["previewAdminEpisodeOrder"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/items/{id}/files": {
     parameters: {
       query?: never;
@@ -18684,6 +18719,95 @@ export interface components {
        */
       status: "queued" | "already_running";
     };
+    AdminEpisodeOrder: {
+      choice: components["schemas"]["EpisodeOrderChoice"];
+      /**
+       * @description True while the series follows its library; the choice then shows the defaults
+       * @example true
+       */
+      inherited: boolean;
+      /**
+       * @description Provider the series follows without its own choice: its library's episode_order_provider, else the first remote provider of the episode chain
+       * @example tvdb
+       */
+      library_provider: string;
+      /** @description The series' remote episode providers, in chain order */
+      providers: components["schemas"]["EpisodeOrderProvider"][];
+      /**
+       * Format: int64
+       * @description Send back on save to refuse a save over a newer one; 0 while inherited
+       * @example 0
+       */
+      revision: number;
+    };
+    AdminEpisodeOrderPreview: {
+      /**
+       * Format: int64
+       * @example 214
+       */
+      episode_count: number;
+      /**
+       * Format: int64
+       * @description The series' files named by season and episode
+       * @example 63
+       */
+      file_count: number;
+      /**
+       * Format: int64
+       * @description Of those, the files the order places
+       * @example 62
+       */
+      matched_files: number;
+      /** @description Regular seasons in order, then Specials */
+      seasons: components["schemas"]["EpisodeOrderPreviewSeason"][];
+      /**
+       * @description Provider that numbered the preview: the chosen one, or the other when the chosen one has no episodes for the series; empty when neither has any
+       * @example tvdb
+       */
+      structure_provider: string;
+      /** @description File names the order does not place, at most 50 */
+      unmatched_files: string[];
+    };
+    AdminEpisodeOrderSaved: {
+      /**
+       * @description Metadata refresh that applies the order; absent when queuing it failed, and the next refresh applies it
+       * @example 01J9Z8
+       */
+      job_id?: string;
+      /**
+       * Format: int64
+       * @example 3
+       */
+      revision: number;
+    };
+    AdminEpisodeOrderSaveInputBody: {
+      /**
+       * @description Provider whose default order the file names follow (S02E05 is that order's season 2, episode 5); empty means the series' provider
+       * @example tvdb
+       */
+      file_order: string;
+      /**
+       * @description seasons keeps the order's seasons; absolute numbers every regular episode in one season, specials apart
+       * @example seasons
+       * @enum {string}
+       */
+      layout: "seasons" | "absolute";
+      /**
+       * @description One of the provider's orders (the id of an EpisodeOrderOption); empty is its default order. Needs a provider
+       * @example 5e2b0c1bfe5ee0001a5d5b58
+       */
+      order_id: string;
+      /**
+       * @description Provider whose order the series follows; empty follows its library
+       * @example tmdb
+       */
+      provider: string;
+      /**
+       * Format: int64
+       * @description The revision the choice was based on; a different stored revision answers 409
+       */
+      revision?: number;
+    };
     AdminFilesystemEntry: {
       name: string;
       path: string;
@@ -29886,6 +30010,97 @@ export interface components {
       resolution?: string;
       /** @description Present and true when the server could not read the file (empty, corrupt, or truncated). Playback of it falls back to another version of the episode the viewer may play; if no such version is available, playback returns the terminal reason source_unreadable until the file is replaced and a scan reads it successfully. */
       unreadable?: boolean;
+    };
+    EpisodeOrderChoice: {
+      /**
+       * @description Provider whose default order the file names follow (S02E05 is that order's season 2, episode 5); empty means the series' provider
+       * @example tvdb
+       */
+      file_order: string;
+      /**
+       * @description seasons keeps the order's seasons; absolute numbers every regular episode in one season, specials apart
+       * @example seasons
+       * @enum {string}
+       */
+      layout: "seasons" | "absolute";
+      /**
+       * @description One of the provider's orders (the id of an EpisodeOrderOption); empty is its default order. Needs a provider
+       * @example 5e2b0c1bfe5ee0001a5d5b58
+       */
+      order_id: string;
+      /**
+       * @description Provider whose order the series follows; empty follows its library
+       * @example tmdb
+       */
+      provider: string;
+    };
+    EpisodeOrderOption: {
+      description?: string;
+      /**
+       * Format: int64
+       * @description 0 when the provider does not say
+       * @example 214
+       */
+      episode_count: number;
+      /**
+       * @description Sent back as order_id
+       * @example dvd
+       */
+      id: string;
+      /**
+       * @description The order the provider serves without an order_id
+       * @example false
+       */
+      is_default: boolean;
+      /**
+       * @description Open lowercase vocabulary: aired, dvd, absolute, digital, story_arc, production, tv, alternate; treat an unknown kind like alternate
+       * @example dvd
+       */
+      kind: string;
+      /** @example DVD Order */
+      name: string;
+      /**
+       * Format: int64
+       * @description Regular seasons; 0 when the provider does not say
+       * @example 10
+       */
+      season_count: number;
+    };
+    EpisodeOrderPreviewSeason: {
+      /**
+       * Format: int64
+       * @example 22
+       */
+      episode_count: number;
+      /**
+       * Format: int64
+       * @description Files the season would hold
+       * @example 20
+       */
+      file_count: number;
+      /**
+       * Format: int64
+       * @description 0 is Specials
+       * @example 1
+       */
+      number: number;
+      /** @example Season 1 */
+      title: string;
+    };
+    EpisodeOrderProvider: {
+      /**
+       * @description Listing the orders failed; try again later
+       * @example false
+       */
+      failed: boolean;
+      orders: components["schemas"]["EpisodeOrderOption"][];
+      /** @example tvdb */
+      provider: string;
+      /**
+       * @description False when the provider's plugin serves only its default order
+       * @example true
+       */
+      supported: boolean;
     };
     EventsCapabilities: {
       /** @description Whether the current principal may use the capability */
@@ -64834,6 +65049,392 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminEpisodeOrder: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminEpisodeOrder"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  setAdminEpisodeOrder: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminEpisodeOrderSaveInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminEpisodeOrderSaved"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  previewAdminEpisodeOrder: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["EpisodeOrderChoice"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminEpisodeOrderPreview"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
         headers: {
           [name: string]: unknown;
         };

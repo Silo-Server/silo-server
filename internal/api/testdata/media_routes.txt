@@ -271,6 +271,9 @@ DELETE /api/v2/admin/invite-codes/{id}	non-media
 PUT /api/v2/admin/invite-codes/{id}	non-media
 POST /api/v2/admin/invite-codes/{id}/top-up	non-media
 GET /api/v2/admin/ips	non-media
+GET /api/v2/admin/items/{id}/episode-order	non-media
+PUT /api/v2/admin/items/{id}/episode-order	non-media
+POST /api/v2/admin/items/{id}/episode-order/preview	non-media
 GET /api/v2/admin/items/{id}/files	non-media
 GET /api/v2/admin/items/{id}/images	non-media
 POST /api/v2/admin/items/{id}/images/apply	non-media
@@ -1368,6 +1371,9 @@ DELETE /api/v2/admin/invite-codes/{id}	non-media
 PUT /api/v2/admin/invite-codes/{id}	non-media
 POST /api/v2/admin/invite-codes/{id}/top-up	non-media
 GET /api/v2/admin/ips	non-media
+GET /api/v2/admin/items/{id}/episode-order	non-media
+PUT /api/v2/admin/items/{id}/episode-order	non-media
+POST /api/v2/admin/items/{id}/episode-order/preview	non-media
 GET /api/v2/admin/items/{id}/files	non-media
 GET /api/v2/admin/items/{id}/images	non-media
 POST /api/v2/admin/items/{id}/images/apply	non-media

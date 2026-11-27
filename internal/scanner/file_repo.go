@@ -3734,8 +3734,6 @@ func (r *FileRepository) BulkLinkEpisodesBySeries(ctx context.Context, seriesCon
 		updated AS (
 			UPDATE media_files mf
 			SET episode_id = e.content_id,
-				season_number = e.season_number,
-				episode_number = e.episode_number,
 				updated_at = NOW()
 			FROM episodes e
 			WHERE mf.id IN (SELECT id FROM locked)
@@ -3745,8 +3743,17 @@ func (r *FileRepository) BulkLinkEpisodesBySeries(ctx context.Context, seriesCon
 			  AND mf.season_number IS NOT NULL
 			  AND mf.episode_number IS NOT NULL
 			  AND e.series_id = $1
-			  AND mf.season_number = e.season_number
-			  AND mf.episode_number = e.episode_number
+			  -- A file's numbers are in the order the series' files are
+			  -- named in, which episodes record when it is not their own.
+			  AND mf.season_number = COALESCE(e.file_season_number, e.season_number)
+			  AND mf.episode_number = COALESCE(e.file_episode_number, e.episode_number)
+			  AND NOT EXISTS (
+				SELECT 1 FROM episodes named
+				WHERE named.series_id = $1 AND named.content_id <> e.content_id
+				  AND e.file_season_number IS NULL
+				  AND named.file_season_number = mf.season_number
+				  AND named.file_episode_number = mf.episode_number
+			  )
 			RETURNING mf.id, mf.episode_id, mf.media_folder_id, mf.created_at, mf.first_seen_scan_run_id
 		),
 		inserted AS (

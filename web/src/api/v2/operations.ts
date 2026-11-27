@@ -199,6 +199,7 @@ export const v2Operations = {
   "GET /api/v2/admin/invite-codes": "listAdminInviteCodes",
   "GET /api/v2/admin/invite-codes/capabilities": "getAdminInviteCodeCapabilities",
   "GET /api/v2/admin/ips": "listAdminIPUsers",
+  "GET /api/v2/admin/items/{id}/episode-order": "getAdminEpisodeOrder",
   "GET /api/v2/admin/items/{id}/files": "listAdminItemFiles",
   "GET /api/v2/admin/items/{id}/images": "listAdminItemImages",
   "GET /api/v2/admin/items/{id}/match/hints": "getAdminItemMatchHints",
@@ -706,6 +707,7 @@ export const v2Operations = {
   "POST /api/v2/admin/invitations/{id}/resend": "resendAdminInvitation",
   "POST /api/v2/admin/invite-codes": "createAdminInviteCode",
   "POST /api/v2/admin/invite-codes/{id}/top-up": "topUpAdminInviteCode",
+  "POST /api/v2/admin/items/{id}/episode-order/preview": "previewAdminEpisodeOrder",
   "POST /api/v2/admin/items/{id}/images/apply": "applyAdminItemImage",
   "POST /api/v2/admin/items/{id}/images/upload": "uploadAdminItemImage",
   "POST /api/v2/admin/items/{id}/match/apply": "applyAdminItemMatch",
@@ -953,6 +955,7 @@ export const v2Operations = {
   "PUT /api/v2/admin/history-imports/mappings/{id}": "updateAdminHistoryImportMapping",
   "PUT /api/v2/admin/history-imports/sources/{id}/token": "setAdminHistoryImportToken",
   "PUT /api/v2/admin/invite-codes/{id}": "updateAdminInviteCode",
+  "PUT /api/v2/admin/items/{id}/episode-order": "setAdminEpisodeOrder",
   "PUT /api/v2/admin/libraries/{library_id}/collection-groups/order":
     "reorderAdminCollectionGroups",
   "PUT /api/v2/admin/markers/providers/{provider}": "updateAdminMarkerProvider",

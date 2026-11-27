@@ -549,6 +549,9 @@ type SeasonsRequest struct {
 	ProviderIDs map[string]string
 	ContentType string
 	Language    string
+	// Ordering names one of the provider's episode orders (ListEpisodeOrders);
+	// empty is its default order.
+	Ordering string
 	// Local sidecar context (additive, internal — mirrors MetadataRequest).
 	// SeriesRootPaths are directories already validated as safe for
 	// directory-level sidecars (the series root); SeasonDirectoryPaths maps
@@ -566,6 +569,8 @@ type EpisodesRequest struct {
 	ProviderIDs  map[string]string
 	SeasonNumber int
 	Language     string
+	// Ordering as on SeasonsRequest; SeasonNumber is a season of that order.
+	Ordering string
 	// Local sidecar context (additive, internal). SeriesRootPaths as on
 	// SeasonsRequest; EpisodeFilePaths maps each filename-derived episode
 	// number within SeasonNumber to that episode's media file paths.
@@ -621,6 +626,21 @@ type EpisodeResult struct {
 	StillPath        string
 	StillSourcePath  string
 	StillThumbhash   string
+	// AbsoluteNumber is the episode's position counted through the series'
+	// regular seasons, when the provider gives one.
+	AbsoluteNumber int
+	// DefaultSeasonNumber and DefaultEpisodeNumber place the episode in the
+	// provider's default order when it was fetched in another order; nil
+	// when the provider did not say.
+	DefaultSeasonNumber  *int
+	DefaultEpisodeNumber *int
+	// FileSeasonNumber and FileEpisodeNumber are the numbers a file name
+	// gives this episode, in the order the series' files are named in;
+	// FileNumbered is false when that order does not have the episode.
+	// Set by applyEpisodeFileOrder before persisting.
+	FileSeasonNumber  int
+	FileEpisodeNumber int
+	FileNumbered      bool
 
 	// stillFallback is the remote still a local one displaced while results
 	// merged; the episode shows it until the local copy is cached.

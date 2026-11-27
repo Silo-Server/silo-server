@@ -1672,6 +1672,65 @@
       "body_file": "admin_episode_markers_refresh.json"
     },
     {
+      "name": "admin_episode_order_previewed",
+      "operation_id": "previewAdminEpisodeOrder",
+      "scenario": "A preview reports the order's seasons and the files it would not place.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/items/item-1/episode-order/preview",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"provider\":\"tvdb\",\"order_id\":\"dvd\",\"file_order\":\"\",\"layout\":\"seasons\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminEpisodeOrderPreview",
+      "body_file": "admin_episode_order_previewed.json"
+    },
+    {
+      "name": "admin_episode_order_read",
+      "operation_id": "getAdminEpisodeOrder",
+      "scenario": "A curator reads a series' episode order with the orders each provider offers.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/items/item-1/episode-order",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminEpisodeOrder",
+      "body_file": "admin_episode_order_read.json"
+    },
+    {
+      "name": "admin_episode_order_saved",
+      "operation_id": "setAdminEpisodeOrder",
+      "scenario": "Saving stores the order and queues the refresh that renumbers the series.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/admin/items/item-1/episode-order",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"provider\":\"tvdb\",\"order_id\":\"dvd\",\"file_order\":\"\",\"layout\":\"seasons\",\"revision\":2}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminEpisodeOrderSaved",
+      "body_file": "admin_episode_order_saved.json"
+    },
+    {
       "name": "admin_filesystem_browse",
       "operation_id": "browseAdminFilesystem",
       "scenario": "Directory browsing preserves the resolved path and parent with an explicit continuation page.",

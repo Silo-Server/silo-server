@@ -1,0 +1,17 @@
+{
+  "structure_provider": "tvdb",
+  "episode_count": 22,
+  "seasons": [
+    {
+      "number": 1,
+      "title": "Season 1",
+      "episode_count": 22,
+      "file_count": 20
+    }
+  ],
+  "file_count": 21,
+  "matched_files": 20,
+  "unmatched_files": [
+    "Stargate SG-1 - S01E02.mkv"
+  ]
+}

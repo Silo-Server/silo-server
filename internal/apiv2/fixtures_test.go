@@ -1664,6 +1664,7 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, adminCatalogPeopleFixtureCases()...)
 	cases = append(cases, adminCatalogTranslationFixtureCases()...)
 	cases = append(cases, adminCatalogItemMetadataFixtureCases()...)
+	cases = append(cases, adminEpisodeOrderFixtureCases()...)
 	cases = append(cases, notificationDestinationFixtureCases()...)
 	cases = append(cases, invitationFixtureCases()...)
 	cases = append(cases, adminAccountFixtureCases()...)
@@ -2209,6 +2210,7 @@ func fixtureDeps() Dependencies {
 	deps.AdminPeople = &fakeAdminPeople{}
 	deps.AdminMetadataTranslation = &fakeAdminTranslation{}
 	deps.AdminItemMetadata = &fakeAdminItemMetadata{}
+	deps.AdminEpisodeOrders = &fakeAdminEpisodeOrders{}
 	deps.AdminEpisodeMarkers = &fakeAdminIntro{}
 	deps.AdminMarkerHistory = &fakeAdminMarkerHistory{}
 	deps.AdminMarkerProviders = &fakeAdminMarkerProviders{}

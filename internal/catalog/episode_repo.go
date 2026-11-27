@@ -776,6 +776,21 @@ func (r *EpisodeRepository) GetBySeriesAndNumber(ctx context.Context, seriesID s
 	return scanEpisode(r.pool.QueryRow(ctx, query, seriesID, season, episode))
 }
 
+// GetBySeriesAndFileNumber returns the episode a file named season, episode
+// belongs to: the row whose file numbers are those (episodes in another order
+// than the files record them), else the row with those numbers and no file
+// numbers of its own.
+func (r *EpisodeRepository) GetBySeriesAndFileNumber(ctx context.Context, seriesID string, season, episode int) (*models.Episode, error) {
+	query := `SELECT ` + episodeColumns + `
+		FROM episodes
+		WHERE series_id = $1
+		  AND ((file_season_number = $2 AND file_episode_number = $3)
+		    OR (file_season_number IS NULL AND season_number = $2 AND episode_number = $3))
+		ORDER BY file_season_number IS NULL
+		LIMIT 1`
+	return scanEpisode(r.pool.QueryRow(ctx, query, seriesID, season, episode))
+}
+
 // ListBySeriesAndAirDates retrieves provider episode rows for a series keyed by
 // air date. It intentionally does not use episodeAvailabilityPredicate because
 // callers use it to link files before episode_libraries rows exist.
