@@ -93,7 +93,10 @@ export default function SeriesContent({
   const [matchOpen, setMatchOpen] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
   const [orderOpen, setOrderOpen] = useState(false);
-  const [arrange, setArrange] = useState<{ startFrom: EpisodeOrderChoice | null } | null>(null);
+  const [arrange, setArrange] = useState<{
+    startFrom: EpisodeOrderChoice | null;
+    activate: boolean;
+  } | null>(null);
   const [requestSeasonsOpen, setRequestSeasonsOpen] = useState(false);
   const tmdbID = Number(item.tmdb_id) || 0;
   const canRequestSeasons = useMissingSeasonsRequestable(Boolean(currentProfile?.id) && tmdbID > 0);
@@ -250,7 +253,9 @@ export default function SeriesContent({
                 onSplitItem={canCurateMetadata ? () => setSplitOpen(true) : undefined}
                 onEpisodeOrder={canCurateMetadata ? () => setOrderOpen(true) : undefined}
                 onArrangeSeasons={
-                  canCurateMetadata ? () => setArrange({ startFrom: null }) : undefined
+                  canCurateMetadata
+                    ? () => setArrange({ startFrom: null, activate: false })
+                    : undefined
                 }
                 onRequestSeasons={canRequestSeasons ? () => setRequestSeasonsOpen(true) : undefined}
                 onShuffle={
@@ -344,7 +349,7 @@ export default function SeriesContent({
               title={title}
               open={orderOpen}
               onOpenChange={setOrderOpen}
-              onArrangeSeasons={(startFrom) => setArrange({ startFrom })}
+              onArrangeSeasons={(startFrom) => setArrange({ startFrom, activate: true })}
             />
           )}
           {canCurateMetadata && (
@@ -353,6 +358,7 @@ export default function SeriesContent({
               title={title}
               open={arrange !== null}
               startFrom={arrange?.startFrom ?? null}
+              activate={arrange?.activate ?? false}
               onOpenChange={(next) => !next && setArrange(null)}
             />
           )}

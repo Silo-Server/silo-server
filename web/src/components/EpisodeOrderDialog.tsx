@@ -223,10 +223,10 @@ export default function EpisodeOrderDialog({
               <Button
                 onClick={() => {
                   if (!choice || !savedChoice) return;
-                  // The stored arrangement fits only the order it was made
-                  // from; another order starts over from its seasons.
+                  // A stored arrangement (kept while another layout is in
+                  // use) opens for the same base order; another order starts
+                  // over from its seasons.
                   const sameBase =
-                    savedChoice.layout === "custom" &&
                     savedChoice.provider === choice.provider &&
                     savedChoice.order_id === choice.order_id &&
                     savedChoice.file_order === choice.file_order;

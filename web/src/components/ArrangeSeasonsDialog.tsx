@@ -67,7 +67,11 @@ import {
 import { useGripDragSensors } from "@/hooks/useSortableList";
 import { useT } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
-import { EPISODE_PROVIDER_LABEL, episodeOrderLabel, isNumberedSeasonTitle } from "@/lib/episodeOrder";
+import {
+  EPISODE_PROVIDER_LABEL,
+  episodeOrderLabel,
+  isNumberedSeasonTitle,
+} from "@/lib/episodeOrder";
 import { cn } from "@/lib/utils";
 
 const SPECIALS = "specials";
@@ -97,6 +101,7 @@ export default function ArrangeSeasonsDialog({
   open,
   onOpenChange,
   startFrom = null,
+  activate = false,
 }: {
   contentId: string;
   title: string;
@@ -104,6 +109,8 @@ export default function ArrangeSeasonsDialog({
   onOpenChange: (open: boolean) => void;
   /** Start from this order's seasons instead of the stored arrangement. */
   startFrom?: EpisodeOrderChoice | null;
+  /** The series does not use its arrangement yet; saving switches it to it. */
+  activate?: boolean;
 }) {
   // Mounted only while open, so every opening starts from the saved seasons.
   if (!open) return null;
@@ -112,6 +119,7 @@ export default function ArrangeSeasonsDialog({
       contentId={contentId}
       title={title}
       startFrom={startFrom}
+      activate={activate}
       onClose={() => onOpenChange(false)}
     />
   );
@@ -121,11 +129,13 @@ function Loader({
   contentId,
   title,
   startFrom,
+  activate,
   onClose,
 }: {
   contentId: string;
   title: string;
   startFrom: EpisodeOrderChoice | null;
+  activate: boolean;
   onClose: () => void;
 }) {
   const t = useT();
@@ -158,7 +168,7 @@ function Loader({
       contentId={contentId}
       title={title}
       data={data}
-      dirtyFromStart={base !== null}
+      dirtyFromStart={base !== null || activate}
       onStartOver={setBase}
       onClose={onClose}
     />
