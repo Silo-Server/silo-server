@@ -1073,17 +1073,27 @@ while local passwords are on, a password or a provider account; while they
 are off, a provider account, or a password for a break-glass administrator
 it names.
 
-Two changes to an account, rather than to these settings, can still leave it
-with no way in; neither is new, and neither is refused. Making an account an
-administrator revokes its app keys, so an account whose keys were its only
-way in has none until an administrator sets a password for it or makes it a
-sign-in link, which gives an administrator the password route only; while
-local passwords are off, that password signs in only once the Owner makes the
-account break-glass. Clearing break-glass while local passwords are off ends
-the account's password sign-in, and with it the local keys that need it, so
-an account with no sign-in provider account it can use has no way in until
-the Owner sets break-glass again; the last usable break-glass account can't
-be cleared.
+Two changes to an account, rather than to these settings, can leave it with
+no way in. Both are long-standing behavior that predates the switch checks
+above, and those checks do not refuse them.
+
+- **Making an account an administrator** revokes its app keys, so an account
+  whose keys were its only way in has none. Another administrator's account
+  is the Owner's alone to change, so the Owner fixes it: while local password
+  sign-in is on, by setting a password for it or making it a sign-in link (an
+  administrator's link gives the password route only). While local password
+  sign-in is off, a password signs in only a break-glass account, and neither
+  email match nor linking (which needs the person signed in) can give an
+  administrator a provider account, so nothing short of the Owner making the
+  account break-glass, or turning local password sign-in back on, and then
+  setting its password, lets it in.
+- **Clearing break-glass while local password sign-in is off** ends the
+  account's password sign-in and, with it, the local keys that need it. An
+  account with no provider account it can use then has no way in until the
+  Owner sets break-glass again or local password sign-in is turned back on;
+  for the reason above it can't be given a provider account instead. The
+  last usable break-glass account can't be cleared (409
+  `break_glass_required`).
 
 ### Sign-in links
 

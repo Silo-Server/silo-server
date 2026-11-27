@@ -102,26 +102,31 @@ func TestPromotionEndsSessionAppCodesDB(t *testing.T) {
 				t.Fatalf("redeem before the promotion = %v, want it enrolled", redeemed)
 			}
 			if !promoteFirst {
-				// The redeem enrolled a device key and opened its session,
-				// and the promotion ended both.
-				if result == nil || result.Pair == nil || result.DeviceID == "" {
-					t.Fatalf("redeem before the promotion = %+v; want a device key and a session", result)
-				}
-				var keyRevoked, sessionRevoked *bool
-				if err := env.pool.QueryRow(ctx, `SELECT
-					(SELECT revoked_at IS NOT NULL FROM auth_device_keys WHERE id = $1 AND user_id = $3),
-					(SELECT revoked_at IS NOT NULL FROM auth_sessions WHERE id = $2 AND device_key_id = $1)`,
-					result.DeviceID, result.Pair.SessionID, c.user.ID).Scan(&keyRevoked, &sessionRevoked); err != nil {
-					t.Fatal(err)
-				}
-				if keyRevoked == nil || sessionRevoked == nil {
-					t.Fatalf("the redeem's device key or session is not stored (key %v, session %v)", keyRevoked, sessionRevoked)
-				}
-				if !*keyRevoked || !*sessionRevoked {
-					t.Fatalf("after the promotion: device key revoked %v, session revoked %v; want both ended", *keyRevoked, *sessionRevoked)
-				}
+				requireEnrolledThenEnded(t, env, c.user.ID, result)
 			}
 			requireNoKeys(t, c.user.ID)
 		})
+	}
+}
+
+// requireEnrolledThenEnded checks that a redeem enrolled a device key on
+// userID and opened its session, and that the promotion after it ended both.
+func requireEnrolledThenEnded(t *testing.T, env *keyEnv, userID int, result *KeySignInResult) {
+	t.Helper()
+	if result == nil || result.Pair == nil || result.DeviceID == "" {
+		t.Fatalf("redeem before the promotion = %+v; want a device key and a session", result)
+	}
+	var keyRevoked, sessionRevoked *bool
+	if err := env.pool.QueryRow(t.Context(), `SELECT
+		(SELECT revoked_at IS NOT NULL FROM auth_device_keys WHERE id = $1 AND user_id = $3),
+		(SELECT revoked_at IS NOT NULL FROM auth_sessions WHERE id = $2 AND device_key_id = $1)`,
+		result.DeviceID, result.Pair.SessionID, userID).Scan(&keyRevoked, &sessionRevoked); err != nil {
+		t.Fatal(err)
+	}
+	if keyRevoked == nil || sessionRevoked == nil {
+		t.Fatalf("the redeem's device key or session is not stored (key %v, session %v)", keyRevoked, sessionRevoked)
+	}
+	if !*keyRevoked || !*sessionRevoked {
+		t.Fatalf("after the promotion: device key revoked %v, session revoked %v; want both ended", *keyRevoked, *sessionRevoked)
 	}
 }
